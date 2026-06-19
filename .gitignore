@@ -1,0 +1,27 @@
+# ---- .NET / build output (regenerable, large: ~156 MB of WASM artifacts) ----
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+artifacts/
+project.lock.json
+release/
+
+# ---- Original Xbox 360 STFS package -------------------------------------------
+# Provenance only: a 52 MB signed Xbox Live marketplace binary. The actual game
+# assets are unpacked under extracted/ , so the package is not needed to build.
+# Kept locally; re-extract from it only if you need to (see plan.md appendix).
+47D5BF15FF8CC1DB145E8BA9542C43FD3209A09A58
+
+# ---- Claude Code local settings ----------------------------------------------
+# Keep .claude/launch.json (used by the preview tooling); ignore machine-local bits.
+.claude/settings.local.json
+.claude/*.local.json
+
+# ---- OS / editor cruft -------------------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*.log

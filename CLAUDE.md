@@ -63,18 +63,28 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `PersistentSave` + `Compat/SaveInterop.cs` + `eaSave` in `index.html`). `ResolveBackBuffer` and
   the `SpriteBlendMode`→`BlendState` mapping are now **real** (Stage 5); the `Effect`/`EffectPass`
   `Begin/End` no-op shims are dead (no callers).
-- **It runs AND it's live (Stages 4–8 done).** `Game1` boots through splash → menu → playable/attract
-  gameplay with shaders (gamma, bloom, sprite effects), **audio** (music, SFX, speech) **and persistent
-  saves** (settings/unlockables/awardments/screenshots → localStorage) and 0 console exceptions —
+- **It runs AND it's live (Stages 4–9 done).** `Game1` boots through splash → menu → playable/attract
+  gameplay with shaders (gamma, bloom, sprite effects), **audio** (music, SFX, speech), **persistent
+  saves** (settings/unlockables/awardments/screenshots → localStorage), **polish** (keyboard controls-help,
+  browser fullscreen, favicon/meta, on-screen touch controls) and a **trimmed download** (9.6 MB
+  uncompressed boot payload, ~2.9 MB brotli — down from 25.8 MB) and 0 console exceptions —
   **deployed publicly at https://coamithra.github.io/RotEA26/**, auto-rebuilt on every push to `main`.
-  Remaining: polish/fullscreen (9), unified hi-res render path (10), online co-op (11). See `plan.md`
-  "Stage 4/5/6/7/8 — DONE" for what changed and the stubs each later stage must un-stub.
+  Remaining: unified hi-res render path (10), online co-op (11). See `plan.md`
+  "Stage 4/5/6/7/8/9 — DONE" for what changed and the stubs each later stage must un-stub.
 - **Hosting (Stage 8):** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI (Pages
   can't build .NET), rewrites `<base href>` to `/RotEA26/` (project page), adds `.nojekyll` + `404.html`,
   and deploys via `actions/deploy-pages`. **The dev build keeps `<base href="/" />`** for local
-  `dotnet run` — CI flips it; don't hard-code `/RotEA26/` in `index.html`. **`PublishTrimmed=false`**
-  in the csproj is deliberate: Release trims by default and would strip the `XmlSerializer` save types
-  → white screen. Download-size trimming/AOT/Brotli is **Stage 9** (the published site is ~113 MB now).
+  `dotnet run` — CI flips it; don't hard-code `/RotEA26/` in `index.html`. CI is unchanged from Stage 8;
+  it just `dotnet publish -c Release`, which now **trims** (Stage 9).
+- **Download trim (Stage 9):** the csproj now uses **`PublishTrimmed=true` + `TrimMode=partial`** (NOT
+  full — full strips the `XmlSerializer` save types + KNI's reflection factories → white screen, the
+  Stage-8 trap). Partial trims only `[IsTrimmable]` assemblies (the BCL, where the bloat was); the game
+  assembly + every `nkast.*` engine assembly stay WHOLE, so reflected save types + factory registration
+  survive. **`InvariantGlobalization=true`** drops ICU + relinks `dotnet.native.wasm` (native rebuild —
+  also means **Debug runs are culture-invariant too**; don't add culture-dependent parse/format).
+  `System.Private.Xml` is pinned via `<TrimmerRootAssembly>`. **Always verify a trim change with a LOCAL
+  Release publish (publish → serve `wwwroot` at localhost root → real Chrome, check saves round-trip)
+  before pushing** — trimming breakage only shows at runtime in the browser, not in the build.
 - **GOTCHA — content paths are CASE-SENSITIVE on the live host (not on Windows).** GitHub Pages serves
   from a case-sensitive Linux FS; the dev box + `dotnet run` are case-insensitive, so a casing mismatch
   passes locally and 404s in production (Stage 8's black-screen `ManagedError: content/gfx/...`). The
@@ -116,11 +126,21 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the console / automation: `eaPress('Enter')` (tap), `eaPress('Up')`, `eaPress('Left', 30)` (hold
   ~30 ticks). Keys: Up/Down/Left/Right/Enter/Esc/Mouse1/Generic_Start (+ w/a/s/d, start/select→Enter,
   back→Esc, fire→Mouse1). Rapid repeats of the SAME key collapse into one press — space them by a
-  tick (one per automation step) to register distinct taps.
-- **Stubs that will read as "broken" until their stage (not bugs):**
-  the controls-help screen shows the **Xbox joypad** (PC keyboard help was `#if WINDOWS`-stripped,
-  Stage 9). *(Audio is no longer stubbed — Stage 6 done. Saves now persist to localStorage —
-  Stage 7 done.)*
+  tick (one per automation step) to register distinct taps. **Touch/mobile (Stage 9)** uses the same
+  seam: `eaHold(key, down)` (JS) → `DebugInput.Hold`/`touchHeld[]` holds a key down until released
+  (vs `eaPress`'s tick countdown), both drained by `DebugInput.Consume` in `InputHandler`. Driving
+  fullscreen via automation fails (synthetic clicks carry no `navigator.userActivation`); that's a
+  harness limit, not a bug — a real click works.
+- **Touch + fullscreen UI (Stage 9)** lives in `index.html` **outside `#app`** (so it survives
+  Blazor's mount of `App` into `#app`): a corner fullscreen button + a touch overlay (D-pad / FIRE /
+  BACK, shown only on touch devices). Fullscreen is the DOM Fullscreen API via `Compat/FullscreenInterop.cs`
+  → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
+  "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
+  outside-`#app` pattern.
+- **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
+  shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
+  `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no
+  standalone controls menu entry).
 - **Resolution = a presenter, not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the 800×600 frame into an offscreen `sceneTarget` and blits it

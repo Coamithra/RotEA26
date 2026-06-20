@@ -7,6 +7,8 @@
 artifacts/
 project.lock.json
 release/
+# Stage 9: scratch dirs for local `dotnet publish` size/trim verification.
+_sizetest_*/
 
 # ---- Original Xbox 360 STFS package -------------------------------------------
 # Provenance only: a 52 MB signed Xbox Live marketplace binary. The actual game

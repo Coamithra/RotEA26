@@ -148,10 +148,8 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 					currentlyDisplaying = Displays.Keyboard;
 				}
 				state = States.displaying;
-				if (currentlyDisplaying == Displays.Keyboard)
-				{
-					currentlyDisplaying++;
-				}
+				// Web port (Stage 9): the Xbox build skipped the Keyboard layout (joypad
+				// only). On the web, cycle the keyboard controls slide in too.
 			}
 			break;
 		case States.displaying:

@@ -3,9 +3,23 @@
 
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Revenge of the Evil Aliens</title>
     <base href="/" />
+
+    <!-- SEO / social (Stage 9). og:image is an absolute URL to the live host so link
+         previews work when the public page is shared; the <base href> above is what CI
+         rewrites for Pages, NOT these. -->
+    <meta name="description" content="Revenge of the Evil Aliens — a 2008 Xbox Live Indie shoot-'em-up, recovered and ported to play in your browser. Up to 4-player couch co-op, three worlds, retro arcade mayhem." />
+    <meta name="theme-color" content="#05030a" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Revenge of the Evil Aliens" />
+    <meta property="og:description" content="A lost 2008 XBLIG shoot-'em-up, revived to play in your browser." />
+    <meta property="og:image" content="https://coamithra.github.io/RotEA26/Content/gfx/preview/poster.png" />
+    <meta property="og:url" content="https://coamithra.github.io/RotEA26/" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link href="css/app.css" rel="stylesheet" />
     <link href="EvilAliensWeb.styles.css" rel="stylesheet" />
 </head>
@@ -25,6 +39,29 @@
         An unhandled error has occurred.
         <a href="" class="reload">Reload</a>
         <a class="dismiss">x</a>
+    </div>
+
+    <!-- Stage 9 on-screen UI: a fullscreen toggle (always) + touch controls (shown only
+         on touch devices). Lives OUTSIDE #app so it survives Blazor's mount, which
+         replaces #app's loading markup. Wired by the ea-ui script block below. -->
+    <div id="ea-ui">
+        <button id="ea-fs-btn" type="button" title="Fullscreen" aria-label="Toggle fullscreen">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
+
+        <div id="ea-touch">
+            <div id="ea-dpad">
+                <button class="ea-tbtn ea-up"    type="button" data-key="Up"    aria-label="Move up">&#9650;</button>
+                <button class="ea-tbtn ea-left"  type="button" data-key="Left"  aria-label="Move left">&#9664;</button>
+                <button class="ea-tbtn ea-right" type="button" data-key="Right" aria-label="Move right">&#9654;</button>
+                <button class="ea-tbtn ea-down"  type="button" data-key="Down"  aria-label="Move down">&#9660;</button>
+            </div>
+            <button id="ea-fire" class="ea-tbtn" type="button" data-key="Mouse1" data-tap="Enter" aria-label="Fire / Select">FIRE</button>
+            <button id="ea-back" class="ea-tbtn" type="button" data-tap="Esc" aria-label="Back / Pause">BACK</button>
+        </div>
     </div>
 
     <script src="_framework/blazor.webassembly.js" autostart="false"></script>
@@ -113,6 +150,124 @@
         {
             event.preventDefault();
         }, { passive: false });
+    </script>
+
+    <script>
+        // ----- Stage 9: browser fullscreen + on-screen touch controls -----------
+        // eaFullscreen drives the DOM Fullscreen API (KNI's graphics.IsFullScreen is a
+        // no-op on BlazorGL). Entering/leaving just resizes the canvas, which KNI already
+        // follows and Game1.Draw letterboxes — no graphics work needed. C# reaches set()
+        // via Compat/FullscreenInterop (the in-menu "Fullscreen" option); the corner
+        // button is the guaranteed-gesture path.
+        window.eaFullscreen = (function ()
+        {
+            var docEl = document.documentElement;
+            function supported()
+            {
+                return !!(docEl.requestFullscreen || docEl.webkitRequestFullscreen);
+            }
+            function isFs()
+            {
+                return !!(document.fullscreenElement || document.webkitFullscreenElement);
+            }
+            function enter()
+            {
+                var fn = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+                if (!fn) return;
+                try { var r = fn.call(docEl); if (r && r.catch) r.catch(function () { }); }
+                catch (e) { /* rejected without a gesture — non-fatal */ }
+            }
+            function exit()
+            {
+                var fn = document.exitFullscreen || document.webkitExitFullscreen;
+                if (!fn) return;
+                try { var r = fn.call(document); if (r && r.catch) r.catch(function () { }); }
+                catch (e) { }
+            }
+            return {
+                supported: supported,
+                isFullscreen: isFs,
+                toggle: function () { if (isFs()) exit(); else enter(); },
+                set: function (on) { if (on && !isFs()) enter(); else if (!on && isFs()) exit(); }
+            };
+        })();
+
+        // eaHold: persistent press for the on-screen D-pad/fire button. Mirrors eaPress
+        // but holds the key down until released (see Compat/DebugInput.cs Hold/Consume).
+        window.eaHold = function (key, down)
+        {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugHold', String(key), !!down); }
+            catch (e) { /* game not booted yet — ignore */ }
+        };
+
+        (function ()
+        {
+            function setup()
+            {
+                var ui = document.getElementById('ea-ui');
+                if (!ui) return;
+
+                var fsBtn = document.getElementById('ea-fs-btn');
+                if (fsBtn)
+                {
+                    if (!window.eaFullscreen.supported())
+                    {
+                        // iOS Safari et al. can't fullscreen an arbitrary element — hide it.
+                        fsBtn.style.display = 'none';
+                    }
+                    else
+                    {
+                        fsBtn.addEventListener('click', function (e)
+                        {
+                            e.preventDefault();
+                            window.eaFullscreen.toggle();
+                        });
+                        var syncFs = function () { ui.classList.toggle('ea-fs-on', window.eaFullscreen.isFullscreen()); };
+                        document.addEventListener('fullscreenchange', syncFs);
+                        document.addEventListener('webkitfullscreenchange', syncFs);
+                    }
+                }
+
+                // Touch controls only make sense on a touch device.
+                var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+                if (isTouch)
+                {
+                    ui.classList.add('ea-has-touch');
+                    var btns = ui.querySelectorAll('#ea-touch .ea-tbtn');
+                    Array.prototype.forEach.call(btns, function (b)
+                    {
+                        var holdKey = b.getAttribute('data-key');   // held while pressed
+                        var tapKey = b.getAttribute('data-tap');    // single tap on press
+                        var press = function (e)
+                        {
+                            if (e) e.preventDefault();
+                            b.classList.add('ea-active');
+                            if (tapKey) window.eaPress(tapKey, 1);
+                            if (holdKey) window.eaHold(holdKey, true);
+                        };
+                        var release = function (e)
+                        {
+                            if (e) e.preventDefault();
+                            b.classList.remove('ea-active');
+                            if (holdKey) window.eaHold(holdKey, false);
+                        };
+                        b.addEventListener('touchstart', press, { passive: false });
+                        b.addEventListener('touchend', release, { passive: false });
+                        b.addEventListener('touchcancel', release, { passive: false });
+                        // Mouse fallback so the overlay is also testable on desktop.
+                        b.addEventListener('mousedown', press);
+                        b.addEventListener('mouseup', release);
+                        b.addEventListener('mouseleave', function (e) { if (b.classList.contains('ea-active')) release(e); });
+                        b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+                    });
+                }
+            }
+
+            if (document.readyState === 'loading')
+                document.addEventListener('DOMContentLoaded', setup);
+            else
+                setup();
+        })();
     </script>
 
     <script>

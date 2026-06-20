@@ -91,7 +91,13 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   `content/` root while the on-disk dir is `Content` — invisible on case-insensitive Windows.
   Also disabled `PublishTrimmed` (Release trims by default and would strip the XmlSerializer
   save types). See the Stage-8 notes below.
-- [ ] Stage 9 — Polish (input map, fullscreen, download size)
+- [x] **Stage 9 — Polish.** Keyboard controls-help screen un-stubbed (web players see the
+  keyboard layout, not just the Xbox joypad); real browser **fullscreen** (corner button + the
+  in-menu option, via JS interop — KNI's `IsFullScreen` is a no-op on BlazorGL); **favicon +
+  social/SEO meta**; **on-screen touch controls** (D-pad / fire / back, fed through the
+  `DebugInput` seam) for phones; and the headline win — **WASM download trimmed 25.8 MB → 9.6 MB
+  uncompressed (~2.9 MB brotli)** via `TrimMode=partial` + `InvariantGlobalization`, **verified
+  on a local Release publish** so it can't repeat Stage 8's white-screen. See the Stage-9 notes.
 - [ ] Stage 10 — Unified hi-res render path (lo-res + hi-res share one scaled scene)
 - [ ] Stage 11 — Online co-op multiplayer (networked couch co-op)
 
@@ -799,6 +805,73 @@ Persistence layer = browser localStorage (or IndexedDB) via Blazor JS interop.
 Input remapping/help screen for web, fullscreen + canvas resize handling, loading screen
 (already styled in `wwwroot/css/app.css`), trim WASM download size
 (`dotnet publish -c Release` + trimming/AOT), favicon/title/meta, mobile/touch (optional).
+
+### Stage 9 — DONE. What was changed (read before Stage 10)
+
+- **Download-size trim — the headline win (25.8 MB → 9.6 MB uncompressed boot payload; ~2.9 MB
+  brotli; `_framework` 46 MB → 17 MB on disk; 217 → 77 payload files).** Stage 8 had to disable
+  trimming because a *full* trim strips the `XmlSerializer` save-type members AND KNI's
+  reflection-registered factories, white-screening the published build. The fix in
+  `EvilAliensWeb.csproj`: **`PublishTrimmed=true` + `TrimMode=partial`**. Partial only trims
+  assemblies marked `[IsTrimmable]` — i.e. the .NET BCL, which is where the bloat lived
+  (`System.Private.Xml` ~3 MB, `CoreLib` 4.0→1.8 MB, and `System.Data.Common` /
+  `DataContractSerialization` / `Encoding.CodePages` trimmed away entirely). The game assembly
+  (`EvilAliensWeb`) and **every `nkast.*` engine assembly are NOT marked trimmable, so they stay
+  WHOLE** — so the reflected save types and KNI's `Concrete*FactoryStrategy through reflection`
+  registration all survive untouched. Plus **`InvariantGlobalization=true`** drops the ~2.5 MB ICU
+  `.dat` set + globalization code (the game only uses culture-invariant `ToLower`/number
+  formatting) and **relinks `dotnet.native.wasm` 2.4→1.1 MB** (it's a native rebuild — CI's
+  existing `wasm-tools` workload covers it; the Release publish just takes a bit longer).
+  `System.Private.Xml` is additionally pinned via `<TrimmerRootAssembly>` so XmlSerializer's own
+  reflection internals can't be trimmed from under it (belt-and-braces vs the Stage-8 trap).
+  - **Verified on a LOCAL Release publish before trusting CI** (the whole point of "verify
+    locally first"): `dotnet publish -c Release -o <dir>` → served `<dir>/wwwroot` with a static
+    server (`<base href>` stays `/` in the dev build, so it serves at localhost root) → real
+    Chrome. Menu + tutorial level + attract gameplay all render, **0 console exceptions** (only the
+    benign KNI factory-reflection boot logs), and the **save round-trip works under trimming**:
+    toggled Music → Settings.xml written to localStorage with `<PlayMusic>false</PlayMusic>`
+    (Serialize ✓) → reloaded → menu read it back as Disabled (Deserialize ✓). The CI
+    (`deploy.yml`) is unchanged — it already runs `dotnet publish -c Release`, which now trims.
+- **Keyboard controls-help screen un-stubbed.** Both `InstructionsMenu` (the menu Tutorial /
+  in-game pause → "Instructions") and `HelpText` (the attract-mode demos `Demo1/2/3`) **already
+  loaded `GFX/Help/Controls Keyboard`** but the Xbox build *skipped* `Displays.Keyboard` in its
+  slide cycle (joypad-only — the `#if WINDOWS` PC-help was stripped). Removed those skip-branches
+  so web players see the keyboard layout (WASD/arrows = move, mouse = fire/special/aim) alongside
+  the gamepad slide. Pure logic change; the asset was always shipped.
+- **Real browser fullscreen.** KNI's BlazorGL ignores `GraphicsDeviceManager.IsFullScreen`, so
+  fullscreen is driven via the DOM Fullscreen API through **`Compat/FullscreenInterop.cs` →
+  `window.eaFullscreen`** (`index.html`). Two entry points: (1) a always-visible **corner button**
+  (the guaranteed-gesture path — verified its click handler fires and the API is available;
+  couldn't enter fullscreen under *automation* only because synthetic clicks carry no
+  `navigator.userActivation`, a harness limitation, not a code bug); (2) the existing in-menu
+  **"Fullscreen"** option (`MenuScene` → `Game1.GoFullScreen`), now best-effort via interop within
+  the keypress's transient-activation window. Entering/leaving fullscreen just resizes the canvas,
+  which KNI already follows and `Game1.Draw` letterboxes — no graphics changes. The button is
+  auto-hidden where `requestFullscreen` is unavailable (iOS Safari).
+- **On-screen touch controls (basic mobile support).** `index.html` adds a touch overlay (D-pad,
+  a FIRE/select button, a BACK/pause button), shown only on touch devices
+  (`ontouchstart`/`maxTouchPoints`). It feeds the **same `DebugInput` injection seam** the `eaPress`
+  test helper uses: a new persistent **`Hold(key,down)` / `touchHeld[]`** path (JS `eaHold`) added
+  alongside the existing tick-countdown, both drained by `InputHandler` via `DebugInput.Consume`.
+  So a held D-pad button reads exactly like a physical key held across frames (no rAF-timing race).
+  **Verified end-to-end**: `eaHold('Right')` drove the player ship across the screen; layout
+  (D-pad bottom-left, FIRE bottom-right, BACK top-left, fullscreen top-right) confirmed, with
+  `env(safe-area-inset-*)` for notched phones. FIRE = hold `Mouse1` (gameplay) + a one-frame
+  `Enter` tap on press (menu select / Press Start); BACK = `Esc`.
+- **Favicon + SEO/social meta.** Added `wwwroot/favicon.svg` (an inline-SVG alien head — crisp at
+  any size, ~1 KB) and `description` / `theme-color` / OpenGraph / Twitter-card meta in
+  `index.html`. The `og:image` is an **absolute** URL to the live host (`…/Content/gfx/preview/
+  poster.png`) on purpose — that's independent of the `<base href>` CI rewrites for Pages.
+- **Loading screen:** already correct (the styled `#loading` in `app.css` shows during the
+  `_framework` boot download and is replaced when Blazor mounts `App` into `#app`) — left as-is.
+- **Gotchas for later stages:** (1) `InvariantGlobalization` now applies to **Debug runs too**, so
+  all number/string formatting is culture-invariant everywhere — don't add culture-dependent
+  parsing/formatting. (2) The on-screen UI lives in `index.html` **outside `#app`** so it survives
+  Blazor's mount; a new scene needing a HUD button should follow that (or it gets wiped when `App`
+  renders). (3) The keyboard-help slide's natural homes are the **attract demos** and the **in-game
+  pause → Instructions** — there's no standalone "controls" menu entry. (4) Stage 10's larger
+  design-resolution target will change the touch overlay's relationship to the scene only if it
+  reads back-buffer size — it doesn't (it's pure DOM over the canvas).
 
 ---
 

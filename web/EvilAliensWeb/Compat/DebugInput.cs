@@ -31,6 +31,13 @@ namespace EvilAliensWeb.Compat
 		private static readonly int[] holdTicks =
 			new int[Enum.GetValues(typeof(EvilAliens.MyKeys)).Length];
 
+		// Per-MyKeys persistent "held" flag for the on-screen touch controls (Stage 9).
+		// Unlike holdTicks (a tick countdown for scripted taps), these stay down until JS
+		// clears them on touchend/cancel — an on-screen D-pad/fire button held with a
+		// finger behaves like a physical key held across many frames.
+		private static readonly bool[] touchHeld =
+			new bool[Enum.GetValues(typeof(EvilAliens.MyKeys)).Length];
+
 		// JS bridge: DotNet.invokeMethod('EvilAliensWeb', 'debugPress', key, frames).
 		// `frames` is how many ticks to hold the key down (>=1; 1 == a single tap).
 		// Re-pressing extends to the longest pending hold.
@@ -54,18 +61,36 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaPress " + mk + " x" + frames + " frame(s)");
 		}
 
+		// JS bridge for the on-screen touch controls (eaHold in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugHold', key, down). Sets/clears the
+		// persistent held state for `key` so it reads as down for as long as the finger
+		// stays on the button. Unknown keys are ignored.
+		[JSInvokable("debugHold")]
+		public static void Hold(string key, bool down)
+		{
+			if (TryMap(key, out EvilAliens.MyKeys mk))
+			{
+				touchHeld[(int)mk] = down;
+			}
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first
 		// forced tick = a fresh Pressed edge, the rest = Down, then a clean release.
 		internal static bool Consume(int idx)
 		{
-			if (idx < 0 || idx >= holdTicks.Length || holdTicks[idx] <= 0)
+			if (idx < 0 || idx >= holdTicks.Length)
 			{
 				return false;
 			}
-			holdTicks[idx]--;
-			return true;
+			// A scripted tap (countdown) OR a held touch button both read as "down".
+			if (holdTicks[idx] > 0)
+			{
+				holdTicks[idx]--;
+				return true;
+			}
+			return touchHeld[idx];
 		}
 
 		private static bool TryMap(string key, out EvilAliens.MyKeys mk)

@@ -113,10 +113,9 @@ internal class InstructionsMenu : DrawableGameComponent
 		{
 			currentlyDisplaying = HelpText.Displays.Lead;
 		}
-		if (currentlyDisplaying == HelpText.Displays.Keyboard)
-		{
-			displayNext();
-		}
+		// Web port (Stage 9): the Xbox build skipped Displays.Keyboard here so the
+		// controls screen only ever showed the joypad. On the web the keyboard IS the
+		// primary input, so show "Controls (Keyboard)" (Controls Keyboard.png) too.
 		if (currentlyDisplaying == HelpText.Displays.Lead)
 		{
 			displayNext();
@@ -130,10 +129,7 @@ internal class InstructionsMenu : DrawableGameComponent
 		{
 			currentlyDisplaying = HelpText.Displays.End;
 		}
-		if (currentlyDisplaying == HelpText.Displays.Keyboard)
-		{
-			displayPrevious();
-		}
+		// Web port (Stage 9): keep the keyboard layout in the cycle (see displayNext).
 		if (currentlyDisplaying == HelpText.Displays.End)
 		{
 			displayPrevious();

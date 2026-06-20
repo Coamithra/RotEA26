@@ -65,3 +65,109 @@ html, body {
     right: 0.75rem;
     top: 0.5rem;
 }
+
+/* ---- Stage 9: on-screen UI (fullscreen toggle + touch controls) ----
+   #ea-ui itself never blocks the canvas; only the actual buttons capture input. */
+
+#ea-fs-btn {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    z-index: 1100;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: #9be15d;
+    background: rgba(5, 3, 10, 0.45);
+    border: 1px solid rgba(124, 252, 0, 0.45);
+    border-radius: 8px;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+#ea-fs-btn:hover,
+#ea-fs-btn:focus-visible { opacity: 1; outline: none; }
+
+/* Touch controls: hidden unless we detected a touch device (ea-has-touch). */
+#ea-touch { display: none; }
+#ea-ui.ea-has-touch #ea-touch {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1090;
+    pointer-events: none;          /* clicks pass through to the canvas... */
+    touch-action: none;
+}
+
+.ea-tbtn {
+    pointer-events: auto;          /* ...except on the buttons themselves */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #d8ffd0;
+    background: rgba(5, 3, 10, 0.4);
+    border: 2px solid rgba(124, 252, 0, 0.5);
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+.ea-tbtn.ea-active {
+    background: rgba(124, 252, 0, 0.35);
+    border-color: #7CFC00;
+    color: #fff;
+}
+
+/* Directional pad, bottom-left, arranged as a cross. */
+#ea-dpad {
+    position: fixed;
+    left: max(14px, env(safe-area-inset-left, 0px));
+    bottom: max(14px, env(safe-area-inset-bottom, 0px));
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 6px;
+    width: clamp(150px, 42vmin, 240px);
+    height: clamp(150px, 42vmin, 240px);
+    pointer-events: none;
+}
+#ea-dpad .ea-tbtn {
+    border-radius: 12px;
+    font-size: clamp(20px, 6vmin, 34px);
+}
+.ea-tbtn.ea-up    { grid-column: 2; grid-row: 1; }
+.ea-tbtn.ea-left  { grid-column: 1; grid-row: 2; }
+.ea-tbtn.ea-right { grid-column: 3; grid-row: 2; }
+.ea-tbtn.ea-down  { grid-column: 2; grid-row: 3; }
+
+/* Primary action (fire / menu select), bottom-right. */
+#ea-fire {
+    position: fixed;
+    right: max(20px, env(safe-area-inset-right, 0px));
+    bottom: max(28px, env(safe-area-inset-bottom, 0px));
+    width: clamp(84px, 24vmin, 130px);
+    height: clamp(84px, 24vmin, 130px);
+    border-radius: 50%;
+    font-size: clamp(15px, 4vmin, 22px);
+    letter-spacing: 0.08em;
+}
+
+/* Back / pause, top-left (kept clear of the fullscreen button at top-right). */
+#ea-back {
+    position: fixed;
+    left: max(14px, env(safe-area-inset-left, 0px));
+    top: max(8px, env(safe-area-inset-top, 0px));
+    width: 64px;
+    height: 38px;
+    border-radius: 8px;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+}

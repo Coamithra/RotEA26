@@ -9,13 +9,31 @@
     <DefineConstants>$(DefineConstants);BLAZORGL</DefineConstants>
     <KniPlatform>BlazorGL</KniPlatform>
     <BlazorEnableTimeZoneSupport>false</BlazorEnableTimeZoneSupport>
-    <!-- Stage 8: IL trimming is ON by default for a Release Blazor-WASM publish, but the
-         game serialises Settings/Unlockables/Achievements with XmlSerializer (runtime
-         reflection) — trimming strips those members and white-screens the published build
-         even though Debug runs clean. Keep the published build at Debug parity here; the
-         download-size trim/AOT pass is Stage 9's job. -->
-    <PublishTrimmed>false</PublishTrimmed>
+
+    <!-- Stage 9 download-size trim. Stage 8 disabled trimming because a FULL trim strips
+         the XmlSerializer save-type members (Settings/Unlockables/Achievements) and the
+         KNI factories that are registered via reflection, white-screening the published
+         build. The fix is to trim conservatively:
+           * TrimMode=partial only trims assemblies marked [IsTrimmable] — that's the .NET
+             BCL (System.Private.Xml @ ~3 MB, CoreLib, Data.Common, DataContractSerializer,
+             etc.), which is where the bloat is. The game assembly (EvilAliensWeb) and every
+             nkast.* engine assembly are NOT marked trimmable, so they're kept WHOLE — so the
+             reflected save types and KNI's reflection factory registration all survive.
+           * System.Private.Xml is rooted anyway so XmlSerializer's own reflection-driven
+             internals can't be trimmed out from under it (belt-and-braces vs the Stage-8 trap).
+         Verified by a local Release publish + serve before relying on CI (see plan.md Stage 9).
+         InvariantGlobalization drops the ~2.5 MB ICU data + globalization code the game
+         never needs (it only uses culture-invariant ToLower/number formatting). -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Keep XmlSerializer (System.Private.Xml) intact even though it's trimmable; the save
+         system relies on its reflection-based serializer at runtime. -->
+    <TrimmerRootAssembly Include="System.Private.Xml" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="nkast.Xna.Framework" Version="4.1.9001.*" />

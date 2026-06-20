@@ -393,9 +393,20 @@ public class Game1 : Game
 
 	public void GoFullScreen(object sender)
 	{
-		graphics.IsFullScreen = Settings.GetInstance().FullScreen;
-		graphics.SynchronizeWithVerticalRetrace = Settings.GetInstance().VSync;
-		graphics.ApplyChanges();
+		// Web port (Stage 9): drive the browser Fullscreen API via JS interop rather than
+		// KNI's graphics.IsFullScreen — BlazorGL doesn't honour it (and toggling it can be
+		// unsupported). The canvas already fills the window and Draw() letterboxes the fixed
+		// 800x600 scene, so fullscreen needs no graphics changes beyond applying VSync. Kept
+		// graphics.IsFullScreen at its default (false) so Update/Draw take the plain path.
+		try
+		{
+			graphics.SynchronizeWithVerticalRetrace = Settings.GetInstance().VSync;
+			graphics.ApplyChanges();
+		}
+		catch (Exception)
+		{
+		}
+		EvilAliensWeb.Compat.FullscreenInterop.Set(Settings.GetInstance().FullScreen);
 	}
 
 	protected void MenuFinished(object sender, ControlDevice starter, Levels selectedLevel)

@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -50,7 +51,9 @@ internal class CreditsScene : Scene
 	{
 		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 		//IL_004a: Expected O, but got Unknown
-		content = new ContentManager((IServiceProvider)game.Services, "Content");
+		// Web port: load unpacked web assets via WebContentManager (KNI can't read the
+		// original .xnb). Kept scene-local so it can Unload() when the scene finishes.
+		content = new WebContentManager((IServiceProvider)game.Services, "Content");
 		texturetoload = "GFX/Menu/planet";
 		castDisplayer = new CastDisplayer(base.Game);
 		castDisplayer.owner = (GameComponent)(object)this;

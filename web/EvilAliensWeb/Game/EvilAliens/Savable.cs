@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 using Microsoft.Xna.Framework.Storage;
 
 namespace EvilAliens;
@@ -54,13 +53,9 @@ public abstract class Savable
 
 	public void SaveThreaded()
 	{
-		wantsToSave = true;
-		if (Storage.StorageEnabled)
-		{
-			wantsToSave = false;
-			Thread thread = new Thread(threadedSave);
-			thread.Start();
-		}
+		// Web port: browsers have no background threads (WASM is single-threaded),
+		// so the original background save now runs synchronously on the game loop.
+		SaveNoThread();
 	}
 
 	public void SaveNoThread()
@@ -73,18 +68,10 @@ public abstract class Savable
 		}
 	}
 
-	private void threadedSave()
-	{
-		// Thread.CurrentThread.SetProcessorAffinity(new int[1] { 3 }); // Xbox 360 only
-		Thread.CurrentThread.Priority = ThreadPriority.Normal;
-		SaveInner();
-	}
-
 	private void SaveInner()
 	{
 		lock (syncObj)
 		{
-			Thread.Sleep(100);
 			StorageContainer val = null;
 			try
 			{

@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -69,7 +70,8 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
 		//IL_003e: Expected O, but got Unknown
 		base.DrawOrder = 2000;
-		localContent = new ContentManager((IServiceProvider)base.Game.Services, "Content");
+		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
+		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
 	}
 
 	public void Unload()

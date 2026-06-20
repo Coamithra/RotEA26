@@ -24,7 +24,7 @@ namespace EvilAliensWeb.Pages
             // init game on first tick
             if (_game == null)
             {
-                _game = new SpikeGame();
+                _game = new EvilAliens.Game1();
                 _game.Run();
             }
 

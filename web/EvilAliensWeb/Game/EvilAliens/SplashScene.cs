@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -45,7 +46,10 @@ internal class SplashScene : Scene
 	{
 		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
 		//IL_006a: Expected O, but got Unknown
-		localContent = new ContentManager((IServiceProvider)game.Services, "Content");
+		// Web port: load the unpacked web assets (PNG/font) rather than the original
+		// .xnb, which KNI can't read (see Game1's content wiring). The scene keeps its
+		// own manager so it can Unload() the splash textures when it finishes.
+		localContent = new WebContentManager((IServiceProvider)game.Services, "Content");
 	}
 
 	public override void OnComponentRemoved(GameComponentCollectionEventArgs e)
@@ -136,7 +140,7 @@ internal class SplashScene : Scene
 				num = 255;
 			}
 			fadeBackBufferToBlack(num);
-			base.SpriteBatch.DrawString("v2.10", new Vector2(730f, 550f), Color.AliceBlue, 0f, Vector2.Zero, 0.5f, (SpriteEffects)0, 1f);
+			base.SpriteBatch.DrawString("v2026.0", new Vector2(700f, 550f), Color.AliceBlue, 0f, Vector2.Zero, 0.5f, (SpriteEffects)0, 1f);
 		}
 	}
 

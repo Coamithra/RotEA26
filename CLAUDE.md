@@ -18,6 +18,11 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   **browser console** — always verify visually *and* read the console. Use the preview tools
   against the `eaweb` config in `.claude/launch.json` (`preview_start` → `preview_screenshot`
   → `preview_console_logs`).
+- **Verify with the `claude-in-chrome` MCP, not `preview_screenshot`.** A real foreground
+  Chrome tab screenshots + reads console reliably; the built-in preview renderer wedges
+  whenever *its* tab is backgrounded (the rAF game loop pauses, so it never paints). Flow:
+  `preview_start` to serve → in Chrome `navigate` to `http://localhost:5280` → `wait` ~10s
+  for WASM → `computer{screenshot}`/`zoom` + `read_console_messages`.
 
 ## Toolchain (already installed)
 - .NET 8 SDK + `wasm-tools` workload (Emscripten / mono browser-wasm).
@@ -48,11 +53,33 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   persistent). Some shims are **no-ops that affect runtime until their stage** — `Effect`/
   `EffectPass` `Begin/End` and `ResolveBackBuffer` (shaders, Stage 5), and the
   `SpriteBlendMode`→`BlendState` mapping (verify visually). Don't mistake these for bugs.
-- **Not runnable yet.** Blockers in order: content load (Stage 3); threading
-  (`new Thread().Start()` is unsupported on the browser — Stage 4); then shaders/audio/saves.
+- **It runs (Stage 4 done).** `Game1` boots through splash → menu → playable/attract gameplay
+  with 0 console exceptions. Remaining: shaders/bloom (Stage 5), audio (Stage 6), persistent
+  saves (Stage 7), hosting (8), polish/fullscreen (9). See `plan.md` "Stage 4 — DONE" for the
+  full list of what was changed and the stubs each later stage must un-stub.
+- **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
+  the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
+  keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`
+  and left the `keysToCheck` table dead). Keyboard: arrows/WASD move, Enter select/start, Esc back.
 - **Game loop is JS-driven:** `wwwroot/index.html` (`initRenderJS`/`tickJS`) →
-  `Pages/Index.razor.cs` `TickDotNet()`. It currently runs the Stage-1 placeholder `SpikeGame`;
-  switch to `new EvilAliens.Game1()` in Stage 4.
+  `Pages/Index.razor.cs` `TickDotNet()` → now `new EvilAliens.Game1()`. `ContentTestGame.cs` /
+  `SpikeGame.cs` are dead harnesses, safe to delete.
+- **Real keyboard input works** — KNI maps keys via **`event.keyCode`** (decompiled from
+  `Kni.Platform`: `Keys = (Keys)keyCode`), so Enter/arrows/WASD/Esc are correct for real users.
+  When *driving* the browser headlessly, the game polls `Keyboard.GetState()` once per rAF, so a
+  synthetic event needs the right `keyCode` AND must be **held across a frame** (dispatch keydown,
+  wait ~250 ms, keyup) — a fast tap is missed. See plan.md Stage-4 notes.
+- **Stubs that will read as "broken" until their stage (not bugs):** no shaders/bloom so the
+  gamma/resolve composite in `Game1.DrawInner` is **skipped** and visuals are flat (Stage 5);
+  `SoundManager` XACT is try/caught to null = silent (Stage 6); saves are in-memory (Stage 7);
+  the controls-help screen shows the **Xbox joypad** (PC keyboard help was `#if WINDOWS`-stripped,
+  Stage 9).
+- **Resolution = a presenter, not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
+  the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
+  reverts. `Game1.Draw` renders the 800×600 frame into an offscreen `sceneTarget` and blits it
+  scaled+letterboxed to the window; the game's `SetRenderTarget(0, null)` calls are redirected to
+  that target via `Xna3GraphicsDeviceCompat.BaseRenderTarget`. Don't re-introduce a pinned
+  `PreferredBackBuffer`. Stage 5 layers the gamma shader on this same target; Stage 9 adds fullscreen.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

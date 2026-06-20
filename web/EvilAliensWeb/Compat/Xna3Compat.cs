@@ -70,6 +70,17 @@ namespace Microsoft.Xna.Framework.Graphics
 
     public static class Xna3GraphicsDeviceCompat
     {
+        // Stage-4 presenter target (see Game1.Draw). The game is authored at a fixed
+        // 800x600, but KNI's BlazorGL backend forces the back buffer to the browser
+        // window size and rewrites PreferredBackBuffer on every resize (GameWindow.
+        // OnResize -> UpdateBackBufferSize). So Game1 renders the whole frame into an
+        // 800x600 RenderTarget and blits it scaled+letterboxed to the window. The game
+        // returns to "the back buffer" via SetRenderTarget(0, null) in many places
+        // (Background, MenuScene, MenuSub1, ...); when a presenter target is active we
+        // redirect those nulls to it, so the entire frame composites at 800x600.
+        // Game1 sets this around its frame; null = the real back buffer (default).
+        public static RenderTarget2D BaseRenderTarget;
+
         // TODO(bloom): real impl copies the back buffer into 'target' via a
         // RenderTarget2D. No-op for now; bloom/screenshot is deferred to a later stage.
         public static void ResolveBackBuffer(this GraphicsDevice device, ResolveTexture2D target)
@@ -77,8 +88,10 @@ namespace Microsoft.Xna.Framework.Graphics
         }
 
         // XNA 3.x had multiple render targets addressed by index; 4.0 dropped the index.
+        // A null target means "the back buffer" — redirected to the presenter target when
+        // one is active (see BaseRenderTarget above).
         public static void SetRenderTarget(this GraphicsDevice device, int renderTargetIndex, RenderTarget2D renderTarget)
-            => device.SetRenderTarget(renderTarget);
+            => device.SetRenderTarget(renderTarget ?? BaseRenderTarget);
     }
 
     public static class Xna3RenderTargetCompat

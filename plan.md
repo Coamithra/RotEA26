@@ -43,8 +43,24 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
 - [x] **Stage 2 — Whole game compiles to WASM.** All ~40k lines (222 game files) build
   against KNI with **0 errors**. Decompiler artifacts auto-fixed; the XNA 3.x→4.0 API gap
   bridged with shims. *It compiles but does not run yet.*
-- [ ] Stage 3 — Content pipeline (assets load)
-- [ ] Stage 4 — First boot / playable core (threading, startup, input)
+- [x] **Stage 3 — Content pipeline (assets load).** The shipped `.xnb` are XNA 3.1 /
+  Xbox 360 / LZX-compressed and KNI can't read them. Built a Python unpacker
+  (`tools/xnb/`) that LZX-decompresses (faithful port of KNI's own decoder) and decodes
+  the Color/Dxt1/Dxt3/Dxt5 surfaces (Xbox is big-endian → 16-bit byte-swap on DXT;
+  textures turned out to be **linear, not tiled**). Converted everything to web assets
+  under `wwwroot/Content` (112 textures→PNG, menu font→atlas+metrics, 1 curve, +`.dat`/
+  level text copied), all **lowercased** for case-sensitive Pages. A runtime
+  `Compat/WebContentManager.cs` loads them so the game's `Content.Load<>()` calls work
+  unchanged. Verified in-browser (textures of every format + the SpriteFont render, no
+  `ContentLoadException`). See the Stage-3 notes below before doing Stage 4.
+- [x] **Stage 4 — First boot / playable core.** `Game1` boots in-browser through
+  splash → "Press Start" → main menu → controls screen → playable/attract gameplay
+  (4-player HUD, scrolling DXT backgrounds, enemies, combos), with **0 exceptions**.
+  Threading made synchronous; XBLIG sign-in gate replaced with the PC keyboard path
+  (the keyboard-read block was `#if WINDOWS`-stripped from `InputHandler.Update` —
+  reconstructed it); per-scene `ContentManager`s rewired to `WebContentManager`;
+  `GraphicsProfile.HiDef` (Reach rejects the game's 32-bit index buffers); audio +
+  shaders + bloom stubbed for their later stages. See the Stage-4 notes below.
 - [ ] Stage 5 — Shaders (bloom + sprite effects)
 - [ ] Stage 6 — Audio (XACT → modern)
 - [ ] Stage 7 — Saves & awardments persistence (localStorage)
@@ -154,6 +170,50 @@ Fonts: XNA `SpriteFont` `.xnb` may need recompiling from a `.spritefont`.
 **Done when:** the game can load at least the menu/HUD textures and a font without throwing
 `ContentLoadException`.
 
+### Stage 3 — DONE. How it was wired (read before Stage 4)
+- **Unpacker:** `tools/xnb/` — `lzx.py` (LZX, line-for-line port of KNI's `LzxDecoder`,
+  decompiled to `LzxDecoder.decompiled.cs`), `tex.py` (Color/Dxt1/Dxt3/Dxt5 → RGBA; everything is
+  **big-endian Xbox**, so `Color` is stored **ARGB** [A,R,G,B] (NOT BGRA, or you get a blue
+  cast + a wrong alpha mask); DXT needs a 16-bit byte-swap; surfaces are **linear, not
+  tiled**),
+  `xnb.py` (container + Texture2D/SpriteFont/Curve parsers; XNA-3.1 enums: Dxt1=28,
+  Dxt3=30, Dxt5=32, Color=1). `unpack.py` drives it all → `wwwroot/Content`.
+  **Re-run with `python unpack.py`** (idempotent; wipes+rebuilds `wwwroot/Content`).
+- **Output layout:** every path **lowercased** (Pages is case-sensitive; the game asks
+  with inconsistent casing). Textures→`<name>.png`; font→`<name>.fnt.png`+`<name>.fnt`
+  (binary metrics, see `unpack.py:write_fnt`); curve→`<name>.curve`; `.dat`/`level3.txt`
+  copied verbatim.
+- **Alpha is PREMULTIPLIED on export** (`unpack.py:to_image`). XNA's pipeline premultiplied
+  by default and KNI's default `SpriteBatch` blend (`BlendState.AlphaBlend`) is the
+  premultiplied variant, but `Texture2D.FromStream` does NOT premultiply — so without this,
+  transparent pixels with non-black RGB bleed in (the Dxt3 font atlas has white-on-
+  transparent → text renders as solid "white squares"; soft sprites get bright halos).
+  **Implication for Stage 5:** when verifying the `SpriteBlendMode`→`BlendState` mapping,
+  treat all content as premultiplied (e.g. 3.x `Additive` → KNI `BlendState.Additive`,
+  which is also premultiplied — OK; don't "fix" it back to non-premultiplied).
+- **Runtime loader:** `Compat/WebContentManager.cs` (subclasses `ContentManager`). Texture2D
+  via `Texture2D.FromStream` (KNI decodes PNG with StbImageSharp, synchronously);
+  SpriteFont reconstructed via the public `SpriteFont(...)` ctor; Curve rebuilt from keys.
+  `ResolvePath` normalises casing **and** collapses the stray `Content/` prefix so both the
+  `content` field (root `"Content"`) and `base.Content` (root `""`) resolve to one
+  `content/...` root. Files are fetched with `TitleContainer.OpenStream` (sync XHR).
+- **Stage-4 wiring:** point the game at the web loader. In `Game1` ctor swap
+  `content = new ContentManager(Services,"Content")` → `new WebContentManager(...)`, and set
+  `((Game)this).Content = new WebContentManager(Services, "")` so the `"Content/"`-prefixed
+  `base.Content` loads also use it. The current Stage-3 harness is `ContentTestGame.cs`
+  (wired in `Pages/Index.razor.cs`); swap that to `new EvilAliens.Game1()` per Stage 4.
+- **Still unhandled (by design):** `Effect` (Stage 5), `SoundEffect`/`Song`/`Video`
+  (Stage 6) fall through to `base.Load<T>` and **will throw** — handle in those stages.
+  `Game1.LoadContent` loads the `gamma` Effect, so booting Game1 hits this immediately.
+- **Gotcha for Stage 4:** `AnimatedSprite.cs:~29` reads animation `.dat` via
+  `File.OpenRead("Content/"+filename)` — no FS in WASM. The `.dat` files are already in
+  `wwwroot/Content`; redirect that read to `TitleContainer.OpenStream` (lowercase the path).
+- **Game loop fix (in `wwwroot/index.html`):** the loop now falls back to `setTimeout`
+  when the tab is hidden (rAF pauses in background tabs — froze the game + headless
+  capture) and the canvas size falls back to the window / 1280×720 when the holder hasn't
+  laid out. (Verification tip: drive/inspect via the **claude-in-chrome** MCP on a real
+  foreground tab — the preview renderer wedges when its tab is backgrounded.)
+
 ---
 
 ## Stage 4 — First boot / playable core
@@ -179,6 +239,77 @@ with the keyboard. This is the headline "it actually runs" milestone.
 a `GameTime` ctor). Watch for `Guide.IsTrialMode` gating (returns false = full game, good).
 
 **Done when:** title → menu → first level renders and responds to input in the browser.
+
+### Stage 4 — DONE. What was changed (read before Stage 5/6/9)
+- **Game loop wiring:** `Pages/Index.razor.cs` now runs `new EvilAliens.Game1()`
+  (was `ContentTestGame`). `ContentTestGame.cs`/`SpikeGame.cs` are now dead — safe to delete.
+- **Content (the recurring trap):** `Game1` and **every scene that makes its own
+  `ContentManager`** must use `WebContentManager`, or the load hits KNI's base manager and
+  throws `The content file was not found for asset '...'` (it looks for `.xnb`, we ship PNG).
+  Rewired: `Game1` (`content` + `base.Content`), `SplashScene`, `CreditsScene`, `HelpText`,
+  `InstructionsMenu`. **`BloomComponent`'s is left as plain `ContentManager` on purpose** —
+  it's not added to `Components` (see below) so it never loads. *If you add a new scene with a
+  local `ContentManager`, make it a `WebContentManager`.*
+- **Threading → synchronous** (browser WASM is single-threaded; `new Thread().Start()` throws):
+  `Savable.SaveThreaded` now calls `SaveNoThread` (removed the thread + the `Thread.Sleep(100)`);
+  `Game1.exitFunc`'s exit thread replaced with a direct `base.Exit()`.
+- **The XBLIG sign-in gate (the "stuck on Press Start" blocker) — recreated the PC path.**
+  The recovered Xbox build gated start on `isSignedIn(starter)` and, with the web's empty
+  `SignedInGamers`, looped forever on the no-op `Guide.ShowSignIn`. The PC build had no
+  signed-in-gamer requirement, and **its keyboard support is all still here as runtime code**
+  (it was never `#if`-stripped) — only the one block in `InputHandler.Update()` that reads
+  `keysToCheck[]` against `Keyboard.GetState()` was `#if WINDOWS` and got stripped (the Xbox
+  build fetched `Keyboard.GetState()` and discarded it; the `keysToCheck` table was left dead).
+  Fixes: (1) **reconstructed that keyboard-read block** — re-lights menu nav (`MyKeys.Enter/
+  Esc/Up/Down/...`), Enter-to-start, and the in-game `ControlDevice.Keyboard` player
+  (`PlayerShip` already reads `MyKeys` for movement, Mouse1 to fire); (2) `StartScreen` accepts
+  keyboard Enter and starts as a local profile (no sign-in); (3) `Storage.Update` guards the
+  `SignedInGamers[activePlayer]` indexer (Xbox sign-OUT check) against the empty collection.
+  `SignedInGamers` stays **empty** (faithful: no Xbox sign-in on the web). Keyboard: arrows/WASD
+  move, Enter select, Esc back.
+- **`GraphicsProfile.HiDef`** set in the `Game1` ctor. KNI defaults a new device to **Reach**,
+  which throws `Reach profile does not support 32 bit indices` the moment the menu draws (the
+  game uses 32-bit index buffers). WebGL 2 supports them; HiDef matches the Xbox feature set.
+- **Stubbed-until-their-stage (compile + run, no visual/audio yet):**
+  - *Audio (Stage 6):* `SoundManager` ctor wraps the XACT `AudioEngine`/`WaveBank`/`SoundBank`
+    (`.xgs/.xwb/.xsb`, not unpacked) in try/catch → null; `Play`/`PlayCue`/`Update` null-check.
+  - *Shaders/bloom (Stage 5):* `BloomComponent` is **not added to `Components`** (kept as an
+    object + `IBloomService` so `Settings`/`Visible` callers work) — re-add it in Stage 5.
+    `EffectHandler.LoadGraphicsContent` is a no-op and `LoadEffects` early-outs while the
+    `*EffectFile`s are null (original body preserved in `src_decompiled/`). `Game1`'s `gamma`
+    effect load is now optional (try/catch → null) and **`DrawInner` skips the gamma/resolve
+    composite when `gamma==null`** — otherwise, with the no-op `ResolveBackBuffer` shim, it
+    would `Clear(Black)` and draw an empty resolve target over the scene = black screen.
+- **`AnimatedSprite.loadData`** reads the animation `.dat` via `TitleContainer.OpenStream`
+  (lowercased) instead of `File.OpenRead` (no WASM filesystem).
+- **Resolution / presenter (don't fight KNI):** the game is authored at a fixed **800×600**,
+  but KNI's BlazorGL backend **forces the back buffer to the browser window size and rewrites
+  `PreferredBackBufferWidth/Height` on every resize** (`GameWindow.OnResize` →
+  `UpdateBackBufferSize`, decompiled from `Kni.Platform`). So pinning `PreferredBackBuffer`
+  does NOT stick — it reverts to the window size on the next resize / fullscreen toggle (this was
+  the "sometimes the game suddenly reverts to the wrong resolution" bug). The fix: **`Game1.Draw`
+  renders the whole 800×600 frame into an offscreen `sceneTarget` (`RenderTarget2D`), then blits
+  it scaled + letterboxed to the window-sized back buffer.** The game's many "return to back
+  buffer" calls are `SetRenderTarget(0, null)` through the Xna3 shim, so
+  `Xna3GraphicsDeviceCompat.BaseRenderTarget` redirects those nulls to `sceneTarget` while a frame
+  is in flight (single choke point — `Background`, `MenuScene`, `MenuSub1`, … all route through
+  it). `index.html`/`Index.razor` just let the canvas fill the window 1:1 (KNI owns its size).
+  This is effectively the **front half of the Stage-5 resolve composite**; Stage 5 adds the gamma
+  shader on top of this same target, and Stage 9 adds fullscreen / integer-scale options.
+- **Real keyboard input works** — KNI binds `keydown`/`keyup` on `window` and maps to XNA `Keys`
+  by **`event.keyCode`** (verified by decompiling `Kni.Platform` BlazorGL: `Keys k = (Keys)keyCode`,
+  with only keyCode 16/17/18 = Shift/Ctrl/Alt disambiguated by `location`; the `key` char is
+  ignored). So Enter (13), arrows (37–40), WASD (65/87/83/68) and Esc (27) all register the right
+  `Keys`. **Verifying input from a driven/headless browser (gotcha):** the game polls
+  `Keyboard.GetState()` once per `requestAnimationFrame`, so a dispatched event must (a) carry the
+  correct `keyCode`, and (b) be **held across ≥1 frame** — dispatch `keydown`, wait ~250 ms, then
+  `keyup`. A fast tap is added-then-removed between polls and missed (this, not the char value, is
+  why a quick synthetic Enter "didn't work" mid-debugging).
+- **Known cosmetic / later-stage leftovers (not bugs):** no bloom/shaders so visuals are flat
+  (Stage 5); no audio (Stage 6); saves are in-memory only (Stage 7); the controls help screen
+  shows the **Xbox joypad** (the PC keyboard-help screen was `#if WINDOWS`-stripped) — a web
+  input-help screen is Stage 9. The menu auto-runs an **attract-mode demo** (`Demo1/2/3`) after
+  idle, which is why gameplay appears without selecting a level.
 
 ---
 

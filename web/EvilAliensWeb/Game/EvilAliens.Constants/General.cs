@@ -13,7 +13,7 @@ public static class General
 
 	public const int MaxPlayers = 4;
 
-	public const string Version = "2.10";
+	public const string Version = "2026.0";
 
 	private const float safeZonePercentage = 5f;
 

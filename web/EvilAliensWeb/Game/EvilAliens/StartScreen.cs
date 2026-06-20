@@ -69,6 +69,11 @@ public class StartScreen : Scene
 		if (!startPressed)
 		{
 			int num4 = -1;
+			// Web/PC port: keyboard Enter starts the game as the local player (index 0).
+			if (base.InputHandler.Pressed(MyKeys.Enter))
+			{
+				num4 = 0;
+			}
 			for (int i = 0; i < 4; i++)
 			{
 				bool flag = false;
@@ -83,22 +88,13 @@ public class StartScreen : Scene
 				return;
 			}
 			PlayerIndex starter = (PlayerIndex)num4;
-			if (isSignedIn(starter))
-			{
-				Storage.Init(base.Game, (PlayerIndex)num4);
-				startPressed = true;
-				text = "Loading";
-			}
-			else if (!Guide.IsVisible)
-			{
-				try
-				{
-					Guide.ShowSignIn(1, false);
-				}
-				catch (Exception)
-				{
-				}
-			}
+			// Web/PC port: there is no Xbox LIVE sign-in. The Xbox build gated start on
+			// isSignedIn(starter) and otherwise showed the (now no-op) sign-in blade,
+			// which would leave the web build stuck forever on "Press Start". PC builds
+			// had no signed-in-gamer requirement, so proceed directly as a local profile.
+			Storage.Init(base.Game, starter);
+			startPressed = true;
+			text = "Loading";
 		}
 		else if (!Storage.Busy && !Guide.IsVisible)
 		{

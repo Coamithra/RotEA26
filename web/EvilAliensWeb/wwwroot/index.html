@@ -47,23 +47,48 @@
         function tickJS()
         {
             window.theInstance.invokeMethod('TickDotNet');
-            window.requestAnimationFrame(tickJS);
+            scheduleTick();
+        }
+
+        function scheduleTick()
+        {
+            // Browsers pause requestAnimationFrame in a backgrounded/hidden tab,
+            // which would freeze the game (and stall headless/preview captures).
+            // Fall back to setTimeout (~30fps) when hidden so the loop keeps
+            // running; use rAF when visible for smooth, vsync-aligned frames.
+            if (document.hidden)
+                setTimeout(tickJS, 33);
+            else
+                window.requestAnimationFrame(tickJS);
+        }
+
+        function sizeCanvas()
+        {
+            var canvas = document.getElementById('theCanvas');
+            var holder = document.getElementById('canvasHolder');
+            if (!canvas || !holder)
+                return;
+            // The KNI back buffer follows the canvas drawing-buffer size, and KNI itself
+            // re-syncs it to window.innerWidth/Height on every resize (GameWindow.OnResize),
+            // so match that here for the first frame. The game renders at its native
+            // 800x600 into an offscreen target and Game1.Draw blits it scaled+letterboxed
+            // to this window-sized buffer (so the scene fills the window, aspect-correct).
+            // Fall back to the window / 16:9 default when the holder hasn't laid out yet.
+            canvas.width = holder.clientWidth || window.innerWidth || 1280;
+            canvas.height = holder.clientHeight || window.innerHeight || 720;
         }
 
         window.initRenderJS = (instance) =>
         {
             window.theInstance = instance;
 
-            // set initial canvas size to fill the holder
-            var canvas = document.getElementById('theCanvas');
-            var holder = document.getElementById('canvasHolder');
-            canvas.width = holder.clientWidth;
-            canvas.height = holder.clientHeight;
+            sizeCanvas();
+            window.addEventListener("resize", sizeCanvas);
             // disable context menu on right click
-            canvas.addEventListener("contextmenu", e => e.preventDefault());
+            document.getElementById('theCanvas').addEventListener("contextmenu", e => e.preventDefault());
 
             // begin game loop
-            window.requestAnimationFrame(tickJS);
+            scheduleTick();
         };
 
         // Prevent arrow keys / spacebar / wheel from scrolling the page (esp. in an iframe)

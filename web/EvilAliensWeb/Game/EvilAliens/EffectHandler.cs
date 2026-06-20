@@ -128,6 +128,13 @@ public class EffectHandler
 		//IL_0a80: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0abf: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0afb: Unknown result type (might be due to invalid IL or missing references)
+		// Stage 5 (shaders): effect files aren't loaded yet (LoadGraphicsContent is a
+		// no-op until the shaders are ported), so there is nothing to apply. Bail out
+		// before dereferencing the null *EffectFile fields; sprites render unshaded.
+		if (staticAlphaEffectFile == null)
+		{
+			return;
+		}
 		lightenEffect.SaveState();
 		colorizeEffect.SaveState();
 		outlineEffect.SaveState();
@@ -412,51 +419,16 @@ public class EffectHandler
 		//IL_01dd: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01e2: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
-		GraphicsDevice graphicsDevice = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
 		if (!loadAllContent)
 		{
 			return;
 		}
-		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
-		lightenEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten");
-		colorizeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize");
-		outlineEffectFile = contentManager.Load<Effect>("GFX/Effects/outline");
-		fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/fade");
-		colorize_lightenEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten");
-		colorize_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_fade");
-		interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/interpolate");
-		staticAlphaEffectFile = contentManager.Load<Effect>("GFX/Effects/staticAlpha");
-		colorize_fade_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_fade_interpolate");
-		colorize_lighten_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten_interpolate");
-		colorize_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_interpolate");
-		fade_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/fade_interpolate");
-		lighten_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten_interpolate");
-		colorize_lighten_interpolate_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten_interpolate_fade");
-		lighten_interpolate_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten_interpolate_fade");
-		if (conversionHSVtoRGB != null && !((GraphicsResource)conversionHSVtoRGB).IsDisposed)
-		{
-			return;
-		}
-		int num = 8;
-		uint[] array = new uint[256 / num * 256 / num * 256 / num];
-		uint[] array2 = new uint[256 / num * 256 / num * 256 / num];
-		for (int i = 0; i < 256 / num; i++)
-		{
-			for (int j = 0; j < 256 / num; j++)
-			{
-				for (int k = 0; k < 256 / num; k++)
-				{
-					Color val = RGBtoHSV(new Color((byte)(i * num), (byte)(j * num), (byte)(k * num)));
-					array[i + j * 256 / num + k * 256 / num * 256 / num] = (val).PackedValue;
-					Color val2 = HSVtoRGB(new Color((byte)(i * num), (byte)(j * num), (byte)(k * num)));
-					array2[i + j * 256 / num + k * 256 / num * 256 / num] = (val2).PackedValue;
-				}
-			}
-		}
-		conversionRGBtoHSV = new Texture3D(graphicsDevice, 256 / num, 256 / num, 256 / num, false, (SurfaceFormat)2);
-		conversionRGBtoHSV.SetData<uint>(array);
-		conversionHSVtoRGB = new Texture3D(graphicsDevice, 256 / num, 256 / num, 256 / num, false, (SurfaceFormat)2);
-		conversionHSVtoRGB.SetData<uint>(array2);
+		// Stage 5 (shaders): the ~16 sprite-effect .fx files aren't ported yet, so
+		// loading them would throw (and the HSV<->RGB conversion Texture3Ds they feed
+		// are unused until then). Leave every *EffectFile field null; LoadEffects()
+		// early-outs while they are, so sprites render unshaded. The original loads +
+		// conversion-texture build are preserved in src_decompiled/; restore here when
+		// porting the shaders.
 	}
 
 	internal void UnloadGraphicsContent(bool unloadAllContent)

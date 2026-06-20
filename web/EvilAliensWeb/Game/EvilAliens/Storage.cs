@@ -116,7 +116,12 @@ public static class Storage
 	public static void Update(GameTime gameTime, Game1 game)
 	{
 		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		if (!busy && started && Gamer.SignedInGamers[(int)activePlayer] == null)
+		// Web/PC port: this is the Xbox "active player signed OUT -> reset to start"
+		// check. SignedInGamers is empty on the web (no sign-in / no sign-out), so only
+		// run it when a gamer actually exists, guarding the indexer against the empty
+		// collection (which would otherwise throw every frame once a game has started).
+		if (!busy && started && (int)activePlayer < Gamer.SignedInGamers.Count
+			&& Gamer.SignedInGamers[(int)activePlayer] == null)
 		{
 			Reset(game);
 		}

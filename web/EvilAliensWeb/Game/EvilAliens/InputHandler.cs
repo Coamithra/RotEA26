@@ -185,20 +185,37 @@ public class InputHandler : IInputHandlerService
 		//IL_0056: Invalid comparison between Unknown and I4
 		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0063: Invalid comparison between Unknown and I4
-		Keyboard.GetState();
+		// Web/PC port: the Xbox build called Keyboard.GetState() but threw the result
+		// away — the block that tested keysToCheck[] against the keyboard lived under
+		// #if WINDOWS and was stripped from the shipped binary (the keysToCheck table
+		// it built was left dead). Restored here, which re-activates every latent
+		// keyboard path: menu navigation, Enter to start/select, Esc to back, and the
+		// in-game ControlDevice.Keyboard player. keysToCheck[i] = physical Keys for MyKeys i.
+		KeyboardState keyboardState = Keyboard.GetState();
 		MouseState state = Mouse.GetState();
 		mousepos = new Vector2((float)(state).X, (float)(state).Y);
 		bool flag = false;
 		for (int i = 0; i < keysToCheck.Length; i++)
 		{
 			flag = false;
+			if (keysToCheck[i] != null)
+			{
+				for (int k = 0; k < keysToCheck[i].Length; k++)
+				{
+					if (keyboardState.IsKeyDown(keysToCheck[i][k]))
+					{
+						flag = true;
+						break;
+					}
+				}
+			}
 			switch (i)
 			{
 			case 6:
-				flag = (int)(state).LeftButton == 1;
+				flag |= (int)(state).LeftButton == 1;
 				break;
 			case 7:
-				flag = (int)(state).RightButton == 1;
+				flag |= (int)(state).RightButton == 1;
 				break;
 			}
 			if (flag)

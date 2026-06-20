@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
@@ -99,6 +100,10 @@ public class SoundManager : ISoundManagerService
 
 	public Cue Play(string name)
 	{
+		if (soundbank == null)
+		{
+			return null;
+		}
 		Cue val;
 		try
 		{
@@ -114,6 +119,10 @@ public class SoundManager : ISoundManagerService
 
 	public void PlayCue(string name)
 	{
+		if (soundbank == null)
+		{
+			return;
+		}
 		try
 		{
 			soundbank.PlayCue(name);
@@ -194,7 +203,10 @@ public class SoundManager : ISoundManagerService
 
 	public void Update(GameTime gameTime)
 	{
-		engine.Update();
+		if (engine != null)
+		{
+			engine.Update();
+		}
 		foreach (SongInstance value in loadedSongs.Values)
 		{
 			value.Update(gameTime);
@@ -217,9 +229,22 @@ public class SoundManager : ISoundManagerService
 		//IL_0041: Expected O, but got Unknown
 		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0061: Expected O, but got Unknown
-		engine = new AudioEngine("Content/SFX/alienssfx.xgs");
-		wavebank = new WaveBank(engine, General.Path + "SFX/Wave Bank.xwb");
-		soundbank = new SoundBank(engine, General.Path + "SFX/Sound Bank.xsb");
+		// Stage 6 (audio): the original used XACT (.xgs/.xwb/.xsb), which isn't ported
+		// to the web yet and whose banks aren't in wwwroot/Content. Construct them
+		// best-effort so the game boots; every play path null-checks `soundbank`/`engine`
+		// and silently no-ops until audio is rewritten on SoundEffect/Song in Stage 6.
+		try
+		{
+			engine = new AudioEngine("Content/SFX/alienssfx.xgs");
+			wavebank = new WaveBank(engine, General.Path + "SFX/Wave Bank.xwb");
+			soundbank = new SoundBank(engine, General.Path + "SFX/Sound Bank.xsb");
+		}
+		catch (Exception)
+		{
+			engine = null;
+			wavebank = null;
+			soundbank = null;
+		}
 		this.game = game;
 	}
 }

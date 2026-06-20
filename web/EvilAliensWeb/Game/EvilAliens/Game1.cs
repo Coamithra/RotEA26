@@ -10,6 +10,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -109,6 +110,10 @@ public class Game1 : Game
 
 	private Effect gamma;
 
+	// Stage-4 presenter: the 800x600 design is rendered into this offscreen target each
+	// frame, then blitted scaled+letterboxed to KNI's window-sized back buffer (Draw).
+	private RenderTarget2D sceneTarget;
+
 	public Game1()
 	{
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
@@ -120,7 +125,22 @@ public class Game1 : Game
 		instance = this;
 		ServiceHelper.Game = (Game)(object)this;
 		graphics = new GraphicsDeviceManager((Game)(object)this);
-		content = new ContentManager((IServiceProvider)base.Services, "Content");
+		// The Xbox 360 original ran on the HiDef profile; KNI defaults a new device to
+		// Reach, which rejects 32-bit index buffers (the game uses them) with
+		// "Reach profile does not support 32 bit indices". WebGL 2 supports them, so
+		// request HiDef to match the original feature set.
+		graphics.GraphicsProfile = GraphicsProfile.HiDef;
+		// NOTE: do NOT pin PreferredBackBuffer here. KNI's BlazorGL backend forces the
+		// back buffer to the browser window size and rewrites PreferredBackBuffer on
+		// every resize (GameWindow.OnResize -> UpdateBackBufferSize), so any fixed size
+		// gets clobbered. Instead the game renders at its native 800x600 into an offscreen
+		// target and Draw() blits that scaled to the window back buffer (see sceneTarget).
+		// Web port: load the unpacked PNG/font/curve assets through WebContentManager.
+		// `content` is rooted at "Content" (names like "GFX/x"); base.Content is rooted
+		// at "" because some call sites ask with a "Content/" prefix. Both normalise to
+		// the same wwwroot/Content root inside WebContentManager.
+		content = new WebContentManager((IServiceProvider)base.Services, "Content");
+		base.Content = new WebContentManager((IServiceProvider)base.Services, "");
 		inputHandler = new InputHandler();
 		base.Services.AddService(typeof(IInputHandlerService), (object)inputHandler);
 		collectionHelper = new ComponentBin((Game)(object)this);
@@ -146,7 +166,10 @@ public class Game1 : Game
 		ServiceHelper.Add((IVibratorService)vibrator);
 		// graphics.MinimumPixelShaderProfile = (ShaderProfile)4; // removed in XNA 4.0
 		bloom = new BloomComponent((Game)(object)this);
-		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)bloom);
+		// Stage 5 (shaders): re-add bloom to Components once its .fx effects are ported.
+		// Until then its LoadContent would Load<Effect>(...) and throw, so we keep the
+		// object + service (callers set Settings/Visible) but never run its Draw.
+		// ((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)bloom);
 		bloom.Settings = BloomSettings.PresetSettings[5];
 		ServiceHelper.Add((IBloomService)bloom);
 		graphics.PreparingDeviceSettings += graphics_PreparingDeviceSettings;
@@ -296,7 +319,17 @@ public class Game1 : Game
 		{
 			Settings.GetInstance().Scale = 0.9f;
 		}
-		gamma = base.Content.Load<Effect>("Content/GFX/Effects/gamma");
+		// Stage 5 (shaders): the gamma .fx isn't ported yet. Leave it null; DrawInner
+		// skips the gamma/resolve composite when it's missing and presents the scene
+		// directly (the back buffer is already the 800x600 design resolution).
+		try
+		{
+			gamma = base.Content.Load<Effect>("Content/GFX/Effects/gamma");
+		}
+		catch (Exception)
+		{
+			gamma = null;
+		}
 	}
 
 	public void GoFullScreen(object sender)
@@ -484,18 +517,13 @@ public class Game1 : Game
 			exitTicks++;
 			if (exitTicks == 10)
 			{
-				Thread thread = new Thread(exitFunc);
-				thread.Start();
+				// Web port: no background threads and no real "exit" in a browser tab;
+				// the original spun a thread to delay+Exit. Just stop ticking the game.
+				lock (Savable.syncObj)
+				{
+					base.Exit();
+				}
 			}
-		}
-	}
-
-	private void exitFunc()
-	{
-		Thread.Sleep(1000);
-		lock (Savable.syncObj)
-		{
-			base.Exit();
 		}
 	}
 
@@ -509,12 +537,27 @@ public class Game1 : Game
 		{
 			bloom.Settings = BloomSettings.PresetSettings[3];
 		}
+		// Presenter: render the fixed 800x600 design into an offscreen target, then blit
+		// it scaled+letterboxed to KNI's window-sized back buffer. KNI forces the back
+		// buffer to the window size on every resize, so scaling at present time (instead
+		// of pinning the back buffer) is the only stable approach. The game's many
+		// SetRenderTarget(0, null) "return to back buffer" calls are redirected to this
+		// target via Xna3GraphicsDeviceCompat.BaseRenderTarget so the whole frame
+		// composites at 800x600. (This is also the groundwork for the Stage-5 composite.)
+		if (sceneTarget == null || ((GraphicsResource)sceneTarget).IsDisposed)
+		{
+			sceneTarget = new RenderTarget2D(base.GraphicsDevice, 800, 600, false,
+				base.GraphicsDevice.PresentationParameters.BackBufferFormat, DepthFormat.None,
+				0, RenderTargetUsage.PreserveContents);
+		}
+		Xna3GraphicsDeviceCompat.BaseRenderTarget = sceneTarget;
+		base.GraphicsDevice.SetRenderTarget(sceneTarget);
+
 		if (graphics.IsFullScreen)
 		{
 			try
 			{
 				DrawInner(gameTime);
-				return;
 			}
 			catch (Exception innerException)
 			{
@@ -529,7 +572,23 @@ public class Game1 : Game
 				throw new Exception("See inner exception (error.txt): ", innerException);
 			}
 		}
-		DrawInner(gameTime);
+		else
+		{
+			DrawInner(gameTime);
+		}
+
+		// Present the 800x600 scene target to the real (window-sized) back buffer.
+		Xna3GraphicsDeviceCompat.BaseRenderTarget = null;
+		base.GraphicsDevice.SetRenderTarget((RenderTarget2D)null);
+		base.GraphicsDevice.Clear(Color.Black);
+		PresentationParameters pp = base.GraphicsDevice.PresentationParameters;
+		float scale = Math.Min((float)pp.BackBufferWidth / 800f, (float)pp.BackBufferHeight / 600f);
+		int destW = (int)(800f * scale);
+		int destH = (int)(600f * scale);
+		Rectangle dest = new Rectangle((pp.BackBufferWidth - destW) / 2, (pp.BackBufferHeight - destH) / 2, destW, destH);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null);
+		spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
+		spriteBatch.End();
 	}
 
 	private static void Output(string fileName, string data)
@@ -563,18 +622,27 @@ public class Game1 : Game
 		{
 			onPostDraw();
 		}
-		float num = ((!isWideScreen || Settings.GetInstance().Stretch) ? 1f : 0.75f);
-		base.GraphicsDevice.ResolveBackBuffer(resolveTarget);
-		base.GraphicsDevice.Clear(Color.Black);
-		spriteBatchWrapper.Flush();
-		gamma.Parameters[0].SetValue(Settings.GetInstance().Gamma);
-		spriteBatch.Begin((SpriteBlendMode)0, (SpriteSortMode)0, (SaveStateMode)0);
-		gamma.Begin();
-		gamma.CurrentTechnique.Passes[0].Begin();
-		spriteBatch.Draw((Texture2D)(object)resolveTarget, new Vector2(400f, 300f), (Rectangle?)null, Color.White, 0f, new Vector2((float)(((Texture2D)resolveTarget).Width / 2), (float)(((Texture2D)resolveTarget).Height / 2)), Settings.GetInstance().Scale * new Vector2(num, 1f), (SpriteEffects)0, 0f);
-		gamma.CurrentTechnique.Passes[0].End();
-		gamma.End();
-		spriteBatch.End();
+		// Stage 5 (shaders): once the gamma/bloom post-process is ported, gamma is
+		// non-null and this composites the resolved back buffer through it. Until then
+		// gamma is null AND ResolveBackBuffer is a no-op shim, so running this would
+		// Clear the screen to black and draw an empty resolve target over the scene
+		// (= black screen). Skip it and present what base.Draw already rendered — the
+		// back buffer is the 800x600 design resolution, so it shows 1:1.
+		if (gamma != null)
+		{
+			float num = ((!isWideScreen || Settings.GetInstance().Stretch) ? 1f : 0.75f);
+			base.GraphicsDevice.ResolveBackBuffer(resolveTarget);
+			base.GraphicsDevice.Clear(Color.Black);
+			spriteBatchWrapper.Flush();
+			gamma.Parameters[0].SetValue(Settings.GetInstance().Gamma);
+			spriteBatch.Begin((SpriteBlendMode)0, (SpriteSortMode)0, (SaveStateMode)0);
+			gamma.Begin();
+			gamma.CurrentTechnique.Passes[0].Begin();
+			spriteBatch.Draw((Texture2D)(object)resolveTarget, new Vector2(400f, 300f), (Rectangle?)null, Color.White, 0f, new Vector2((float)(((Texture2D)resolveTarget).Width / 2), (float)(((Texture2D)resolveTarget).Height / 2)), Settings.GetInstance().Scale * new Vector2(num, 1f), (SpriteEffects)0, 0f);
+			gamma.CurrentTechnique.Passes[0].End();
+			gamma.End();
+			spriteBatch.End();
+		}
 		if (Settings.GetInstance().HideSafeArea)
 		{
 			Rectangle safeZone = General.SafeZone;

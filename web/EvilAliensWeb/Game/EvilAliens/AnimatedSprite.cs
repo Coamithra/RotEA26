@@ -26,7 +26,10 @@ public class AnimatedSprite
 
 	private void loadData(string filename)
 	{
-		FileStream input = File.OpenRead("Content/" + filename);
+		// Web port: there is no filesystem in WASM. The Stage-3 unpacker copied the
+		// animation .dat files into wwwroot/Content (lowercased), so stream them via
+		// TitleContainer (the same root WebContentManager uses) instead of File.OpenRead.
+		Stream input = TitleContainer.OpenStream(("Content/" + filename).Replace('\\', '/').ToLowerInvariant());
 		BinaryReader binaryReader = new BinaryReader(input);
 		binaryReader.ReadInt32();
 		binaryReader.ReadString();

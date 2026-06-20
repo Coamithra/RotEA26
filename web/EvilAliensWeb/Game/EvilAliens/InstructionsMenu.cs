@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -37,7 +38,8 @@ internal class InstructionsMenu : DrawableGameComponent
 	{
 		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
 		//IL_002d: Expected O, but got Unknown
-		localContent = new ContentManager((IServiceProvider)base.Game.Services, "Content");
+		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
+		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
 		base.DrawOrder = 2000;
 	}
 

@@ -56,8 +56,17 @@ namespace EvilAliensWeb.Compat
         // root is wwwroot/Content. The game asks for assets in two inconsistent
         // ways — via a manager rooted at "Content" with names like "GFX/x", and
         // via one rooted at "" with names like "Content/GFX/x" — and with mixed
-        // casing. Normalise both to exactly one "content/" root: strip every
-        // leading "content/" segment, then prepend a single one.
+        // casing. Normalise both to exactly one "Content/" root: lowercase the
+        // whole thing, strip every leading "content/" segment, then prepend a
+        // single "Content/".
+        //
+        // The root segment MUST be capital "Content" to match the physical
+        // wwwroot/Content directory: GitHub Pages serves from a case-sensitive
+        // Linux filesystem, so a lowercase "content/..." request 404s there even
+        // though it resolves fine on a case-insensitive Windows dev box. Files
+        // *under* the root are all lowercase on disk, so lowercasing everything
+        // after the root is correct. (The JS music layer + music.json already use
+        // capital "Content/" — keep all consumers aligned.)
         private string ResolvePath(string assetName)
         {
             string combined = string.IsNullOrEmpty(RootDirectory)
@@ -66,7 +75,7 @@ namespace EvilAliensWeb.Compat
             combined = combined.Replace('\\', '/').ToLowerInvariant().TrimStart('/');
             while (combined.StartsWith("content/"))
                 combined = combined.Substring("content/".Length);
-            return "content/" + combined;
+            return "Content/" + combined;
         }
 
         public override T Load<T>(string assetName)

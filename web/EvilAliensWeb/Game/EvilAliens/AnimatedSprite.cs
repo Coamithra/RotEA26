@@ -29,7 +29,9 @@ public class AnimatedSprite
 		// Web port: there is no filesystem in WASM. The Stage-3 unpacker copied the
 		// animation .dat files into wwwroot/Content (lowercased), so stream them via
 		// TitleContainer (the same root WebContentManager uses) instead of File.OpenRead.
-		Stream input = TitleContainer.OpenStream(("Content/" + filename).Replace('\\', '/').ToLowerInvariant());
+		// Keep the "Content/" root capitalised (case-sensitive GitHub Pages); only the
+		// filename under it is lowercased to match the on-disk lowercase names.
+		Stream input = TitleContainer.OpenStream("Content/" + filename.Replace('\\', '/').ToLowerInvariant());
 		BinaryReader binaryReader = new BinaryReader(input);
 		binaryReader.ReadInt32();
 		binaryReader.ReadString();

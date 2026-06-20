@@ -63,14 +63,14 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `PersistentSave` + `Compat/SaveInterop.cs` + `eaSave` in `index.html`). `ResolveBackBuffer` and
   the `SpriteBlendMode`→`BlendState` mapping are now **real** (Stage 5); the `Effect`/`EffectPass`
   `Begin/End` no-op shims are dead (no callers).
-- **It runs AND it's live (Stages 4–9 done).** `Game1` boots through splash → menu → playable/attract
+- **It runs AND it's live (Stages 4–10 done).** `Game1` boots through splash → menu → playable/attract
   gameplay with shaders (gamma, bloom, sprite effects), **audio** (music, SFX, speech), **persistent
   saves** (settings/unlockables/awardments/screenshots → localStorage), **polish** (keyboard controls-help,
-  browser fullscreen, favicon/meta, on-screen touch controls) and a **trimmed download** (9.6 MB
+  browser fullscreen, favicon/meta, on-screen touch controls), a **unified hi-res render path** (legacy + hi-res art share one window-resolution scene, one bloom/gamma) and a **trimmed download** (9.6 MB
   uncompressed boot payload, ~2.9 MB brotli — down from 25.8 MB) and 0 console exceptions —
   **deployed publicly at https://coamithra.github.io/RotEA26/**, auto-rebuilt on every push to `main`.
-  Remaining: unified hi-res render path (10), online co-op (11). See `plan.md`
-  "Stage 4/5/6/7/8/9 — DONE" for what changed and the stubs each later stage must un-stub.
+  Remaining: online co-op (11). See `plan.md`
+  "Stage 4/5/6/7/8/9/10 — DONE" for what changed and the stubs each later stage must un-stub.
 - **Hosting (Stage 8):** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI (Pages
   can't build .NET), rewrites `<base href>` to `/RotEA26/` (project page), adds `.nojekyll` + `404.html`,
   and deploys via `actions/deploy-pages`. **The dev build keeps `<base href="/" />`** for local
@@ -141,13 +141,13 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no
   standalone controls menu entry).
-- **Resolution = a presenter, not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
+- **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
-  reverts. `Game1.Draw` renders the 800×600 frame into an offscreen `sceneTarget` and blits it
+  reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it
   scaled+letterboxed to the window; the game's `SetRenderTarget(0, null)` calls are redirected to
   that target via `Xna3GraphicsDeviceCompat.BaseRenderTarget`. Don't re-introduce a pinned
   `PreferredBackBuffer`. Stage 5 applies the gamma shader on the present blit of this target, and
-  bloom renders into it (its targets are sized 800×600 to match); Stage 9 adds fullscreen.
+  the game's 800×600-design draws scale up to fill it via `RenderScale.Matrix` (applied at the `SpriteBatchWrapper` Begin choke), and bloom + the menu/background offscreen targets are all sized to `RenderScale` and recreated on resize. Stage 9 adds fullscreen; **Stage 10** drew the hi-res art (menu title, splash channel-flip) straight into this one scene — the separate `HiResOverlay` pass is GONE — so it shares the same bloom/gamma. A render-sized offscreen target composited back uses `SpriteBatchWrapper.DrawPresent` (identity, not a scaled draw); full-screen overlays use `(0,0,800,600)` design coords, never the viewport.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

@@ -1,6 +1,8 @@
+using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -86,8 +88,13 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			// 4.0: select the effect first, then begin the batch WITH it — the pass
 			// is applied during End()/DrawBatch. A null effect = default sprite shader.
+			// Stage 10: every game-content draw is authored in 800x600 design space;
+			// RenderScale.Matrix scales it up to fill the window-sized scene target so
+			// the legacy art shares the unified high-res pipeline. The custom sprite
+			// effects are pixel-only (the internal sprite VS stays bound), so the
+			// transform flows through them unchanged.
 			effectHandler.LoadEffects();
-			spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effectHandler.CurrentEffect);
+			spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effectHandler.CurrentEffect, RenderScale.Matrix);
 			enabled = true;
 		}
 	}
@@ -100,6 +107,37 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			effectHandler.UnloadEffects();
 			enabled = false;
 		}
+	}
+
+	// Stage 10: composite a full-scene-sized offscreen target (a menu / background
+	// cross-fade render target, now sized to the render resolution) into the scene at
+	// 1:1, bypassing the design->render scale that content draws use — the texture is
+	// already at render resolution. `position`/`origin`/`scale` are in RENDER space
+	// (e.g. centre = (RenderScale.Width/2, RenderScale.Height/2)); `scale` carries any
+	// entry/exit animation. Honours the current BlendMode.
+	public void DrawPresent(Texture2D texture, Vector2 position, Vector2 origin, float scale, Color color)
+	{
+		Flush();
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
+		spriteBatch.Draw(texture, position, (Rectangle?)null, color, 0f, origin, scale, (SpriteEffects)0, 0f);
+		spriteBatch.End();
+	}
+
+	// Stage 10: draw `texture` over `designRect` (800x600 space) through a custom
+	// full-frame pixel effect (the splash channel-flip), at render resolution. Runs a
+	// one-off batch with the effect + the design->render matrix so it lands in the
+	// unified scene target like everything else. `configure` sets the effect params
+	// (arg = the render-space dest rect). Honours the current BlendMode.
+	public void DrawEffect(Texture2D texture, Rectangle designRect, Effect effect, Action<Effect, Rectangle> configure)
+	{
+		Flush();
+		Vector2 tl = Vector2.Transform(new Vector2((float)designRect.Left, (float)designRect.Top), RenderScale.Matrix);
+		Vector2 br = Vector2.Transform(new Vector2((float)designRect.Right, (float)designRect.Bottom), RenderScale.Matrix);
+		Rectangle renderDest = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
+		configure?.Invoke(effect, renderDest);
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effect, RenderScale.Matrix);
+		spriteBatch.Draw(texture, designRect, Color.White);
+		spriteBatch.End();
 	}
 
 	public void DrawString(SpriteFont spritefont, string text, Vector2 position, Color color, float rotation, Vector2 origin, float scale, SpriteEffects spriteeffect, float layerdepth)

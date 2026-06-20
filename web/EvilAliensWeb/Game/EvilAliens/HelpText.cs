@@ -175,8 +175,8 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		spriteBatch.Draw(blankTexture, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
+		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
+		spriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
 	}
 
 	public override void Draw(GameTime gameTime)

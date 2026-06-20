@@ -988,20 +988,32 @@ internal class MenuScene : Scene
 		{
 			idleStar.ReloadSprite(stargfx);
 		}
-		if (myRenderTarget == null)
-		{
-			// Stage 5: size to the 800x600 design resolution (the presenter target),
-			// NOT the window back buffer — the menu is authored for 800x600 (backdrop
-			// origin (400,300)) and is blitted 1:1 at (0,0) onto the 800x600 sceneTarget,
-			// so a window-sized target misaligns it. Also use Color (RGBA8): the original
-			// Bgr565 ((SurfaceFormat)1) is not a valid WebGL render-target format and
-			// renders black.
-			myRenderTarget = new RenderTarget2D(base.GraphicsDevice, 800, 600, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
-			base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
-			base.GraphicsDevice.Clear(Color.Black);
-			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
-		}
+		EnsureRenderTarget();
 		font = content.Load<SpriteFont>("GFX/Menu/menufont");
+	}
+
+	// Stage 10: the menu backdrop + stars render into this offscreen target, then it's
+	// composited 1:1 into the scene. Size it to the unified render resolution (RenderScale)
+	// so it aligns with the scene and stays crisp; Color (RGBA8) because Bgr565 renders
+	// nothing on WebGL (Stage 5). PreserveContents ((RenderTargetUsage)1) is kept and the
+	// target is cleared once on (re)creation — the "lightspeed warp" star trail relies on
+	// PreserveContents and NOT being cleared during FadeToGame. Recreated on size change (a resize mid-warp resets the star trail; rare and self-heals).
+	private void EnsureRenderTarget()
+	{
+		int w = EvilAliensWeb.Compat.RenderScale.Width;
+		int h = EvilAliensWeb.Compat.RenderScale.Height;
+		if (myRenderTarget != null && ((Texture2D)myRenderTarget).Width == w && ((Texture2D)myRenderTarget).Height == h)
+		{
+			return;
+		}
+		if (myRenderTarget != null)
+		{
+			((Texture2D)myRenderTarget).Dispose();
+		}
+		myRenderTarget = new RenderTarget2D(base.GraphicsDevice, w, h, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
+		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
+		base.GraphicsDevice.Clear(Color.Black);
+		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -1013,6 +1025,7 @@ internal class MenuScene : Scene
 		//IL_02d9: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.Flush();
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
+		EnsureRenderTarget();
 		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
 		bool flag = false;
 		if (state != MenuState.FadeToGame)
@@ -1045,7 +1058,9 @@ internal class MenuScene : Scene
 		}
 		base.SpriteBatch.Flush();
 		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
-		base.SpriteBatch.Draw(myRenderTarget.GetTexture(), Vector2.Zero, Color.White);
+		// Stage 10: the RT is render-sized — composite 1:1 into the scene via the
+		// identity-transform DrawPresent (a normal scaled draw would double the scale).
+		base.SpriteBatch.DrawPresent(myRenderTarget, Vector2.Zero, Vector2.Zero, 1f, Color.White);
 		drawButtonTips();
 		if (state == MenuState.FadeToGame)
 		{
@@ -1189,8 +1204,9 @@ internal class MenuScene : Scene
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)alpha));
+		// Stage 10: full-screen fade in 800x600 design space (RenderScale.Matrix scales it
+		// to fill the render target); reading the viewport would over/under-cover it.
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)alpha));
 	}
 
 	internal void PreSelectLevel(Levels level)

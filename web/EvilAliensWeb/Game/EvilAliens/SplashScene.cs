@@ -43,7 +43,7 @@ internal class SplashScene : Scene
 	// The flip splash holds its OLD image briefly, then a sudden TV glitch + push
 	// reveals one of the revenged images; the normal show/pause/fade dwell then runs
 	// on the REVEAL (the retime: the wait time lands after the effect). The reveal is
-	// drawn crisp through the native-res HiResOverlay with channelflip.fx.
+	// drawn crisp into the unified scene via SpriteBatchWrapper.DrawEffect + channelflip.fx.
 	private Effect channelFlip;
 
 	private int flipIndex = -1;
@@ -213,8 +213,8 @@ internal class SplashScene : Scene
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
+		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
 	}
 
 	public void Unload()
@@ -232,8 +232,9 @@ internal class SplashScene : Scene
 		{
 			return;
 		}
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		Rectangle dest = new Rectangle(0, 0, (viewport).Width, (viewport).Height);
+		// Stage 10: splashes are drawn in 800x600 design space (RenderScale.Matrix scales
+		// them up to fill the render target); the Clear wipes the whole bound target.
+		Rectangle dest = new Rectangle(0, 0, 800, 600);
 		base.GraphicsDevice.Clear(Color.Black);
 
 		bool isFlip = (currentTextureNumber == flipIndex) && variantPicked && (channelFlip != null);
@@ -251,8 +252,12 @@ internal class SplashScene : Scene
 				Texture2D newTex = chosenNew;
 				Vector4 nrect = chosenNewRect;
 				Effect fx = channelFlip;
-				HiResOverlay.Draw(oldTex, new Rectangle(0, 0, 800, 600), Color.White,
-					OverlayFit.Stretch, 0f, 1f, fx, delegate(Effect eff, Rectangle d)
+				// Stage 10: the channel-flip reveal now rides the unified scene path — drawn
+				// in 800x600 design space through the channelflip pixel effect (s0 = the old
+				// splash, the reveal bound as NewTexture), scaled up to render res by
+				// RenderScale.Matrix. (Was a bolt-on native-res overlay pass pre-Stage-10.)
+				base.SpriteBatch.DrawEffect(oldTex, new Rectangle(0, 0, 800, 600), fx,
+					delegate(Effect eff, Rectangle d)
 					{
 						eff.Parameters["Progress"].SetValue(prog);
 						eff.Parameters["Time"].SetValue(time);

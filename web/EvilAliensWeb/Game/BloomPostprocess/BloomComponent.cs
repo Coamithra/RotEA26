@@ -114,16 +114,34 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		gaussianBlurEffect = content.Load<Effect>("GaussianBlur");
 		// 'sketch' was loaded by the original but never applied in Draw; its .fx is
 		// lost and it's dead, so we don't ship/load it (Stage 5).
-		// Stage 5: the scene composites at the fixed 800x600 design resolution (the
-		// presenter target), NOT the window-sized back buffer, so the bloom targets
-		// must match 800x600 (half-res for the blur). Sizing to the back buffer would
-		// mismatch the presenter target and misalign the combine.
+		EnsureTargets();
+	}
+
+	// Stage 10: the bloom targets must match the unified scene target (Game1.sceneTarget
+	// = RenderScale.Width x Height), NOT 800x600 and NOT the window back buffer — so the
+	// ResolveBackBuffer copy and the combine align 1:1 with the scene. The window (hence
+	// the render size) can change after LoadContent, so (re)create on size change; called
+	// from LoadContent and at the top of every Draw.
+	private void EnsureTargets()
+	{
+		int w = EvilAliensWeb.Compat.RenderScale.Width;
+		int h = EvilAliensWeb.Compat.RenderScale.Height;
+		if (resolveTarget != null && ((Texture2D)resolveTarget).Width == w && ((Texture2D)resolveTarget).Height == h)
+		{
+			return;
+		}
+		if (resolveTarget != null)
+		{
+			((GraphicsResource)resolveTarget).Dispose();
+			((Texture2D)renderTarget1).Dispose();
+			((Texture2D)renderTarget2).Dispose();
+		}
 		SurfaceFormat backBufferFormat = base.GraphicsDevice.PresentationParameters.BackBufferFormat;
-		int sceneWidth = 800;
-		int sceneHeight = 600;
-		resolveTarget = new ResolveTexture2D(base.GraphicsDevice, sceneWidth, sceneHeight, 1, backBufferFormat);
-		renderTarget1 = new RenderTarget2D(base.GraphicsDevice, sceneWidth / 2, sceneHeight / 2, false, backBufferFormat, DepthFormat.None);
-		renderTarget2 = new RenderTarget2D(base.GraphicsDevice, sceneWidth / 2, sceneHeight / 2, false, backBufferFormat, DepthFormat.None);
+		int halfW = System.Math.Max(1, w / 2);
+		int halfH = System.Math.Max(1, h / 2);
+		resolveTarget = new ResolveTexture2D(base.GraphicsDevice, w, h, 1, backBufferFormat);
+		renderTarget1 = new RenderTarget2D(base.GraphicsDevice, halfW, halfH, false, backBufferFormat, DepthFormat.None);
+		renderTarget2 = new RenderTarget2D(base.GraphicsDevice, halfW, halfH, false, backBufferFormat, DepthFormat.None);
 	}
 
 	protected override void UnloadContent()
@@ -146,6 +164,7 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		//IL_0172: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0177: Unknown result type (might be due to invalid IL or missing references)
 		batch.Flush();
+		EnsureTargets();
 		base.GraphicsDevice.ResolveBackBuffer(resolveTarget);
 		bloomExtractEffect.Parameters["BloomThreshold"].SetValue(Settings.BloomThreshold);
 		DrawFullscreenQuad((Texture2D)(object)resolveTarget, renderTarget1, bloomExtractEffect, IntermediateBuffer.PreBloom);
@@ -164,8 +183,9 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		// path, so without this the combine reads a black base and only the blurred
 		// bloom shows (everything looks blurry).
 		parameters["BaseTexture"].SetValue((Texture2D)(object)resolveTarget);
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		DrawFullscreenQuad(renderTarget1.GetTexture(), (viewport).Width, (viewport).Height, bloomCombineEffect, IntermediateBuffer.FinalResult);
+		// Combine fills the bound scene target (sceneTarget, redirected above) at the render
+		// resolution; use RenderScale directly rather than relying on the viewport equalling it.
+		DrawFullscreenQuad(renderTarget1.GetTexture(), EvilAliensWeb.Compat.RenderScale.Width, EvilAliensWeb.Compat.RenderScale.Height, bloomCombineEffect, IntermediateBuffer.FinalResult);
 	}
 
 	private void DrawFullscreenQuad(Texture2D texture, RenderTarget2D renderTarget, Effect effect, IntermediateBuffer currentBuffer)

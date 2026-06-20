@@ -873,9 +873,18 @@ internal abstract class GameScene : Scene
 		Game1.onPostDraw = (Game1.PostDrawEvent)Delegate.Remove(Game1.onPostDraw, game1PostDrawEvent);
 		if (((Collection<IGameComponent>)(object)base.Game.Components).Contains((IGameComponent)(object)this))
 		{
-			if (MyScreenShot == null)
+			// Stage 10: the level-select screenshot resolves the scene target, which is now
+			// the render-resolution 4:3 target (not the window back buffer) — size it to
+			// match so ResolveBackBuffer copies 1:1 and the thumbnail keeps the 4:3 aspect.
+			int shotW = EvilAliensWeb.Compat.RenderScale.Width;
+			int shotH = EvilAliensWeb.Compat.RenderScale.Height;
+			if (MyScreenShot == null || ((Texture2D)MyScreenShot).Width != shotW || ((Texture2D)MyScreenShot).Height != shotH)
 			{
-				MyScreenShot = new ResolveTexture2D(base.GraphicsDevice, base.GraphicsDevice.PresentationParameters.BackBufferWidth, base.GraphicsDevice.PresentationParameters.BackBufferHeight, 1, base.GraphicsDevice.PresentationParameters.BackBufferFormat);
+				if (MyScreenShot != null)
+				{
+					((GraphicsResource)MyScreenShot).Dispose();
+				}
+				MyScreenShot = new ResolveTexture2D(base.GraphicsDevice, shotW, shotH, 1, base.GraphicsDevice.PresentationParameters.BackBufferFormat);
 			}
 			try
 			{

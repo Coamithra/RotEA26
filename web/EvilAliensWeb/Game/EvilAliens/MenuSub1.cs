@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -339,16 +340,28 @@ internal class MenuSub1 : Scene
 		base.LoadContent();
 		brainPulsate = Content.Load<Curve>("GFX/Effects/BrainCurve");
 		font = Content.Load<SpriteFont>("GFX/Menu/menufont");
-		if (myRenderTarget == null)
+		EnsureRenderTarget();
+	}
+
+	// Stage 10: the menu renders its entries into this offscreen target (so the whole
+	// menu can be scaled+faded as a unit on entry/exit), then composites it into the
+	// scene. Size it to the unified render resolution (RenderScale) so the menu text is
+	// crisp and the 1:1 DrawPresent composite aligns with the scene. Use Color (RGBA8):
+	// the original window-sized Bgr565 target renders nothing on WebGL (Stage 5).
+	// PreserveContents ((RenderTargetUsage)1) is kept. Recreated on a render-size change.
+	private void EnsureRenderTarget()
+	{
+		int w = RenderScale.Width;
+		int h = RenderScale.Height;
+		if (myRenderTarget != null && ((Texture2D)myRenderTarget).Width == w && ((Texture2D)myRenderTarget).Height == h)
 		{
-			PresentationParameters presentationParameters = base.GraphicsDevice.PresentationParameters;
-			// Stage 5: size to the 800x600 design resolution and use Color (RGBA8). The
-			// original window-sized Bgr565 ((SurfaceFormat)1) render target does not work on
-			// WebGL (Bgr565 is not a valid render-target format -> renders nothing, so the
-			// menu entries were invisible). Entries are laid out around origin (400,300) and
-			// the RT is blitted center:true at origin, so 800x600 aligns 1:1.
-			myRenderTarget = new RenderTarget2D(base.GraphicsDevice, 800, 600, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
+			return;
 		}
+		if (myRenderTarget != null)
+		{
+			((Texture2D)myRenderTarget).Dispose();
+		}
+		myRenderTarget = new RenderTarget2D(base.GraphicsDevice, w, h, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
 	}
 
 	protected override void UnloadContent()
@@ -419,6 +432,7 @@ internal class MenuSub1 : Scene
 		//IL_0132: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.SpriteBatch.Flush();
+		EnsureRenderTarget();
 		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
 		((Texture2D)myRenderTarget).GraphicsDevice.Clear(new Color(new Vector4(0f, 0f, 0f, 0f)));
 		DrawMenu(gameTime, 0f);
@@ -436,7 +450,14 @@ internal class MenuSub1 : Scene
 			num = MyMath.PowerCurve(1f, 0f, 2f, 1f - fadeTimer.Normalized);
 			break;
 		}
-		base.SpriteBatch.Draw(myRenderTarget.GetTexture(), origin, 0f, scale, center: true, new Color(new Vector4(num, num, num, num)));
+		// Stage 10: the RT is render-sized, so composite it 1:1 into the scene via the
+		// identity-transform DrawPresent (the design->render scale would double up here).
+		// Centre it on screen (render-space centre) and apply the entry/exit scale+fade
+		// about that centre — same visual as the old design-space center:true blit.
+		base.SpriteBatch.DrawPresent(myRenderTarget,
+			new Vector2((float)RenderScale.Width / 2f, (float)RenderScale.Height / 2f),
+			new Vector2((float)((Texture2D)myRenderTarget).Width / 2f, (float)((Texture2D)myRenderTarget).Height / 2f),
+			scale, new Color(new Vector4(num, num, num, num)));
 	}
 
 	public void RemoveInstantly()

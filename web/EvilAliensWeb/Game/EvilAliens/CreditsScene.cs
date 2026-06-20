@@ -297,8 +297,8 @@ internal class CreditsScene : Scene
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)alpha));
+		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)alpha));
 	}
 
 	protected void fadeBackBufferToBlack(int alpha)
@@ -307,8 +307,8 @@ internal class CreditsScene : Scene
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
+		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
 	}
 
 	protected override void LoadContent()

@@ -77,8 +77,8 @@ internal class ConfirmationMenu : MenuSub1
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
-		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color((byte)0, (byte)0, (byte)0, (byte)128));
+		// Stage 10: full-screen darken in 800x600 design space (scaled by RenderScale.Matrix).
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)128));
 		base.Draw(gameTime);
 	}
 

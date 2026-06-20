@@ -98,7 +98,14 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   `DebugInput` seam) for phones; and the headline win — **WASM download trimmed 25.8 MB → 9.6 MB
   uncompressed (~2.9 MB brotli)** via `TrimMode=partial` + `InvariantGlobalization`, **verified
   on a local Release publish** so it can't repeat Stage 8's white-screen. See the Stage-9 notes.
-- [ ] Stage 10 — Unified hi-res render path (lo-res + hi-res share one scaled scene)
+- [x] **Stage 10 — Unified hi-res render path.** The whole frame — legacy 800×600 art (upscaled
+  via one shared `RenderScale.Matrix`) AND the hi-res art (menu title, channel-flip splash) drawn at
+  native density — now renders into ONE scene target sized to the window's 4:3 letterbox (capped at
+  1440px tall), so everything shares one bloom, one gamma, one present blit. The Stage-9 bolt-on
+  native-res `HiResOverlay` pass (with its own separate glow-bloom) is **deleted** — the title now
+  blooms through the *main* bloom like everything else. Verified in real Chrome (menu, level-select,
+  Level 1 gameplay with the crisp hi-res Earth backdrop, both splash paths incl. the channel-flip,
+  and a window resize) with 0 console exceptions. See the Stage-10 notes below.
 - [ ] Stage 11 — Online co-op multiplayer (networked couch co-op)
 
 ---
@@ -952,6 +959,83 @@ is upscaled into it.
 shares gamma, bloom, and the sprite effects (consistent brightness/blooming across both), the
 separate hi-res pass is gone, and the result still letterboxes correctly to any window size with no
 `PreferredBackBuffer` regression.
+
+### Stage 10 — DONE. What was changed (read before Stage 11)
+
+- **The plan above was written before the overlay existed — reality had diverged.** Between Stage 5
+  and Stage 6, the "Revenged Edition" reskin (commit `20b9ba6`) added a **`HiResOverlay`**: a
+  native-window-resolution pass at *present* time that drew the only two hi-res assets (the menu
+  title `title-revenged.png` ~1.9 MB, and the channel-flip splash reveals up to ~3 MB) crisply,
+  **already** with matched gamma AND its own glow-bloom. So the real divergence Stage 10 had to fix
+  was narrow: **two separate bloom implementations** (the full `BloomComponent` over the 800×600
+  scene vs. the overlay's simpler `BuildOverlayGlow`). The chosen fix (user-picked over a
+  keep-the-overlay option and a fixed-2× option) is the **full rework to one window-resolution
+  target** — the plan's intent, modernized to *match-the-window* instead of a fixed 2×.
+- **One source of truth: `Compat/RenderScale.cs`.** Holds the current render resolution = the
+  window's **4:3 letterbox** size (`min(win/800, win/600)`), **capped at 1440px tall** (a 4K
+  fullscreen would otherwise render a ~3840×2880 scene + bloom every frame; the legacy art is 600px
+  and the hi-res art ≤ ~1920px wide, so beyond the cap the present blit's bilinear upscale is
+  invisible — tunable `MaxHeight`). Exposes `Width`/`Height` (the render-target size) and **`Matrix`**
+  = per-axis `CreateScale(Width/800, Height/600)` so design corners map exactly onto the target
+  (no sub-pixel edge seam). `Game1.Draw` calls `RenderScale.Update(backBufferW, backBufferH)` once
+  per frame, before any size-dependent target is (re)created.
+- **The design→render scale is applied at ONE choke point.** `SpriteBatchWrapper._beginDrawing` now
+  passes `RenderScale.Matrix` to every `SpriteBatch.Begin`, so all the game's 800×600-design draws
+  scale up to fill the bigger target automatically. (The custom sprite effects are pixel-only — the
+  internal sprite VS stays bound — so the transform flows through them unchanged.) **Every** game
+  draw goes through this wrapper (verified: the only raw `SpriteBatch`es are Bloom's own + Game1's
+  present, both using explicit dest rects), so there were no scattered `Begin` sites to chase.
+- **The two new wrapper methods for the exceptions to that rule:**
+  - **`DrawPresent(tex, position, origin, scale, color)`** — an **identity-transform** 1:1 blit, for
+    compositing a *render-sized* offscreen target back into the scene (the scale matrix would
+    double-up here). Used by the menu (`MenuSub1`/`MenuScene`) and the background cross-fade
+    (`Background`).
+  - **`DrawEffect(tex, designRect, effect, configure)`** — a one-off batch with a **custom
+    full-frame pixel effect** + the design→render matrix, for the splash **channel-flip**
+    (`channelflip.fx`); `configure` sets the effect params (the old splash is s0, the reveal is the
+    `NewTexture` param).
+- **Every offscreen render target moved from 800×600 (or window-sized) to `RenderScale.Width×Height`,
+  recreated on a size change** (a shared `EnsureTargets()`/`EnsureRenderTarget()` per owner, called at
+  the top of its `Draw`): `Game1.sceneTarget`; the three `BloomComponent` targets (resolve +
+  half-res ping-pong); the `MenuScene` + `MenuSub1` menu targets (the warp-trail `PreserveContents` +
+  clear-once is kept); `Background`'s cross-fade target (also switched from the 16-bit
+  `(SurfaceFormat)2`, which renders nothing on WebGL, to `SurfaceFormat.Color` — the same trap Stage 5
+  hit); and `GameScene.MyScreenShot` (so the level-select thumbnail keeps a 1:1 4:3 capture). The
+  bloom Gaussian offsets are texel-relative so the blur tracks the resolution automatically.
+- **Full-screen fades were drawn at `viewport.Width/Height` (window pixels) — now `(0,0,800,600)`
+  design space** (the matrix scales them to the target). Fixed in `Background`, `MenuScene`,
+  `SplashScene`, `CreditsScene`, `ConfirmationMenu`, `HelpText` (the `Background.fadeBackBufferToBlack`
+  one was *already* design-space — that was the precedent). Reading the viewport would over/under-cover
+  the target once the wrapper applies the scale.
+- **The hi-res art now rides the unified scene.** The menu **title** is drawn in-scene in
+  `MenuSubWithSkull.DrawMenu` (it runs while the menu's render-sized target is bound, so it's crisp at
+  render res) and **blooms through the main `BloomComponent`** — the whole point: consistent glow with
+  everything else, no separate pass. The **channel-flip** reveal goes through `DrawEffect`.
+- **Deleted:** the entire overlay/glow pass — `Game1.PresentHiResOverlay` + `BuildOverlayGlow` +
+  `overlayTarget`/`glowTargetA`/`glowTargetB`/`glowBlur`/`PremultipliedAdditive` + a dead
+  window-sized `resolveTarget` field, and the whole **`Compat/HiResOverlay.cs`** (its `Premultiply`
+  helper — still needed for the straight-alpha title — moved to the new `Compat/TextureUtil.cs`).
+  The `glowblur.mgfxo` asset is now unused (left on disk, harmless).
+- **Present blit is structurally unchanged** and needed no edits: it still computes the window
+  letterbox and stretches `sceneTarget` into it through the gamma shader — now a **1:1 copy** when
+  uncapped, a bilinear **upscale** only when the 1440px cap engages on a very large window.
+- **Verification (real Chrome, per CLAUDE.md — 0 console exceptions throughout, only the benign KNI
+  `*Factory not found → reflection` boot logs):** `?menu` shows the crisp hi-res title now glowing
+  via the main bloom over the planet backdrop; Start → **level-select** submenu composites correctly
+  (the render-sized RT + entry animation via `DrawPresent`); `?level=Level1` renders the **hi-res
+  Earth backdrop crisp at full window res** with the player ship + alien UFOs (colorize/additive +
+  bloom) and the corner-anchored 4-player HUD all correctly scaled; a **normal boot** shows the EA
+  splash and the **channel-flip "I Made This" reveal** (the `DrawEffect` path) crisply; and a
+  **window resize** recreated every target with no exceptions/corruption. (The brief all-white frame
+  right after `?level=Level1` is just the level's warp-in flash, not a bug — it resolves to gameplay.)
+- **Gotchas for Stage 11 / future work:** (1) anything that draws into the scene must go through
+  `SpriteBatchWrapper` (gets the scale) — a raw `SpriteBatch.Begin` would draw at design size in the
+  top-left of the bigger target; if you must, multiply by `RenderScale.Matrix` yourself. (2) A
+  *render-sized* offscreen target composited back into the scene must use `DrawPresent` (identity),
+  NOT a normal scaled draw. (3) New offscreen targets should size to `RenderScale.Width×Height` with
+  `SurfaceFormat.Color` and recreate on size change. (4) Full-screen overlays use `(0,0,800,600)`
+  design coords, never the viewport. (5) The 1440px height cap (`RenderScale.MaxHeight`) is the one
+  perf knob; raise it for crisper 4K at higher fill cost.
 
 ---
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -181,10 +182,10 @@ public class Background : Scene
 		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
 		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
-		Viewport viewport = base.GraphicsDevice.Viewport;
 		factor = MathHelper.Clamp(factor, 0f, 1f);
 		int num = Convert.ToInt16(factor * 255f);
-		base.SpriteBatch.Draw(blank, new Rectangle(0, 0, (viewport).Width, (viewport).Height), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)num));
+		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
+		base.SpriteBatch.Draw(blank, new Rectangle(0, 0, 800, 600), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)num));
 	}
 
 	protected void fadeBackBufferToBlack(float factor)
@@ -290,7 +291,8 @@ public class Background : Scene
 		{
 			float num = 1f - XFade.Normalized;
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-			base.SpriteBatch.Draw(rendertarget.GetTexture(), Vector2.Zero, new Color(new Vector4(1f, 1f, 1f, num)));
+			// Stage 10: render-sized RT -> 1:1 identity composite (DrawPresent).
+			base.SpriteBatch.DrawPresent(rendertarget, Vector2.Zero, Vector2.Zero, 1f, new Color(new Vector4(1f, 1f, 1f, num)));
 		}
 		foreach (BackgroundImage foregroundLayer in foregroundLayers)
 		{
@@ -307,6 +309,7 @@ public class Background : Scene
 		if (XFade.Active)
 		{
 			base.SpriteBatch.Flush();
+			EnsureRenderTarget();
 			base.GraphicsDevice.SetRenderTarget(0, rendertarget);
 		}
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
@@ -331,7 +334,8 @@ public class Background : Scene
 			base.SpriteBatch.Flush();
 			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
-			base.SpriteBatch.Draw(rendertarget.GetTexture(), Vector2.Zero);
+			// Stage 10: render-sized RT -> 1:1 identity composite (DrawPresent).
+			base.SpriteBatch.DrawPresent(rendertarget, Vector2.Zero, Vector2.Zero, 1f, Color.White);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		}
 	}
@@ -668,11 +672,27 @@ public class Background : Scene
 		{
 			foregroundLayer.LoadGraphics(Content);
 		}
-		if (rendertarget == null)
+		EnsureRenderTarget();
+	}
+
+	// Stage 10: the cross-fade (XFade) renders a background into this offscreen target,
+	// then blits it over the new background to dissolve between them. Size it to the
+	// unified render resolution (RenderScale) so it composites 1:1 with the scene, and
+	// use SurfaceFormat.Color (RGBA8) — the original 16-bit format renders nothing on
+	// WebGL (same trap Stage 5 hit with the menu targets). Recreated on a size change.
+	private void EnsureRenderTarget()
+	{
+		int w = RenderScale.Width;
+		int h = RenderScale.Height;
+		if (rendertarget != null && ((Texture2D)rendertarget).Width == w && ((Texture2D)rendertarget).Height == h)
 		{
-			_ = base.GraphicsDevice.PresentationParameters;
-			rendertarget = new RenderTarget2D(base.GraphicsDevice, 800, 600, false, (SurfaceFormat)2, DepthFormat.None, 0, (RenderTargetUsage)1);
+			return;
 		}
+		if (rendertarget != null)
+		{
+			((Texture2D)rendertarget).Dispose();
+		}
+		rendertarget = new RenderTarget2D(base.GraphicsDevice, w, h, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
 	}
 
 	protected override void UnloadContent()

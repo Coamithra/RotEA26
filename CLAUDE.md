@@ -98,6 +98,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   nuget cache). `WebContentManager` loads them via `new Effect(gd,bytes)`. **Re-run the script
   after editing any `.fx`; don't hand-edit `.mgfxo`.** Effects apply via `SpriteBatch.Begin(effect)`
   (4.0 model), not `effect.Begin()`.
+- **Alpha is STRAIGHT (non-premultiplied); `AlphaBlend` -> `BlendState.NonPremultiplied`.** The unpacked
+  content is straight alpha (the original Xbox 3.1 build was — proven from the source `.xnb` and the
+  decompiled explosion's explicit `Additive` swap), so `unpack.py:to_image` emits the decoded RGBA
+  verbatim and `SpriteBatchWrapper.ToBlendState` maps `AlphaBlend` -> `BlendState.NonPremultiplied`
+  (SrcAlpha/InvSrcAlpha). **DON'T use `BlendState.AlphaBlend`** — that's KNI's *premultiplied* variant
+  (One/InvSrcAlpha), a same-name trap: pairing it with straight content makes alpha fades go
+  additive-bright instead of dissolving (the "bomb/blast vanishes suddenly" bug — we tried it, it's
+  reverted). Don't premultiply on export, don't premultiply tints; straight tints like
+  `new Color(1,1,1,a)` are correct as written. Evidence + the full story: `plan.md` Stage 3.
 - **Audio (Stage 6):** the lost XACT runtime is replaced, not ported. `tools/audio/` cracks the
   big-endian Xbox banks in pure Python (`xact.py` parses `.xwb`/`.xsb`; PCM SFX + **xWMA music**
   decoded via **PyAV**) and `build_audio.py` writes `wwwroot/Content/{sfx,vo}/*.wav`,

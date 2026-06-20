@@ -42,19 +42,14 @@ skipped = []
 
 
 def to_image(rgba_bytes, w, h):
-    """RGBA bytes -> premultiplied-alpha PIL image.
+    """RGBA bytes -> straight (non-premultiplied) alpha PIL image.
 
-    XNA's content pipeline premultiplies texture alpha by default, and KNI's
-    default SpriteBatch BlendState (AlphaBlend) is the premultiplied variant.
-    KNI's Texture2D.FromStream does NOT premultiply, so we must bake it in here
-    or transparent pixels with non-black RGB (e.g. the white background of the
-    Dxt3 font atlas) bleed in as solid colour ("white squares" on text, bright
-    halos on soft sprites).
+    The original Xbox 3.1 content is straight alpha (transparent pixels keep real
+    RGB), and the renderer matches it with BlendState.NonPremultiplied
+    (SrcAlpha/InvSrcAlpha), so we emit the decoded RGBA verbatim -- no premultiply.
     """
-    arr = np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(h, w, 4).astype(np.uint16)
-    a = arr[:, :, 3:4]
-    arr[:, :, :3] = (arr[:, :, :3] * a + 127) // 255
-    return Image.fromarray(arr.astype(np.uint8), "RGBA")
+    arr = np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(h, w, 4)
+    return Image.fromarray(arr, "RGBA")
 
 
 def out_path(rel, new_ext):

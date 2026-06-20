@@ -33,8 +33,11 @@ namespace Microsoft.Xna.Framework.Graphics
 
     public static class Xna3SpriteBatchCompat
     {
-        // TODO(visual): confirm the SpriteBlendMode int->BlendState mapping against
-        // the original once content renders. AlphaBlend is the safe default for 2D.
+        // Same straight-alpha mapping as the live path (SpriteBatchWrapper.ToBlendState):
+        // content is straight (non-premultiplied), so AlphaBlend -> BlendState.NonPremultiplied
+        // (SrcAlpha/InvSrcAlpha), NOT KNI's premultiplied BlendState.AlphaBlend. These
+        // Begin(SpriteBlendMode) overloads have no live callers today, but keep them in sync
+        // so a future caller doesn't fall into the AlphaBlend same-name trap.
         private static BlendState ToBlendState(SpriteBlendMode mode)
         {
             switch (mode)
@@ -42,7 +45,7 @@ namespace Microsoft.Xna.Framework.Graphics
                 case SpriteBlendMode.Additive: return BlendState.Additive;
                 case SpriteBlendMode.None:     return BlendState.Opaque;
                 case SpriteBlendMode.AlphaBlend:
-                default:                       return BlendState.AlphaBlend;
+                default:                       return BlendState.NonPremultiplied;
             }
         }
 

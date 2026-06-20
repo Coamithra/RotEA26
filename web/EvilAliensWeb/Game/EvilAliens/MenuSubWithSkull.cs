@@ -1,7 +1,6 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -26,10 +25,9 @@ internal class MenuSubWithSkull : MenuSub1
 	protected override void LoadContent()
 	{
 		base.LoadContent();
+		// Straight-alpha title + the straight NonPremultiplied blend = no conversion needed
+		// (the chroma-keyed logo is straight, like the rest of the content now).
 		title = Content.Load<Texture2D>("GFX/Menu/title-revenged");
-		// The chroma-keyed title is straight alpha; the game works in premultiplied
-		// alpha, so convert it once at load.
-		TextureUtil.Premultiply(title);
 	}
 
 	public override void DrawMenu(GameTime gameTime, float yoffset)

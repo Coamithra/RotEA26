@@ -62,8 +62,14 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	}
 
 	// XNA 3.x mapped its SpriteBlendMode to fixed-function blend state; 4.0 uses
-	// BlendState objects. Content is premultiplied (see Stage 3), so AlphaBlend and
-	// Additive here are the premultiplied variants KNI ships, which is correct.
+	// BlendState objects. Content is STRAIGHT (non-premultiplied) alpha, exactly as the
+	// original Xbox 3.1 build shipped it (the source .xnb store transparent pixels with
+	// real RGB; the explosion code explicitly swaps to Additive — both impossible under
+	// premultiply). So AlphaBlend maps to BlendState.NonPremultiplied (SrcAlpha/InvSrcAlpha),
+	// the exact equation 3.x's SpriteBlendMode.AlphaBlend used. NOTE: KNI's BlendState.AlphaBlend
+	// is the *premultiplied* variant (One/InvSrcAlpha) — a same-name, different-equation trap;
+	// pairing it with straight content is what made fades go additive-bright instead of dissolving.
+	// Additive (SrcAlpha/One) and Opaque are the straight variants too, matching the original.
 	private static BlendState ToBlendState(SpriteBlendMode mode)
 	{
 		switch (mode)
@@ -73,7 +79,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		case SpriteBlendMode.None:
 			return BlendState.Opaque;
 		default:
-			return BlendState.AlphaBlend;
+			return BlendState.NonPremultiplied;
 		}
 	}
 

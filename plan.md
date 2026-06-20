@@ -224,14 +224,19 @@ Fonts: XNA `SpriteFont` `.xnb` may need recompiling from a `.spritefont`.
   with inconsistent casing). Textures→`<name>.png`; font→`<name>.fnt.png`+`<name>.fnt`
   (binary metrics, see `unpack.py:write_fnt`); curve→`<name>.curve`; `.dat`/`level3.txt`
   copied verbatim.
-- **Alpha is PREMULTIPLIED on export** (`unpack.py:to_image`). XNA's pipeline premultiplied
-  by default and KNI's default `SpriteBatch` blend (`BlendState.AlphaBlend`) is the
-  premultiplied variant, but `Texture2D.FromStream` does NOT premultiply — so without this,
-  transparent pixels with non-black RGB bleed in (the Dxt3 font atlas has white-on-
-  transparent → text renders as solid "white squares"; soft sprites get bright halos).
-  **Implication for Stage 5:** when verifying the `SpriteBlendMode`→`BlendState` mapping,
-  treat all content as premultiplied (e.g. 3.x `Additive` → KNI `BlendState.Additive`,
-  which is also premultiplied — OK; don't "fix" it back to non-premultiplied).
+- **Alpha is STRAIGHT (non-premultiplied) on export** (`unpack.py:to_image` emits the decoded RGBA
+  verbatim). The original Xbox 3.1 content is straight alpha — proven from the bytes: source `.xnb`
+  store transparent pixels with real (non-black) RGB and channels > alpha, both impossible under
+  premultiply; the decompiled `Explosion` also explicitly *swaps* to `Additive`, which premultiply
+  would make unnecessary. (The old "XNA premultiplies by default" rationale was a 4.0 fact misapplied
+  to this 3.1 title.) The renderer matches with the straight blend (`SpriteBlendMode.AlphaBlend`
+  → `BlendState.NonPremultiplied` = SrcAlpha/InvSrcAlpha). **SAME-NAME TRAP:** KNI's
+  `BlendState.AlphaBlend` is the *premultiplied* variant (One/InvSrcAlpha); pairing it with straight
+  content is what made alpha fades go additive-bright instead of dissolving (the "blast vanishes"
+  bug). The font "white squares" that once seemed to need premultiply were that
+  straight-content-vs-premultiplied-BLEND mismatch, not a content problem — `NonPremultiplied`
+  renders the straight font atlas correctly with no conversion. **Don't re-introduce premultiply** on
+  export or in the blend mapping; `Additive`/`Opaque` are the straight variants and unchanged.
 - **Runtime loader:** `Compat/WebContentManager.cs` (subclasses `ContentManager`). Texture2D
   via `Texture2D.FromStream` (KNI decodes PNG with StbImageSharp, synchronously);
   SpriteFont reconstructed via the public `SpriteFont(...)` ctor; Curve rebuilt from keys.
@@ -446,8 +451,8 @@ asset names in `Content/Bloom/` and `Content/GFX/Effects/`.
     fix kept that usage flag, so the warp still works; the trail accumulates in myRenderTarget (not
     sceneTarget), so bloom compositing over sceneTarget doesn't wipe it.
 - **Blend modes verified:** `SpriteBatchWrapper.ToBlendState` maps 3.x
-  `None→Opaque`, `AlphaBlend→AlphaBlend`, `Additive→Additive` (all premultiplied, matching
-  the premultiplied content) — additive glows and alpha blends render correctly in gameplay.
+  `None→Opaque`, `AlphaBlend→NonPremultiplied`, `Additive→Additive` (all straight,
+  matching the straight content) — additive glows and alpha fades render correctly in gameplay.
 - **Verification:** booted in a fresh Chrome tab; gamma proven by a forced-value test
   (whole frame brightens, letterbox stays black); bloom visible as glow on text/sprites and
   correct on dark gameplay; attract-mode gameplay renders enemies/ships/HUD with correct
@@ -1014,7 +1019,9 @@ separate hi-res pass is gone, and the result still letterboxes correctly to any 
 - **Deleted:** the entire overlay/glow pass — `Game1.PresentHiResOverlay` + `BuildOverlayGlow` +
   `overlayTarget`/`glowTargetA`/`glowTargetB`/`glowBlur`/`PremultipliedAdditive` + a dead
   window-sized `resolveTarget` field, and the whole **`Compat/HiResOverlay.cs`** (its `Premultiply`
-  helper — still needed for the straight-alpha title — moved to the new `Compat/TextureUtil.cs`).
+  helper moved to `Compat/TextureUtil.cs` at the time — both now GONE: the straight-alpha
+  restoration deleted `TextureUtil.cs`, since straight content + the `NonPremultiplied` blend needs no
+  premultiply).
   The `glowblur.mgfxo` asset is now unused (left on disk, harmless).
 - **Present blit is structurally unchanged** and needed no edits: it still computes the window
   letterbox and stretches `sceneTarget` into it through the gamma shader — now a **1:1 copy** when

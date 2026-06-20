@@ -1,13 +1,20 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
+// The main-menu header. (Name kept for MenuScene's sake; the "skull" is gone —
+// see below.) Revenge reskin: the old grey "Revenge of the Evil Aliens" text and
+// the separate evilskull are both retired. The new title-revenged logo already
+// carries the alien/UFO mascot, so the skull was double-billing and crowding it.
+// The logo is high-res (1642x656), so it's drawn through the native-res
+// HiResOverlay — crisp at window resolution instead of being squeezed through the
+// 800x600 menu render target — re-centred and enlarged into the freed space, with
+// an arcade pulse + subtle wobble.
 internal class MenuSubWithSkull : MenuSub1
 {
-	private Texture2D skull;
-
 	private Texture2D title;
 
 	public MenuSubWithSkull(Game game)
@@ -18,37 +25,32 @@ internal class MenuSubWithSkull : MenuSub1
 	protected override void LoadContent()
 	{
 		base.LoadContent();
-		skull = Content.Load<Texture2D>("GFX/Menu/evilskull");
-		title = Content.Load<Texture2D>("GFX/Menu/title");
+		title = Content.Load<Texture2D>("GFX/Menu/title-revenged");
+		// The chroma-keyed title is straight alpha; the game (and overlay) work in
+		// premultiplied alpha, so convert it once at load.
+		HiResOverlay.Premultiply(title);
 	}
 
 	public override void DrawMenu(GameTime gameTime, float yoffset)
 	{
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0114: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0116: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-		// Stage 5: the skull/title rects are fractions of the surface. We render into the
-		// 800x600 design-resolution target (MenuSub1.myRenderTarget), so base them on
-		// 800x600, NOT the window back buffer (~1300px) — otherwise they're scaled for the
-		// window and overflow the 800x600 frame (title/skull too big and cut off).
-		float num = 800f;
-		float num2 = 600f;
-		int num3 = Convert.ToInt16(0.05f * num2);
-		int num4 = Convert.ToInt16(0.05f * num);
-		int num5 = Convert.ToInt16(0.25f * num);
-		int num6 = Convert.ToInt16((float)skull.Height / (float)skull.Width * (float)num5);
-		int num7 = Convert.ToInt16(0.05f * num2);
-		int num8 = Convert.ToInt16(0.35f * num);
-		int num9 = Convert.ToInt16(0.55f * num);
-		int num10 = Convert.ToInt16((float)title.Height / (float)title.Width * (float)num9);
-		Rectangle dest = default(Rectangle);
-		(dest) = new Rectangle(num4, num3, num5, num6);
-		Rectangle dest2 = default(Rectangle);
-		(dest2) = new Rectangle(num8, num7, num9, num10);
-		base.SpriteBatch.Draw(skull, dest, Color.White);
-		base.SpriteBatch.Draw(title, dest2, Color.White);
+
+		// Arcade marquee feel: a gentle scale "breathe" plus a subtle rotational
+		// wobble at a detuned frequency (so it sways rather than ticks), and a tiny
+		// vertical bob. Driven off wall-clock game time; pivots about the slot centre.
+		float t = (float)gameTime.TotalGameTime.TotalSeconds;
+		const float TwoPi = 6.28318548f;
+		float pulse = 1f + 0.018f * (float)Math.Sin(TwoPi * 0.9f * t);   // ~+/-1.8% breathe
+		float wobble = 0.0105f * (float)Math.Sin(TwoPi * 0.55f * t);     // ~+/-0.6 deg sway
+		int bob = (int)Math.Round(1.0 * Math.Sin(TwoPi * 0.4f * t));     // +/-1 px design-space
+
+		// Horizontally-centred slot near the top of the 800x600 design surface.
+		// AspectFit keeps the 2.5:1 logo undistorted regardless of the slot aspect,
+		// and centres it within the slot. The overlay maps this design rect through
+		// the presenter transform so it lines up with the rest of the menu.
+		Rectangle titleSlot = new Rectangle(130, 30 + bob, 540, 210);
+		HiResOverlay.Draw(title, titleSlot, Color.White, OverlayFit.AspectFit, wobble, pulse, glow: true);
+
 		base.DrawMenu(gameTime, 75f);
 	}
 }

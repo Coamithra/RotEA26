@@ -72,6 +72,7 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
 - [ ] Stage 7 — Saves & awardments persistence (localStorage)
 - [ ] Stage 8 — GitHub hosting + Pages deploy (public)
 - [ ] Stage 9 — Polish (input map, fullscreen, download size)
+- [ ] Stage 10 — Unified hi-res render path (lo-res + hi-res share one scaled scene)
 
 ---
 
@@ -431,16 +432,102 @@ asset names in `Content/Bloom/` and `Content/GFX/Effects/`.
 **Goal:** music + SFX play in the browser.
 
 **Context:** audio is XACT (`Content/SFX/*.xgs/.xsb/.xwb`), driven by
-`Game/EvilAliens/SoundManager.cs` (+ `SongInstance.cs`). KNI/web XACT support is limited.
+`Game/EvilAliens/SoundManager.cs` (+ `SongInstance.cs`). **There is NO XACT runtime in KNI's
+BlazorGL backend** (MonoGame's XACT is legacy/desktop-only) — the `AudioEngine`/`SoundBank`/
+`WaveBank` ctor is already try/caught to null, so audio silently no-ops today. We do not "port
+XACT"; we rebuild its *behaviours* on `SoundEffect`/`SoundEffectInstance` (+ a JS/WebAudio music
+layer). The good news from inspecting the banks: scope is small and well-defined.
 
-**Steps:**
-1. Extract the WAV cues from the `.xwb` wave bank (the format is documented; `unxwb`-style
-   tools exist) and map cue names from the `.xsb` sound bank.
-2. Rewrite `SoundManager` to use `SoundEffect`/`SoundEffectInstance` (SFX) and `Song`/
-   `MediaPlayer` (music) loaded from WAV/OGG — drop `AudioEngine`/`SoundBank`/`WaveBank`.
-3. Handle the browser autoplay policy (audio must start after a user gesture).
+### What XACT actually did here (inventory — read before scoping)
+Pulled from `alienssfx.xgs` (542 B) + `Sound Bank.xsb` (2.3 KB) + the call sites:
+- **Categories:** `Music`, `Speech`, `Default` (+ `Global`). Used for group volume + the
+  `Settings.PlayMusic` toggle. No others.
+- **Custom variables / DSP:** exactly **one** custom variable, `Pitch` (everything else in the
+  `.xgs` — `NumCueInstances`, `AttackTime`, `DopplerPitchScalar`, ... — is XACT's stock built-in
+  set). **No custom reverb/distortion/DSP presets exist** (the tiny `.xgs` confirms it), so
+  there is no hidden effects chain to recreate. Good.
+- **Cue list (`.xsb`):** SFX (`expl1/2`, `fire`, `head asplode`, `small head asplode`,
+  `lazershot`, `lazercharge`, `lazershotnoloop`, `newwave`, `blast`, `powerup`,
+  `targetacquired`, `hit_boss`, `bugdies`, `bees`, `wasp`, `spiderbossdeath`, `evillaugh`,
+  `usepowerup`); **Speech** (`ttf_*` x10 — the `PlayText()` warnings/unlock stingers); **intro
+  voice-over** (`humanityshope`, `inagalaxyundersiege`, `inanageofviolence`, `lieswithoneman`,
+  `single heartbeat` — the movie-trailer narration); **music** (`stage1/2/3`, `bach`, `classic`,
+  `sjaak`, `kylikova`, `sjaakslow`).
 
-**Done when:** title music + core SFX play.
+### The "cool effects" to preserve (and how each rebuilds)
+1. **Reactive music pitch/rate** — the standout. `SetMusicRate(rate)` -> (XACT)
+   `currentMusic.SetVariable("Pitch", rate)`. Call sites: **`BrainBoss`** sweeps music pitch with
+   boss HP (`SetMusicRate(MyMath.PowerCurve(50f, 68f, 2f, 1f - HitPointsNormalized))`) and
+   **`Level3`** starts Kylikova at `SetMusicRate(50f)`. Rebuild: WebAudio
+   `AudioBufferSourceNode.playbackRate` (pitch+tempo together, faithful to XACT's resampling
+   pitch). *Open question:* the `Pitch` variable's value range (~50-68) maps through an XACT RPC
+   curve we don't have -> derive the rate multiplier by ear at impl time (50 == normal? a
+   semitone scale?). This is the one bit needing tuning.
+2. **Cue variation / anti-machine-stamp** — XACT cues randomize pitch/volume (and pick wave
+   variations) per play so repeated `expl1`/`head asplode` don't sound identical. Rebuild:
+   small random pitch+gain per shot (exactly Fighterproto's `0.94 + rand*0.12` trick).
+3. **Instance limiting** — `InstancePlayLimitException` is caught everywhere; cues had max-instance
+   caps + steal-oldest so rapid fire (`lazershot`, explosions) doesn't pile into mud. Rebuild: a
+   per-cue active-voice cap in the new manager.
+4. **Looping SFX** — naming (`lazershot`/`lazershotnoloop`, `lazercharge`/`lazerrepeatable`)
+   implies some cues loop. Rebuild: per-cue loop flag on the `SoundEffectInstance`.
+5. **Categories/volume + Speech priority** — `Music`/`Speech`/`Default` group volumes; `PlayText`
+   carries a `priority` (the `currentspeechpriority` field hints at speech ducking, though the
+   recovered Xbox build's priority logic is thin). Rebuild: a gain group per category.
+
+### Decided architecture (split: native SFX + JS music)
+KNI `SoundEffectInstance` natively gives `Pitch` (+/-1 octave), `Volume`, `Pan`, `IsLooped` and
+manual instance management — that covers SFX, speech, variation, instance caps and looping SFX
+**with zero interop**. The *only* thing it can't do is seamless music **loop points** (its
+`IsLooped` loops the whole buffer). So:
+- **SFX + speech + intro VO -> native C# (`SoundEffect`/`SoundEffectInstance`).** Many SFX already
+  exist as standalone `.xnb` SoundEffects in `Content/SFX/` (`expl1.xnb`, `blast.xnb`, ...), so
+  those decode directly; the rest come from the `.xwb`.
+- **Music -> JS/WebAudio interop layer (Fighterproto approach).** This is where we "spend the
+  time" the brief calls for: it buys seamless **intro -> loop-body** (`AudioBufferSourceNode`
+  `loop`+`loopStart`/`loopEnd` from `pymusiclooper` tags) AND the reactive `playbackRate` pitch
+  AND gain crossfades — i.e. it solves effect #1 and the looping problem in one layer. Reuse
+  `C:\Programming\Fighterproto\src\render\audio.ts` (BGM half: tag parser + player) nearly
+  verbatim; `SetMusicRate`/`PlayMusic`/`StopMusic` become Blazor JS-interop calls. Interop is
+  already wired (`initRenderJS`/`tickJS`).
+
+### Voice-over: re-cast with ElevenLabs (decided + generated 2026-06-20)
+We are NOT reusing Microsoft Sam's `ttf_*` speech from the `.xwb` — the game's voice is re-cast
+with ElevenLabs (Eleven v3), full commercial license. Scripts in `tools/tts/`, renders in
+`tools/tts/out/`:
+- **Announcer = "Brian"** (`[robotic announcer]` + per-line emotion, stability 0.5): the 10
+  `ttf_*` cues named to the exact `SoundManager.PlayText` ids, in `out/announcer_final/`, PLUS two
+  NEW barks `ttf_missionFailed` + `ttf_gameOver` (the defeat screen was silent in the original).
+- **Narrator = "Victor"** (`[British accent][cinematic][reverent]`, stability 0.0): the
+  `CreditsScene.SetupLevel1/2/3` story crawls in `out/narrator/` — a NEW cinematic narration layer
+  the XBLIG never had (story text scrolled silently).
+Wiring impact on the steps below:
+- Speech no longer comes from the `.xwb`; the crack is only for music + intro VO.
+- Add `Texts.MissionFailed` / `Texts.GameOver` (+ `PlayText` cases) and fire one on the defeat
+  screen (`GameScene.cs:598`, currently `Texts.Nothing`).
+- Renders are MP3 (API output); convert to WAV in this audio step.
+- Open option: the intro movie-trailer VO (`humanityshope`, `inagalaxyundersiege`, ...) is a
+  natural fit for Victor too — re-cast with the narrator if we want it voiced.
+`CreditsScene` already credits Brian + Victor and retires Sam ("IN LOVING MEMORY OF: Microsoft Sam").
+
+### Steps
+1. **Crack the `.xwb`** (9.8 MB) to WAV and map cue->wave names via the `.xsb` (`unxwb`-style;
+   format is documented). Needed for **music + intro VO** (no `.xnb` copies); **speech is now our
+   own ElevenLabs renders (see above), not the `.xwb`.** SFX can instead reuse the existing `.xnb`.
+   Re-encode music to `.ogg/.opus`.
+2. **Loop-tag the 8 music tracks** offline with `pymusiclooper` (find seam -> bake
+   `LOOPSTART`/`LOOPEND`). If a track has a one-shot intro, keep it; loop only the body.
+3. **Build the JS music layer** (port `audio.ts` BGM half) + a thin C# `IMusicService` over JS
+   interop. Wire `PlayMusic`/`StopMusic`/`SetMusicRate(rate->playbackRate)` to it.
+4. **Rewrite `SoundManager` SFX path** on `SoundEffect`/`SoundEffectInstance`: per-cue
+   instance cap, random pitch/volume variation, loop flags, `Music`/`Speech`/`Default` gain
+   groups; drop `AudioEngine`/`SoundBank`/`WaveBank`. Keep `SongInstance.cs` only if useful.
+5. **Autoplay policy:** unlock `AudioContext` (and KNI audio) on the first `keydown`/`pointerdown`
+   (Fighterproto's `kick` pattern); queue any music requested before unlock.
+
+**Done when:** title music loops seamlessly; core SFX play with variation (not machine-stamped);
+the **BrainBoss music-pitch sweep** audibly tracks boss HP; `Music`/`Speech` volumes + the
+`PlayMusic` setting work; nothing throws on the autoplay gate.
 
 ---
 
@@ -523,6 +610,86 @@ Persistence layer = browser localStorage (or IndexedDB) via Blazor JS interop.
 Input remapping/help screen for web, fullscreen + canvas resize handling, loading screen
 (already styled in `wwwroot/css/app.css`), trim WASM download size
 (`dotnet publish -c Release` + trimming/AOT), favicon/title/meta, mobile/touch (optional).
+
+---
+
+## Stage 10 — Unified hi-res render path
+
+**Goal:** the original 800×600 content and the new high-resolution textures render through
+**one** scene target so they share the same effects (gamma, bloom, sprite shaders), the same
+render-target tricks, and the same present/letterbox blit — instead of the current bolt-on
+"separate pass" for the hi-res art.
+
+**Context / why this exists:** the game is authored in a fixed **800×600** coordinate space, and
+Stage 4 renders that whole frame into an offscreen `sceneTarget` (`RenderTarget2D`) which Stage 5's
+gamma + bloom operate on before the present blit letterboxes it to the window (see the Stage 4/5
+notes + "Resolution = a presenter" in `CLAUDE.md`). The new hi-res textures being added today are
+drawn in a **separate pass**, so they bypass that pipeline: they get gamma/bloom/sprite-effects
+inconsistently or not at all (e.g. the present-blit gamma applies to the 800×600 target but not to
+a hi-res overlay drawn after it → mismatched brightness; bloom only ever sees the lo-res target).
+That divergence gets worse with every effect added. We want a single scene the whole game draws
+into, at a resolution high enough that the new textures keep their detail while the old 800×600 art
+is upscaled into it.
+
+**Proposed approach (the "render bigger + upscale the old sprites" idea):**
+- Make the scene target a **larger "design-resolution" target** at the same 4:3 aspect (e.g.
+  1600×1200 = 2×, or 1920×1440, or match the window capped to a max). Call the ratio
+  `renderScale = renderW / 800`.
+- Keep **all game logic in 800×600 space** (positions, hitboxes, the menu layout around origin
+  400,300 from Stage 5). Don't touch gameplay coordinates.
+- Upscale the legacy content for free by passing a uniform `Matrix.CreateScale(renderScale)`
+  transform to every legacy `SpriteBatch.Begin`, so the 800×600 draws fill the big target.
+  Centralize this scale (one source of truth) — many call sites `Begin` without a matrix today,
+  and the bloom + menu offscreen targets are explicitly 800×600 (Stage 5), so they all have to
+  move to the design res in lock-step.
+- Draw the **new hi-res textures at native density into the same target**: position them in
+  800×600 space (so they sit correctly relative to everything else) but let their footprint map to
+  `renderScale×` more texels (draw at an explicit render-space destination rect / without the
+  upscale baked in) so they stay crisp instead of being a blurred scaled-up 800×600-sized blit.
+- Effects, render targets, and the present blit are then **structurally unchanged** — gamma + bloom
+  + sprite shaders are pixel shaders that operate per-texel on whatever the target's size is, so
+  they apply uniformly to both lo-res and hi-res content. The present blit keeps letterboxing the
+  (now larger) target to the window.
+
+**Steps:**
+1. Introduce a single `renderScale` / design-resolution (res + scale-from-800×600) and route
+   `sceneTarget`, the bloom targets, and the menu `myRenderTarget`s through it (replace the
+   hard-coded 800×600 from Stages 4/5).
+2. Make every legacy `SpriteBatch.Begin` use the shared scale transform (centralize in
+   `SpriteBatchWrapper` + the few raw `Begin` sites). Verify the `BaseRenderTarget` redirect
+   (Stage 4) still funnels every `SetRenderTarget(0, null)` into the resized scene target.
+3. Convert the hi-res textures' draws to native-density (own destination rects, no double-upscale)
+   and **delete the separate hi-res pass** once they go through the shared batches.
+4. Re-tune anything pixel-size-relative: the bloom blur kernel/threshold (GaussianBlur offsets are
+   texel-relative so the spread mostly tracks, but verify the look), and any layout code reading
+   `BackBufferWidth/Height` (must use the design res, per the Stage-5 rule).
+5. Pick texture filtering per content: linear for hi-res, and decide point vs linear for the
+   upscaled 800×600 art (point = crisp pixels, linear = the soft look it has now) — sampler state
+   per batch.
+
+**Gotchas:**
+- **Don't re-pin `PreferredBackBuffer`** — KNI still owns the window/back-buffer size (Stage 4);
+  this all happens on the offscreen design target, blitted at present.
+- The menu **"lightspeed warp" trail** relies on `myRenderTarget` keeping
+  `RenderTargetUsage.PreserveContents` and not being cleared (Stage 5) — preserve that flag when
+  you resize those targets.
+- Larger targets cost VRAM + fill rate; cap the design res sensibly (a 4× target is 16× the
+  pixels). Ties into Stage 9's download-size / perf budget.
+- Tightly coupled to **Stage 4 (the presenter)** and **Stage 9 (fullscreen + canvas resize +
+  integer-scale options)** — ideally sequence this *with* Stage 9's resize work rather than after,
+  so the scene target and the fullscreen scaling are designed together.
+
+**Open questions:**
+- **Fixed design res vs. match-the-window?** Fixed (e.g. 2×) is simplest and matches "render
+  bigger + upscale"; matching the window is crispest but means recreating every render target on
+  resize and re-verifying bloom each time.
+- How are the new hi-res assets authored/sized — at a known native resolution, or per-asset? That
+  decides whether "native density" is one global factor or per-sprite.
+
+**Done when:** the new hi-res textures and the original 800×600 art render in a single pass that
+shares gamma, bloom, and the sprite effects (consistent brightness/blooming across both), the
+separate hi-res pass is gone, and the result still letterboxes correctly to any window size with no
+`PreferredBackBuffer` regression.
 
 ---
 

@@ -39,6 +39,33 @@ internal class SplashScene : Scene
 
 	private int pausetime = 1500;
 
+	// --- channel-flip ("change the channel") transition on one chosen splash ---
+	// The flip splash holds its OLD image briefly, then a sudden TV glitch + push
+	// reveals one of the revenged images; the normal show/pause/fade dwell then runs
+	// on the REVEAL (the retime: the wait time lands after the effect). The reveal is
+	// drawn crisp through the native-res HiResOverlay with channelflip.fx.
+	private Effect channelFlip;
+
+	private int flipIndex = -1;
+
+	private string flipRevengedName, flipPureName, flipGlassesName;
+
+	private Texture2D flipRevenged, flipPure, flipGlasses;
+
+	private Texture2D chosenNew;
+
+	private Vector4 chosenNewRect;
+
+	private bool variantPicked;
+
+	private readonly Random rng = new Random();
+
+	private const double HOLD_MS = 700.0;   // old image visible before the flip fires
+
+	private const double FLIP_MS = 450.0;   // sudden glitch + push duration
+
+	private double effShowtime;             // showtime + (flip ? HOLD+FLIP : 0)
+
 	public event FinishedHandler OnFinished;
 
 	public SplashScene(Game game)
@@ -69,6 +96,17 @@ internal class SplashScene : Scene
 		fadetime = afadetime;
 	}
 
+	// Mark splash `index` as the channel-flip one, and name the three reveal
+	// candidates (the 4:3 "revenged" default + the two portrait "pure" shots). Must
+	// be called before Initialize so LoadContent picks them up.
+	public void SetChannelFlip(int index, string revengedName, string pureName, string glassesName)
+	{
+		flipIndex = index;
+		flipRevengedName = revengedName;
+		flipPureName = pureName;
+		flipGlassesName = glassesName;
+	}
+
 	public override void Initialize()
 	{
 		base.Initialize();
@@ -91,6 +129,82 @@ internal class SplashScene : Scene
 		{
 			textures.Add(localContent.Load<Texture2D>(texturename));
 		}
+		if (flipIndex >= 0)
+		{
+			// channelflip.fx may be missing on a partial deploy; degrade to a plain
+			// (un-flipped) old splash rather than crashing the boot sequence.
+			try
+			{
+				channelFlip = localContent.Load<Effect>("GFX/Effects/channelflip");
+			}
+			catch (Exception ex)
+			{
+				System.Console.WriteLine("[channelflip] effect load failed: " + ex);
+				channelFlip = null;
+			}
+			flipRevenged = localContent.Load<Texture2D>(flipRevengedName);
+			flipPure = localContent.Load<Texture2D>(flipPureName);
+			flipGlasses = localContent.Load<Texture2D>(flipGlassesName);
+		}
+	}
+
+	// Called when a splash starts displaying: extend the showtime for the flip splash
+	// (so the reveal gets the full dwell) and roll the reveal variant.
+	private void BeginDisplay()
+	{
+		bool isFlip = (currentTextureNumber == flipIndex);
+		effShowtime = (double)showtime + (isFlip ? (HOLD_MS + FLIP_MS) : 0.0);
+		variantPicked = false;
+		if (isFlip)
+		{
+			PickFlipVariant();
+		}
+	}
+
+	// ~1-in-10 reveals a portrait "pure" shot (50/50 plain vs sunglasses); otherwise
+	// the 4:3 "revenged" default. The reveal is pillarboxed into the 4:3 splash frame.
+	private void PickFlipVariant()
+	{
+		if (rng.NextDouble() < 0.10)
+		{
+			chosenNew = (rng.Next(2) == 0) ? flipPure : flipGlasses;
+		}
+		else
+		{
+			chosenNew = flipRevenged;
+		}
+		chosenNewRect = FitRect(chosenNew);
+		variantPicked = (chosenNew != null) && (channelFlip != null);
+	}
+
+	// AspectFit the reveal into the 800x600 (4:3) splash frame, as a uv sub-rect
+	// (xy = offset, zw = scale) for channelflip.fx; black outside it (pillar/letterbox).
+	private static Vector4 FitRect(Texture2D tex)
+	{
+		float frame = 800f / 600f;
+		float a = (float)tex.Width / (float)tex.Height;
+		if (a >= frame)
+		{
+			float vS = frame / a;
+			return new Vector4(0f, (1f - vS) / 2f, 1f, vS);
+		}
+		float uS = a / frame;
+		return new Vector4((1f - uS) / 2f, 0f, uS, 1f);
+	}
+
+	// 0 during the hold, 0..1 across the flip, 1 afterwards.
+	private float FlipProgress()
+	{
+		double t = stateTimer.TotalMilliseconds;
+		if (t < HOLD_MS)
+		{
+			return 0f;
+		}
+		if (t < HOLD_MS + FLIP_MS)
+		{
+			return (float)((t - HOLD_MS) / FLIP_MS);
+		}
+		return 1f;
 	}
 
 	protected void fadeBackBufferToBlack(int alpha)
@@ -113,23 +227,49 @@ internal class SplashScene : Scene
 	{
 		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c3: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-		if (state != SplashSceneState.stopped)
+		if (state == SplashSceneState.stopped)
 		{
-			Viewport viewport = base.GraphicsDevice.Viewport;
-			Rectangle dest = default(Rectangle);
-			(dest) = new Rectangle(0, 0, (viewport).Width, (viewport).Height);
-			base.GraphicsDevice.Clear(Color.Black);
-			if (displaySplash & (currentSplash != null))
+			return;
+		}
+		Viewport viewport = base.GraphicsDevice.Viewport;
+		Rectangle dest = new Rectangle(0, 0, (viewport).Width, (viewport).Height);
+		base.GraphicsDevice.Clear(Color.Black);
+
+		bool isFlip = (currentTextureNumber == flipIndex) && variantPicked && (channelFlip != null);
+		if (displaySplash & (currentSplash != null))
+		{
+			if (isFlip)
+			{
+				// Hand the reveal to the native-res overlay: s0 = the OLD splash
+				// (currentSplash), the chosen reveal bound as the NewTexture param,
+				// the glitch driven by Progress, the fade by Fade. Full 4:3 design slot.
+				float prog = FlipProgress();
+				float time = (float)gameTime.TotalGameTime.TotalSeconds;
+				float fade = (float)currentFade / 255f;
+				Texture2D oldTex = currentSplash;
+				Texture2D newTex = chosenNew;
+				Vector4 nrect = chosenNewRect;
+				Effect fx = channelFlip;
+				HiResOverlay.Draw(oldTex, new Rectangle(0, 0, 800, 600), Color.White,
+					OverlayFit.Stretch, 0f, 1f, fx, delegate(Effect eff, Rectangle d)
+					{
+						eff.Parameters["Progress"].SetValue(prog);
+						eff.Parameters["Time"].SetValue(time);
+						eff.Parameters["Fade"].SetValue(fade);
+						eff.Parameters["NewRect"].SetValue(nrect);
+						eff.Parameters["NewTexture"].SetValue(newTex);
+					});
+			}
+			else
 			{
 				base.SpriteBatch.Draw(currentSplash, dest, Color.White);
 			}
+		}
+		if (!isFlip)
+		{
+			// The flip path fades via the shader's Fade uniform; other splashes use
+			// the classic fade-to-black overlay.
 			int num = 255 - currentFade;
 			if (num < 0)
 			{
@@ -140,13 +280,22 @@ internal class SplashScene : Scene
 				num = 255;
 			}
 			fadeBackBufferToBlack(num);
-			base.SpriteBatch.DrawString("v2026.0", new Vector2(700f, 550f), Color.AliceBlue, 0f, Vector2.Zero, 0.5f, (SpriteEffects)0, 1f);
 		}
+		base.SpriteBatch.DrawString("v2026.0", new Vector2(700f, 550f), Color.AliceBlue, 0f, Vector2.Zero, 0.5f, (SpriteEffects)0, 1f);
 	}
 
 	public override void Update(GameTime gameTime)
 	{
-		stateTimer += gameTime.ElapsedGameTime;
+		// Clamp the per-frame step: WASM boot hands the first Update a huge dt (the
+		// whole load time), which would otherwise blow through the splash timers in a
+		// single frame and skip the channel-flip entirely. Normal frames (~16ms) are
+		// well under the cap, so real-time playback is unchanged.
+		TimeSpan dt = gameTime.ElapsedGameTime;
+		if (dt.TotalMilliseconds > 100.0)
+		{
+			dt = TimeSpan.FromMilliseconds(100.0);
+		}
+		stateTimer += dt;
 		switch (state)
 		{
 		case SplashSceneState.loading:
@@ -157,6 +306,7 @@ internal class SplashScene : Scene
 				currentTextureNumber = 0;
 				currentSplash = textures[currentTextureNumber];
 				displaySplash = true;
+				BeginDisplay();
 			}
 			break;
 		case SplashSceneState.displaying:
@@ -167,16 +317,16 @@ internal class SplashScene : Scene
 				num *= stateTimer.TotalMilliseconds;
 				currentFade = Convert.ToInt32(num);
 			}
-			else if ((double)(showtime - fadetime) < stateTimer.TotalMilliseconds)
+			else if (effShowtime - (double)fadetime < stateTimer.TotalMilliseconds)
 			{
-				num *= (double)showtime - stateTimer.TotalMilliseconds;
+				num *= effShowtime - stateTimer.TotalMilliseconds;
 				currentFade = Convert.ToInt32(num);
 			}
 			else
 			{
 				currentFade = 255;
 			}
-			if (stateTimer.TotalMilliseconds > (double)showtime)
+			if (stateTimer.TotalMilliseconds > effShowtime)
 			{
 				state = SplashSceneState.paused;
 				stateTimer = TimeSpan.Zero;
@@ -206,6 +356,7 @@ internal class SplashScene : Scene
 				currentSplash = textures[currentTextureNumber];
 				state = SplashSceneState.displaying;
 				currentFade = 0;
+				BeginDisplay();
 			}
 			break;
 		}

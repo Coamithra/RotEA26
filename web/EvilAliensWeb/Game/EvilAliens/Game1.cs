@@ -114,6 +114,29 @@ public class Game1 : Game
 	// frame, then blitted scaled+letterboxed to KNI's window-sized back buffer (Draw).
 	private RenderTarget2D sceneTarget;
 
+	// Native-resolution overlay layer (HiResOverlay). Sized to the window back
+	// buffer; high-res art (menu title, channel-flip splash reveal) is composited
+	// here AFTER the 800x600 scene blit so it stays crisp instead of being squeezed
+	// through the 800x600 presenter. Recreated when the window size changes (Draw).
+	private RenderTarget2D overlayTarget;
+
+	// Bloom-on-overlay (the title glow): a half-res ping-pong pair the overlay is blurred
+	// through, then composited back additively. Lit only when the Bloom setting is on and
+	// a glow-flagged request (the menu title) is present. Recreated with the window size.
+	private RenderTarget2D glowTargetA;
+	private RenderTarget2D glowTargetB;
+	private Effect glowBlur;
+
+	// Premultiplied additive (One/One) for the glow halo — NOT BlendState.Additive, which
+	// is SourceAlpha/One (it re-premultiplies and would dim the premultiplied glow).
+	private static readonly BlendState PremultipliedAdditive = new BlendState
+	{
+		ColorSourceBlend = Blend.One,
+		ColorDestinationBlend = Blend.One,
+		AlphaSourceBlend = Blend.One,
+		AlphaDestinationBlend = Blend.One,
+	};
+
 	public Game1()
 	{
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
@@ -206,8 +229,13 @@ public class Game1 : Game
 		startScreen.OnFinished += startScreen_OnFinished;
 		splashScene = new SplashScene((Game)(object)this);
 		splashScene.SetTimers(1000, 3000, 1200, 400);
-		splashScene.AddSplash("GFX/Splash/uglysplash22");
+		// Revenge reskin: studio logo first, then the classic "I made this!" meme as
+		// the finale (index 1) — where the channel-flip glitch reveals the revenged
+		// splash (90% the 4:3 "revenged", ~10% a portrait "pure" shot, 50/50 glasses).
 		splashScene.AddSplash("GFX/Splash/ealogo");
+		splashScene.AddSplash("GFX/Splash/uglysplash22");
+		splashScene.SetChannelFlip(1, "GFX/Splash/uglysplash22-revenged",
+			"GFX/Splash/uglysplash22-revenged-pure", "GFX/Splash/uglysplash22-revenged-pure-glasses");
 		splashScene.OnFinished += SplashFinished;
 		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)splashScene);
 		demo3 = new Demo3((Game)(object)this);
@@ -331,6 +359,15 @@ public class Game1 : Game
 		{
 			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
 			gamma = null;
+		}
+		try
+		{
+			glowBlur = base.Content.Load<Effect>("Content/GFX/Effects/glowblur");
+		}
+		catch (Exception ex)
+		{
+			System.Console.WriteLine("[overlay] glow blur effect load failed: " + ex);
+			glowBlur = null;
 		}
 	}
 
@@ -599,6 +636,188 @@ public class Game1 : Game
 		}
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gamma);
 		spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
+		spriteBatch.End();
+
+		// Native-res overlay: draw any high-res art (menu title, channel-flip reveal)
+		// queued this frame on top of the scaled scene at full window resolution,
+		// aligned to the same letterboxed rect so 800x600 design coords line up 1:1.
+		PresentHiResOverlay(dest, scale);
+	}
+
+	// Drains the per-frame HiResOverlay queue into the window-sized overlay target at
+	// native resolution, then composites it over the (already gamma'd) back buffer
+	// with matching gamma. Each request's 800x600 design rect is mapped through the
+	// SAME scale+offset the presenter used for the scene blit, so overlay art sits
+	// pixel-aligned with the 800x600 layer — but sampled once, crisply, from the
+	// full-res source. Keeping the overlay in its own target leaves a clean seam for
+	// an optional bloom/glow pass on it later (the title's "does it need bloom" pass).
+	private void PresentHiResOverlay(Rectangle sceneDest, float sceneScale)
+	{
+		var queue = HiResOverlay.Queue;
+		if (queue.Count == 0)
+		{
+			HiResOverlay.Clear();
+			return;
+		}
+
+		GraphicsDevice gd = base.GraphicsDevice;
+		PresentationParameters pp = gd.PresentationParameters;
+		int w = pp.BackBufferWidth;
+		int h = pp.BackBufferHeight;
+
+		if (overlayTarget == null || ((GraphicsResource)overlayTarget).IsDisposed
+			|| ((Texture2D)overlayTarget).Width != w || ((Texture2D)overlayTarget).Height != h)
+		{
+			if (overlayTarget != null && !((GraphicsResource)overlayTarget).IsDisposed)
+			{
+				((Texture2D)overlayTarget).Dispose();
+			}
+			// SurfaceFormat.Color (RGBA8): the overlay needs a real alpha channel for
+			// the straight->premultiplied composite; Bgr565 back buffers would drop it.
+			overlayTarget = new RenderTarget2D(gd, w, h, false, SurfaceFormat.Color,
+				DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+		}
+
+		// Draw the queued art into the transparent overlay target at native res.
+		gd.SetRenderTarget(overlayTarget);
+		gd.Clear(Color.Transparent);
+		bool anyGlow = false;
+		for (int i = 0; i < queue.Count; i++)
+		{
+			HiResOverlay.Request r = queue[i];
+			if (r.Texture == null)
+			{
+				continue;
+			}
+			anyGlow |= r.Glow;
+
+			// design-space slot -> window slot (presenter transform).
+			float slotX = (float)sceneDest.X + (float)r.DesignRect.X * sceneScale;
+			float slotY = (float)sceneDest.Y + (float)r.DesignRect.Y * sceneScale;
+			float slotW = (float)r.DesignRect.Width * sceneScale;
+			float slotH = (float)r.DesignRect.Height * sceneScale;
+
+			// fit the texture inside the slot.
+			float texW = ((Texture2D)r.Texture).Width;
+			float texH = ((Texture2D)r.Texture).Height;
+			float drawW, drawH;
+			switch (r.Fit)
+			{
+			case OverlayFit.AspectFit:
+			{
+				float s = Math.Min(slotW / texW, slotH / texH);
+				drawW = texW * s;
+				drawH = texH * s;
+				break;
+			}
+			case OverlayFit.Cover:
+			{
+				float s = Math.Max(slotW / texW, slotH / texH);
+				drawW = texW * s;
+				drawH = texH * s;
+				break;
+			}
+			default:
+				drawW = slotW;
+				drawH = slotH;
+				break;
+			}
+			drawW *= r.Scale;
+			drawH *= r.Scale;
+
+			Vector2 centre = new Vector2(slotX + slotW / 2f, slotY + slotH / 2f);
+			Vector2 origin = new Vector2(texW / 2f, texH / 2f);
+			Vector2 scaleVec = new Vector2(drawW / texW, drawH / texH);
+			Rectangle windowDest = new Rectangle(
+				(int)(centre.X - drawW / 2f), (int)(centre.Y - drawH / 2f),
+				(int)drawW, (int)drawH);
+
+			r.Configure?.Invoke(r.Effect, windowDest);
+
+			// Premultiplied-alpha convention: overlay source art is premultiplied (the
+			// game assets already are; the title is premultiplied at load, the channel
+			// flip outputs premultiplied), so composite into the premultiplied overlay
+			// target with premultiplied AlphaBlend (matches SpriteBatchWrapper's choke).
+			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend,
+				SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone, r.Effect);
+			spriteBatch.Draw(r.Texture, centre, null, r.Tint, r.Rotation, origin, scaleVec,
+				SpriteEffects.None, 0f);
+			spriteBatch.End();
+		}
+
+		// Optional bloom on the overlay (the title glow): blur a half-res copy of the
+		// overlay and composite it back additively under the crisp art. Only when the
+		// Bloom setting is on and a glow-flagged request (the title) is present.
+		bool doGlow = anyGlow && glowBlur != null && Settings.GetInstance().Bloom;
+		if (doGlow)
+		{
+			BuildOverlayGlow(gd, w, h);
+		}
+
+		// Composite the overlay over the back buffer, gamma-matched to the scene blit.
+		gd.SetRenderTarget((RenderTarget2D)null);
+		if (gamma != null)
+		{
+			gamma.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
+		}
+		if (doGlow)
+		{
+			// Additive glow halo first (premultiplied One/One), crisp art drawn over it.
+			spriteBatch.Begin(SpriteSortMode.Deferred, PremultipliedAdditive, SamplerState.LinearClamp, null, null, gamma);
+			spriteBatch.Draw((Texture2D)(object)glowTargetA, new Rectangle(0, 0, w, h), Color.White * GlowIntensity);
+			spriteBatch.End();
+		}
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, null, null, gamma);
+		spriteBatch.Draw((Texture2D)(object)overlayTarget, new Rectangle(0, 0, w, h), Color.White);
+		spriteBatch.End();
+
+		HiResOverlay.Clear();
+	}
+
+	// Glow strength and blur reach (in half-res texels) for the overlay bloom. Tunable.
+	private const float GlowIntensity = 0.65f;
+	private const float GlowRadius = 2.0f;
+
+	// Blur a half-res copy of overlayTarget into glowTargetA (downsample -> horizontal
+	// blur -> vertical blur), leaving the bloom halo ready to composite additively.
+	private void BuildOverlayGlow(GraphicsDevice gd, int w, int h)
+	{
+		int gw = Math.Max(1, w / 2);
+		int gh = Math.Max(1, h / 2);
+		if (glowTargetA == null || ((GraphicsResource)glowTargetA).IsDisposed
+			|| ((Texture2D)glowTargetA).Width != gw || ((Texture2D)glowTargetA).Height != gh)
+		{
+			if (glowTargetA != null && !((GraphicsResource)glowTargetA).IsDisposed)
+			{
+				((Texture2D)glowTargetA).Dispose();
+				((Texture2D)glowTargetB).Dispose();
+			}
+			glowTargetA = new RenderTarget2D(gd, gw, gh, false, SurfaceFormat.Color, DepthFormat.None);
+			glowTargetB = new RenderTarget2D(gd, gw, gh, false, SurfaceFormat.Color, DepthFormat.None);
+		}
+
+		// downsample overlay -> A (premultiplied content; the title's brightness becomes
+		// the glow source, transparent areas contribute nothing)
+		gd.SetRenderTarget(glowTargetA);
+		gd.Clear(Color.Transparent);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, null);
+		spriteBatch.Draw((Texture2D)(object)overlayTarget, new Rectangle(0, 0, gw, gh), Color.White);
+		spriteBatch.End();
+
+		// horizontal blur A -> B
+		glowBlur.Parameters["Texel"].SetValue(new Vector2(GlowRadius / (float)gw, 0f));
+		gd.SetRenderTarget(glowTargetB);
+		gd.Clear(Color.Transparent);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, glowBlur);
+		spriteBatch.Draw((Texture2D)(object)glowTargetA, new Rectangle(0, 0, gw, gh), Color.White);
+		spriteBatch.End();
+
+		// vertical blur B -> A
+		glowBlur.Parameters["Texel"].SetValue(new Vector2(0f, GlowRadius / (float)gh));
+		gd.SetRenderTarget(glowTargetA);
+		gd.Clear(Color.Transparent);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, glowBlur);
+		spriteBatch.Draw((Texture2D)(object)glowTargetB, new Rectangle(0, 0, gw, gh), Color.White);
 		spriteBatch.End();
 	}
 

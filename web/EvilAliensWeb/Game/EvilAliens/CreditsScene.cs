@@ -265,7 +265,13 @@ internal class CreditsScene : Scene
 		lines.Add("Dark Omen Games");
 		lines.Add("");
 		lines.Add("FEATURING THE VOICE TALENT OF:");
+		lines.Add("Brian (Announcer)");
+		lines.Add("Victor (Narrator)");
+		lines.Add("voices synthesized by ElevenLabs");
+		lines.Add("");
+		lines.Add("IN LOVING MEMORY OF:");
 		lines.Add("Microsoft Sam");
+		lines.Add("our original announcer, 2008 - 2026");
 		lines.Add("");
 		lines.Add("SPECIAL THANKS TO:");
 		lines.Add("The XNA team and community ");

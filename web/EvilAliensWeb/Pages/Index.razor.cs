@@ -14,6 +14,21 @@ namespace EvilAliensWeb.Pages
 
             if (firstRender)
             {
+                // Parse the URL query (?menu / ?noattract / ?level=...) into DebugFlags
+                // BEFORE the render loop starts, so Game1 (created on the first tick) sees
+                // them. Synchronous in-process interop guarantees it lands before initRenderJS.
+                if (JsRuntime is IJSInProcessRuntime jsSync)
+                {
+                    try
+                    {
+                        EvilAliensWeb.Compat.DebugFlags.Parse(jsSync.Invoke<string>("getDebugQuery"));
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("[debug] flag read failed: " + ex.Message);
+                    }
+                }
+
                 JsRuntime.InvokeAsync<object>("initRenderJS", DotNetObjectReference.Create(this));
             }
         }

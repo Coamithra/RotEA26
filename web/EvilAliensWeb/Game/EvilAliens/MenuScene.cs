@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -147,7 +148,12 @@ internal class MenuScene : Scene
 		mainMenu.AddEntryEvent(mainMenu_AwardmentsSelected);
 		mainMenu.AddEntry("Cheats", Unlockables.Items.Cheats);
 		mainMenu.AddEntryEvent(mainMenu_CheatsSelected);
-		mainMenu.OnTimeOut += mainMenu_DemoSelected;
+		// Debug (?noattract): leave the idle timeout unwired so the menu never drops into
+		// a random demo while you're testing it. Normal boot keeps the attract demo.
+		if (!DebugFlags.NoAttract)
+		{
+			mainMenu.OnTimeOut += mainMenu_DemoSelected;
+		}
 		mainMenu.AddEntry("Exit");
 		mainMenu.AddEntryEvent(mainMenu_ExitSelected);
 		mainMenu.OnExit += mainMenu_OnExit;

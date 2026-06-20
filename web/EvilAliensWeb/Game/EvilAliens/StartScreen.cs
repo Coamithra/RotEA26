@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.GamerServices;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -69,8 +70,14 @@ public class StartScreen : Scene
 		if (!startPressed)
 		{
 			int num4 = -1;
+			// Debug (?menu / ?autostart / ?level=...): auto-"Press Start" as keyboard
+			// player 0 so the Press Start screen advances itself without a key press.
+			if (DebugFlags.AutoStart)
+			{
+				num4 = 0;
+			}
 			// Web/PC port: keyboard Enter starts the game as the local player (index 0).
-			if (base.InputHandler.Pressed(MyKeys.Enter))
+			else if (base.InputHandler.Pressed(MyKeys.Enter))
 			{
 				num4 = 0;
 			}

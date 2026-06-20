@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -218,6 +219,10 @@ public class InputHandler : IInputHandlerService
 				flag |= (int)(state).RightButton == 1;
 				break;
 			}
+			// Debug input injection (immune to the rAF frame-timing miss): force this key
+			// down for any remaining injected ticks. Done inside the tick so a scripted
+			// tap can't fall between keyboard polls. See Compat/DebugInput.cs / eaPress().
+			flag |= DebugInput.Consume(i);
 			if (flag)
 			{
 				if (!pressedAndIdle[i])

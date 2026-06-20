@@ -44,6 +44,18 @@
     <script src="_content/nkast.Wasm.Audio/js/Audio.8.0.5.js"></script>
 
     <script>
+        // Web-port debug shortcuts: hand the URL query string to .NET at boot so
+        // DebugFlags can parse ?menu / ?noattract / ?level=... (see Compat/DebugFlags.cs).
+        window.getDebugQuery = () => (window.location.search || "");
+
+        // Reliable input injection for testing — immune to the rAF frame-timing miss that
+        // makes synthetic key events drop (see Compat/DebugInput.cs). Drive from the
+        // console / automation: eaPress('Enter'), eaPress('Up'), eaPress('Left', 30).
+        window.eaPress = (key, frames) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugPress', String(key), frames || 1); }
+            catch (e) { console.warn('[debug] eaPress failed (game not booted yet?): ' + e.message); }
+        };
+
         function tickJS()
         {
             window.theInstance.invokeMethod('TickDotNet');

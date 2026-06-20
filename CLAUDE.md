@@ -23,6 +23,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   whenever *its* tab is backgrounded (the rAF game loop pauses, so it never paints). Flow:
   `preview_start` to serve → in Chrome `navigate` to `http://localhost:5280` → `wait` ~10s
   for WASM → `computer{screenshot}`/`zoom` + `read_console_messages`.
+- **Debug boot shortcuts (opt-in via URL query — use these instead of fighting the splash/
+  press-start/menu when testing).** Parsed once at boot in `Compat/DebugFlags.cs` (wired via
+  `wwwroot/index.html` `getDebugQuery` → `Pages/Index.razor.cs`). No query = normal boot, so
+  a shipped build is unaffected. Flags (combine with `&`):
+  `?menu` (straight to main menu, skips splash + auto-"Press Start") ·
+  `?noattract` (disable the menu's 20s idle→demo attract) ·
+  `?level=<Name>` (boot straight into a level, bypassing the menu — `<Name>` is a `Levels`
+  value, e.g. `Level1`/`Level2`/`Level3`/`ClassicAliens`/`SpaceDodge`) ·
+  `?skipsplash` / `?autostart` as building blocks. e.g. `…:5280/?level=Level2&noattract`.
 
 ## Toolchain (already installed)
 - .NET 8 SDK + `wasm-tools` workload (Emscripten / mono browser-wasm).
@@ -75,6 +84,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   action (held across a frame). **Synthetic JS `KeyboardEvent`s do NOT work** — KNI's WASM
   keyboard interop throws `JSON value could not be converted to System.Int32` on the faked
   `keyCode` and can leave a key stuck. Click-to-focus the canvas first.
+- **For automated/headless input, use `eaPress(...)` — don't fight OS-key timing.** `InputHandler`
+  polls `Keyboard.GetState()` once per tick; a scripted keydown+keyup fired between two ticks is
+  added-and-removed before any poll sees it, so the press is dropped (the "stuck on Press Start"
+  churn). `Compat/DebugInput.cs` (JS wrapper `eaPress` in `index.html`) injects a key as a per-key
+  tick COUNTER that `InputHandler` drains *inside* the tick, so it can't fall between polls. From
+  the console / automation: `eaPress('Enter')` (tap), `eaPress('Up')`, `eaPress('Left', 30)` (hold
+  ~30 ticks). Keys: Up/Down/Left/Right/Enter/Esc/Mouse1/Generic_Start (+ w/a/s/d, start/select→Enter,
+  back→Esc, fire→Mouse1). Rapid repeats of the SAME key collapse into one press — space them by a
+  tick (one per automation step) to register distinct taps.
 - **Stubs that will read as "broken" until their stage (not bugs):**
   `SoundManager` XACT is try/caught to null = silent (Stage 6); saves are in-memory (Stage 7);
   the controls-help screen shows the **Xbox joypad** (PC keyboard help was `#if WINDOWS`-stripped,

@@ -237,7 +237,17 @@ public class Game1 : Game
 		splashScene.SetChannelFlip(1, "GFX/Splash/uglysplash22-revenged",
 			"GFX/Splash/uglysplash22-revenged-pure", "GFX/Splash/uglysplash22-revenged-pure-glasses");
 		splashScene.OnFinished += SplashFinished;
-		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)splashScene);
+		// Debug (?skipsplash / ?menu / ?level=...): jump past the splash sequence straight
+		// to the Press Start screen (what SplashFinished would otherwise swap in). Normal
+		// boot goes through the splash.
+		if (DebugFlags.SkipSplash)
+		{
+			((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)startScreen);
+		}
+		else
+		{
+			((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)splashScene);
+		}
 		demo3 = new Demo3((Game)(object)this);
 		demo3.OnFinished += gameScene_OnFinished;
 		demo2 = new Demo2((Game)(object)this);
@@ -295,7 +305,17 @@ public class Game1 : Game
 		menuScene.OnResetSelected += menuScene_OnResetSelected;
 		menuScene.OnBragSelected += menuScene_OnBragSelected;
 		((Collection<IGameComponent>)(object)base.Components).Remove((IGameComponent)(object)startScreen);
-		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)menuScene);
+		// Debug (?level=...): bypass the menu and boot straight into the requested level.
+		// menuScene is still created + wired above, so returning from the level (or losing)
+		// drops back to a normal menu via gameScene_OnFinished.
+		if (DebugFlags.Level.HasValue)
+		{
+			LaunchLevelDirect(DebugFlags.Level.Value);
+		}
+		else
+		{
+			((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)menuScene);
+		}
 	}
 
 	private void menuScene_OnBragSelected(object sender)
@@ -385,6 +405,13 @@ public class Game1 : Game
 		oracle.ResetPlayers();
 		oracle.AddPlayer(starter);
 		bragScene.StoreCompletionProgress();
+		LaunchLevel(selectedLevel);
+	}
+
+	// Add the GameScene for `selectedLevel` to the live component bin. Shared by the
+	// normal menu path (MenuFinished) and the ?level=... debug direct-launch.
+	private void LaunchLevel(Levels selectedLevel)
+	{
 		switch (selectedLevel)
 		{
 		case Levels.Tutorial:
@@ -435,6 +462,18 @@ public class Game1 : Game
 		default:
 			throw new Exception("Level not implemented!");
 		}
+	}
+
+	// Debug (?level=...): start a level without going through the menu. Mirrors
+	// MenuFinished's player/brag setup, but skips the menuScene removal (it was never
+	// shown) and forces a keyboard starter.
+	private void LaunchLevelDirect(Levels selectedLevel)
+	{
+		collectionHelper.ClearCache();
+		oracle.ResetPlayers();
+		oracle.AddPlayer(ControlDevice.Keyboard);
+		bragScene.StoreCompletionProgress();
+		LaunchLevel(selectedLevel);
 	}
 
 	private void gameScene_OnFinished(object sender, GameScene.FinishedArgs args)

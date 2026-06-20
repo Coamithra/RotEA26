@@ -984,8 +984,13 @@ internal class MenuScene : Scene
 		}
 		if (myRenderTarget == null)
 		{
-			PresentationParameters presentationParameters = base.GraphicsDevice.PresentationParameters;
-			myRenderTarget = new RenderTarget2D(base.GraphicsDevice, presentationParameters.BackBufferWidth, presentationParameters.BackBufferHeight, false, (SurfaceFormat)1, DepthFormat.None, 0, (RenderTargetUsage)1);
+			// Stage 5: size to the 800x600 design resolution (the presenter target),
+			// NOT the window back buffer — the menu is authored for 800x600 (backdrop
+			// origin (400,300)) and is blitted 1:1 at (0,0) onto the 800x600 sceneTarget,
+			// so a window-sized target misaligns it. Also use Color (RGBA8): the original
+			// Bgr565 ((SurfaceFormat)1) is not a valid WebGL render-target format and
+			// renders black.
+			myRenderTarget = new RenderTarget2D(base.GraphicsDevice, 800, 600, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
 			base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
 			base.GraphicsDevice.Clear(Color.Black);
 			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);

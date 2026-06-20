@@ -50,13 +50,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   later hand edits. Edit `Game/` directly.
 - **Shims in `Compat/` fake the Xbox APIs.** GamerServices = no-ops (full game unlocked,
   `SignedInGamers` empty so per-gamer loops do nothing); Storage = WASM in-memory FS (not yet
-  persistent). Some shims are **no-ops that affect runtime until their stage** — `Effect`/
-  `EffectPass` `Begin/End` and `ResolveBackBuffer` (shaders, Stage 5), and the
-  `SpriteBlendMode`→`BlendState` mapping (verify visually). Don't mistake these for bugs.
-- **It runs (Stage 4 done).** `Game1` boots through splash → menu → playable/attract gameplay
-  with 0 console exceptions. Remaining: shaders/bloom (Stage 5), audio (Stage 6), persistent
-  saves (Stage 7), hosting (8), polish/fullscreen (9). See `plan.md` "Stage 4 — DONE" for the
-  full list of what was changed and the stubs each later stage must un-stub.
+  persistent). `ResolveBackBuffer` and the `SpriteBlendMode`→`BlendState` mapping are now
+  **real** (Stage 5); the `Effect`/`EffectPass` `Begin/End` no-op shims are dead (no callers).
+- **It runs (Stages 4–5 done).** `Game1` boots through splash → menu → playable/attract gameplay
+  with shaders (gamma, bloom, sprite effects) and 0 console exceptions. Remaining: audio
+  (Stage 6), persistent saves (Stage 7), hosting (8), polish/fullscreen (9). See `plan.md`
+  "Stage 4 — DONE" / "Stage 5 — DONE" for what changed and the stubs each later stage must un-stub.
+- **Shaders (Stage 5):** the lost `.fx` were rewritten in `tools/shaders/src/` and compiled
+  offline to MGFX v10 GLSL `.mgfxo` by `tools/shaders/build_shaders.py` (KNI's MGCB, BlazorGL
+  target — needs `nkast.Xna.Framework.Content.Pipeline.Builder.Windows 4.1.9001` restored in the
+  nuget cache). `WebContentManager` loads them via `new Effect(gd,bytes)`. **Re-run the script
+  after editing any `.fx`; don't hand-edit `.mgfxo`.** Effects apply via `SpriteBatch.Begin(effect)`
+  (4.0 model), not `effect.Begin()`.
 - **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
   the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
   keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`
@@ -66,11 +71,11 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `SpikeGame.cs` are dead harnesses, safe to delete.
 - **Real keyboard input works** — KNI maps keys via **`event.keyCode`** (decompiled from
   `Kni.Platform`: `Keys = (Keys)keyCode`), so Enter/arrows/WASD/Esc are correct for real users.
-  When *driving* the browser headlessly, the game polls `Keyboard.GetState()` once per rAF, so a
-  synthetic event needs the right `keyCode` AND must be **held across a frame** (dispatch keydown,
-  wait ~250 ms, keyup) — a fast tap is missed. See plan.md Stage-4 notes.
-- **Stubs that will read as "broken" until their stage (not bugs):** no shaders/bloom so the
-  gamma/resolve composite in `Game1.DrawInner` is **skipped** and visuals are flat (Stage 5);
+  When *driving* the browser, prefer **real OS keys** via the claude-in-chrome `computer` `key`
+  action (held across a frame). **Synthetic JS `KeyboardEvent`s do NOT work** — KNI's WASM
+  keyboard interop throws `JSON value could not be converted to System.Int32` on the faked
+  `keyCode` and can leave a key stuck. Click-to-focus the canvas first.
+- **Stubs that will read as "broken" until their stage (not bugs):**
   `SoundManager` XACT is try/caught to null = silent (Stage 6); saves are in-memory (Stage 7);
   the controls-help screen shows the **Xbox joypad** (PC keyboard help was `#if WINDOWS`-stripped,
   Stage 9).
@@ -79,7 +84,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   reverts. `Game1.Draw` renders the 800×600 frame into an offscreen `sceneTarget` and blits it
   scaled+letterboxed to the window; the game's `SetRenderTarget(0, null)` calls are redirected to
   that target via `Xna3GraphicsDeviceCompat.BaseRenderTarget`. Don't re-introduce a pinned
-  `PreferredBackBuffer`. Stage 5 layers the gamma shader on this same target; Stage 9 adds fullscreen.
+  `PreferredBackBuffer`. Stage 5 applies the gamma shader on the present blit of this target, and
+  bloom renders into it (its targets are sized 800×600 to match); Stage 9 adds fullscreen.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

@@ -29,8 +29,12 @@ internal class MenuSubWithSkull : MenuSub1
 		//IL_0114: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0116: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-		float num = base.Game.GraphicsDevice.PresentationParameters.BackBufferWidth;
-		float num2 = base.Game.GraphicsDevice.PresentationParameters.BackBufferHeight;
+		// Stage 5: the skull/title rects are fractions of the surface. We render into the
+		// 800x600 design-resolution target (MenuSub1.myRenderTarget), so base them on
+		// 800x600, NOT the window back buffer (~1300px) — otherwise they're scaled for the
+		// window and overflow the 800x600 frame (title/skull too big and cut off).
+		float num = 800f;
+		float num2 = 600f;
 		int num3 = Convert.ToInt16(0.05f * num2);
 		int num4 = Convert.ToInt16(0.05f * num);
 		int num5 = Convert.ToInt16(0.25f * num);

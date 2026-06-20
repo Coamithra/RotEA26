@@ -342,7 +342,12 @@ internal class MenuSub1 : Scene
 		if (myRenderTarget == null)
 		{
 			PresentationParameters presentationParameters = base.GraphicsDevice.PresentationParameters;
-			myRenderTarget = new RenderTarget2D(base.GraphicsDevice, presentationParameters.BackBufferWidth, presentationParameters.BackBufferHeight, false, (SurfaceFormat)1, DepthFormat.None, 0, (RenderTargetUsage)1);
+			// Stage 5: size to the 800x600 design resolution and use Color (RGBA8). The
+			// original window-sized Bgr565 ((SurfaceFormat)1) render target does not work on
+			// WebGL (Bgr565 is not a valid render-target format -> renders nothing, so the
+			// menu entries were invisible). Entries are laid out around origin (400,300) and
+			// the RT is blitted center:true at origin, so 800x600 aligns 1:1.
+			myRenderTarget = new RenderTarget2D(base.GraphicsDevice, 800, 600, false, SurfaceFormat.Color, DepthFormat.None, 0, (RenderTargetUsage)1);
 		}
 	}
 

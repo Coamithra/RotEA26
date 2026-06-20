@@ -59,11 +59,13 @@ namespace Microsoft.Xna.Framework.Graphics
     }
 
     // XNA 3.x back-buffer resolve target (4.0 replaced with RenderTarget2D).
-    public class ResolveTexture2D : Texture2D
+    // It must BE a RenderTarget2D (not just a Texture2D) so ResolveBackBuffer can
+    // render the current scene into it (Stage 5: bloom needs the scene as a texture).
+    public class ResolveTexture2D : RenderTarget2D
     {
         public ResolveTexture2D(GraphicsDevice graphicsDevice, int width, int height,
             int numberLevels, SurfaceFormat format)
-            : base(graphicsDevice, width, height, numberLevels > 1, format)
+            : base(graphicsDevice, width, height, numberLevels > 1, format, DepthFormat.None)
         {
         }
     }
@@ -81,10 +83,25 @@ namespace Microsoft.Xna.Framework.Graphics
         // Game1 sets this around its frame; null = the real back buffer (default).
         public static RenderTarget2D BaseRenderTarget;
 
-        // TODO(bloom): real impl copies the back buffer into 'target' via a
-        // RenderTarget2D. No-op for now; bloom/screenshot is deferred to a later stage.
+        // Stage 5: snapshot the current scene (the active presenter target,
+        // BaseRenderTarget) into 'target' so post-process effects (bloom) have the
+        // scene as a sampleable texture. XNA 3.x's ResolveBackBuffer copied the back
+        // buffer; here we blit the presenter target with a private SpriteBatch, then
+        // restore it as the render target (it preserves contents).
+        private static SpriteBatch _resolveBatch;
+
         public static void ResolveBackBuffer(this GraphicsDevice device, ResolveTexture2D target)
         {
+            RenderTarget2D src = BaseRenderTarget;
+            if (target == null || src == null)
+                return;
+            if (_resolveBatch == null)
+                _resolveBatch = new SpriteBatch(device);
+            device.SetRenderTarget(target);
+            _resolveBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.PointClamp, null, null);
+            _resolveBatch.Draw(src, new Rectangle(0, 0, target.Width, target.Height), Color.White);
+            _resolveBatch.End();
+            device.SetRenderTarget(src);
         }
 
         // XNA 3.x had multiple render targets addressed by index; 4.0 dropped the index.

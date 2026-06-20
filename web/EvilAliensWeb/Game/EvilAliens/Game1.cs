@@ -166,10 +166,11 @@ public class Game1 : Game
 		ServiceHelper.Add((IVibratorService)vibrator);
 		// graphics.MinimumPixelShaderProfile = (ShaderProfile)4; // removed in XNA 4.0
 		bloom = new BloomComponent((Game)(object)this);
-		// Stage 5 (shaders): re-add bloom to Components once its .fx effects are ported.
-		// Until then its LoadContent would Load<Effect>(...) and throw, so we keep the
-		// object + service (callers set Settings/Visible) but never run its Draw.
-		// ((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)bloom);
+		// Stage 5 (shaders): bloom is back in the component list (its .fx are ported).
+		// It draws at DrawOrder 950 into the presenter target; Visible follows the
+		// Bloom setting (default on).
+		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)bloom);
+		((DrawableGameComponent)(object)bloom).Visible = Settings.GetInstance().Bloom;
 		bloom.Settings = BloomSettings.PresetSettings[5];
 		ServiceHelper.Add((IBloomService)bloom);
 		graphics.PreparingDeviceSettings += graphics_PreparingDeviceSettings;
@@ -326,8 +327,9 @@ public class Game1 : Game
 		{
 			gamma = base.Content.Load<Effect>("Content/GFX/Effects/gamma");
 		}
-		catch (Exception)
+		catch (Exception ex)
 		{
+			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
 			gamma = null;
 		}
 	}
@@ -586,7 +588,16 @@ public class Game1 : Game
 		int destW = (int)(800f * scale);
 		int destH = (int)(600f * scale);
 		Rectangle dest = new Rectangle((pp.BackBufferWidth - destW) / 2, (pp.BackBufferHeight - destH) / 2, destW, destH);
-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null);
+		// Stage 5: gamma correction is applied here, on the final present blit.
+		// sceneTarget already holds the fully composited 800x600 frame, so applying
+		// the gamma pixel shader as the scene is scaled+letterboxed to the window is
+		// equivalent to the original full-screen gamma post-process (and avoids the
+		// XNA-3.x ResolveBackBuffer round-trip, which the presenter made redundant).
+		if (gamma != null)
+		{
+			gamma.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
+		}
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gamma);
 		spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
 		spriteBatch.End();
 	}
@@ -622,27 +633,11 @@ public class Game1 : Game
 		{
 			onPostDraw();
 		}
-		// Stage 5 (shaders): once the gamma/bloom post-process is ported, gamma is
-		// non-null and this composites the resolved back buffer through it. Until then
-		// gamma is null AND ResolveBackBuffer is a no-op shim, so running this would
-		// Clear the screen to black and draw an empty resolve target over the scene
-		// (= black screen). Skip it and present what base.Draw already rendered — the
-		// back buffer is the 800x600 design resolution, so it shows 1:1.
-		if (gamma != null)
-		{
-			float num = ((!isWideScreen || Settings.GetInstance().Stretch) ? 1f : 0.75f);
-			base.GraphicsDevice.ResolveBackBuffer(resolveTarget);
-			base.GraphicsDevice.Clear(Color.Black);
-			spriteBatchWrapper.Flush();
-			gamma.Parameters[0].SetValue(Settings.GetInstance().Gamma);
-			spriteBatch.Begin((SpriteBlendMode)0, (SpriteSortMode)0, (SaveStateMode)0);
-			gamma.Begin();
-			gamma.CurrentTechnique.Passes[0].Begin();
-			spriteBatch.Draw((Texture2D)(object)resolveTarget, new Vector2(400f, 300f), (Rectangle?)null, Color.White, 0f, new Vector2((float)(((Texture2D)resolveTarget).Width / 2), (float)(((Texture2D)resolveTarget).Height / 2)), Settings.GetInstance().Scale * new Vector2(num, 1f), (SpriteEffects)0, 0f);
-			gamma.CurrentTechnique.Passes[0].End();
-			gamma.End();
-			spriteBatch.End();
-		}
+		// Stage 5 (shaders): the gamma post-process used to composite the resolved
+		// back buffer here via ResolveBackBuffer + a full-screen gamma draw. The
+		// Stage-4 presenter already renders the whole frame into sceneTarget, so
+		// gamma is now applied on the final present blit in Draw() instead (no
+		// ResolveBackBuffer round-trip needed). See Draw().
 		if (Settings.GetInstance().HideSafeArea)
 		{
 			Rectangle safeZone = General.SafeZone;

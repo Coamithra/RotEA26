@@ -1,6 +1,7 @@
 using System;
 using EvilAliens;
 using EvilAliens.Constants;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -85,7 +86,8 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		{
 			throw new ArgumentNullException("game");
 		}
-		content = new ContentManager((IServiceProvider)game.Services, General.Path + "Bloom");
+		// Stage 5: must be the web loader (effects ship as .mgfxo, not .xnb).
+		content = new WebContentManager((IServiceProvider)game.Services, General.Path + "Bloom");
 		base.DrawOrder = 950;
 		batch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 	}
@@ -110,16 +112,18 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		bloomExtractEffect = content.Load<Effect>("BloomExtract");
 		bloomCombineEffect = content.Load<Effect>("BloomCombine");
 		gaussianBlurEffect = content.Load<Effect>("GaussianBlur");
-		sketchEffect = content.Load<Effect>("sketch");
-		PresentationParameters presentationParameters = base.GraphicsDevice.PresentationParameters;
-		int backBufferWidth = presentationParameters.BackBufferWidth;
-		int backBufferHeight = presentationParameters.BackBufferHeight;
-		SurfaceFormat backBufferFormat = presentationParameters.BackBufferFormat;
-		resolveTarget = new ResolveTexture2D(base.GraphicsDevice, backBufferWidth, backBufferHeight, 1, backBufferFormat);
-		backBufferWidth /= 2;
-		backBufferHeight /= 2;
-		renderTarget1 = new RenderTarget2D(base.GraphicsDevice, backBufferWidth, backBufferHeight, false, backBufferFormat, DepthFormat.None);
-		renderTarget2 = new RenderTarget2D(base.GraphicsDevice, backBufferWidth, backBufferHeight, false, backBufferFormat, DepthFormat.None);
+		// 'sketch' was loaded by the original but never applied in Draw; its .fx is
+		// lost and it's dead, so we don't ship/load it (Stage 5).
+		// Stage 5: the scene composites at the fixed 800x600 design resolution (the
+		// presenter target), NOT the window-sized back buffer, so the bloom targets
+		// must match 800x600 (half-res for the blur). Sizing to the back buffer would
+		// mismatch the presenter target and misalign the combine.
+		SurfaceFormat backBufferFormat = base.GraphicsDevice.PresentationParameters.BackBufferFormat;
+		int sceneWidth = 800;
+		int sceneHeight = 600;
+		resolveTarget = new ResolveTexture2D(base.GraphicsDevice, sceneWidth, sceneHeight, 1, backBufferFormat);
+		renderTarget1 = new RenderTarget2D(base.GraphicsDevice, sceneWidth / 2, sceneHeight / 2, false, backBufferFormat, DepthFormat.None);
+		renderTarget2 = new RenderTarget2D(base.GraphicsDevice, sceneWidth / 2, sceneHeight / 2, false, backBufferFormat, DepthFormat.None);
 	}
 
 	protected override void UnloadContent()
@@ -155,7 +159,11 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		parameters["BaseIntensity"].SetValue(Settings.BaseIntensity);
 		parameters["BloomSaturation"].SetValue(Settings.BloomSaturation);
 		parameters["BaseSaturation"].SetValue(Settings.BaseSaturation);
-		base.GraphicsDevice.Textures[1] = (Texture)(object)resolveTarget;
+		// Bind the original scene as an effect texture parameter (Stage 5): a manual
+		// GraphicsDevice.Textures[1] is not preserved by SpriteBatch's custom-effect
+		// path, so without this the combine reads a black base and only the blurred
+		// bloom shows (everything looks blurry).
+		parameters["BaseTexture"].SetValue((Texture2D)(object)resolveTarget);
 		Viewport viewport = base.GraphicsDevice.Viewport;
 		DrawFullscreenQuad(renderTarget1.GetTexture(), (viewport).Width, (viewport).Height, bloomCombineEffect, IntermediateBuffer.FinalResult);
 	}
@@ -169,21 +177,13 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	private void DrawFullscreenQuad(Texture2D texture, int width, int height, Effect effect, IntermediateBuffer currentBuffer)
 	{
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0046: Unknown result type (might be due to invalid IL or missing references)
-		spriteBatch.Begin((SpriteBlendMode)0, (SpriteSortMode)0, (SaveStateMode)0);
-		if (showBuffer >= currentBuffer)
-		{
-			effect.Begin();
-			effect.CurrentTechnique.Passes[0].Begin();
-		}
+		// Stage 5: XNA 4.0 applies the effect by passing it to SpriteBatch.Begin
+		// (the pass is applied during End/DrawBatch). A null effect = the default
+		// sprite shader, used when showBuffer says to skip this stage's effect.
+		Effect fx = (showBuffer >= currentBuffer) ? effect : null;
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone, fx);
 		spriteBatch.Draw(texture, new Rectangle(0, 0, width, height), Color.White);
 		spriteBatch.End();
-		if (showBuffer >= currentBuffer)
-		{
-			effect.CurrentTechnique.Passes[0].End();
-			effect.End();
-		}
 	}
 
 	private void SetBlurEffectParameters(float dx, float dy)

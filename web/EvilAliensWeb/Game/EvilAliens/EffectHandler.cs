@@ -4,6 +4,17 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
+// Stage 5 (shaders): the lost XNA 3.x sprite effects were rewritten as one master
+// HLSL shader (tools/shaders/src/sprite.fx) compiled into 13 variants via #defines
+// (COLORIZE/LIGHTEN/FADE/INTERPOLATE), plus standalone outline/staticAlpha. The
+// HSV colour rotation is done in-shader, so the old RGB<->HSV conversion Texture3D
+// lookup tables are gone.
+//
+// XNA 3.x set the device shader globally (effect.Begin / pass.Begin) and then drew
+// sprites; XNA 4.0 / KNI instead passes the Effect to SpriteBatch.Begin and applies
+// it during the batch flush. So LoadEffects() now just SELECTS currentEffect and
+// sets its parameters; SpriteBatchWrapper reads CurrentEffect and hands it to
+// spriteBatch.Begin (see SpriteBatchWrapper._beginDrawing).
 public class EffectHandler
 {
 	private InterpolateEffect interpolateEffect;
@@ -50,10 +61,6 @@ public class EffectHandler
 
 	private Effect currentEffect;
 
-	private Texture3D conversionHSVtoRGB;
-
-	private Texture3D conversionRGBtoHSV;
-
 	public InterpolateEffect InterpolateEffect => interpolateEffect;
 
 	public LightenEffect LightenEffect => lightenEffect;
@@ -65,6 +72,10 @@ public class EffectHandler
 	public FadeEffect FadeEffect => fadeEffect;
 
 	public StaticAlphaEffect StaticAlphaEffect => staticAlphaEffect;
+
+	// The effect SpriteBatchWrapper should apply for the current batch (null = the
+	// default sprite shader). Valid after LoadEffects(), cleared by UnloadEffects().
+	public Effect CurrentEffect => currentEffect;
 
 	public EffectHandler()
 	{
@@ -90,47 +101,16 @@ public class EffectHandler
 
 	public void UnloadEffects()
 	{
-		if (currentEffect != null)
-		{
-			currentEffect.CurrentTechnique.Passes[0].End();
-			currentEffect.End();
-			currentEffect = null;
-		}
+		// 4.0: nothing to "end" — the effect is applied via SpriteBatch.Begin.
+		currentEffect = null;
 	}
 
+	// Pick the variant matching the enabled effects (same precedence as the
+	// original XNA 3.x if-chain), then push its parameters. No device shader is
+	// bound here; SpriteBatchWrapper passes CurrentEffect to SpriteBatch.Begin.
 	public void LoadEffects()
 	{
-		//IL_028a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02cc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01be: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03be: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_040a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_064b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0655: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0676: Unknown result type (might be due to invalid IL or missing references)
-		//IL_051d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0527: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0548: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0707: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0873: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0894: Unknown result type (might be due to invalid IL or missing references)
-		//IL_089e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0774: Unknown result type (might be due to invalid IL or missing references)
-		//IL_097c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0986: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a76: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a80: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0abf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0afb: Unknown result type (might be due to invalid IL or missing references)
-		// Stage 5 (shaders): effect files aren't loaded yet (LoadGraphicsContent is a
-		// no-op until the shaders are ported), so there is nothing to apply. Bail out
-		// before dereferencing the null *EffectFile fields; sprites render unshaded.
+		// effects not loaded yet (LoadGraphicsContent uses this as its sentinel)
 		if (staticAlphaEffectFile == null)
 		{
 			return;
@@ -141,304 +121,172 @@ public class EffectHandler
 		fadeEffect.SaveState();
 		interpolateEffect.SaveState();
 		staticAlphaEffect.SaveState();
-		GraphicsDevice graphicsDevice = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
+
+		currentEffect = SelectEffect();
+		if (currentEffect == null)
+		{
+			return;
+		}
+
+		// Set only the parameters the chosen variant declares (Set is null-safe).
+		// Tinting: the FADE variants receive the sprite colour via FadeValue (the
+		// game enables fade for exactly those draws); non-fade variants tint via
+		// the vertex colour the normal SpriteBatch way.
 		if (staticAlphaEffect.Enabled)
 		{
-			currentEffect = staticAlphaEffectFile;
-			currentEffect.Parameters[0].SetValue(staticAlphaEffect.Alpha);
+			Set("Alpha", staticAlphaEffect.Alpha);
 		}
-		else if (outlineEffect.Enabled)
+		if (outlineEffect.Enabled)
 		{
-			currentEffect = outlineEffectFile;
-			currentEffect.Parameters[0].SetValue(outlineEffect.LineThickness);
+			Set("LineThickness", outlineEffect.LineThickness);
 		}
-		else if (colorizeEffect.Enabled && lightenEffect.Enabled && interpolateEffect.Enabled && fadeEffect.Enabled)
+		if (colorizeEffect.Enabled)
 		{
-			currentEffect = colorize_lighten_interpolate_fadeEffectFile;
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect.Parameters[0].SetValue(colorizeEffect.RangeTarget / 360f);
-			currentEffect.Parameters[1].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[2].SetValue(interpolateEffect.Delta);
-			currentEffect.Parameters[3].SetValue(fadeEffect.Value);
+			Set("ColorizeRange", colorizeEffect.RangeTarget / 360f);
 		}
-		else if (lightenEffect.Enabled && interpolateEffect.Enabled && fadeEffect.Enabled)
+		if (fadeEffect.Enabled)
 		{
-			currentEffect = lighten_interpolate_fadeEffectFile;
-			currentEffect.Parameters[0].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[1].SetValue(interpolateEffect.Delta);
-			currentEffect.Parameters[2].SetValue(fadeEffect.Value);
+			Set("FadeValue", fadeEffect.Value);
 		}
-		else if (colorizeEffect.Enabled && fadeEffect.Enabled && interpolateEffect.Enabled)
+		if (interpolateEffect.Enabled)
 		{
-			currentEffect = colorize_fade_interpolateEffectFile;
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect.Parameters[0].SetValue(fadeEffect.Value);
-			currentEffect.Parameters[1].SetValue(colorizeEffect.RangeTarget / 360f);
-			currentEffect.Parameters[2].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[3].SetValue(interpolateEffect.Delta);
-		}
-		else if (colorizeEffect.Enabled && lightenEffect.Enabled && interpolateEffect.Enabled)
-		{
-			currentEffect = colorize_lighten_interpolateEffectFile;
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect.Parameters[0].SetValue(colorizeEffect.RangeTarget / 360f);
-			currentEffect.Parameters[1].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[2].SetValue(interpolateEffect.Delta);
-		}
-		else if (colorizeEffect.Enabled && interpolateEffect.Enabled)
-		{
-			currentEffect = colorize_interpolateEffectFile;
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect.Parameters[0].SetValue(colorizeEffect.RangeTarget / 360f);
-			currentEffect.Parameters[1].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[2].SetValue(interpolateEffect.Delta);
-		}
-		else if (fadeEffect.Enabled && interpolateEffect.Enabled)
-		{
-			currentEffect = fade_interpolateEffectFile;
-			currentEffect.Parameters[0].SetValue(fadeEffect.Value);
-			currentEffect.Parameters[1].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[2].SetValue(interpolateEffect.Delta);
-		}
-		else if (lightenEffect.Enabled && interpolateEffect.Enabled)
-		{
-			currentEffect = lighten_interpolateEffectFile;
-			currentEffect.Parameters[0].SetValue(interpolateEffect.Offset);
-			currentEffect.Parameters[1].SetValue(interpolateEffect.Delta);
-		}
-		else if (colorizeEffect.Enabled & fadeEffect.Enabled)
-		{
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect = colorize_fadeEffectFile;
-			currentEffect.Parameters[0].SetValue(fadeEffect.Value);
-			currentEffect.Parameters[1].SetValue(colorizeEffect.RangeTarget / 360f);
-		}
-		else if (lightenEffect.Enabled & colorizeEffect.Enabled)
-		{
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect = colorize_lightenEffectFile;
-			currentEffect.Parameters[0].SetValue(colorizeEffect.RangeTarget / 360f);
-		}
-		else if (lightenEffect.Enabled)
-		{
-			currentEffect = lightenEffectFile;
-		}
-		else if (colorizeEffect.Enabled)
-		{
-			graphicsDevice.Textures[1] = (Texture)(object)conversionRGBtoHSV;
-			graphicsDevice.SamplerStates[1].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[1].AddressW = (TextureAddressMode)3;
-			graphicsDevice.Textures[2] = (Texture)(object)conversionHSVtoRGB;
-			graphicsDevice.SamplerStates[2].AddressU = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressV = (TextureAddressMode)3;
-			graphicsDevice.SamplerStates[2].AddressW = (TextureAddressMode)3;
-			currentEffect = colorizeEffectFile;
-			currentEffect.Parameters[0].SetValue(colorizeEffect.RangeTarget / 360f);
-		}
-		else if (fadeEffect.Enabled)
-		{
-			currentEffect = fadeEffectFile;
-			currentEffect.Parameters[0].SetValue(fadeEffect.Value);
-		}
-		else if (interpolateEffect.Enabled)
-		{
-			currentEffect = interpolateEffectFile;
-			currentEffect.Parameters[0].SetValue(InterpolateEffect.Offset);
-			currentEffect.Parameters[1].SetValue(InterpolateEffect.Delta);
-		}
-		else
-		{
-			UnloadEffects();
-		}
-		if (currentEffect != null)
-		{
-			currentEffect.Begin();
-			currentEffect.CurrentTechnique.Passes[0].Begin();
+			Set("InterpOffset", interpolateEffect.Offset);
+			Set("InterpDelta", interpolateEffect.Delta);
 		}
 	}
 
-	private Color RGBtoHSV(Color color)
+	private Effect SelectEffect()
 	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0191: Unknown result type (might be due to invalid IL or missing references)
-		Vector4 val = (color).ToVector4();
-		Vector4 val2 = default(Vector4);
-		val2.W = val.W;
-		val2.X = 1f;
-		val2.Y = 1f;
-		val2.Z = 1f;
-		float num = MathHelper.Min(val.X, val.Y);
-		num = MathHelper.Min(num, val.Z);
-		float num2 = MathHelper.Max(val.X, val.Y);
-		num2 = (val2.Z = MathHelper.Max(num2, val.Z));
-		float num3 = num2 - num;
-		if (num2 == 0f)
+		if (staticAlphaEffect.Enabled)
 		{
-			val2.Y = 0f;
-			val2.X = -1f;
-			val2.Z = 0f;
+			return staticAlphaEffectFile;
 		}
-		else
+		if (outlineEffect.Enabled)
 		{
-			val2.Y = num3 / num2;
-			if (val.X == num2)
-			{
-				val2.X = (val.Z - val.Y) / num3;
-			}
-			else if (val.Y == num2)
-			{
-				val2.X = 2f + (val.Z - val.X) / num3;
-			}
-			else
-			{
-				val2.X = 4f + (val.X - val.Y) / num3;
-			}
-			val2.X *= 60f;
-			if (val2.X < 0f)
-			{
-				val2.X += 360f;
-			}
+			return outlineEffectFile;
 		}
-		return new Color(new Vector4(val2.X / 360f, val2.Y, val2.Z, val2.W));
+		bool c = colorizeEffect.Enabled;
+		bool l = lightenEffect.Enabled;
+		bool f = fadeEffect.Enabled;
+		bool i = interpolateEffect.Enabled;
+		if (c && l && i && f)
+		{
+			return colorize_lighten_interpolate_fadeEffectFile;
+		}
+		if (l && i && f)
+		{
+			return lighten_interpolate_fadeEffectFile;
+		}
+		if (c && f && i)
+		{
+			return colorize_fade_interpolateEffectFile;
+		}
+		if (c && l && i)
+		{
+			return colorize_lighten_interpolateEffectFile;
+		}
+		if (c && i)
+		{
+			return colorize_interpolateEffectFile;
+		}
+		if (f && i)
+		{
+			return fade_interpolateEffectFile;
+		}
+		if (l && i)
+		{
+			return lighten_interpolateEffectFile;
+		}
+		if (c && f)
+		{
+			return colorize_fadeEffectFile;
+		}
+		if (l && c)
+		{
+			return colorize_lightenEffectFile;
+		}
+		if (l)
+		{
+			return lightenEffectFile;
+		}
+		if (c)
+		{
+			return colorizeEffectFile;
+		}
+		if (f)
+		{
+			return fadeEffectFile;
+		}
+		if (i)
+		{
+			return interpolateEffectFile;
+		}
+		return null;
 	}
 
-	private Color HSVtoRGB(Color hsv_color)
+	private void Set(string name, float value)
 	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c4: Unknown result type (might be due to invalid IL or missing references)
-		Vector4 val = (hsv_color).ToVector4();
-		val.X *= 360f;
-		Vector4 val2 = default(Vector4);
-		val2.W = val.W;
-		if (val.Y == 0f)
+		EffectParameter p = currentEffect.Parameters[name];
+		if (p != null)
 		{
-			val2.X = (val2.Y = (val2.Z = val.Z));
+			p.SetValue(value);
 		}
-		else
+	}
+
+	private void Set(string name, Vector2 value)
+	{
+		EffectParameter p = currentEffect.Parameters[name];
+		if (p != null)
 		{
-			val.X /= 60f;
-			int num = (int)val.X;
-			float num2 = val.X - (float)num;
-			float num3 = val.Z * (1f - val.Y);
-			float num4 = val.Z * (1f - val.Y * num2);
-			float num5 = val.Z * (1f - val.Y * (1f - num2));
-			switch (num)
-			{
-			case 0:
-				val2.X = val.Z;
-				val2.Y = num5;
-				val2.Z = num3;
-				break;
-			case 1:
-				val2.X = num4;
-				val2.Y = val.Z;
-				val2.Z = num3;
-				break;
-			case 2:
-				val2.X = num3;
-				val2.Y = val.Z;
-				val2.Z = num5;
-				break;
-			case 3:
-				val2.X = num3;
-				val2.Y = num4;
-				val2.Z = val.Z;
-				break;
-			case 4:
-				val2.X = num5;
-				val2.Y = num3;
-				val2.Z = val.Z;
-				break;
-			default:
-				val2.X = val.Z;
-				val2.Y = num3;
-				val2.Z = num4;
-				break;
-			}
+			p.SetValue(value);
 		}
-		return new Color(val2);
+	}
+
+	private void Set(string name, Vector3 value)
+	{
+		EffectParameter p = currentEffect.Parameters[name];
+		if (p != null)
+		{
+			p.SetValue(value);
+		}
+	}
+
+	private void Set(string name, Vector4 value)
+	{
+		EffectParameter p = currentEffect.Parameters[name];
+		if (p != null)
+		{
+			p.SetValue(value);
+		}
 	}
 
 	internal void LoadGraphicsContent(bool loadAllContent)
 	{
-		//IL_0269: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0273: Expected O, but got Unknown
-		//IL_0299: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02a3: Expected O, but got Unknown
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01dd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
 		if (!loadAllContent)
 		{
 			return;
 		}
-		// Stage 5 (shaders): the ~16 sprite-effect .fx files aren't ported yet, so
-		// loading them would throw (and the HSV<->RGB conversion Texture3Ds they feed
-		// are unused until then). Leave every *EffectFile field null; LoadEffects()
-		// early-outs while they are, so sprites render unshaded. The original loads +
-		// conversion-texture build are preserved in src_decompiled/; restore here when
-		// porting the shaders.
+		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
+		lightenEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten");
+		colorizeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize");
+		outlineEffectFile = contentManager.Load<Effect>("GFX/Effects/outline");
+		fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/fade");
+		colorize_lightenEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten");
+		colorize_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_fade");
+		interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/interpolate");
+		colorize_fade_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_fade_interpolate");
+		colorize_lighten_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten_interpolate");
+		colorize_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_interpolate");
+		fade_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/fade_interpolate");
+		lighten_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten_interpolate");
+		colorize_lighten_interpolate_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten_interpolate_fade");
+		lighten_interpolate_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten_interpolate_fade");
+		// staticAlpha must be loaded LAST: LoadEffects() uses staticAlphaEffectFile
+		// != null as the "effects are ready" sentinel.
+		staticAlphaEffectFile = contentManager.Load<Effect>("GFX/Effects/staticAlpha");
 	}
 
 	internal void UnloadGraphicsContent(bool unloadAllContent)
 	{
-		if (unloadAllContent && conversionHSVtoRGB != null)
-		{
-			((GraphicsResource)conversionRGBtoHSV).Dispose();
-			((GraphicsResource)conversionHSVtoRGB).Dispose();
-			conversionHSVtoRGB = null;
-			conversionRGBtoHSV = null;
-		}
 	}
 }

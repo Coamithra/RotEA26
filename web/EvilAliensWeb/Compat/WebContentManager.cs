@@ -14,8 +14,10 @@
 // serves them regardless of the (inconsistent) casing the game asks for; this
 // manager lowercases every request to match.
 //
-// Effects (Stage 5), audio (Stage 6) and video (Stage 6) are NOT handled yet:
-// those fall through to the base ContentManager (and will fail until ported).
+//   Effect     -> <name>.mgfxo      (MGFX v10 GLSL blob; see tools/shaders/)
+//
+// Audio (Stage 6) and video (Stage 6) are NOT handled yet: those fall through to
+// the base ContentManager (and will fail until ported).
 // ---------------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
@@ -79,8 +81,10 @@ namespace EvilAliensWeb.Compat
                 asset = LoadFont(key);
             else if (typeof(T) == typeof(Curve))
                 asset = LoadCurve(key);
+            else if (typeof(T) == typeof(Effect))
+                asset = LoadEffect(key);
             else
-                return base.Load<T>(assetName); // Effect / SoundEffect / Song / Video: later stages
+                return base.Load<T>(assetName); // SoundEffect / Song / Video: later stages
 
             _cache[key] = asset;
             return (T)asset;
@@ -123,6 +127,23 @@ namespace EvilAliensWeb.Compat
 
             char? defaultChar = hasDefault ? (char)defaultCp : (char?)null;
             return new SpriteFont(texture, glyphs, cropping, chars, lineSpacing, spacing, kerning, defaultChar);
+        }
+
+        // Effects (Stage 5): the lost XNA 3.x .fx were rewritten in HLSL under
+        // tools/shaders/src and compiled offline by tools/shaders/build_shaders.py
+        // (KNI's MGCB, BlazorGL target) to a raw MGFX v10 GLSL blob, shipped as
+        // <name>.mgfxo. new Effect(gd, bytes) is exactly the ctor the stock
+        // EffectReader feeds, so we read the blob and hand it over directly.
+        private Effect LoadEffect(string key)
+        {
+            byte[] code;
+            using (Stream s = TitleContainer.OpenStream(key + ".mgfxo"))
+            using (var ms = new MemoryStream())
+            {
+                s.CopyTo(ms);
+                code = ms.ToArray();
+            }
+            return new Effect(GraphicsDevice, code) { Name = key };
         }
 
         private Curve LoadCurve(string key)

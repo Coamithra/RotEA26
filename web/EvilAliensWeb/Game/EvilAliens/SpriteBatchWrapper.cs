@@ -59,6 +59,22 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		effectHandler = new EffectHandler();
 	}
 
+	// XNA 3.x mapped its SpriteBlendMode to fixed-function blend state; 4.0 uses
+	// BlendState objects. Content is premultiplied (see Stage 3), so AlphaBlend and
+	// Additive here are the premultiplied variants KNI ships, which is correct.
+	private static BlendState ToBlendState(SpriteBlendMode mode)
+	{
+		switch (mode)
+		{
+		case SpriteBlendMode.Additive:
+			return BlendState.Additive;
+		case SpriteBlendMode.None:
+			return BlendState.Opaque;
+		default:
+			return BlendState.AlphaBlend;
+		}
+	}
+
 	private void _beginDrawing()
 	{
 		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
@@ -68,8 +84,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		}
 		if (!enabled)
 		{
-			spriteBatch.Begin(blendmode, (SpriteSortMode)0, (SaveStateMode)0);
+			// 4.0: select the effect first, then begin the batch WITH it — the pass
+			// is applied during End()/DrawBatch. A null effect = default sprite shader.
 			effectHandler.LoadEffects();
+			spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effectHandler.CurrentEffect);
 			enabled = true;
 		}
 	}
@@ -78,8 +96,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	{
 		if (enabled)
 		{
-			effectHandler.UnloadEffects();
 			spriteBatch.End();
+			effectHandler.UnloadEffects();
 			enabled = false;
 		}
 	}

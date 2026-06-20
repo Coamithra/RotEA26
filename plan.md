@@ -61,7 +61,13 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   reconstructed it); per-scene `ContentManager`s rewired to `WebContentManager`;
   `GraphicsProfile.HiDef` (Reach rejects the game's 32-bit index buffers); audio +
   shaders + bloom stubbed for their later stages. See the Stage-4 notes below.
-- [ ] Stage 5 — Shaders (bloom + sprite effects)
+- [x] **Stage 5 — Shaders (bloom + sprite effects).** The lost `.fx` were rewritten in
+  HLSL (`tools/shaders/src/`) and compiled offline to KNI MGFX v10 GLSL blobs (`.mgfxo`)
+  via MGCB targeting **BlazorGL**; `WebContentManager` loads them with `new Effect(gd,bytes)`.
+  Gamma (composited on the present blit), the full bloom post-process (real
+  `ResolveBackBuffer` + render-target ping-pong), and all the sprite effects
+  (colorize/lighten/fade/interpolate via one master shader compiled into 13 variants,
+  + outline/staticAlpha) render in-browser with 0 console errors. See the Stage-5 notes.
 - [ ] Stage 6 — Audio (XACT → modern)
 - [ ] Stage 7 — Saves & awardments persistence (localStorage)
 - [ ] Stage 8 — GitHub hosting + Pages deploy (public)
@@ -333,6 +339,90 @@ asset names in `Content/Bloom/` and `Content/GFX/Effects/`.
 4. Verify the `SpriteBlendMode`→`BlendState` mapping in `Compat/Xna3Compat.cs`.
 
 **Done when:** bloom + the colorize/outline/fade effects render correctly in-browser.
+
+### Stage 5 — DONE. What was changed (read before Stage 6/9)
+- **The toolchain (the make-or-break enabler).** KNI's `Effect(gd, byte[])` parses an
+  **MGFX v10** blob (GLSL inside for the GL/Web profile). KNI ships the full Windows
+  effect compiler in the nuget package **`nkast.Xna.Framework.Content.Pipeline.Builder.Windows`
+  `4.1.9001`** (`MGCB.exe` + `SharpDX.D3DCompiler` + `libmojoshader_64.dll` + the
+  `MojoProcessor`). Restore it into the nuget cache (any project referencing it, then
+  `dotnet restore`). `BlazorGL` is a real MGCB `/platform`, and it emits exactly the v10
+  GLSL the `4.1.9001` runtime wants. **Version must match the runtime** — a newer compiler
+  emits a format the runtime rejects ("for a newer version of KNI").
+- **Offline build, committed outputs (mirrors Stage 3's philosophy).**
+  `tools/shaders/src/*.fx` (hand-written HLSL) → `tools/shaders/build_shaders.py` runs MGCB
+  for BlazorGL, strips the `.xnb` wrapper to the raw MGFX blob, and writes lowercased
+  `.mgfxo` into `wwwroot/Content/{gfx/effects,bloom}/`. Re-run with
+  `PYTHONIOENCODING=utf-8 python tools/shaders/build_shaders.py`. The build is NOT wired
+  into the .csproj (keeps the project + Stage-8 CI light); the `.mgfxo` are committed.
+  `bin/`,`obj/`,`gen/`,`effects.mgcb` under `tools/shaders/` are gitignored.
+- **Runtime loading:** `WebContentManager.Load<Effect>` reads `<name>.mgfxo` and calls
+  `new Effect(gd, bytes)` — the exact ctor the stock `EffectReader` feeds.
+- **The XNA 3.x→4.0 effect model.** 3.x set the device shader globally
+  (`effect.Begin()` / `pass.Begin()`, then draw); 4.0/KNI passes the `Effect` to
+  `SpriteBatch.Begin(...)` and applies it during the batch flush. KNI's `SpriteBatch.Setup`
+  always applies its **internal** sprite vertex shader, so a custom effect needs **only a
+  pixel shader** (a pass with no VS leaves the sprite VS bound). The no-op
+  `Xna3EffectCompat.Begin/End` shims are now **dead** (no callers); the real work is the
+  effect passed to `Begin`.
+- **Gamma:** loaded in `Game1.LoadContent`; applied on the **final present blit** in
+  `Game1.Draw` (sceneTarget → window, through the gamma PS). The old DrawInner
+  resolve-based gamma block was removed (the Stage-4 presenter made it redundant).
+- **Bloom:** `BloomComponent` re-added to `Components` (Visible follows `Settings.Bloom`).
+  Its content manager is now a `WebContentManager`; targets sized to the **800×600** scene
+  (not the window back buffer); `Draw`/`DrawFullscreenQuad` ported to pass the effect to
+  `SpriteBatch.Begin`; the base scene is bound to sampler **s1** (`Textures[1]` +
+  `SamplerStates[1]`) for the combine. `ResolveTexture2D` is now a real **`RenderTarget2D`**
+  and **`ResolveBackBuffer` is implemented** (blits `BaseRenderTarget` = sceneTarget into the
+  target via a private SpriteBatch, then restores it). The `sketch` shader was dead (loaded,
+  never applied) — dropped. Shaders: `BloomExtract/GaussianBlur/BloomCombine.fx` (canonical
+  XNA Bloom sample ports).
+- **Sprite effects:** one master `tools/shaders/src/sprite.fx` with
+  `#ifdef COLORIZE/LIGHTEN/FADE/INTERPOLATE`, compiled **13×** with different `#define`s
+  (MGCB dedupes by source path, so `build_shaders.py` generates a stub per variant that
+  `#define`s + `#include`s the master — the FX preprocessor only searches the stub's own
+  dir, hence the master is copied beside the stubs in `gen/`). `EffectHandler` was rewritten:
+  `LoadEffects()` SELECTS `currentEffect` and sets **named** params (no positional indexing,
+  no `Begin`); `SpriteBatchWrapper._beginDrawing` reads `EffectHandler.CurrentEffect` and
+  passes it to `SpriteBatch.Begin`. **HSV is computed in-shader** (Sam Hocevar rgb2hsv/
+  hsv2rgb), so the old RGB↔HSV `Texture3D` lookup tables are gone. Tinting: FADE variants
+  tint via `FadeValue`; non-fade variants via the vertex colour — single tint in every case
+  the game draws (see the comment in `sprite.fx`). `outline`/`staticAlpha` are **never
+  `.Enable()`d** in the shipped build (placeholder shaders that only need to load — LoadEffects
+  uses `staticAlphaEffectFile != null` as its "loaded" sentinel).
+- **Menu render targets (bug found during verification):** the menu classes (`MenuScene`,
+  `MenuSub1` and its submenu subclasses) render into an offscreen `myRenderTarget` then blit
+  it. These were created **window-sized** with **`(SurfaceFormat)1` = Bgr565** — and a Bgr565
+  render target is not valid on WebGL (it renders nothing), so the whole menu (planet backdrop,
+  the alien skull, the Start/Options/Tutorial/Exit entries, button tips) came out **black**,
+  leaving only the separately-drawn title. Fixed by creating those targets at the **800×600**
+  design resolution with **`SurfaceFormat.Color`** (RGBA8); the entries are laid out around
+  origin (400,300) and blitted 1:1 / center-at-origin, so 800×600 also aligns them to the
+  Stage-4 presenter target. (Same window-vs-design sizing issue as the bloom targets.) If a new
+  menu/scene renders to an offscreen target, use Color at design res, not Bgr565 at back-buffer size.
+  - **`MenuSubWithSkull` skull + title sizing:** that override sized the skull/title destination
+    rects as fractions of `BackBufferWidth/Height` (the ~1300px window) but draws into the
+    800x600 design target, so they were scaled for the window and overflowed (title/skull too big
+    and cut off). Fixed to base the rects on 800x600. General rule: size/position menu elements
+    against the 800x600 design space, not the back buffer.
+  - **Intentional, left intact:** the menu's "lightspeed warp" star-trail effect during the
+    zoom-in (`FadeToGame`) relies on NOT clearing `MenuScene.myRenderTarget` (the backdrop draw is
+    skipped during the warp and the RT keeps `RenderTargetUsage.PreserveContents`). The size/format
+    fix kept that usage flag, so the warp still works; the trail accumulates in myRenderTarget (not
+    sceneTarget), so bloom compositing over sceneTarget doesn't wipe it.
+- **Blend modes verified:** `SpriteBatchWrapper.ToBlendState` maps 3.x
+  `None→Opaque`, `AlphaBlend→AlphaBlend`, `Additive→Additive` (all premultiplied, matching
+  the premultiplied content) — additive glows and alpha blends render correctly in gameplay.
+- **Verification:** booted in a fresh Chrome tab; gamma proven by a forced-value test
+  (whole frame brightens, letterbox stays black); bloom visible as glow on text/sprites and
+  correct on dark gameplay; attract-mode gameplay renders enemies/ships/HUD with correct
+  colours + animation; **0 game/shader console errors** (the only console errors seen during
+  debugging came from synthetic key-injection in the test harness, not the game).
+- **Gotcha for later stages — driving keyboard input headlessly:** real OS keys via the
+  claude-in-chrome `computer` `key` action work; **synthetic JS `KeyboardEvent`s do NOT** —
+  KNI's WASM keyboard interop throws `JSON value could not be converted to System.Int32`
+  reading the faked `keyCode` and can leave a key stuck. Use real key events (held across a
+  frame) or click-to-focus + `computer key`.
 
 ---
 

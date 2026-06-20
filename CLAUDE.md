@@ -63,12 +63,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `PersistentSave` + `Compat/SaveInterop.cs` + `eaSave` in `index.html`). `ResolveBackBuffer` and
   the `SpriteBlendMode`→`BlendState` mapping are now **real** (Stage 5); the `Effect`/`EffectPass`
   `Begin/End` no-op shims are dead (no callers).
-- **It runs (Stages 4–7 done).** `Game1` boots through splash → menu → playable/attract gameplay
-  with shaders (gamma, bloom, sprite effects), **audio** (music, SFX, speech) **and persistent
-  saves** (settings/unlockables/awardments/screenshots → localStorage) and 0 console exceptions.
-  Remaining: hosting (8), polish/fullscreen (9), unified hi-res render path (10). See `plan.md`
-  "Stage 4/5/6/7 — DONE" for what changed and the stubs each
-  later stage must un-stub.
+- **It runs AND it's live (Stages 4–8 done).** `Game1` boots through splash → menu → playable/attract
+  gameplay with shaders (gamma, bloom, sprite effects), **audio** (music, SFX, speech) **and persistent
+  saves** (settings/unlockables/awardments/screenshots → localStorage) and 0 console exceptions —
+  **deployed publicly at https://coamithra.github.io/RotEA26/**, auto-rebuilt on every push to `main`.
+  Remaining: polish/fullscreen (9), unified hi-res render path (10), online co-op (11). See `plan.md`
+  "Stage 4/5/6/7/8 — DONE" for what changed and the stubs each later stage must un-stub.
+- **Hosting (Stage 8):** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI (Pages
+  can't build .NET), rewrites `<base href>` to `/RotEA26/` (project page), adds `.nojekyll` + `404.html`,
+  and deploys via `actions/deploy-pages`. **The dev build keeps `<base href="/" />`** for local
+  `dotnet run` — CI flips it; don't hard-code `/RotEA26/` in `index.html`. **`PublishTrimmed=false`**
+  in the csproj is deliberate: Release trims by default and would strip the `XmlSerializer` save types
+  → white screen. Download-size trimming/AOT/Brotli is **Stage 9** (the published site is ~113 MB now).
+- **GOTCHA — content paths are CASE-SENSITIVE on the live host (not on Windows).** GitHub Pages serves
+  from a case-sensitive Linux FS; the dev box + `dotnet run` are case-insensitive, so a casing mismatch
+  passes locally and 404s in production (Stage 8's black-screen `ManagedError: content/gfx/...`). The
+  on-disk asset root is **`wwwroot/Content` (capital C)** with everything lowercase under it. **Every
+  content request must use a capital `Content/` root, lowercase under it** — `WebContentManager.ResolvePath`
+  and `AnimatedSprite.loadData` do this; the JS `eaMusic`/`music.json` always did. Don't reintroduce a
+  lowercase `content/` request, and verify new assets/scenes ON THE LIVE URL, not just locally.
 - **Shaders (Stage 5):** the lost `.fx` were rewritten in `tools/shaders/src/` and compiled
   offline to MGFX v10 GLSL `.mgfxo` by `tools/shaders/build_shaders.py` (KNI's MGCB, BlazorGL
   target — needs `nkast.Xna.Framework.Content.Pipeline.Builder.Windows 4.1.9001` restored in the

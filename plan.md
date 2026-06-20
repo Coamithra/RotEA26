@@ -83,7 +83,14 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   WASM-MEMFS ↔ localStorage mirror) so every `Savable` subclass is untouched: hydrate once before
   the first read, flush changed files on each container `Dispose`. Verified in-browser (toggle a
   setting → reload → it's remembered). See the Stage-7 notes below.
-- [ ] Stage 8 — GitHub hosting + Pages deploy (public)
+- [x] **Stage 8 — GitHub hosting + Pages deploy (public).** Live at
+  **https://coamithra.github.io/RotEA26/**, auto-rebuilt on every push to `main` by
+  `.github/workflows/deploy.yml` (CI does the `dotnet publish`; Pages only serves). The real
+  catch was **case-sensitivity**: the published build white-screened on the Linux Pages host
+  (`ManagedError: content/gfx/splash/ealogo.png`) because the C# loaders requested a lowercase
+  `content/` root while the on-disk dir is `Content` — invisible on case-insensitive Windows.
+  Also disabled `PublishTrimmed` (Release trims by default and would strip the XmlSerializer
+  save types). See the Stage-8 notes below.
 - [ ] Stage 9 — Polish (input map, fullscreen, download size)
 - [ ] Stage 10 — Unified hi-res render path (lo-res + hi-res share one scaled scene)
 - [ ] Stage 11 — Online co-op multiplayer (networked couch co-op)
@@ -732,6 +739,58 @@ Persistence layer = browser localStorage (or IndexedDB) via Blazor JS interop.
   Pages doesn't negotiate `.br`.
 
 **Done when:** the public URL loads and plays the game; pushing to `main` redeploys.
+
+### Stage 8 — DONE. What was changed (read before Stage 9/10)
+- **Live URL: https://coamithra.github.io/RotEA26/** — a **project page**, so the app serves from
+  `/RotEA26/`. The repo (`Coamithra/RotEA26`) already existed, was already **public**, and `main`
+  was already pushed, so the plan's `git init` / `gh repo create` steps were already done; `.gitignore`
+  was already complete (`bin/`,`obj/`,`release/`, the raw 53 MB package, `.env`, `.claude/*.local.json`).
+  Stage 8 reduced to: add CI, enable Pages, fix what only breaks on the live host.
+- **CI: `.github/workflows/deploy.yml`** (push to `main` + `workflow_dispatch`). GitHub Pages can't
+  build .NET, so CI does it: `setup-dotnet` 8 → `dotnet workload install wasm-tools` →
+  `dotnet publish web/EvilAliensWeb -c Release -o release` → **rewrite `<base href="/" />` →
+  `/RotEA26/`** (sed; the dev build keeps `/` for local `dotnet run`) → `.nojekyll` (Jekyll would drop
+  the `_framework/` folder — leading underscore) → copy `index.html`→`404.html` (SPA deep-link
+  fallback) → `upload-pages-artifact` → `deploy-pages`. Added a `concurrency: {group: pages,
+  cancel-in-progress: true}` guard so a newer push supersedes an in-flight deploy. The committed
+  shader `.mgfxo` + audio `.ogg/.wav` outputs mean CI needs **no** shader/audio toolchain — just
+  `dotnet publish`.
+- **Pages enabled via the API** (source = GitHub Actions): `gh api -X POST repos/Coamithra/RotEA26/pages
+  -f build_type=workflow` (one-time; HTTPS auto-enforced). Equivalent to repo Settings → Pages →
+  Source = "GitHub Actions".
+- **`PublishTrimmed=false` (csproj).** A Release Blazor-WASM publish **trims by default**, and the game
+  serialises `Settings`/`Unlockables`/`Achievements` with **`XmlSerializer`** (runtime reflection) —
+  trimming strips those members and **white-screens the published build even though Debug runs clean**.
+  Disabled trimming so the published build is at Debug parity. **This is why the published `wwwroot` is
+  ~113 MB** (46 MB `_framework` + ~67 MB Content); shrinking it (trim roots / AOT / Brotli) is **Stage 9**,
+  not Stage 8. (Well under Pages' 1 GB site limit.)
+- **THE host-only bug — content path case-sensitivity (worked on Windows, 404'd on Pages).** The first
+  deploy booted to a **black screen**; the browser console (not the build) showed
+  `ManagedError: content/gfx/splash/ealogo.png`. Root cause: the physical asset root is **`wwwroot/Content`
+  (capital C)** with all files lowercase *under* it, but the C# loaders forced a **lowercase `content/`
+  root**. Case-insensitive Windows (dev box + `dotnet run`/Kestrel) resolved it fine; **case-sensitive
+  Linux Pages 404s** `content/...` vs the real `Content/...`. The JS music layer + `music.json` +
+  `General.Path` already used capital `Content/` (so music had been working on Pages). Fix = align the two
+  C# path builders to the on-disk capital root:
+  - `Compat/WebContentManager.cs` `ResolvePath` now prepends **`"Content/"`** (still lowercases everything
+    after the root — disk is lowercase there).
+  - `Game/EvilAliens/AnimatedSprite.cs` `loadData` keeps **`"Content/"` capital** and lowercases only the
+    `.dat` filename (was `("Content/"+filename).ToLowerInvariant()` — lowercased the root too).
+  - **Rule for future stages: every content request uses a capital `Content/` root, lowercase under it.**
+    Don't reintroduce a lowercase `content/` request, and watch this when adding assets/scenes.
+- **Verified on the live host (real Chrome, cache-busted `?cb=` because Pages serves a sticky
+  `index.html`):** `?menu&noattract` renders the full menu (glowing title, planet backdrop, bloom/gamma);
+  `?level=Level1` boots the space-intro then **Level 1 gameplay** (Earth hi-res backdrop, the animated
+  player saucer via the fixed `.dat` path, powerup, HUD). **0 console exceptions** across both — the only
+  console lines are KNI's benign `*Factory not found → registering through reflection` boot logs (same as
+  Debug). HTTP-checked `index.html` (base href `= /RotEA26/`), `blazor.boot.json`, `.wasm`, the nkast
+  `_content/*.8.0.5.js`, `music.json`, and `404.html` all 200.
+- **Untouched / deferred (by design):** Brotli/gzip negotiation (Pages gzips text on the fly; `.br` files
+  ship but aren't negotiated — Stage 9 size work); the nkast `8.0.5` JS `<script>` versions still match the
+  restored package after the Release publish (re-check this if KNI is bumped). `Wall.cs:680` reads
+  `level3.txt` via `new StreamReader(General.Path + "Levels/level3.txt")` — a WASM-filesystem read that
+  can't hit the web server regardless of casing; it's a Level-3 gameplay concern, not on the menu/Level-1
+  boot path, left for whoever does Level 3.
 
 ---
 

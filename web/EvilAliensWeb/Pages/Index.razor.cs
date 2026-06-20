@@ -15,6 +15,7 @@ namespace EvilAliensWeb.Pages
             if (firstRender)
             {
                 EvilAliensWeb.Compat.MusicInterop.Init(JsRuntime);
+                EvilAliensWeb.Compat.SaveInterop.Init(JsRuntime);
 
                 // Parse the URL query (?menu / ?noattract / ?level=...) into DebugFlags
                 // BEFORE the render loop starts, so Game1 (created on the first tick) sees

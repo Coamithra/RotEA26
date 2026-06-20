@@ -68,11 +68,25 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   `ResolveBackBuffer` + render-target ping-pong), and all the sprite effects
   (colorize/lighten/fade/interpolate via one master shader compiled into 13 variants,
   + outline/staticAlpha) render in-browser with 0 console errors. See the Stage-5 notes.
-- [ ] Stage 6 — Audio (XACT → modern)
-- [ ] Stage 7 — Saves & awardments persistence (localStorage)
+- [x] **Stage 6 — Audio (XACT → modern).** The Xbox XACT banks (`.xwb`/`.xsb`) were
+  cracked offline in pure Python (`tools/audio/`): SFX/speech are big-endian PCM, the 8
+  music tracks are **xWMA** (decoded via PyAV by rebuilding a `RIFF/XWMA` container). SFX +
+  speech play natively on KNI `SoundEffect`/`SoundEffectInstance` (instance caps, pitch/volume
+  variation, loop flags, Default/Speech gains); **music** plays through a WebAudio JS layer
+  (`wwwroot/index.html` `eaMusic`, driven by `Compat/MusicInterop.cs`) for seamless loop
+  points + the BrainBoss pitch sweep. Speech is re-cast with ElevenLabs (Brian announcer,
+  Victor narrator). Verified in-browser: menu music + attract-mode SFX, 0 exceptions. See the
+  Stage-6 notes below.
+- [x] **Stage 7 — Saves & awardments persistence (localStorage).** The in-memory save tree
+  (`/eaweb_save/EvilAliens/`) is mirrored to browser **localStorage**, so settings, unlockables,
+  awardments and level-select screenshots survive a reload. Done at the `StorageStub` layer (a
+  WASM-MEMFS ↔ localStorage mirror) so every `Savable` subclass is untouched: hydrate once before
+  the first read, flush changed files on each container `Dispose`. Verified in-browser (toggle a
+  setting → reload → it's remembered). See the Stage-7 notes below.
 - [ ] Stage 8 — GitHub hosting + Pages deploy (public)
 - [ ] Stage 9 — Polish (input map, fullscreen, download size)
 - [ ] Stage 10 — Unified hi-res render path (lo-res + hi-res share one scaled scene)
+- [ ] Stage 11 — Online co-op multiplayer (networked couch co-op)
 
 ---
 
@@ -529,6 +543,72 @@ Wiring impact on the steps below:
 the **BrainBoss music-pitch sweep** audibly tracks boss HP; `Music`/`Speech` volumes + the
 `PlayMusic` setting work; nothing throws on the autoplay gate.
 
+### Stage 6 — DONE. What was changed (read before Stage 7/9/10)
+- **The banks were cracked offline in pure Python — no ffmpeg, no vgmstream, no external
+  binaries** (mirrors Stage 3/5: a reproducible tool + committed outputs). `tools/audio/`:
+  - `xact.py` — parses the **big-endian Xbox** Wave Bank (`.xwb`) + Sound Bank (`.xsb`) and
+    decodes the waves. The `.xsb` header is **2 bytes shorter** than the PC/MonoGame layout
+    (offset block at `0x22`); all 42 cues are *simple* cues but the sounds are a mix of simple
+    (inline wave index) and complex (clip → play-wave event; wave index at `clipOffset+9`).
+    The cue→wave map was validated by checking **all 44 waves are referenced exactly once**.
+  - **Codecs:** SFX/speech are **PCM** (16-bit signed **big-endian**, or 8-bit unsigned); the
+    8 music tracks are **xWMA** (entries 34–43). xWMA is decoded with **PyAV** (bundled
+    libavcodec `wmav2`) by **rebuilding the `RIFF/XWMA` container** FFmpeg expects — the XACT
+    mini-format `wBlockAlign` byte indexes the standard WMA bytes-per-sec / block-align tables;
+    **no `dpds` seek table is needed** for a straight decode-from-start.
+  - `build_audio.py` — the driver (`PYTHONIOENCODING=utf-8 python tools/audio/build_audio.py`).
+    Writes `wwwroot/Content/sfx/*.wav` (PCM_16; SFX from the banks + ElevenLabs `ttf_*` speech
+    from `tools/tts/out/announcer_final/*.mp3` via libsndfile MP3 read), `Content/vo/*.wav`
+    (Victor narration), and `Content/music/*.ogg` (Vorbis) + `Content/music/music.json` (loop
+    manifest). **Gotcha:** libsndfile's Vorbis encoder *aborts the whole process* on a single
+    multi-MB write — OGG must be written in chunks via `sf.SoundFile` (see `write_ogg`).
+  - **Music loop points come straight from XACT, not a guesser.** The `.xsb` play-wave events
+    set **loop count 255 (infinite) = loop the whole wave**, and the wave-bank `LoopRegion`s are
+    all `(0,0)` (no partial loops). So: the 6 single-wave tracks loop **whole** (`loopStart=0,
+    loopEnd=duration`); the two intro+loop cues (`stage2`=waves 34+35, `stage3`=36+37) are
+    concatenated with the leading intro wave played once (loop count 0) and `loopStart` = the
+    intro length (the body wave has loop count 255). *(An earlier pass used pymusiclooper to find
+    an internal seam — dropped: it discarded the post-loop tail and wasn't what the game encoded.)*
+- **Music = a WebAudio JS layer, NOT KNI.** KNI's `SoundEffect` looping replays the *whole*
+  buffer; music needs loop *points*. `wwwroot/index.html` defines `window.eaMusic`
+  (`play(cue)`/`stop()`/`setRate(rate)`): it loads `music.json`, fetches+decodes the OGG, and
+  loops an `AudioBufferSourceNode` with `loopStart`/`loopEnd` (seconds). **Autoplay unlock:**
+  resumes the `AudioContext` on the first `keydown`/`pointerdown`, queuing any track requested
+  before unlock. `Compat/MusicInterop.cs` bridges C#→JS via `IJSInProcessRuntime.InvokeVoid`
+  (`MusicInterop.Init(JsRuntime)` is called from `Pages/Index.razor.cs`). `SetMusicRate` maps
+  the game's XACT pitch value (`~50` = normal) to `playbackRate = rate/50` (the BrainBoss sweep).
+- **SFX + speech = native KNI `SoundEffect`/`SoundEffectInstance`.** `SoundManager` was rewritten:
+  per-cue **instance cap + steal-oldest**, random **pitch/volume variation** (skipped for speech
+  and loops), **loop flags** (`lazershot`/`lazercharge`/`bees`), and **Default/Speech gain
+  groups** (the game has only a `PlayMusic` on/off toggle, no volume sliders). The XACT
+  `AudioEngine`/`WaveBank`/`SoundBank`/`Cue` are gone. **`Play(name)` now returns a
+  `SoundEffectInstance`** (was `Cue`) — the 4 held-handle call sites were retyped: `Lazer`,
+  `LazerGenerator`, `Level2`, `StarMine`. `WebContentManager` now loads `SoundEffect` (`.wav`)
+  via `SoundEffect.FromStream`.
+- **Speech re-cast (ElevenLabs).** `PlayText` plays the `ttf_*` cues (Brian announcer). Added
+  `Texts.MissionFailed`/`Texts.GameOver` (+ `PlayText` cases); the **defeat screen now barks**
+  "Mission Failed" — `AnimatedMessage.UpdateDefeat` plays its `speechText` (it didn't before),
+  and `GameScene` passes `Texts.MissionFailed` (was `Texts.Nothing`). **Narrator (new layer):**
+  `SoundManager.PlayNarration`/`StopNarration` play the Victor `victor_level{1,2,3_hard,
+  3_normal}` clips over the `CreditsScene` story crawls (`SetupLevel1/2/3`; stopped in
+  `Terminate`).
+- **Dev commentary stays silent (decided).** The live-"MS Sam" path (`DevCommentEvent`,
+  arbitrary `PlayText(speechText)`) was `#if WINDOWS` and is gone; it was an **abandoned,
+  unhooked feature**, so `TTSIsSilent()` stays `true` and that code remains a no-op. (Fossils:
+  `GetTTSName()`→"Karel", the dead `currentspeechpriority`.)
+- **Toolchain used (already installed):** PyAV (xWMA decode), `soundfile`/libsndfile (MP3 read,
+  OGG/WAV write), numpy. **No ffmpeg / vgmstream needed** (pymusiclooper is no longer used —
+  loops come from the XACT data).
+- **Verification (in real Chrome, per CLAUDE.md):** the menu's `PlayMusic(Sjaak)` fired the full
+  C#→JS chain (`eaMusic.play("sjaak")` with the right loop points), attract-mode gameplay fired
+  KNI SFX (`AudioBufferSourceNode` starts at the exact extracted durations — `fire` 0.23s,
+  `expl1` 1.07s, `lazercharge` 2.25s loop), **0 console exceptions**. *Driving gotcha (worse than
+  Stage 5's):* `computer key` presses release in **~0.7 ms**, far under the 33 ms input poll, so
+  the `Pressed`-edge at "Press Start" never latches — pass it with a **forced-`keyCode` synthetic
+  `keydown` held across frames** (`Object.defineProperty(e,'keyCode',{get:()=>13})`, dispatch
+  `keydown`, wait, then `keyup`). The cache is also sticky: hard-reload / cache-bust the URL or
+  the browser serves a stale `index.html` without `eaMusic`.
+
 ---
 
 ## Stage 7 — Saves & awardments persistence
@@ -545,6 +625,56 @@ Persistence layer = browser localStorage (or IndexedDB) via Blazor JS interop.
    reflects saved state. (This is the "fake achievements" experience for the web.)
 
 **Done when:** change a setting / unlock something, reload, and it's remembered.
+
+### Stage 7 — DONE. What was changed (read before Stage 8/9)
+- **Approach: a MEMFS ↔ localStorage *mirror* at the `StorageStub` layer — the game's `Savable`
+  subclasses are untouched.** The game still does the XNA 3.x dance (`OpenContainer` → `File`/
+  `StreamWriter`/`BinaryWriter` against `container.Path` → `Dispose`) against the WASM in-memory FS.
+  We just make that FS persistent: **hydrate** localStorage → MEMFS once before the first read, and
+  **flush** changed files MEMFS → localStorage on every container `Dispose`. No edits to `Settings`/
+  `Unlockables`/`Achievements`/`ScreenshotSaver` — they keep writing XML/`.dat` exactly as before.
+- **The three pieces (mirrors the Stage-6 `eaMusic`/`MusicInterop` split):**
+  - `wwwroot/index.html` **`window.eaSave`** — synchronous localStorage `get`/`set`/`remove`. Keys
+    are `eaweb_save:<relpath>` (e.g. `eaweb_save:EvilAliens/Settings.xml`); values are **base64 of
+    the raw file bytes** (handles the binary `.dat` screenshots too). `load()` returns a JSON
+    `{relpath: b64}` of every entry; `set()` returns **false on `QuotaExceededError`** instead of
+    throwing.
+  - `Compat/SaveInterop.cs` — the C# bridge (like `MusicInterop`): `Init(IJSRuntime)` grabs the
+    `IJSInProcessRuntime`; `Load()` parses `eaSave.load`'s JSON → `name→byte[]`; `Set`/`Remove`
+    proxy through. Synchronous interop (`Invoke<string>`/`Invoke<bool>`), so it fits the game's
+    synchronous save path with no async.
+  - `Compat/StorageStub.cs` **`PersistentSave`** — `EnsureHydrated()` (once, called at the top of
+    `StorageDevice.OpenContainer`, i.e. right before `StartScreen`'s `Settings/Unlockables/
+    Achievements.Load()` read) writes every persisted entry into MEMFS. `Sync()` (called from
+    `StorageContainer.Dispose`) walks the `/eaweb_save/**` tree and persists it. The save pattern
+    is *open → write → Dispose*, so Dispose is the natural flush point.
+  - `Pages/Index.razor.cs` calls `SaveInterop.Init(JsRuntime)` next to `MusicInterop.Init` (before
+    the first tick, so saves persist from the very first frame).
+- **What persists:** `Settings.xml`, `Unlockables.xml`, `Achievements.xml` (awardment unlocks +
+  per-level hi-scores/difficulty) and the `<Level>.dat` level-select **screenshots** (binary).
+- **Efficiency + correctness details that matter:**
+  - `Sync` keeps an in-memory **`_mirror` (relpath → last-persisted bytes)** and **only writes
+    files whose bytes changed** (byte-compare). `Dispose` fires on *read-only* opens too (every
+    `LoadScreenshot`), so without this each menu-load would needlessly re-persist everything.
+  - It also **prunes** localStorage keys for files the game deleted from MEMFS (e.g. *Reset All
+    Progress* → `ScreenshotSaver.DeleteScreenshots`), keeping the two in sync.
+  - Files are persisted **smallest-first**, so if a 300×225 screenshot (~360 KB base64) ever blows
+    the ~5 MB localStorage quota, the tiny XML (settings/unlockables/awardments) is already saved.
+    A failed `set` leaves the file *dirty* in `_mirror` so the next `Sync` retries it.
+  - Hydrate / Sync are both wrapped in try/catch — a persistence hiccup (quota, private-mode
+    storage, corrupt entry) must never break the game loop; corrupt base64 entries are skipped per
+    file, and the game's own `loadData` try/catch still falls back to defaults.
+- **Verification (real Chrome, per CLAUDE.md):** booted `?menu&noattract`, Options → toggled
+  **Music: Enabled → Disabled** → `localStorage` gained `eaweb_save:EvilAliens/Settings.xml`
+  (decoded `<PlayMusic>false</PlayMusic>`) + `Achievements.xml`; **reloaded** → Options read back
+  **Music: Disabled** (hydrate works); toggled back to Enabled and confirmed the re-save. **0 game
+  console errors.** (This stage's verification leaned on the merged-in **`eaPress` / `?menu`** debug
+  helpers — synthetic `KeyboardEvent`s still throw the `System.Int32` interop error; use `eaPress`.)
+- **Not done here (by design):** awardment-unlock *gameplay* triggers already call
+  `Achievements/Unlockables.SaveThreaded()`, so they now persist for free — no new UI work was
+  needed for `AwardmentBlade`/`SubMenuAwardments` to reflect saved state. IndexedDB was **not**
+  needed: the save set is small and the synchronous `localStorage` path fits the game's synchronous
+  save model cleanly (IndexedDB's async API would fight it).
 
 ---
 
@@ -690,6 +820,130 @@ is upscaled into it.
 shares gamma, bloom, and the sprite effects (consistent brightness/blooming across both), the
 separate hi-res pass is gone, and the result still letterboxes correctly to any window size with no
 `PreferredBackBuffer` regression.
+
+---
+
+## Stage 11 — Online co-op multiplayer
+
+**Goal:** two-to-four players on different machines play the same game together over the
+internet (shared-screen co-op), joining a match via a shareable link.
+
+**Why this is realistic here (the architecture is already on our side):** this was an Xbox
+*couch co-op* game, and the N-player structure survived the decompile intact. We are NOT
+adding multiplayer to a single-player game -- we are making existing **local** co-op work over
+a wire. Four facts from the code make it tractable:
+- **Already 4-player.** `InputHandler` tracks 4 independent pad slots (`padkeyspressed[4][]`,
+  `PlayerIndex` 0-3) plus a keyboard player (`Game/EvilAliens/InputHandler.cs:57`); the sim is
+  written around a variable player count -- `oracle.Players`, `oracle.GetShips()`, per-player
+  `ControlDevice`, ships spawning at `600/(Players+1)` slots (`PlayerShip.cs:1040`).
+- **Input is a clean injection seam.** Every ship reads its input by controller index through
+  `IInputHandlerService` -- `input.LeftStick(i)`, `input.PadDown(key,i)`, `input.Down(MyKeys...)`
+  (`PlayerShip.cs:388-460`). A remote player is just a **virtual gamepad**: wrap/replace
+  `InputHandler` so pad slots 2-4 (or the `Generic` device) read network packets instead of
+  `GamePad.GetState()`. Gameplay code never needs to know the input came from the network.
+- **Randomness is centralized.** One global RNG -- `RandomHelper._random`
+  (`Game/EvilAliens/RandomHelper.cs:8`) -- not `new Random()` scattered everywhere (the only
+  other one, `SplashScene.rng`, is cosmetic and pre-gameplay). That makes deterministic netcode
+  *auditable* instead of hopeless.
+- **Shared-screen co-op = the friendly case.** Everyone plays in one 800x600 space against the
+  aliens; there's no competitive fairness to protect, so latency only ever makes *your own*
+  ship feel slightly heavy. No client-side prediction of *other* players is required for
+  correctness.
+
+**The one real tax (decide first):** Blazor WASM cannot open raw UDP, and the whole port's goal
+is "output = a static site." Online play needs **a** server no matter what -- at minimum a tiny
+signaling/relay process. "Static site on a CDN" becomes "static site + one always-on service."
+That infrastructure, not the game code, is the genuinely new cost. **Keep single-player working
+with zero server** (multiplayer opt-in) so the Stage-8 CDN build still stands alone.
+
+### Decision 1 -- netcode model
+- **Lockstep / input-sync** (send only inputs each tick; every client runs the identical sim):
+  maps almost perfectly onto the input seam above -- architecturally we're most of the way there.
+  Risk = **determinism**. It's `float`/`Vector2` physics with trig, but every client runs the
+  *same wasm binary*, so cross-machine float divergence is far less scary than cross-platform;
+  the single RNG makes seeding tractable. Hard requirements: a **fixed timestep** (impossible on
+  a variable `dt`) and deterministic-or-disabled AI bots.
+- **Host-authoritative / state-sync** (host runs the real sim; clients send inputs and render
+  snapshots): sidesteps the determinism rabbit hole entirely -- which matters for *decompiled*
+  code we only partly understand. Cost = serializing hundreds of entities (bullets, asteroids,
+  explosions) per tick; doable for a 2D game with delta compression, but more new code, and it
+  needs client-side prediction so the local ship feels responsive.
+
+**Recommendation:** prefer **lockstep** *if* the determinism spike (Step 1) passes, because the
+input architecture is so clean; fall back to host-authoritative state-sync if determinism proves
+flaky. Either way it's **co-op only** (all-vs-aliens), shared camera.
+
+### Decision 2 -- transport
+- **WebSocket relay** -- TCP, reliable-ordered, trivial to host (one small process relays packets
+  between players in a room). Head-of-line blocking adds latency under packet loss, but co-op is
+  forgiving. **Least infrastructure -- recommended for v1.**
+- **WebRTC DataChannel** -- UDP-like (unreliable/unordered available), lowest latency. Needs a
+  signaling server to introduce peers *and* a STUN/TURN server for NAT traversal (a TURN relay
+  for the ~10-20% who can't connect peer-to-peer). Move here if input latency feels bad.
+
+### Determinism audit (the gate for lockstep -- spike it before committing)
+1. **Fixed timestep?** Confirm `Game1` runs `IsFixedTimeStep=true` with a fixed
+   `TargetElapsedTime`, and that gameplay advances on a fixed `dt`, not wall-clock
+   `gameTime.ElapsedGameTime`. The JS rAF loop (`wwwroot/index.html` -> `TickDotNet`) and the
+   Stage-4 `GameTime` scaling in `Game1.Update` both need checking; if movement scales by real
+   elapsed time, a fixed-step conversion comes first. *(Not yet verified -- this is the first
+   thing to check.)*
+2. **Seed + step one RNG.** Seed `RandomHelper._random` from a shared match seed; `.Next()`
+   consumption order is then identical iff the sim is identical (the usual lockstep
+   circularity -- one RNG source makes it provable).
+3. **AI bots.** `ControlDevice.AI` (attract-mode `Demo1/2/3` and AI-filled co-op slots,
+   `PlayerShip.DoAIMove/DoAIFire`) must be deterministic or disabled in networked matches.
+4. **No per-client nondeterminism in the sim:** wall-clock reads, `Date.now()`/`Math.random()`
+   (banned in this project anyway), unordered-collection iteration, frame-rate-dependent timers.
+
+### Steps
+1. **Spike (decides the model).** Confirm the fixed timestep; add a shared-seed hook to
+   `RandomHelper`; run two browser tabs feeding the *same scripted input stream* and diff the
+   resulting game state after N frames (positions/score/RNG counter). Match -> lockstep is open;
+   diverge -> go host-authoritative.
+2. **Virtual-gamepad seam.** Add an `INetworkInputSource`; make `InputHandler` read the networked
+   slots' `PadDown/PadPressed/LeftStick/RightStick` from it, leaving the local player on real
+   hardware. This is the small, central game-side change everything else hangs off.
+3. **Lobby + transport.** Stand up the WebSocket room server; add Blazor JS-interop for
+   send/receive; build a "host / join by link" lobby. Assign each player a `ControlDevice` slot
+   and gate match start on everyone ready.
+4. **Sync layer (per chosen model).**
+   - *Lockstep:* exchange per-tick input frames with a small **input-delay** buffer (2-3 frames);
+     a client advances tick T only once all inputs for T arrive; add a periodic state checksum
+     and disconnect + report on a desync mismatch.
+   - *State-authoritative:* host serializes delta-compressed entity snapshots; clients
+     interpolate remote entities and predict + reconcile the local ship.
+5. **Drop / rejoin / pause.** Handle a mid-match disconnect (hand the ship to AI or despawn);
+   surface latency/desync to the UI.
+6. **Hosting.** Deploy the relay (small VPS / Fly.io / serverless WebSocket) and wire its URL
+   into the static build's config. Update Stage 8's CI + docs to note the external dependency.
+
+### Gotchas
+- **Static-site break:** Stage 8 ships a pure static site; this adds a runtime server. Keep
+  single-player fully working with **no** server so the CDN build still stands alone.
+- **No WASM threads:** the network client must be async on the single game thread (same
+  constraint that forced Stage 4 synchronous) -- poll the socket in the game loop, don't block.
+- **Inject above KNI, not via DOM:** the virtual gamepad feeds the *game's* `IInputHandlerService`,
+  NOT synthetic DOM `KeyboardEvent`s -- those throw in KNI's WASM keyboard interop (Stage 4/5
+  notes: `JSON value could not be converted to System.Int32`).
+- **Clock for timeouts only:** `Math.random()`/`Date.now()`/`new Date()` are banned in sim code;
+  any netcode timestamps (RTT, timeouts) live in the JS/interop layer, never in the
+  deterministic path.
+- **TURN cost (WebRTC only):** ~10-20% of players need a TURN relay; budget for it or accept that
+  some can't connect peer-to-peer.
+
+### Open questions
+- **Lockstep vs state-sync** -- resolved by the Step-1 spike, not up front.
+- **Player cap:** keep the original 4, or limit online to 2 for bandwidth/latency headroom?
+- **Matchmaking:** private "share a link" rooms only (cheap, no backend state), or a public game
+  list (needs a lobby service)?
+- **Mid-game join:** allow drop-in like the local game (`AddPlayer` on Start), or lock the roster
+  at match start (simpler for sync)?
+
+**Done when:** two players on different machines join one match via a link and play a level
+together with responsive controls; scores/lives/enemies stay in sync for the whole level; a
+disconnect is handled without crashing -- and the single-player static build still runs with no
+server.
 
 ---
 

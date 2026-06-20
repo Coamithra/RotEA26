@@ -239,6 +239,52 @@
             };
         })();
     </script>
+
+    <script>
+        // ----- eaSave: localStorage persistence for the save tree (Stage 7) ----
+        // The game writes settings / unlockables / awardments / level screenshots
+        // to the in-memory WASM filesystem (StorageStub.cs). This mirrors that tree
+        // to localStorage so it survives a reload; C# drives it via SaveInterop.
+        // Keys are "eaweb_save:<relpath>" (e.g. eaweb_save:EvilAliens/Settings.xml);
+        // values are base64 of the raw file bytes.
+        window.eaSave = (function ()
+        {
+            var PREFIX = "eaweb_save:";
+            return {
+                // Returns JSON { "<relpath>": "<base64>", ... } for every entry.
+                load: function ()
+                {
+                    var out = {};
+                    try
+                    {
+                        for (var i = 0; i < localStorage.length; i++)
+                        {
+                            var k = localStorage.key(i);
+                            if (k && k.indexOf(PREFIX) === 0)
+                                out[k.substring(PREFIX.length)] = localStorage.getItem(k);
+                        }
+                    }
+                    catch (e) { console.warn("eaSave.load failed", e); }
+                    return JSON.stringify(out);
+                },
+                // Returns false if it didn't stick (quota / disabled storage), so C#
+                // keeps the file dirty and retries on the next save.
+                set: function (name, b64)
+                {
+                    try { localStorage.setItem(PREFIX + name, b64); return true; }
+                    catch (e)
+                    {
+                        console.warn("eaSave: could not persist " + name + " (quota?)", e);
+                        return false;
+                    }
+                },
+                remove: function (name)
+                {
+                    try { localStorage.removeItem(PREFIX + name); } catch (e) { }
+                }
+            };
+        })();
+    </script>
 </body>
 
 </html>

@@ -58,19 +58,30 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   **Do NOT re-run them** — they rewrite `Game/` from the pristine source and would clobber any
   later hand edits. Edit `Game/` directly.
 - **Shims in `Compat/` fake the Xbox APIs.** GamerServices = no-ops (full game unlocked,
-  `SignedInGamers` empty so per-gamer loops do nothing); Storage = WASM in-memory FS (not yet
-  persistent). `ResolveBackBuffer` and the `SpriteBlendMode`→`BlendState` mapping are now
-  **real** (Stage 5); the `Effect`/`EffectPass` `Begin/End` no-op shims are dead (no callers).
-- **It runs (Stages 4–5 done).** `Game1` boots through splash → menu → playable/attract gameplay
-  with shaders (gamma, bloom, sprite effects) and 0 console exceptions. Remaining: audio
-  (Stage 6), persistent saves (Stage 7), hosting (8), polish/fullscreen (9). See `plan.md`
-  "Stage 4 — DONE" / "Stage 5 — DONE" for what changed and the stubs each later stage must un-stub.
+  `SignedInGamers` empty so per-gamer loops do nothing); Storage = WASM in-memory FS, now
+  **mirrored to browser localStorage** so saves persist across reloads (Stage 7 — `StorageStub`'s
+  `PersistentSave` + `Compat/SaveInterop.cs` + `eaSave` in `index.html`). `ResolveBackBuffer` and
+  the `SpriteBlendMode`→`BlendState` mapping are now **real** (Stage 5); the `Effect`/`EffectPass`
+  `Begin/End` no-op shims are dead (no callers).
+- **It runs (Stages 4–7 done).** `Game1` boots through splash → menu → playable/attract gameplay
+  with shaders (gamma, bloom, sprite effects), **audio** (music, SFX, speech) **and persistent
+  saves** (settings/unlockables/awardments/screenshots → localStorage) and 0 console exceptions.
+  Remaining: hosting (8), polish/fullscreen (9), unified hi-res render path (10). See `plan.md`
+  "Stage 4/5/6/7 — DONE" for what changed and the stubs each
+  later stage must un-stub.
 - **Shaders (Stage 5):** the lost `.fx` were rewritten in `tools/shaders/src/` and compiled
   offline to MGFX v10 GLSL `.mgfxo` by `tools/shaders/build_shaders.py` (KNI's MGCB, BlazorGL
   target — needs `nkast.Xna.Framework.Content.Pipeline.Builder.Windows 4.1.9001` restored in the
   nuget cache). `WebContentManager` loads them via `new Effect(gd,bytes)`. **Re-run the script
   after editing any `.fx`; don't hand-edit `.mgfxo`.** Effects apply via `SpriteBatch.Begin(effect)`
   (4.0 model), not `effect.Begin()`.
+- **Audio (Stage 6):** the lost XACT runtime is replaced, not ported. `tools/audio/` cracks the
+  big-endian Xbox banks in pure Python (`xact.py` parses `.xwb`/`.xsb`; PCM SFX + **xWMA music**
+  decoded via **PyAV**) and `build_audio.py` writes `wwwroot/Content/{sfx,vo}/*.wav`,
+  `music/*.ogg` + `music/music.json`. **Re-run `python tools/audio/build_audio.py` after changing
+  the banks or the ElevenLabs renders; don't hand-edit the outputs.** SFX/speech play on KNI
+  `SoundEffect`; **music** is a WebAudio layer (`index.html` `eaMusic`, via `Compat/MusicInterop.cs`)
+  for seamless loop points. `SoundManager.Play()` now returns a `SoundEffectInstance` (not `Cue`).
 - **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
   the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
   keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`
@@ -94,9 +105,9 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   back→Esc, fire→Mouse1). Rapid repeats of the SAME key collapse into one press — space them by a
   tick (one per automation step) to register distinct taps.
 - **Stubs that will read as "broken" until their stage (not bugs):**
-  `SoundManager` XACT is try/caught to null = silent (Stage 6); saves are in-memory (Stage 7);
   the controls-help screen shows the **Xbox joypad** (PC keyboard help was `#if WINDOWS`-stripped,
-  Stage 9).
+  Stage 9). *(Audio is no longer stubbed — Stage 6 done. Saves now persist to localStorage —
+  Stage 7 done.)*
 - **Resolution = a presenter, not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the 800×600 frame into an offscreen `sceneTarget` and blits it

@@ -128,6 +128,7 @@ internal class CreditsScene : Scene
 		bg = content.Load<Texture2D>(texturetoload);
 		color = Color.White;
 		nextlevel = Levels.Level2;
+		base.SoundManager.PlayNarration("victor_level1");
 	}
 
 	public void SetupLevel2()
@@ -154,6 +155,7 @@ internal class CreditsScene : Scene
 		bg = content.Load<Texture2D>(texturetoload);
 		color = Color.White;
 		nextlevel = Levels.Level3;
+		base.SoundManager.PlayNarration("victor_level2");
 	}
 
 	public void SetupLevel3()
@@ -184,6 +186,7 @@ internal class CreditsScene : Scene
 			lines.Add("The game is over. ");
 			lines.Add("The Earth is safe. ");
 			lines.Add("Well done.");
+			base.SoundManager.PlayNarration("victor_level3_hard");
 		}
 		else
 		{
@@ -214,6 +217,7 @@ internal class CreditsScene : Scene
 			lines.Add("");
 			lines.Add("");
 			SetupCredits();
+			base.SoundManager.PlayNarration("victor_level3_normal");
 		}
 		texturetoload = "GFX/Menu/planet";
 		bg = content.Load<Texture2D>(texturetoload);
@@ -390,6 +394,7 @@ internal class CreditsScene : Scene
 
 	private void Terminate()
 	{
+		base.SoundManager.StopNarration();
 		if (this.OnFinished != null)
 		{
 			this.OnFinished(this, nextlevel);

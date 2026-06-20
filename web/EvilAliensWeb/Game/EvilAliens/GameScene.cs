@@ -595,7 +595,7 @@ internal abstract class GameScene : Scene
 		if ((_timer.TotalSeconds > 4.0) & !defeatmessageshown)
 		{
 			defeatmessage = AnimatedMessage.NewAnimatedMessage(Collection, base.Game);
-			defeatmessage.Setup("Mission\nFailed", SoundManager.Texts.Nothing, AnimatedMessage.MessageType.defeat);
+			defeatmessage.Setup("Mission\nFailed", SoundManager.Texts.MissionFailed, AnimatedMessage.MessageType.defeat);
 			Collection.Add((GameComponent)(object)defeatmessage);
 			defeatmessage.OnFinished += defeatmessage_OnFinished;
 			defeatmessageshown = true;

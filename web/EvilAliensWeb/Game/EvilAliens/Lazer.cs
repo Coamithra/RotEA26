@@ -7,7 +7,7 @@ internal class Lazer : AlienDrawableGameComponent
 {
 	private Quad lazor;
 
-	private Cue soundeffect;
+	private SoundEffectInstance soundeffect;
 
 	private bool stopped;
 

@@ -114,6 +114,131 @@
             event.preventDefault();
         }, { passive: false });
     </script>
+
+    <script>
+        // ----- eaMusic: WebAudio background-music layer (Stage 6) -------------
+        // Music needs seamless loop POINTS (intro -> looping body, or a
+        // pymusiclooper seam), which KNI's whole-buffer SoundEffect looping can't
+        // do. Tracks + loop points live in Content/music/music.json; C# drives
+        // this via MusicInterop (eaMusic.play/stop/setRate). SFX stay on KNI.
+        window.eaMusic = (function ()
+        {
+            var ctx = null, master = null;
+            var manifest = null, manifestPromise = null;
+            var started = false;     // AudioContext unlocked by a user gesture?
+            var pending = null;      // track requested before unlock
+            var current = null;      // { cue, src, gain }
+            var token = 0;           // newer play() supersedes in-flight loads
+            var curRate = 1;
+
+            function ensureCtx()
+            {
+                if (ctx) return;
+                var AC = window.AudioContext || window.webkitAudioContext;
+                ctx = new AC();
+                master = ctx.createGain();
+                master.gain.value = 0.55;
+                master.connect(ctx.destination);
+            }
+
+            function loadManifest()
+            {
+                if (!manifestPromise)
+                    manifestPromise = fetch("Content/music/music.json")
+                        .then(function (r) { return r.json(); })
+                        .then(function (m) { manifest = m; return m; })
+                        .catch(function () { manifest = {}; return {}; });
+                return manifestPromise;
+            }
+
+            function fadeOut(entry)
+            {
+                if (!entry) return;
+                var t = ctx.currentTime;
+                entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
+                entry.gain.gain.linearRampToValueAtTime(0.0001, t + 0.4);
+                try { entry.src.stop(t + 0.45); } catch (e) { }
+            }
+
+            function startTrack(cue)
+            {
+                ensureCtx();
+                loadManifest().then(function (m)
+                {
+                    var info = m[cue];
+                    if (!info) return;
+                    if (current && current.cue === cue) return;   // already on it
+                    var myToken = ++token;
+                    fetch(encodeURI(info.file)).then(function (resp)
+                    {
+                        if (!resp.ok) throw 0;
+                        return resp.arrayBuffer();
+                    }).then(function (ab)
+                    {
+                        return ctx.decodeAudioData(ab);
+                    }).then(function (buf)
+                    {
+                        if (myToken !== token) return;            // superseded
+                        fadeOut(current); current = null;
+                        var src = ctx.createBufferSource();
+                        src.buffer = buf;
+                        src.loop = true;
+                        if (info.loopEnd > info.loopStart)
+                        {
+                            src.loopStart = info.loopStart;       // seconds
+                            src.loopEnd = info.loopEnd;
+                        }
+                        src.playbackRate.value = curRate;
+                        var g = ctx.createGain();
+                        g.gain.value = 0.6;
+                        src.connect(g).connect(master);
+                        src.start();
+                        current = { cue: cue, src: src, gain: g };
+                    }).catch(function () { /* music is non-fatal */ });
+                });
+            }
+
+            function kick()
+            {
+                if (started) return;
+                started = true;
+                ensureCtx();
+                ctx.resume().then(function ()
+                {
+                    if (pending) { var c = pending; pending = null; startTrack(c); }
+                });
+                window.removeEventListener("keydown", kick);
+                window.removeEventListener("pointerdown", kick);
+            }
+            window.addEventListener("keydown", kick);
+            window.addEventListener("pointerdown", kick);
+
+            return {
+                play: function (cue)
+                {
+                    curRate = 1;
+                    if (!started) { pending = cue; return; }
+                    startTrack(cue);
+                },
+                stop: function ()
+                {
+                    pending = null;
+                    curRate = 1;
+                    if (current) { fadeOut(current); current = null; }
+                },
+                setRate: function (rate)
+                {
+                    // XACT "Pitch" ~50 = normal -> AudioBufferSourceNode.playbackRate
+                    curRate = Math.max(0.25, rate / 50);
+                    if (current && ctx)
+                    {
+                        try { current.src.playbackRate.setTargetAtTime(curRate, ctx.currentTime, 0.05); }
+                        catch (e) { }
+                    }
+                }
+            };
+        })();
+    </script>
 </body>
 
 </html>

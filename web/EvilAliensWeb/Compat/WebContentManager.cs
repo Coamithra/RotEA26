@@ -23,6 +23,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -83,8 +84,10 @@ namespace EvilAliensWeb.Compat
                 asset = LoadCurve(key);
             else if (typeof(T) == typeof(Effect))
                 asset = LoadEffect(key);
+            else if (typeof(T) == typeof(SoundEffect))
+                asset = LoadSoundEffect(key);
             else
-                return base.Load<T>(assetName); // SoundEffect / Song / Video: later stages
+                return base.Load<T>(assetName); // Song / Video: later stages
 
             _cache[key] = asset;
             return (T)asset;
@@ -144,6 +147,19 @@ namespace EvilAliensWeb.Compat
                 code = ms.ToArray();
             }
             return new Effect(GraphicsDevice, code) { Name = key };
+        }
+
+        // Audio (Stage 6): the XACT banks were cracked offline to PCM WAV under
+        // Content/sfx (tools/audio/build_audio.py). KNI decodes WAV via
+        // SoundEffect.FromStream and plays it through its WebAudio backend.
+        // (Music does NOT come through here — it needs seamless loop points and
+        // is handled by the JS eaMusic layer; see MusicInterop.)
+        private SoundEffect LoadSoundEffect(string key)
+        {
+            using Stream s = TitleContainer.OpenStream(key + ".wav");
+            SoundEffect fx = SoundEffect.FromStream(s);
+            fx.Name = key;
+            return fx;
         }
 
         private Curve LoadCurve(string key)

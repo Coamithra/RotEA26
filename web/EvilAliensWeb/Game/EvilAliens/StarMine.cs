@@ -33,7 +33,7 @@ public class StarMine : KillableAlien
 
 	private Timer soundtimer = new Timer(300f, repeating: false);
 
-	private Cue sfx;
+	private SoundEffectInstance sfx;
 
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
 

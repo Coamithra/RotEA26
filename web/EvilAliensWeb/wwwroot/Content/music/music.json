@@ -1,0 +1,50 @@
+{
+  "stage1": {
+    "file": "Content/music/stage1.ogg",
+    "loopStart": 0.0,
+    "loopEnd": 138.0659,
+    "duration": 138.0659
+  },
+  "stage2": {
+    "file": "Content/music/stage2.ogg",
+    "loopStart": 13.7462,
+    "loopEnd": 116.6106,
+    "duration": 116.6106
+  },
+  "stage3": {
+    "file": "Content/music/stage3.ogg",
+    "loopStart": 36.6875,
+    "loopEnd": 146.7966,
+    "duration": 146.7966
+  },
+  "bach": {
+    "file": "Content/music/bach.ogg",
+    "loopStart": 0.0,
+    "loopEnd": 279.5683,
+    "duration": 279.5683
+  },
+  "classic": {
+    "file": "Content/music/classic.ogg",
+    "loopStart": 0.0,
+    "loopEnd": 109.7375,
+    "duration": 109.7375
+  },
+  "sjaak": {
+    "file": "Content/music/sjaak.ogg",
+    "loopStart": 0.0,
+    "loopEnd": 135.8367,
+    "duration": 135.8367
+  },
+  "kylikova": {
+    "file": "Content/music/kylikova.ogg",
+    "loopStart": 0.0,
+    "loopEnd": 266.8437,
+    "duration": 266.8437
+  },
+  "sjaakslow": {
+    "file": "Content/music/sjaakslow.ogg",
+    "loopStart": 0.0,
+    "loopEnd": 68.5453,
+    "duration": 68.5453
+  }
+}

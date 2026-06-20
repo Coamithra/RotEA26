@@ -14,7 +14,7 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	private LazerGeneratorData[] particles;
 
-	private Cue sfx;
+	private SoundEffectInstance sfx;
 
 	private float size = 1f;
 

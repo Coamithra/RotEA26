@@ -405,6 +405,13 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 		{
 		case MessageState.enter:
 		{
+			if (!soundplayed)
+			{
+				// Announce the defeat (Stage 6): the original passed Texts.Nothing
+				// here; the announcer line is a web re-cast (ElevenLabs "Brian").
+				sound.PlayText(speechText, 2);
+				soundplayed = true;
+			}
 			fadefactor = MathHelper.Lerp(0f, 0.5f, 1f - timer.Normalized);
 			byte b = (byte)(255f * MathHelper.Lerp(1f, 0f, timer.Normalized));
 			color = new Color((color).R, (color).G, (color).B, b);

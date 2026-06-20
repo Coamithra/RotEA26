@@ -25,6 +25,12 @@ tools/shaders/effects.mgcb
 # Keep .claude/launch.json (used by the preview tooling); ignore machine-local bits.
 .claude/settings.local.json
 .claude/*.local.json
+.claude/worktrees/
+
+# ---- Python bytecode / scratch (tools/audio, tools/xnb, ...) -----------------
+__pycache__/
+*.pyc
+tools/audio/_t2.ogg
 
 # ---- OS / editor cruft -------------------------------------------------------
 Thumbs.db

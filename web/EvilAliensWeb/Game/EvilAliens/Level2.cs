@@ -11,7 +11,7 @@ internal class Level2 : GameScene
 {
 	private const int InitialLives = 7;
 
-	private Cue bees;
+	private SoundEffectInstance bees;
 
 	private Floor floor;
 

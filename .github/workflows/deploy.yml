@@ -1,0 +1,63 @@
+name: Deploy to GitHub Pages
+
+# Builds the Blazor WebAssembly site (GitHub Pages can't build .NET itself) and
+# publishes wwwroot to Pages. Fires on every push to main; can also be run by hand.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a newer push supersede an in-flight deploy instead of queueing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # The WebGL/WASM backend needs the wasm-tools workload (Emscripten/mono browser-wasm).
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Publish (Release)
+        run: dotnet publish web/EvilAliensWeb -c Release -o release
+
+      # This is a PROJECT page (Coamithra.github.io/RotEA26/), so the app is served from
+      # /RotEA26/ — rewrite the base href the dev build keeps at "/". If this ever moves to
+      # a user/org page or a custom domain at the root, drop this step.
+      - name: Fix base href for project page
+        run: sed -i 's|<base href="/" />|<base href="/RotEA26/" />|' release/wwwroot/index.html
+
+      # _framework/ has a leading underscore; Jekyll would drop it. Disable Jekyll.
+      - name: Disable Jekyll
+        run: touch release/wwwroot/.nojekyll
+
+      # SPA fallback so deep links / refresh resolve to the app instead of a Pages 404.
+      - name: SPA 404 fallback
+        run: cp release/wwwroot/index.html release/wwwroot/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: release/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

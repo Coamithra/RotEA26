@@ -9,6 +9,12 @@
     <DefineConstants>$(DefineConstants);BLAZORGL</DefineConstants>
     <KniPlatform>BlazorGL</KniPlatform>
     <BlazorEnableTimeZoneSupport>false</BlazorEnableTimeZoneSupport>
+    <!-- Stage 8: IL trimming is ON by default for a Release Blazor-WASM publish, but the
+         game serialises Settings/Unlockables/Achievements with XmlSerializer (runtime
+         reflection) — trimming strips those members and white-screens the published build
+         even though Debug runs clean. Keep the published build at Debug parity here; the
+         download-size trim/AOT pass is Stage 9's job. -->
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
   <ItemGroup>

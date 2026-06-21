@@ -107,6 +107,15 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   Level 1 gameplay with the crisp hi-res Earth backdrop, both splash paths incl. the channel-flip,
   and a window resize) with 0 console exceptions. See the Stage-10 notes below.
 - [ ] Stage 11 — Online co-op multiplayer (networked couch co-op)
+- [ ] **Stage 12 — Custom in-game font ("Revenge" reskin).** STARTED — base font wired &
+  verified in real Chrome (0 console errors), 3 fixes left. The user hand-drew a full glyph set
+  (caps / lowercase / digits / punctuation in `wwwroot/Content/gfx/menu/revenge_font_*.png`);
+  `tools/font/build_revenge_font.py` bakes them into the **single** `GFX/Menu/menufont` SpriteFont
+  (atlas `.fnt.png` + binary metrics `.fnt`) that **every** text call site uses, merging the
+  original font's space + debug symbols and aliasing `´`→ the drawn apostrophe. **Remaining: (1)
+  low-res atlas (baked at the old 21 px cap — uprez it); (2) per-glyph vertical alignment + a stray
+  sliver of the neighbouring sheet row bleeding into some glyphs; (3) kerning.** See the Stage-12
+  notes below.
 
 ---
 
@@ -1167,6 +1176,109 @@ flaky. Either way it's **co-op only** (all-vs-aliens), shared camera.
 together with responsive controls; scores/lives/enemies stay in sync for the whole level; a
 disconnect is handled without crashing -- and the single-player static build still runs with no
 server.
+
+---
+
+## Stage 12 — Custom in-game font ("Revenge" reskin)
+
+**Goal:** replace the game's text font with the user's hand-drawn alphabet so all on-screen text
+matches the "Revenge of the Evil Aliens" title art. **Whole-game** (user's call): there is exactly
+ONE font in the game — `GFX/Menu/menufont` — and **all 33 text call sites load that same name**
+(`grep "Load<SpriteFont>" Game/`), so reskinning that one asset reskins everything (menus, score,
+HUD, credits, help, tutorials).
+
+**How fonts work here (the pipeline that already existed).** `Compat/WebContentManager.cs:113`
+`LoadFont` reads a KNI/XNA `SpriteFont` from two files: a glyph atlas `<name>.fnt.png` (white-on-
+transparent, tinted at draw time) and a little-endian binary `<name>.fnt` with
+`lineSpacing:int, spacing:float, hasDefault:int, defaultCp:int, n:int`, then `n×` each of:
+`char(int)`, `glyphBounds(x,y,w,h)`, `cropping(x,y,w,h)`, `kerning(Vector3 = A leftBearing,
+B glyphWidth, C rightBearing)`. Draw advance per glyph = `A + B + C` plus the global `spacing`
+between glyphs; the glyph is drawn at `pen + (cropping.X, cropping.Y)`. These were originally
+produced from the Xbox `.xnb` by `tools/xnb/unpack.py`; Stage 12 adds a second producer.
+
+**The source art (committed):** the user drew white-on-dark sheets on a 1642×656 canvas with a
+rounded border frame + a script header strip, glyphs laid out in rows:
+- `wwwroot/Content/gfx/menu/revenge_font_caps.png` — rows `A-J / K-T / U-Z / 0-9`
+- `wwwroot/Content/gfx/menu/revenge_punctuation.png` — rows `a-j / k-t / u-z / [. , ! ' : ( ) - ? " % &]`
+- (`revenge_font_lower.png`, `revenge_font.png` are earlier/alt specimens — `revenge_font_caps`
+  + `revenge_punctuation` are the canonical sources the builder reads.)
+
+**The builder (DONE):** `tools/font/build_revenge_font.py` (run from repo root,
+`python tools/font/build_revenge_font.py` = dry-run → writes `tools/font/_preview.png`; add
+`--commit` to write the live font; **it backs up `menufont.fnt`/`.fnt.png` → `*.orig` on first
+commit**). What it does:
+- Crops the 26 px frame; finds glyph rows as horizontal bands where >5 % of width is lit and
+  height ≥ 70 px (this cleanly drops the header — both headers are ≤ 63 px, every glyph row ≥ 76 px;
+  a fixed "drop band 0" was fragile because the punctuation sheet's header merges with row 0).
+  Segments glyphs per row by column gaps, keeps the leftmost N (drops the decorative corner ◆).
+- Extracts each glyph as white-on-transparent (alpha = remapped luminance, so the drawn dark
+  outline becomes the transparent edge and the spiky terminals survive).
+- **Scales to the original's metrics so layouts don't move:** caps body → 21 px cap height,
+  lowercase → 15 px x-height; reuses the original `lineSpacing 45`, `spacing 2.0`, **baseline 28 px**.
+  Per-glyph `cropping.Y = 28 − scaledAscentAboveBaseline`; advance = ink width (`A = C = 0`,
+  `B = width`), matching the original convention.
+- **Merges** the original `menufont` glyphs for every char NOT redrawn (space + the debug/edge
+  symbols `_ [ ] = $ < > ; + * / \ ~ …`) so no string can break, and **aliases `U+00B4` (´, the
+  game's acute-accent apostrophe used in ~270 lines) to the drawn `'`**. Output = 96 glyphs,
+  512×90 atlas — same coverage as the original.
+
+**Verified (real Chrome per CLAUDE.md):** `?menu&noattract` renders Start/Options/Tutorial/
+Challenges/Awardments/Exit + lowercase back/select all in the new face, on the correct baseline,
+0 console errors. **It is committed to the working tree** (next `git push` would deploy it via the
+Stage-8 CI) — to revert while iterating: `copy *.orig` back over `menufont.fnt`/`.fnt.png`.
+
+### The 3 fixes remaining (what "needs work" means)
+
+1. **Resolution — the atlas is too low-res for the artwork.** The glyphs were downscaled from
+   ~89 px caps to a 21 px cap atlas to match the original metric size, throwing away the detail the
+   user drew. But text is then *upscaled again* by the Stage-10 `RenderScale` present blit (the whole
+   800×600 design scene renders into a target up to 1440 px tall), so a 21 px atlas glyph gets
+   stretched ~2–2.5× → visibly soft. **Fix = supersample the atlas.** The tension: a plain
+   `SpriteFont.DrawString` couples atlas pixels to draw size 1:1, and we must NOT change the design-
+   space layout (cap stays 21 design px). Recommended approach: build the atlas + `glyphBounds` at
+   N× (e.g. cap 42–63 px), keep `cropping`/`kerning`/`lineSpacing` in **design units (/N)**, and bake
+   a compensating `1/N` into the **single** `SpriteBatchWrapper.DrawString` choke
+   (`Game/EvilAliens/SpriteBatchWrapper.cs` ~line 428 area — confirm every `DrawString` flows through
+   the wrapper and how the caller's own scale composes). Net: same layout, N× texel density, so the
+   `RenderScale` upscale samples a crisp atlas. Pick N from the 1440 px cap vs. 600 design height
+   (~2.4×) → N = 3 is safe. Verify the kept original glyphs (space/punct) still align (they'd also
+   need the N× treatment or to be re-rendered at N×).
+
+2. **Vertical alignment + a sliver of the neighbouring row.** Two bugs in the extractor:
+   (a) *Inconsistent baselines* — per-row baseline uses a dense-band median + a linear extrapolation
+   for the punctuation row, which is approximate, so some glyphs (esp. lowercase / punctuation) sit a
+   px or two high/low. Fix: compute each row's true baseline from flat-bottomed reference glyphs
+   (caps bottoms; lowercase bottoms of `a c e m n o r s u v w x z`, excluding round-overshoot and
+   descenders), not a whole-row density median; place every glyph against that.
+   (b) *Stray line under some glyphs* — the per-glyph crop is taking the full band height, so a thin
+   bit of the adjacent sheet row (an ascender/descender poking into this band, or the threshold
+   catching the next row) rides along. Fix: tighten each glyph's vertical bbox to its **own connected
+   component** (flood/label per glyph, or trim to the largest contiguous ink run with a gap break),
+   not the shared band `[y0:y1]`. Re-check `to_white_alpha`'s alpha floor (40) and the row-band
+   boundaries so no neighbour ink is included.
+
+3. **Kerning.** Currently advance = ink width with zero side bearings + a flat global `spacing 2.0`,
+   so the heavy italic runs tight/uneven (the slant makes some pairs collide and others gap). Fix:
+   add per-glyph left/right side bearings (account for the italic overhang — e.g. negative-ish on the
+   sheared sides), tune `spacing`, and ideally a small pair-kerning table for the worst pairs. Easy to
+   iterate via `_preview.png` before `--commit`. Watch overflow: this face is **wider** than the
+   original, so widening spacing further risks clipping fixed-width menu boxes — verify text-heavy
+   screens (credits, awardment descriptions, instructions) don't overflow after retuning.
+
+**Gotchas / pickup notes:**
+- Re-run the builder after editing any sheet; **don't hand-edit `menufont.fnt`/`.fnt.png`**.
+- It's the SAME `menufont` the score/HUD uses — test numbers + punctuation in-game
+  (`?level=Level1`), not just the menu.
+- Content paths are case-sensitive on the live host (capital `Content/`); these assets already live
+  under `gfx/menu/` lowercase, fine.
+- `defaultCp`/`hasDefault` is left 0 (no default char) as in the original — the merge guarantees
+  every used codepoint exists, but if a future string uses a symbol that's neither drawn nor in the
+  original 96, `SpriteFont` will throw; add a default char if that ever bites.
+
+**Done when:** the in-game text is crisp at the upscaled present resolution, every glyph sits on a
+consistent baseline with no stray neighbour-row pixels, spacing reads evenly across caps/lowercase/
+digits/punctuation, and no text-heavy screen overflows — verified in real Chrome on the menu, the
+HUD, and a credits/instructions screen.
 
 ---
 

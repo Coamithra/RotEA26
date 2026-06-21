@@ -34,6 +34,13 @@ __pycache__/
 *.pyc
 tools/audio/_t2.ogg
 
+# ---- Stage-12 custom-font build (tools/font/build_revenge_font.py) ------------
+# The script + source sheets + the built menufont ship; the preview render is a
+# regenerated scratch artifact, and *.orig are local pre-edit backups (the
+# original font is already recoverable from git history).
+tools/font/_preview.png
+*.orig
+
 # ---- OS / editor cruft -------------------------------------------------------
 Thumbs.db
 desktop.ini

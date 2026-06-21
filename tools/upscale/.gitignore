@@ -1,0 +1,9 @@
+# Heavy / regenerable / scratch — keep scripts + docs + source gen images, drop the rest.
+# Real-ESRGAN weights (~82MB, re-downloadable):
+models/
+# preview GIFs, diagnostics, HD repacks (~30MB scratch):
+out/
+# intermediate per-frame export for manual tweaking:
+player_frames/
+# scratch reference tiles / captures:
+_*.png

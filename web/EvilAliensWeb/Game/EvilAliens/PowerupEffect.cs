@@ -86,7 +86,9 @@ internal class PowerupEffect : AlienDrawableGameComponent
 			{
 				float num = 4f * powerupEffectData.normalizedLifetime * (1f - powerupEffectData.normalizedLifetime);
 				Color val = new Color(new Vector4(1f, 1f, 1f, num));
-				spriteBatch.Draw(texture, new Rectangle(0, 0, 48, 48), base.Position + powerupEffectData.position, powerupEffectData.rotation, powerupEffectData.scale, center: true, val);
+				int fw = (texture.Width - (columns - 1) * separatingspace) / columns;
+				int fh = (texture.Height - (rows - 1) * separatingspace) / rows;
+				spriteBatch.Draw(texture, new Rectangle(0, 0, fw, fh), base.Position + powerupEffectData.position, powerupEffectData.rotation, powerupEffectData.scale / textureScale, center: true, val);
 			}
 		}
 	}

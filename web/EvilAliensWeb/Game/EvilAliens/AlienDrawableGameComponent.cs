@@ -33,6 +33,30 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public float scale = 1f;
 
+	// Supersample decoupling. An upscaled sheet has more texels per frame, but the engine
+	// sizes a sprite as frameTexels * scale, so a bigger frame would render bigger. textureScale
+	// = actualFrameWidth / designFrameWidth; dividing the draw scale (and collision size) by it
+	// keeps on-screen size/position/collision IDENTICAL while the extra texels just add crispness.
+	// Sheets opt in via the registry below (name -> original/design frame width); others stay 1.
+	public float textureScale = 1f;
+
+	private static readonly Dictionary<string, int> DesignFrameWidth = new Dictionary<string, int>
+	{
+		{ "GFX/Sprites/ufosheet", 48 },
+		{ "GFX/Sprites/playersheet", 48 }
+	};
+
+	// effective on-screen draw scale once the supersample factor is removed
+	protected float DrawScale => scale / textureScale;
+
+	// factor for a registered sheet given its actual per-frame texel width (1 if not registered);
+	// used by the few sites that draw these textures directly instead of through this component
+	public static float SuperSampleFactor(string textureName, int actualFrameWidth)
+	{
+		return DesignFrameWidth.TryGetValue(textureName, out int dfw) && dfw > 0
+			? (float)actualFrameWidth / dfw : 1f;
+	}
+
 	public int rows;
 
 	public int columns;
@@ -280,8 +304,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		float num2 = texture.Height;
 		num2 -= (float)((rows - 1) * separatingspace);
 		num2 /= (float)rows;
-		collisionBox.TopLeft = new Vector2((0f - num * scale) / 2f, (0f - num2 * scale) / 2f) * 0.6f;
-		collisionBox.BottomRight = new Vector2(num * scale / 2f, num2 * scale / 2f) * 0.6f;
+		collisionBox.TopLeft = new Vector2((0f - num * DrawScale) / 2f, (0f - num2 * DrawScale) / 2f) * 0.6f;
+		collisionBox.BottomRight = new Vector2(num * DrawScale / 2f, num2 * DrawScale / 2f) * 0.6f;
 		return collisionBox;
 	}
 
@@ -295,6 +319,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		columns = animationData.columns;
 		fps = animationData.fps;
 		separatingspace = animationData.separatingspace;
+		textureScale = SuperSampleFactor(texturename, texture.Width / columns);
 		curframe = 0f;
 		color = Color.White;
 	}
@@ -402,7 +427,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 		else
 		{
-			spriteBatch.Draw(texture, _position, rotation, scale, center: true, color, spriteEffects);
+			spriteBatch.Draw(texture, _position, rotation, DrawScale, center: true, color, spriteEffects);
 		}
 		base.Draw(gameTime);
 	}
@@ -423,7 +448,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			spriteBatch.fadeEffect.Enable();
 			spriteBatch.fadeEffect.Value = (color).ToVector4();
 		}
-		spriteBatch.Draw(texture, frameRectangle, Position, rotation, scale, center: true, color, spriteEffects);
+		spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, color, spriteEffects);
 		if (flag)
 		{
 			spriteBatch.fadeEffect.Disable();
@@ -489,8 +514,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			(val2) = new Color(new Vector4(1f, 1f, 1f, 1f - num2));
 			Color val3 = default(Color);
 			(val3) = new Color(new Vector4(1f, 1f, 1f, num2));
-			spriteBatch.Draw(texture, frameRectangle, Position, rotation, scale, center: true, val2, spriteEffects);
-			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, scale, center: true, val3, spriteEffects);
+			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, val2, spriteEffects);
+			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, DrawScale, center: true, val3, spriteEffects);
 			break;
 		}
 		case 0:
@@ -500,7 +525,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			spriteBatch.interpolateEffect.Delta = num2;
 			spriteBatch.fadeEffect.Enable();
 			spriteBatch.fadeEffect.Value = (color).ToVector4();
-			spriteBatch.Draw(texture, frameRectangle, Position, rotation, scale, center: true, color, spriteEffects);
+			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, color, spriteEffects);
 			spriteBatch.interpolateEffect.Disable();
 			spriteBatch.fadeEffect.Disable();
 			break;

@@ -478,7 +478,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 		for (int j = 0; j < lives; j++)
 		{
-			spriteBatch.Draw(playersheet, new Rectangle(0, 0, 48, 48), livePosition(j), 0f, 0.5f, center: true, new Color(new Vector4(1f, 1f, 1f, 0.5f)));
+			int fw = (playersheet.Width - 7) / 8;
+			int fh = (playersheet.Height - 3) / 4;
+			spriteBatch.Draw(playersheet, new Rectangle(0, 0, fw, fh), livePosition(j), 0f, 0.5f * 48f / (float)fw, center: true, new Color(new Vector4(1f, 1f, 1f, 0.5f)));
 		}
 		if (explosion.Active)
 		{

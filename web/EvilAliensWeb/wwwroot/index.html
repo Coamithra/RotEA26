@@ -140,6 +140,27 @@
             scheduleTick();
         };
 
+        // eaQuit: the main-menu "Exit" "boss key". A browser tab can't really quit, so
+        // we "close" the game (fade the canvas to black) and navigate to the fake
+        // corporate productivity suite in office/ — a separate, dependency-free decoy
+        // (see office/index.html). C# reaches this via Compat/ExitInterop.Quit().
+        // Resolved against document.baseURI so it works at "/" locally and "/RotEA26/"
+        // on GitHub Pages; the office's Start -> Shut Down navigates back to "../".
+        window.eaQuit = function ()
+        {
+            // Navigate to the explicit index.html (not the "office/" directory): the local
+            // dev server routes a bare directory request through the SPA fallback, while the
+            // explicit file is served statically on both dev and GitHub Pages.
+            var url;
+            try { url = new URL("office/index.html", document.baseURI).href; }
+            catch (e) { url = "office/index.html"; }
+            var ov = document.createElement("div");
+            ov.style.cssText = "position:fixed;inset:0;background:#000;opacity:0;z-index:99999;transition:opacity .5s ease";
+            document.body.appendChild(ov);
+            requestAnimationFrame(function () { ov.style.opacity = "1"; });
+            setTimeout(function () { window.location.href = url; }, 560);
+        };
+
         // Prevent arrow keys / spacebar / wheel from scrolling the page (esp. in an iframe)
         window.addEventListener("keydown", function(event)
         {

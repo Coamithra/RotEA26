@@ -969,7 +969,12 @@ internal class MenuScene : Scene
 
 	private void mainMenu_ExitSelected(MenuSub1 sender)
 	{
+		// Web-port "boss key": there's no real Exit in a browser tab, so "close" the
+		// game and hand off to the fake productivity suite in wwwroot/office/ (see
+		// Compat/ExitInterop + wwwroot/index.html eaQuit). WantExit() still blacks out
+		// the canvas underneath the JS fade in case navigation is somehow blocked.
 		((Game1)(object)base.Game).WantExit();
+		EvilAliensWeb.Compat.ExitInterop.Quit();
 	}
 
 	public override void Initialize()

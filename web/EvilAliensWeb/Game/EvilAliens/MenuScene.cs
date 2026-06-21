@@ -61,6 +61,52 @@ internal class MenuScene : Scene
 
 	private Texture2D blankTexture;
 
+	private Texture2D hudring;
+
+	private Texture2D vignette;
+
+	// HUD ring "autofocus hunt": instead of a steady spin, the reticle darts to a new
+	// angle, holds, twitches, and occasionally reverses or sweeps — like a camera lens
+	// hunting for focus. State advanced in UpdateRing(), consumed in DrawHudDecor().
+	private float ringAngle;
+
+	private float ringFrom;
+
+	private float ringTo;
+
+	private double ringMoveStart;
+
+	private double ringMoveDur = 0.0001;
+
+	private double ringHoldUntil;
+
+	private bool ringHolding = true;
+
+	private float ringDirAccumDeg;
+
+	private float ringDrift;
+
+	private float ringDriftVel;
+
+	// HUD ring centre "recalibration": the ring re-centres on whichever menu is active
+	// (main vs. a submenu). OnComponentAdded sets ringTargetMenu when a menu is shown;
+	// the centre then eases (with overshoot) from where it was to the new menu's centre.
+	private MenuSub1 ringTargetMenu;
+
+	private Vector2 ringCentre = new Vector2(400f, 403f);
+
+	private Vector2 ringCentreFrom;
+
+	private Vector2 ringCentreTo;
+
+	private double ringCentreTweenStart;
+
+	private double ringCentreTweenDur = 0.5;
+
+	private bool ringCentreTweening;
+
+	private bool ringCentreInit;
+
 	private ContentManager content;
 
 	private List<Star> stars = new List<Star>();
@@ -232,8 +278,10 @@ internal class MenuScene : Scene
 		optionsMenu.AddEntry("Controller Settings");
 		optionsMenu.AddEntryEvent(optionsMenu_PlayerOptionsSelected);
 		playerSettingsMenu.OnExit += playerSettingsMenu_OnExit;
-		optionsMenu.AddEntry("Trailers");
-		optionsMenu.AddEntryEvent(optionsMenu_OnTrailersSelected);
+		// "Trailers" is removed on the web build: the trailer videos (VFX/*) were never
+		// ported (Stage 6 did audio, not video), so selecting one throws "content file not
+		// found" and wedges the loop. optionsMenu_OnTrailersSelected + trailerMenu/trailerScene
+		// are now unused but kept in place for if/when video is ported.
 		optionsMenu.AddEntry("Back");
 		optionsMenu.AddEntryEvent(optionsMenu_OnExit);
 		optionsMenu.OnExit += optionsMenu_OnExit;
@@ -946,6 +994,21 @@ internal class MenuScene : Scene
 			CreateStar(moveit: true);
 		}
 		base.SoundManager.PlayMusic(Songs.Sjaak);
+		// Debug (?unlockall): reveal every gated menu option (Cheats, all challenges,
+		// Level 2/3, Challenges/Awardments) and mark all awardments unlocked, so the whole
+		// menu can be walked through. Session-only (not saved) — a normal reload reverts it.
+		if (DebugFlags.UnlockAll)
+		{
+			foreach (Unlockables.Items item in Game1.GetEnumValues<Unlockables.Items>())
+			{
+				Unlockables.GetInstance().Unlock(item);
+			}
+			int awardCount = Game1.GetEnumValues<Awardment>().Count;
+			for (int i = 0; i < awardCount; i++)
+			{
+				Achievements.GetInstance().SetAwardmentIsUnlocked(i, true);
+			}
+		}
 		state = MenuState.Normal;
 		timer = TimeSpan.Zero;
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
@@ -977,6 +1040,8 @@ internal class MenuScene : Scene
 		base.LoadContent();
 		stargfx = content.Load<Texture2D>("GFX/Menu/star");
 		blankTexture = content.Load<Texture2D>("GFX/Menu/blank");
+		hudring = content.Load<Texture2D>("GFX/Menu/hudring");
+		vignette = content.Load<Texture2D>("GFX/Menu/vignette");
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
 		AButton = Content.Load<Texture2D>("GFX/Preview/small_face_a");
 		BButton = Content.Load<Texture2D>("GFX/Preview/small_face_b");
@@ -1042,6 +1107,8 @@ internal class MenuScene : Scene
 			{
 				base.SpriteBatch.Draw(backdrop, origin, 0f, currentBackdropSize, center: true);
 			}
+			base.SpriteBatch.Draw(vignette, new Rectangle(0, 0, 800, 600), Color.White);
+			DrawHudDecor();
 		}
 		bool flag2 = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane;
 		foreach (Star star in stars)
@@ -1075,6 +1142,161 @@ internal class MenuScene : Scene
 			}
 			fadeBackBufferToWhite(num);
 		}
+	}
+
+	// Advances the HUD ring's "autofocus hunt": it holds at an angle, then darts to a
+	// new one with a quick eased move, then holds again. Move size is mostly small
+	// twitches with the occasional medium adjust or big sweep, direction is random, and
+	// holds are usually brief with the odd longer "locked" pause — reads as a robotic
+	// lens hunting focus rather than a steady spin.
+	private void UpdateRing(GameTime gameTime)
+	{
+		double now = timer.TotalSeconds;
+		// Ambient background coast: a slow drift that inherits the LAST dart's direction
+		// and a sliver of its speed (set in the dart branch below), so the ring keeps
+		// gently rotating the way it last moved instead of a fixed constant spin.
+		ringDrift += ringDriftVel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+		Random rng = RandomHelper.Random;
+		if (ringHolding)
+		{
+			if (now < ringHoldUntil)
+				return;
+			double roll = rng.NextDouble();
+			float magDeg;
+			if (roll < 0.6)
+				magDeg = rng.Next(4, 18);     // small twitch
+			else if (roll < 0.9)
+				magDeg = rng.Next(20, 55);    // medium adjust
+			else
+				magDeg = rng.Next(70, 140);   // big sweep (one dart always < 180)
+			float sign = (rng.NextDouble() < 0.5) ? -1f : 1f;
+			// Never travel more than 180 degrees in one continuous direction: if this
+			// move would push the running same-direction total past 180, reverse instead
+			// (brief holds between same-way darts otherwise read as one big >180 sweep).
+			if (Math.Sign(sign) == Math.Sign(ringDirAccumDeg) && Math.Abs(ringDirAccumDeg) + magDeg > 180f)
+				sign = -sign;
+			if (Math.Sign(sign) == Math.Sign(ringDirAccumDeg))
+				ringDirAccumDeg += sign * magDeg;
+			else
+				ringDirAccumDeg = sign * magDeg;
+			ringFrom = ringAngle;
+			ringTo = ringAngle + sign * MathHelper.ToRadians(magDeg);
+			ringMoveDur = 0.30 + 0.006 * magDeg; // unhurried: ~0.35s small .. ~1.1s big
+			// Ambient coast inherits this dart's direction + ~5% of its angular speed, so
+			// the ring keeps drifting the way it last moved (a bit of angular momentum).
+			ringDriftVel = sign * (float)(MathHelper.ToRadians(magDeg) / ringMoveDur) * 0.05f;
+			ringMoveStart = now;
+			ringHolding = false;
+		}
+		else
+		{
+			double u = (now - ringMoveStart) / ringMoveDur;
+			if (u >= 1.0)
+			{
+				ringAngle = ringTo;
+				ringHolding = true;
+				ringHoldUntil = now + ((rng.NextDouble() < 0.3) ? (2.5 + rng.NextDouble() * 2.5) : (0.9 + rng.NextDouble() * 1.6));
+			}
+			else
+			{
+				float s = (float)u;
+				s = s * s * (3f - 2f * s); // smoothstep ease
+				ringAngle = MathHelper.Lerp(ringFrom, ringTo, s);
+			}
+		}
+	}
+
+	// Menu "manager" hook: the shared ComponentBin notifies every IComponentWatcher when
+	// a component is added, so when a menu (main or submenu) is shown we make it the HUD
+	// ring's target — the ring then eases over to re-centre on it (see UpdateRingCentre).
+	public override void OnComponentAdded(GameComponentCollectionEventArgs e)
+	{
+		base.OnComponentAdded(e);
+		if (e.GameComponent is MenuSub1 menu)
+			ringTargetMenu = menu;
+	}
+
+	// Eases the ring's centre toward the active menu's list centre. When the target
+	// changes (you enter/leave a submenu) it kicks off a quick "recalibrate" tween with
+	// overshoot (ease-out-back) — the lens darts past the new centre and settles back.
+	private void UpdateRingCentre(GameTime gameTime)
+	{
+		// The active menu becomes the ring's target the moment it's shown, but we hold the
+		// recalibrate until it has finished its zoom-in (IsEntering clears) so the ring
+		// reacts to the menu having appeared rather than sliding alongside it.
+		if (ringTargetMenu != null && !ringTargetMenu.IsEntering)
+		{
+			Vector2 target = ringTargetMenu.GetListCentre();
+			if (!ringCentreInit)
+			{
+				ringCentre = target;
+				ringCentreTo = target;
+				ringCentreInit = true;
+			}
+			else if ((target - ringCentreTo).LengthSquared() > 1f) // active menu changed -> recalibrate
+			{
+				ringCentreFrom = ringCentre;
+				ringCentreTo = target;
+				ringCentreTweenStart = timer.TotalSeconds;
+				ringCentreTweening = true;
+			}
+		}
+		if (ringCentreTweening)
+		{
+			double u = (timer.TotalSeconds - ringCentreTweenStart) / ringCentreTweenDur;
+			if (u >= 1.0)
+			{
+				ringCentre = ringCentreTo;
+				ringCentreTweening = false;
+			}
+			else
+			{
+				ringCentre = Vector2.Lerp(ringCentreFrom, ringCentreTo, EaseOutBack((float)u));
+			}
+		}
+		else if (ringCentreInit)
+		{
+			ringCentre = ringCentreTo;
+		}
+	}
+
+	// Ease-out-back: overshoots the target then settles (a "tween with overshoot").
+	private static float EaseOutBack(float t)
+	{
+		const float c1 = 1.9f;          // a touch more overshoot than the textbook 1.70158
+		const float c3 = c1 + 1f;
+		float u = t - 1f;
+		return 1f + c3 * u * u * u + c1 * u * u;
+	}
+
+	// Stage 13 menu reskin: a sci-fi HUD layer drawn into the scene target (so it
+	// sits BEHIND the menu's own composited render target) — a slowly-rotating
+	// targeting reticle centred behind the menu list, plus four corner brackets.
+	// Drawn in 800x600 design space, dim + slightly cool so the menu text reads on
+	// top and the whole thing only gently feeds the scene bloom.
+	private void DrawHudDecor()
+	{
+		// Reticle centre is eased toward the active menu by UpdateRingCentre (it re-centres
+		// with an overshoot when you enter/leave a submenu).
+		base.SpriteBatch.Draw(hudring, ringCentre, ringAngle + ringDrift, 580f / (float)hudring.Height, center: true, new Color(124, 186, 152, 175));
+		Color bc = new Color(132, 188, 152, 180);
+		int inset = 20, arm = 56, th = 3, R = 800, B = 600;
+		Bracket(inset, inset, arm, th, bc, 1, 1);
+		Bracket(R - inset, inset, arm, th, bc, -1, 1);
+		Bracket(inset, B - inset, arm, th, bc, 1, -1);
+		Bracket(R - inset, B - inset, arm, th, bc, -1, -1);
+	}
+
+	// One L-shaped corner bracket: (cx,cy) is the corner point; (dx,dy) point the
+	// two arms inward (e.g. +1,+1 = top-left). Built from the white `blank` sprite.
+	private void Bracket(int cx, int cy, int arm, int th, Color c, int dx, int dy)
+	{
+		int hx = (dx > 0) ? cx : cx - arm;
+		int hy = (dy > 0) ? cy : cy - th;
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(hx, hy, arm, th), c);
+		int vx = (dx > 0) ? cx : cx - th;
+		int vy = (dy > 0) ? cy : cy - arm;
+		base.SpriteBatch.Draw(blankTexture, new Rectangle(vx, vy, th, arm), c);
 	}
 
 	private void drawButtonTips()
@@ -1111,6 +1333,8 @@ internal class MenuScene : Scene
 			RemovePreviewOption();
 		}
 		timer += gameTime.ElapsedGameTime;
+		UpdateRing(gameTime);
+		UpdateRingCentre(gameTime);
 		HandleStars(gameTime);
 		float num = 16.666666f;
 		float num2 = Convert.ToSingle(Math.Pow(1.000100016593933, timer.TotalMilliseconds / (double)num));

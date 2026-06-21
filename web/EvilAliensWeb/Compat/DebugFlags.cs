@@ -17,6 +17,9 @@ namespace EvilAliensWeb.Compat
 	//   ?level=<Name>  boot straight into a level, bypassing the menu entirely
 	//                  (<Name> is a Levels enum value, case-insensitive: Level1, Level2,
 	//                   Level3, ClassicAliens, SpaceDodge, Braineroids, Tutorial, ...)
+	//   ?unlockall     reveal every gated menu option (Cheats, all challenges, Level 2/3,
+	//                  Challenges/Awardments) so the whole menu can be walked through;
+	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
 	public static class DebugFlags
@@ -32,6 +35,9 @@ namespace EvilAliensWeb.Compat
 
 		// If set, boot directly into this level (implies SkipSplash + AutoStart).
 		public static EvilAliens.Levels? Level { get; private set; }
+
+		// Unlock every gated menu option (session-only) so the full menu can be explored.
+		public static bool UnlockAll { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -75,6 +81,10 @@ namespace EvilAliensWeb.Compat
 				case "nodemo":
 					NoAttract = IsOn(val);
 					break;
+				case "unlockall":
+				case "unlock":
+					UnlockAll = IsOn(val);
+					break;
 				case "level":
 					if (Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl))
 					{
@@ -90,12 +100,13 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
 					+ " autoStart=" + AutoStart + " noAttract=" + NoAttract
-					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-"));
+					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
+					+ " unlockAll=" + UnlockAll);
 			}
 			else
 			{

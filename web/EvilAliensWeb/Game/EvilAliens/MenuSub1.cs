@@ -70,6 +70,11 @@ internal class MenuSub1 : Scene
 
 	public int GetSelectedEntry => selectedEntry;
 
+	// True while the menu is still playing its zoom-in entry animation. MenuScene holds
+	// the HUD ring's recalibrate until this clears, so the ring reacts to the menu having
+	// appeared rather than moving in lock-step with it.
+	public bool IsEntering => state == SubMenuState.entry;
+
 	public event ExitMenu OnExit;
 
 	public event TimeOut OnTimeOut;
@@ -388,11 +393,11 @@ internal class MenuSub1 : Scene
 		Vector2 position = default(Vector2);
 		if (isScrolling)
 		{
-			(position) = new Vector2(origin.X - 75f, yoffset + origin.Y - (float)(selectedEntry * font.LineSpacing));
+			(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(selectedEntry * font.LineSpacing));
 		}
 		else
 		{
-			(position) = new Vector2(origin.X - 75f, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
+			(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
 		}
 		Vector2 val = default(Vector2);
 		for (int i = 0; i < menuEntries.Count; i++)
@@ -404,19 +409,55 @@ internal class MenuSub1 : Scene
 				float num = 15f / font.MeasureString(menuEntries[i]).X;
 				float num2 = (float)gameTime.TotalGameTime.TotalSeconds;
 				float num3 = MyMath.Mod(num2 / 2f, 1f);
-				color = Color.AliceBlue;
+				color = MenuTheme.Selected;
 				num4 = 1f + num * brainPulsate.Evaluate(num3);
 			}
 			else
 			{
-				color = Color.Gray;
+				color = MenuTheme.Idle;
 				num4 = 1f;
 			}
 			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
 			{
 				float x = font.MeasureString(menuEntries[i]).X;
-				float num5 = (x * num4 - x) / 2f;
-				(val) = new Vector2(num5, (float)(font.LineSpacing / 2));
+				// Centre each entry on origin.X (was left-aligned at origin.X-75); the centre
+				// origin keeps the selected-row pulse symmetric. Matches the framed main menu
+				// so the HUD ring (which centres on the menu) lines up for the submenus too.
+				(val) = new Vector2(x / 2f, (float)(font.LineSpacing / 2));
+				// Polish: a soft drop shadow under every entry lifts the text off the busy
+				// starfield/planet backdrop (the flat gray items in particular were reading
+				// weakly). Same glyph string, offset a few design-space px in translucent
+				// black, drawn first so the coloured text lands on top. Straight-alpha
+				// (NonPremultiplied) so it darkens the scene behind rather than glowing —
+				// and being dark it stays below the bloom threshold, so it never blooms.
+				Vector2 shadowOffset = new Vector2(3f, 3f);
+				base.SpriteBatch.DrawString(font, menuEntries[i], position + shadowOffset, new Color(0, 0, 0, 160), 0f, val, num4, (SpriteEffects)0, 0f);
+				if (i == selectedEntry)
+				{
+					// Selection aura: a violet halo behind the bright core, a neon
+					// highlight that brightens the whole row. It reads as an
+					// arcade selection once bloom amplifies it. Built from stacked
+					// translucent copies of the glyph string in two rings (straight alpha,
+					// so each pass layers up a soft glow); the bright core lands on top. The
+					// outer ring sits past the bloom corona so the purple actually
+					// shows instead of washing out. Strength breathes with the scale pulse.
+					float glowPulse = brainPulsate.Evaluate(MyMath.Mod((float)gameTime.TotalGameTime.TotalSeconds / 2f, 1f)); // same phase as the scale pulse
+					byte ga = (byte)(70f + 45f * glowPulse);
+					Color glow = MenuTheme.WithAlpha(MenuTheme.Glow, ga);
+					foreach (float r in new float[] { 4f, 8f })
+					{
+						float d = r * 0.7071f;
+						Vector2[] ring = new Vector2[]
+						{
+							new Vector2(r, 0f), new Vector2(-r, 0f), new Vector2(0f, r), new Vector2(0f, -r),
+							new Vector2(d, d), new Vector2(-d, d), new Vector2(d, -d), new Vector2(-d, -d)
+						};
+						foreach (Vector2 off in ring)
+						{
+							base.SpriteBatch.DrawString(font, menuEntries[i], position + off, glow, 0f, val, num4, (SpriteEffects)0, 0f);
+						}
+					}
+				}
 				base.SpriteBatch.DrawString(font, menuEntries[i], position, color, 0f, val, num4, (SpriteEffects)0, 0f);
 				position.Y += (float)font.LineSpacing;
 			}
@@ -487,5 +528,27 @@ internal class MenuSub1 : Scene
 				selectedEntry = MyMath.Mod(selectedEntry + 1, menuEntries.Count);
 			}
 		}
+	}
+
+	// The vertical centre of the visible row list, in 800x600 design space. MenuScene
+	// parks (and tweens) the HUD ring around whichever menu is active, so each menu
+	// reports its own centre. This base version mirrors the base DrawMenu layout
+	// (origin (400,300), yoffset 0, locked entries skipped); MenuSubWithSkull overrides
+	// it for the framed main menu (which sits at a different vertical offset).
+	public virtual Vector2 GetListCentre()
+	{
+		if (font == null)
+			return origin;
+		if (isScrolling)
+			return new Vector2(origin.X, origin.Y); // selected entry hovers near origin
+		int visible = 0;
+		for (int i = 0; i < menuEntries.Count; i++)
+		{
+			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
+				visible++;
+		}
+		float curY0 = origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f;
+		float centreY = curY0 + (visible > 0 ? (visible - 1) / 2f * font.LineSpacing : 0f);
+		return new Vector2(origin.X, centreY);
 	}
 }

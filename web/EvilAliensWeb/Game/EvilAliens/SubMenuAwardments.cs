@@ -31,7 +31,7 @@ internal class SubMenuAwardments : MenuSub1
 		//IL_0192: Unknown result type (might be due to invalid IL or missing references)
 		yoffset -= 35f;
 		Vector2 position = default(Vector2);
-		(position) = new Vector2(origin.X - 75f, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
+		(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
 		Vector2 val = default(Vector2);
 		for (int i = 0; i < menuEntries.Count; i++)
 		{
@@ -53,11 +53,17 @@ internal class SubMenuAwardments : MenuSub1
 			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
 			{
 				float x = font.MeasureString(menuEntries[i]).X;
-				float num5 = (x * num4 - x) / 2f;
-				(val) = new Vector2(num5, (float)(font.LineSpacing / 2));
+				(val) = new Vector2(x / 2f, (float)(font.LineSpacing / 2)); // centre on origin.X
 				base.SpriteBatch.DrawString(font, menuEntries[i], position, color, 0f, val, num4, (SpriteEffects)0, 0f);
 				position.Y += (float)font.LineSpacing;
 			}
 		}
+	}
+
+	// DrawMenu nudges the list up by 35 (yoffset -= 35), so report that for the HUD ring.
+	public override Vector2 GetListCentre()
+	{
+		Vector2 c = base.GetListCentre();
+		return new Vector2(c.X, c.Y - 35f);
 	}
 }

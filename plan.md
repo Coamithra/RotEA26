@@ -118,6 +118,18 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   punctuation is cap-anchored (fixed the tiny `% & ? ( )`). Verified in real Chrome (menu, in-game HUD
   digits, a gamma/text screen — crisp, on-baseline, no overflow, 0 console errors). See the Stage-12
   notes below.
+- [ ] **Stage 13 — Menu reskin (sci-fi HUD title screen).** IN PROGRESS (this session, not yet
+  committed). Angular HUD frames per row (procedural, chamfered, octagon fill), toxic-green idle /
+  electric-purple selected palette (`MenuTheme`), ► pointer + cap-centred text, a generated
+  planet+nebula background with a vignette, corner brackets, a sparkle starfield, and a robotic
+  "autofocus" reticle ring that recalibrates (overshoot/ease-out-back tween) onto whichever menu is
+  active. Submenus centred to match. Adds a `?unlockall` debug flag.
+- [ ] **Stage 14 — Trailers (re-add via embedded YouTube player).** The two original `.wmv` trailers
+  (`extracted/584E07D1/Content/*.wmv`) were never ported — the web build has no WMV/video pipeline
+  (Stage 6 ported audio only) — so selecting a trailer threw `content file not found: VFX/<name>`
+  and wedged the loop. The "Trailers" Options entry was **removed** to stop the crash; re-add it by
+  overlaying an embedded **YouTube** player on trailer-select, sidestepping a video codec/transcode
+  entirely. See the Stage-14 notes below.
 
 ---
 
@@ -1318,6 +1330,46 @@ evenly; no overflow on a text-heavy screen — checked on the main menu, the in-
 (`?level=Level1`), and the gamma-calibration/instruction text, with **0 console errors**. Committed to
 the working tree (next `git push` deploys it via the Stage-8 CI); revert while iterating by copying
 `menufont.fnt.orig`/`.fnt.png.orig` back.
+
+---
+
+## Stage 14 — Trailers (re-add via embedded YouTube player)
+
+**Why it's here:** the game has an in-menu trailer player (Options → Trailers → pick one), backed
+by `TrailerScene`, which on Xbox played the two bundled `.wmv` videos. The web port never ported
+video (Stage 6 was audio-only; `WebContentManager` has no video loader), so picking a trailer does
+`Content.Load("VFX/<name>")` → **`content file not found`** → the exception wedges the JS game loop.
+The Stage-13 menu work **removed the "Trailers" Options entry** so it can't be triggered, but left
+the machinery in place: `MenuScene.trailerMenu` / `trailerScene` / `optionsMenu_OnTrailersSelected`
+/ `trailerMenu_EvilAliensSelected` / `trailerMenu_RocketRiotSelected` are all intact, just unwired.
+
+**The recovered videos:** `extracted/584E07D1/Content/*.wmv` (2 files — the "Revenge of the Evil
+Aliens" and "Rocket Riot" trailers). They're WMV (VC-1/WMA), which browsers don't play natively.
+
+**Decided approach — embed YouTube, don't transcode.** Rather than build a video pipeline
+(transcode `.wmv` → MP4/H.264 + ship a few MB + add an HTML5 `<video>` decode path), overlay an
+**embedded YouTube player** when a trailer is selected. It's the lowest-effort, zero-asset path and
+the trailers presumably already exist on the publisher's/author's channel. (Fallback if a video
+isn't on YouTube: upload the `.wmv`-sourced MP4 there, or self-host the MP4 and use `<video>`.)
+
+**Steps (sketch):**
+1. Re-add `optionsMenu.AddEntry("Trailers")` + `AddEntryEvent(optionsMenu_OnTrailersSelected)` in
+   `MenuScene` (the line removed in Stage 13).
+2. Replace `TrailerScene`'s video load with a JS-interop overlay: an `eaTrailer(youtubeId)` /
+   `eaTrailerClose()` pair in `index.html` (sibling of `eaMusic`/`eaFullscreen`, drawn **outside
+   `#app`** like the touch/fullscreen UI so Blazor's mount doesn't clobber it) that injects a
+   `<iframe src="https://www.youtube-nocookie.com/embed/<id>?autoplay=1&rel=0">` over the canvas,
+   plus a close/Back button. Pause the game music while it's up; resume + remove the iframe on close.
+3. Map each `TrailerScene.TrailerMode` (EvilAliens / RocketRiot) to its YouTube id; keep the two
+   trailer-menu entries.
+4. Mobile/keyboard: `Esc`/Back closes the overlay (route through the existing input seam or a DOM
+   click). Make sure closing returns focus to the canvas so menu input keeps working.
+
+**Gotchas:** (1) autoplay needs `navigator.userActivation` — fine here since a trailer is started by
+a real keypress/click, but a headless/automation start won't autoplay (harness limit, not a bug).
+(2) Keep it **outside `#app`** (see the Stage-9 touch/fullscreen pattern) or Blazor will wipe it.
+(3) `youtube-nocookie.com` + `rel=0` for privacy/clean UX. (4) Don't reintroduce any `VFX/*`
+`Content.Load` — that's the crash path.
 
 ---
 

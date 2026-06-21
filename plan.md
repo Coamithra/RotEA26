@@ -130,6 +130,13 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   and wedged the loop. The "Trailers" Options entry was **removed** to stop the crash; re-add it by
   overlaying an embedded **YouTube** player on trailer-select, sidestepping a video codec/transcode
   entirely. See the Stage-14 notes below.
+- [x] **Stage 15 — Laser VFX (Protoss-style beams). DONE (this session).** The boss/UFO sweep beam
+  (`Lazer` → `Quad`) was re-rendered from immediate-mode 3D quads (a per-laser `SpriteBatch.Flush` + 3×
+  `BasicEffect`/`DrawUserIndexedPrimitives` — brutal on WebGL, a real slowdown) into batched additive
+  sprites: a blue glow + white-hot core (one continuous sprite each → no seam) + round tip/muzzle
+  flares + smooth, **time-driven** electric tendrils (midpoint-displacement; writhe, not strobe). Also
+  fixed the latent XNA 3.x→4.0 `PrimitiveType` enum mistranslation that had been rendering each beam as
+  half a quad (the "cone"). Researched via `/research`. See the Stage-15 notes + future-improvements list.
 
 ---
 
@@ -1370,6 +1377,64 @@ a real keypress/click, but a headless/automation start won't autoplay (harness l
 (2) Keep it **outside `#app`** (see the Stage-9 touch/fullscreen pattern) or Blazor will wipe it.
 (3) `youtube-nocookie.com` + `rel=0` for privacy/clean UX. (4) Don't reintroduce any `VFX/*`
 `Content.Load` — that's the crash path.
+
+---
+
+## Stage 15 — Laser VFX (Protoss-style beams)
+
+**Status: DONE this session.** The boss/UFO beam weapon (`Lazer` → `Quad`; textures
+`GFX/Sprites/lazer{top,middle,bottom}` + `singleconnectorglow`) was rewritten for correctness,
+performance, and looks. All knobs are `const`/`Color` fields at the top of `Game/EvilAliens/Quad.cs`.
+
+**Three things fixed:**
+1. **The "cone" bug (correctness).** The decompiled original drew the quad with `(PrimitiveType)4`.
+   XNA 3.x numbered the enum D3D9-style (`4 = TriangleList`); the port had mistranslated the raw `4`
+   to the *name* `TriangleStrip`, which is a different value in KNI/XNA 4.0. A TriangleStrip with
+   `primitiveCount:2` consumes only 4 of the 6 list indices → one real triangle + one degenerate →
+   **half the quad** → the white wedge/"cone" artifact. (Now moot — the 3D-quad path is gone.)
+2. **Performance (the real win).** Each beam used to do, *per frame*: `spriteBatchWrapper.Flush()`
+   (shattering the scene's sprite batch) + 3× `BasicEffect.Apply` + 3× `DrawUserIndexedPrimitives`.
+   On WebGL each of those is a marshalled WASM→JS GL call (dynamic vertex-buffer upload + draw) —
+   cheap on Xbox/native, brutal in the browser and a genuine slowdown with many beams. Now the whole
+   beam is a handful of **additive sprites through the batching `SpriteBatchWrapper`**: no flush, no
+   immediate-mode uploads, and it batches with its siblings (and the additive `LazerGenerator` sparks).
+3. **The segment seam.** The first sprite rewrite kept the 3-piece (top/middle/bottom) layout and
+   showed a 1px black rasterisation crack where the abutting additive quads met. The Protoss redesign
+   removes it for free — the body is now ONE continuous glow sprite + ONE continuous core sprite, so
+   there are no coincident edges to crack.
+
+**The look.** A wide electric-blue glow + a white-hot core (each a single stretched `lazermiddle`
+sprite), round `singleconnectorglow` flares blooming at the leading tip (gently pulsing) and the
+muzzle, and **electric tendrils** crackling off the beam. The tendrils are **midpoint-displacement
+bolts** (fractal jaggedness, displacement halving each of `ArcLevels` subdivisions) whose offsets are
+driven by a smooth time-based `Wiggle` (two out-of-phase sines) keyed off a stable per-beam seed — so
+they **writhe smoothly instead of re-randomising every frame** (per-frame RNG was the original
+"spastic" look). Each tendril is a wide dim glow pass + a thin hot core, fading toward the free end.
+FX use a **dedicated `Random`** (not the gameplay `RandomHelper`) so render-time jitter can't desync a
+future lockstep co-op (Stage 11); `Lazer.Draw` passes `gameTime.TotalGameTime.TotalSeconds` into
+`Quad.Draw(float time)` to animate.
+
+**Researched via the `/research` skill:** Drilian's "How to Generate Shockingly Good 2D Lightning"
+(the canonical XNA implementation — smoothed offsets, additive glow segments + half-circle caps, ±30°
+branches, `BlendFunction.Max` to tame over-bright joints); craftofcoding's recursive
+midpoint-displacement (offset `/2` per level, stop at a detail threshold); a Roblox smooth-beam module
+(time-sampled moving Perlin noise + uniform point distribution + Bézier paths for non-strobing motion).
+
+**Future improvements (next time):**
+- **Taper the ends to a point** (user note — the beams read a touch "blocky"). The core/glow are
+  flat-ended rectangles capped by round flares; taper the core/glow width toward the tip and tail
+  (a trapezoid, or a dedicated tapered-tip sprite) so the beam narrows to a point instead of a blunt end.
+- **Tapered forks/branches** off the tendrils — Drilian's ±30° branch trick (3–6 forks that get
+  shorter further along the bolt and inherit its fade) for a busier, more organic crackle.
+- **`BlendFunction.Max` glow pass** — pure additive over-brightens where layers cross/overlap; a
+  Max-blend variant gives an even glow without hot joints (per Drilian).
+- **Per-shooter colour** — boss vs UFO vs (future) player beams in different hues; currently one global
+  electric-blue (`CoreColor`/`GlowColor`/`ArcColor`/`ArcGlowColor` are single consts, easy to thread
+  through from the `Lazer`/shooter).
+- **Impact splash** where the beam lands (a brighter flare or a small crackle burst at the hit point).
+- **Gentle curve** (Bézier) along the beam and/or a faint scrolling-noise core texture for extra life.
+- **Trail/fade accumulation** (Drilian's HDR target drawn at ~96%/frame) if the render path can afford
+  one more target cheaply.
 
 ---
 

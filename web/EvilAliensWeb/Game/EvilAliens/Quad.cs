@@ -11,19 +11,9 @@ public class Quad
 
 	private Game game;
 
-	private Texture2D top;
-
 	private Texture2D middle;
 
-	private Texture2D bottom;
-
-	private BasicEffect effect;
-
-	private BasicEffect topeffect;
-
-	private BasicEffect bottomeffect;
-
-	private VertexDeclaration vertexdecl;
+	private Texture2D glow;
 
 	private Vector3 origin;
 
@@ -47,13 +37,26 @@ public class Quad
 
 	private static Vector3 normal = Vector3.Backward;
 
-	private VertexPositionNormalTexture[] vertices;
-
-	private VertexPositionNormalTexture[] topvertices;
-
-	private VertexPositionNormalTexture[] bottomvertices;
-
-	public int[] indices;
+	// --- Protoss-style beam FX (see Draw) -----------------------------------------
+	private const float GlowWidthScale = 2.6f;   // blue glow halo width vs core width
+	private const float TipFlareScale = 3.0f;    // leading-tip bloom diameter vs core width
+	private const float MuzzleFlareScale = 2.0f; // muzzle bloom diameter vs core width
+	private const float ArcThickness = 2.0f;     // electric tendril core thickness (design px)
+	private const int ArcLevels = 3;             // midpoint-displacement subdivisions per tendril
+	private static readonly Color CoreColor = new Color(210, 235, 255);   // white-hot beam core
+	private static readonly Color GlowColor = new Color(35, 110, 235);    // electric-blue beam glow
+	private static readonly Color FlareColor = new Color(150, 215, 255);  // cyan-white bloom
+	private static readonly Color ArcColor = new Color(195, 235, 255);    // tendril hot core
+	private static readonly Color ArcGlowColor = new Color(45, 120, 235); // tendril blue glow
+	// FX-only RNG, kept separate from the gameplay RandomHelper so render-time jitter
+	// can't desync a future lockstep co-op session (Stage 11).
+	private static readonly Random fxr = new Random();
+	// Per-beam stable seed: each tendril is a deterministic function of (seed, time), so it
+	// writhes smoothly with the clock instead of being re-randomised (= strobing) each frame.
+	private readonly float fxPhase = RandF(0f, 1000f);
+	// Reusable midpoint-displacement scratch buffers (no per-frame allocation in Draw).
+	private static readonly Vector2[] boltA = new Vector2[64];
+	private static readonly Vector2[] boltB = new Vector2[64];
 
 	public void LoadContent()
 	{
@@ -84,32 +87,9 @@ public class Quad
 		if (!alreadyloaded)
 		{
 			alreadyloaded = true;
-			Matrix view = Matrix.CreateLookAt(new Vector3(0f, 0f, 1f), Vector3.Zero, Vector3.Up);
-			Matrix projection = Matrix.CreateOrthographic(800f, 600f, 0f, 1f);
-			GraphicsDevice graphicsDevice = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
 			ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
-			top = contentManager.Load<Texture2D>("GFX/Sprites/lazertop");
-			bottom = contentManager.Load<Texture2D>("GFX/Sprites/lazerbottom");
 			middle = contentManager.Load<Texture2D>("GFX/Sprites/lazermiddle");
-			effect = new BasicEffect(graphicsDevice);
-			effect.World = Matrix.Identity;
-			effect.View = view;
-			effect.Projection = projection;
-			effect.TextureEnabled = true;
-			effect.Texture = middle;
-			topeffect = new BasicEffect(graphicsDevice);
-			topeffect.World = Matrix.Identity;
-			topeffect.View = view;
-			topeffect.Projection = projection;
-			topeffect.TextureEnabled = true;
-			topeffect.Texture = top;
-			bottomeffect = new BasicEffect(graphicsDevice);
-			bottomeffect.World = Matrix.Identity;
-			bottomeffect.View = view;
-			bottomeffect.Projection = projection;
-			bottomeffect.TextureEnabled = true;
-			bottomeffect.Texture = bottom;
-			vertexdecl = VertexPositionNormalTexture.VertexDeclaration;
+			glow = contentManager.Load<Texture2D>("GFX/Sprites/singleconnectorglow");
 		}
 	}
 
@@ -125,161 +105,190 @@ public class Quad
 		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
 		this.game = game;
-		vertices = (VertexPositionNormalTexture[])(object)new VertexPositionNormalTexture[4];
-		topvertices = (VertexPositionNormalTexture[])(object)new VertexPositionNormalTexture[4];
-		bottomvertices = (VertexPositionNormalTexture[])(object)new VertexPositionNormalTexture[4];
-		indices = new int[6];
 		this.origin = new Vector3(origin.X - 400f, 300f - origin.Y, 0f);
 		this.height = height;
 		this.lead = lead;
 		this.width = width;
 		this.direction = convertToVector3(direction);
 		calculatePoints();
-		FillVertices();
 	}
 
-	private void FillVertices()
+	// Web port: the original beam was three textured 3D quads pushed with BasicEffect via
+	// DrawUserIndexedPrimitives -- on WebGL each is a marshalled WASM->JS GL call (vertex-
+	// buffer upload + effect apply + draw) and the leading SpriteBatch Flush() shattered the
+	// scene's sprite batch once per laser: cheap on Xbox/native, brutal in the browser. It now
+	// draws as a handful of additive sprites through the batching wrapper (no flush, no
+	// immediate-mode uploads), and the flat white bolt got a Protoss-style glow-up: a wide blue
+	// glow + a white-hot core (each ONE continuous sprite, so there's no segment-seam crack) +
+	// round flares blooming at the muzzle and leading tip + electric tendrils crackling off it.
+	public void Draw(float time)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0095: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0096: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00de: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0102: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0104: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0115: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0116: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0127: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0128: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0139: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015f: Unknown result type (might be due to invalid IL or missing references)
-		for (int i = 0; i < vertices.Length; i++)
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		SpriteBatchWrapper sb = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
+		// Beam axis in screen space (y-down): texture +Y runs along the beam, +X across it.
+		Vector2 dirScreen = new Vector2(direction.X, 0f - direction.Y);
+		float rotation = (float)Math.Atan2(dirScreen.X, 0f - dirScreen.Y);
+
+		Vector2 tip = ToScreen((upperLeft + upperRight) * 0.5f);
+		Vector2 tail = ToScreen((lowerLeft + lowerRight) * 0.5f);
+		Vector2 bodyCenter = (tip + tail) * 0.5f;
+		float bodyLen = Vector2.Distance(tip, tail);
+		Vector2 axis = (bodyLen > 0.001f) ? (tip - tail) / bodyLen : new Vector2(0f, -1f);
+		Vector2 perp = new Vector2(0f - axis.Y, axis.X);
+
+		SpriteBlendMode oldMode = sb.BlendMode;
+		sb.BlendMode = SpriteBlendMode.Additive;
+		// wide soft blue glow, then the bright hot core -- each a single continuous sprite, so
+		// the old core/cap rasterisation crack can't form.
+		DrawBeam(sb, middle, bodyCenter, rotation, width * GlowWidthScale, bodyLen + width, GlowColor);
+		DrawBeam(sb, middle, bodyCenter, rotation, width, bodyLen, CoreColor);
+		// electric tendrils crackling off the beam (smooth, time-driven -- see DrawArcs)
+		DrawArcs(sb, tail, axis, perp, bodyLen, time);
+		// round flares blooming at the leading tip (gently pulsing) and the muzzle
+		float pulse = 1f + 0.12f * (float)Math.Sin(time * 9f + fxPhase);
+		DrawFlare(sb, tip, width * TipFlareScale * pulse, FlareColor);
+		DrawFlare(sb, tail, width * MuzzleFlareScale, FlareColor);
+		sb.BlendMode = oldMode;
+	}
+
+	// Quad world space is centred + y-up (origin at screen centre); convert to screen pixels.
+	private static Vector2 ToScreen(Vector3 p)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		return new Vector2(p.X + 400f, 300f - p.Y);
+	}
+
+	// Stretches the soft beam strip to acrossPx x alongPx, centred and rotated about `center`.
+	private void DrawBeam(SpriteBatchWrapper sb, Texture2D tex, Vector2 center, float rotation, float acrossPx, float alongPx, Color color)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		Vector2 scale = new Vector2(acrossPx / (float)tex.Width, alongPx / (float)tex.Height);
+		sb.Draw(tex, center, rotation, scale, center: true, color);
+	}
+
+	// Blooms the round glow texture to ~diameterPx, centred (it's radial, so rotation is moot).
+	private void DrawFlare(SpriteBatchWrapper sb, Vector2 center, float diameterPx, Color color)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		float s = diameterPx / (float)glow.Width;
+		sb.Draw(glow, center, 0f, new Vector2(s, s), center: true, color);
+	}
+
+	// Draws a thin glowing line p0->p1 as one stretched strip -- a single electric tendril edge.
+	private void DrawLine(SpriteBatchWrapper sb, Vector2 p0, Vector2 p1, float thickness, Color color)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		Vector2 d = p1 - p0;
+		float len = d.Length();
+		if (len < 0.5f)
 		{
-			vertices[i].Normal = Vector3.Backward;
-			topvertices[i].Normal = Vector3.Backward;
+			return;
 		}
-		calculateVertexPositions();
-		Vector2 textureCoordinate = default(Vector2);
-		(textureCoordinate) = new Vector2(0f, 0f);
-		Vector2 textureCoordinate2 = default(Vector2);
-		(textureCoordinate2) = new Vector2(1f, 0f);
-		Vector2 textureCoordinate3 = default(Vector2);
-		(textureCoordinate3) = new Vector2(0f, 1f);
-		Vector2 textureCoordinate4 = default(Vector2);
-		(textureCoordinate4) = new Vector2(1f, 1f);
-		vertices[0].TextureCoordinate = textureCoordinate3;
-		vertices[1].TextureCoordinate = textureCoordinate;
-		vertices[2].TextureCoordinate = textureCoordinate4;
-		vertices[3].TextureCoordinate = textureCoordinate2;
-		topvertices[0].TextureCoordinate = textureCoordinate3;
-		topvertices[1].TextureCoordinate = textureCoordinate;
-		topvertices[2].TextureCoordinate = textureCoordinate4;
-		topvertices[3].TextureCoordinate = textureCoordinate2;
-		bottomvertices[0].TextureCoordinate = textureCoordinate3;
-		bottomvertices[1].TextureCoordinate = textureCoordinate;
-		bottomvertices[2].TextureCoordinate = textureCoordinate4;
-		bottomvertices[3].TextureCoordinate = textureCoordinate2;
-		indices[0] = 0;
-		indices[1] = 1;
-		indices[2] = 2;
-		indices[3] = 2;
-		indices[4] = 1;
-		indices[5] = 3;
+		float rot = (float)Math.Atan2(0f - d.X, d.Y);
+		DrawBeam(sb, middle, (p0 + p1) * 0.5f, rot, thickness, len, color);
 	}
 
-	private void calculateVertexPositions()
+	// Electric tendrils crackling off the beam. Each is a midpoint-displacement bolt (fractal
+	// jaggedness, the offset halving every subdivision) whose displacements are driven by smooth
+	// time functions rather than fresh RNG -- so the tendrils WRITHE instead of strobing (the fix
+	// for the "spastic" look; see the /research notes). Drawn as a wide dim glow pass + a thin hot
+	// core, both fading toward the free end.
+	private void DrawArcs(SpriteBatchWrapper sb, Vector2 tailPt, Vector2 axis, Vector2 perp, float bodyLen, float time)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0029: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0086: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0097: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ca: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00eb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0103: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0114: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0119: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0130: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0135: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0147: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0163: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0168: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017f: Unknown result type (might be due to invalid IL or missing references)
-		vertices[0].Position = lowerLeft;
-		vertices[1].Position = upperLeft;
-		vertices[2].Position = lowerRight;
-		vertices[3].Position = upperRight;
-		topvertices[0].Position = upperLeft;
-		topvertices[1].Position = upperLeft + direction * (width / 2f);
-		topvertices[2].Position = upperRight;
-		topvertices[3].Position = upperRight + direction * (width / 2f);
-		bottomvertices[0].Position = lowerLeft - direction * (width / 2f);
-		bottomvertices[1].Position = lowerLeft;
-		bottomvertices[2].Position = lowerRight - direction * (width / 2f);
-		bottomvertices[3].Position = lowerRight;
+		if (bodyLen < width)
+		{
+			return;
+		}
+		int count = (int)(bodyLen / 90f);
+		if (count < 1) count = 1;
+		if (count > 3) count = 3;
+		for (int i = 0; i < count; i++)
+		{
+			float key = fxPhase + (float)i * 101.7f;
+			// anchor sits at a stable spot along the beam; the tendril sweeps out to the side,
+			// its reach and lean animated by smooth wiggles so the whole arc slithers.
+			float ap = 0.12f + 0.76f * Frac(key * 0.013f);
+			Vector2 anchor = tailPt + axis * (bodyLen * ap);
+			float side = ((i & 1) == 0) ? 1f : -1f;
+			float reach = width * (1.4f + 1.0f * Wiggle(time, key));
+			float lean = width * 1.6f * Wiggle(time, key * 1.7f + 3.1f);
+			Vector2 endPt = anchor + perp * (side * reach) + axis * lean;
+
+			Vector2 d = endPt - anchor;
+			float len = d.Length();
+			if (len < 1f)
+			{
+				continue;
+			}
+			Vector2 bperp = new Vector2(0f - d.Y, d.X) / len;
+			float amp = Math.Min(len, reach) * 0.55f;
+			int n = BuildBolt(anchor, endPt, bperp, amp, time, key);
+			// glow pass (wide, dim) then core pass (thin, hot), each fading toward the free end
+			for (int pass = 0; pass < 2; pass++)
+			{
+				float thick = (pass == 0) ? ArcThickness * 2.6f : ArcThickness;
+				Color col = (pass == 0) ? ArcGlowColor : ArcColor;
+				for (int k = 0; k < n - 1; k++)
+				{
+					float fade = 1f - 0.6f * ((float)k / (float)(n - 1));
+					DrawLine(sb, boltA[k], boltA[k + 1], thick, col * fade);
+				}
+			}
+		}
 	}
 
-	public void Draw()
+	// Midpoint-displacement subdivision into boltA[0..return). Each level inserts a displaced
+	// midpoint between every pair and HALVES the displacement amplitude, giving smooth fractal
+	// jaggedness. Displacement uses a time-driven wiggle (deterministic per seed), so the bolt
+	// animates smoothly frame to frame instead of being re-rolled.
+	private int BuildBolt(Vector2 start, Vector2 end, Vector2 perpUnit, float amp, float time, float seed)
 	{
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c3: Unknown result type (might be due to invalid IL or missing references)
-		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
-		spriteBatchWrapper.Flush();
-		GraphicsDevice graphicsDevice = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
-		BlendState oldBlend = graphicsDevice.BlendState;
-			graphicsDevice.BlendState = BlendState.Additive;
-			foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		Vector2[] cur = boltA;
+		Vector2[] nxt = boltB;
+		cur[0] = start;
+		cur[1] = end;
+		int n = 2;
+		float a = amp;
+		for (int lvl = 0; lvl < ArcLevels; lvl++)
+		{
+			int m = 0;
+			for (int i = 0; i < n - 1; i++)
 			{
-				pass.Apply();
-				graphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleStrip, vertices, 0, 4, indices, 0, 2);
+				nxt[m++] = cur[i];
+				Vector2 mid = (cur[i] + cur[i + 1]) * 0.5f;
+				mid += perpUnit * (a * Wiggle(time, seed + (float)(lvl * 31 + i) * 2.39f));
+				nxt[m++] = mid;
 			}
-			foreach (EffectPass pass2 in topeffect.CurrentTechnique.Passes)
-			{
-				pass2.Apply();
-				graphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleStrip, topvertices, 0, 4, indices, 0, 2);
-			}
-			foreach (EffectPass pass3 in bottomeffect.CurrentTechnique.Passes)
-			{
-				pass3.Apply();
-				graphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleStrip, bottomvertices, 0, 4, indices, 0, 2);
-			}
-			graphicsDevice.BlendState = oldBlend;
+			nxt[m++] = cur[n - 1];
+			n = m;
+			Vector2[] tmp = cur;
+			cur = nxt;
+			nxt = tmp;
+			a *= 0.5f;
+		}
+		if (cur != boltA)
+		{
+			Array.Copy(cur, boltA, n);
+		}
+		return n;
+	}
+
+	// Smooth, deterministic [-1,1] wiggle: two out-of-phase sines so the motion looks organic
+	// instead of one obvious oscillation. Driven by time, so it animates without any RNG.
+	private static float Wiggle(float time, float seed)
+	{
+		return 0.6f * (float)Math.Sin(time * 5.5f + seed) + 0.4f * (float)Math.Sin(time * 2.3f + seed * 1.7f);
+	}
+
+	private static float Frac(float v)
+	{
+		return v - (float)Math.Floor(v);
+	}
+
+	private static float RandF(float min, float max)
+	{
+		return (float)(fxr.NextDouble() * (max - min)) + min;
 	}
 
 	public void SetProperties(Vector2 position, float direction, float length, float lead)
@@ -293,7 +302,6 @@ public class Quad
 		height = length;
 		this.lead = lead;
 		calculatePoints();
-		calculateVertexPositions();
 	}
 
 	public void SetLead(float lead)
@@ -313,7 +321,6 @@ public class Quad
 		this.lead = lead;
 		lowerLeft = upperLeft - val;
 		lowerRight = upperRight - val;
-		calculateVertexPositions();
 	}
 
 	private void calculatePoints()
@@ -374,7 +381,6 @@ public class Quad
 		height = length;
 		upperLeft += val;
 		upperRight += val;
-		calculateVertexPositions();
 	}
 
 	public void MoveTo(Vector2 position)
@@ -383,7 +389,6 @@ public class Quad
 		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
 		origin = new Vector3(position.X - 400f, 300f - position.Y, 0f);
 		calculatePoints();
-		calculateVertexPositions();
 	}
 
 	public void AimAt(float direction)
@@ -392,7 +397,6 @@ public class Quad
 		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
 		this.direction = convertToVector3(direction);
 		calculatePoints();
-		calculateVertexPositions();
 	}
 
 	private Vector3 convertToVector3(float direction)

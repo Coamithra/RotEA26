@@ -143,7 +143,7 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		lazor.Draw();
+		lazor.Draw((float)gameTime.TotalGameTime.TotalSeconds);
 	}
 
 	public override void Update(GameTime gameTime)

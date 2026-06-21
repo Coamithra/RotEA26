@@ -7,8 +7,12 @@
   body { margin: 0; background:#0d0f12; color:#cfd3da; font:13px/1.4 system-ui, sans-serif; }
   h1 { font-size:14px; margin:0; padding:8px 12px; background:#15181d; color:#9fe; letter-spacing:.5px; }
   #wrap { display:flex; flex-direction:column; height:100vh; }
-  #previewPane { overflow:auto; background:#111317; border-bottom:1px solid #222; padding:6px; }
+  #previewPane { overflow:auto; max-height:38vh; background:#111317; border-bottom:1px solid #222; padding:6px; }
   #preview { display:block; image-rendering:auto; }
+  #combosPane { overflow:auto; max-height:34vh; background:#0f1418; border-bottom:1px solid #222; }
+  #combosBar { display:flex; gap:10px; align-items:center; padding:5px 10px; background:#13171c; border-bottom:1px solid #1d2229; position:sticky; top:0; }
+  #combosBar b { color:#9cf; font-size:15px; }
+  #combos { display:block; image-rendering:auto; }
   #mid { display:flex; flex:1; min-height:0; }
   #left { width:480px; min-width:380px; border-right:1px solid #222; padding:10px; overflow:auto; }
   #right { flex:1; padding:10px; overflow:auto; }
@@ -37,6 +41,14 @@
 <div id="wrap">
   <h1>REVENGE font — live editor &nbsp; <span class="muted" id="head"></span></h1>
   <div id="previewPane"><canvas id="preview"></canvas></div>
+  <div id="combosPane">
+    <div id="combosBar">
+      <span class="muted">kerning combos · <b id="comboCh">—</b> in the middle</span>
+      <button id="reroll">⟳ reroll</button>
+      <span class="hint" style="margin:0">random neighbours each side — eyeball the spacing</span>
+    </div>
+    <canvas id="combos"></canvas>
+  </div>
   <div id="mid">
     <div id="left">
       <div class="pillrow">
@@ -218,6 +230,71 @@ function renderPreview(){
   });
 }
 
+// ---- kerning combos (selected glyph framed by random neighbours) ----
+let comboPairs=[]; const COMBO_N=8;
+const combos=$('#combos');
+function poolFor(ch){
+  let pool;
+  if(/[a-z]/.test(ch)) pool='abcdefghijklmnopqrstuvwxyz';
+  else if(/[A-Z]/.test(ch)) pool='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  else if(/[0-9]/.test(ch)) pool='0123456789';
+  else pool='abcdefghijklmnopqrstuvwxyznm';   // punctuation: sit it among letters
+  return pool.split('').filter(c=>byChar[c]);
+}
+function rollCombos(){
+  const pool=poolFor(sel);
+  comboPairs=[];
+  for(let i=0;i<COMBO_N;i++){
+    const l=pool[Math.floor(Math.random()*pool.length)];
+    const r=pool[Math.floor(Math.random()*pool.length)];
+    comboPairs.push([l,r]);
+  }
+  renderCombos();
+}
+function renderCombos(){
+  $('#comboCh').textContent = sel===' '?'space':sel;
+  const showBear=$('#showBear').checked;
+  const gapX=16, padX=8, padY=6, rowH=G.lineSpacing;
+  const items=comboPairs.map(([l,r])=>({laid:layout(l+sel+r)}));
+  const availW=Math.max(160,(combos.parentElement.clientWidth-padX*2)/PZ - 4);
+  const rows=[]; let row=[], rowW=0;                 // greedy wrap into rows
+  items.forEach(c=>{
+    const w=c.laid.width;
+    if(row.length && rowW+gapX+w>availW){ rows.push({items:row,w:rowW}); row=[]; rowW=0; }
+    if(row.length) rowW+=gapX;
+    c.ox=rowW; row.push(c); rowW+=w;
+  });
+  if(row.length) rows.push({items:row,w:rowW});
+  let maxW=10; rows.forEach(r=>maxW=Math.max(maxW,r.w));
+  combos.width=Math.ceil((maxW+padX*2)*PZ);
+  combos.height=Math.ceil((rowH*rows.length+padY*2)*PZ);
+  const x=combos.getContext('2d');
+  x.fillStyle='#0f1418'; x.fillRect(0,0,combos.width,combos.height);
+  rows.forEach((r,ri)=>{
+    const top=padY+ri*rowH;
+    x.fillStyle='rgba(210,70,70,0.4)';
+    x.fillRect(0,(top+G.tgtBaseline)*PZ, combos.width, 1);
+    r.items.forEach(c=>{
+      const base=padX+c.ox;
+      c.laid.items.forEach((it,idx)=>{
+        const px=base+it.penx;
+        if(idx===1){ x.fillStyle='rgba(90,150,255,0.20)';
+          x.fillRect(px*PZ, top*PZ, it.adv*PZ, rowH*PZ); }
+        if(showBear){
+          const h=rowH*PZ, y=top*PZ;
+          if(it.lsb>0){ x.fillStyle='rgba(70,200,120,0.28)'; x.fillRect((px-it.lsb)*PZ,y,it.lsb*PZ,h); }
+          else if(it.lsb<0){ x.fillStyle='rgba(220,80,80,0.30)'; x.fillRect(px*PZ,y,-it.lsb*PZ,h); }
+          const ae=px+it.adv;
+          if(it.rsb>0){ x.fillStyle='rgba(240,160,60,0.28)'; x.fillRect(ae*PZ,y,it.rsb*PZ,h); }
+          else if(it.rsb<0){ x.fillStyle='rgba(220,80,80,0.30)'; x.fillRect((ae+it.rsb)*PZ,y,-it.rsb*PZ,h); }
+        }
+        const t=tile(it.ch); if(!t) return;
+        x.drawImage(t, px*PZ, (top+it.cropY)*PZ, it.designW*PZ, it.designH*PZ);
+      });
+    });
+  });
+}
+
 function renderSource(){
   const m=metrics(sel); if(!m){ return; }
   const S=sheets[m.sheet];
@@ -239,6 +316,24 @@ function renderSource(){
   x.fillStyle='#5cf';
   for(const [hx,hy] of [[bx,byy+bh/2],[bx+bw,byy+bh/2],[bx+bw/2,byy],[bx+bw/2,byy+bh]])
     x.fillRect(hx-4,hy-4,8,8);
+  // kerning / advance boundaries as vertical dotted lines (where a neighbour's ink lands)
+  if($('#showBear').checked){
+    const sc=m.a.scale;
+    const advEnd=m.jl + m.adv/sc;          // right edge of the advance (≈ box right)
+    const leftBear=m.jl - m.lsb/sc;        // pen origin: previous glyph ends here
+    const rightBear=advEnd + m.rsb/sc;     // next glyph's pen starts here
+    const vline=(srcX,color,lab)=>{
+      const px=Math.round((srcX-rx)*Z)+0.5;
+      if(px<-2||px>source.width+2) return;
+      x.save(); x.setLineDash([3,4]); x.strokeStyle=color; x.lineWidth=1.5;
+      x.beginPath(); x.moveTo(px,0); x.lineTo(px,source.height); x.stroke();
+      x.setLineDash([]); x.fillStyle=color; x.font='10px system-ui';
+      x.fillText(lab, px+3, source.height-4);
+      x.restore();
+    };
+    vline(leftBear,  m.lsb>=0?'rgba(70,200,120,0.95)':'rgba(220,80,80,0.95)','L');
+    vline(rightBear, m.rsb>=0?'rgba(240,160,60,0.95)':'rgba(220,80,80,0.95)','R');
+  }
 }
 
 function renderInfo(){
@@ -285,20 +380,22 @@ function selectGlyph(ch){
   document.querySelectorAll('.cell').forEach(c=>c.classList.toggle('sel', c.dataset.ch===ch));
   if(prev) refreshPickerCell(prev);
   refreshPickerCell(ch);
-  renderSource(); renderInfo(); renderPreview();
+  renderSource(); renderInfo(); renderPreview(); rollCombos();
 }
 function renderAll(){ renderPreview(); renderSource(); renderInfo();
   document.querySelectorAll('.cell').forEach(c=>{ if(overrides[c.dataset.ch]) c.style.background='#2a2030'; }); }
 
-function afterEdit(){ refreshPickerCell(sel); renderSource(); renderInfo(); renderPreview(); }
+function afterEdit(){ refreshPickerCell(sel); renderSource(); renderInfo(); renderPreview(); renderCombos(); }
 
 // ---- controls ----
 document.querySelectorAll('.controls button').forEach(b=>{
   b.onclick=()=>{ bump(sel, b.dataset.act, parseFloat(b.dataset.d)); afterEdit(); };
 });
 $('#resetGlyph').onclick=()=>{ delete overrides[sel]; invalidate(sel); afterEdit(); };
-$('#zoom').oninput=e=>{ PZ=parseFloat(e.target.value); renderPreview(); };
+$('#zoom').oninput=e=>{ PZ=parseFloat(e.target.value); renderPreview(); renderCombos(); };
 $('#reload').onclick=()=>location.reload();
+$('#reroll').onclick=()=>rollCombos();
+window.addEventListener('resize', ()=>renderCombos());
 
 $('#save').onclick=async()=>{
   $('#status').textContent='saving…';
@@ -328,7 +425,7 @@ function translateBox(ch,axis,d){
 document.querySelectorAll('[data-mov]').forEach(b=>{
   b.onclick=()=>{ translateBox(sel,b.dataset.mov,parseFloat(b.dataset.d)); afterEdit(); };
 });
-$('#showBear').onchange=renderPreview;
+$('#showBear').onchange=()=>{ renderPreview(); renderSource(); renderCombos(); };
 
 // drag the cyan box on the source canvas: edges resize, interior translates
 let drag=null, dragStart=null;

@@ -58,16 +58,19 @@ DEBUG_PNG   = os.path.join(ROOT, 'tools/font/_debug_rows.png')
 OVERRIDES   = os.path.join(ROOT, 'tools/font/overrides.json')   # written by the live editor
 EDITOR_DATA = os.path.join(ROOT, 'tools/font/editor/data.json') # auto-extraction for the editor
 
-# sample lines the editor renders (kept short so the editor preview fits)
+# sample lines the editor renders (kept short so the editor preview fits).
+# The main-menu entries (mirrors MenuScene's mainMenu, non-trial build) so the
+# preview reads like the actual title screen; a pangram + glyph rows keep full
+# coverage for kerning/metrics work.
 SAMPLE_LINES = [
+    'Start',
+    'Options',
+    'Tutorial',
+    'Challenges',
+    'Awardments',
+    'Cheats',
+    'Exit',
     'The quick brown fox jumps over the lazy dog.',
-    'Pack my box with five dozen liquor jugs.',
-    'ABCDEFGHIJKLM  NOPQRSTUVWXYZ',
-    'abcdefghijklm  nopqrstuvwxyz',
-    '0123456789  .,!\'":()-?%&',
-    'Score: 1234567890   50% off!',
-    'REVENGE of the EVIL ALIENS!',
-    '"Awardment" Unlocked - (Don\'t stop)',
 ]
 
 # ---- targets locked onto the original menufont's metrics --------------------

@@ -1,0 +1,370 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Revenge font — live editor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background:#0d0f12; color:#cfd3da; font:13px/1.4 system-ui, sans-serif; }
+  h1 { font-size:14px; margin:0; padding:8px 12px; background:#15181d; color:#9fe; letter-spacing:.5px; }
+  #wrap { display:flex; flex-direction:column; height:100vh; }
+  #previewPane { overflow:auto; background:#111317; border-bottom:1px solid #222; padding:6px; }
+  #preview { display:block; image-rendering:auto; }
+  #mid { display:flex; flex:1; min-height:0; }
+  #left { width:480px; min-width:380px; border-right:1px solid #222; padding:10px; overflow:auto; }
+  #right { flex:1; padding:10px; overflow:auto; }
+  #source { background:#000; border:1px solid #333; cursor:crosshair; max-width:100%; }
+  .grid { display:flex; flex-wrap:wrap; gap:3px; margin-top:6px; }
+  .cell { width:40px; height:46px; background:#16191e; border:1px solid #262b32; border-radius:4px;
+          display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; }
+  .cell.sel { border-color:#5cf; background:#1c2530; }
+  .cell canvas { display:block; }
+  .cell .lab { font-size:9px; color:#8a93a0; margin-top:1px; }
+  .controls { display:grid; grid-template-columns:auto 1fr auto auto; gap:4px 8px; align-items:center; margin:8px 0; }
+  .controls .k { color:#8a93a0; }
+  button { background:#222932; color:#cfd3da; border:1px solid #38414c; border-radius:4px; padding:3px 8px; cursor:pointer; font:inherit; }
+  button:hover { background:#2c343f; }
+  button:active { background:#3a4555; }
+  .big { padding:5px 10px; }
+  #bar { display:flex; gap:10px; align-items:center; padding:8px 12px; background:#15181d; border-top:1px solid #222; }
+  #status { color:#7fd17f; }
+  .muted { color:#7b838f; }
+  b.sel { color:#9cf; font-size:16px; }
+  .info code { color:#d8b86a; }
+  .hint { color:#6b7280; font-size:11px; margin-top:6px; }
+  .pillrow { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:3px 0; }
+  .pillrow > span.lbl { width:96px; color:#9aa3af; }
+</style>
+<div id="wrap">
+  <h1>REVENGE font — live editor &nbsp; <span class="muted" id="head"></span></h1>
+  <div id="previewPane"><canvas id="preview"></canvas></div>
+  <div id="mid">
+    <div id="left">
+      <div class="pillrow">
+        <span class="lbl">Selected</span> <b class="sel" id="sel">—</b>
+        <span class="info" id="info"></span>
+      </div>
+      <canvas id="source"></canvas>
+      <div class="hint">Drag box <b>edges</b> to grow/shrink, drag <b>inside</b> to move the whole box. Red line = baseline.</div>
+
+      <div class="controls">
+        <span class="k">Move glyph ↕</span>
+          <span class="muted">±0.5px</span>
+          <button data-act="voff" data-d="-0.5">up</button>
+          <button data-act="voff" data-d="0.5">down</button>
+        <span class="k">Move box ↔↕</span>
+          <span></span>
+          <button data-mov="x" data-d="-1">←</button>
+          <button data-mov="x" data-d="1">→</button>
+        <span class="k">(translate whole box)</span>
+          <span></span>
+          <button data-mov="y" data-d="-1">↑</button>
+          <button data-mov="y" data-d="1">↓</button>
+        <span class="k">Capture top</span>
+          <span></span>
+          <button data-act="dTop" data-d="-1">grow ↑</button>
+          <button data-act="dTop" data-d="1">shrink ↓</button>
+        <span class="k">Capture bottom</span>
+          <span></span>
+          <button data-act="dBot" data-d="1">grow ↓</button>
+          <button data-act="dBot" data-d="-1">shrink ↑</button>
+        <span class="k">Capture left</span>
+          <span></span>
+          <button data-act="dLeft" data-d="-1">grow ←</button>
+          <button data-act="dLeft" data-d="1">shrink →</button>
+        <span class="k">Capture right</span>
+          <span></span>
+          <button data-act="dRight" data-d="1">grow →</button>
+          <button data-act="dRight" data-d="-1">shrink ←</button>
+        <span class="k">Bearing left</span>
+          <span></span>
+          <button data-act="dlsb" data-d="-0.5">−</button>
+          <button data-act="dlsb" data-d="0.5">+</button>
+        <span class="k">Bearing right</span>
+          <span></span>
+          <button data-act="drsb" data-d="-0.5">−</button>
+          <button data-act="drsb" data-d="0.5">+</button>
+      </div>
+      <div class="pillrow">
+        <button class="big" id="resetGlyph">Reset glyph</button>
+        <span class="hint">Keys: ←/→ select · ↑/↓ move glyph · Shift+↑/↓ capture-bottom</span>
+      </div>
+    </div>
+    <div id="right">
+      <div class="muted">Click a glyph to edit. Cells with edits are tinted.</div>
+      <div class="grid" id="picker"></div>
+    </div>
+  </div>
+  <div id="bar">
+    <button class="big" id="save">Save overrides</button>
+    <button class="big" id="reload">Reload</button>
+    <span class="muted">zoom</span><input type="range" id="zoom" min="1.5" max="4" step="0.1" value="2.6">
+    <label><input type="checkbox" id="showBear" checked> bearings</label>
+    <span style="color:#46c878">▉</span><span class="muted">left</span>
+    <span style="color:#f0a03c">▉</span><span class="muted">right</span>
+    <span style="color:#dc5050">▉</span><span class="muted">neg/tuck</span>
+    <span id="status"></span>
+    <span class="muted" id="count"></span>
+  </div>
+</div>
+<script>
+let DATA, G, byChar={}, order=[], overrides={}, sel=null, srcView=null;
+const sheets={}, sheetCtx={}, tileCache={};
+const $ = s => document.querySelector(s);
+const preview=$('#preview'), source=$('#source');
+let PZ = 2.6;
+
+async function init(){
+  DATA = await (await fetch('/data.json',{cache:'no-store'})).json();
+  G = DATA.globals;
+  overrides = await (await fetch('/overrides.json',{cache:'no-store'})).json().catch(()=>({}));
+  DATA.glyphs.forEach(g=>{ byChar[g.ch]=g; order.push(g.ch); });
+  // load both source sheets into offscreen canvases for getImageData
+  await Promise.all(Object.entries(G.sheets).map(([k,s])=>new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>{ const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
+      const cx=c.getContext('2d',{willReadFrequently:true}); cx.drawImage(img,0,0);
+      sheets[k]={canvas:c, w:c.width, h:c.height}; sheetCtx[k]=cx; res(); };
+    img.onerror=rej; img.src='/sources/'+s.file;
+  })));
+  $('#head').textContent = `${order.length} glyphs · baseline ${G.tgtBaseline} · ss ${G.ss}`;
+  buildPicker();
+  sel = order[0];
+  selectGlyph(sel);
+  renderAll();
+}
+
+function getOv(ch){ return overrides[ch] || {}; }
+function setOv(ch,key,val){
+  const o = overrides[ch] || (overrides[ch]={});
+  val = Math.round(val*1000)/1000;
+  if(val===0) delete o[key]; else o[key]=val;
+  if(Object.keys(o).length===0) delete overrides[ch];
+  invalidate(ch);
+}
+function bump(ch,key,d){ setOv(ch,key,(getOv(ch)[key]||0)+d); }
+function invalidate(ch){ for(const k of Object.keys(tileCache)) if(k.startsWith(ch+'|')) delete tileCache[k]; }
+
+function metrics(ch){
+  const a = byChar[ch]; if(!a) return null;
+  const o = getOv(ch);
+  const it = a.y + (o.dTop||0), ib = a.y + a.h + (o.dBot||0);
+  const jl = a.x + (o.dLeft||0), jr = a.x + a.w + (o.dRight||0);
+  const w = Math.max(1, jr-jl), h = Math.max(1, ib-it);
+  const designW = Math.max(1, Math.round(w*a.scale));
+  const designH = Math.max(1, Math.round(h*a.scale));
+  const ascent = (a.baseline - it)*a.scale;
+  const cropY = Math.round(G.tgtBaseline - ascent) + (o.voff||0);
+  return {a,o,sheet:a.sheet, jl,it,w,h, designW,designH, cropY,
+          lsb:G.sideBearing+(o.dlsb||0), rsb:G.sideBearing+(o.drsb||0), adv:designW};
+}
+
+function tile(ch){
+  const m = metrics(ch); if(!m) return null;
+  const key = ch+'|'+m.jl+','+m.it+','+m.w+','+m.h;
+  if(tileCache[key]) return tileCache[key];
+  const S = sheets[m.sheet]; const cx = sheetCtx[m.sheet];
+  const jl=Math.max(0,Math.min(S.w-1,m.jl)), it=Math.max(0,Math.min(S.h-1,m.it));
+  const w=Math.max(1,Math.min(S.w-jl,m.w)), h=Math.max(1,Math.min(S.h-it,m.h));
+  const id = cx.getImageData(jl,it,w,h), d=id.data;
+  for(let i=0;i<d.length;i+=4){
+    const lum=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    let al=(lum-G.alphaLo)/(G.alphaHi-G.alphaLo); al=al<0?0:al>1?1:al;
+    d[i]=255; d[i+1]=255; d[i+2]=255; d[i+3]=Math.round(al*255);
+  }
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  c.getContext('2d').putImageData(id,0,0); tileCache[key]=c; return c;
+}
+
+function layout(text){
+  let pen=4, first=true; const items=[];
+  for(const ch of text){
+    if(ch===' '){ pen += (first?0:G.spacing)+G.spaceW; first=false; continue; }
+    const m=metrics(ch); if(!m){ pen+=G.spaceW; continue; }
+    pen += first? Math.max(m.lsb,0) : (G.spacing+m.lsb); first=false;
+    const inkStart=pen, advEnd=pen+m.adv, rsbEnd=advEnd+m.rsb;
+    items.push({ch, penx:inkStart, cropY:m.cropY, designW:m.designW, designH:m.designH, adv:m.adv,
+                lsb:m.lsb, rsb:m.rsb, inkStart, advEnd});
+    pen = rsbEnd;
+  }
+  return {items, width:pen};
+}
+
+function renderPreview(){
+  const laid = G.sampleLines.map(layout);
+  let maxW=10; laid.forEach(l=>maxW=Math.max(maxW,l.width));
+  const padX=8, padY=6;
+  preview.width = Math.ceil((maxW+padX*2)*PZ);
+  preview.height = Math.ceil((G.lineSpacing*laid.length+padY*2)*PZ);
+  const x=preview.getContext('2d');
+  x.fillStyle='#111317'; x.fillRect(0,0,preview.width,preview.height);
+  const showBear = $('#showBear').checked;
+  laid.forEach((l,li)=>{
+    const top=padY+li*G.lineSpacing;
+    x.fillStyle='rgba(210,70,70,0.55)';
+    x.fillRect(0,(top+G.tgtBaseline)*PZ, preview.width, 1);
+    if(showBear) l.items.forEach(it=>{   // bearing zones (behind glyphs)
+      const h=G.lineSpacing*PZ, y=top*PZ;
+      if(it.lsb>0){ x.fillStyle='rgba(70,200,120,0.30)'; x.fillRect((it.inkStart-it.lsb)*PZ,y,it.lsb*PZ,h); }
+      else if(it.lsb<0){ x.fillStyle='rgba(220,80,80,0.32)'; x.fillRect(it.inkStart*PZ,y,-it.lsb*PZ,h); }
+      if(it.rsb>0){ x.fillStyle='rgba(240,160,60,0.30)'; x.fillRect(it.advEnd*PZ,y,it.rsb*PZ,h); }
+      else if(it.rsb<0){ x.fillStyle='rgba(220,80,80,0.32)'; x.fillRect((it.advEnd+it.rsb)*PZ,y,-it.rsb*PZ,h); }
+    });
+    l.items.forEach(it=>{
+      if(it.ch===sel){ x.fillStyle='rgba(90,150,255,0.20)';
+        x.fillRect(it.penx*PZ, top*PZ, it.adv*PZ, G.lineSpacing*PZ); }
+      const t=tile(it.ch); if(!t) return;
+      x.drawImage(t, it.penx*PZ, (top+it.cropY)*PZ, it.designW*PZ, it.designH*PZ);
+    });
+  });
+}
+
+function renderSource(){
+  const m=metrics(sel); if(!m){ return; }
+  const S=sheets[m.sheet];
+  const mx=Math.round(m.w*0.7)+12, my=Math.round(m.h*0.7)+12;
+  let rx=Math.max(0,m.jl-mx), ry=Math.max(0,m.it-my);
+  let rw=Math.min(S.w-rx, m.w+mx*2), rh=Math.min(S.h-ry, m.h+my*2);
+  const Z=Math.max(1.2, Math.min(3.2, 320/rh));
+  source.width=Math.round(rw*Z); source.height=Math.round(rh*Z);
+  srcView={rx,ry,rw,rh,Z};
+  const x=source.getContext('2d'); x.imageSmoothingEnabled=false;
+  x.drawImage(S.canvas, rx,ry,rw,rh, 0,0, source.width, source.height);
+  // baseline
+  const by=(m.a.baseline-ry)*Z;
+  x.strokeStyle='rgba(255,70,70,0.9)'; x.lineWidth=1;
+  x.beginPath(); x.moveTo(0,by+0.5); x.lineTo(source.width,by+0.5); x.stroke();
+  // capture box
+  const bx=(m.jl-rx)*Z, byy=(m.it-ry)*Z, bw=m.w*Z, bh=m.h*Z;
+  x.strokeStyle='#5cf'; x.lineWidth=2; x.strokeRect(bx,byy,bw,bh);
+  x.fillStyle='#5cf';
+  for(const [hx,hy] of [[bx,byy+bh/2],[bx+bw,byy+bh/2],[bx+bw/2,byy],[bx+bw/2,byy+bh]])
+    x.fillRect(hx-4,hy-4,8,8);
+}
+
+function renderInfo(){
+  const m=metrics(sel); if(!m) return;
+  const botOff = m.cropY + m.designH - G.tgtBaseline;
+  const o=getOv(sel); const od=Object.keys(o).length? JSON.stringify(o):'—';
+  $('#info').innerHTML = `<span class="muted">cls</span> ${m.a.cls} · `
+    + `<span class="muted">size</span> ${m.designW}×${m.designH} · `
+    + `<span class="muted">cropY</span> ${m.cropY} · `
+    + `<span class="muted">botOff</span> <code>${botOff>0?'+':''}${botOff}</code> · `
+    + `<span class="muted">ovr</span> <code>${od}</code>`;
+  $('#count').textContent = `${Object.keys(overrides).length} glyphs overridden`;
+}
+
+function buildPicker(){
+  const p=$('#picker'); p.innerHTML='';
+  order.forEach(ch=>{
+    const cell=document.createElement('div'); cell.className='cell'; cell.dataset.ch=ch;
+    const c=document.createElement('canvas');
+    const t=tile(ch);
+    const m=metrics(ch); const z=Math.min(1.4, 28/Math.max(m.designH,1));
+    c.width=Math.max(1,Math.round(m.designW*z)); c.height=Math.max(1,Math.round(m.designH*z));
+    if(t) c.getContext('2d').drawImage(t,0,0,c.width,c.height);
+    const lab=document.createElement('div'); lab.className='lab'; lab.textContent = ch===' '?'␠':ch;
+    cell.appendChild(c); cell.appendChild(lab);
+    cell.onclick=()=>{ selectGlyph(ch); };
+    p.appendChild(cell);
+  });
+}
+function refreshPickerCell(ch){
+  const cell=$(`.cell[data-ch="${cssEsc(ch)}"]`); if(!cell) return;
+  cell.classList.toggle('sel', ch===sel);
+  cell.style.background = overrides[ch] ? '#2a2030' : (ch===sel?'#1c2530':'');
+  const c=cell.querySelector('canvas'), t=tile(ch), m=metrics(ch);
+  const z=Math.min(1.4,28/Math.max(m.designH,1));
+  c.width=Math.max(1,Math.round(m.designW*z)); c.height=Math.max(1,Math.round(m.designH*z));
+  const ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); if(t) ctx.drawImage(t,0,0,c.width,c.height);
+}
+function cssEsc(s){ return (window.CSS&&CSS.escape)?CSS.escape(s):s.replace(/["\\]/g,'\\$&'); }
+
+function selectGlyph(ch){
+  const prev=sel; sel=ch;
+  $('#sel').textContent = ch===' '?'space':ch;
+  document.querySelectorAll('.cell').forEach(c=>c.classList.toggle('sel', c.dataset.ch===ch));
+  if(prev) refreshPickerCell(prev);
+  refreshPickerCell(ch);
+  renderSource(); renderInfo(); renderPreview();
+}
+function renderAll(){ renderPreview(); renderSource(); renderInfo();
+  document.querySelectorAll('.cell').forEach(c=>{ if(overrides[c.dataset.ch]) c.style.background='#2a2030'; }); }
+
+function afterEdit(){ refreshPickerCell(sel); renderSource(); renderInfo(); renderPreview(); }
+
+// ---- controls ----
+document.querySelectorAll('.controls button').forEach(b=>{
+  b.onclick=()=>{ bump(sel, b.dataset.act, parseFloat(b.dataset.d)); afterEdit(); };
+});
+$('#resetGlyph').onclick=()=>{ delete overrides[sel]; invalidate(sel); afterEdit(); };
+$('#zoom').oninput=e=>{ PZ=parseFloat(e.target.value); renderPreview(); };
+$('#reload').onclick=()=>location.reload();
+
+$('#save').onclick=async()=>{
+  $('#status').textContent='saving…';
+  try{
+    const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(overrides)});
+    const j=await r.json();
+    $('#status').textContent = j.ok ? `saved ${j.count} glyphs ✓  (rebuild with --commit)` : ('error: '+j.error);
+  }catch(e){ $('#status').textContent='save failed: '+e; }
+};
+
+// keyboard
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT') return;
+  const i=order.indexOf(sel);
+  if(e.key==='ArrowLeft'){ selectGlyph(order[(i-1+order.length)%order.length]); e.preventDefault(); return; }
+  if(e.key==='ArrowRight'){ selectGlyph(order[(i+1)%order.length]); e.preventDefault(); return; }
+  if(e.key==='ArrowUp'){ bump(sel, e.shiftKey?'dBot':'voff', e.shiftKey?-1:-0.5); afterEdit(); e.preventDefault(); return; }
+  if(e.key==='ArrowDown'){ bump(sel, e.shiftKey?'dBot':'voff', e.shiftKey?1:0.5); afterEdit(); e.preventDefault(); return; }
+});
+
+// move (translate) the capture box without resizing
+function translateBox(ch,axis,d){
+  if(axis==='x'){ bump(ch,'dLeft',d); bump(ch,'dRight',d); }
+  else { bump(ch,'dTop',d); bump(ch,'dBot',d); }
+}
+document.querySelectorAll('[data-mov]').forEach(b=>{
+  b.onclick=()=>{ translateBox(sel,b.dataset.mov,parseFloat(b.dataset.d)); afterEdit(); };
+});
+$('#showBear').onchange=renderPreview;
+
+// drag the cyan box on the source canvas: edges resize, interior translates
+let drag=null, dragStart=null;
+function evtPos(e){ const r=source.getBoundingClientRect();
+  return {cxp:(e.clientX-r.left)*(source.width/r.width), cyp:(e.clientY-r.top)*(source.height/r.height)}; }
+source.addEventListener('mousedown',e=>{
+  if(!srcView) return;
+  const {cxp,cyp}=evtPos(e);
+  const m=metrics(sel); const {rx,ry,Z}=srcView;
+  const bx=(m.jl-rx)*Z, bxr=(m.jl+m.w-rx)*Z, byt=(m.it-ry)*Z, byb=(m.it+m.h-ry)*Z;
+  const T=8;
+  if(Math.abs(cxp-bx)<T) drag='dLeft';
+  else if(Math.abs(cxp-bxr)<T) drag='dRight';
+  else if(Math.abs(cyp-byt)<T) drag='dTop';
+  else if(Math.abs(cyp-byb)<T) drag='dBot';
+  else if(cxp>bx&&cxp<bxr&&cyp>byt&&cyp<byb){
+    drag='move'; const o=getOv(sel);
+    dragStart={sx:rx+cxp/Z, sy:ry+cyp/Z, dLeft:o.dLeft||0, dRight:o.dRight||0, dTop:o.dTop||0, dBot:o.dBot||0};
+  } else drag=null;
+});
+window.addEventListener('mousemove',e=>{
+  if(!drag||!srcView) return;
+  const {cxp,cyp}=evtPos(e); const {rx,ry,Z}=srcView; const a=byChar[sel];
+  const sx=rx+cxp/Z, sy=ry+cyp/Z;
+  if(drag==='move'){
+    const ddx=Math.round(sx-dragStart.sx), ddy=Math.round(sy-dragStart.sy);
+    setOv(sel,'dLeft',dragStart.dLeft+ddx); setOv(sel,'dRight',dragStart.dRight+ddx);
+    setOv(sel,'dTop',dragStart.dTop+ddy);   setOv(sel,'dBot',dragStart.dBot+ddy);
+  }
+  else if(drag==='dLeft') setOv(sel,'dLeft', Math.round(sx-a.x));
+  else if(drag==='dRight') setOv(sel,'dRight', Math.round(sx-(a.x+a.w)));
+  else if(drag==='dTop') setOv(sel,'dTop', Math.round(sy-a.y));
+  else if(drag==='dBot') setOv(sel,'dBot', Math.round(sy-(a.y+a.h)));
+  afterEdit();
+});
+window.addEventListener('mouseup',()=>{ drag=null; dragStart=null; });
+
+init().catch(e=>{ document.body.innerHTML='<pre style="padding:20px;color:#f88">'+e+'\n\nRun:  python tools/font/build_revenge_font.py --emit-editor\nthen restart serve.py</pre>'; });
+</script>

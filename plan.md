@@ -107,14 +107,16 @@ Browser console **must** be checked — WASM errors surface there, not in the bu
   Level 1 gameplay with the crisp hi-res Earth backdrop, both splash paths incl. the channel-flip,
   and a window resize) with 0 console exceptions. See the Stage-10 notes below.
 - [ ] Stage 11 — Online co-op multiplayer (networked couch co-op)
-- [ ] **Stage 12 — Custom in-game font ("Revenge" reskin).** STARTED — base font wired &
-  verified in real Chrome (0 console errors), 3 fixes left. The user hand-drew a full glyph set
-  (caps / lowercase / digits / punctuation in `wwwroot/Content/gfx/menu/revenge_font_*.png`);
-  `tools/font/build_revenge_font.py` bakes them into the **single** `GFX/Menu/menufont` SpriteFont
-  (atlas `.fnt.png` + binary metrics `.fnt`) that **every** text call site uses, merging the
-  original font's space + debug symbols and aliasing `´`→ the drawn apostrophe. **Remaining: (1)
-  low-res atlas (baked at the old 21 px cap — uprez it); (2) per-glyph vertical alignment + a stray
-  sliver of the neighbouring sheet row bleeding into some glyphs; (3) kerning.** See the Stage-12
+- [x] **Stage 12 — Custom in-game font ("Revenge" reskin). DONE.** The user's hand-drawn glyph set
+  replaces the **single** `GFX/Menu/menufont` SpriteFont that **every** text call site uses (built by
+  `tools/font/build_revenge_font.py` from `tools/font/sources/revenge_font_*.png`), so menus, score/HUD,
+  credits, help and tutorials are all reskinned. All three "needs work" items are fixed: (1) the atlas
+  is **supersampled 3×** (crisp after the Stage-10 RenderScale upscale) via a hi-res draw path that keeps
+  SpriteFont metrics in design units; (2) **consistent baselines** (reference-glyph baselines) + **clean
+  extraction** (per-glyph connected-component trimming kills neighbour-row / adjacent-glyph slivers);
+  (3) **even spacing** (per-glyph side bearings + tuned tracking + a proper space width), plus
+  punctuation is cap-anchored (fixed the tiny `% & ? ( )`). Verified in real Chrome (menu, in-game HUD
+  digits, a gamma/text screen — crisp, on-baseline, no overflow, 0 console errors). See the Stage-12
   notes below.
 
 ---
@@ -1196,12 +1198,13 @@ B glyphWidth, C rightBearing)`. Draw advance per glyph = `A + B + C` plus the gl
 between glyphs; the glyph is drawn at `pen + (cropping.X, cropping.Y)`. These were originally
 produced from the Xbox `.xnb` by `tools/xnb/unpack.py`; Stage 12 adds a second producer.
 
-**The source art (committed):** the user drew white-on-dark sheets on a 1642×656 canvas with a
-rounded border frame + a script header strip, glyphs laid out in rows:
-- `wwwroot/Content/gfx/menu/revenge_font_caps.png` — rows `A-J / K-T / U-Z / 0-9`
-- `wwwroot/Content/gfx/menu/revenge_punctuation.png` — rows `a-j / k-t / u-z / [. , ! ' : ( ) - ? " % &]`
-- (`revenge_font_lower.png`, `revenge_font.png` are earlier/alt specimens — `revenge_font_caps`
-  + `revenge_punctuation` are the canonical sources the builder reads.)
+**The source art (committed, NOT shipped):** the user drew white-on-dark sheets on a 1642×656 canvas
+with a rounded border frame + a script header strip, glyphs laid out in rows. They live under
+**`tools/font/sources/`** (moved out of `wwwroot` so they don't bloat the deploy):
+- `tools/font/sources/revenge_font_caps.png` — rows `A-J / K-T / U-Z / 0-9` (+ corner diamond)
+- `tools/font/sources/revenge_punctuation.png` — rows `a-j / k-t / u-z / [. , ! ' : ( ) - ? " % &]`
+- (`revenge_font_lower.png` is an earlier/alt specimen — `revenge_font_caps` + `revenge_punctuation`
+  are the canonical sources the builder reads.)
 
 **The builder (DONE):** `tools/font/build_revenge_font.py` (run from repo root,
 `python tools/font/build_revenge_font.py` = dry-run → writes `tools/font/_preview.png`; add
@@ -1213,72 +1216,108 @@ commit**). What it does:
   Segments glyphs per row by column gaps, keeps the leftmost N (drops the decorative corner ◆).
 - Extracts each glyph as white-on-transparent (alpha = remapped luminance, so the drawn dark
   outline becomes the transparent edge and the spiky terminals survive).
-- **Scales to the original's metrics so layouts don't move:** caps body → 21 px cap height,
-  lowercase → 15 px x-height; reuses the original `lineSpacing 45`, `spacing 2.0`, **baseline 28 px**.
-  Per-glyph `cropping.Y = 28 − scaledAscentAboveBaseline`; advance = ink width (`A = C = 0`,
-  `B = width`), matching the original convention.
+- **Scales to the original's metrics so layouts don't move:** caps/digits → 21 px cap height,
+  lowercase → 15 px x-height, **punctuation marks cap-anchored** (so `% & ? ( )` aren't shrunk to
+  x-height — the old bug); reuses the original `lineSpacing 45`, **baseline 28 px**. Per-glyph
+  `cropping.Y = 28 − scaledAscentAboveBaseline`.
 - **Merges** the original `menufont` glyphs for every char NOT redrawn (space + the debug/edge
-  symbols `_ [ ] = $ < > ; + * / \ ~ …`) so no string can break, and **aliases `U+00B4` (´, the
-  game's acute-accent apostrophe used in ~270 lines) to the drawn `'`**. Output = 96 glyphs,
-  512×90 atlas — same coverage as the original.
+  symbols `_ [ ] = $ < > ; + * / \ ~ …`) so no string can break — read from the `*.orig` backup so
+  re-runs stay idempotent — and **aliases `U+00B4` (´, the game's acute-accent apostrophe used in
+  ~270 lines) to the drawn `'`**. Output = 96 glyphs, a 1024×~309 **3× supersampled** atlas.
 
 **Verified (real Chrome per CLAUDE.md):** `?menu&noattract` renders Start/Options/Tutorial/
 Challenges/Awardments/Exit + lowercase back/select all in the new face, on the correct baseline,
 0 console errors. **It is committed to the working tree** (next `git push` would deploy it via the
 Stage-8 CI) — to revert while iterating: `copy *.orig` back over `menufont.fnt`/`.fnt.png`.
 
-### The 3 fixes remaining (what "needs work" means)
+### Stage 12 — DONE. What was changed (the three "needs work" fixes)
 
-1. **Resolution — the atlas is too low-res for the artwork.** The glyphs were downscaled from
-   ~89 px caps to a 21 px cap atlas to match the original metric size, throwing away the detail the
-   user drew. But text is then *upscaled again* by the Stage-10 `RenderScale` present blit (the whole
-   800×600 design scene renders into a target up to 1440 px tall), so a 21 px atlas glyph gets
-   stretched ~2–2.5× → visibly soft. **Fix = supersample the atlas.** The tension: a plain
-   `SpriteFont.DrawString` couples atlas pixels to draw size 1:1, and we must NOT change the design-
-   space layout (cap stays 21 design px). Recommended approach: build the atlas + `glyphBounds` at
-   N× (e.g. cap 42–63 px), keep `cropping`/`kerning`/`lineSpacing` in **design units (/N)**, and bake
-   a compensating `1/N` into the **single** `SpriteBatchWrapper.DrawString` choke
-   (`Game/EvilAliens/SpriteBatchWrapper.cs` ~line 428 area — confirm every `DrawString` flows through
-   the wrapper and how the caller's own scale composes). Net: same layout, N× texel density, so the
-   `RenderScale` upscale samples a crisp atlas. Pick N from the 1440 px cap vs. 600 design height
-   (~2.4×) → N = 3 is safe. Verify the kept original glyphs (space/punct) still align (they'd also
-   need the N× treatment or to be re-rendered at N×).
+1. **Resolution — atlas supersampled 3×, with a hi-res draw path.** The atlas + each glyph's
+   `BoundsInTexture` are now **3× the design size**, but **every other SpriteFont metric
+   (`Cropping`/kerning/`LineSpacing`/`Spacing`) stays in DESIGN units** — crucial because
+   `font.MeasureString(...)` is called **directly on the raw `SpriteFont` in ~40 places** for layout
+   (centering origins, right-alignment, `15f / MeasureString(...).X` auto-fit), so the stored metrics
+   must read as design px. Stock `SpriteBatch.DrawString` sizes each glyph quad from
+   `BoundsInTexture × scale` (which would draw 3× too big), so the draw was reimplemented:
+   **`SpriteBatchWrapper.DrawStringScaled`** re-walks KNI's exact `DrawString` layout (verified against
+   the decompiled `Xna.Framework.Graphics` — matrix, advance, cropping, rotation) but sizes each quad
+   from its **DESIGN `Cropping` size** instead, i.e. per-glyph quad scale = `Cropping.Size /
+   BoundsInTexture.Size` (= 1/3 for the redrawn glyphs, **= 1 for the un-supersampled merged
+   originals**, so they're untouched). All four wrapper `DrawString` overloads route through it.
+   Net: design-space layout is byte-identical to before, but texels come from the dense atlas → crisp
+   after the Stage-10 `RenderScale` upscale. (`SS` is a constant in the builder; the C# side is
+   N-agnostic via the size ratio, so it was committed behaviour-preserving at the old size first.)
 
-2. **Vertical alignment + a sliver of the neighbouring row.** Two bugs in the extractor:
-   (a) *Inconsistent baselines* — per-row baseline uses a dense-band median + a linear extrapolation
-   for the punctuation row, which is approximate, so some glyphs (esp. lowercase / punctuation) sit a
-   px or two high/low. Fix: compute each row's true baseline from flat-bottomed reference glyphs
-   (caps bottoms; lowercase bottoms of `a c e m n o r s u v w x z`, excluding round-overshoot and
-   descenders), not a whole-row density median; place every glyph against that.
-   (b) *Stray line under some glyphs* — the per-glyph crop is taking the full band height, so a thin
-   bit of the adjacent sheet row (an ascender/descender poking into this band, or the threshold
-   catching the next row) rides along. Fix: tighten each glyph's vertical bbox to its **own connected
-   component** (flood/label per glyph, or trim to the largest contiguous ink run with a gap break),
-   not the shared band `[y0:y1]`. Re-check `to_white_alpha`'s alpha floor (40) and the row-band
-   boundaries so no neighbour ink is included.
+2. **Baselines + slivers — reference baselines + connected-component extraction.** Per-row baselines
+   now come from **flat-bottomed reference glyphs** (caps `ABDEFHIKLMNPRTVWXYZ`; lowercase
+   `acemnorsuvwxz`; digits; punctuation `.!?:%&`), median of their ink bottoms — not the old
+   dense-band median/extrapolation — so caps, lowercase, digits and punctuation share one baseline.
+   Each glyph's bbox is trimmed to its **own connected component(s)** (`scipy.ndimage.label`, 8-conn)
+   inside a baseline-anchored row window, dropping neighbour-row ink, hairline "stray lines", and the
+   italic-lean sliver from the adjacent glyph — while keeping dots/accents and multi-stroke parts
+   (`i j : ! ? " % &`). Column segmentation gained a **merge step** (joins the tightest gaps to reach
+   the expected glyph count, so `"`/`%` don't split) and drops the trailing corner diamond.
 
-3. **Kerning.** Currently advance = ink width with zero side bearings + a flat global `spacing 2.0`,
-   so the heavy italic runs tight/uneven (the slant makes some pairs collide and others gap). Fix:
-   add per-glyph left/right side bearings (account for the italic overhang — e.g. negative-ish on the
-   sheared sides), tune `spacing`, and ideally a small pair-kerning table for the worst pairs. Easy to
-   iterate via `_preview.png` before `--commit`. Watch overflow: this face is **wider** than the
-   original, so widening spacing further risks clipping fixed-width menu boxes — verify text-heavy
-   screens (credits, awardment descriptions, instructions) don't overflow after retuning.
+3. **Spacing — per-glyph side bearings + tuned tracking + real space width.** Advance is ink width
+   plus small per-glyph side bearings, with a tuned global tracking, and the **space advance is set
+   explicitly** (the merged-original space was far too thin → words ran together). Punctuation being
+   cap-anchored (fix 2's scale change) also evens runs like `50% off?`. *Note:* `SpriteFont` has **no
+   pair-kern table**, so per-glyph bearings + tracking is the only lever — there is no per-pair
+   kerning. Iterate via `tools/font/_preview.png` (multi-line, with a baseline guide) and
+   `--debug` (a per-glyph montage) before `--commit`.
+
+**Follow-up pass (scrutiny round):**
+- **Below-baseline ink (descenders `q p y g`, the comma tail, parens, any caps spur) was being
+  clipped** — the auto-extractor bounded each glyph to the dense "row band", which stops at the
+  baseline. Fixed by extending the connected-component search *past* the band: the glyph's own
+  (connected) descender/spur rides along with the main component, while neighbour-row ink is dropped
+  by a "centre must fall inside the original band" test. Also: the **baseline is now computed from the
+  same clean bottoms the glyphs use** (it used a looser box before), which removed a ~1px float on
+  round letters.
+- **Live editor for the genuinely per-glyph residual + kerning — `tools/font/editor/`.** A local web
+  app (`python tools/font/editor/serve.py`, after `build_revenge_font.py --emit-editor` writes
+  `editor/data.json`) that renders the sample lines from the source sheets, lets you **drag a glyph's
+  capture-box edges (resize) or its interior (translate the whole box)**, nudge its **vertical
+  position** (sub-pixel — see below) / **side bearings**, **visualises the bearing zones** in the
+  preview (green = left bearing, orange = right, red = negative/tuck — so you can see which side a gap
+  comes from), and POSTs a per-glyph **`tools/font/overrides.json`** (`{char: {dTop,dBot,dLeft,dRight
+  (capture-box edge deltas, source px), voff (design px, FRACTIONAL ok), dlsb,drsb (bearings)}}`). The
+  builder reads it in `add()` and bakes it in on `--commit`. **Fractional `voff` is real sub-pixel:**
+  integer part → `cropY`, fractional part → a bilinear vertical shift baked into a 1-design-px-taller
+  supersampled tile (integer `voff` is byte-identical to before, so old tweaks don't move). This is the
+  right tool for the per-glyph alignment the auto-heuristics + vision-loop can't reliably nail.
+  `_diag.py` prints per-glyph `botOff` (bottom vs. baseline) to find floats/clips numerically.
+  - *Extractor follow-ups from editor scrutiny:* a glyph's flag/tail/descender from an adjacent row
+    can intrude on this row's band (e.g. the **`j` descender bleeding into `t`** from the row above).
+    Fix either per-glyph in the editor (raise the capture top / move the box) **or** by relocating the
+    glyph in the source sheet (the `t` was moved right). *Gotcha when moving in the source:* shifting a
+    glyph can expose its serif/flag as a stray column in the NEIGHBOURING row's band (the moved `t`'s
+    top flag landed in the `a-j` row and cascaded into an `i`+`j` merge). `seg_glyphs` now defends
+    against this — when a row has too many column-runs it drops the **trailing** run if it's a short
+    fragment (neighbour-row flag) or far-separated (the corner diamond), which leaves interior short
+    marks (the punctuation period/hyphen) untouched.
 
 **Gotchas / pickup notes:**
-- Re-run the builder after editing any sheet; **don't hand-edit `menufont.fnt`/`.fnt.png`**.
+- Re-run the builder after editing any sheet (`python tools/font/build_revenge_font.py` dry-run →
+  `_preview.png`; `--commit` writes the live font); **don't hand-edit `menufont.fnt`/`.fnt.png`**.
+- The atlas is supersampled, so the metrics in `.fnt` are NOT 1:1 with the atlas pixels — the
+  `DrawStringScaled` size-ratio is what reconciles them. If you ever revert to stock
+  `SpriteBatch.DrawString` for this font, glyphs render 3× too big.
 - It's the SAME `menufont` the score/HUD uses — test numbers + punctuation in-game
   (`?level=Level1`), not just the menu.
-- Content paths are case-sensitive on the live host (capital `Content/`); these assets already live
-  under `gfx/menu/` lowercase, fine.
-- `defaultCp`/`hasDefault` is left 0 (no default char) as in the original — the merge guarantees
-  every used codepoint exists, but if a future string uses a symbol that's neither drawn nor in the
-  original 96, `SpriteFont` will throw; add a default char if that ever bites.
+- Sources moved to `tools/font/sources/` (out of `wwwroot`); the builder reads from there and writes
+  `wwwroot/Content/gfx/menu/menufont.*`. The merged originals come from `menufont.*.orig`.
+- `defaultCp`/`hasDefault` is left 0 — the merge guarantees every used codepoint exists; a future
+  string using a symbol that's neither drawn nor in the original 96 would throw (add a default char).
+- The merged original debug glyphs (`_ [ ] = $ …`) are still 1× (low-res) — fine, they're rarely
+  shown; if any becomes prominent, redraw it on a sheet so it supersamples too.
 
-**Done when:** the in-game text is crisp at the upscaled present resolution, every glyph sits on a
-consistent baseline with no stray neighbour-row pixels, spacing reads evenly across caps/lowercase/
-digits/punctuation, and no text-heavy screen overflows — verified in real Chrome on the menu, the
-HUD, and a credits/instructions screen.
+**Done (verified in real Chrome per CLAUDE.md):** in-game text is crisp at the upscaled present
+resolution; caps/lowercase/digits/punctuation share one baseline with no stray pixels; spacing reads
+evenly; no overflow on a text-heavy screen — checked on the main menu, the in-game HUD score digits
+(`?level=Level1`), and the gamma-calibration/instruction text, with **0 console errors**. Committed to
+the working tree (next `git push` deploys it via the Stage-8 CI); revert while iterating by copying
+`menufont.fnt.orig`/`.fnt.png.orig` back.
 
 ---
 

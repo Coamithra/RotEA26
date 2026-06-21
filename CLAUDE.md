@@ -8,6 +8,20 @@ each stage is written to be done independently with fresh context. This file is 
 in the repo. (Global prefs — `rtk` git, `python` not `python3`, the `edit_unicode.py` helper —
 still apply.)
 
+## Project tracking (Trello — local backend)
+A **local** (offline, file-backed) Trello board tracks the staged plan. It is NOT on trello.com —
+it lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programming\FakeTrelloData`.
+- **Board:** `RotEA26 — Evil Aliens Web Port` · id `10989a3d`.
+- **Always pass `--backend local --board 10989a3d`** (the CLI's default backend is `trello`, and the
+  active board is a *different* one). e.g.
+  `trello --backend local --board 10989a3d board` (show), `... list ls`, `... card ls <listId>`.
+- **Columns (list ids):** `Backlog` `79158996` · `In Progress` `3b43cba3` · `Done` `9c204b80`.
+- **Cards = plan.md's stages.** Done: Stages 1–10 + 12 (the custom "Revenge" font). Backlog:
+  Stage 11 (online co-op). Each card's description summarises that
+  stage; `plan.md` remains the source of truth — when a stage's status changes, `card move <id> <listId>`
+  it and keep the description in sync.
+- Browse it visually with `trello --backend local --board 10989a3d serve` (drag-drop kanban web app).
+
 ## Build / run / verify
 ```sh
 cd web/EvilAliensWeb
@@ -150,6 +164,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no
   standalone controls menu entry).
+- **Custom font (Stage 12) — the atlas is SUPERSAMPLED; never route `menufont` through stock
+  `SpriteBatch.DrawString`.** `GFX/Menu/menufont` (the ONE font every text call site uses) is rebuilt
+  by `tools/font/build_revenge_font.py` from `tools/font/sources/*.png` with a **3× atlas**
+  (`BoundsInTexture` is 3×) while `Cropping`/kerning/`LineSpacing`/`Spacing` stay **design-size** (so
+  `font.MeasureString(...)`, called raw in ~40 layout sites, is unchanged). The wrapper's
+  **`SpriteBatchWrapper.DrawStringScaled`** draws each glyph at `Cropping.Size / BoundsInTexture.Size`
+  (=1/3 for redrawn glyphs, =1 for merged originals) — all four `DrawString` overloads go through it.
+  Reverting to `spriteBatch.DrawString(font,…)` would render glyphs 3× too big. Re-run the builder
+  after editing a sheet (don't hand-edit `menufont.fnt`/`.fnt.png`); revert via the `*.orig` backups.
+  Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
+  authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
+  `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it

@@ -35,10 +35,12 @@ __pycache__/
 tools/audio/_t2.ogg
 
 # ---- Stage-12 custom-font build (tools/font/build_revenge_font.py) ------------
-# The script + source sheets + the built menufont ship; the preview render is a
-# regenerated scratch artifact, and *.orig are local pre-edit backups (the
+# The script + source sheets + overrides.json + the live editor + the built
+# menufont ship. The _*.png are regenerated scrutiny/preview renders, data.json
+# is re-emitted by `--emit-editor`, and *.orig are local pre-edit backups (the
 # original font is already recoverable from git history).
-tools/font/_preview.png
+tools/font/_*.png
+tools/font/editor/data.json
 *.orig
 
 # ---- OS / editor cruft -------------------------------------------------------

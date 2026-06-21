@@ -153,7 +153,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.DrawString(spritefont, text, position, color, rotation, origin, scale, spriteeffect, layerdepth);
+		DrawStringScaled(spritefont, text, position, color, rotation, origin, new Vector2(scale, scale), spriteeffect, layerdepth);
 	}
 
 	public void DrawString(string text, Vector2 position, Color color, float rotation, Vector2 origin, float scale, SpriteEffects spriteeffect, float layerdepth)
@@ -163,7 +163,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.DrawString(font, text, position, color, rotation, origin, scale, spriteeffect, layerdepth);
+		DrawStringScaled(font, text, position, color, rotation, origin, new Vector2(scale, scale), spriteeffect, layerdepth);
 	}
 
 	public void DrawString(string text, Vector2 position, Color color, float rotation, bool centered, float scale, SpriteEffects spriteeffect, float layerdepth)
@@ -179,7 +179,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = ((!centered) ? Vector2.Zero : (font.MeasureString(text) / 2f));
 		_beginDrawing();
-		spriteBatch.DrawString(font, text, position, color, rotation, val, scale, spriteeffect, layerdepth);
+		DrawStringScaled(font, text, position, color, rotation, val, new Vector2(scale, scale), spriteeffect, layerdepth);
 	}
 
 	public void DrawString(string text, Vector2 position, Color color, float rotation, bool centered, Vector2 scale, SpriteEffects spriteeffect, float layerdepth)
@@ -196,7 +196,62 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = ((!centered) ? Vector2.Zero : (font.MeasureString(text) / 2f));
 		_beginDrawing();
-		spriteBatch.DrawString(font, text, position, color, rotation, val, scale, spriteeffect, layerdepth);
+		DrawStringScaled(font, text, position, color, rotation, val, scale, spriteeffect, layerdepth);
+	}
+
+	// Stage 12: hi-res font draw. The atlas is supersampled (each glyph's
+	// BoundsInTexture is N x its design size), but every SpriteFont metric
+	// (Cropping / kerning / LineSpacing / Spacing) stays in DESIGN units so
+	// MeasureString -- called directly across the game for layout -- is unchanged.
+	// Stock SpriteBatch.DrawString sizes each glyph quad from BoundsInTexture*scale,
+	// which would draw N x too big; this re-walks KNI's exact DrawString layout but
+	// sizes each quad from its DESIGN Cropping size instead. Per-glyph quad scale =
+	// Cropping.Size / BoundsInTexture.Size (= 1/N for the redrawn glyphs, = 1 for the
+	// un-supersampled merged originals), so design-space layout is byte-identical to
+	// before while the texels come from the dense atlas -> crisp after RenderScale.
+	private void DrawStringScaled(SpriteFont sf, string text, Vector2 position, Color color, float rotation, Vector2 origin, Vector2 scale, SpriteEffects effects, float layerdepth)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		if (sf == null || string.IsNullOrEmpty(text))
+			return;
+		Texture2D tex = sf.Texture;
+		float cos = 1f, sin = 0f;
+		if (rotation != 0f) { cos = (float)Math.Cos(rotation); sin = (float)Math.Sin(rotation); }
+		// transformation matrix (KNI's no-flip path: scale, rotate, origin, position)
+		float m11 = scale.X * cos, m12 = scale.X * sin;
+		float m21 = scale.Y * (0f - sin), m22 = scale.Y * cos;
+		float m41 = (0f - origin.X) * m11 + (0f - origin.Y) * m21 + position.X;
+		float m42 = (0f - origin.X) * m12 + (0f - origin.Y) * m22 + position.Y;
+		float offX = 0f, offY = 0f;
+		bool first = true;
+		foreach (char ch in text)
+		{
+			if (ch == '\r')
+				continue;
+			if (ch == '\n')
+			{
+				offX = 0f; offY += sf.LineSpacing; first = true;
+				continue;
+			}
+			char c = ch;
+			if (!sf.Glyphs.ContainsKey(c))
+			{
+				if (sf.DefaultCharacter.HasValue) c = sf.DefaultCharacter.Value;
+				else continue;
+			}
+			SpriteFont.Glyph g = sf.Glyphs[c];
+			if (first) { offX = Math.Max(g.LeftSideBearing, 0f); first = false; }
+			else offX += sf.Spacing + g.LeftSideBearing;
+			float vx = offX + g.Cropping.X;
+			float vy = offY + g.Cropping.Y;
+			float wx = vx * m11 + vy * m21 + m41;
+			float wy = vx * m12 + vy * m22 + m42;
+			Rectangle b = g.BoundsInTexture;
+			float gsx = (b.Width > 0 ? (float)g.Cropping.Width / b.Width : 0f) * scale.X;
+			float gsy = (b.Height > 0 ? (float)g.Cropping.Height / b.Height : 0f) * scale.Y;
+			spriteBatch.Draw(tex, new Vector2(wx, wy), b, color, rotation, Vector2.Zero, new Vector2(gsx, gsy), effects, layerdepth);
+			offX += g.Width + g.RightSideBearing;
+		}
 	}
 
 	public void Draw(Texture2D texture, Vector2 position)

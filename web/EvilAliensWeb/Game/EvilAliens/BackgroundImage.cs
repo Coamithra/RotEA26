@@ -27,6 +27,11 @@ internal class BackgroundImage
 
 	public SpriteBlendMode blendMode = (SpriteBlendMode)1;
 
+	// Holodeck glitch hook (driven by Background while in the simulator): drawOffset shifts
+	// the whole tiled layer by a few px without touching the wrapped scroll position. A no-op
+	// at its default, so non-simulator backgrounds render exactly as before.
+	public Vector2 drawOffset;
+
 	public string[,] new_texturenames;
 
 	public Texture2D[,] new_textures;
@@ -104,6 +109,7 @@ internal class BackgroundImage
 		//IL_0111: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = position;
 		val -= realsize;
+		val += drawOffset;
 		Vector2 val2 = val;
 		spriteBatch.BlendMode = blendMode;
 		float fade = 1f;
@@ -123,7 +129,7 @@ internal class BackgroundImage
 		}
 		if (switchTimer.Active)
 		{
-			val = position - realsize;
+			val = position - realsize + drawOffset;
 			val2 = val;
 			spriteBatch.BlendMode = (SpriteBlendMode)2;
 			for (int k = 0; k < UpperDiv(800f, realsize.X) + 1; k++)

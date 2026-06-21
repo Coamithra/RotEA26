@@ -7,12 +7,9 @@ namespace EvilAliens;
 
 internal class ClassicAliens : GameScene
 {
-	private TrialChamber trialChamber;
-
 	public ClassicAliens(Game game)
 		: base(game, Levels.ClassicAliens)
 	{
-		trialChamber = new TrialChamber(game);
 		base.OnFinished += ClassicAliens_OnFinished;
 	}
 
@@ -29,7 +26,6 @@ internal class ClassicAliens : GameScene
 	private void ClassicAliens_OnFinished(object sender, FinishedArgs args)
 	{
 		score.EnableCombos();
-		Collection.Remove((GameComponent)(object)trialChamber);
 	}
 
 	protected override void PreloadGraphicalContent()
@@ -56,13 +52,12 @@ internal class ClassicAliens : GameScene
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty();
 		spawnType = PlayerSpawnType.North;
-		Collection.Add((GameComponent)(object)trialChamber);
 	}
 
 	public override void Update(GameTime gameTime)
 	{
 		base.Update(gameTime);
-		if (RandomHelper.RandomFromAverage(0.3f, gameTime))
+		if (RandomHelper.RandomFromAverage(0.2f, gameTime))
 		{
 			Background.Jump();
 		}

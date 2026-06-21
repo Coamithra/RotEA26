@@ -10,18 +10,14 @@ internal class TutorialLevel : GameScene
 {
 	private const int InitialLives = 7;
 
-	private TrialChamber trialChamber;
-
 	public TutorialLevel(Game game)
 		: base(game, Levels.Tutorial)
 	{
-		trialChamber = new TrialChamber(game);
 		base.OnFinished += TutorialLevel_OnFinished;
 	}
 
 	private void TutorialLevel_OnFinished(object sender, FinishedArgs args)
 	{
-		Collection.Remove((GameComponent)(object)trialChamber);
 		score.EnableCombos();
 		score.IsTutorial = false;
 	}
@@ -34,7 +30,6 @@ internal class TutorialLevel : GameScene
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty(Settings.DifficultyLevel.Very_Hard);
 		base.spawnPlayerNormally = true;
-		Collection.Add((GameComponent)(object)trialChamber);
 		score.DisableCombos();
 		score.IsTutorial = true;
 	}
@@ -208,7 +203,7 @@ internal class TutorialLevel : GameScene
 	public override void Update(GameTime gameTime)
 	{
 		base.Update(gameTime);
-		if (RandomHelper.RandomFromAverage(0.3f, gameTime))
+		if (RandomHelper.RandomFromAverage(0.2f, gameTime))
 		{
 			Background.Jump();
 		}

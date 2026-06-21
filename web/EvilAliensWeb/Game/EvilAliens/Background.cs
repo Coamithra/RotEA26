@@ -60,6 +60,25 @@ public class Background : Scene
 
 	private float fadeFactor;
 
+	// Holodeck (trial-simulation chamber). When the simulator background is active, Jump()
+	// fires a brief, deliberate "projection hiccup" instead of teleporting the layers:
+	// a stutter-slip and/or a brightness flicker driven over glitchTimer.
+	private bool isHolodeck;
+
+	private BackgroundImage holoGrid;
+
+	private Timer glitchTimer = new Timer(170f, repeating: false);
+
+	private Vector2 glitchSlip;
+
+	// A light pulse that sweeps down through the holodeck grid every once in a while.
+	// pulseTimer = one sweep's travel; pulseCooldown = the (randomised) gap between sweeps.
+	private Timer pulseTimer = new Timer(1500f, repeating: false);
+
+	private Timer pulseCooldown = new Timer(10000f, repeating: false);
+
+	private bool pulseActive;
+
 	public Vector2 ScrollSpeed => scrollspeed;
 
 	public event XFadeFinishedEvent OnXFadeFinished;
@@ -69,6 +88,9 @@ public class Background : Scene
 	{
 		base.DrawOrder = 0;
 		scrollspeedchangetimer.Stop();
+		glitchTimer.Stop();
+		pulseTimer.Stop();
+		pulseCooldown.Stop();
 		showdoodad = false;
 		backgroundLayers = new List<BackgroundImage>();
 		foregroundLayers = new List<BackgroundImage>();
@@ -247,6 +269,8 @@ public class Background : Scene
 		{
 			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
 		}
+		UpdateHoloGlitch(gameTime);
+		UpdateHoloPulse(gameTime);
 		switch (state)
 		{
 		case BackgroundState.LeavingHyperspace:
@@ -316,6 +340,7 @@ public class Background : Scene
 		{
 			backgroundLayer.Draw(base.SpriteBatch, gameTime);
 		}
+		DrawHoloPulse();
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		if (showdoodad)
 		{
@@ -408,6 +433,8 @@ public class Background : Scene
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
+		isHolodeck = false;
+		holoGrid = null;
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
 		backgroundImage.texturenames = new string[1, 1];
@@ -464,6 +491,8 @@ public class Background : Scene
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
+		isHolodeck = false;
+		holoGrid = null;
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
 		backgroundImage.texturenames = new string[1, 1];
@@ -508,21 +537,16 @@ public class Background : Scene
 	{
 		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ed: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01de: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b9: Unknown result type (might be due to invalid IL or missing references)
-		BackgroundImage backgroundImage = new BackgroundImage();
+		// Holodeck / trial-simulation chamber. Space here is PROJECTED, not real: the stars
+		// stay (a space-combat sim that showed no stars would be dull AND a poor simulation)
+		// but are cool-tinted + dimmed so they read as part of the projection, while the grid
+		// becomes the hero -- a bright cyan near layer over a dim far layer for depth. A gentle
+		// pulse breathes (oscilate*), and Jump() fires deliberate holo-glitches (see Update).
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
+		// simulated stars, far: cool + dim, straight alpha
+		BackgroundImage backgroundImage = new BackgroundImage();
+		backgroundImage.color = new Color(0.45f, 0.7f, 0.95f, 1f);
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
 		backgroundImage.texturenames = new string[1, 1];
@@ -531,9 +555,11 @@ public class Background : Scene
 		backgroundImage.size = 1.5f;
 		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
 		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 0.66f;
+		backgroundImage.scrollspeedmodifier = 0.5f;
 		backgroundLayers.Add(backgroundImage);
+		// simulated stars, near: additive cool glint
 		backgroundImage = new BackgroundImage();
+		backgroundImage.color = new Color(0.3f, 0.55f, 0.8f, 1f);
 		backgroundImage.position = new Vector2(400f, 0f);
 		backgroundImage.textures = new Texture2D[1, 1];
 		backgroundImage.texturenames = new string[1, 1];
@@ -542,25 +568,46 @@ public class Background : Scene
 		backgroundImage.size = 2f;
 		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
 		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 1.5f;
+		backgroundImage.scrollspeedmodifier = 1.2f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
+		// holo-grid, far: dim, large, slow -> depth
 		backgroundImage = new BackgroundImage();
-		backgroundImage.color = new Color(Color.Teal, 0.3f);
+		backgroundImage.color = new Color(0.22f, 0.55f, 0.66f, 0.3f);
 		backgroundImage.position = new Vector2(400f, 0f);
 		backgroundImage.textures = new Texture2D[1, 1];
 		backgroundImage.texturenames = new string[1, 1];
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Tutorial/grid3");
 		backgroundImage.texturenames[0, 0] = "GFX/Tutorial/grid3";
-		backgroundImage.size = 1.6f;
+		backgroundImage.size = 2.4f;
 		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
 		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 0.45f;
+		backgroundImage.scrollspeedmodifier = 0.25f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
+		// holo-grid, near: cyan hero -> the layer the glitch slips most
+		backgroundImage = new BackgroundImage();
+		backgroundImage.color = new Color(0.42f, 0.82f, 0.95f, 0.55f);
+		backgroundImage.position = new Vector2(400f, 0f);
+		backgroundImage.textures = new Texture2D[1, 1];
+		backgroundImage.texturenames = new string[1, 1];
+		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Tutorial/grid3");
+		backgroundImage.texturenames[0, 0] = "GFX/Tutorial/grid3";
+		backgroundImage.size = 1.5f;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.scrollspeedmodifier = 0.5f;
+		backgroundImage.blendMode = (SpriteBlendMode)2;
+		backgroundLayers.Add(backgroundImage);
+		holoGrid = backgroundImage;
+		isHolodeck = true;
+		pulseActive = false;
+		pulseCooldown.Duration = RandomHelper.RandomNextFloat(4000f, 9000f);
+		pulseCooldown.Reset();
+		pulseCooldown.Start();
 		scrollspeedreset = new Vector2(0f, 0.2f) / 16.666666f;
-		oscilatereach = 0f;
-		oscilatespeed = 0f;
+		oscilatereach = 0.06f;
+		oscilatespeed = 0.0025f;
 		Reset();
 	}
 
@@ -591,6 +638,8 @@ public class Background : Scene
 		//IL_04b0: Unknown result type (might be due to invalid IL or missing references)
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
+		isHolodeck = false;
+		holoGrid = null;
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
@@ -721,15 +770,110 @@ public class Background : Scene
 		Reset();
 	}
 
+	// Trigger one deliberate "projection hiccup". Called by the simulator levels
+	// (TutorialLevel/ClassicAliens). The old behaviour teleported each layer to a random
+	// position -- a hard pop that read like a rendering seam; now it kicks off a short,
+	// subtle position-only stutter-slip driven over glitchTimer in UpdateHoloGlitch. No
+	// brightness flash (a tinted flicker read as a distracting random-colour flash).
 	internal void Jump()
 	{
-		foreach (BackgroundImage backgroundLayer in backgroundLayers)
+		if (!isHolodeck)
 		{
-			if (RandomHelper.Random.Next(2) == 0)
+			return;
+		}
+		glitchTimer.Reset();
+		glitchTimer.Start();
+		glitchSlip = new Vector2(RandomHelper.RandomNextFloat(-7f, 7f), RandomHelper.RandomNextFloat(-3f, 3f));
+	}
+
+	// Per-frame: clear last frame's transient slip, then (while a glitch burst is active)
+	// apply a small steppy "digital" stutter so it reads as an intentional holographic
+	// hiccup rather than a smooth smear. The grid slips most; the rest of the projection
+	// (stars, far grid) barely moves, so it doesn't pull the eye off gameplay.
+	private void UpdateHoloGlitch(GameTime gameTime)
+	{
+		if (!isHolodeck)
+		{
+			return;
+		}
+		foreach (BackgroundImage layer in backgroundLayers)
+		{
+			layer.drawOffset = Vector2.Zero;
+		}
+		glitchTimer.Update(gameTime);
+		if (!glitchTimer.Active)
+		{
+			return;
+		}
+		float p = 1f - glitchTimer.Normalized;
+		float[] slipSteps = new float[3] { 1f, -0.5f, 0.2f };
+		Vector2 off = glitchSlip * slipSteps[Math.Min((int)(p * 3f), 2)];
+		if (holoGrid != null)
+		{
+			holoGrid.drawOffset = off;
+		}
+		foreach (BackgroundImage layer in backgroundLayers)
+		{
+			if (layer != holoGrid)
 			{
-				backgroundLayer.position.X = RandomHelper.RandomNextFloat(0f, backgroundLayer.realsize.X);
-				backgroundLayer.position.Y = RandomHelper.RandomNextFloat(0f, backgroundLayer.realsize.Y);
+				layer.drawOffset = off * 0.15f;
 			}
+		}
+	}
+
+	// Drives the grid light-pulse: while a sweep runs, advance it; otherwise count down the
+	// randomised cooldown and kick off the next sweep when it elapses. DrawHoloPulse renders it.
+	private void UpdateHoloPulse(GameTime gameTime)
+	{
+		if (!isHolodeck)
+		{
+			return;
+		}
+		if (pulseActive)
+		{
+			pulseTimer.Update(gameTime);
+			if (!pulseTimer.Active)
+			{
+				pulseActive = false;
+				pulseCooldown.Duration = RandomHelper.RandomNextFloat(8000f, 16000f);
+				pulseCooldown.Reset();
+				pulseCooldown.Start();
+			}
+		}
+		else
+		{
+			pulseCooldown.Update(gameTime);
+			if (!pulseCooldown.Active)
+			{
+				pulseActive = true;
+				pulseTimer.Reset();
+				pulseTimer.Start();
+			}
+		}
+	}
+
+	// A soft cyan light band that sweeps top->bottom through the holodeck. Built from a few
+	// stacked, centred additive strips (a cheap triangular falloff) so where it passes the
+	// grid lines surge brighter; the bloom present-pass softens it further. Drawn in 800x600
+	// design space (scaled by RenderScale.Matrix), like the fade overlays.
+	private void DrawHoloPulse()
+	{
+		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
+		if (!isHolodeck || !pulseActive)
+		{
+			return;
+		}
+		float p = 1f - pulseTimer.Normalized;
+		float bandFull = 220f;
+		float centerY = MathHelper.Lerp(0f - bandFull, 600f + bandFull, p);
+		float envelope = MathHelper.Clamp(Convert.ToSingle(Math.Sin((double)p * Math.PI)), 0f, 1f);
+		float peak = 0.5f * envelope;
+		int layers = 10;
+		base.SpriteBatch.BlendMode = (SpriteBlendMode)2;
+		for (int i = 0; i < layers; i++)
+		{
+			float h = bandFull * (float)(layers - i) / (float)layers;
+			base.SpriteBatch.Draw(blank, new Rectangle(0, (int)(centerY - h / 2f), 800, (int)h), new Color(0.5f, 0.9f, 1f, peak / (float)layers));
 		}
 	}
 

@@ -194,7 +194,12 @@ public class InputHandler : IInputHandlerService
 		// in-game ControlDevice.Keyboard player. keysToCheck[i] = physical Keys for MyKeys i.
 		KeyboardState keyboardState = Keyboard.GetState();
 		MouseState state = Mouse.GetState();
-		mousepos = new Vector2((float)(state).X, (float)(state).Y);
+		// Stage 10 presenter: KNI's back buffer is the browser-WINDOW size, and the mouse
+		// arrives in those window pixels — but the game (mouse-aim fire in PlayerShip, the
+		// software cursor in MousePointer) works in 800x600 design space. Undo Game1.Draw's
+		// letterbox scale+offset so the cursor maps to the design point under it; otherwise
+		// the ship fires toward a scaled/shifted phantom point, not where you clicked.
+		mousepos = RenderScale.WindowToDesign(new Vector2((float)(state).X, (float)(state).Y));
 		bool flag = false;
 		for (int i = 0; i < keysToCheck.Length; i++)
 		{

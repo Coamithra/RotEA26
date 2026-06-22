@@ -39,6 +39,10 @@ namespace EvilAliensWeb.Compat
 		// Unlock every gated menu option (session-only) so the full menu can be explored.
 		public static bool UnlockAll { get; private set; }
 
+		// Force the Invulnerability cheat ON at boot (so playtesting a level doesn't keep
+		// dying). Applied in Game1.startScreen_OnFinished after Settings has loaded.
+		public static bool Invuln { get; private set; }
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -85,6 +89,11 @@ namespace EvilAliensWeb.Compat
 				case "unlock":
 					UnlockAll = IsOn(val);
 					break;
+				case "invuln":
+				case "invulnerability":
+				case "god":
+					Invuln = IsOn(val);
+					break;
 				case "level":
 					if (Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl))
 					{
@@ -100,13 +109,13 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
 					+ " autoStart=" + AutoStart + " noAttract=" + NoAttract
 					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
-					+ " unlockAll=" + UnlockAll);
+					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln);
 			}
 			else
 			{

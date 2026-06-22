@@ -209,13 +209,24 @@ public class Game1 : Game
 		startScreen.OnFinished += startScreen_OnFinished;
 		splashScene = new SplashScene((Game)(object)this);
 		splashScene.SetTimers(1000, 3000, 1200, 400);
-		// Revenge reskin: studio logo first, then the classic "I made this!" meme as
-		// the finale (index 1) — where the channel-flip glitch reveals the revenged
-		// splash (90% the 4:3 "revenged", ~10% a portrait "pure" shot, 50/50 glasses).
-		splashScene.AddSplash("GFX/Splash/ealogo");
+		// Revenge reskin: studio logo (index 0), then the classic "I made this!" meme
+		// (index 1) — where the channel-flip glitch CROSSFADES the old meme into the
+		// revenged splash (90% the 4:3 "revenged", ~10% a portrait "pure" shot, 50/50
+		// glasses) — and FINALLY a text "confession" (index 2) that lands as the reveal:
+		// now that you've seen the game's been messed with, here's what happened. Each
+		// text-array entry is a reveal beat that fades in on its own comedic timer.
+		splashScene.AddSplash("GFX/Splash/easplashredone");
 		splashScene.AddSplash("GFX/Splash/uglysplash22");
 		splashScene.SetChannelFlip(1, "GFX/Splash/uglysplash22-revenged",
 			"GFX/Splash/uglysplash22-revenged-pure", "GFX/Splash/uglysplash22-revenged-pure-glasses");
+		splashScene.AddTextSplash(new string[]
+		{
+			"This game has been lovingly crafted without the use of AI",
+			".. in 2008",
+			"Then, in 2026, I used a BUNCH of AI",
+			"Like, a LOT",
+			"I'm sorry :("
+		});
 		splashScene.OnFinished += SplashFinished;
 		// Debug (?skipsplash / ?menu / ?level=...): jump past the splash sequence straight
 		// to the Press Start screen (what SplashFinished would otherwise swap in). Normal
@@ -273,6 +284,12 @@ public class Game1 : Game
 
 	private void startScreen_OnFinished(object sender)
 	{
+		// Debug (?invuln): turn the Invulnerability cheat on before any level can spawn a
+		// player. Settings has loaded by the time Press Start completes, so this sticks.
+		if (DebugFlags.Invuln)
+		{
+			Settings.GetInstance().Invulnerability = true;
+		}
 		if (menuScene != null)
 		{
 			menuScene.CleanUp();

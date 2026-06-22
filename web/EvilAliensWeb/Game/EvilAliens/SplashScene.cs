@@ -40,10 +40,12 @@ internal class SplashScene : Scene
 	private int pausetime = 1500;
 
 	// --- channel-flip ("change the channel") transition on one chosen splash ---
-	// The flip splash holds its OLD image briefly, then a sudden TV glitch + push
-	// reveals one of the revenged images; the normal show/pause/fade dwell then runs
-	// on the REVEAL (the retime: the wait time lands after the effect). The reveal is
-	// drawn crisp into the unified scene via SpriteBatchWrapper.DrawEffect + channelflip.fx.
+	// The flip splash holds its OLD image for ~75% of a normal splash dwell, then a TV
+	// glitch CROSSFADES it into one of the revenged images: the old distorts and
+	// dissolves while the new emerges distorted and settles crisp (no vertical scroll;
+	// see channelflip.fx). The normal show/pause/fade dwell then runs on the REVEAL
+	// (the retime: the wait time lands after the effect). Drawn crisp into the unified
+	// scene via SpriteBatchWrapper.DrawEffect + channelflip.fx.
 	private Effect channelFlip;
 
 	private int flipIndex = -1;
@@ -60,11 +62,36 @@ internal class SplashScene : Scene
 
 	private readonly Random rng = new Random();
 
-	private const double HOLD_MS = 700.0;   // old image visible before the flip fires
+	private double holdMs;                  // old image visible before the flip fires (= showtime * HOLD_FRAC)
 
-	private const double FLIP_MS = 450.0;   // sudden glitch + push duration
+	private const double HOLD_FRAC = 0.55;  // hold the old "I made this" ~55% of a normal splash dwell before the glitch
 
-	private double effShowtime;             // showtime + (flip ? HOLD+FLIP : 0)
+	private const double FLIP_MS = 650.0;   // glitch + crossfade duration
+
+	private double effShowtime;             // showtime + (flip ? hold+FLIP : text ? textShowtime : 0)
+
+	// --- text-only splash (drawn with the menu font, not a texture) ---
+	// One entry may be a text splash: its `currentLines` reveal stanza-by-stanza on a
+	// comedic-beat timer, centred and auto-fit to the 800x600 design frame. The overall
+	// in/out still rides the shared fade-to-black overlay; each stanza adds its own
+	// fade-in alpha on top.
+	private SpriteFont textFont;
+
+	private int textIndex = -1;
+
+	private List<string[]> splashTexts = new List<string[]>();
+
+	private string[] currentLines;
+
+	private double textShowtime;
+
+	private const double TEXT_FIRST_MS = 700.0;    // first stanza appears
+
+	private const double TEXT_STANZA_MS = 1150.0;  // gap between stanza reveals
+
+	private const double TEXT_STANZA_FADE_MS = 380.0; // each stanza's fade-in
+
+	private const double TEXT_HOLD_MS = 2600.0;    // dwell after the last stanza lands
 
 	public event FinishedHandler OnFinished;
 
@@ -118,6 +145,17 @@ internal class SplashScene : Scene
 		Texture2D item = localContent.Load<Texture2D>(filename);
 		texturenames.Add(filename);
 		textures.Add(item);
+		splashTexts.Add(null);
+	}
+
+	// Register a text-only splash (no texture). `lines` are the reveal beats: each
+	// stanza fades in in turn for comedic timing. Must be called before Initialize.
+	public void AddTextSplash(string[] lines)
+	{
+		texturenames.Add(null);
+		textures.Add(null);
+		splashTexts.Add(lines);
+		textIndex = textures.Count - 1;
 	}
 
 	protected override void LoadContent()
@@ -127,7 +165,12 @@ internal class SplashScene : Scene
 		textures.Clear();
 		foreach (string texturename in texturenames)
 		{
-			textures.Add(localContent.Load<Texture2D>(texturename));
+			// null name == a text splash; it carries no texture.
+			textures.Add(texturename == null ? null : localContent.Load<Texture2D>(texturename));
+		}
+		if (textIndex >= 0)
+		{
+			textFont = localContent.Load<SpriteFont>("GFX/Menu/menufont");
 		}
 		if (flipIndex >= 0)
 		{
@@ -152,8 +195,21 @@ internal class SplashScene : Scene
 	// (so the reveal gets the full dwell) and roll the reveal variant.
 	private void BeginDisplay()
 	{
+		currentLines = splashTexts[currentTextureNumber];
+		bool isText = (currentLines != null) && (textFont != null);
 		bool isFlip = (currentTextureNumber == flipIndex);
-		effShowtime = (double)showtime + (isFlip ? (HOLD_MS + FLIP_MS) : 0.0);
+		holdMs = (double)showtime * HOLD_FRAC;
+		if (isText)
+		{
+			// Last stanza lands at TEXT_FIRST + (n-1)*TEXT_STANZA, plus its fade-in and a hold.
+			textShowtime = TEXT_FIRST_MS + (currentLines.Length - 1) * TEXT_STANZA_MS
+				+ TEXT_STANZA_FADE_MS + TEXT_HOLD_MS;
+			effShowtime = textShowtime;
+		}
+		else
+		{
+			effShowtime = (double)showtime + (isFlip ? (holdMs + FLIP_MS) : 0.0);
+		}
 		variantPicked = false;
 		if (isFlip)
 		{
@@ -196,13 +252,13 @@ internal class SplashScene : Scene
 	private float FlipProgress()
 	{
 		double t = stateTimer.TotalMilliseconds;
-		if (t < HOLD_MS)
+		if (t < holdMs)
 		{
 			return 0f;
 		}
-		if (t < HOLD_MS + FLIP_MS)
+		if (t < holdMs + FLIP_MS)
 		{
-			return (float)((t - HOLD_MS) / FLIP_MS);
+			return (float)((t - holdMs) / FLIP_MS);
 		}
 		return 1f;
 	}
@@ -215,6 +271,48 @@ internal class SplashScene : Scene
 		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
 		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
+	}
+
+	// Draw the text splash: stanzas centred & auto-fit to the 800x600 design frame,
+	// each fading in on its own comedic beat. Positions are fixed from the start (laid
+	// out for the full block) so nothing jumps as later stanzas pop in; the shared
+	// fade-to-black overlay still rides on top for the whole-block in/out.
+	private void DrawTextSplash()
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		string[] lines = currentLines;
+		double t = stateTimer.TotalMilliseconds;
+
+		// Auto-fit: scale so the widest stanza fits the frame with a margin.
+		float maxW = 1f;
+		for (int i = 0; i < lines.Length; i++)
+		{
+			float w = textFont.MeasureString(lines[i]).X;
+			if (w > maxW)
+			{
+				maxW = w;
+			}
+		}
+		float scale = Math.Min(1f, 720f / maxW);
+		float lineH = (float)textFont.LineSpacing * scale;
+		float gap = lineH * 1.7f;                       // stanza spacing (blank-line feel)
+		float blockH = (float)(lines.Length - 1) * gap + lineH;
+		float top = 300f - blockH / 2f;
+
+		for (int i = 0; i < lines.Length; i++)
+		{
+			double revealAt = TEXT_FIRST_MS + (double)i * TEXT_STANZA_MS;
+			float a = MathHelper.Clamp((float)((t - revealAt) / TEXT_STANZA_FADE_MS), 0f, 1f);
+			if (a <= 0f)
+			{
+				continue;
+			}
+			float w = textFont.MeasureString(lines[i]).X * scale;
+			Vector2 pos = new Vector2(400f - w / 2f, top + (float)i * gap);
+			// Straight alpha (NonPremultiplied blend): keep RGB full, vary only alpha.
+			Color c = new Color((byte)240, (byte)248, (byte)255, (byte)(a * 255f));
+			base.SpriteBatch.DrawString(textFont, lines[i], pos, c, 0f, Vector2.Zero, scale, (SpriteEffects)0, 0f);
+		}
 	}
 
 	public void Unload()
@@ -237,44 +335,61 @@ internal class SplashScene : Scene
 		Rectangle dest = new Rectangle(0, 0, 800, 600);
 		base.GraphicsDevice.Clear(Color.Black);
 
-		bool isFlip = (currentTextureNumber == flipIndex) && variantPicked && (channelFlip != null);
-		if (displaySplash & (currentSplash != null))
+		bool isText = (currentLines != null) && (textFont != null);
+		bool isFlip = !isText && (currentTextureNumber == flipIndex) && variantPicked && (channelFlip != null);
+		if (displaySplash && isText)
+		{
+			DrawTextSplash();
+		}
+		else if (displaySplash & (currentSplash != null))
 		{
 			if (isFlip)
 			{
-				// Hand the reveal to the native-res overlay: s0 = the OLD splash
-				// (currentSplash), the chosen reveal bound as the NewTexture param,
-				// the glitch driven by Progress, the fade by Fade. Full 4:3 design slot.
+				// The channel-flip SHADER only runs once the crossfade actually starts
+				// (prog > 0). During the pre-glitch HOLD we draw the old splash with the
+				// PLAIN Draw + the shared black-overlay fade — byte-identical to the EA
+				// logo's path, which fades correctly — so the "I made this" fade-in can't
+				// be entangled with the shader at all. (The old bug: routing the hold's
+				// fade through the shader's premultiplied Fade / a separate DrawEffect
+				// batch never composited the fade the way the plain path does.) At the
+				// handoff prog is 0+ and currentFade is already 255 (hold is well past the
+				// fade-in), and the shader at prog~=0 == the old image, so there's no pop.
 				float prog = FlipProgress();
-				float time = (float)gameTime.TotalGameTime.TotalSeconds;
-				float fade = (float)currentFade / 255f;
-				Texture2D oldTex = currentSplash;
-				Texture2D newTex = chosenNew;
-				Vector4 nrect = chosenNewRect;
-				Effect fx = channelFlip;
-				// Stage 10: the channel-flip reveal now rides the unified scene path — drawn
-				// in 800x600 design space through the channelflip pixel effect (s0 = the old
-				// splash, the reveal bound as NewTexture), scaled up to render res by
-				// RenderScale.Matrix. (Was a bolt-on native-res overlay pass pre-Stage-10.)
-				base.SpriteBatch.DrawEffect(oldTex, new Rectangle(0, 0, 800, 600), fx,
-					delegate(Effect eff, Rectangle d)
-					{
-						eff.Parameters["Progress"].SetValue(prog);
-						eff.Parameters["Time"].SetValue(time);
-						eff.Parameters["Fade"].SetValue(fade);
-						eff.Parameters["NewRect"].SetValue(nrect);
-						eff.Parameters["NewTexture"].SetValue(newTex);
-					});
+				if (prog <= 0f)
+				{
+					base.SpriteBatch.Draw(currentSplash, dest, Color.White);
+				}
+				else
+				{
+					float time = (float)gameTime.TotalGameTime.TotalSeconds;
+					Texture2D oldTex = currentSplash;
+					Texture2D newTex = chosenNew;
+					Vector4 nrect = chosenNewRect;
+					Effect fx = channelFlip;
+					// Stage 10: the channel-flip reveal rides the unified scene path — drawn
+					// in 800x600 design space through the channelflip pixel effect (s0 = the
+					// old splash, the reveal bound as NewTexture), scaled up to render res by
+					// RenderScale.Matrix. Fade=1: the global fade rides the overlay below.
+					base.SpriteBatch.DrawEffect(oldTex, new Rectangle(0, 0, 800, 600), fx,
+						delegate(Effect eff, Rectangle d)
+						{
+							eff.Parameters["Progress"].SetValue(prog);
+							eff.Parameters["Time"].SetValue(time);
+							eff.Parameters["Fade"].SetValue(1f);
+							eff.Parameters["NewRect"].SetValue(nrect);
+							eff.Parameters["NewTexture"].SetValue(newTex);
+						});
+				}
 			}
 			else
 			{
 				base.SpriteBatch.Draw(currentSplash, dest, Color.White);
 			}
 		}
-		if (!isFlip)
+		// Global fade-to-black for ALL splash types (image, text, AND the channel-flip):
+		// the flip shader now renders at full opacity, so this single overlay is the one
+		// fade path — the "I made this" fades in/out identically to the EA logo.
 		{
-			// The flip path fades via the shader's Fade uniform; other splashes use
-			// the classic fade-to-black overlay.
 			int num = 255 - currentFade;
 			if (num < 0)
 			{

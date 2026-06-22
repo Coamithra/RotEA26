@@ -109,7 +109,6 @@
                 mkFile("Board_Deck_FINAL_v7", "pptx"),
                 mkFile("2026_Operating_Budget", "xlsx"),
                 mkFile("Performance_Reviews_CONFIDENTIAL", "pdf"),
-                mkFile("Meeting_Notes", "txt", { text: "SYNERGY SYNC — notes\r\n\r\n- discussed the alignment doc\r\n- aligned on aligning the alignment\r\n- ACTION: socialize the framework, circle back\r\n- ACTION: take the other thing offline\r\n- next steps: define \"next steps\"\r\n\r\n(meeting ran 50 min over. nobody knows why we met.)\r\n" }),
                 mkFile("Headcount_Plan", "csv"),
                 { kind: "folder", to: "reports", name: "Reports" },
                 { kind: "folder", to: "archive", name: "Archive" },
@@ -163,11 +162,34 @@ P.S. — I have NOT sent this. I closed the lid, told myself "Monday," and
 dragged it to the Recycle Bin instead. It is still Monday somewhere. It is
 always Monday here.`;
 
-    // {file, fromFolder, fromName} — pre-seeded with the resignation letter the
-    // employee drafted, thought better of, and quietly deleted. (Classic.)
+    const MEETING_NOTES =
+        "SYNERGY SYNC — notes\r\n\r\n" +
+        "- discussed the alignment doc\r\n" +
+        "- aligned on aligning the alignment\r\n" +
+        "- ACTION: socialize the framework, circle back\r\n" +
+        "- ACTION: take the other thing offline\r\n" +
+        "- next steps: define \"next steps\"\r\n\r\n" +
+        "(meeting ran 50 min over. nobody knows why we met.)\r\n";
+
+    // A resignation-adjacent email Alex actually addressed to their manager, then
+    // chickened out of and binned. Restored, it lands in Mail → Drafts where it can
+    // be deleted again — or sent, which has consequences (see scheduleIncomingCall).
+    const DRAFT_EMAIL = {
+        to: "Jordan Ellis", toAddr: "jordan.ellis@meridian-dynamics.com",
+        subj: "RE: quick sync?",
+        body: "<p>Hi Jordan,</p><p>Thanks for the invite to align on the alignment doc before we align with the broader alignment group. Honest answer: there is no sync short enough.</p><p>I've gone ahead and blocked my calendar for the next four to six business years. If something is genuinely urgent it can go in a document, which I will then move &mdash; unread &mdash; to a folder named &ldquo;Reviewed.&rdquo;</p><p>Warmest possible regards,<br>Alex</p>",
+    };
+
+    // Recycle Bin entries are either { file, fromFolder, fromName } or, for a deleted
+    // email, { kind:"mail", mail, fromName }. Pre-seeded with everything Alex thought
+    // better of and quietly deleted: the resignation letter, the meeting notes, the email.
     const recycleBin = [
         { file: mkFile("Resignation_Letter_DRAFT", "txt", { text: RESIGNATION_LETTER }), fromFolder: "documents", fromName: "Documents" },
+        { file: mkFile("Meeting_Notes", "txt", { text: MEETING_NOTES }), fromFolder: "documents", fromName: "Documents" },
+        { kind: "mail", mail: DRAFT_EMAIL, fromName: "Mail" },
     ];
+    const drafts = [];          // emails restored from the bin live here (Mail → Drafts)
+    let mailRefresh = null;     // set while a Mail window is open, so restores re-render it
 
     /* --------------------------------------------------- boot sequence ----- */
     const boot = $("#boot"), os = $("#os");
@@ -910,42 +932,136 @@ always Monday here.`;
         { from: "Jordan Ellis (Manager)", when: "Yesterday", subj: "quick sync?", unread: false, body: "<p>Hey,</p><p>Do you have 15 minutes to align on the alignment doc before we align with the broader alignment group? Want to make sure we're aligned.</p><p>Thanks!<br>Jordan</p>" },
         { from: "Meridian Wellness", when: "Mon", subj: "🧘 5-minute mindfulness for peak productivity", unread: false, body: "<p>Feeling overwhelmed? Studies show that taking a deliberate 5-minute breathing break can boost output by up to 4%.</p><p>Please log your mindfulness minutes in the Wellness Portal so they can be tracked against your quarterly targets.</p>" },
     ];
-    async function openMail() {
+    const MAIL_FOLDERS = ["Inbox", "Sent", "Drafts", "Synergy", "Spam", "Deleted Items"];
+    function mailCount(name) {
+        if (name === "Inbox") return mails.filter(m => m.unread).length;
+        if (name === "Drafts") return drafts.length;
+        if (name === "Spam") return 47;
+        return 0;
+    }
+    async function openMail(startFolder) {
         if (!(await gateEula())) return;
         openWindow({
-            id: "mail", title: "Meridian Mail", icon: ICO.mail, width: 800, height: 540,
-            build(body) {
+            id: "mail", title: "Meridian Mail", icon: ICO.mail, width: 820, height: 560,
+            build(body, w) {
                 const tools = el("div", { class: "toolbar" });
                 tools.append(
                     el("button", { class: "tbtn primary", html: "&#9993; New Message", onclick: compose }),
                     el("button", { class: "tbtn", text: "Reply", onclick: () => toast({ kind: "info", title: "Reply", body: "Drafting is disabled in offline mode." }) }),
                     el("button", { class: "tbtn", text: "Archive", onclick: () => toast({ kind: "ok", title: "Archived", body: "Message moved to Archive." }) }),
-                    el("button", { class: "tbtn", text: "Delete", onclick: () => toast({ kind: "ok", title: "Deleted", body: "Message moved to Deleted Items." }) }),
                 );
                 body.appendChild(tools);
                 const mail = el("div", { class: "mail" });
                 const side = el("div", { class: "mail-side" });
-                [["Inbox", mails.filter(m => m.unread).length], ["Sent", 0], ["Drafts", 1], ["Synergy", 0], ["Spam", 47], ["Deleted Items", 0]].forEach(([nm, n], i) => {
-                    const it = el("div", { class: "side-item" + (i === 0 ? " active" : "") });
-                    it.innerHTML = `<span>${nm}</span>` + (n ? `<span style="margin-left:auto;color:var(--ink-soft)">${n}</span>` : "");
-                    side.appendChild(it);
-                });
                 const list = el("div", { class: "mail-list" });
                 const read = el("div", { class: "mail-read" });
-                mails.forEach((m, i) => {
-                    const it = el("div", { class: "mail-item" + (m.unread ? " unread" : "") + (i === 0 ? " active" : "") });
-                    it.innerHTML = `<div class="from"><span>${m.unread ? '<span class="dot"></span>' : ""}${m.from}</span><span class="when">${m.when}</span></div><div class="subj">${m.subj}</div><div class="prev">${m.body.replace(/<[^>]+>/g, " ").trim().slice(0, 60)}…</div>`;
-                    it.addEventListener("click", () => { list.querySelectorAll(".mail-item").forEach(n => n.classList.remove("active")); it.classList.add("active"); it.classList.remove("unread"); m.unread = false; showMsg(m); });
-                    list.appendChild(it);
-                });
+                mail.append(side, list, read); body.appendChild(mail);
+
+                let cur = MAIL_FOLDERS.includes(startFolder) ? startFolder : "Inbox";
+                const itemsFor = name => name === "Inbox" ? mails : name === "Drafts" ? drafts : [];
+
+                function renderSide() {
+                    side.innerHTML = "";
+                    MAIL_FOLDERS.forEach(name => {
+                        const n = mailCount(name);
+                        const it = el("div", { class: "side-item" + (name === cur ? " active" : ""), onclick: () => { cur = name; render(); } });
+                        it.innerHTML = `<span>${name}</span>` + (n ? `<span style="margin-left:auto;color:var(--ink-soft)">${n}</span>` : "");
+                        side.appendChild(it);
+                    });
+                }
+                function render() {
+                    renderSide();
+                    list.innerHTML = "";
+                    const items = itemsFor(cur);
+                    if (!items.length) {
+                        list.appendChild(el("div", { class: "empty-note", text: cur === "Drafts" ? "No drafts." : "This folder is empty." }));
+                        read.innerHTML = `<div class="mail-empty">Nothing to read here.</div>`;
+                        return;
+                    }
+                    const isDraft = cur === "Drafts";
+                    items.forEach(m => {
+                        const who = isDraft ? "To: " + m.to : m.from;
+                        const when = isDraft ? "Draft" : m.when;
+                        const it = el("div", { class: "mail-item" + (!isDraft && m.unread ? " unread" : "") });
+                        it.innerHTML = `<div class="from"><span>${!isDraft && m.unread ? '<span class="dot"></span>' : ""}${who}</span><span class="when">${when}</span></div><div class="subj">${m.subj}</div><div class="prev">${m.body.replace(/<[^>]+>/g, " ").trim().slice(0, 60)}…</div>`;
+                        it.addEventListener("click", () => {
+                            list.querySelectorAll(".mail-item").forEach(n => n.classList.remove("active")); it.classList.add("active");
+                            if (isDraft) showDraft(m);
+                            else { if (m.unread) { m.unread = false; it.classList.remove("unread"); renderSide(); } showMsg(m); }
+                        });
+                        list.appendChild(it);
+                    });
+                    // open the first item by default
+                    const first = list.querySelector(".mail-item");
+                    if (first) { first.classList.add("active"); isDraft ? showDraft(items[0]) : showMsg(items[0]); }
+                }
                 function showMsg(m) {
                     read.innerHTML = `<h2>${m.subj}</h2><div class="meta"><b>${m.from}</b> &lt;${m.from.toLowerCase().replace(/[^a-z]+/g, ".").replace(/^\.|\.$/g, "")}@meridian-dynamics.com&gt;<br>To: alex.morgan@meridian-dynamics.com &nbsp;·&nbsp; ${m.when}</div><div class="body">${m.body}</div>`;
                 }
-                mail.append(side, list, read); body.appendChild(mail);
-                showMsg(mails[0]);
+                function showDraft(d) {
+                    read.innerHTML = `<h2>${d.subj || "(no subject)"}</h2><div class="meta">From: <b>Alex Morgan</b> &lt;alex.morgan@meridian-dynamics.com&gt;<br>To: ${d.to} &lt;${d.toAddr}&gt; &nbsp;·&nbsp; <span style="color:var(--danger)">Draft — not sent</span></div><div class="body">${d.body}</div>`;
+                    const row = el("div", { class: "draft-actions" });
+                    row.append(
+                        el("button", { class: "btn primary", html: "&#9993;&nbsp; Send", onclick: () => sendDraft(d) }),
+                        el("button", { class: "btn danger", text: "Delete", onclick: () => deleteDraft(d) }),
+                    );
+                    read.appendChild(row);
+                }
+                function sendDraft(d) {
+                    const i = drafts.indexOf(d); if (i < 0) return;
+                    drafts.splice(i, 1);
+                    toast({ kind: "ok", title: "Message sent", body: `“${d.subj}” has been delivered to ${d.to}.` });
+                    scheduleIncomingCall(d);   // the boss tends to "quick sync" right back…
+                    render();
+                }
+                async function deleteDraft(d) {
+                    const ok = await showDialog({
+                        title: "Delete draft", icon: "warn",
+                        html: `Move the draft <b>“${d.subj}”</b> to the Recycle Bin?`,
+                        buttons: [{ label: "Delete", value: true, kind: "danger" }, { label: "Cancel", value: false, primary: true }], escValue: false,
+                    });
+                    if (!ok) return;
+                    const i = drafts.indexOf(d); if (i < 0) return;
+                    drafts.splice(i, 1);
+                    recycleBin.push({ kind: "mail", mail: d, fromName: "Mail" });
+                    refreshBinIcon();
+                    toast({ kind: "ok", title: "Moved to Recycle Bin", body: `“${d.subj}”` });
+                    render();
+                }
+
+                w.render = render;
+                mailRefresh = render;
+                w._onClose = () => { if (mailRefresh === render) mailRefresh = null; };
+                render();
             }
         });
     }
+
+    // --- Incoming call (STUB — to be expanded later) -----------------------
+    // Sending the binned draft "summons" the manager: 5 minutes later an incoming
+    // Meridian Meet call slides in. For now it's a popup with Accept/Decline; the
+    // actual in-call experience is a follow-up. Console: eaIncomingCall() to preview.
+    const INCOMING_CALL_DELAY = 5 * 60 * 1000;   // 5 minutes
+    function scheduleIncomingCall(draft) {
+        setTimeout(() => incomingCall(draft), INCOMING_CALL_DELAY);
+    }
+    function incomingCall(draft) {
+        if ($("#zoom-call")) return;   // never stack two calls
+        const caller = (draft && draft.to) || "Jordan Ellis";
+        const initials = caller.split(/\s+/).map(s => s[0]).join("").slice(0, 2).toUpperCase();
+        const card = el("div", { class: "zoom-call", id: "zoom-call" });
+        card.innerHTML =
+            `<div class="zc-head"><span class="zc-dot"></span>Incoming Meridian Meet call…</div>` +
+            `<div class="zc-who"><div class="zc-avatar">${initials}</div><div><div class="zc-name">${caller}</div><div class="zc-sub">Manager · wants to “quick sync”</div></div></div>`;
+        const row = el("div", { class: "zc-actions" });
+        row.append(
+            el("button", { class: "zc-btn decline", text: "Decline", onclick: () => { card.remove(); toast({ kind: "warn", title: "Call declined", body: `${caller} will “find time on your calendar.”` }); } }),
+            el("button", { class: "zc-btn accept", text: "Accept", onclick: () => { card.remove(); toast({ kind: "info", title: "Meridian Meet", body: "Connecting you to the call… (coming soon)" }); } }),
+        );
+        card.appendChild(row);
+        document.body.appendChild(card);
+    }
+    window.eaIncomingCall = incomingCall;   // dev hook: preview without the 5-min wait
     async function compose() {
         const v = await showDialog({
             title: "New Message", titleIcon: false, icon: null,
@@ -958,6 +1074,15 @@ always Monday here.`;
             escValue: false,
         });
         if (v) toast({ kind: "ok", title: "Message sent", body: "Your message has been delivered." });
+    }
+    // Read-only peek at the binned email (double-click in the Recycle Bin). To send
+    // or delete it, the player restores it to Drafts first.
+    function previewBinMail(m) {
+        showDialog({
+            title: "Draft (in Recycle Bin)", titleIcon: false, icon: null,
+            html: `<div class="meta" style="margin-bottom:10px">To: ${m.to} &lt;${m.toAddr}&gt;<br>Subject: <b>${m.subj}</b></div><div class="body">${m.body}</div><div class='sub'>Restore this draft to Mail → Drafts to send or delete it.</div>`,
+            buttons: [{ label: "Close", value: null, primary: true }],
+        });
     }
 
     /* ----- Recycle Bin ----------------------------------------------------- */
@@ -977,14 +1102,17 @@ always Monday here.`;
                 const status = el("div", { class: "statusbar" });
                 body.appendChild(status);
                 let sel = null;
+                const binName = entry => entry.kind === "mail" ? entry.mail.subj : entry.file.name + "." + entry.file.ext;
                 function render() {
                     grid.innerHTML = ""; sel = null; restoreBtn.disabled = true;
                     if (!recycleBin.length) { grid.appendChild(el("div", { class: "empty-note", text: "Recycle Bin is empty." })); }
                     else recycleBin.forEach(entry => {
-                        const node = el("div", { class: "file", title: `${entry.file.name}.${entry.file.ext} (from ${entry.fromName})` });
-                        node.innerHTML = `<div class="ico">${fileGlyph(entry.file.ext)}</div><div class="nm">${entry.file.name}.${entry.file.ext}</div>`;
+                        const isMail = entry.kind === "mail";
+                        const name = binName(entry);
+                        const node = el("div", { class: "file", title: `${name} (from ${entry.fromName})` });
+                        node.innerHTML = `<div class="ico">${isMail ? BIGICO.mail : fileGlyph(entry.file.ext)}</div><div class="nm">${name}</div>`;
                         node.addEventListener("click", () => { grid.querySelectorAll(".file.sel").forEach(n => n.classList.remove("sel")); node.classList.add("sel"); sel = entry; restoreBtn.disabled = false; });
-                        node.addEventListener("dblclick", () => openFileItem(entry.file));
+                        node.addEventListener("dblclick", () => isMail ? previewBinMail(entry.mail) : openFileItem(entry.file));
                         grid.appendChild(node);
                     });
                     status.textContent = `${recycleBin.length} item${recycleBin.length === 1 ? "" : "s"}`;
@@ -994,10 +1122,21 @@ always Monday here.`;
                 restoreBtn.addEventListener("click", () => {
                     if (!sel) return;
                     const i = recycleBin.indexOf(sel); if (i < 0) return;
-                    const dest = folders[sel.fromFolder] || folders.documents;
-                    dest.items.push(sel.file); recycleBin.splice(i, 1);
-                    toast({ kind: "ok", title: "Restored", body: `${sel.file.name}.${sel.file.ext} → ${dest.name}` });
-                    render(); refreshAllFileViews(); refreshBinIcon();
+                    recycleBin.splice(i, 1);
+                    if (sel.kind === "mail") {
+                        // an email restores into Mail → Drafts, where it can be sent or re-deleted
+                        drafts.push(sel.mail);
+                        if (mailRefresh) mailRefresh();
+                        toast({ kind: "ok", title: "Restored to Drafts", body: `“${sel.mail.subj}” → Drafts`, action: { label: "Open Mail", fn: () => openMail("Drafts") } });
+                    } else {
+                        // documents land back in a (randomly chosen) docs folder
+                        const keys = ["documents", "reports", "archive"];
+                        const destKey = keys[Math.floor(Math.random() * keys.length)];
+                        folders[destKey].items.push(sel.file);
+                        refreshAllFileViews();
+                        toast({ kind: "ok", title: "Restored", body: `${sel.file.name}.${sel.file.ext} → ${folders[destKey].name}` });
+                    }
+                    render(); refreshBinIcon();
                 });
                 emptyBtn.addEventListener("click", async () => {
                     if (!recycleBin.length) return;

@@ -1755,3 +1755,459 @@ table.sheet td:focus {
     .files-side, .mail-side { display: none; }
     .mail-list { width: 200px; }
 }
+
+/* ===========================================================================
+   Meridian Meet  --  the LucasArts-style boss call + the leaving ending.
+   Driven by office.js (startMeetCall / playQuitEnding). The call overlay sits
+   above the desktop/windows but below dialogs+toasts, which are lifted over it
+   while a call is up (body.in-call) so the "Leave" confirm renders on top.
+   =========================================================================== */
+body.in-call {
+    overflow: hidden;
+}
+
+body.in-call #dialog-layer,
+body.in-call #toast-layer {
+    z-index: 6000;
+}
+
+.meet {
+    position: fixed;
+    inset: 0;
+    z-index: 4500;
+    display: flex;
+    flex-direction: column;
+    background: radial-gradient(1200px 820px at 50% 26%, #1b2435 0%, #0c111b 64%, #070a10 100%);
+    color: #eef2f9;
+    font-family: var(--font);
+    animation: meet-in .35s ease;
+}
+
+@keyframes meet-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.meet.ending {
+    animation: meet-out .48s ease forwards;
+}
+
+@keyframes meet-out {
+    to { opacity: 0; }
+}
+
+.meet-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 20px;
+    font-size: 13px;
+    color: #9fb1cf;
+}
+
+.meet-live {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 700;
+    color: #ff5b5b;
+    letter-spacing: .1em;
+}
+
+.meet-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff5b5b;
+    box-shadow: 0 0 0 0 rgba(255, 91, 91, .6);
+    animation: zc-pulse 1.4s infinite;
+}
+
+.meet-title { color: #cdd9ee; }
+.meet-timer { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.meet-stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 20px 4px;
+    overflow: hidden;
+}
+
+.meet-tile {
+    position: relative;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #0c1320;
+    border: 1px solid #29374f;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, .45);
+}
+
+.meet-tile.boss {
+    aspect-ratio: 4 / 3;
+    /* Sized to the space left after the fixed chrome (bar + 204px caption + 196px
+       choices + tray), so a tall caption never overflows or shoves the feed.
+       69vw caps the width (69vw * 4/3 ~= 92vw) on short/wide screens. */
+    height: min(calc(100vh - 520px), 69vw);
+    max-width: 100%;
+}
+
+.boss-poster,
+.boss-vid {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 42%;
+}
+
+.boss-vid {
+    opacity: 0;
+    transition: opacity .3s ease;
+}
+
+.boss-vid.idle.ready { opacity: 1; }
+#bossTile.talking .boss-vid.talk.ready { opacity: 1; }
+
+.meet-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 0 rgba(52, 210, 123, 0);
+    transition: box-shadow .25s ease;
+}
+
+#bossTile.talking .meet-ring {
+    animation: ring-glow 1.25s ease-in-out infinite;
+}
+
+@keyframes ring-glow {
+    0%, 100% { box-shadow: inset 0 0 0 3px rgba(52, 210, 123, .65); }
+    50% { box-shadow: inset 0 0 0 5px rgba(52, 210, 123, 1); }
+}
+
+.meet-label {
+    position: absolute;
+    left: 12px;
+    bottom: 11px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 11px;
+    background: rgba(8, 12, 20, .62);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+}
+
+.meet-eq {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 13px;
+    opacity: .3;
+}
+
+.meet-eq i {
+    width: 3px;
+    height: 3px;
+    background: #34d27b;
+    border-radius: 1px;
+}
+
+.talking .meet-eq { opacity: 1; }
+.talking .meet-eq i { animation: eq .6s ease-in-out infinite; }
+.talking .meet-eq i:nth-child(2) { animation-delay: .15s; }
+.talking .meet-eq i:nth-child(3) { animation-delay: .3s; }
+.talking .meet-eq i:nth-child(4) { animation-delay: .45s; }
+
+@keyframes eq {
+    0%, 100% { height: 3px; }
+    50% { height: 13px; }
+}
+
+.meet-tile.self {
+    position: absolute;
+    right: 26px;
+    bottom: 14px;
+    width: clamp(150px, 18vw, 220px);
+    aspect-ratio: 4 / 3;
+    background: #11161f;
+}
+
+.meet-tile.self .self-av {
+    position: absolute;
+    top: 46%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6d4bd1, #3a2a7a);
+    display: grid;
+    place-items: center;
+    font-weight: 600;
+    font-size: 16px;
+    color: #fff;
+}
+
+.meet-tile.self .self-cam {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 34px;
+    text-align: center;
+    font-size: 11px;
+    color: #6b7a93;
+}
+
+/* "Start Video" with no real camera -> a generic device error in the self tile. */
+.meet-tile.self.nocam .self-av { display: none; }
+
+.meet-tile.self.nocam .self-cam {
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: #c79090;
+}
+
+.meet-tile.self .self-cam .cam-off {
+    display: block;
+    width: 24px;
+    height: 24px;
+    margin: 0 auto 6px;
+    opacity: .85;
+}
+
+.meet-caption {
+    flex: none;
+    max-width: min(900px, 92vw);
+    width: 100%;
+    margin: 6px auto 0;
+    padding: 12px 22px 8px;
+    /* Fixed-height box: the dialogue is centered inside it and wraps WITHIN it, so
+       longer lines never push the video feed (or the choices/tray) around. Sized for
+       the longest boss line (~6 wrapped lines at this width) so nothing clips. */
+    height: 204px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: clamp(15px, 2.3vw, 21px);
+    line-height: 1.45;
+}
+
+/* The "Speaker: text..." line wraps as one centered paragraph inside the box. */
+.cap-line { width: 100%; }
+
+.meet-caption.clickable { cursor: pointer; }
+
+/* Inline "advance" cue: a blinking >> at the end of the line, click to continue.
+   No words -- it sits right after the spoken text like a classic text-box prompt. */
+.cap-more {
+    display: inline-block;
+    margin-left: 8px;
+    font-weight: 700;
+    font-size: 1.05em;
+    line-height: 1;
+    color: #8fb6ff;
+    cursor: pointer;
+    animation: cap-more-blink 1.05s ease-in-out infinite;
+}
+
+.cap-more:hover { color: #cfe1ff; }
+
+@keyframes cap-more-blink {
+    0%, 100% { opacity: .15; }
+    50% { opacity: 1; }
+}
+
+.cap-spk {
+    font-weight: 700;
+    color: #ffce6e;
+    margin-right: 9px;
+}
+
+.cap-spk.you { color: #7fc6ff; }
+
+.cap-txt {
+    font-size: clamp(15px, 2.3vw, 21px);
+    line-height: 1.45;
+    color: #eaf0fb;
+}
+
+.meet-choices {
+    flex: none;
+    max-width: min(900px, 92vw);
+    width: 100%;
+    /* Reserve the height of a full 4-option menu so the caption + tray sit still:
+       options just fade into this already-empty space instead of shoving the
+       caption upward when they appear. */
+    min-height: 196px;
+    margin: 0 auto;
+    padding: 2px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity .22s ease, transform .22s ease;
+}
+
+.meet-choices.show {
+    opacity: 1;
+    transform: none;
+}
+
+.choice {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-align: left;
+    background: rgba(28, 40, 62, .62);
+    border: 1px solid #32425f;
+    color: #dfe7f3;
+    border-radius: 10px;
+    padding: 11px 14px;
+    font: 500 15px var(--font);
+    transition: background .12s, border-color .12s, transform .06s;
+}
+
+.choice:hover {
+    background: rgba(50, 70, 106, .85);
+    border-color: #5b80c0;
+}
+
+.choice:active { transform: translateY(1px); }
+
+/* Muted: the reply options are struck through and can't be picked. */
+.meet-choices.muted .choice {
+    pointer-events: none;
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.meet-choices.muted .choice span { text-decoration: line-through; }
+
+.meet-tray {
+    flex: none;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 0 18px;
+}
+
+.tray-btn {
+    background: #222c3c;
+    color: #cdd9ee;
+    border: 0;
+    border-radius: 9px;
+    padding: 9px 18px;
+    font: 600 13px var(--font);
+    transition: filter .12s;
+}
+
+.tray-btn.on { background: #3a4a63; }
+.tray-btn.leave { background: #d2433a; color: #fff; }
+.tray-btn:hover { filter: brightness(1.12); }
+
+.meet-ended {
+    position: absolute;
+    inset: 0;
+    z-index: 12;
+    display: grid;
+    place-items: center;
+    background: rgba(7, 10, 16, .9);
+    text-align: center;
+    font-size: 24px;
+    font-weight: 300;
+    letter-spacing: .04em;
+    color: #dfe7f3;
+    animation: meet-in .3s ease;
+}
+
+.meet-ended-sub {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #7c8aa3;
+    letter-spacing: normal;
+}
+
+/* The leaving ending: fade to black -> "three months later" -> home-PC placeholder. */
+.ending-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #000;
+    color: #e8eefc;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 1s ease;
+    font-family: var(--font);
+}
+
+.ending-overlay.show { opacity: 1; }
+
+.ending-cap {
+    font-weight: 300;
+    letter-spacing: .34em;
+    text-indent: .34em;
+    font-size: clamp(20px, 4vw, 34px);
+    opacity: 0;
+    transition: opacity 1.2s ease;
+}
+
+.ending-cap.show { opacity: 1; }
+
+.ending-placeholder {
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.7;
+    letter-spacing: .04em;
+    color: #6a7d97;
+    border: 1px dashed #36506e;
+    border-radius: 10px;
+    padding: 22px 28px;
+}
+
+/* ---------- Decoy image thumbnails (bin/Files) + the Photos viewer -------- */
+.file .ico .thumb {
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 5px;
+    display: block;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .3);
+}
+
+.photo-view {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    background: #11151c;
+    overflow: auto;
+    padding: 14px;
+}
+
+.photo {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 6px 26px rgba(0, 0, 0, .5);
+    transition: transform .2s ease;
+}

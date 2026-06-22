@@ -130,65 +130,78 @@
             ]
         },
     };
-    const RESIGNATION_LETTER =
-`DRAFT 4 — do NOT send until I have slept on it
-
-Dear Jordan,
-
-Please accept this letter as my formal resignation from the position of
-Regional Synergy Lead at Meridian Dynamics, effective two weeks from today.
-
-After 6 years, 11 reorgs, 4 "new" mission statements and roughly 1,900 hours
-of mandatory Synergy Syncs, I have decided to pursue an opportunity that does
-not require me to "circle back," "double-click," or "take this offline" ever
-again.
-
-I am deeply grateful for everything I have learned here, chiefly that a
-12-minute coffee break is, in fact, logged.
-
-----------------------------------------------------------------------
-[draft 3 — too honest, tone down before sending]
-Jordan. I quit. I am going to go outside. The sun is real. Synergy is not.
-----------------------------------------------------------------------
-[draft 2 — closer?]
-To whom it may concern: I regret to inform you that I no longer regret
-anything.
-----------------------------------------------------------------------
-
-Sincerely,
-Alex Morgan
-
-P.S. — I have NOT sent this. I closed the lid, told myself "Monday," and
-dragged it to the Recycle Bin instead. It is still Monday somewhere. It is
-always Monday here.`;
-
     const MEETING_NOTES =
-        "SYNERGY SYNC — notes\r\n\r\n" +
-        "- discussed the alignment doc\r\n" +
-        "- aligned on aligning the alignment\r\n" +
-        "- ACTION: socialize the framework, circle back\r\n" +
-        "- ACTION: take the other thing offline\r\n" +
-        "- next steps: define \"next steps\"\r\n\r\n" +
-        "(meeting ran 50 min over. nobody knows why we met.)\r\n";
+`SYNERGY SYNC - notes
 
-    // A resignation-adjacent email Alex actually addressed to their manager, then
-    // chickened out of and binned. Restored, it lands in Mail → Drafts where it can
-    // be deleted again — or sent, which has consequences (see scheduleIncomingCall).
-    const DRAFT_EMAIL = {
+- discussed the alignment doc
+- aligned on aligning the alignment
+- ACTION: socialize the framework, circle back
+- ACTION: take the other thing offline
+- next steps: define "next steps"
+
+(meeting ran 50 min over. nobody knows why we met.)
+`;
+
+    // The resignation Alex actually wrote, then lost their nerve and binned. It is an
+    // email (not a doc): restore it to Mail -> Drafts and it can be sent -- which
+    // summons the boss (see scheduleIncomingCall). A touch of cold feet is still baked
+    // in (the struck-through false starts), but it is basically ready to fire.
+    const RESIGNATION_DRAFT = {
         to: "Jordan Ellis", toAddr: "jordan.ellis@meridian-dynamics.com",
-        subj: "RE: quick sync?",
-        body: "<p>Hi Jordan,</p><p>Thanks for the invite to align on the alignment doc before we align with the broader alignment group. Honest answer: there is no sync short enough.</p><p>I've gone ahead and blocked my calendar for the next four to six business years. If something is genuinely urgent it can go in a document, which I will then move &mdash; unread &mdash; to a folder named &ldquo;Reviewed.&rdquo;</p><p>Warmest possible regards,<br>Alex</p>",
+        subj: "My resignation",
+        body: "<p>Jordan,</p>" +
+            "<p>Please accept this as my formal resignation from the position of Regional Synergy Lead, effective two weeks from today.</p>" +
+            "<p>I have started this email four times. <s>I think I might want to</s> <s>I am fairly sure I</s> I am leaving &mdash; to go make video games. The kind with spaceships in them.</p>" +
+            "<p>Six years, eleven reorgs and roughly 1,900 hours of Synergy Syncs have been a journey. But it is time, and this one is not a draft. No need to circle back.</p>" +
+            "<p>Thank you for everything I have learned here, chiefly that a 12-minute coffee break is, in fact, logged.</p>" +
+            "<p>Alex</p>",
     };
 
-    // Recycle Bin entries are either { file, fromFolder, fromName } or, for a deleted
-    // email, { kind:"mail", mail, fromName }. Pre-seeded with everything Alex thought
-    // better of and quietly deleted: the resignation letter, the meeting notes, the email.
+    // Decoy junk so the resignation email isn't conspicuously alone in the bin.
+    const NOTES_TO_SELF =
+`- ask HR what "unlimited PTO" actually means
+- (it is not unlimited)
+- look into that game-dev bootcamp
+- learn an engine -- Unity? Godot?
+- update resume (done -> see other file, do NOT open at work)
+- stop opening this file at work
+- breathe`;
+    const PASSWORDS_TXT =
+`this is obviously NOT where I keep my passwords.
+
+...it's where I keep one password.
+
+Meridian2026!  (they make you change it every 30 days, so, you know.)`;
+    const UNTITLED_1 =
+`asdfasdf
+
+(this is the file OneVault has been failing to back up for six weeks.
+i'm afraid to close it now. we've been through a lot together.)`;
+
+    // Recycle Bin entries: { file, fromFolder, fromName } or { kind:"mail", mail, fromName }.
+    // The resignation email is deliberately BURIED in the middle of the clutter so it
+    // doesn't stand out -- you have to go digging to find the thing worth sending.
+    const binImg = (name, jpg) => ({ file: mkFile(name, "jpg", { src: "bin/" + jpg }), fromFolder: "documents", fromName: "Documents" });
+    const binDoc = (name, ext, extra) => ({ file: mkFile(name, ext, extra), fromFolder: "documents", fromName: "Documents" });
     const recycleBin = [
-        { file: mkFile("Resignation_Letter_DRAFT", "txt", { text: RESIGNATION_LETTER }), fromFolder: "documents", fromName: "Documents" },
-        { file: mkFile("Meeting_Notes", "txt", { text: MEETING_NOTES }), fromFolder: "documents", fromName: "Documents" },
-        { kind: "mail", mail: DRAFT_EMAIL, fromName: "Mail" },
+        binImg("IMG_2287", "cat.jpg"),
+        binDoc("Q3_Financials_OLD_OLD", "xlsx"),
+        binDoc("notes_to_self", "txt", { text: NOTES_TO_SELF }),
+        binImg("team_offsite_2025", "offsite.jpg"),
+        binDoc("Strategic_Synergy_Memo_v2_FINAL_FINAL", "docx"),
+        { kind: "mail", mail: RESIGNATION_DRAFT, fromName: "Mail" },   // <-- the one that matters, buried
+        binImg("Q2_kickoff_afterparty_DO_NOT_SHARE", "bosswild.jpg"),
+        binDoc("Performance_Review_self_assessment", "pdf"),
+        binImg("IMG_2291", "lunch.jpg"),
+        binDoc("passwords", "txt", { text: PASSWORDS_TXT }),
+        binDoc("Org_Chart_March", "pptx"),
+        binDoc("Meeting_Notes", "txt", { text: MEETING_NOTES }),
+        binImg("someday", "beach.jpg"),
+        binDoc("Untitled-1", "txt", { text: UNTITLED_1 }),
+        binDoc("Old_Invoices_2025", "zip"),
+        binDoc("expense_report_DRAFT", "xlsx"),
     ];
-    const drafts = [];          // emails restored from the bin live here (Mail → Drafts)
+    const drafts = [];          // emails restored from the bin live here (Mail -> Drafts)
     let mailRefresh = null;     // set while a Mail window is open, so restores re-render it
 
     /* --------------------------------------------------- boot sequence ----- */
@@ -707,7 +720,7 @@ always Monday here.`;
     }
     function fileTile(file, folderKey) {
         const node = el("div", { class: "file", title: file.name + "." + file.ext });
-        node.innerHTML = `<div class="ico">${fileGlyph(file.ext)}</div><div class="nm">${file.name}.${file.ext}</div>`;
+        node.innerHTML = `<div class="ico">${fileIconHTML(file)}</div><div class="nm">${file.name}.${file.ext}</div>`;
         node.addEventListener("click", e => { node.parentNode.querySelectorAll(".file.sel").forEach(n => n.classList.remove("sel")); node.classList.add("sel"); });
         node.addEventListener("dblclick", () => openFileItem(file));
         node.addEventListener("pointerdown", e => {
@@ -728,6 +741,7 @@ always Monday here.`;
         if (meta && meta.app === "sheets") return openSheets(file.name);
         if (meta && meta.app === "docs") return openDocs(file.name);
         if (file.ext === "txt") return openNotepad(file);
+        if (file.src && IMAGE_EXTS.includes(file.ext)) return openImage(file);
         // everything else: a believable "opening / preview" flow
         showDialog({
             title: "Meridian Workspace", icon: "info",
@@ -924,6 +938,42 @@ always Monday here.`;
         });
     }
 
+    /* ----- Photos (image viewer) ------------------------------------------ */
+    // Opens the decoy JPEGs that clutter the Recycle Bin (cat, offsite, sad lunch,
+    // beach...). Image files carry a `src` into office/bin/; everything else keeps
+    // the generic "opening" flow.
+    const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "bmp"];
+    const photoIcon = () => tile("#7a5bb0", '<rect x="5.5" y="6.5" width="13" height="11" rx="1.5" fill="#fff"/><circle cx="9.3" cy="10" r="1.3" fill="#7a5bb0"/><path d="M6.5 16l3-2.6 2 1.6 3-3.4 3 4.4z" fill="#7a5bb0"/>');
+    // File-tile icon: a cover-cropped thumbnail for images-with-src, else the glyph.
+    function fileIconHTML(file) {
+        return (file.src && IMAGE_EXTS.includes(file.ext))
+            ? `<img class="thumb" src="${file.src}" alt="" draggable="false">`
+            : fileGlyph(file.ext);
+    }
+    function openImage(file) {
+        const fname = file.name + "." + file.ext;
+        openWindow({
+            id: "img:" + file.id, title: fname + " - Photos", icon: photoIcon, width: 720, height: 560,
+            build(body) {
+                body.appendChild(el("div", { class: "menubar", html: ["File", "Edit", "View", "Help"].map(m => `<span class="mi">${m}</span>`).join("") }));
+                let rot = 0;
+                const tools = el("div", { class: "toolbar" });
+                tools.append(
+                    el("button", { class: "tbtn", text: "Rotate", onclick: () => { rot = (rot + 90) % 360; im.style.transform = "rotate(" + rot + "deg)"; } }),
+                    el("button", { class: "tbtn", text: "Set as wallpaper", onclick: () => toast({ kind: "info", title: "Photos", body: "Wallpaper is locked by your administrator." }) }),
+                    el("div", { class: "tgrow" }),
+                );
+                body.appendChild(tools);
+                const view = el("div", { class: "photo-view" });
+                const im = el("img", { class: "photo", src: file.src, alt: fname, draggable: "false" });
+                view.appendChild(im); body.appendChild(view);
+                const status = el("div", { class: "statusbar", text: fname });
+                im.addEventListener("load", () => { status.textContent = fname + "   -   " + im.naturalWidth + " x " + im.naturalHeight + " px"; });
+                body.appendChild(status);
+            }
+        });
+    }
+
     /* ----- Mail ------------------------------------------------------------ */
     const mails = [
         { from: "IT Service Desk", when: "9:14 AM", subj: "ACTION REQUIRED: Mandatory password reset", unread: true, body: "<p>Dear valued team member,</p><p>Our records indicate your network password will expire in <b>0 days</b>. To avoid disruption, please reset it immediately using the self-service portal. Your new password must contain at least 14 characters, three emoji, and may not resemble any of your previous 24 passwords.</p><p>Thank you for helping keep Meridian secure.</p><p>— IT Service Desk</p>" },
@@ -1037,35 +1087,399 @@ always Monday here.`;
         });
     }
 
-    // --- Incoming call (STUB — to be expanded later) -----------------------
-    // Sending the binned draft "summons" the manager: 5 minutes later an incoming
-    // Meridian Meet call slides in. For now it's a popup with Accept/Decline; the
-    // actual in-call experience is a follow-up. Console: eaIncomingCall() to preview.
-    // Testing: shorten the wait with ?call=<seconds> on the office URL (e.g. ?call=5).
+    // --- Incoming call ------------------------------------------------------
+    // Sending the binned resignation "summons" the manager: 3 minutes later an
+    // incoming Meridian Meet call slides in (Accept -> the full LucasArts call,
+    // startMeetCall). Console: eaIncomingCall() previews the card, eaCall() jumps
+    // straight into the call. Testing: shorten the wait with ?call=<seconds> on
+    // the office URL (e.g. ?call=5). 3 min is the head start for going this deep.
     const INCOMING_CALL_DELAY = (() => {
         const s = parseFloat(new URLSearchParams(location.search).get("call"));
-        return s > 0 ? s * 1000 : 5 * 60 * 1000;   // default 5 minutes
+        return s > 0 ? s * 1000 : 3 * 60 * 1000;   // default 3 minutes
     })();
     function scheduleIncomingCall(draft) {
         setTimeout(() => incomingCall(draft), INCOMING_CALL_DELAY);
     }
+    let gameQuit = false;   // set true once the boss accepts the resignation (CALL.resign_final)
+
     function incomingCall(draft) {
-        if ($("#zoom-call")) return;   // never stack two calls
+        if (gameQuit || $("#zoom-call") || $("#meet-call")) return;   // never stack calls; never after you've quit
         const caller = (draft && draft.to) || "Jordan Ellis";
         const initials = caller.split(/\s+/).map(s => s[0]).join("").slice(0, 2).toUpperCase();
         const card = el("div", { class: "zoom-call", id: "zoom-call" });
         card.innerHTML =
-            `<div class="zc-head"><span class="zc-dot"></span>Incoming Meridian Meet call…</div>` +
-            `<div class="zc-who"><div class="zc-avatar">${initials}</div><div><div class="zc-name">${caller}</div><div class="zc-sub">Manager · wants to “quick sync”</div></div></div>`;
+            `<div class="zc-head"><span class="zc-dot"></span>Incoming Meridian Meet call&hellip;</div>` +
+            `<div class="zc-who"><div class="zc-avatar">${initials}</div><div><div class="zc-name">${caller}</div><div class="zc-sub">Manager &middot; wants to &ldquo;quick sync&rdquo;</div></div></div>`;
         const row = el("div", { class: "zc-actions" });
         row.append(
-            el("button", { class: "zc-btn decline", text: "Decline", onclick: () => { card.remove(); toast({ kind: "warn", title: "Call declined", body: `${caller} will “find time on your calendar.”` }); } }),
-            el("button", { class: "zc-btn accept", text: "Accept", onclick: () => { card.remove(); toast({ kind: "info", title: "Meridian Meet", body: "Connecting you to the call… (coming soon)" }); } }),
+            el("button", {
+                class: "zc-btn decline", text: "Decline",
+                onclick: () => {
+                    card.remove();
+                    toast({ kind: "warn", title: "Call declined", body: `${caller} will &ldquo;find time on your calendar.&rdquo;` });
+                    setTimeout(() => incomingCall(draft), 25000);   // he is nothing if not persistent
+                }
+            }),
+            el("button", {
+                class: "zc-btn accept", text: "Accept",
+                onclick: () => { card.remove(); startMeetCall(draft); }
+            }),
         );
         card.appendChild(row);
         document.body.appendChild(card);
     }
-    window.eaIncomingCall = incomingCall;   // dev hook: preview without the 5-min wait
+
+    /* ====================================================== the boss call === */
+    // A LucasArts-style dialogue. The boss "talks" (active-speaker ring + meter,
+    // plus a talking video clip if present), a caption types out his line, then he
+    // goes idle and the player picks one of 1-4 replies. Several branches let you
+    // chicken out; only the committed path reaches resign_final, after which the
+    // game is "quit" (gameQuit) and Start -> Shut Down plays the leaving ending.
+
+    // Boss video feed: a still poster with idle + talking clips layered over it
+    // (office/boss/boss_idle.mp4 / boss_talking.mp4). A <video> is only revealed
+    // once it has actually loaded data, so if a clip is ever missing the poster
+    // underneath just stays put -- no black flash. Talking overlays idle.
+    const BOSS_DIR = "boss/";
+    function bossFeedHTML() {
+        return `<img class="boss-poster" src="${BOSS_DIR}boss_poster.jpg" alt="" draggable="false">` +
+            `<video class="boss-vid idle" muted loop playsinline preload="auto" src="${BOSS_DIR}boss_idle.mp4"></video>` +
+            `<video class="boss-vid talk" muted loop playsinline preload="auto" src="${BOSS_DIR}boss_talking.mp4"></video>`;
+    }
+    function makeBossFeed(tile) {
+        const vIdle = tile.querySelector(".boss-vid.idle"), vTalk = tile.querySelector(".boss-vid.talk");
+        const play = v => { try { const p = v.play(); if (p && p.catch) p.catch(() => { }); } catch (_) { } };
+        [vIdle, vTalk].forEach(v => v.addEventListener("loadeddata", () => v.classList.add("ready")));
+        play(vIdle);
+        return {
+            talk() { tile.classList.add("talking"); play(vIdle); play(vTalk); },
+            idle() { tile.classList.remove("talking"); },
+        };
+    }
+
+    // The dialogue tree. Each node is { boss, choices:[...] }, a passthrough
+    // { boss, next:"<id>" } (no choices -- click-to-continue straight into another
+    // boss line), or a terminal { boss, end:"quit"|"stay" }. "stay" = you chickened
+    // out; "quit" = he accepts.
+    //
+    // Each choice is { you, say, to }, built for the LucasArts "three jokes" rule:
+    //   you  = the SHORT line shown in the menu (joke #1, the one you read);
+    //   say  = the LONGER line the player actually delivers (joke #2 -- it adds a
+    //          new beat, it doesn't just repeat `you`); omit to speak `you` as-is.
+    //   The target node's `boss` line is joke #3 (it tops/subverts the `say`).
+    // showChoices() prints `you`; choose() speaks `say || you`. See
+    // boss_dialog_tree.txt for the design notes + running-gag bible.
+    const CALL = {
+        start: {
+            boss: "Alex! There he is. So -- I got your email. \"My resignation.\" Heavy subject line for a Tuesday, champ, but I respect the swing. I've carved us out fifteen minutes. Talk to me. What's really going on up there?",
+            choices: [
+                { you: "I'm resigning.", say: "Two weeks' notice, Jordan. I practiced this in the shower. Was going to say something about 'personal growth.' ...You can fill it in yourself.", to: "resign1" },
+                { you: "My cat did it.", say: "Total misfire. You know how you type things just to get them out of your body, and then the cat walks across the keyboard and anyway, we're good. We're SO good.", to: "chicken_draft" },
+                { you: "Everything's aggressively fine.", say: "I'm fine. The quarter's fine. I just stopped sleeping. Frees up a lot of hours! Why are you writing that down? It's fine.", to: "chicken_fine" },
+                { you: "I think I'd like to make video games.", say: "Little ships, big explosions, a guy with a laser. I started building it at night. I don't know if that's a dream, Jordan, or just what happens when you stop sleeping.", to: "games1" },
+            ],
+        },
+        chicken_draft: {
+            boss: "Oh, thank GOD. A draft. See, THIS is why we never email angry, champ -- sleep on it, loop in your manager, that's the Meridian Way. And good on you for having a cat; pets are huge for resilience, there's a whole slide on it. Okay! Thursday's All-Hands is strongly mandatory, by the way. Strongly. Great sync!",
+            end: "stay",
+        },
+        chicken_fine: {
+            boss: "Love that. Love that for you. We actually tested \"Fine\" as a core value last cycle -- slide forty, right under \"Relentless.\" My door is always open, Alex. It's a hybrid door. It's open Tuesdays. Go get 'em.",
+            end: "stay",
+        },
+        games1: {
+            boss: "Love the FIRE. Alex -- what do you think we do here? Software is just video games for adults, with deliverables. Have you SEEN the new expense-report flow? Progress bar. Achievements. There's a guy. He doesn't have a laser yet, but that's on the roadmap.",
+            choices: [
+                { you: "A progress bar is not joy, Jordan.", say: "You can put lipstick on an expense report, but it's still an expense report. I want to build the one where the guy actually gets the laser -- where something's finished, for once.", to: "resign1" },
+                { you: "...achievements?", say: "...I hate that I'm asking but.. What achievements?", to: "games2" },
+            ],
+        },
+        games2: {
+            boss: "Bronze for filing on time. Silver for filing early -- nobody's ever unlocked Silver. There's a leaderboard, Alex, company-wide, live. You're currently... forty-first. You were thirty-eighth, but you logged off early one Friday. The system remembers.",
+            choices: [
+                { you: "Forty-first feels like a great final score.", say: "You know what? That's the perfect number to quit on. Tell Karen she can have my Bronze -- I want it weighing on her.", to: "resign1" },
+                { you: "...who's in first?", say: "You telling me forty people have been outfiling me!? ...Tell me who's in first.", to: "chicken_leaderboard" },
+            ],
+        },
+        chicken_leaderboard: {
+            boss: "Karen. Procurement. Karen files things that haven't happened yet, Alex -- she's already pre-filed Q1. Don't you worry about Karen. You worry about Q4. ...And there he is. Knew we'd land it. Glad we synced!",
+            end: "stay",
+        },
+        resign1: {
+            boss: "Okay. Okay -- I hear you, and two weeks, very classy, very you. Can I say something, just us? I know it's been rough since Emma left. Nobody -- especially not the C-suite -- is judging you for wanting to make a big life move after a personal disruption. But walking all the way out the door? That's a big swing, champ. Big, scary swing.",
+            choices: [
+                { you: "Leave Emma out of this.", say: "You met her twice, Jordan. Once on Zoom, and once at the holiday party -- when you called her my 'home stakeholder.'", to: "resign_emma" },
+                { you: "It's not about Emma.", say: "It's about me -- probably. Maybe. I've spent six years making other people's quarters look good. I'd like to make one bad decision that's entirely my own.", to: "resign2" },
+                { you: "...maybe you're right.", say: "It IS a big swing, isn't it. Maybe the headspace thing is real. Maybe I'm not -- maybe I just need to--", to: "wobble" },
+            ],
+        },
+        // resign_emma is a passthrough beat: Jordan deflects to mindfulness, then `next`
+        // continues straight into the resign2 bribe (no player choice). See runNode.
+        resign_emma: {
+            boss: "I love that you brought your whole self to that boundary. Genuinely. Can I ask, gently: are you keeping up with the mandatory mindfulness sessions? The Tuesday ones? Because what you're feeling right now -- this -- is exactly what those are designed to suppress. Process. I mean process.",
+            next: "resign2",
+        },
+        wobble: {
+            boss: "THERE he is. There's my guy. There's my Regional Synergy Lead. I KNEW you'd come around -- you always come around, it's my favorite thing about you. I'll go quietly kill that offboarding ticket before HR clocks it. The dental, the chair, the personal disruption, whatever you just said -- parking lot, we'll circle back. Now: Thursday's All-Hands. I've got you down as a yes-maybe. Great sync, champ.",
+            end: "stay",
+        },
+        resign2: {
+            boss: "Okay. Okay -- real talk, two guys, off the record. What if I told you I could find room in the budget -- and it is TIGHT this year, Alex, brutal -- for a title bump? \"Senior\" Regional Synergy Lead. Senior. A desk that's corner-adjacent. Not the corner, but the closest desk to it. You'd be number one of the non-corner desks. And -- I shouldn't even float this -- the chair. The lumbar one.",
+            choices: [
+                { you: "The lumbar chair?", say: "The one Gary has? With the little wheel on the side?", to: "chair" },
+                { you: "I don't want a better chair. I want out.", say: "I don't want 'Senior' in front of a job I can't explain to my own mother, Jordan. I want out of the building -- with the lights coming up behind me, like the end of a movie.", to: "resign3" },
+            ],
+        },
+        chair: {
+            boss: "Full lumbar. Adjustable arms, adjustable depth, a little wheel on the side. It learns your spine, Alex. It learns you. It remembers YOU.",
+            choices: [
+                { you: "It remembers me. That's the problem.", say: "That's not a perk, Jordan, that's a threat. I'd be haunted by Gary's lower back for years. I don't want to be remembered by you or this chair, I want to be forgotten.", to: "resign3" },
+                { you: "Okay, the chair is genuinely--", say: "Okay -- okay, the chair is genuinely -- no. NO. See, this is exactly what you do, you find the one thing -- put the chair away, Jordan. Put it away!", to: "wobble" },
+            ],
+        },
+        resign3: {
+            boss: "Alright. No more games -- and I do hear the wordplay there, but I'm choosing leadership. I went to bat for you, Alex. Six years. Eleven reorgs. I kept your name off three lists I am not allowed to talk about. And you want to throw all of that away to go make -- what. Little spaceman games. On a laptop. In an apartment.",
+            choices: [
+                { you: "Yes. Exactly that.", say: "It sounds small when you say it. Which is annoying, because it is small. I still want to try.", to: "resign_final" },
+                { you: "They're not little.", say: "There are bosses too, Jordan. There's a final boss, actually -- real piece of work, never lets anybody leave. You'd see a lot of yourself in him.", to: "resign_final" },
+                { you: "Goodbye, Jordan.", say: "Tell Karen she can have my parking spot. Tell Gary the chair is all his. ...Goodbye, Jordan.", to: "resign_final" },
+            ],
+        },
+        resign_final: {
+            boss: "...You know what? Fine. FINE. You want out, you're out. Shut down your PC. Matt from IT will swing by for your badge and your good pens. Good luck out there, champ -- and hey, honestly, between us? You're gonna need a--",
+            end: "quit",
+        },
+    };
+
+    function startMeetCall(draft) {
+        if ($("#meet-call")) return;
+        document.body.classList.add("in-call");
+        const overlay = el("div", { class: "meet", id: "meet-call" });
+        overlay.innerHTML =
+            `<div class="meet-bar"><span class="meet-live"><span class="meet-dot"></span>LIVE</span>` +
+            `<span class="meet-title">Quick Sync &middot; Meridian Meet</span><span class="meet-timer" id="meetTimer">0:00</span></div>` +
+            `<div class="meet-stage">` +
+            `<div class="meet-tile boss" id="bossTile">${bossFeedHTML()}<div class="meet-ring"></div>` +
+            `<div class="meet-label"><span class="meet-eq"><i></i><i></i><i></i><i></i></span><span>Jordan Ellis</span></div></div>` +
+            `<div class="meet-tile self" id="selfTile"><div class="self-av">AM</div><div class="self-cam">Camera off</div>` +
+            `<div class="meet-label"><span class="meet-eq"><i></i><i></i><i></i><i></i></span><span>Alex Morgan (You)</span></div></div>` +
+            `</div>` +
+            `<div class="meet-caption" id="meetCap"><div class="cap-line"><span class="cap-spk" id="capSpk"></span><span class="cap-txt" id="capTxt"></span></div></div>` +
+            `<div class="meet-choices" id="meetChoices"></div>` +
+            `<div class="meet-tray"><button class="tray-btn" id="mtMute">Mute</button>` +
+            `<button class="tray-btn" id="mtVid">Start Video</button>` +
+            `<button class="tray-btn leave" id="mtLeave">Leave</button></div>`;
+        document.body.appendChild(overlay);
+
+        const bossTile = $("#bossTile", overlay), selfTile = $("#selfTile", overlay);
+        const selfCam = selfTile.querySelector(".self-cam");
+        const cap = $("#meetCap", overlay), capSpk = $("#capSpk", overlay), capTxt = $("#capTxt", overlay);
+        const choicesEl = $("#meetChoices", overlay);
+        const feed = makeBossFeed(bossTile);
+
+        // cosmetic call timer
+        let secs = 0;
+        const timer = setInterval(() => {
+            secs++;
+            const t = $("#meetTimer", overlay);
+            if (t) t.textContent = Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0");
+        }, 1000);
+
+        // decorative tray toggles. There's no real camera, so "Start Video" just
+        // fails into a "no camera found" state in the self tile (where your own
+        // feed would be) -- toggle it back off to clear it.
+        const CAMOFF = '<svg class="cam-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8h9a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 11.5 16H5"/><path d="M16 10.5l5-3v9l-5-3"/><path d="M3 3l18 18"/></svg>';
+        // Mute is a gag: while muted, the reply options are struck through and
+        // can't be picked (by click or keyboard) -- you have to unmute to speak.
+        let muted = false;
+        $("#mtMute", overlay).addEventListener("click", e => {
+            muted = !muted;
+            const b = e.currentTarget;
+            b.classList.toggle("on", muted);
+            b.textContent = muted ? "Unmute" : "Mute";
+            choicesEl.classList.toggle("muted", muted);
+        });
+        $("#mtVid", overlay).addEventListener("click", () => {
+            const on = selfTile.classList.toggle("nocam");
+            selfCam.innerHTML = on ? CAMOFF + "<span>No camera found</span>" : "Camera off";
+        });
+        $("#mtLeave", overlay).addEventListener("click", leaveEarly);
+
+        let typing = null, keyHandler = null, done = false;
+        const clearTyping = () => { if (typing) { clearInterval(typing); typing = null; } };
+        function setKeys(h) {
+            if (keyHandler) document.removeEventListener("keydown", keyHandler, true);
+            keyHandler = h;
+            if (h) document.addEventListener("keydown", h, true);
+        }
+
+        // Protagonist VO: Alex's reply lines are voiced (ElevenLabs v3, voice "Victor" --
+        // the SAME actor as the level interstitials; the joke is he narrated his own game).
+        // Boss is intentionally unvoiced. The clip (vo/alex_<node>_<n>.mp3) plays under the
+        // typewriter when Alex speaks and is cut when we move on. Missing file or an
+        // autoplay block just no-ops silently. Re-render the set with tools/tts/eleven_alex.py.
+        let voAudio = null;
+        function stopVO() { if (voAudio) { try { voAudio.pause(); } catch (_) { } voAudio = null; } }
+        function playVO(slug) {
+            stopVO();
+            const a = new Audio(`vo/alex_${slug}.mp3`);
+            a.play().catch(() => { });
+            voAudio = a;
+        }
+
+        // Typewriter caption. Click the caption to skip to the full line.
+        function typeCaption(speaker, text, isYou, cb) {
+            capSpk.textContent = speaker + ":";
+            capSpk.className = "cap-spk" + (isYou ? " you" : "");
+            capTxt.textContent = "";
+            let i = 0;
+            cap.classList.add("clickable");
+            const finish = () => { cap.onclick = null; cap.classList.remove("clickable"); cb && cb(); };
+            cap.onclick = () => { if (typing) { clearTyping(); capTxt.textContent = text; finish(); } };
+            typing = setInterval(() => {
+                capTxt.textContent = text.slice(0, ++i);
+                if (i >= text.length) { clearTyping(); setTimeout(finish, 140); }
+            }, isYou ? 16 : 24);
+        }
+
+        function runNode(id) {
+            const node = CALL[id];
+            if (!node) return;
+            choicesEl.innerHTML = ""; choicesEl.classList.remove("show");
+            selfTile.classList.remove("talking");
+            stopVO();                       // a new boss line -> cut any of Alex's still-playing VO
+            feed.talk();
+            typeCaption("Jordan Ellis", node.boss, false, () => {
+                feed.idle();
+                if (node.end) setTimeout(() => hangup(node.end), node.end === "quit" ? 650 : 1500);
+                else if (node.next) waitForContinue(() => runNode(node.next));   // passthrough beat: click on to the next boss line
+                else showChoices(id, node.choices);
+            });
+        }
+
+        function showChoices(nodeId, choices) {
+            choicesEl.innerHTML = "";
+            choices.forEach((c, idx) => {
+                const b = el("button", { class: "choice", onclick: () => choose(c, `${nodeId}_${idx + 1}`) });
+                b.innerHTML = `<span>${c.you.replace(/</g, "&lt;")}</span>`;
+                choicesEl.appendChild(b);
+            });
+            requestAnimationFrame(() => choicesEl.classList.add("show"));
+            setKeys(e => {
+                if (muted) return;   // muted -> options are locked
+                const n = parseInt(e.key, 10);
+                if (n >= 1 && n <= choices.length) { e.preventDefault(); e.stopPropagation(); choose(choices[n - 1], `${nodeId}_${n}`); }
+            });
+        }
+
+        function choose(c, voSlug) {
+            if (muted) return;   // can't speak while muted (also blocked by pointer-events)
+            setKeys(null);
+            choicesEl.innerHTML = ""; choicesEl.classList.remove("show");
+            feed.idle();
+            selfTile.classList.add("talking");
+            if (voSlug) playVO(voSlug);   // Alex's voiced reply plays under the typewriter
+            // The menu showed the short `you` line; what Alex actually SAYS is the
+            // longer `say` elaboration (the second of the option's three jokes).
+            typeCaption("You", c.say || c.you, true, () => {
+                selfTile.classList.remove("talking");
+                waitForContinue(() => runNode(c.to));   // beat: let the player read their line first
+            });
+        }
+
+        // LucasArts "click to continue": after the player speaks, wait for a click
+        // (anywhere but the call controls) or Enter/Space before the boss replies,
+        // instead of auto-advancing. hangup() clears the key handler + cap.onclick,
+        // and removing the overlay drops the click listener, so it can't dangle.
+        function waitForContinue(cb) {
+            // A wordless, blinking ">>" at the end of the line (click it, or anywhere,
+            // or Enter/Space). Inline after the spoken text, inside the .cap-line.
+            const hint = el("span", { class: "cap-more", html: "&#187;&#187;" });
+            capTxt.parentNode.appendChild(hint);
+            let did = false;
+            const go = () => {
+                if (did) return; did = true;
+                overlay.removeEventListener("click", onClick, true);
+                setKeys(null);
+                if (hint.parentNode) hint.remove();
+                cb();
+            };
+            const onClick = (ev) => { if (ev.target.closest(".meet-tray")) return; ev.stopPropagation(); go(); };
+            overlay.addEventListener("click", onClick, true);
+            setKeys(e => {
+                if (!dlgLayer.classList.contains("hidden")) return;   // a dialog (Leave/nag) owns input
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); go(); }
+            });
+        }
+
+        async function leaveEarly() {
+            const ok = await showDialog({
+                title: "Leave call", icon: "question",
+                html: "Leave the Meridian Meet?<div class='sub'>Jordan will almost certainly schedule a follow-up.</div>",
+                buttons: [{ label: "Stay", value: false, primary: true }, { label: "Leave", value: true, kind: "danger" }], escValue: false,
+            });
+            if (ok) hangup("bail");
+        }
+
+        function hangup(outcome) {
+            if (done) return;
+            done = true;
+            clearTyping(); setKeys(null); clearInterval(timer); cap.onclick = null; stopVO();
+            const splash = el("div", { class: "meet-ended" });
+            const dur = Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0");
+            splash.innerHTML = `<div>Call ended<div class="meet-ended-sub">Duration ${dur}</div></div>`;
+            overlay.appendChild(splash);
+            setTimeout(() => {
+                overlay.classList.add("ending");
+                setTimeout(() => { overlay.remove(); document.body.classList.remove("in-call"); afterCall(outcome, draft); }, 480);
+            }, 1300);
+        }
+
+        runNode("start");
+    }
+
+    function afterCall(outcome, draft) {
+        if (outcome === "quit") {
+            // No toast -- the boss already told you to shut down your PC; that's the
+            // cue. Start -> Shut Down now plays the leaving ending (see shutdown()).
+            gameQuit = true;
+        } else if (outcome === "bail") {
+            toast({ kind: "warn", title: "You left the call", body: "Jordan is &ldquo;finding time on your calendar.&rdquo;" });
+            setTimeout(() => incomingCall(draft), 30000);
+        } else {
+            toast({ kind: "info", title: "Call ended" });
+        }
+    }
+
+    // The leaving ending: fade to black, hold, "three months later", then boot
+    // the player's home PC. Fired from Start -> Shut Down once gameQuit is set.
+    function playQuitEnding() {
+        const ov = el("div", { class: "ending-overlay" });
+        document.body.appendChild(ov);
+        requestAnimationFrame(() => ov.classList.add("show"));        // fade to black
+        setTimeout(() => {                                            // ...hold on black...
+            const c = el("div", { class: "ending-cap", text: "three months later" });
+            ov.appendChild(c);
+            requestAnimationFrame(() => c.classList.add("show"));
+            setTimeout(() => {
+                c.classList.remove("show");                          // fade the caption out
+                setTimeout(() => {
+                    // <placeholder> ----------------------------------------------
+                    // Boot into Alex's personal home PC here: cluttered but homely,
+                    // a funny cat wallpaper, etc. To be built in a later pass.
+                    ov.innerHTML = "";
+                    ov.appendChild(el("div", {
+                        class: "ending-placeholder", html:
+                            "&lt;placeholder&gt;<br><br>boot into Alex's home PC<br>(cluttered, homely, a cat on the wallpaper)<br><br><span style='opacity:.6'>// home-PC scene to follow</span>"
+                    }));
+                }, 1300);
+            }, 4200);   // hold on "three months later" a good while
+        }, 4000);       // ~1s fade to black, then ~3s of held black before the caption
+    }
+
+    window.eaIncomingCall = incomingCall;            // dev: preview the incoming-call card
+    window.eaCall = draft => startMeetCall(draft);   // dev: jump straight into the call
+    window.eaQuitEnding = playQuitEnding;            // dev: preview the leaving ending
     async function compose() {
         const v = await showDialog({
             title: "New Message", titleIcon: false, icon: null,
@@ -1114,7 +1528,7 @@ always Monday here.`;
                         const isMail = entry.kind === "mail";
                         const name = binName(entry);
                         const node = el("div", { class: "file", title: `${name} (from ${entry.fromName})` });
-                        node.innerHTML = `<div class="ico">${isMail ? BIGICO.mail : fileGlyph(entry.file.ext)}</div><div class="nm">${name}</div>`;
+                        node.innerHTML = `<div class="ico">${isMail ? BIGICO.mail : fileIconHTML(entry.file)}</div><div class="nm">${name}</div>`;
                         node.addEventListener("click", () => { grid.querySelectorAll(".file.sel").forEach(n => n.classList.remove("sel")); node.classList.add("sel"); sel = entry; restoreBtn.disabled = false; });
                         node.addEventListener("dblclick", () => isMail ? previewBinMail(entry.mail) : openFileItem(entry.file));
                         grid.appendChild(node);
@@ -1284,6 +1698,9 @@ always Monday here.`;
             buttons: [{ label: "Cancel", value: false }, { label: verb, value: true, primary: true }], escValue: false,
         });
         if (!ok) return;
+        // Once you've quit, "Shut Down" no longer returns to the game -- it plays
+        // the leaving ending (fade to black -> "three months later" -> home PC).
+        if (gameQuit && kind === "shutdown") { playQuitEnding(); return; }
         // "Shutting down" overlay, then return to the game.
         const ov = el("div", { style: { position: "fixed", inset: "0", zIndex: "9999", background: "radial-gradient(900px 600px at 50% 40%, #16223f, #080d1f)", color: "#cfe0ff", display: "grid", placeItems: "center", opacity: "0", transition: "opacity .4s ease", textAlign: "center", font: "300 18px var(--font)" } });
         ov.innerHTML = `<div><div class="boot-spinner" style="margin-bottom:18px"><i></i><i></i><i></i><i></i><i></i></div><div>${kind === "out" ? "Signing out" : kind === "restart" ? "Restarting" : "Shutting down"}…</div><div style="margin-top:8px;font-size:12px;color:#7c93bd">Please wait while Meridian Workspace closes.</div></div>`;

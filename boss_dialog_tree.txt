@@ -1,0 +1,162 @@
+================================================================
+ REVENGE OF THE EVIL ALIENS  --  Boss "Quick Sync" call
+ The LucasArts-style dialogue tree (office easter-egg).
+================================================================
+
+THE DESIGN RULE (the "three jokes" pass, hardened over two telegraph tests):
+  A good adventure-game reply lands THREE separate jokes:
+    1. PREVIEW -- the short line in the menu. Funny on its own. A feint,
+       an understatement, a register clash. (Joke you read.)
+    2. SAYS    -- the longer line the player ACTUALLY delivers. It must add
+       a NEW joke, not just say the preview louder: an escalation, a too-
+       specific detail, a swerve into (embarrassed) honesty. (Joke you hear
+       yourself say.)
+    3. BOSS    -- the reply at the target node. It must TOP or SUBVERT the
+       SAYS line, not just acknowledge it -- usually by latching onto the
+       wrong word and synergising it. (Joke the other guy lands.)
+  Two refinements learned the hard way:
+    * NO PREVIEW-ECHO. The SAYS must not OPEN by restating the preview's
+      words -- the preview is a label, the spoken line launches into a fresh
+      beat. (Allowed exceptions: an interrupted preview the line completes-
+      then-reverses, e.g. chair 2; or a single word re-stated to twist it,
+      e.g. mindful 1's "Four dollars" -> "Four dollars. A year.")
+    * KILL THE TELEGRAPHED. Each line was run past a cold "audience" that saw
+      only the preview and tried to predict the payoff; anything it guessed
+      (by mechanism, not wording) got rewritten until it surprised.
+  If a node has several inbound options, its BOSS line is written as a
+  generic deflection -- which is in character: Jordan deflects everything
+  the same way. Single-inbound nodes get a BOSS line aimed at that one SAYS.
+
+HOW TO READ / EDIT THIS:
+  * Each [node] is one beat: the BOSS line, then the player's replies.
+  * 'BOSS:' is the talking-head line (popup text, not voice-acted).
+  * Each reply is:  PREVIEW (menu) / SAYS (spoken) -> the node it jumps to.
+    If SAYS is omitted, the PREVIEW is spoken verbatim.
+  * (ENDS CALL: stay) = you chickened out, call ends, nothing changes.
+  * (ENDS CALL: quit) = the boss accepts -- this arms the leaving ending.
+  * SPECIAL CASE: resign_final ends by cutting Jordan off mid-word. No final
+    player button -- the call dies before anyone gets dignity. Leave it.
+  * Edit the wording freely. Keep the [ids], the PREVIEW/SAYS labels, and
+    the -> targets intact for a clean re-import; otherwise just scribble.
+
+CAST / RUNNING GAGS (thread these, don't drop them):
+  Alex Morgan (you) -- dry, deflecting, quietly coming apart; his own
+    sincerity embarrasses him, so he undercuts it.
+  Jordan Ellis (boss) -- folksy corporate manipulator; "champ", "big swing";
+    weaponizes buzzwords, never hears the actual words, scores every beat a win.
+  EMMA -- Alex's EX-PARTNER. She left HIM (a breakup, not a job). Jordan has
+    met her maybe twice, treats it as a retention variable, euphemizes it as a
+    "personal disruption", once cringe-called her Alex's "home stakeholder".
+    This is the quiet ache under the jokes -- NOT a coworker who quit.
+  TONE -- keep it AMBIGUOUS whether Alex has a real calling or is just free-
+    falling post-breakup (the game might be a dream, or "just what happens when
+    you stop sleeping"). Never resolve it; never play it as a sincere calling.
+    Show the ache, don't state it ("an apartment that echoes").
+  Karen, Procurement (#1, pre-files Q1) . Gary (has the chair; inherits it in the
+    goodbye) . Matt from IT (collects badges) . the CAT (planted in the draft lie,
+    paid off on the home-PC wallpaper) . "it remembers you" (chair + leaderboard =
+    surveillance) . "personal disruption" (Jordan's euphemism for the breakup) .
+    the cut-off final word.
+  CUT with the mindfulness branch (gone, don't re-add): Brandon / "arrive in your
+    body", the Premium Calm comp, the dental counteroffer.
+
+ENTRY: bin the/restore 'My resignation' email -> Drafts -> Send -> this call.
+
+NODES: 13 total  (7 branching, 1 passthrough [resign_emma -> resign2], 5 endings)
+ENDINGS: chicken_draft [stay], chicken_fine [stay], chicken_leaderboard [stay], wobble [stay], resign_final [quit]
+
+----------------------------------------------------------------
+
+[start]
+BOSS: Alex! There he is. So -- I got your email. "My resignation." Heavy subject line for a Tuesday, champ, but I respect the swing. I've carved us out fifteen minutes. Talk to me. What's really going on up there?
+   1) PREVIEW: "I'm resigning."
+      SAYS: "Two weeks' notice, Jordan. I practiced this in the shower. Was going to say something about 'personal growth.' ...You can fill it in yourself."
+      -> resign1
+   2) PREVIEW: "My cat did it."
+      SAYS: "Total misfire. You know how you type things just to get them out of your body, and then the cat walks across the keyboard and anyway, we're good. We're SO good."
+      -> chicken_draft
+   3) PREVIEW: "Everything's aggressively fine."
+      SAYS: "I'm fine. The quarter's fine. I just stopped sleeping. Frees up a lot of hours! Why are you writing that down? It's fine."
+      -> chicken_fine
+   4) PREVIEW: "I think I'd like to make video games."
+      SAYS: "Little ships, big explosions, a guy with a laser. I started building it at night. I don't know if that's a dream, Jordan, or just what happens when you stop sleeping."
+      -> games1
+
+[chicken_draft]   (ENDS CALL: stay)
+BOSS: Oh, thank GOD. A draft. See, THIS is why we never email angry, champ -- sleep on it, loop in your manager, that's the Meridian Way. And good on you for having a cat; pets are huge for resilience, there's a whole slide on it. Okay! Thursday's All-Hands is strongly mandatory, by the way. Strongly. Great sync!
+
+[chicken_fine]   (ENDS CALL: stay)
+BOSS: Love that. Love that for you. We actually tested "Fine" as a core value last cycle -- slide forty, right under "Relentless." My door is always open, Alex. It's a hybrid door. It's open Tuesdays. Go get 'em.
+
+[games1]
+BOSS: Love the FIRE. Alex -- what do you think we do here? Software is just video games for adults, with deliverables. Have you SEEN the new expense-report flow? Progress bar. Achievements. There's a guy. He doesn't have a laser yet, but that's on the roadmap.
+   1) PREVIEW: "A progress bar is not joy, Jordan."
+      SAYS: "You can put lipstick on an expense report, but it's still an expense report. I want to build the one where the guy actually gets the laser -- where something's finished, for once."
+      -> resign1
+   2) PREVIEW: "...achievements?"
+      SAYS: "...I hate that I'm asking but.. What achievements?"
+      -> games2
+
+[games2]
+BOSS: Bronze for filing on time. Silver for filing early -- nobody's ever unlocked Silver. There's a leaderboard, Alex, company-wide, live. You're currently... forty-first. You were thirty-eighth, but you logged off early one Friday. The system remembers.
+   1) PREVIEW: "Forty-first feels like a great final score."
+      SAYS: "You know what? That's the perfect number to quit on. Tell Karen she can have my Bronze -- I want it weighing on her."
+      -> resign1
+   2) PREVIEW: "...who's in first?"
+      SAYS: "You telling me forty people have been outfiling me!? ...Tell me who's in first."
+      -> chicken_leaderboard
+
+[chicken_leaderboard]   (ENDS CALL: stay)
+BOSS: Karen. Procurement. Karen files things that haven't happened yet, Alex -- she's already pre-filed Q1. Don't you worry about Karen. You worry about Q4. ...And there he is. Knew we'd land it. Glad we synced!
+
+[resign1]
+BOSS: Okay. Okay -- I hear you, and two weeks, very classy, very you. Can I say something, just us? I know it's been rough since Emma left. Nobody -- especially not the C-suite -- is judging you for wanting to make a big life move after a personal disruption. But walking all the way out the door? That's a big swing, champ. Big, scary swing.
+   1) PREVIEW: "Leave Emma out of this."
+      SAYS: "You met her twice, Jordan. Once on Zoom, and once at the holiday party -- when you called her my 'home stakeholder.'"
+      -> resign_emma
+   2) PREVIEW: "It's not about Emma."
+      SAYS: "It's about me -- probably. Maybe. I've spent six years making other people's quarters look good. I'd like to make one bad decision that's entirely my own."
+      -> resign2
+   3) PREVIEW: "...maybe you're right."
+      SAYS: "It IS a big swing, isn't it. Maybe the headspace thing is real. Maybe I'm not -- maybe I just need to--"
+      -> wobble
+
+[resign_emma]   (PASSTHROUGH: no choices -- continues straight into [resign2])
+BOSS: I love that you brought your whole self to that boundary. Genuinely. Can I ask, gently: are you keeping up with the mandatory mindfulness sessions? The Tuesday ones? Because what you're feeling right now -- this -- is exactly what those are designed to suppress. Process. I mean process.
+   -> resign2  (Jordan never lets you answer; he just pivots to the bribe)
+
+[wobble]   (ENDS CALL: stay)
+BOSS: THERE he is. There's my guy. There's my Regional Synergy Lead. I KNEW you'd come around -- you always come around, it's my favorite thing about you. I'll go quietly kill that offboarding ticket before HR clocks it. The dental, the chair, the personal disruption, whatever you just said -- parking lot, we'll circle back. Now: Thursday's All-Hands. I've got you down as a yes-maybe. Great sync, champ.
+
+[resign2]
+BOSS: Okay. Okay -- real talk, two guys, off the record. What if I told you I could find room in the budget -- and it is TIGHT this year, Alex, brutal -- for a title bump? "Senior" Regional Synergy Lead. Senior. A desk that's corner-adjacent. Not the corner, but the closest desk to it. You'd be number one of the non-corner desks. And -- I shouldn't even float this -- the chair. The lumbar one.
+   1) PREVIEW: "The lumbar chair?"
+      SAYS: "The one Gary has? With the little wheel on the side?"
+      -> chair
+   2) PREVIEW: "I don't want a better chair. I want out."
+      SAYS: "I don't want 'Senior' in front of a job I can't explain to my own mother, Jordan. I want out of the building -- with the lights coming up behind me, like the end of a movie."
+      -> resign3
+
+[chair]
+BOSS: Full lumbar. Adjustable arms, adjustable depth, a little wheel on the side. It learns your spine, Alex. It learns you. It remembers YOU.
+   1) PREVIEW: "It remembers me. That's the problem."
+      SAYS: "That's not a perk, Jordan, that's a threat. I'd be haunted by Gary's lower back for years. I don't want to be remembered by you or this chair, I want to be forgotten."
+      -> resign3
+   2) PREVIEW: "Okay, the chair is genuinely--"
+      SAYS: "Okay -- okay, the chair is genuinely -- no. NO. See, this is exactly what you do, you find the one thing -- put the chair away, Jordan. Put it away!"
+      -> wobble
+
+[resign3]
+BOSS: Alright. No more games -- and I do hear the wordplay there, but I'm choosing leadership. I went to bat for you, Alex. Six years. Eleven reorgs. I kept your name off three lists I am not allowed to talk about. And you want to throw all of that away to go make -- what. Little spaceman games. On a laptop. In an apartment.
+   1) PREVIEW: "Yes. Exactly that."
+      SAYS: "It sounds small when you say it. Which is annoying, because it is small. I still want to try."
+      -> resign_final
+   2) PREVIEW: "They're not little."
+      SAYS: "There are bosses too, Jordan. There's a final boss, actually -- real piece of work, never lets anybody leave. You'd see a lot of yourself in him."
+      -> resign_final
+   3) PREVIEW: "Goodbye, Jordan."
+      SAYS: "Tell Karen she can have my parking spot. Tell Gary the chair is all his. ...Goodbye, Jordan."
+      -> resign_final
+
+[resign_final]   (ENDS CALL: quit)
+BOSS: ...You know what? Fine. FINE. You want out, you're out. Shut down your PC. Matt from IT will swing by for your badge and your good pens. Good luck out there, champ -- and hey, honestly, between us? You're gonna need a--

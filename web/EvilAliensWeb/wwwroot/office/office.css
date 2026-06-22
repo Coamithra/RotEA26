@@ -786,6 +786,31 @@ table.sheet td:focus {
     background: #fff;
 }
 
+/* ---------------------------------------------------- Notepad app --------- */
+.notepad {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    border: 0;
+    outline: none;
+    resize: none;
+    padding: 14px 16px;
+    background: #fff;
+    color: #1c2738;
+    font-family: "Consolas", "SF Mono", "Menlo", "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 4;
+}
+
+.notepad.wrap {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 /* ---------------------------------------------------- Mail app ------------ */
 .mail {
     flex: 1;

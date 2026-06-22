@@ -44,6 +44,7 @@
         bin: () => tile("#6b7280", '<g fill="#fff"><path d="M9.5 5h5l.8 1.6H18V8H6V6.6h2.7z"/><path d="M7.2 9h9.6l-.8 9.4a1.2 1.2 0 0 1-1.2 1.1H9.2a1.2 1.2 0 0 1-1.2-1.1z"/></g>'),
         binFull: () => tile("#6b7280", '<g fill="#fff"><path d="M9.5 5h5l.8 1.6H18V8H6V6.6h2.7z"/><path d="M7.2 9h9.6l-.8 9.4a1.2 1.2 0 0 1-1.2 1.1H9.2a1.2 1.2 0 0 1-1.2-1.1z"/></g><g fill="#3aa655"><rect x="9" y="2.4" width="6" height="3" rx="1"/></g>'),
         games: () => tile("#6d4bd1", '<path d="M8 9.5h8a3.4 3.4 0 0 1 3.3 4.2l-.5 2a2.1 2.1 0 0 1-3.8.5L14.2 15H9.8l-1 1.2a2.1 2.1 0 0 1-3.8-.5l-.5-2A3.4 3.4 0 0 1 8 9.5z" fill="#fff"/><g fill="#6d4bd1"><rect x="6.6" y="12" width="3" height="1" rx=".5"/><rect x="7.6" y="11" width="1" height="3" rx=".5"/><circle cx="15.4" cy="11.6" r=".9"/><circle cx="16.8" cy="13" r=".9"/></g>'),
+        note: () => tile("#6b7280", '<rect x="6" y="5" width="12" height="14" rx="1.3" fill="#fff"/><g stroke="#6b7280" stroke-width="1.2" stroke-linecap="round"><path d="M8.6 9h6.8M8.6 12h6.8M8.6 15h4.4"/></g>'),
     };
 
     // big desktop versions (transparent, drop-shadowed by CSS)
@@ -98,7 +99,7 @@
 
     /* ----------------------------------------------------------------- data */
     let fileSeq = 1;
-    const mkFile = (name, ext) => ({ id: "f" + (fileSeq++), kind: "file", name, ext });
+    const mkFile = (name, ext, extra) => Object.assign({ id: "f" + (fileSeq++), kind: "file", name, ext }, extra);
 
     const folders = {
         documents: {
@@ -108,7 +109,7 @@
                 mkFile("Board_Deck_FINAL_v7", "pptx"),
                 mkFile("2026_Operating_Budget", "xlsx"),
                 mkFile("Performance_Reviews_CONFIDENTIAL", "pdf"),
-                mkFile("Meeting_Notes", "txt"),
+                mkFile("Meeting_Notes", "txt", { text: "SYNERGY SYNC — notes\r\n\r\n- discussed the alignment doc\r\n- aligned on aligning the alignment\r\n- ACTION: socialize the framework, circle back\r\n- ACTION: take the other thing offline\r\n- next steps: define \"next steps\"\r\n\r\n(meeting ran 50 min over. nobody knows why we met.)\r\n" }),
                 mkFile("Headcount_Plan", "csv"),
                 { kind: "folder", to: "reports", name: "Reports" },
                 { kind: "folder", to: "archive", name: "Archive" },
@@ -130,10 +131,42 @@
             ]
         },
     };
+    const RESIGNATION_LETTER =
+`DRAFT 4 — do NOT send until I have slept on it
+
+Dear Jordan,
+
+Please accept this letter as my formal resignation from the position of
+Regional Synergy Lead at Meridian Dynamics, effective two weeks from today.
+
+After 6 years, 11 reorgs, 4 "new" mission statements and roughly 1,900 hours
+of mandatory Synergy Syncs, I have decided to pursue an opportunity that does
+not require me to "circle back," "double-click," or "take this offline" ever
+again.
+
+I am deeply grateful for everything I have learned here, chiefly that a
+12-minute coffee break is, in fact, logged.
+
+----------------------------------------------------------------------
+[draft 3 — too honest, tone down before sending]
+Jordan. I quit. I am going to go outside. The sun is real. Synergy is not.
+----------------------------------------------------------------------
+[draft 2 — closer?]
+To whom it may concern: I regret to inform you that I no longer regret
+anything.
+----------------------------------------------------------------------
+
+Sincerely,
+Alex Morgan
+
+P.S. — I have NOT sent this. I closed the lid, told myself "Monday," and
+dragged it to the Recycle Bin instead. It is still Monday somewhere. It is
+always Monday here.`;
+
     // {file, fromFolder, fromName} — pre-seeded with the resignation letter the
     // employee drafted, thought better of, and quietly deleted. (Classic.)
     const recycleBin = [
-        { file: mkFile("Resignation_Letter_DRAFT", "txt"), fromFolder: "documents", fromName: "Documents" },
+        { file: mkFile("Resignation_Letter_DRAFT", "txt", { text: RESIGNATION_LETTER }), fromFolder: "documents", fromName: "Documents" },
     ];
 
     /* --------------------------------------------------- boot sequence ----- */
@@ -672,6 +705,7 @@
         const meta = EXT[file.ext];
         if (meta && meta.app === "sheets") return openSheets(file.name);
         if (meta && meta.app === "docs") return openDocs(file.name);
+        if (file.ext === "txt") return openNotepad(file);
         // everything else: a believable "opening / preview" flow
         showDialog({
             title: "Meridian Workspace", icon: "info",
@@ -834,6 +868,40 @@
         });
     }
 
+    /* ----- Notepad (plain-text viewer) ------------------------------------- */
+    // A lightweight Notepad for .txt files. One window per file (id keyed on the
+    // file id) so several notes can sit open and content never goes stale. The
+    // pay-off home for it is the resignation letter sitting in the Recycle Bin.
+    function openNotepad(file) {
+        const fname = file.name + "." + file.ext;
+        const text = file.text != null ? file.text : "";
+        openWindow({
+            id: "note:" + file.id, title: fname + " — Notepad", icon: ICO.note, width: 600, height: 480,
+            build(body) {
+                body.appendChild(el("div", { class: "menubar", html: ["File", "Edit", "Format", "View", "Help"].map(m => `<span class="mi">${m}</span>`).join("") }));
+                const tools = el("div", { class: "toolbar" });
+                const wrapBtn = el("button", { class: "tbtn", text: "Word Wrap", onclick: () => { area.classList.toggle("wrap"); wrapBtn.classList.toggle("primary"); } });
+                tools.append(
+                    el("button", { class: "tbtn", text: "Save", onclick: () => savedToast("Note") }),
+                    el("div", { class: "tsep" }),
+                    wrapBtn,
+                    el("div", { class: "tgrow" }),
+                );
+                body.appendChild(tools);
+                const area = el("textarea", { class: "notepad", spellcheck: "false" });
+                area.value = text;
+                body.appendChild(area);
+                const status = el("div", { class: "statusbar" });
+                const refresh = () => {
+                    const v = area.value, lines = v.split("\n").length, chars = v.length;
+                    status.innerHTML = `${lines} line${lines === 1 ? "" : "s"} &nbsp;·&nbsp; ${chars} character${chars === 1 ? "" : "s"} &nbsp;·&nbsp; Plain Text &nbsp;·&nbsp; UTF-8`;
+                };
+                area.addEventListener("input", refresh);
+                body.appendChild(status); refresh();
+            }
+        });
+    }
+
     /* ----- Mail ------------------------------------------------------------ */
     const mails = [
         { from: "IT Service Desk", when: "9:14 AM", subj: "ACTION REQUIRED: Mandatory password reset", unread: true, body: "<p>Dear valued team member,</p><p>Our records indicate your network password will expire in <b>0 days</b>. To avoid disruption, please reset it immediately using the self-service portal. Your new password must contain at least 14 characters, three emoji, and may not resemble any of your previous 24 passwords.</p><p>Thank you for helping keep Meridian secure.</p><p>— IT Service Desk</p>" },
@@ -916,6 +984,7 @@
                         const node = el("div", { class: "file", title: `${entry.file.name}.${entry.file.ext} (from ${entry.fromName})` });
                         node.innerHTML = `<div class="ico">${fileGlyph(entry.file.ext)}</div><div class="nm">${entry.file.name}.${entry.file.ext}</div>`;
                         node.addEventListener("click", () => { grid.querySelectorAll(".file.sel").forEach(n => n.classList.remove("sel")); node.classList.add("sel"); sel = entry; restoreBtn.disabled = false; });
+                        node.addEventListener("dblclick", () => openFileItem(entry.file));
                         grid.appendChild(node);
                     });
                     status.textContent = `${recycleBin.length} item${recycleBin.length === 1 ? "" : "s"}`;

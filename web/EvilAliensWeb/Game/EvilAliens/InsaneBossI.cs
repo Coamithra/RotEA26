@@ -52,14 +52,11 @@ internal class InsaneBossI : GameScene
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/andromeda");
-		contentManager.Load<Texture2D>("GFX/Sprites/Asteroid2");
 		contentManager.Load<Texture2D>("GFX/Sprites/blooddrop");
 		contentManager.Load<Texture2D>("GFX/Sprites/braingoo");
 		contentManager.Load<Texture2D>("GFX/Sprites/earth");
 		contentManager.Load<Texture2D>("GFX/Sprites/eye");
-		contentManager.Load<Texture2D>("GFX/Sprites/lazerbottom");
 		contentManager.Load<Texture2D>("GFX/Sprites/lazermiddle");
-		contentManager.Load<Texture2D>("GFX/Sprites/lazertop");
 		contentManager.Load<Texture2D>("GFX/Sprites/ufosheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/mediumship");
 		contentManager.Load<Texture2D>("GFX/Sprites/mothershipA");

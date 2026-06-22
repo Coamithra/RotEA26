@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace EvilAliensWeb.Compat
 {
@@ -20,8 +21,23 @@ namespace EvilAliensWeb.Compat
 	//   ?unlockall     reveal every gated menu option (Cheats, all challenges, Level 2/3,
 	//                  Challenges/Awardments) so the whole menu can be walked through;
 	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
+	//   ?harness=<Obj> SPRITE HARNESS: boot straight onto a space background showing ONE
+	//                  game object (an enemy/boss/projectile), FROZEN on a frame, drawn by
+	//                  the real in-game Draw path (same SpriteBatchWrapper / RenderScale /
+	//                  bloom / gamma). Built for iterating on drawing code: the image is
+	//                  identical every frame, so a screenshot at any moment is reliable -- no
+	//                  fighting game timing. <Obj> is a HarnessRegistry name (see that file or
+	//                  harness.html), case-insensitive, e.g. Spider / UFO / Asteroid / DeathStar.
+	//                  Companion flags (only meaningful with ?harness):
+	//     ?frame=<n>   freeze on animation frame n (default 0)
+	//     ?play        let the animation play in place instead of freezing (alias ?animate)
+	//     ?bg=<name>   backdrop: space (default) / spaceclassic / holodeck / mars / base
+	//     ?pos=<x,y>   object position in 800x600 design space (default 400,300 = centre)
+	//     ?objscale=<f> multiply the object's natural draw scale (default 1; alias ?size)
+	//     ?rot=<deg>   object rotation in degrees (default 0; alias ?rotation)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
+	//            ?harness=Spider&frame=2   ?harness=DeathStar&play   ?harness=UFO&pos=300,260
 	public static class DebugFlags
 	{
 		// Skip the studio/meme splash sequence and land on the Press Start screen.
@@ -42,6 +58,31 @@ namespace EvilAliensWeb.Compat
 		// Force the Invulnerability cheat ON at boot (so playtesting a level doesn't keep
 		// dying). Applied in Game1.startScreen_OnFinished after Settings has loaded.
 		public static bool Invuln { get; private set; }
+
+		// Sprite harness (see the header comment + HarnessScene/HarnessRegistry). Harness is
+		// the registry name of the object to show; non-null => SkipSplash + AutoStart and the
+		// boot routes into HarnessScene instead of the menu/a level.
+		public static string Harness { get; private set; }
+
+		// Animation frame to freeze on (default 0). Ignored when HarnessPlay is set.
+		public static int HarnessFrame { get; private set; }
+
+		// Let the object's animation play in place instead of freezing on a single frame.
+		public static bool HarnessPlay { get; private set; }
+
+		// Which Background setup to use behind the object (default "space").
+		public static string HarnessBg { get; private set; } = "space";
+
+		// Object position in 800x600 design space (null => centre, 400,300).
+		public static float? HarnessX { get; private set; }
+
+		public static float? HarnessY { get; private set; }
+
+		// Multiplier on the object's natural draw scale (default 1).
+		public static float HarnessScale { get; private set; } = 1f;
+
+		// Object rotation in degrees (default 0).
+		public static float HarnessRot { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -94,7 +135,51 @@ namespace EvilAliensWeb.Compat
 				case "god":
 					Invuln = IsOn(val);
 					break;
-				case "level":
+				case "harness":
+						// The object name itself is the value (?harness=Spider). A bare ?harness
+						// with no value is meaningless (no object), so ignore it.
+						if (!string.IsNullOrEmpty(val))
+						{
+							Harness = val.Trim();
+							SkipSplash = true;
+							AutoStart = true;
+						}
+						break;
+					case "frame":
+						if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fr))
+						{
+							HarnessFrame = fr;
+						}
+						break;
+					case "play":
+					case "animate":
+						HarnessPlay = IsOn(val);
+						break;
+					case "bg":
+					case "background":
+						if (!string.IsNullOrEmpty(val))
+						{
+							HarnessBg = val.Trim().ToLowerInvariant();
+						}
+						break;
+					case "pos":
+						ParsePos(val);
+						break;
+					case "objscale":
+					case "size":
+						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var sc) && sc > 0f)
+						{
+							HarnessScale = sc;
+						}
+						break;
+					case "rot":
+					case "rotation":
+						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var rt))
+						{
+							HarnessRot = rt;
+						}
+						break;
+					case "level":
 					if (Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl))
 					{
 						Level = lvl;
@@ -109,17 +194,40 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || Harness != null;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
 					+ " autoStart=" + AutoStart + " noAttract=" + NoAttract
 					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
-					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln);
+					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln
+						+ (Harness != null
+							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
+							: ""));
 			}
 			else
 			{
 				Hint();
+			}
+		}
+
+		// Parse a "?pos=x,y" value into HarnessX/HarnessY (800x600 design space). Either
+		// component may be omitted ("400," / ",300") to override just one axis; the missing
+		// one falls back to centre in HarnessScene.
+		private static void ParsePos(string val)
+		{
+			if (string.IsNullOrEmpty(val))
+			{
+				return;
+			}
+			string[] parts = val.Split(',');
+			if (parts.Length >= 1 && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+			{
+				HarnessX = x;
+			}
+			if (parts.Length >= 2 && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+			{
+				HarnessY = y;
 			}
 		}
 

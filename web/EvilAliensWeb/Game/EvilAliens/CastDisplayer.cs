@@ -63,6 +63,11 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private float scale = 1f;
 
+	// supersample factor of the loaded sheet (4 for an HD-registered sheet, else 1). The cast
+	// display draws frames at their actual texel size, so divide the draw scale by this to keep
+	// every cast member at its original on-screen size after a sheet is upscaled.
+	private float textureScale = 1f;
+
 	private int rows;
 
 	private int columns;
@@ -131,6 +136,8 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		columns = animationData.columns;
 		fps = animationData.fps;
 		separatingspace = animationData.separatingspace;
+		int frameWidth = columns > 0 ? (texture.Width - (columns - 1) * separatingspace) / columns : texture.Width;
+		textureScale = AlienDrawableGameComponent.SuperSampleFactor(texturename, frameWidth);
 		color = Color.White;
 	}
 
@@ -757,11 +764,11 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 				num6 /= rows;
 				Rectangle source = default(Rectangle);
 				(source) = new Rectangle(num4 * (num5 + separatingspace), num3 * (num6 + separatingspace), num5, num6);
-				spriteBatch.Draw(texture, source, val3 + new Vector2(0f, num), rotation, scale, center: true, color, spriteEffects);
+				spriteBatch.Draw(texture, source, val3 + new Vector2(0f, num), rotation, scale / textureScale, center: true, color, spriteEffects);
 			}
 			else
 			{
-				spriteBatch.Draw(texture, val3 + new Vector2(0f, num), rotation, scale, center: true, color, spriteEffects);
+				spriteBatch.Draw(texture, val3 + new Vector2(0f, num), rotation, scale / textureScale, center: true, color, spriteEffects);
 			}
 			if (state == CastState.brainboss)
 			{

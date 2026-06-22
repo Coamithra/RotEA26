@@ -58,6 +58,11 @@ public class Game1 : Game
 
 	private NewPreviewScene previewScene;
 
+	// Web-port debug sprite harness (?harness=...): a single frozen object on a space
+	// background drawn through the real pipeline. Created in Initialize, launched from
+	// startScreen_OnFinished instead of the menu when DebugFlags.Harness is set.
+	private EvilAliensWeb.Compat.HarnessScene harnessScene;
+
 	private AsteroidChase spaceDodge;
 
 	private BraineroidsLevel braineroids;
@@ -272,6 +277,8 @@ public class Game1 : Game
 		previewScene = new NewPreviewScene((Game)(object)this);
 		NewPreviewScene newPreviewScene = previewScene;
 		newPreviewScene.onExit = (NewPreviewScene.ExitEvent)Delegate.Combine(newPreviewScene.onExit, new NewPreviewScene.ExitEvent(previewScene_onExit));
+		harnessScene = new EvilAliensWeb.Compat.HarnessScene((Game)(object)this);
+		harnessScene.OnExitToMenu = harnessScene_OnExitToMenu;
 		creditsScene = new CreditsScene((Game)(object)this);
 		creditsScene.OnFinished += creditsScene_OnFinished;
 		bragScene = new BragScene((Game)(object)this);
@@ -302,10 +309,17 @@ public class Game1 : Game
 		menuScene.OnResetSelected += menuScene_OnResetSelected;
 		menuScene.OnBragSelected += menuScene_OnBragSelected;
 		((Collection<IGameComponent>)(object)base.Components).Remove((IGameComponent)(object)startScreen);
+		// Debug (?harness=...): bypass the menu and boot straight into the sprite harness.
+		// menuScene is still created + wired above, so pressing Esc drops back to the menu
+		// via harnessScene_OnExitToMenu.
+		if (DebugFlags.Harness != null)
+		{
+			collectionHelper.Add((GameComponent)(object)harnessScene);
+		}
 		// Debug (?level=...): bypass the menu and boot straight into the requested level.
 		// menuScene is still created + wired above, so returning from the level (or losing)
 		// drops back to a normal menu via gameScene_OnFinished.
-		if (DebugFlags.Level.HasValue)
+		else if (DebugFlags.Level.HasValue)
 		{
 			LaunchLevelDirect(DebugFlags.Level.Value);
 		}
@@ -505,6 +519,15 @@ public class Game1 : Game
 	private void previewScene_onExit()
 	{
 		collectionHelper.Remove((GameComponent)(object)previewScene);
+		collectionHelper.Add((GameComponent)(object)menuScene);
+	}
+
+	// Esc out of the sprite harness: drop the harness (and the object + background it
+	// added) and show the normal menu. Mirrors previewScene_onExit.
+	private void harnessScene_OnExitToMenu()
+	{
+		harnessScene.Teardown();
+		collectionHelper.Remove((GameComponent)(object)harnessScene);
 		collectionHelper.Add((GameComponent)(object)menuScene);
 	}
 

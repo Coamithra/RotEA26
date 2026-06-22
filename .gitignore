@@ -13,7 +13,7 @@ _sizetest_*/
 # ---- Original Xbox 360 STFS package -------------------------------------------
 # Provenance only: a 52 MB signed Xbox Live marketplace binary. The actual game
 # assets are unpacked under extracted/ , so the package is not needed to build.
-# Kept locally; re-extract from it only if you need to (see plan.md appendix).
+# Kept locally; re-extract from it only if you need to (see plans/plan.md appendix).
 47D5BF15FF8CC1DB145E8BA9542C43FD3209A09A58
 
 # ---- Stage-5 shader build artifacts ------------------------------------------
@@ -49,6 +49,13 @@ desktop.ini
 .DS_Store
 *.swp
 *.log
+
+# ---- Raw asset sources / scratch ---------------------------------------------
+# new_assets_raw/ holds raw AI-gen sprite sources + intermediate repacks (~68 MB).
+# The SHIPPED assets live under wwwroot/Content; the repack scripts (tools/upscale/)
+# reproduce the engine textures from these, so the raw gens are kept local-only.
+new_assets_raw/
+tools/tts/_alex_oneshot_full.mp3
 
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.

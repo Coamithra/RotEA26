@@ -16,7 +16,7 @@ internal class AsteroidChase : GameScene
 	{
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
-		contentManager.Load<Texture2D>("GFX/Sprites/Asteroid2");
+		contentManager.Load<Texture2D>("GFX/Sprites/large_asteroid");
 		contentManager.Load<Texture2D>("GFX/Sprites/ufosheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/smallship");
 	}

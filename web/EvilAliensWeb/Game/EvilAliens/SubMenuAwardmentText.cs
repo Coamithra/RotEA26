@@ -107,7 +107,7 @@ internal class SubMenuAwardmentText : MenuSub1
 		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
 		//IL_007c: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0086: Unknown result type (might be due to invalid IL or missing references)
-		base.SpriteBatch.Draw(skull, new Vector2(400f, 200f), 0f, 0.6f, center: true, Color.LightGray);
+		base.SpriteBatch.Draw(skull, new Vector2(400f, 200f), 0f, 0.6f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Menu/evilskull", skull.Width), center: true, Color.LightGray);
 		Vector2 val = font.MeasureString("Status: LOCKED") / 2f;
 		SpriteBatchWrapper spriteBatch = base.SpriteBatch;
 		Vector2 position = new Vector2(400f, 200f);
@@ -137,7 +137,7 @@ internal class SubMenuAwardmentText : MenuSub1
 		float num2 = MyMath.Mod(num / 2f, 1f);
 		num2 = brainPulsate.Evaluate(num2);
 		Color color = Color.Lerp(Color.White, Color.LightGreen, 1f - num2);
-		base.SpriteBatch.Draw(skull, new Vector2(400f, 200f), 0f, 0.6f, center: true, color);
+		base.SpriteBatch.Draw(skull, new Vector2(400f, 200f), 0f, 0.6f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Menu/evilskull", skull.Width), center: true, color);
 		Vector2 val = font.MeasureString("Status: UNLOCKED") / 2f;
 		SpriteBatchWrapper spriteBatch = base.SpriteBatch;
 		Vector2 position = new Vector2(400f, 200f);

@@ -43,7 +43,42 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	private static readonly Dictionary<string, int> DesignFrameWidth = new Dictionary<string, int>
 	{
 		{ "GFX/Sprites/ufosheet", 48 },
-		{ "GFX/Sprites/playersheet", 48 }
+		{ "GFX/Sprites/smallship", 48 },
+		{ "GFX/Sprites/faceofdeathspritesheet", 48 },
+		{ "GFX/Sprites/deathstarsheet2", 48 },
+		{ "GFX/Sprites/playersheet", 48 },
+		// single-frame "landed" stills: design width is the WHOLE texture (not a frame),
+		// drawn directly in UFO.Draw so the factor is removed there via SuperSampleFactor.
+		// Keys must match the stationarySpriteName strings exactly (note the capital S).
+		{ "GFX/Sprites/ufometpootjes", 55 },
+		{ "GFX/Sprites/Smallship_landed", 48 },
+		{ "GFX/Sprites/Mediumship_landed", 216 },
+		{ "GFX/Sprites/Mothership_landed", 456 },
+		// drawn DIRECTLY (not via the component). spiderjump is now a 6x4 soar ANIMATION
+		// sheet played frame-by-frame in Spider.Draw (design = per-CELL width 399/3);
+		// wing1 is the FlyingSpider's flapping wing. Both divide draw scale by
+		// SuperSampleFactor at their draw site.
+		{ "GFX/Sprites/spiderjump", 133 },
+		{ "GFX/Sprites/wing1", 92 },
+		// spider_sheet2: the 7x7 "rear up" animation (drawn through the component by the grounded
+		// Spider). Design width 160 -> 256px cells are 1:1 at a 1280x1024 window (160 * 1.6).
+		{ "GFX/Sprites/spider_sheet2", 160 },
+		// Asteroids (single frame, design = full texture width; drawn through the component so
+		// size auto-corrects). large_asteroid is the hi-res (7x) big level-opener; the AsteroidSmall
+		// variants are lower-res (1.5x) for the small normal asteroids (scale 0.45) AND the JunkBoss
+		// balls (Ball.cs), picked at random per spawn.
+		{ "GFX/Sprites/large_asteroid", 179 },
+		{ "GFX/Sprites/AsteroidSmall1", 179 },
+		{ "GFX/Sprites/AsteroidSmall2", 179 },
+		{ "GFX/Sprites/AsteroidSmall3", 179 },
+		{ "GFX/Sprites/AsteroidSmall4", 179 },
+		// power-up bubble: HD (4x) replacement for the old 32px disc, tinted per type. Drawn
+		// through the component by the Powerup entity; the HelpText/InstructionsMenu draw it
+		// DIRECTLY and divide their scale by SuperSampleFactor.
+		{ "GFX/Sprites/powerupbw", 32 },
+		// awardment-screen decoration skull: HD (2x) still, design = full texture width. Drawn
+		// DIRECTLY in SubMenuAwardmentText, which divides its scale by SuperSampleFactor.
+		{ "GFX/Menu/evilskull", 376 }
 	};
 
 	// effective on-screen draw scale once the supersample factor is removed

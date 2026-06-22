@@ -3,8 +3,8 @@
 Porting a recovered 2008 **XBLIG** (XNA 3.x, C#) to run in the browser via **KNI**
 (a MonoGame fork with a Blazor WebAssembly / WebGL backend). Output = a static site.
 
-**`plan.md` is the staged plan** (content → boot → shaders → audio → saves → hosting → polish);
-each stage is written to be done independently with fresh context. This file is how to *work*
+**The project tracker is now the local Trello board (see "Project tracking" below); `plans/plan.md` is a historical artifact — the archived staged plan** (content → boot → shaders → audio → saves → hosting → polish);
+each stage was written to be done independently with fresh context. This file is how to *work*
 in the repo. (Global prefs — `rtk` git, `python` not `python3`, the `edit_unicode.py` helper —
 still apply.)
 
@@ -16,9 +16,9 @@ it lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programmin
   active board is a *different* one). e.g.
   `trello --backend local --board 10989a3d board` (show), `... list ls`, `... card ls <listId>`.
 - **Columns (list ids):** `Backlog` `79158996` · `In Progress` `3b43cba3` · `Done` `9c204b80`.
-- **Cards = plan.md's stages.** Done: Stages 1–10 + 12 (the custom "Revenge" font). Backlog:
-  Stage 11 (online co-op). Each card's description summarises that
-  stage; `plan.md` remains the source of truth — when a stage's status changes, `card move <id> <listId>`
+- **Cards = the plan's stages; the Trello board is now the live tracker.** Done: Stages 1-10, 12, 15. In Progress: Stage 13 (menu reskin). Backlog:
+  Stage 11 (online co-op) + Stage 14 (trailers). Each card's description summarises that
+  stage; the now-archived `plans/plan.md` holds the full per-stage detail. When a stage's status changes, `card move <id> <listId>`
   it and keep the description in sync.
 - Browse it visually with `trello --backend local --board 10989a3d serve` (drag-drop kanban web app).
 
@@ -28,6 +28,12 @@ cd web/EvilAliensWeb
 dotnet build -c Debug
 dotnet run -c Debug --urls http://localhost:5280     # then open the URL
 ```
+- **Debugging how an ENEMY/OBJECT draws (a sprite, frame, blend, tint, scale)? STOP — do NOT
+  boot the game and try to screenshot a moving target.** Use the **sprite harness**:
+  `…:5280/?harness=<Obj>&frame=<n>` boots straight to that object, frozen, on a space
+  background, drawn by the real pipeline — so a screenshot is reliable every time. Full flag
+  list + how it works + how to add an object are in the "Sprite harness" bullet below; the
+  human picker is `wwwroot/harness.html`. Reach for this FIRST for any drawing-code change.
 - **A clean `dotnet build` does NOT mean it runs.** WASM runtime errors only appear in the
   **browser console** — always verify visually *and* read the console. Use the preview tools
   against the `eaweb` config in `.claude/launch.json` (`preview_start` → `preview_screenshot`
@@ -45,7 +51,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `?noattract` (disable the menu's 20s idle→demo attract) ·
   `?level=<Name>` (boot straight into a level, bypassing the menu — `<Name>` is a `Levels`
   value, e.g. `Level1`/`Level2`/`Level3`/`ClassicAliens`/`SpaceDodge`) ·
+  `?invuln` (force the Invulnerability cheat ON so playtesting a level doesn't keep dying;
+  aliases `?invulnerability`/`?god`); `?unlockall` (reveal every gated menu option);
   `?skipsplash` / `?autostart` as building blocks. e.g. `…:5280/?level=Level2&noattract`.
+- **Sprite harness — USE THIS to debug an object's drawing code instead of booting the game
+  and trying to screenshot a moving enemy at the right instant.** `?harness=<Obj>` boots
+  straight onto a space background showing ONE game object, drawn by its OWN `Draw()` through
+  the real pipeline (same `SpriteBatchWrapper` / `RenderScale` / blend mapping / bloom / gamma),
+  FROZEN — so a screenshot at any moment is pixel-identical (no timing to catch). It's 1:1
+  because it reuses each type's real `NewXxx`+`Setup` and the real draw path; it only freezes
+  time (object `Enabled=false` so gameplay `Update` never runs; the harness sets
+  `Position`/`curframe`/`scale`/`rotation`). Companion flags: `?frame=<n>` (freeze frame, default 0)
+  · `?play` (animate in place instead) · `?bg=space|spaceclassic|holodeck|mars|base|basedark`
+  · `?pos=<x,y>` (design space, default 400,300) · `?objscale=<f>` (alias `?size`) · `?rot=<deg>`.
+  e.g. `…:5280/?harness=Spider&frame=2` · `…/?harness=DeathStar&play` · `…/?harness=ufo&bg=mars`.
+  Code: **`Compat/HarnessScene.cs`** (the scene) + **`Compat/HarnessRegistry.cs`** (name→factory;
+  add an object in ONE line — call its `New*`+`Setup`). Wired in `Game1` next to the `?level=`
+  path. Human picker: **`wwwroot/harness.html`** (dropdown + fields → builds the URL; keep its
+  list in sync with the registry). Caveat: objects whose Draw depends on state only their Update
+  reaches (mid-attack bosses, the spider's airborne sheet) show their spawned/idle pose — bosses
+  are best-effort; the common per-frame sprite-sheet enemies are exact. Verify like any game
+  change: real Chrome, not `preview_screenshot` (the rAF loop pauses when the tab is backgrounded).
 
 ## Toolchain (already installed)
 - .NET 8 SDK + `wasm-tools` workload (Emscripten / mono browser-wasm).
@@ -83,7 +109,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   browser fullscreen, favicon/meta, on-screen touch controls), a **unified hi-res render path** (legacy + hi-res art share one window-resolution scene, one bloom/gamma) and a **trimmed download** (9.6 MB
   uncompressed boot payload, ~2.9 MB brotli — down from 25.8 MB) and 0 console exceptions —
   **deployed publicly at https://coamithra.github.io/RotEA26/**, auto-rebuilt on every push to `main`.
-  Remaining: online co-op (11). See `plan.md`
+  Remaining: online co-op (11) + trailers (14); menu reskin (13) in progress. See the archived `plans/plan.md`
   "Stage 4/5/6/7/8/9/10 — DONE" for what changed and the stubs each later stage must un-stub.
 - **Hosting (Stage 8):** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI (Pages
   can't build .NET), rewrites `<base href>` to `/RotEA26/` (project page), adds `.nojekyll` + `404.html`,
@@ -120,7 +146,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (One/InvSrcAlpha), a same-name trap: pairing it with straight content makes alpha fades go
   additive-bright instead of dissolving (the "bomb/blast vanishes suddenly" bug — we tried it, it's
   reverted). Don't premultiply on export, don't premultiply tints; straight tints like
-  `new Color(1,1,1,a)` are correct as written. Evidence + the full story: `plan.md` Stage 3.
+  `new Color(1,1,1,a)` are correct as written. Evidence + the full story: `plans/plan.md` Stage 3.
 - **Audio (Stage 6):** the lost XACT runtime is replaced, not ported. `tools/audio/` cracks the
   big-endian Xbox banks in pure Python (`xact.py` parses `.xwb`/`.xsb`; PCM SFX + **xWMA music**
   decoded via **PyAV**) and `build_audio.py` writes `wwwroot/Content/{sfx,vo}/*.wav`,

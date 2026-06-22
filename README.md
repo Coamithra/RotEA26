@@ -12,8 +12,9 @@ GitHub Pages.
 - ✅ The full ~40k-line game **compiles to WebAssembly** (0 errors)
 - ⬜ Content pipeline · first boot · shaders · audio · saves · hosting · polish
 
-**See [plan.md](plan.md) for the full multi-stage plan** — each stage is written to be
-executed independently with fresh context.
+**See [plans/plan.md](plans/plan.md) for the archived multi-stage development plan** — a historical record of how each
+stage was built, kept for reference. Active task tracking now lives on a local Trello
+board, not in this repo.
 
 ## Layout
 

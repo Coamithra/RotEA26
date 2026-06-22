@@ -301,7 +301,10 @@ public class UFO : KillableAlien
 		else
 		{
 			spriteBatch.BlendMode = (SpriteBlendMode)1;
-			spriteBatch.Draw(stationarySprite, base.Position, 0f, scale, center: true);
+			// landed stills are drawn directly (not via DrawScale), so undo any supersample
+			// factor here; 1 for not-yet-upscaled stills (Smallship_landed / Mediumship_landed)
+			float landedScale = scale / SuperSampleFactor(stationarySpriteName, stationarySprite.Width);
+			spriteBatch.Draw(stationarySprite, base.Position, 0f, landedScale, center: true);
 		}
 		if (lazerGenerator != null)
 		{

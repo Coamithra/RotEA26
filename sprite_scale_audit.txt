@@ -1,0 +1,115 @@
+================================================================================
+ SPRITE SCALE AUDIT  -  Revenge of the Evil Aliens (web port)
+================================================================================
+ Metric: EFFECTIVE SCALE at the 1440px render-target cap (presenter scale 2.4x).
+ This is the WORST CASE the engine ever rasterizes (RenderScale.MaxHeight=1440,
+ 2.4 = 1440/600). Bigger windows just bilinear-stretch this target, so 2.4x is
+ the true ceiling for how much a texture is ever magnified.
+
+   eff = (on-screen size in 800x600 design px) * 2.4 / (native texels per frame)
+
+   eff > 1  -> texture is MAGNIFIED at the cap -> soft -> UPSCALE candidate
+   eff ~ 1  -> about right
+   eff < 1  -> texture is MINIFIED -> wasted pixels -> SHRINK candidate
+              (you can shrink the asset to ~eff of its current size, lossless@cap)
+
+ NATIVE = per-frame texel width (sheet width / columns, or .dat source region,
+ or full texture for single-frame). ONSCR = on-screen footprint width in design
+ px (designFrameWidth * gameplay-scale, i.e. independent of window size).
+ Dynamic-scale sprites use their MAX on-screen size (worst case for blur).
+
+ Sorted by EFF, high -> low. Edit the STATUS column to track work.
+ Generated 2026-06-22. (1080p window numbers = these * 1.8/2.4 = *0.75.)
+================================================================================
+
+EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
+----  -------  -------------------------------------  ------  -----  ---------------------------------
+8.40  skip     sprites/blast                            384   1344   transient additive shockwave; blur invisible. (mini=1.08)
+5.76  lowpri   tutorial/grid3 (holodeck grid)            30    173   tiny tiled grid line; bg
+4.80  lowpri   game/starfield2                         1024   2048   scrolling starfield, drawn 1.5-2x; soft by nature
+4.80  lowpri   base/"black line lalalal" (wall edge)    256    512   thin edge-highlight strip on wall blocks
+2.88  TODO     alienboss  (FakeBoss, scale 1.2)         ~278   ~334   .dat 29-frame sheet; HARD (consistent HD frames + .dat regen). orig in -premult
+2.81  lowpri   credits/slawekmars2                     1024    800   fullscreen credits backdrop (height-stretched)
+2.64  TODO     alienboss  (ClassicBoss, scale 1.1)      ~278   ~306   .dat 29-frame sheet; HARD. -premult has the original
+2.64  TODO     sprites/brainlargetransglow (BrainBoss)   519    571   SINGLE FRAME -> easy upscale. shared w/ small Braineroids (fine)
+2.40  TODO     alienboss  (BattleSkull, scale 1.0)      ~278   ~278   .dat sheet; same as above
+2.40  note     sprites/mediumship (medium UFO/SweepUFO)  216    216   8x4 sheet; crisp@cap needs ~518px frame -> 4144px sheet > 4096 WebGL cap. left native by choice
+2.40  note     sprites/mothershipa + mothershipb (boss)  456    456   two 4x4 sheets; 1094px frame -> 4376px > 4096 cap. can't 1-sheet; redesign?
+2.40  note     sprites/mothershipb (Mars boss)           456    456   same sheet, different boss
+2.40  TODO     spider/spiderfly,-jump,-land,-stand       ~466   ~466   SpiderBoss; four .dat sheets, deep boss. -premult has originals
+2.40  TODO     sprites/spiderdebris1/2/3            136/258/219  =nat  SpiderBoss debris, scale 1
+2.40  lowpri   sprites/bulletgood, bulletevil             16     16   tiny projectiles; cheap to bump but low impact
+2.40  lowpri   sprites/connector (ShipConnector)         180    180   2-player ship link
+2.40  lowpri   sprites/cablesfront, cablesback           800    800   boss cables overlay
+2.40  lowpri   marsbg/mars1-6, marshills                1000   1000   Mars parallax layers; bg
+2.40  lowpri   marsbg/clouds-background, -foreground2   1024   1024   Mars cloud parallax; bg
+2.40  lowpri   base/756* , base/2331-v5 (alien base)     512    512   base interior + walls; bg
+2.40  TODO     splash/uglysplash22, splash/ealogo        800    800   native-800 fullscreen; regen at >=1440 wide instead of upscale
+2.40  TODO     help/"controls keyboard","controls joypad" 800   800   native-800 controls screens; regen at >=1440
+2.40  lowpri   preview/poster                            800    800   upsell screen
+2.40  lowpri   credits/mars_joost                        800    800   credits backdrop
+2.40  lowpri   hud/barlit, barunlit2, barlitedge      116/20   ~116   power/gamma bars (GammaMenu, PowerupData)
+2.40  lowpri   menu/powerbar, awardmentblade, arrow,    24-487  =nat   small UI: powerbar/blade/arrow/option/star/cursor
+              option, menu/star, cursor2
+2.40  lowpri   sprites/explosion, explosionpurple, smoke  512   ~512   particle blasts (big explosions); soft glow
+2.40  lowpri   sprites/shadow                             82   ~115   ground shadow; dynamic ~1.7-3.4x
+1.92  lowpri   game/tileablestarfield                   1280   1024   menu/space starfield, drawn 0.8x; bg
+1.88  TODO     menu/planet, menu/vignette               1024    800   fullscreen menu backdrop + vignette
+1.81  TODO     menu/hudring                              768    580   menu targeting reticle
+1.80  lowpri   sprites/explosionsprite (Basic mode)      180   ~180   5x6 sheet; only in BasicExplosions setting
+1.50  maybe    sprites/spider_sheet2 (grounded spider)   256    160   7x7; built for 1280x1024. 384px cells (~2700 sheet) fits if wanted
+1.46  lowpri   menu/pointer                              128     78   menu list pointer
+1.33  ok       splash/easplashredone, uglysplash22-     1448    800   redone splash; near-crisp, fine
+              revenged
+1.20  ok       sprites/powerupbw (help-screen draw)      128     64   help/instructions; preview small_face_a/b also ~1.20
+1.13  ok       splash/uglysplash22-revenged-pure(-glass) 1280    600   portrait reveal, aspect-fit; fine
+1.03  DONE     sprites/large_asteroid (big asteroid)    1253    537   <<< DONE 2026-06-22, repacked 7x from original >>>
+--------------------------------------------------------------- ~1.0 (crisp) ---
+0.97  shrink?  sprites/earth (background)                735   ~298   large use 0.405; small use 0.15 -> 0.36. shared
+0.96  shrink   screenshots/* (11 level-select thumbs)    800   ~320   shown at ~0.25-0.4x; store as thumbnails not full screens
+0.80  ok       sprites/spiderjump (grounded soar)        399    133   6x4 soar sheet; fine
+0.80  ok       sprites/mothership_landed (StationaryBoss)1368    456   landed mothership; fine
+0.80  ok       menu/menufont (3x supersampled atlas)    (3x)    n/a   text stays crisp; fine
+0.79  ok       menu/title-revenged                      1642    540   main title; crisp, slight headroom
+0.72  shrink   sprites/AsteroidSmall1-4 (small asteroids)268     81   drawn scale 0.45; ~half the texels would do
+0.72  shrink   menu/evilskull (awardment decoration)     752    226   2x still drawn at 0.6 scale
+0.61  shrink   sprites/AsteroidSmall* via Ball (balls)   268   ~102   JunkBoss balls (now AsteroidSmall, updated 2026-06-22)
+0.60  shrink   sprites/ufosheet, smallship               192     48   small UFOs; 4x sheets, oversampled even @cap
+0.60  shrink   sprites/faceofdeathspritesheet (skull)    192     48   4x sheet
+0.60  shrink   sprites/deathstarsheet2 (DeathStar/Mine)  192     48   4x sheet
+0.60  shrink   sprites/playersheet (player ship)         192     48   4x sheet
+0.60  shrink   sprites/powerupbw (Powerup entity)        128     32   4x bubble
+0.60  shrink   sprites/ufometpootjes, smallship_landed,  varies  =df   landed UFO stills (4x); mediumship_landed too
+              mediumship_landed
+0.60  shrink   sprites/andromeda (background)            840    210   far backdrop, scale 0.25
+0.60  shrink   sprites/plasmaball2 (PlasmaBall)          697   ~174   drawn scale 0.25; native 697 is big waste
+0.60  shrink   sprites/parachute (Parachute)             366    ~92   grows to 0.25 max
+0.60  shrink   sprites/wing1 (FlyingSpider wing)         368     92   4x; 0.40 in foreground
+0.48  shrink   sprites/braingoo, blooddrop, blooddrop_   15-45   ~9   blood/goo particles; tiny anyway
+              green
+0.48  shrink   sprites/brainlargetransglow (Braineroid   519   ~104   medium braineroid; SAME texture as BrainBoss (keep big for boss)
+              medium)
+0.31  shrink   sprites/eye (JunkBoss / PunchingBag)       360     47   big texture drawn at scale 0.13 -> huge waste
+0.17  shrink   sprites/brainlargetransglow (Braineroid    519    ~36   small braineroid (shared texture)
+              small)
+
+================================================================================
+ STATUS legend:  TODO=upscale me | DONE | maybe | note=blocked (4096 cap etc) |
+                 ok=fine | shrink=oversampled, can reduce | lowpri | skip
+================================================================================
+ DELETED this session (dead assets, ~3.7MB): menu/title, cursor22, hud/barunlit,
+ sprites/{secretcow,testsprite,lazertop,lazerbottom}, tutorial/twistedcheckerboard,
+ 2 splash scratch PNGs, sprites/asteroid2 (replaced by large_asteroid).
+================================================================================
+ NOTES
+ - "4096 cap" sprites (mediumship, mothership*): a single crisp@cap sheet exceeds
+   the WebGL 4096px texture limit. Options: split the sheet, accept ~2x (eff ~1.2),
+   or redesign. This is why UPSCALING.md left them native.
+ - alienboss / spider boss are .dat multi-frame sheets: faithful HD needs N
+   consistent frames + .dat regen (hard); the -premult repo has the originals.
+ - brainlargetransglow is ONE texture shared by the boss (needs HD) and small
+   braineroids (oversampled). Upscaling it helps the boss; small uses just get
+   more oversampled (harmless). Net: upscale it.
+ - "shrink" 4x sheets were built for the cap with headroom; dropping to ~3x stays
+   crisp@cap and trims payload. Lower priority than the UPSCALE (eff>1) work.
+================================================================================

@@ -21,7 +21,7 @@
              reflected save types and KNI's reflection factory registration all survive.
            * System.Private.Xml is rooted anyway so XmlSerializer's own reflection-driven
              internals can't be trimmed out from under it (belt-and-braces vs the Stage-8 trap).
-         Verified by a local Release publish + serve before relying on CI (see plan.md Stage 9).
+         Verified by a local Release publish + serve before relying on CI (see plans/plan.md Stage 9).
          InvariantGlobalization drops the ~2.5 MB ICU data + globalization code the game
          never needs (it only uses culture-invariant ToLower/number formatting). -->
     <PublishTrimmed>true</PublishTrimmed>

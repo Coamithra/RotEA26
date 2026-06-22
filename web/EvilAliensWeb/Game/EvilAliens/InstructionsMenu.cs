@@ -176,7 +176,7 @@ internal class InstructionsMenu : DrawableGameComponent
 		{
 			Color color2 = default(Color);
 			(color2) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
-			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f, center: true, color2);
+			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.Width), center: true, color2);
 			spriteBatch.Flush();
 			string text2 = "Enhancements";
 			spriteBatch.DrawString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f, (SpriteEffects)0, 0f);

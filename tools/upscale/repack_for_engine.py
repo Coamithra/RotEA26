@@ -3,7 +3,10 @@ ORIGINAL low-res sheet so it draws at the identical in-game size (with the engin
 supersample factor = FACTOR). Frames are aligned to the original by max silhouette
 overlap, packed FACTOR*48 px with 1px separators, straight alpha.
 
-usage: python repack_for_engine.py <upscaled.png> <original.png> <factor> <crop> <out.png>
+usage: python repack_for_engine.py <upscaled.png> <original.png> <factor> <crop> <out.png> [cols] [rows]
+
+cols/rows default to 8/4 (ufosheet's landscape grid). For a portrait sheet like smallship
+or mediumship (4 cols x 8 rows) pass `4 8`. Frame count (cols*rows) must stay 32.
 """
 import sys, numpy as np
 from PIL import Image
@@ -11,7 +14,9 @@ from keycompare import key_magenta
 
 UP, ORIG = sys.argv[1], sys.argv[2]
 FACTOR = int(sys.argv[3]); CROP = int(sys.argv[4]); OUT = sys.argv[5]
-COLS, ROWS, DESIGN, SEP = 8, 4, 48, 1
+COLS = int(sys.argv[6]) if len(sys.argv) > 6 else 8
+ROWS = int(sys.argv[7]) if len(sys.argv) > 7 else 4
+DESIGN, SEP = 48, 1
 FRAME = DESIGN * FACTOR
 
 orig = np.asarray(Image.open(ORIG).convert("RGBA"))

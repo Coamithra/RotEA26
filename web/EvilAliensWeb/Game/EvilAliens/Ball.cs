@@ -77,7 +77,9 @@ internal class Ball : AlienDrawableGameComponent
 		: base(game)
 	{
 		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
-		LoadAnimation(new AnimationData("GFX/Sprites/Asteroid2"));
+		// Balls are visually small asteroids -> use the same lower-res AsteroidSmall set the
+		// normal small asteroids use (picked at random), NOT the hi-res big-asteroid texture.
+		LoadAnimation(new AnimationData("GFX/Sprites/AsteroidSmall" + RandomHelper.Random.Next(1, 5)));
 		base.DrawOrder = 22;
 		hittimer = new Timer(35f, repeating: false);
 		hittimer.Stop();
@@ -119,7 +121,10 @@ internal class Ball : AlienDrawableGameComponent
 		base.Initialize();
 		rotationspeed = RandomHelper.RandomNextFloat(-0.001f, 0.001f);
 		scale = 0.45f * RandomHelper.RandomNextFloat(0.42f, 0.85f);
-		r = scale * (float)(texture.Width / 2);
+		// physics/collision radius must match the on-screen size, so use DrawScale (= scale /
+		// textureScale) against the texel width -- like the small asteroids' retrieveBoundsFromTexture.
+		// (Raw `scale * texture.Width` would scale the hitbox by the supersample factor.)
+		r = DrawScale * (float)(texture.Width / 2);
 		state = BallState.startup;
 		base.Position = new Vector2(RandomHelper.RandomNextFloat(0f, 800f), RandomHelper.RandomNextFloat(0f - r, -600f - ybuffer));
 		base.Direction = (float)Math.PI / 2f + RandomHelper.RandomNextFloat(-(float)Math.PI / 12f, (float)Math.PI / 12f);

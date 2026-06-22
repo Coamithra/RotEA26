@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<!--
+  Sprite harness picker — a tiny, dependency-free launcher for the in-game sprite
+  harness (see Compat/HarnessScene.cs + Compat/DebugFlags.cs "?harness="). It just
+  builds a "?harness=..." URL and opens the real game frozen on the chosen object.
+  No build step, no framework: it must never be able to break the Blazor/KNI game,
+  exactly like wwwroot/office/.
+
+  KEEP THE OBJECT LIST BELOW IN SYNC with HarnessRegistry.cs (the C# registry is the
+  source of truth; this dropdown is a convenience mirror). An unknown name still
+  works -- the harness shows the full available list on screen.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Evil Aliens — Sprite Harness</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 32px 16px;
+    font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+    color: #d8e2f0; background: radial-gradient(120% 120% at 50% 0%, #0b1020 0%, #05070d 70%);
+    display: flex; justify-content: center;
+  }
+  .card {
+    width: 100%; max-width: 540px; background: #121a2c; border: 1px solid #233047;
+    border-radius: 12px; padding: 24px 24px 28px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .5px; }
+  p.sub { margin: 0 0 20px; color: #8a99b3; font-size: 13px; }
+  label { display: block; margin: 14px 0 4px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .6px; color: #8a99b3; }
+  select, input {
+    width: 100%; padding: 9px 10px; background: #0c1322; color: #e6edf7;
+    border: 1px solid #2b3a55; border-radius: 7px; font: inherit;
+  }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+  .check input { width: auto; }
+  .check label { margin: 0; text-transform: none; letter-spacing: 0; font-size: 14px; color: #d8e2f0; }
+  .actions { display: flex; gap: 10px; margin-top: 22px; }
+  button {
+    flex: 1; padding: 11px 14px; border: 0; border-radius: 8px; cursor: pointer;
+    font: 600 15px system-ui; color: #06101f; background: #4fd1c5;
+  }
+  button.secondary { background: #2b3a55; color: #d8e2f0; }
+  button:hover { filter: brightness(1.08); }
+  .url {
+    margin-top: 18px; padding: 10px 12px; background: #0a0f1c; border: 1px dashed #2b3a55;
+    border-radius: 7px; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 12px;
+    color: #93e6db; word-break: break-all; user-select: all;
+  }
+  .hint { margin-top: 16px; font-size: 12px; color: #6f7f9b; }
+  code { background: #0a0f1c; padding: 1px 5px; border-radius: 4px; color: #b9c6dc; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🛸 Sprite Harness</h1>
+    <p class="sub">Render one game object on a space background, frozen on a frame, drawn
+      through the real in-game pipeline — so a screenshot at any moment is identical.</p>
+
+    <label for="obj">Object</label>
+    <select id="obj">
+      <optgroup label="Enemies">
+        <option value="spider" selected>spider</option>
+        <option value="flyingspider">flyingspider</option>
+        <option value="ufo">ufo (big)</option>
+        <option value="ufosmall">ufosmall</option>
+        <option value="sweepufo">sweepufo</option>
+        <option value="asteroid">asteroid</option>
+        <option value="asteroidbig">asteroidbig</option>
+        <option value="braineroid">braineroid (huge)</option>
+        <option value="braineroidmedium">braineroidmedium</option>
+        <option value="braineroidsmall">braineroidsmall</option>
+        <option value="evilskull">evilskull</option>
+        <option value="battleskull">battleskull</option>
+        <option value="starmine">starmine</option>
+        <option value="powerup">powerup</option>
+        <option value="plasmaball">plasmaball</option>
+        <option value="paratrooper">paratrooper</option>
+        <option value="paratrooperbrain">paratrooperbrain</option>
+        <option value="wall">wall</option>
+      </optgroup>
+      <optgroup label="Projectiles">
+        <option value="bullet">bullet</option>
+        <option value="evilbullet">evilbullet</option>
+        <option value="blast">blast</option>
+      </optgroup>
+      <optgroup label="Bosses (best-effort: idle pose)">
+        <option value="deathstar">deathstar</option>
+        <option value="brainboss">brainboss</option>
+        <option value="classicboss">classicboss</option>
+        <option value="marsboss">marsboss</option>
+        <option value="junkboss">junkboss</option>
+        <option value="fakeboss">fakeboss</option>
+        <option value="spiderboss">spiderboss</option>
+        <option value="stationaryboss">stationaryboss</option>
+      </optgroup>
+    </select>
+
+    <div class="row">
+      <div>
+        <label for="frame">Frame</label>
+        <input id="frame" type="number" value="0" min="0" step="1" />
+      </div>
+      <div>
+        <label for="bg">Background</label>
+        <select id="bg">
+          <option value="space" selected>space</option>
+          <option value="spaceclassic">spaceclassic</option>
+          <option value="holodeck">holodeck</option>
+          <option value="mars">mars</option>
+          <option value="base">base</option>
+          <option value="basedark">basedark</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="px">Pos X</label>
+        <input id="px" type="number" value="400" step="1" />
+      </div>
+      <div>
+        <label for="py">Pos Y</label>
+        <input id="py" type="number" value="300" step="1" />
+      </div>
+      <div>
+        <label for="scale">Scale ×</label>
+        <input id="scale" type="number" value="1" step="0.1" min="0.1" />
+      </div>
+      <div>
+        <label for="rot">Rot°</label>
+        <input id="rot" type="number" value="0" step="5" />
+      </div>
+    </div>
+
+    <div class="check">
+      <input id="play" type="checkbox" />
+      <label for="play">Play the animation in place (instead of freezing on the frame)</label>
+    </div>
+
+    <div class="actions">
+      <button id="launch">Launch ▶</button>
+      <button id="newtab" class="secondary">Open in new tab ↗</button>
+    </div>
+
+    <div class="url" id="url"></div>
+
+    <p class="hint">Agents: skip this page — just navigate to <code>./?harness=&lt;name&gt;&amp;frame=&lt;n&gt;</code>.
+      Object names are the C# <code>HarnessRegistry</code> keys.</p>
+  </div>
+
+<script>
+  // The game lives in the directory that contains this page (index.html sits beside
+  // harness.html). "./" resolves correctly on both local dev (/) and GitHub Pages
+  // (/RotEA26/). We pass the query through to DebugFlags via the game's getDebugQuery.
+  var GAME_BASE = new URL("./", location.href);
+
+  function buildUrl() {
+    var p = new URLSearchParams();
+    p.set("harness", document.getElementById("obj").value);
+
+    var play = document.getElementById("play").checked;
+    if (play) p.set("play", "1");
+    else {
+      var frame = parseInt(document.getElementById("frame").value, 10) || 0;
+      if (frame !== 0) p.set("frame", String(frame));
+    }
+
+    var bg = document.getElementById("bg").value;
+    if (bg && bg !== "space") p.set("bg", bg);
+
+    var px = document.getElementById("px").value.trim();
+    var py = document.getElementById("py").value.trim();
+    if (px !== "400" || py !== "300") p.set("pos", px + "," + py);
+
+    var scale = document.getElementById("scale").value.trim();
+    if (scale !== "1" && scale !== "") p.set("objscale", scale);
+
+    var rot = document.getElementById("rot").value.trim();
+    if (rot !== "0" && rot !== "") p.set("rot", rot);
+
+    return new URL("?" + p.toString(), GAME_BASE).href;
+  }
+
+  function refresh() { document.getElementById("url").textContent = buildUrl(); }
+
+  document.querySelectorAll("select, input").forEach(function (el) {
+    el.addEventListener("input", refresh);
+    el.addEventListener("change", refresh);
+  });
+  document.getElementById("launch").addEventListener("click", function () {
+    location.href = buildUrl();
+  });
+  document.getElementById("newtab").addEventListener("click", function () {
+    window.open(buildUrl(), "_blank");
+  });
+  refresh();
+</script>
+</body>
+</html>

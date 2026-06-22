@@ -87,9 +87,7 @@ internal class Demo2 : GameScene
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/braingoo");
-		contentManager.Load<Texture2D>("GFX/Sprites/lazerbottom");
 		contentManager.Load<Texture2D>("GFX/Sprites/lazermiddle");
-		contentManager.Load<Texture2D>("GFX/Sprites/lazertop");
 		contentManager.Load<Texture2D>("GFX/Sprites/ufosheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/blooddrop_green");
 		contentManager.Load<Texture2D>("GFX/Sprites/spider_sheet2");

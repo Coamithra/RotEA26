@@ -13,7 +13,7 @@
 #
 # Format references: the XACT WaveBank/SoundBank layout (vgmstream xwb.c, the
 # MonoGame XACT readers) — adapted to the 2-bytes-shorter big-endian Xbox header
-# verified against this game's banks (see plan.md "Stage 6").
+# verified against this game's banks (see plans/plan.md "Stage 6").
 # ---------------------------------------------------------------------------
 import io
 import struct

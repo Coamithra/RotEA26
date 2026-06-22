@@ -28,7 +28,7 @@ internal class Asteroid : AlienDrawableGameComponent
 	public Asteroid(Game game)
 		: base(game)
 	{
-		LoadAnimation(new AnimationData("GFX/Sprites/Asteroid2"));
+		LoadAnimation(new AnimationData("GFX/Sprites/large_asteroid"));
 	}
 
 	public static Asteroid NewAsteroid(ComponentBin collection, Game game)
@@ -58,6 +58,18 @@ internal class Asteroid : AlienDrawableGameComponent
 		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		//IL_007f: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
+		// The big level-opening asteroid uses the hi-res large_asteroid (7x texture, drawn at
+		// scale 3). Normal asteroids draw at scale 0.45, where that big sheet would be massively
+		// oversampled, so they use the lower-res AsteroidSmall variants (footprint-matched to the
+		// same design, picked at random each spawn -- recycled, so per-spawn here rather than the ctor).
+		if (reallyBig)
+		{
+			LoadAnimation(new AnimationData("GFX/Sprites/large_asteroid"));
+		}
+		else
+		{
+			LoadAnimation(new AnimationData("GFX/Sprites/AsteroidSmall" + RandomHelper.Random.Next(1, 5)));
+		}
 		base.Position = position;
 		if (randomSpeedOffset)
 		{

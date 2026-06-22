@@ -18,8 +18,6 @@ internal class Spider : KillableAlien
 
 	private Texture2D spiderJump;
 
-	private Texture2D wing;
-
 	public override ICollisionType CollisionType
 	{
 		get
@@ -47,13 +45,15 @@ internal class Spider : KillableAlien
 	{
 		base.LoadContent();
 		spiderJump = content.Load<Texture2D>("GFX/Sprites/spiderjump");
-		wing = content.Load<Texture2D>("GFX/Sprites/wing1");
 	}
 
 	public Spider(Game game)
 		: base(game)
 	{
-		LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 1, 4, 1, 5f));
+		// spider_sheet2 is now the 7x7 (49-frame) "rear up" animation (AnimGen take), replacing the
+		// old 4-frame crawl. The supersample registry (design width 160) draws it at the same
+		// on-screen size; its 256px cells render 1:1 at a 1280x1024 window. ~12 fps.
+		LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 7, 7, 1, 12f));
 		base.DrawOrder = 20;
 		interpolationOptions = InterpolationOptions.never;
 		scale = 1f;
@@ -130,15 +130,17 @@ internal class Spider : KillableAlien
 		{
 			spriteBatch.lightenEffect.Enable();
 		}
-		float num = (float)gameTime.TotalGameTime.TotalMilliseconds;
-		num %= 120f;
-		if (num > 60f)
-		{
-			num = 60f - (num - 60f);
-		}
-		spriteBatch.Draw(wing, base.Position - new Vector2((float)spiderJump.Width / 2f - 69f, (float)spiderJump.Height / 2f - 56f), MathHelper.Lerp(0f, (float)Math.PI / 2f, num / 60f), 1f, new Vector2(82f, 11f), Color.White, (SpriteEffects)1);
-		spriteBatch.Draw(spiderJump, base.Position, rotation, 1f, center: true, color);
-		spriteBatch.Draw(wing, base.Position - new Vector2((float)spiderJump.Width / 2f - 69f, (float)spiderJump.Height / 2f - 56f), MathHelper.Lerp(0f, -(float)Math.PI / 2f, num / 60f), 1f, new Vector2(6f, 11f));
+		// spiderjump is now a 6x4 soar ANIMATION sheet (the AnimGen flying-spider take). Play it
+		// looping while airborne: draw one source-rect cell, footprint-scaled by 1/factor so the
+		// on-screen size matches the old static jump body, with the jump tumble (rotation). The
+		// fake flapping wings are gone -- the animation carries the motion now.
+		int cols = 6, rows = 4, sep = 1;
+		int cellW = (spiderJump.Width - (cols - 1) * sep) / cols;
+		int cellH = (spiderJump.Height - (rows - 1) * sep) / rows;
+		float fJump = SuperSampleFactor("GFX/Sprites/spiderjump", cellW);
+		int frame = (int)(gameTime.TotalGameTime.TotalMilliseconds / 55f) % (cols * rows);
+		Rectangle src = new Rectangle(frame % cols * (cellW + sep), frame / cols * (cellH + sep), cellW, cellH);
+		spriteBatch.Draw(spiderJump, src, base.Position, rotation, 1f / fJump, center: true, color);
 		if (base.hittimeractive)
 		{
 			spriteBatch.lightenEffect.Disable();

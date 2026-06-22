@@ -1,5 +1,11 @@
 # Revenge of the Evil Aliens — Web Port Plan
 
+> **ARCHIVED: historical development plan, kept for reference only.**
+> This document is no longer the project tracker. The live tracker is now the local
+> Trello board (board id `10989a3d`; see the repo `CLAUDE.md` "Project tracking" for how
+> to use it), and its cards are authoritative for stage status. Anything below may be
+> stale; the per-stage notes remain as the detailed record of how each stage was built.
+
 Reviving a 2008 Xbox Live Indie Game (XNA 3.x, C#) as a browser-playable game,
 hosted as a static site on GitHub Pages. The source was lost; it was recovered by
 decompiling the shipped Xbox 360 package.

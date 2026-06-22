@@ -78,7 +78,13 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{ "GFX/Sprites/powerupbw", 32 },
 		// awardment-screen decoration skull: HD (2x) still, design = full texture width. Drawn
 		// DIRECTLY in SubMenuAwardmentText, which divides its scale by SuperSampleFactor.
-		{ "GFX/Menu/evilskull", 376 }
+		{ "GFX/Menu/evilskull", 376 },
+		// JunkBoss "fleet commander drone": idle + attract grid anims (built by
+		// tools/upscale/build_eye_anims.py from AnimGen takes). The body renders 1:1 at the
+		// 1440 cap (cell px = body 47 * 2.4); attract's larger cell is the lightning halo
+		// extending beyond the same static body, so both states draw the body at one size.
+		{ "GFX/Sprites/eye_idle", 48 },
+		{ "GFX/Sprites/eye_attract", 61 }
 	};
 
 	// effective on-screen draw scale once the supersample factor is removed

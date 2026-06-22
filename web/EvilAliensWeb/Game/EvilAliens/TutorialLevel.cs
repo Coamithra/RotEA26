@@ -39,7 +39,7 @@ internal class TutorialLevel : GameScene
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/large_asteroid");
-		contentManager.Load<Texture2D>("GFX/Sprites/eye");
+		contentManager.Load<Texture2D>("GFX/Sprites/eye_idle");
 		contentManager.Load<Texture2D>("GFX/Sprites/ufosheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/smallship");
 	}

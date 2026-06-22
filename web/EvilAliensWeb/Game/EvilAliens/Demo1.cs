@@ -59,7 +59,8 @@ internal class Demo1 : GameScene
 		contentManager.Load<Texture2D>("GFX/Sprites/braingoo");
 		contentManager.Load<Texture2D>("GFX/Sprites/brainlargetransglow");
 		contentManager.Load<Texture2D>("GFX/Sprites/earth");
-		contentManager.Load<Texture2D>("GFX/Sprites/eye");
+		contentManager.Load<Texture2D>("GFX/Sprites/eye_idle");
+		contentManager.Load<Texture2D>("GFX/Sprites/eye_attract");
 		contentManager.Load<Texture2D>("GFX/Sprites/lazermiddle");
 		contentManager.Load<Texture2D>("GFX/Sprites/ufosheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/mediumship");

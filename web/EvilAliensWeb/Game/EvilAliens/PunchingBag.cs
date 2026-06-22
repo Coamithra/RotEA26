@@ -27,8 +27,8 @@ public class PunchingBag : KillableAlien
 	public PunchingBag(Game game)
 		: base(game)
 	{
-		scale = 0.13f;
-		LoadAnimation(new AnimationData("GFX/Sprites/eye"));
+		scale = 1f;
+		LoadAnimation(new AnimationData("GFX/Sprites/eye_idle", 4, 2, 1, 12f));
 		base.DrawOrder = 20;
 		base.IsBoss = true;
 		base.Colorize = true;

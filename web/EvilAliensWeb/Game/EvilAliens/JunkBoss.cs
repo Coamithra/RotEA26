@@ -59,6 +59,18 @@ internal class JunkBoss : KillableAlien
 
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
+	// Animated "fleet commander drone" eye (replaces the old static eye sprite). Idle on/off
+	// loop normally; the spin+lightning attract sheet during the `attracting` suck state.
+	private static readonly AnimationData EyeIdle = new AnimationData("GFX/Sprites/eye_idle", 4, 2, 1, 12f);
+
+	private static readonly AnimationData EyeAttract = new AnimationData("GFX/Sprites/eye_attract", 9, 8, 1, 12f);
+
+	private bool eyeAttracting;
+
+	private bool eyeFinishing;
+
+	private float eyePrevFrame;
+
 	public Vector2 GetPosition => base.Position;
 
 	public override ICollisionType CollisionType
@@ -76,7 +88,7 @@ internal class JunkBoss : KillableAlien
 		: base(game)
 	{
 		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		LoadAnimation(new AnimationData("GFX/Sprites/eye"));
+		LoadAnimation(EyeIdle);
 		base.DrawOrder = 20;
 		lazertimer = new Timer(2500f, repeating: true);
 		shoottimer = new Timer(1100f, repeating: false);
@@ -148,8 +160,15 @@ internal class JunkBoss : KillableAlien
 				((IDisposable)enumerator).Dispose();
 			}
 		}
-		scale = 0.13f;
-		r = 1f * scale * (float)(texture.Width / 2);
+		LoadAnimation(EyeIdle);
+		eyeAttracting = false;
+		eyeFinishing = false;
+		eyePrevFrame = 0f;
+		scale = 1f;
+		// body collision radius from the idle CELL via DrawScale (texture.Width is the whole
+		// sheet now); matches the old on-screen size. Not recomputed for the bigger attract cell
+		// so the lightning halo never inflates the hitbox.
+		r = DrawScale * (float)(texture.Width / columns) / 2f;
 		base.Initialize();
 		children = 0;
 		lazertimer.Start();
@@ -360,6 +379,37 @@ internal class JunkBoss : KillableAlien
 			Move((float?)targetdir, gameTime);
 			SwapDir();
 			break;
+		}
+		UpdateEyeAnim();
+	}
+
+	// Drive the two-sheet eye animation off the boss state: the spin+lightning attract sheet
+	// during the `attracting` suck, finishing its current spin cycle (which ends on the rest
+	// pose, same as idle frame 0) before swapping back to the idle on/off loop -- no jump.
+	private void UpdateEyeAnim()
+	{
+		bool wantAttract = state == JunkBossState.attracting;
+		if (wantAttract && !eyeAttracting)
+		{
+			LoadAnimation(EyeAttract);
+			eyeAttracting = true;
+			eyeFinishing = false;
+			eyePrevFrame = 0f;
+		}
+		else if (!wantAttract && eyeAttracting && !eyeFinishing)
+		{
+			eyeFinishing = true;
+		}
+		if (eyeFinishing && curframe < eyePrevFrame)
+		{
+			LoadAnimation(EyeIdle);
+			eyeAttracting = false;
+			eyeFinishing = false;
+			eyePrevFrame = 0f;
+		}
+		else
+		{
+			eyePrevFrame = curframe;
 		}
 	}
 

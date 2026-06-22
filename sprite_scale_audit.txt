@@ -63,7 +63,6 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
               revenged
 1.20  ok       sprites/powerupbw (help-screen draw)      128     64   help/instructions; preview small_face_a/b also ~1.20
 1.13  ok       splash/uglysplash22-revenged-pure(-glass) 1280    600   portrait reveal, aspect-fit; fine
-1.03  DONE     sprites/large_asteroid (big asteroid)    1253    537   <<< DONE 2026-06-22, repacked 7x from original >>>
 --------------------------------------------------------------- ~1.0 (crisp) ---
 0.97  shrink?  sprites/earth (background)                735   ~298   large use 0.405; small use 0.15 -> 0.36. shared
 0.96  shrink   screenshots/* (11 level-select thumbs)    800   ~320   shown at ~0.25-0.4x; store as thumbnails not full screens
@@ -90,8 +89,6 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
 0.48  shrink   sprites/brainlargetransglow (Braineroid   519   ~104   medium braineroid; SAME texture as BrainBoss (keep big for boss)
               medium)
 0.31  shrink   sprites/eye (JunkBoss / PunchingBag)       360     47   big texture drawn at scale 0.13 -> huge waste
-0.17  shrink   sprites/brainlargetransglow (Braineroid    519    ~36   small braineroid (shared texture)
-              small)
 
 ================================================================================
  STATUS legend:  TODO=upscale me | DONE | maybe | note=blocked (4096 cap etc) |

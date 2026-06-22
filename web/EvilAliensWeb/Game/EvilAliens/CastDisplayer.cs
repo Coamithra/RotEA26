@@ -275,8 +275,8 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.junkboss:
 			alienname = "Fleet Commander Drone";
 			alientext = "Robotic field probes that are in direct\ncontact with the Alien Overmind.\n\nOften equipped with ultragraviton field.";
-			LoadAnimation(new AnimationData("GFX/Sprites/eye"));
-			scale = 0.13f;
+			LoadAnimation(new AnimationData("GFX/Sprites/eye_idle", 4, 2, 1, 12f));
+			scale = 1f;
 			if (flag2)
 			{
 				AsplodeBig();

@@ -130,7 +130,11 @@
             ]
         },
     };
-    const recycleBin = []; // {file, fromFolder, fromName}
+    // {file, fromFolder, fromName} — pre-seeded with the resignation letter the
+    // employee drafted, thought better of, and quietly deleted. (Classic.)
+    const recycleBin = [
+        { file: mkFile("Resignation_Letter_DRAFT", "txt"), fromFolder: "documents", fromName: "Documents" },
+    ];
 
     /* --------------------------------------------------- boot sequence ----- */
     const boot = $("#boot"), os = $("#os");

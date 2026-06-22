@@ -1041,7 +1041,11 @@ always Monday here.`;
     // Sending the binned draft "summons" the manager: 5 minutes later an incoming
     // Meridian Meet call slides in. For now it's a popup with Accept/Decline; the
     // actual in-call experience is a follow-up. Console: eaIncomingCall() to preview.
-    const INCOMING_CALL_DELAY = 5 * 60 * 1000;   // 5 minutes
+    // Testing: shorten the wait with ?call=<seconds> on the office URL (e.g. ?call=5).
+    const INCOMING_CALL_DELAY = (() => {
+        const s = parseFloat(new URLSearchParams(location.search).get("call"));
+        return s > 0 ? s * 1000 : 5 * 60 * 1000;   // default 5 minutes
+    })();
     function scheduleIncomingCall(draft) {
         setTimeout(() => incomingCall(draft), INCOMING_CALL_DELAY);
     }

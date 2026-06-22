@@ -108,6 +108,16 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public float fps;
 
+	// Active play/loop range: frames [FirstFrame, LastFrame) cycle (LastFrame exclusive).
+	// LastFrame <= 0 falls back to the whole sheet (rows*columns). Set from AnimationData by
+	// LoadAnimation; lets a sheet hold a non-grid frame count or a consumer loop a sub-range of
+	// a longer animation. ActiveLastFrame resolves the <=0 "whole sheet" sentinel.
+	public int FirstFrame;
+
+	public int LastFrame;
+
+	private int ActiveLastFrame => (LastFrame > FirstFrame) ? LastFrame : rows * columns;
+
 	public SpriteEffects spriteEffects;
 
 	public SpriteBlendMode blendMode = (SpriteBlendMode)1;
@@ -360,8 +370,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		columns = animationData.columns;
 		fps = animationData.fps;
 		separatingspace = animationData.separatingspace;
+		FirstFrame = animationData.FirstFrame;
+		LastFrame = (animationData.LastFrame > 0) ? animationData.LastFrame : rows * columns;
 		textureScale = SuperSampleFactor(texturename, texture.Width / columns);
-		curframe = 0f;
+		curframe = FirstFrame;
 		color = Color.White;
 	}
 
@@ -433,7 +445,13 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 		Vector2 val = MyMath.AngleToVector(_direction) * _speed * Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
 		_position += val;
-		curframe = (curframe + fps * (float)gameTime.ElapsedGameTime.TotalSeconds) % (float)(rows * columns);
+		float span = ActiveLastFrame - FirstFrame;
+		if (span <= 0f)
+		{
+			span = 1f;
+		}
+		curframe += fps * (float)gameTime.ElapsedGameTime.TotalSeconds;
+		curframe = FirstFrame + ((curframe - FirstFrame) % span + span) % span;
 		base.Update(gameTime);
 	}
 
@@ -545,7 +563,12 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			_ = spriteBatch.lightenEffect.Enabled;
 		}
 		Rectangle frameRectangle = getFrameRectangle(num);
-		Rectangle frameRectangle2 = getFrameRectangle((num + 1) % (rows * columns));
+		int nextFrame = num + 1;
+		if (nextFrame >= ActiveLastFrame)
+		{
+			nextFrame = FirstFrame;
+		}
+		Rectangle frameRectangle2 = getFrameRectangle(nextFrame);
 		SpriteBlendMode val = blendMode;
 		switch ((int)val)
 		{

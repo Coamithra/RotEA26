@@ -6,6 +6,11 @@ namespace EvilAliens;
 
 internal class Spider : KillableAlien
 {
+	// Packed-sheet frame the spider snaps to ONCE on landing (source ~88 at half fps -> packed
+	// 44): the crouched settled stance near the end of the rear-up. It resumes animating from
+	// there on the following frames.
+	private const float LandFrame = 44f;
+
 	private float yspeed;
 
 	private bool hasJumped;
@@ -50,9 +55,11 @@ internal class Spider : KillableAlien
 	public Spider(Game game)
 		: base(game)
 	{
-		// spider_sheet2 is now the 7x7 (49-frame) "rear up" animation (AnimGen take), replacing the
-		// old 4-frame crawl. The supersample registry (design width 160) draws it at the same
-		// on-screen size; its 256px cells render 1:1 at a 1280x1024 window. ~12 fps.
+		// spider_sheet2 is the 7x7 (49-frame) "rear up" animation (AnimGen take, half-fps of the
+		// 98 source frames), replacing the old 4-frame crawl. The supersample registry (design
+		// width 160) draws it at the same on-screen size; its 384px cells render ~1:1 at the 1440
+		// render cap (160 * 2.4). ~12 fps. The FlyingSpider reuses this same sheet, looping just
+		// its reared sub-range via FirstFrame/LastFrame.
 		LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 7, 7, 1, 12f));
 		base.DrawOrder = 20;
 		interpolationOptions = InterpolationOptions.never;
@@ -194,6 +201,9 @@ internal class Spider : KillableAlien
 			rotationspeed = 0f;
 			yspeed = 0f;
 			base.Position = new Vector2(base.Position.X, 505f);
+			// Snap to the settled "landed" frame ONCE on touchdown, then let it keep animating
+			// from there (base.Update advances curframe normally on the following frames).
+			curframe = LandFrame;
 		}
 	}
 

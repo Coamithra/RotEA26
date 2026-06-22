@@ -286,7 +286,9 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.spider:
 			alienname = "Spider Wasp";
 			alientext = "Indigenous life form to Mars.\n\nThese resilient bugs have been brought\nout of hiding by the Evil Aliens'\nactivities, and threaten both you and\nthe Aliens indifferently.";
-			LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 1, 4, 1, 5f));
+			// Same shared rear-up sheet + reared sub-range loop as the FlyingSpider (was the old
+			// 1x4 crawl slicing, which broke when the sheet became the 49-frame rear-up).
+			LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 7, 7, 1, 12f, 22, 31));
 			scale = 1f;
 			if (flag2)
 			{

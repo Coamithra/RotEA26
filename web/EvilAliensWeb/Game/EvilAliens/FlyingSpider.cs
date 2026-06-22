@@ -6,6 +6,23 @@ namespace EvilAliens;
 
 internal class FlyingSpider : KillableAlien
 {
+	// Per-frame wing-root anchor: DESIGN-space offset from the body centre (scaled by `scale`),
+	// indexed by loop frame (0 = FirstFrame). Authored in tools/upscale/wing_editor.html so the
+	// flapping wings stay glued to the reared body's back as the 9-frame loop (sheet 22..30)
+	// plays. Re-run that tool to retune.
+	private static readonly Vector2[] WingAnchors =
+	{
+		new Vector2(21.47f, 2.71f),  // loop 0 (sheet frame 22)
+		new Vector2(20.49f, 3.44f),  // loop 1 (sheet frame 23)
+		new Vector2(19.75f, 3.93f),  // loop 2 (sheet frame 24)
+		new Vector2(19.51f, 4.18f),  // loop 3 (sheet frame 25)
+		new Vector2(19.51f, 4.42f),  // loop 4 (sheet frame 26)
+		new Vector2(19.51f, 4.42f),  // loop 5 (sheet frame 27)
+		new Vector2(20.00f, 3.69f),  // loop 6 (sheet frame 28)
+		new Vector2(20.74f, 3.44f),  // loop 7 (sheet frame 29)
+		new Vector2(21.96f, 2.95f),  // loop 8 (sheet frame 30)
+	};
+
 	private bool isbackground;
 
 	private Texture2D wing;
@@ -42,7 +59,12 @@ internal class FlyingSpider : KillableAlien
 	public FlyingSpider(Game game)
 		: base(game)
 	{
-		LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 1, 4, 1, 5f));
+		// Reuse the grounded spider's 7x7 rear-up sheet, looping only its "reared" sub-range
+		// (packed frames 22..30 = source 44..60 at half fps) via FirstFrame/LastFrame. No
+		// separate flying sheet -- the shared sheet carries the HD body; the wings (below) add
+		// the flight motion. (Old code sliced this same name as a 1x4 crawl, which broke once the
+		// sheet was repurposed to the 49-frame rear-up.)
+		LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 7, 7, 1, 12f, 22, 31));
 		base.DrawOrder = 20;
 		interpolationOptions = InterpolationOptions.never;
 		SetHitPoints(2, scaleWithDifficulty: false);
@@ -159,15 +181,19 @@ internal class FlyingSpider : KillableAlien
 		{
 			timeElapsed = num - (timeElapsed - num);
 		}
-		int num2 = texture.Width - (columns - 1) * separatingspace;
-		num2 /= columns;
-		int num3 = texture.Height - (rows - 1) * separatingspace;
-		num3 /= rows;
-		Vector2 val = default(Vector2);
-		(val) = new Vector2((float)(-num2) / 2f, (float)(-num3) / 2f);
-		spriteBatch.Draw(wing, base.Position + val + new Vector2(69f, 56f), MathHelper.Lerp(0f, (float)Math.PI / 2f, timeElapsed / num), scale, new Vector2(82f, 11f), color, (SpriteEffects)1);
+		// wing1 is a 4x supersampled sheet; divide the draw scale by its factor (and scale the
+		// design-space pivots up by it) so the wing renders at its true on-screen size. Anchor
+		// both wings on the body in DESIGN space relative to its centre (Position) -- the old
+		// texel-space offset assumed cell texels == screen px, which the supersampled rear-up
+		// sheet blows far out of place.
+		float wf = SuperSampleFactor("GFX/Sprites/wing1", wing.Width);
+		int wingIdx = (int)curframe - FirstFrame;
+		if (wingIdx < 0) wingIdx = 0;
+		else if (wingIdx >= WingAnchors.Length) wingIdx = WingAnchors.Length - 1;
+		Vector2 wingAnchor = base.Position + WingAnchors[wingIdx] * scale;
+		spriteBatch.Draw(wing, wingAnchor, MathHelper.Lerp(0f, (float)Math.PI / 2f, timeElapsed / num), scale / wf, new Vector2(82f, 11f) * wf, color, (SpriteEffects)1);
 		base.Draw(gameTime);
-		spriteBatch.Draw(wing, base.Position + val + new Vector2(69f, 56f), MathHelper.Lerp(0f, -(float)Math.PI / 2f, timeElapsed / num), scale, new Vector2(6f, 11f), color, (SpriteEffects)0);
+		spriteBatch.Draw(wing, wingAnchor, MathHelper.Lerp(0f, -(float)Math.PI / 2f, timeElapsed / num), scale / wf, new Vector2(6f, 11f) * wf, color, (SpriteEffects)0);
 		if (base.hittimeractive)
 		{
 			spriteBatch.lightenEffect.Disable();

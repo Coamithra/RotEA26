@@ -7,3 +7,6 @@ out/
 player_frames/
 # scratch reference tiles / captures:
 _*.png
+# generated, self-contained wing-attachment editor (~MBs of base64 frames; regen via
+# build_wing_editor.py):
+wing_editor.html

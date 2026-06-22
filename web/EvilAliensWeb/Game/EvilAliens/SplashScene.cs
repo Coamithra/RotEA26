@@ -85,9 +85,18 @@ internal class SplashScene : Scene
 
 	private double textShowtime;
 
+	private double[] textRevealAt;  // absolute reveal time per stanza (length-relative gaps)
+
 	private const double TEXT_FIRST_MS = 700.0;    // first stanza appears
 
-	private const double TEXT_STANZA_MS = 1150.0;  // gap between stanza reveals
+	// Reading-time gap between stanza reveals: a base beat + per-character dwell, so the
+	// pause BEFORE the next line scales with the length of the line currently showing —
+	// a long line lingers long enough to read, a short quip flicks past.
+	private const double TEXT_GAP_BASE_MS = 550.0;   // minimum beat between reveals
+
+	private const double TEXT_GAP_PER_CHAR_MS = 34.0; // extra dwell per character of the line just shown
+
+	private const double TEXT_DRAMATIC_BEAT_MS = 1100.0; // extra hang after an ellipsis-led setup line, for effect
 
 	private const double TEXT_STANZA_FADE_MS = 380.0; // each stanza's fade-in
 
@@ -201,8 +210,24 @@ internal class SplashScene : Scene
 		holdMs = (double)showtime * HOLD_FRAC;
 		if (isText)
 		{
-			// Last stanza lands at TEXT_FIRST + (n-1)*TEXT_STANZA, plus its fade-in and a hold.
-			textShowtime = TEXT_FIRST_MS + (currentLines.Length - 1) * TEXT_STANZA_MS
+			// Build the reveal schedule: each stanza's reveal is offset from the previous
+			// by a gap that scales with the PREVIOUS stanza's length (its reading time), so
+			// long lines hold and short ones flick past. The last stanza lands at its reveal
+			// time, plus its fade-in and a final hold.
+			textRevealAt = new double[currentLines.Length];
+			double at = TEXT_FIRST_MS;
+			for (int i = 0; i < currentLines.Length; i++)
+			{
+				textRevealAt[i] = at;
+				at += TEXT_GAP_BASE_MS + currentLines[i].Length * TEXT_GAP_PER_CHAR_MS;
+				// An ellipsis-led line (".. in 2008") trails off as a setup — let it hang an
+				// extra beat before the next line lands, for comedic effect.
+				if (currentLines[i].TrimStart().StartsWith(".."))
+				{
+					at += TEXT_DRAMATIC_BEAT_MS;
+				}
+			}
+			textShowtime = textRevealAt[currentLines.Length - 1]
 				+ TEXT_STANZA_FADE_MS + TEXT_HOLD_MS;
 			effShowtime = textShowtime;
 		}
@@ -301,7 +326,7 @@ internal class SplashScene : Scene
 
 		for (int i = 0; i < lines.Length; i++)
 		{
-			double revealAt = TEXT_FIRST_MS + (double)i * TEXT_STANZA_MS;
+			double revealAt = textRevealAt[i];
 			float a = MathHelper.Clamp((float)((t - revealAt) / TEXT_STANZA_FADE_MS), 0f, 1f);
 			if (a <= 0f)
 			{

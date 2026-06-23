@@ -59,6 +59,11 @@ namespace EvilAliensWeb.Compat
 		// dying). Applied in Game1.startScreen_OnFinished after Settings has loaded.
 		public static bool Invuln { get; private set; }
 
+		// TEMP DEBUG (repro only): in any GameScene, jump straight to Victory() once the
+		// level reaches Normal play, to exercise the victory -> credits -> brag -> menu
+		// handoff without playing the whole level. Combine with ?level=Level2. REMOVE.
+		public static bool Win { get; private set; }
+
 		// Sprite harness (see the header comment + HarnessScene/HarnessRegistry). Harness is
 		// the registry name of the object to show; non-null => SkipSplash + AutoStart and the
 		// boot routes into HarnessScene instead of the menu/a level.
@@ -83,6 +88,12 @@ namespace EvilAliensWeb.Compat
 
 		// Object rotation in degrees (default 0).
 		public static float HarnessRot { get; private set; }
+
+		// Record every texture decode (time + size), flag ones that load outside a
+		// level's preload phase, and accumulate a self-improving preload manifest in
+		// localStorage. See Compat/LoadProfiler.cs. Off => zero overhead, no writes
+		// (a shipped build never appends to the list). Does NOT alter the boot path.
+		public static bool LoadLog { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -134,6 +145,13 @@ namespace EvilAliensWeb.Compat
 				case "invulnerability":
 				case "god":
 					Invuln = IsOn(val);
+					break;
+				case "win":
+					Win = IsOn(val);
+					break;
+				case "loadlog":
+				case "profileloads":
+					LoadLog = IsOn(val);
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
@@ -194,13 +212,13 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || Harness != null;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
 					+ " autoStart=" + AutoStart + " noAttract=" + NoAttract
 					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
-					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln
+					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln + " loadLog=" + LoadLog
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

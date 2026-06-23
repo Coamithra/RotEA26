@@ -77,7 +77,6 @@ internal class InsaneBossI : GameScene
 		contentManager.Load<Texture2D>("GFX/alienboss/alienboss");
 		contentManager.Load<Texture2D>("GFX/Sprites/deathstarsheet2");
 		contentManager.Load<Texture2D>("GFX/Sprites/explosionpurple");
-		contentManager.Load<Texture2D>("GFX/Sprites/explosionspritepurple");
 		contentManager.Load<Texture2D>("GFX/Sprites/faceofdeathspritesheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/plasmaball2");
 		contentManager.Load<Texture2D>("GFX/Spider/spiderfly");

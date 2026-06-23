@@ -647,17 +647,10 @@ internal class MenuScene : Scene
 		}
 	}
 
-	private void optionsMenu_ExplosionsSelected(MenuSub1 sender)
-	{
-		Settings.GetInstance().BasicExplosions = !Settings.GetInstance().BasicExplosions;
-		sender.SetEntry("Fancy Explosions: " + boolToGameString(!Settings.GetInstance().BasicExplosions));
-	}
-
 	private void optionsMenu_BloomSelected(MenuSub1 sender)
 	{
 		Settings.GetInstance().Bloom = !Settings.GetInstance().Bloom;
 		Settings.GetInstance().Interpolate = Settings.GetInstance().Bloom;
-		Settings.GetInstance().BasicExplosions = !Settings.GetInstance().Bloom;
 		sender.SetEntry("Fancy GFX: " + boolToGameString(Settings.GetInstance().Bloom));
 		((DrawableGameComponent)ServiceHelper.Get<IBloomService>().BloomComponent).Visible = Settings.GetInstance().Bloom;
 	}

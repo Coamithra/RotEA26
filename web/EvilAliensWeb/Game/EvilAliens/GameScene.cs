@@ -424,7 +424,15 @@ internal abstract class GameScene : Scene
 	protected override void LoadContent()
 	{
 		base.LoadContent();
+		// Bracket the preload so the LoadProfiler (debug ?loadlog) can tell intended
+		// preloads from cold in-game decodes, and so ApplyManifest's loads count as
+		// preloads. ApplyManifest warms any extra assets the committed/localStorage
+		// manifest lists for this level (the self-improving gap-fill); a no-op with
+		// no manifest. All three are cheap no-ops in a release build.
+		EvilAliensWeb.Compat.LoadProfiler.BeginPreload(level.ToString());
 		PreloadGraphicalContent();
+		EvilAliensWeb.Compat.LoadProfiler.ApplyManifest(level.ToString());
+		EvilAliensWeb.Compat.LoadProfiler.EndPreload();
 	}
 
 	protected virtual void PreloadGraphicalContent()
@@ -440,7 +448,6 @@ internal abstract class GameScene : Scene
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletevil");
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletgood");
 		contentManager.Load<Texture2D>("GFX/Sprites/explosion");
-		contentManager.Load<Texture2D>("GFX/Sprites/explosionsprite");
 		contentManager.Load<Texture2D>("GFX/Sprites/playersheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/smoke");
 		contentManager.Load<Texture2D>("GFX/Sprites/blast");
@@ -479,6 +486,7 @@ internal abstract class GameScene : Scene
 
 	protected void Victory()
 	{
+		System.Console.WriteLine("[trace] GameScene.Victory() level=" + level + " difficulty=" + Settings.GetInstance().CurrentDifficulty);
 		_state = GameState.Victory;
 		if (!Settings.GetInstance().CheckForCheats())
 		{
@@ -664,6 +672,7 @@ internal abstract class GameScene : Scene
 		}
 		if (_timer.TotalMilliseconds >= 7000.0)
 		{
+			System.Console.WriteLine("[trace] UpdateWin -> Terminate(finishedlevel) level=" + level);
 			Terminate(FinishedMode.finishedlevel);
 		}
 	}
@@ -757,6 +766,7 @@ internal abstract class GameScene : Scene
 
 	protected void Terminate(FinishedMode mode)
 	{
+		System.Console.WriteLine("[trace] GameScene.Terminate(" + mode + ") level=" + level);
 		Collection.Purge<AnimatedMessage>();
 		Collection.Purge<TutorialMessage>();
 		Collection.Purge<AlienDrawableGameComponent>();

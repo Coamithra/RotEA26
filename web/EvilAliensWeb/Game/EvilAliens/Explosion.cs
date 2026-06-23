@@ -27,10 +27,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	private Texture2D redblast;
 
-	private Texture2D bluesprite;
-
-	private bool stopanimation;
-
 	private Timer collisiontimer = new Timer(700f, repeating: false);
 
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
@@ -53,7 +49,6 @@ internal class Explosion : AlienDrawableGameComponent
 		box = content.Load<Texture2D>("GFX/Sprites/block");
 		blueblast = content.Load<Texture2D>("GFX/Sprites/explosionpurple");
 		redblast = content.Load<Texture2D>("GFX/Sprites/explosion");
-		bluesprite = content.Load<Texture2D>("GFX/Sprites/explosionspritepurple");
 	}
 
 	public Explosion(Game game)
@@ -62,7 +57,6 @@ internal class Explosion : AlienDrawableGameComponent
 		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
-		LoadAnimation(new AnimationData("GFX/Sprites/explosionsprite", 5, 6, 1, 25f));
 		base.DrawOrder = 40;
 		particles = new ExplosionData[5];
 		smokeparticles = new ExplosionData[2];
@@ -136,7 +130,6 @@ internal class Explosion : AlienDrawableGameComponent
 		backgroundimpulsetimer.Start();
 		Vibrate();
 		curframe = 0f;
-		stopanimation = false;
 		rotation = RandomHelper.RandomNextAngle();
 	}
 
@@ -221,28 +214,6 @@ internal class Explosion : AlienDrawableGameComponent
 		//IL_012d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0141: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
-		if (Settings.GetInstance().BasicExplosions)
-		{
-			Texture2D val = texture;
-			if (blue)
-			{
-				texture = bluesprite;
-			}
-			blendMode = (SpriteBlendMode)2;
-			if (curframe > (float)(rows * columns - 1))
-			{
-				stopanimation = true;
-			}
-			if (!stopanimation)
-			{
-				Vector2 position = base.Position;
-				base.Position += particles[0].position;
-				base.Draw(gameTime);
-				base.Position = position;
-			}
-			texture = val;
-			return;
-		}
 		ExplosionData[] array = particles;
 		foreach (ExplosionData explosionData in array)
 		{

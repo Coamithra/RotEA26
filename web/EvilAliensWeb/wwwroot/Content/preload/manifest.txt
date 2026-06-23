@@ -1,0 +1,23 @@
+# Evil Aliens preload manifest — read at level-load time by Compat/LoadProfiler.cs.
+#
+# Each line preloads one texture for one level, ON TOP OF that level's
+# PreloadGraphicalContent() code list. It exists so newly-added art that isn't in
+# the code list can be warmed without editing C#, and so the debug profiler can
+# grow this file automatically (see below).
+#
+# Format:  <Level>|<asset-path>[|COLD|<ms>|<WxH>]      (# = comment, blanks ignored)
+#   <Level>      a Levels enum name (Level1, Level2, TeamChallenge, ...)
+#   <asset-path> Content-relative, lowercase, no extension (e.g. gfx/sprites/eye_idle)
+#   trailing fields (optional) are profiler bookkeeping: COLD/WARM, worst decode ms,
+#                  pixel size. The loader ignores them; only <Level>|<asset-path> matter.
+#
+# HOW TO GROW THIS FILE: run the game with ?loadlog, play the levels you care about
+# (cold decodes are logged to the console as they happen and saved to localStorage),
+# then run  eaPreloadExport()  in the browser console — it downloads an updated
+# manifest. Replace this file with it and commit. Release builds only READ this
+# file; they never record or append.
+
+# TeamChallenge has no PreloadGraphicalContent() override, so the JunkBoss "fleet
+# commander drone" eye sheets decode cold mid-fight. Warm them here.
+TeamChallenge|gfx/sprites/eye_idle
+TeamChallenge|gfx/sprites/eye_attract

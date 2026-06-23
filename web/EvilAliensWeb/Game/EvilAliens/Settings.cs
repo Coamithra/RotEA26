@@ -54,8 +54,6 @@ public class Settings : Savable
 
 	public bool Connector;
 
-	public bool BasicExplosions;
-
 	public bool Interpolate = true;
 
 	public bool DirectRespawn;

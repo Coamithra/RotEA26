@@ -56,8 +56,6 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
 1.92  lowpri   game/tileablestarfield                   1280   1024   menu/space starfield, drawn 0.8x; bg
 1.88  TODO     menu/planet, menu/vignette               1024    800   fullscreen menu backdrop + vignette
 1.81  TODO     menu/hudring                              768    580   menu targeting reticle
-1.80  lowpri   sprites/explosionsprite (Basic mode)      180   ~180   5x6 sheet; only in BasicExplosions setting
-1.50  maybe    sprites/spider_sheet2 (grounded spider)   256    160   7x7; built for 1280x1024. 384px cells (~2700 sheet) fits if wanted
 1.46  lowpri   menu/pointer                              128     78   menu list pointer
 1.33  ok       splash/easplashredone, uglysplash22-     1448    800   redone splash; near-crisp, fine
               revenged
@@ -88,7 +86,6 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
               green
 0.48  shrink   sprites/brainlargetransglow (Braineroid   519   ~104   medium braineroid; SAME texture as BrainBoss (keep big for boss)
               medium)
-0.31  shrink   sprites/eye (JunkBoss / PunchingBag)       360     47   big texture drawn at scale 0.13 -> huge waste
 
 ================================================================================
  STATUS legend:  TODO=upscale me | DONE | maybe | note=blocked (4096 cap etc) |

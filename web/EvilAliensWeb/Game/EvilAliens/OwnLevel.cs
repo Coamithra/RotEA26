@@ -28,7 +28,6 @@ internal class OwnLevel : GameScene
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/deathstarsheet2");
 		contentManager.Load<Texture2D>("GFX/Sprites/explosionpurple");
-		contentManager.Load<Texture2D>("GFX/Sprites/explosionspritepurple");
 		contentManager.Load<Texture2D>("GFX/Sprites/faceofdeathspritesheet");
 		contentManager.Load<Texture2D>("GFX/Base/black line lalalal");
 		contentManager.Load<Texture2D>("GFX/Base/756-v1");

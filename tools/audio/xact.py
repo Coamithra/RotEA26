@@ -143,6 +143,60 @@ def parse_soundbank(path):
     return mapping
 
 
+def parse_soundbank_meta(path):
+    """Parse a .xsb -> dict cue_name -> dict of the per-SOUND mix metadata the
+    XACT runtime applied and the offline crack previously discarded.
+
+    Stage 6 only kept each cue's wave index (parse_soundbank). But the sound
+    header also carries the authored category, volume and pitch — the data that
+    made e.g. 'usepowerup' (a full-scale recording) play quietly in the original.
+    Without an XACT runtime these have to be re-applied at build/play time, so
+    this exposes them. Layout per sound (Xbox big-endian, validated against the
+    clustering of the returned values):
+        flags(1) category(2) volume(1) pitch(2) priority(1) filter(2)
+    `volume` is a single byte; higher = louder. There is no reliable absolute
+    byte->dB law for this Xbox bank (MonoGame's PC ParseVolumeFromDecibels yields
+    nonsense here -> every cue at ~-50 dBFS), so callers should treat it as a
+    RELATIVE ranking and anchor it to a known-good cue. 90 is the modal baseline
+    (most SFX + all music); only 'usepowerup' (39) sits below it.
+    """
+    d = open(path, "rb").read()
+    if d[:4] != b"KBDS":
+        raise ValueError(f"{path}: not a big-endian Xbox sound bank (sig={d[:4]!r})")
+    be = ">"
+    u16 = lambda o: struct.unpack_from(be + "H", d, o)[0]
+    u32 = lambda o: struct.unpack_from(be + "I", d, o)[0]
+    s16 = lambda o: struct.unpack_from(be + "h", d, o)[0]
+
+    num_simple = u16(0x13)
+    simple_cues_off = u32(0x22)
+    cue_names_off = u32(0x2A)
+    names, o = [], cue_names_off
+    while o < len(d):
+        s, o = _read_cstr(d, o)
+        if s:
+            names.append(s)
+
+    BASELINE = 90  # modal volume byte (most SFX + all music); the 0 dB anchor.
+    meta = {}
+    for i in range(num_simple):
+        so = u32(simple_cues_off + i * 5 + 1)
+        flags = d[so]
+        meta[names[i]] = {
+            "complex": bool(flags & 0x01),
+            "has_rpc": bool(flags & 0x0E),
+            "has_dsp": bool(flags & 0x10),
+            "category": u16(so + 1),       # 1=Default 2=Music 3=Speech (per .xgs)
+            "vol_byte": d[so + 3],
+            "pitch": s16(so + 4) / 1000.0,
+            # relative gain vs the baseline cue, in linear amplitude. Only ever
+            # <= 1 here (usepowerup) since every other cue is at/above baseline
+            # and the recordings are already ~full-scale (can't boost w/o clip).
+            "rel_gain": min(1.0, 10.0 ** (((d[so + 3] - BASELINE) * 0.25) / 20.0)),
+        }
+    return meta
+
+
 # --- decoders -------------------------------------------------------------
 
 def decode_pcm(entry):

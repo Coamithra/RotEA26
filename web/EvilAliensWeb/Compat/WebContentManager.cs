@@ -104,10 +104,123 @@ namespace EvilAliensWeb.Compat
 
         private Texture2D LoadTexture(string key)
         {
-            using Stream s = TitleContainer.OpenStream(key + ".png");
-            Texture2D tex = Texture2D.FromStream(GraphicsDevice, s);
+            // Time the load. A PNG goes through Texture2D.FromStream -> StbImageSharp
+            // (managed, on the WASM main thread), so a cold multi-megapixel PNG is a real
+            // frame hitch — that's what the profiler (?loadlog) flags. Precompiled
+            // variants skip the managed decode entirely (build via tools/textures):
+            //   .dds  — BC3/DXT5 blocks uploaded as-is (lossy, small). Preferred.
+            //   .rtex — uncompressed straight-alpha RGBA8 (lossless, large). Use where
+            //           DXT artifacts are unacceptable; still beats a PNG decode.
+            // Precedence dds -> rtex -> png; per asset, the build step ships exactly one
+            // precompiled form (or none). Stopwatch is sub-microsecond; harmless in release.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Texture2D tex = TryLoadDds(key) ?? TryLoadRaw(key);
+            if (tex == null)
+            {
+                using Stream s = TitleContainer.OpenStream(key + ".png");
+                tex = Texture2D.FromStream(GraphicsDevice, s);
+            }
+            sw.Stop();
             tex.Name = key;
+            LoadProfiler.RecordTexture(key, sw.Elapsed.TotalMilliseconds, tex.Width, tex.Height);
             return tex;
+        }
+
+        // Load a precompiled DXT/BCn texture from <key>.dds if one was shipped, else
+        // return null so the caller falls back to the .png. Built offline by
+        // tools/textures/build_dxt.py (texconv, BC3_UNORM, no mips, straight alpha).
+        // Parses only the legacy FourCC DDS header (DXT1/3/5 -> a Dxt SurfaceFormat) and
+        // uploads the block bytes straight to the GPU via the compressed path. Any
+        // problem (missing file, odd header, unsupported format) yields null + the PNG.
+        private Texture2D TryLoadDds(string key)
+        {
+            byte[] data;
+            try
+            {
+                using Stream s = TitleContainer.OpenStream(key + ".dds");
+                using var ms = new MemoryStream();
+                s.CopyTo(ms);
+                data = ms.ToArray();
+            }
+            catch
+            {
+                return null; // no .dds for this asset — normal; use the PNG
+            }
+
+            try
+            {
+                if (data.Length < 128 || data[0] != 'D' || data[1] != 'D' || data[2] != 'S' || data[3] != ' ')
+                    throw new InvalidDataException("bad DDS magic");
+                int height = BitConverter.ToInt32(data, 12);
+                int width = BitConverter.ToInt32(data, 16);
+                uint fourcc = BitConverter.ToUInt32(data, 84);
+                SurfaceFormat fmt = fourcc switch
+                {
+                    0x31545844u => SurfaceFormat.Dxt1, // 'DXT1'
+                    0x33545844u => SurfaceFormat.Dxt3, // 'DXT3'
+                    0x35545844u => SurfaceFormat.Dxt5, // 'DXT5'
+                    _ => throw new NotSupportedException($"DDS FourCC 0x{fourcc:X8} (need DXT1/3/5, no DX10 header)")
+                };
+                const int headerLen = 128; // legacy DDS_HEADER; we never emit the DX10 extension
+                var tex = new Texture2D(GraphicsDevice, width, height, false, fmt);
+                tex.SetData(0, null, data, headerLen, data.Length - headerLen);
+                return tex;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[dds] {key}: {ex.Message} — falling back to PNG");
+                return null;
+            }
+        }
+
+        // Load a precompiled uncompressed RGBA texture from <key>.rtex if shipped, else
+        // null (caller tries the PNG). Built offline by tools/textures/build_textures.py.
+        // Trivial format — 16-byte header then width*height*4 straight-alpha RGBA8 bytes,
+        // matching SurfaceFormat.Color's layout, so it uploads with zero decode. Lossless
+        // and unconstrained by dimension (only block formats need multiples of 4), at the
+        // cost of a large file. Any problem yields null + the PNG fallback.
+        //   bytes 0..3  'R','T','E','X'   4..4 version(1)   5..5 format(0=RGBA8 straight)
+        //   6..7 reserved   8..11 width (uint32 LE)   12..15 height (uint32 LE)
+        private Texture2D TryLoadRaw(string key)
+        {
+            byte[] data;
+            try
+            {
+                using Stream s = TitleContainer.OpenStream(key + ".rtex");
+                using var ms = new MemoryStream();
+                s.CopyTo(ms);
+                data = ms.ToArray();
+            }
+            catch
+            {
+                return null; // no .rtex for this asset — normal; use the PNG
+            }
+
+            try
+            {
+                if (data.Length < 16 || data[0] != 'R' || data[1] != 'T' || data[2] != 'E' || data[3] != 'X')
+                    throw new InvalidDataException("bad RTEX magic");
+                int width = BitConverter.ToInt32(data, 8);
+                int height = BitConverter.ToInt32(data, 12);
+                const int headerLen = 16;
+                long need = (long)width * height * 4;
+                if (width <= 0 || height <= 0 || data.Length - headerLen < need)
+                    throw new InvalidDataException($"RTEX size mismatch ({data.Length - headerLen} < {need} for {width}x{height})");
+                // Copy the payload to its own array and use the plain SetData(T[]) overload:
+                // the (level,rect,data,startIndex,count) overload rejects a non-zero
+                // startIndex for uncompressed SurfaceFormat.Color in KNI's BlazorGL backend
+                // (the compressed .dds path tolerates it, hence it's only needed here).
+                var pixels = new byte[need];
+                Array.Copy(data, headerLen, pixels, 0, (int)need);
+                var tex = new Texture2D(GraphicsDevice, width, height, false, SurfaceFormat.Color);
+                tex.SetData(pixels);
+                return tex;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[rtex] {key}: {ex.Message} — falling back to PNG");
+                return null;
+            }
         }
 
         private SpriteFont LoadFont(string key)

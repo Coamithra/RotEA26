@@ -460,6 +460,50 @@
                 }
             };
         })();
+
+        // ----- eaLoadProfile: localStorage-backed texture-load profile (debug) -----
+        // The C# LoadProfiler (Compat/LoadProfiler.cs, enabled by ?loadlog) records
+        // which textures decode in which level and whether they were preloaded; it
+        // mirrors that here so the data accumulates across reloads, and the level
+        // preloader reads it back so a gap hit last run is warm this run. One key, a
+        // plain-text manifest. download() saves it as a file to commit; release builds
+        // never call save() (RecordTexture is a no-op without ?loadlog).
+        window.eaLoadProfile = (function ()
+        {
+            var KEY = "eaweb_loadprofile";
+            return {
+                load: function () { try { return localStorage.getItem(KEY) || ""; } catch (e) { return ""; } },
+                save: function (text)
+                {
+                    try { localStorage.setItem(KEY, text); return true; }
+                    catch (e) { console.warn("eaLoadProfile.save failed (quota?)", e); return false; }
+                },
+                clear: function () { try { localStorage.removeItem(KEY); } catch (e) { } },
+                download: function (name, text)
+                {
+                    try
+                    {
+                        var blob = new Blob([text], { type: "text/plain" });
+                        var a = document.createElement("a");
+                        a.href = URL.createObjectURL(blob);
+                        a.download = name || "preload_manifest.txt";
+                        document.body.appendChild(a);
+                        a.click();
+                        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+                    }
+                    catch (e) { console.warn("eaLoadProfile.download failed", e); }
+                }
+            };
+        })();
+
+        // Console helper: dump + download the accumulated preload manifest. Returns
+        // the text too, so `eaPreloadExport()` prints it inline. No-op data if ?loadlog
+        // wasn't set this session.
+        window.eaPreloadExport = function ()
+        {
+            try { return DotNet.invokeMethod("EvilAliensWeb", "ExportPreloadManifest"); }
+            catch (e) { console.warn("eaPreloadExport failed (game not ready?)", e); return ""; }
+        };
     </script>
 </body>
 

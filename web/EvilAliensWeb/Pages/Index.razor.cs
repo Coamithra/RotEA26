@@ -34,6 +34,10 @@ namespace EvilAliensWeb.Pages
                     }
                 }
 
+                // After DebugFlags.Parse (so LoadProfiler sees ?loadlog) but before the
+                // render loop starts, so _js is ready before the first texture decode.
+                EvilAliensWeb.Compat.LoadProfiler.Init(JsRuntime);
+
                 JsRuntime.InvokeAsync<object>("initRenderJS", DotNetObjectReference.Create(this));
             }
         }

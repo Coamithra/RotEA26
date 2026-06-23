@@ -75,7 +75,11 @@ public class SoundManager : ISoundManagerService
 		{ "lazershotnoloop", new CueConfig(cap: 8, vol: 0.6f) },
 		{ "fire", new CueConfig(cap: 8, vol: 0.55f) },
 		{ "evillaugh", new CueConfig(cap: 1, vol: 0.9f, vary: false) },
-		{ "usepowerup", new CueConfig(cap: 2, vary: false) },
+		// XACT authored this ~12.8 dB below baseline (vol byte 39 vs 90) -- it's a
+		// full-scale recording the original cut hard; we play it raw, hence the
+		// "super loud bzzzt" on power-up. A cut KNI can do at runtime. (0.23 =
+		// (39-90)*0.25 dB/unit; tunable by ear.)
+		{ "usepowerup", new CueConfig(cap: 2, vol: 0.23f, vary: false) },
 	};
 
 	private readonly Game game;

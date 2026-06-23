@@ -43,6 +43,15 @@ tools/font/_*.png
 tools/font/editor/data.json
 *.orig
 
+# ---- Texture DXT build (tools/textures/build_dxt.py) -------------------------
+# The script ships; the texconv.exe encoder is a ~1 MB Microsoft DirectXTex
+# binary fetched locally (see the script header for the download URL), and
+# _spike/ is scratch from manual encode/verify runs. The compiled .dds outputs
+# DO ship (under wwwroot/Content), loaded by WebContentManager in preference to
+# the .png.
+tools/textures/texconv.exe
+tools/textures/_*/
+
 # ---- OS / editor cruft -------------------------------------------------------
 Thumbs.db
 desktop.ini

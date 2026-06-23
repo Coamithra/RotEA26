@@ -54,6 +54,7 @@ internal class UnlockEvent : GameEvent
 	{
 		if (message == null && Unlockables.GetInstance().IsUnlocked(item))
 		{
+			System.Console.WriteLine("[trace] UnlockEvent '" + text + "' (" + item + ") TERMINATE (already unlocked / msg done)");
 			Terminate();
 		}
 		else
@@ -64,9 +65,11 @@ internal class UnlockEvent : GameEvent
 			}
 			if (!CheckForRequirements())
 			{
+				System.Console.WriteLine("[trace] UnlockEvent '" + text + "' (" + item + ") TERMINATE (requirements not met)");
 				Terminate();
 				return;
 			}
+			System.Console.WriteLine("[trace] UnlockEvent '" + text + "' (" + item + ") SHOW message");
 			Unlockables.GetInstance().Unlock(item);
 			if (item == Unlockables.Items.HarderDifficulties)
 			{

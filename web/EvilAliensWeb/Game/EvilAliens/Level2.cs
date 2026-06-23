@@ -49,6 +49,11 @@ internal class Level2 : GameScene
 			score.Lives = 7;
 		}
 		Settings.GetInstance().UnlockDifficulty();
+		if (EvilAliensWeb.Compat.DebugFlags.Win)
+		{
+			Settings.GetInstance().CurrentDifficulty = Settings.DifficultyLevel.Hard;
+			System.Console.WriteLine("[trace] Level2 DEBUG ?win: forced difficulty=Hard");
+		}
 		base.spawnPlayerNormally = true;
 	}
 
@@ -111,6 +116,26 @@ internal class Level2 : GameScene
 
 	protected override void PopulateEventList()
 	{
+		if (EvilAliensWeb.Compat.DebugFlags.Win)
+		{
+			// DEBUG repro (?win): skip the whole level and run ONLY the ending unlock
+			// sequence -> Victory, mirroring the real tail below, so the Hard ending
+			// handoff can be reproduced in seconds instead of a full playthrough.
+			UnlockEvent ue = new UnlockEvent(base.Game, "Base Pressure", Unlockables.Items.OwnLevel, AnimatedMessage.UnlockType.challenge, level);
+			eventList.AddEvent(ue, halting: true);
+			eventList.AddHalt();
+			ue = new UnlockEvent(base.Game, "Turbo", Unlockables.Items.Turbo, AnimatedMessage.UnlockType.cheat, level);
+			eventList.AddEvent(ue, halting: true);
+			eventList.AddHalt();
+			ue = new UnlockEvent(base.Game, "Next Mission!", Unlockables.Items.Level3, AnimatedMessage.UnlockType.level, level);
+			eventList.AddEvent(ue, halting: true);
+			eventList.AddHalt();
+			ue = new UnlockEvent(base.Game, "Insane Difficulty", Unlockables.Items.InsaneDifficulty, AnimatedMessage.UnlockType.difficulty, level);
+			eventList.AddEvent(ue, halting: true);
+			eventList.AddHalt();
+			ue.OnFinished += Victory;
+			return;
+		}
 		WaitEvent waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += resetlives;
 		StationaryWave(8f, 3f, 100f, 0f, 0f, 0f);

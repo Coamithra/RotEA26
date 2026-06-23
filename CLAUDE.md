@@ -202,6 +202,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
   authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
   `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
+- **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
+  build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
+  thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second
+  frame hitch (measured: `spider_sheet2` 5033 ms; a whole Level2 preload ~28 s). Two tools attack this:
+  (1) **`Compat/LoadProfiler.cs`** (debug flag **`?loadlog`**) times every decode, flags ones that load
+  *outside* a level's preload phase (the stutters), accumulates a per-level set in localStorage that the
+  preloader feeds back (`GameScene.LoadContent` → `BeginPreload`/`ApplyManifest`/`EndPreload`), and exports
+  a committable list via **`eaPreloadExport()`** in the console → `wwwroot/Content/preload/manifest.txt`
+  (read by ALL builds at preload; release never writes). (2) **`tools/textures/build_textures.py`** reads
+  **`tools/textures/textures.config`** and precompiles listed sprites to a GPU-ready sibling:
+  **`.dds`** (BC3/DXT5, lossy, ~2.4× the PNG on disk, ~0 decode — needs `texconv.exe`, gitignored; dims
+  auto-cropped to a mult-of-4 that preserves the `floor(W/cols)` cell pitch, since Chrome/ANGLE→D3D11
+  rejects non-mult-of-4 block textures as black) or **`.rtex`** (uncompressed straight-alpha RGBA8,
+  lossless, large, ~0 decode, any dims). `WebContentManager.LoadTexture` prefers **`.dds` → `.rtex` →
+  `.png`**. Re-run the script after editing a source PNG or the config; don't hand-edit the `.dds`/`.rtex`.
+  It's OFFLINE (texconv is Windows-only); CI just ships the committed outputs (like `tools/shaders`,
+  `tools/audio`). Per-sprite dxt-vs-raw choices are pending the art rescale (Trello: "Revisit per-sprite
+  texture format").
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it

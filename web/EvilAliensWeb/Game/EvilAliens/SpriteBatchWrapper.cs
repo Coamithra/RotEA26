@@ -223,6 +223,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// straight-alpha glyphs verbatim (dst is 0, so the InvSrcAlpha*dst term vanishes).
 		// NonPremultiplied here would instead square the alpha (srcA*srcA) and premultiply
 		// the colour, thinning the edges — invisible over black but haloed over the menu.
+		// Capture whatever target is currently bound so we can restore IT after the RT
+		// ping-pong. DrawMetalString runs mid-draw: from a plain scene draw the bound
+		// target is the Stage-10 scene target, but from inside a menu (MenuSub1.Draw)
+		// it's the menu's OWN render target, which the menu later composites with the
+		// zoom-transition scale via DrawPresent. Hardcoding SetRenderTarget(0, null) here
+		// resolves (via the compat shim) to the scene target, so after the first metal
+		// string the menu RT is abandoned: its composite + every later entry leak
+		// straight to the scene unzoomed, breaking the transition and the selection
+		// highlight. Restore the captured binding instead.
+		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
 		Flush();                                                   // end any active scene batch
 		base.GraphicsDevice.SetRenderTarget(0, metalRT);
 		base.GraphicsDevice.Clear(Color.Transparent);
@@ -231,7 +241,21 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, m);
 		DrawStringScaled(font, text, Vector2.Zero, tint, 0f, Vector2.Zero, new Vector2(1f, 1f), (SpriteEffects)0, 0f);
 		spriteBatch.End();
-		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);   // restore the scene target
+		// Restore the target that was bound on entry (menu RT or scene target), NOT a
+		// hardcoded null, so Pass 2's composite + any following draws land where the
+		// caller expects. In practice prevTargets is always length 1 here: every
+		// DrawMetalString runs inside Game1.DrawInner, which keeps a target bound for the
+		// whole frame, so the empty-array case (real back buffer bound) is unreachable in
+		// that flow. The fallback routes through the compat null (-> BaseRenderTarget)
+		// rather than handing an empty array to SetRenderTargets, purely defensively.
+		if (prevTargets != null && prevTargets.Length > 0)
+		{
+			base.GraphicsDevice.SetRenderTargets(prevTargets);
+		}
+		else
+		{
+			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
+		}
 
 		// --- Pass 2: composite the RT's used sub-rect through metal.fx ---
 		// FLOAT-precise (sub-pixel) draw mirroring DrawString's transform EXACTLY: the RT

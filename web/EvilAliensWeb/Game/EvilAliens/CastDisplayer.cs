@@ -31,10 +31,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private Timer pulsetimer = new Timer(1150f, repeating: true);
 
-	private Texture2D cablesback;
-
-	private Texture2D cablesfront;
-
 	private Vector2 spawnposition = new Vector2(400f, 200f);
 
 	public bool done;
@@ -168,8 +164,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		}
 		wing = content.Load<Texture2D>("GFX/Sprites/wing1");
 		pulsateCurve = content.Load<Curve>("GFX/Effects/BrainCurve");
-		cablesback = content.Load<Texture2D>("GFX/Sprites/cablesback");
-		cablesfront = content.Load<Texture2D>("GFX/Sprites/cablesfront");
 		spiderdebris1 = content.Load<Texture2D>("GFX/Sprites/spiderdebris1");
 		spiderdebris2 = content.Load<Texture2D>("GFX/Sprites/spiderdebris2");
 		spiderdebris3 = content.Load<Texture2D>("GFX/Sprites/spiderdebris3");
@@ -341,7 +335,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.brainboss:
 			alienname = "Alien Overmind";
 			alientext = "Pure.. throbbing.. evil!\n\nGood thing you killed it.";
-			LoadAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
+			LoadAnimation(new AnimationData("GFX/Sprites/brainbosshd"));
 			scale = 1f;
 			if (flag2)
 			{
@@ -753,7 +747,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			{
 				pulsetimer.Update(gameTime);
 				scale = 1f + 0.07f * pulsateCurve.Evaluate(1f - pulsetimer.Normalized);
-				spriteBatch.Draw(cablesback, val3, 0f, scale, new Vector2(val3.X, 80f));
 			}
 			if ((columns > 1) | (rows > 1))
 			{
@@ -771,10 +764,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			else
 			{
 				spriteBatch.Draw(texture, val3 + new Vector2(0f, num), rotation, scale / textureScale, center: true, color, spriteEffects);
-			}
-			if (state == CastState.brainboss)
-			{
-				spriteBatch.Draw(cablesfront, val3, 0f, scale, new Vector2(val3.X, 80f));
 			}
 		}
 		float num7 = 0.5f;

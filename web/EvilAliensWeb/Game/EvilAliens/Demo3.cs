@@ -55,8 +55,8 @@ internal class Demo3 : GameScene
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/blooddrop");
 		contentManager.Load<Texture2D>("GFX/Sprites/brainlargetransglow");
-		contentManager.Load<Texture2D>("GFX/Sprites/cablesback");
-		contentManager.Load<Texture2D>("GFX/Sprites/cablesfront");
+		contentManager.Load<Texture2D>("GFX/Sprites/brainbosshd");
+		contentManager.Load<Texture2D>("GFX/Sprites/brainbossaura");
 		contentManager.Load<Texture2D>("GFX/alienboss/alienboss");
 		contentManager.Load<Texture2D>("GFX/Sprites/deathstarsheet2");
 		contentManager.Load<Texture2D>("GFX/Sprites/explosionpurple");

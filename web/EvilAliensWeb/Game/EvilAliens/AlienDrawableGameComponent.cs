@@ -84,7 +84,12 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		// 1440 cap (cell px = body 47 * 2.4); attract's larger cell is the lightning halo
 		// extending beyond the same static body, so both states draw the body at one size.
 		{ "GFX/Sprites/eye_idle", 48 },
-		{ "GFX/Sprites/eye_attract", 61 }
+		{ "GFX/Sprites/eye_attract", 61 },
+		// Brain final boss (InsaneBossI/Level3): the HD cyborg brain+cables (brainbosshd) and its
+		// additive animated glow aura (brainbossaura) share ONE design width so they draw aligned.
+		// Boss-specific art — the small Braineroids still use the old brainlargetransglow.
+		{ "GFX/Sprites/brainbosshd", 850 },
+		{ "GFX/Sprites/brainbossaura", 850 }
 	};
 
 	// effective on-screen draw scale once the supersample factor is removed

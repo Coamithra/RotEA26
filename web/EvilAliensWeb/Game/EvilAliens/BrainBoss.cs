@@ -59,9 +59,7 @@ internal class BrainBoss : KillableAlien
 
 	private BossState state;
 
-	private Cables cablesfront;
-
-	private Cables cablesback;
+	private BrainAura aura;
 
 	private static List<StuffToSpawn> stuffToSpawnValues = Game1.GetEnumValues<StuffToSpawn>();
 
@@ -69,13 +67,14 @@ internal class BrainBoss : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
-			CollisionBox collisionBox = retrieveBoundsFromTexture();
+			// Hitbox tuned to the cyborg brain BALL, not the full texture (whose width is mostly
+			// the off-screen cables). ~60% of the ~540x441 design ball (matching the original
+			// brain's forgiving 60% box), centred 55px above Position (the ball sits high in the
+			// frame), and pulsing with the boss via `scale`.
+			float hw = 165f * scale;
+			float hh = 135f * scale;
+			float oy = -55f * scale;
+			CollisionBox collisionBox = new CollisionBox(new Vector2(0f - hw, oy - hh), new Vector2(hw, oy + hh));
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
 			return collisionBox;
@@ -85,7 +84,7 @@ internal class BrainBoss : KillableAlien
 	public BrainBoss(Game game)
 		: base(game)
 	{
-		LoadAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
+		LoadAnimation(new AnimationData("GFX/Sprites/brainbosshd"));
 		base.DrawOrder = 21;
 		SetHitPoints(1700, scaleWithDifficulty: false);
 		pulsetimer = new Timer(1600f, repeating: true);
@@ -154,7 +153,7 @@ internal class BrainBoss : KillableAlien
 		}
 		Vector2 position = default(Vector2);
 		position.X = 400f;
-		position.Y = (0f - (float)texture.Height) / 2f;
+		position.Y = (0f - (float)texture.Height / textureScale) / 2f;
 		base.Position = position;
 		pulsetimer.Duration = 1600f;
 		stateTimer.Duration = 6234f;
@@ -165,12 +164,9 @@ internal class BrainBoss : KillableAlien
 		stuff = StuffToSpawn.brainz;
 		base.Collides = true;
 		scale = 1f;
-		cablesback = Cables.NewAlien(collection, base.Game);
-		cablesback.Setup(this, front: false);
-		cablesfront = Cables.NewAlien(collection, base.Game);
-		cablesfront.Setup(this, front: true);
-		collection.Add((GameComponent)(object)cablesback);
-		collection.Add((GameComponent)(object)cablesfront);
+		aura = BrainAura.NewAura(collection, base.Game);
+		aura.Setup(this);
+		collection.Add((GameComponent)(object)aura);
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -332,8 +328,7 @@ internal class BrainBoss : KillableAlien
 				stateTimer.Duration = 700f;
 				stateTimer.Reset();
 				stateTimer.Start();
-				cablesback.Free();
-				cablesfront.Free();
+				aura.Free();
 			}
 			break;
 		}
@@ -347,11 +342,11 @@ internal class BrainBoss : KillableAlien
 			break;
 		case BossState.entry:
 		{
-			float num5 = MathHelper.SmoothStep(80f, (0f - (float)texture.Height) / 2f, stateTimer.Normalized);
+			float num5 = MathHelper.SmoothStep(100f, (0f - (float)texture.Height / textureScale) / 2f, stateTimer.Normalized);
 			base.Position = new Vector2(base.Position.X, num5);
 			if (stateTimer.Finished)
 			{
-				base.Position = new Vector2(base.Position.X, 80f);
+				base.Position = new Vector2(base.Position.X, 100f);
 				base.Speed = 0f;
 				state = BossState.wait;
 				stateTimer.Duration = 15000f;

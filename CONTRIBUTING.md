@@ -49,7 +49,7 @@ the `plans/` directory if needed) with every step from this runbook as a checkbo
 - [ ] Claim the top card (move Backlog -> In Progress), before anything else
 - [ ] Pull latest main
 - [ ] Read the card (description, linked plan stage)
-- [ ] Create worktree/branch
+- [ ] Create worktree (slot wt<k>) + branch
 
 ## Phase 2: Research
 - [ ] Read the referenced code
@@ -63,32 +63,39 @@ tracker is per-card scratch.)
 
 ---
 
-## Worktree Quick Reference (optional — usually single-dev)
+## Worktree Quick Reference
 
-This is a solo project with one dev server, so you'll often just work on a branch in the root
-checkout. Reach for a worktree only when you need to keep `main` clean while iterating, or when two
-agents run in parallel.
+**All card work happens in an isolated git worktree** under `.claude/worktrees/` (gitignored at the
+repo root). This is a one-dev repo, but agents run **many at a time in parallel** (max plan), so the
+worktree is what keeps them from clobbering each other's files and `main`. The root checkout stays on
+`main` — never switch it to a feature branch.
 
 | Command | What it does |
 |---------|-------------|
-| `rtk git worktree add .claude/worktrees/<branch> -b <branch> main` | Worktree + branch off main |
-| `rtk git worktree list` | Show active worktrees |
-| `rtk git worktree remove .claude/worktrees/<branch>` | Remove a worktree |
+| `rtk git worktree add .claude/worktrees/wt<k> -b <branch> main` | Worktree in slot `wt<k>` + branch off main |
+| `rtk git worktree list` | Show active worktrees (which branch is in which slot) |
+| `rtk git worktree remove .claude/worktrees/wt<k>` | Remove a worktree (clean up) |
 | `rtk git worktree prune` | Clean stale references |
 
 **Key rules:**
-- Put worktrees under `.claude/worktrees/` — it's gitignored at the repo root. Keep the root
-  checkout on `main`; never switch it to a feature branch.
-- `bin/`/`obj/` are gitignored and regenerate on first `dotnet build` in the new worktree — no
-  install step (unlike an npm project). The first build is slow (WASM workload restore); that's
-  expected.
-- **Only ONE dev port is provisioned** (`eaweb` = `http://localhost:5280` in `.claude/launch.json`).
-  If you run a second server from a worktree, pass a different port: `dotnet run -c Debug --urls
-  http://localhost:5281`. **Never edit `.claude/launch.json`** — the preview tooling keys off it.
-- **Kill your dev server before `git worktree remove`.** On Windows a running server (or the Bash
-  tool's own cwd sitting inside the worktree) holds the directory lock and the remove fails with
-  "Permission denied" — `cd` back to the repo root, kill the server, then retry. `git worktree
-  remove --force` still unregisters it from git even when the physical folder can't be deleted.
+- **Slot naming (mandatory):** worktree folders are fixed slots `wt1`..`wt8`, NOT branch names. Pick
+  the lowest slot not shown in `git worktree list`. If `git worktree add` fails because the directory
+  already exists, another agent grabbed that slot in the same instant — take the next one. Branch
+  names stay fully descriptive; the slot is only the folder.
+- **One dev PORT per slot.** Only the root `eaweb` config (`http://localhost:5280`, in
+  `.claude/launch.json`) is provisioned, and it serves the **root checkout**. From a worktree, run the
+  server yourself on the per-slot port `5280 + k` (wt1 = 5281 … wt8 = 5288):
+  `dotnet run -c Debug --urls http://localhost:528<k>`. Verify by pointing claude-in-chrome's
+  `navigate` at *that* port — NOT `preview_start`, which would launch the root `eaweb`/5280 config and
+  leave you driving the wrong checkout. **Never edit `.claude/launch.json`** — concurrent per-card
+  edits to that shared file cause port collisions and lost-update races between agents.
+- **`bin/`/`obj/` are gitignored** and regenerate on the first `dotnet build` in a new worktree — no
+  install step (unlike an npm project). That first build is slow (WASM workload restore); expected.
+- **Kill your dev server before `git worktree remove`.** On Windows a running server — or the Bash
+  tool's own cwd sitting inside the worktree — holds the directory lock and the remove fails with
+  "Permission denied": `cd` back to the repo root, kill the server, then retry. `git worktree remove
+  --force` still unregisters it from git even when the physical folder can't be deleted, and a stale
+  server squatting a slot's port blocks the next agent who claims that slot.
 
 ---
 
@@ -103,27 +110,29 @@ agents run in parallel.
 > ```
 >
 > Do the move *before* reading the card or pulling main, so the board reflects what's being worked.
-> If two agents are genuinely running in tandem, fall back to the comment handshake: post
-> `trello --backend local --board 10989a3d comment add <card_id> "I am doing this now — claim <id>"`,
-> wait ~10–30s, re-read `--json comment ls <card_id>`, and the earliest claim wins (back off and take
-> the next card otherwise). For solo work, skip the handshake.
+> If several agents are genuinely running in tandem on the same column, fall back to the comment
+> handshake: post `trello --backend local --board 10989a3d comment add <card_id> "I am doing this now
+> — claim <id>"`, wait ~10–30s, re-read `--json comment ls <card_id>`, and the earliest claim wins
+> (back off and take the next card otherwise). For a single picked card, skip the handshake.
 
 1. **Claim the top Backlog card (do this first)** — move it to In Progress, as above.
 2. **Pull latest main** — `rtk git pull origin main` so you start from the newest code.
 3. **Read the card** — Read the card description, then any linked detail in the archived
    `plans/plan.md` (the per-stage source of truth; the card is a pointer/summary). Keep the card
    description in sync if the work changes its scope.
-4. **Create a branch (or worktree)** — Branch off `main` with a descriptive prefix:
+4. **Create the worktree and branch (mandatory — all work happens here)** — Branch off `main` into the
+   lowest free slot, with a descriptive prefix:
     - Bugs: `fix/<short-name>` (e.g. `fix/premult-alpha-fades`)
     - Features: `feature/<short-name>` (e.g. `feature/metal-font-sheen`)
     - Refactoring: `refactor/<short-name>`
     - Docs / plans only: `docs/<short-name>`
     ```
-    rtk git checkout -b <branch> main                  # in the root checkout
-    # OR, for an isolated worktree:
-    rtk git worktree add .claude/worktrees/<branch> -b <branch> main && cd .claude/worktrees/<branch>
+    rtk git worktree add .claude/worktrees/wt<k> -b <branch> main   # lowest free slot
+    cd .claude/worktrees/wt<k>
     rtk git push -u origin <branch>
     ```
+    **All subsequent work happens inside `.claude/worktrees/wt<k>/`** (run the dev server on port
+    `528<k>`). The root checkout stays on `main`.
 
 ## Phase 2: Research
 
@@ -196,13 +205,14 @@ the user to check manually; verify and share proof.
 
 15. **Build clean** — `cd web/EvilAliensWeb && dotnet build -c Debug` must succeed. **A clean build
     does NOT mean it runs** — WASM runtime errors only appear in the browser console.
-16. **Run and look** — `dotnet run -c Debug --urls http://localhost:5280`, then verify in a **real
-    foreground Chrome tab via the claude-in-chrome MCP** (not `preview_screenshot` — the built-in
-    renderer wedges when its tab is backgrounded and the rAF loop pauses). Flow: `preview_start` to
-    serve → in Chrome `navigate` to `http://localhost:5280` → `wait` ~10s for WASM → screenshot +
-    `read_console_messages`. **Zero console exceptions is the bar.**
+16. **Run and look** — `dotnet run -c Debug --urls http://localhost:528<k>` (your slot's port; the
+    root checkout uses `5280`), then verify in a **real foreground Chrome tab via the claude-in-chrome
+    MCP** — `navigate` to YOUR port, NOT `preview_screenshot` (the built-in renderer wedges when its
+    tab is backgrounded and the rAF loop pauses). Flow: serve → in Chrome `navigate` to
+    `http://localhost:528<k>` → `wait` ~10s for WASM → screenshot + `read_console_messages`.
+    **Zero console exceptions is the bar.**
     - **Drawing change?** Use the **sprite harness** — don't chase a moving enemy.
-      `…:5280/?harness=<Obj>&frame=<n>` boots frozen onto a space background, drawn by the real
+      `…:528<k>/?harness=<Obj>&frame=<n>` boots frozen onto a space background, drawn by the real
       pipeline, so a screenshot is pixel-reliable. Picker at `wwwroot/harness.html`.
     - **Booting deep into the game?** Use the debug flags: `?menu`, `?level=<Name>`, `?invuln`,
       `?unlockall`, `?noattract` (combine with `&`).
@@ -259,9 +269,10 @@ trust the markers.
     **No approval needed** (unprotected solo repo). **The merge auto-deploys to GitHub Pages** —
     confirm the Pages run goes green (`rtk gh run list`) and, for anything content/path-sensitive,
     **spot-check the LIVE URL** (https://coamithra.github.io/RotEA26/), not just localhost.
-26. **Clean up the worktree and branch** — kill your dev server FIRST (it holds the directory lock):
+26. **Clean up the worktree and branch** — kill your dev server FIRST (it holds the directory lock and
+    squats the slot's port):
     ```
-    rtk git worktree remove .claude/worktrees/<branch>   # if you used one
+    rtk git worktree remove .claude/worktrees/wt<k>
     rtk git worktree prune
     rtk git branch -d <branch>
     rtk git push origin --delete <branch>

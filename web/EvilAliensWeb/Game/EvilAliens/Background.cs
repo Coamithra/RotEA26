@@ -60,6 +60,11 @@ public class Background : Scene
 
 	private float fadeFactor;
 
+	// Stage 13 reskin: the new space background — a procedural, infinite, scrolling
+	// grid of overlapping high-res nebula tiles, crossfaded by starwindow.fx. Set by
+	// SetSpace (which then leaves backgroundLayers empty); null for every other scene.
+	private ProceduralStarfield starfield;
+
 	// Holodeck (trial-simulation chamber). When the simulator background is active, Jump()
 	// fires a brief, deliberate "projection hiccup" instead of teleporting the layers:
 	// a stutter-slip and/or a brightness flicker driven over glitchTimer.
@@ -269,6 +274,10 @@ public class Background : Scene
 		{
 			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
 		}
+		if (starfield != null)
+		{
+			starfield.Advance(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
+		}
 		UpdateHoloGlitch(gameTime);
 		UpdateHoloPulse(gameTime);
 		switch (state)
@@ -336,6 +345,14 @@ public class Background : Scene
 			EnsureRenderTarget();
 			base.GraphicsDevice.SetRenderTarget(0, rendertarget);
 		}
+		if (starfield != null)
+		{
+			// Render-space, additive, custom-window batch — flush the wrapper's
+			// design-space batch first so the two SpriteBatches don't overlap.
+			base.SpriteBatch.Flush();
+			starfield.Brightness = DebugToggles.Active ? DebugToggles.StarfieldBrightness : 1f;
+			starfield.Draw();
+		}
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
 			backgroundLayer.Draw(base.SpriteBatch, gameTime);
@@ -349,7 +366,10 @@ public class Background : Scene
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		}
 		float factor = Convert.ToSingle((double)(0.15f + oscilatereach) + Math.Sin((double)oscilatespeed * timer.TotalMilliseconds) * (double)oscilatereach);
-		fadeBackBufferToBlack(factor);
+		if (!DebugToggles.Active || DebugToggles.BgVeil)
+		{
+			fadeBackBufferToBlack(factor);
+		}
 		if (fadeFactor > 0f)
 		{
 			fadeBackBufferToWhite(fadeFactor);
@@ -435,6 +455,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		DisposeStarfield();
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
 		backgroundImage.texturenames = new string[1, 1];
@@ -488,45 +509,17 @@ public class Background : Scene
 		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0295: Unknown result type (might be due to invalid IL or missing references)
 		//IL_029a: Unknown result type (might be due to invalid IL or missing references)
-		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
-		backgroundImage.position = Vector2.Zero;
-		backgroundImage.textures = new Texture2D[1, 1];
-		backgroundImage.texturenames = new string[1, 1];
-		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Game/Starfield2");
-		backgroundImage.texturenames[0, 0] = "GFX/Game/Starfield2";
-		backgroundImage.size = 1.5f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 0.66f;
-		backgroundLayers.Add(backgroundImage);
-		backgroundImage = new BackgroundImage();
-		backgroundImage.position = Vector2.Zero;
-		backgroundImage.textures = new Texture2D[1, 1];
-		backgroundImage.texturenames = new string[1, 1];
-		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Game/tileablestarfield");
-		backgroundImage.texturenames[0, 0] = "GFX/Game/tileablestarfield";
-		backgroundImage.size = 0.8f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 1f;
-		backgroundImage.blendMode = (SpriteBlendMode)2;
-		backgroundLayers.Add(backgroundImage);
-		backgroundImage = new BackgroundImage();
-		backgroundImage.position = new Vector2(400f, 0f);
-		backgroundImage.textures = new Texture2D[1, 1];
-		backgroundImage.texturenames = new string[1, 1];
-		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Game/Starfield2");
-		backgroundImage.texturenames[0, 0] = "GFX/Game/Starfield2";
-		backgroundImage.size = 2f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 1.5f;
-		backgroundImage.blendMode = (SpriteBlendMode)2;
-		backgroundLayers.Add(backgroundImage);
+		// Stage 13 reskin: replace the three hand-placed Starfield2/tileablestarfield
+		// layers with a deterministic, infinite, scrolling grid of overlapping high-res
+		// nebula tiles, crossfaded by starwindow.fx. See ProceduralStarfield. The legacy
+		// backgroundLayers list stays empty for space; Update/Draw drive `starfield`.
+		DisposeStarfield();
+		starfield = new ProceduralStarfield();
+		starfield.LoadContent(Content, base.GraphicsDevice);
 		scrollspeedreset = new Vector2(0f, 0.2f) / 16.666666f;
 		oscilatereach = 0.1f;
 		oscilatespeed = 0.001f;
@@ -544,6 +537,7 @@ public class Background : Scene
 		// pulse breathes (oscilate*), and Jump() fires deliberate holo-glitches (see Update).
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
+		DisposeStarfield();
 		// simulated stars, far: cool + dim, straight alpha
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundImage.color = new Color(0.45f, 0.7f, 0.95f, 1f);
@@ -623,6 +617,17 @@ public class Background : Scene
 		scrollspeedmodifier = 10f;
 	}
 
+	// Dispose the procedural starfield (the SpriteBatch it owns) and forget it, so a
+	// non-space background falls back to backgroundLayers. Safe to call when null.
+	private void DisposeStarfield()
+	{
+		if (starfield != null)
+		{
+			starfield.Dispose();
+			starfield = null;
+		}
+	}
+
 	internal void SetMars()
 	{
 		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
@@ -640,6 +645,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		DisposeStarfield();
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
@@ -747,6 +753,7 @@ public class Background : Scene
 	protected override void UnloadContent()
 	{
 		base.UnloadContent();
+		DisposeStarfield();
 		if (rendertarget != null)
 		{
 			((Texture2D)rendertarget).Dispose();

@@ -295,6 +295,93 @@
     </script>
 
     <script>
+        // ----- ?fx live FX tuning panel (dev only) --------------------------
+        // On-screen buttons to toggle render features while dialing in the new
+        // starfield. Built ONLY when the URL query contains `fx`, so normal play
+        // and the live site never see it. Each change is pushed to C# DebugToggles
+        // via DotNet.invokeMethod('EvilAliensWeb','debugFx', key, value). Defaults
+        // start CLEAN: bloom OFF, bg-veil OFF, gamma ON, brightness 100%.
+        (function ()
+        {
+            if (!/[?&]fx(?:[=&]|$)/.test(window.location.search || "")) return;
+            var fx = { bloom: 0, veil: 0, gamma: 1, brightness: 1 };
+
+            function send(k, v)
+            {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFx', String(k), Number(v)); return true; }
+                catch (e) { return false; }
+            }
+            function pushAll()
+            {
+                // Retry until the .NET runtime is up, then push the initial state.
+                if (!send('bloom', fx.bloom)) { setTimeout(pushAll, 200); return; }
+                send('veil', fx.veil); send('gamma', fx.gamma); send('brightness', fx.brightness);
+            }
+
+            function build()
+            {
+                var p = document.createElement('div');
+                p.id = 'ea-fx';
+                p.style.cssText = 'position:fixed;top:54px;right:8px;z-index:99999;background:rgba(8,6,16,.82);' +
+                    'border:1px solid #3a3550;border-radius:8px;padding:8px;font:12px/1.3 monospace;color:#e8e6f2;' +
+                    'user-select:none;min-width:154px;box-shadow:0 2px 12px rgba(0,0,0,.5)';
+                p.innerHTML = '<div style="font-weight:bold;letter-spacing:1px;margin-bottom:6px;opacity:.8">FX PANEL</div>';
+
+                function mkToggle(key, label)
+                {
+                    var b = document.createElement('button');
+                    b.style.cssText = 'display:block;width:100%;margin:3px 0;padding:5px 8px;border-radius:5px;' +
+                        'border:1px solid #444;cursor:pointer;font:inherit;text-align:left';
+                    function paint()
+                    {
+                        var on = !!fx[key];
+                        b.style.background = on ? '#2e7d32' : '#2a2733';
+                        b.style.color = on ? '#fff' : '#9a96aa';
+                        b.style.borderColor = on ? '#43a047' : '#444';
+                        b.textContent = (on ? '● ' : '○ ') + label;
+                    }
+                    b.onclick = function () { fx[key] = fx[key] ? 0 : 1; send(key, fx[key]); paint(); };
+                    paint(); p.appendChild(b);
+                }
+                mkToggle('bloom', 'Bloom');
+                mkToggle('veil', 'BG dark veil');
+                mkToggle('gamma', 'Gamma');
+
+                var row = document.createElement('div');
+                row.style.cssText = 'margin-top:6px;border-top:1px solid #3a3550;padding-top:6px';
+                row.innerHTML = '<div style="opacity:.8;margin-bottom:3px">Starfield brightness</div>';
+                var wrap = document.createElement('div');
+                wrap.style.cssText = 'display:flex;gap:3px';
+                [['30%', 0.3], ['50%', 0.5], ['75%', 0.75], ['100%', 1]].forEach(function (o)
+                {
+                    var b = document.createElement('button');
+                    b.textContent = o[0];
+                    b.style.cssText = 'flex:1;padding:5px 0;border-radius:5px;border:1px solid #444;cursor:pointer;font:inherit';
+                    function paint()
+                    {
+                        var on = Math.abs(fx.brightness - o[1]) < 0.001;
+                        b.style.background = on ? '#1565c0' : '#2a2733';
+                        b.style.color = on ? '#fff' : '#9a96aa';
+                        b.style.borderColor = on ? '#1e88e5' : '#444';
+                    }
+                    b.onclick = function ()
+                    {
+                        fx.brightness = o[1]; send('brightness', fx.brightness);
+                        Array.prototype.forEach.call(wrap.children, function (c) { c._paint && c._paint(); });
+                    };
+                    b._paint = paint; paint(); wrap.appendChild(b);
+                });
+                row.appendChild(wrap); p.appendChild(row);
+                document.body.appendChild(p);
+                pushAll();
+            }
+
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build);
+            else build();
+        })();
+    </script>
+
+    <script>
         // ----- eaMusic: WebAudio background-music layer (Stage 6) -------------
         // Music needs seamless loop POINTS (intro -> looping body, or a
         // pymusiclooper seam), which KNI's whole-buffer SoundEffect looping can't

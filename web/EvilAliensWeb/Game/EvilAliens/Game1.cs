@@ -631,6 +631,10 @@ public class Game1 : Game
 		{
 			bloom.Settings = BloomSettings.PresetSettings[3];
 		}
+		if (DebugToggles.Active)
+		{
+			((DrawableGameComponent)(object)bloom).Visible = DebugToggles.Bloom;
+		}
 		// Stage 10 unified presenter: render the WHOLE frame into one offscreen target
 		// sized to the window's 4:3 letterbox, then blit it letterboxed to KNI's
 		// window-sized back buffer. KNI forces the back buffer to the window size on
@@ -656,6 +660,13 @@ public class Game1 : Game
 		}
 		Xna3GraphicsDeviceCompat.BaseRenderTarget = sceneTarget;
 		base.GraphicsDevice.SetRenderTarget(sceneTarget);
+		// Clear the scene target to black every frame. It's a PreserveContents target (so
+		// within-frame SetRenderTarget round-trips for bloom/cross-fade keep their content),
+		// which means it is NOT auto-cleared between frames. The legacy backgrounds fully
+		// repainted it with an opaque base layer, so that was invisible; the new additive
+		// ProceduralStarfield only ADDS, so without this clear it accumulates frame-over-
+		// frame and runs away to white (unbounded with the veil off; ~3x with it on).
+		base.GraphicsDevice.Clear(Color.Black);
 
 		if (graphics.IsFullScreen)
 		{
@@ -694,11 +705,12 @@ public class Game1 : Game
 		// gamma pixel shader as it's scaled+letterboxed to the window is equivalent to a
 		// full-screen gamma post-process. The blit is 1:1 when the render size equals the
 		// letterbox (uncapped); a bilinear upscale when RenderScale's height cap kicks in.
-		if (gamma != null)
+		Effect gx = (DebugToggles.Active && !DebugToggles.Gamma) ? null : gamma;
+		if (gx != null)
 		{
-			gamma.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
+			gx.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
 		}
-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gamma);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gx);
 		spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
 		spriteBatch.End();
 	}

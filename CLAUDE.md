@@ -250,6 +250,22 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   leading-slash arg; `--list`/`--dry-run`/`--rm` for inspect/preview/cleanup).
   The meridian repo stays PRIVATE on GitHub (source hidden); the deployed Hetzner site is public so the
   easter egg stays reachable.
+- **Multi-game hub -- how the projects fit together (the setup this separation was built for).** The
+  goal is many small games sharing ONE launcher/decoy without piling into one repo. Architecture is
+  hub-and-spoke: **Meridian** = the shared launcher + "boss key" decoy (its own private repo, deployed
+  at `haraldmaassen.com/meridian/`); **each game** = a standalone spoke in its OWN repo, deployed at its
+  own sibling URL (RotEA26 on GitHub Pages, future games wherever). Games never import or depend on each
+  other or on Meridian's internals -- the ONLY coupling is a URL contract. **To add a new game:**
+  (1) *Meridian side, data-only:* drop cover art in `meridian/covers/` + add one object to
+  `meridian/games.json` (`id`, `title`, `genre`, `blurb`, `status`, then `path` for a sibling slug OR
+  `url` for an absolute off-hub link, plus a `cover` block), then re-deploy Meridian
+  (`tools/deploy.py`). No Meridian code change. (2) *Game side, one handoff:* on the game's Exit/quit,
+  navigate to `<MERIDIAN_BASE>index.html?from=<that game's id>` (copy RotEA26's `wwwroot/index.html`
+  `eaQuit`: fade to black, then `location.href`). `MERIDIAN_BASE` is relative `"../meridian/"` when the
+  game is co-hosted beside Meridian, else an absolute base when cross-origin. (3) *Hosting:* same origin
+  as Meridian => every link stays relative; cross-origin => set the two absolute knobs (`MERIDIAN_BASE`
+  game side, `CONFIG.GAME_ORIGIN` meridian side). `?from=<id>` is what Meridian's "Shut Down" uses to
+  return the player to the right game. Add as many games as you like without touching the existing ones.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

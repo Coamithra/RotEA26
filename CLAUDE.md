@@ -43,6 +43,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   whenever *its* tab is backgrounded (the rAF game loop pauses, so it never paints). Flow:
   `preview_start` to serve → in Chrome `navigate` to `http://localhost:5280` → `wait` ~10s
   for WASM → `computer{screenshot}`/`zoom` + `read_console_messages`.
+- **When working on GRAPHICS/textures, DO A HARD RELOAD -- and not the normal kind.** The
+  browser caches content assets (`Content/**`) aggressively and serves the STALE copy after you
+  regenerate one, so an edited sprite/texture silently "doesn't take effect" (cost an hour on the
+  earth swap: the game kept loading the old 735px `earth.png` while the server already served the
+  new 1480px one). A plain reload -- EVEN Ctrl+Shift+R -- does NOT reliably refetch it, because
+  textures load LATE (during level preload), after the hard-reload cache-bypass window has closed.
+  Reliable busts: (1) DevTools open -> Network -> tick "Disable cache", then reload (best while
+  iterating); (2) right-click reload -> "Empty Cache and Hard Reload"; (3) from the console,
+  `fetch('Content/gfx/...png', {cache:'reload'})` to refresh just that entry, then reload. Symptom:
+  an asset change not showing up, OR a wrong on-screen SIZE (stale-dimensioned texture drawn at the
+  new scale -- exactly the "earth is small" bug). Production (GitHub Pages) self-heals via ETag
+  revalidation; this is mainly a local-iteration trap.
 - **Debug boot shortcuts (opt-in via URL query — use these instead of fighting the splash/
   press-start/menu when testing).** Parsed once at boot in `Compat/DebugFlags.cs` (wired via
   `wwwroot/index.html` `getDebugQuery` → `Pages/Index.razor.cs`). No query = normal boot, so

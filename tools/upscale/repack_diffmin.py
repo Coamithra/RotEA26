@@ -12,8 +12,11 @@ This is the generalised cousin of repack_player_engine.py (which is hardcoded to
 player sheet + its dark-panel feature-lock). Use repack_for_engine.py for rigid single-
 blob sprites (overlap-to-original is simpler and exact there).
 
-usage: python repack_diffmin.py <gen.png> <orig.png> <factor> <crop> <out.png> [cols] [rows]
-cols/rows default to 8/4 (landscape grid). Frame count (cols*rows) must be 32.
+usage: python repack_diffmin.py <gen.png> <orig.png> <factor> <crop> <out.png> [cols] [rows] [pad]
+cols/rows default to 8/4 (landscape grid). Frame count (cols*rows) must be 32. [pad] adds an
+extra margin (px) around every cell so a sprite that DRIFTS under diff-min isn't clipped at the
+frame edge -- a diagnostic for judging the animation's smoothness apart from its centring (the
+padded sheet's cells are bigger than the engine expects, so it's for eval, not for shipping).
 """
 import sys, numpy as np, cv2
 from PIL import Image
@@ -23,8 +26,10 @@ GEN, ORIG = sys.argv[1], sys.argv[2]
 FACTOR = int(sys.argv[3]); CROP = int(sys.argv[4]); OUT = sys.argv[5]
 COLS = int(sys.argv[6]) if len(sys.argv) > 6 else 8
 ROWS = int(sys.argv[7]) if len(sys.argv) > 7 else 4
+PAD = int(sys.argv[8]) if len(sys.argv) > 8 else 0   # extra margin per cell so a drifting sprite isn't clipped
 DESIGN, SEP = 48, 1
 FRAME = DESIGN * FACTOR
+CANVAS = FRAME + 2 * PAD                              # actual cell the sprite is stamped/warped/packed into
 N = COLS * ROWS
 
 gem = key_magenta(np.asarray(Image.open(GEN).convert("RGB"))[:CROP])
@@ -62,8 +67,8 @@ def stamp(i):
     ys, xs = np.where(a > 40)
     cx = (xs.min() + xs.max()) / 2 if len(xs) else im.size[0] / 2  # bbox-centre (NOT centroid)
     cy = (ys.min() + ys.max()) / 2 if len(ys) else im.size[1] / 2
-    cv = Image.new("RGBA", (FRAME, FRAME), (0, 0, 0, 0))
-    cv.alpha_composite(im, (round(FRAME / 2 - cx), round(FRAME / 2 - cy)))
+    cv = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+    cv.alpha_composite(im, (round(CANVAS / 2 - cx), round(CANVAS / 2 - cy)))
     arr = np.asarray(cv).astype(np.float32); al = arr[:, :, 3:4] / 255.0
     return np.dstack([arr[:, :, :3] * al, arr[:, :, 3]]).astype(np.float32)  # premultiplied
 
@@ -102,15 +107,15 @@ ff_after = sum(sad(final[i], final[i - 1]) for i in range(1, N))
 print(f"frame-to-frame wobble: before={ff_before/1e6:.2f}M after={ff_after/1e6:.2f}M "
       f"({100*(1-ff_after/ff_before):.0f}% smoother)")
 
-SW = COLS * FRAME + (COLS - 1) * SEP
-SH = ROWS * FRAME + (ROWS - 1) * SEP
+SW = COLS * CANVAS + (COLS - 1) * SEP
+SH = ROWS * CANVAS + (ROWS - 1) * SEP
 sheet = Image.new("RGBA", (SW, SH), (0, 0, 0, 0))
 for i, f in enumerate(final):
     a = np.clip(f[:, :, 3:4] / 255.0, 0, 1)
     rgb = np.where(a > 1e-4, f[:, :, :3] / np.maximum(a, 1e-4), 0)  # un-premultiply -> straight alpha
     straight = np.dstack([rgb.clip(0, 255), f[:, :, 3].clip(0, 255)]).astype(np.uint8)
     r, c = i // COLS, i % COLS
-    sheet.paste(Image.fromarray(straight, "RGBA"), (c * (FRAME + SEP), r * (FRAME + SEP)))
+    sheet.paste(Image.fromarray(straight, "RGBA"), (c * (CANVAS + SEP), r * (CANVAS + SEP)))
 sheet.save(OUT)
 chk = (SW - (COLS - 1) * SEP) // COLS
-print(f"packed {OUT}  {SW}x{SH}  frame={FRAME}px x{FACTOR}  engine-recompute={chk} {'OK' if chk == FRAME else 'MISMATCH'}")
+print(f"packed {OUT}  {SW}x{SH}  cell={CANVAS}px (sphere x{FACTOR}, pad={PAD})  engine-recompute={chk} {'OK' if chk == CANVAS else 'MISMATCH'}")

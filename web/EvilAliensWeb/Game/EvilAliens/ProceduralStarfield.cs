@@ -15,8 +15,17 @@ namespace EvilAliens;
 // both the geometry and the crossfade; mirroring keeps everything axis-aligned).
 // The pick is a pure function of (cellX, cellY, seed), so the field is identical
 // every run AND infinite as it scrolls — no stored grid, no wrap seam. A cell also
-// avoids matching its already-decided left / up / up-left neighbours, which is the
-// "no direct repeats" rule expressed positionally so it survives infinite scroll.
+// avoids matching the neighbours it overlaps, which is the "no direct repeats" rule
+// expressed positionally so it survives infinite scroll.
+//
+// The rows are laid BRICK-style (running bond): every other row is shifted half a
+// tile horizontally, like staggered masonry, so the seams don't line up into long
+// straight grout lines. This stays perfectly seamless for free: starwindow.fx's
+// window is SEPARABLE (w = wx*wy) and each row is its own independent 1D grid whose
+// horizontal windows already sum to 1 at every x — so a per-row horizontal phase
+// shift is invisible to the total brightness, while vertically the rows still stack
+// and sum to 1 exactly as before. Net result: uniform brightness 1 everywhere, only
+// the seams stagger. (Pass brick:false for the old aligned grid.)
 //
 // Tiles overlap by `overlap` and are drawn ADDITIVELY into the black-cleared scene
 // through starwindow.fx, which multiplies each tile by a separable, mirror-symmetric
@@ -30,8 +39,6 @@ namespace EvilAliens;
 // tiles stay crisp instead of being upscaled through the 800x600 grid.
 internal sealed class ProceduralStarfield : IDisposable
 {
-    private const int TileCount = 12;
-
     // --- the two aesthetic knobs (design units) ---------------------------------
     // tileDesignH = on-screen height of ONE tile in 800x600 design space. 600 = a
     // tile fills the screen height (few, large tiles); smaller = a denser grid of
@@ -44,6 +51,22 @@ internal sealed class ProceduralStarfield : IDisposable
     private readonly float feather;
     private readonly uint seed;
     private readonly Color tint;
+
+    // Brick-laying (running-bond) layout: shift every other ROW horizontally by half a
+    // tile pitch, like staggered masonry, instead of a plain aligned grid. Seamless —
+    // see the class header for why the separable window makes the row phase irrelevant
+    // to total brightness. false = the original aligned grid.
+    private readonly bool brick;
+
+    // The tile set this field draws from, and how many. Default (and only current caller)
+    // = the 12 far nebula tiles; the parameter stays so a different tiled field is a one-
+    // liner. (The near foreground stars are the separate discrete DriftingStars layer.)
+    private readonly string[] tilePaths;
+    private readonly int tileCount;
+
+    // Scroll-speed multiplier applied to every Advance() delta. 1 = same rate as the
+    // far field; >1 = a nearer layer that streaks past faster (parallax depth).
+    private readonly float parallax;
 
     private Texture2D[] tiles;
     private Effect window;
@@ -59,13 +82,25 @@ internal sealed class ProceduralStarfield : IDisposable
     // to the draw alpha so it scales each tile's additive contribution linearly (1 = full).
     public float Brightness = 1f;
 
-    public ProceduralStarfield(uint seed = 1337u, float tileDesignH = 480f, float feather = 0.16f, Color? tint = null)
+    public ProceduralStarfield(uint seed = 1337u, float tileDesignH = 480f, float feather = 0.16f,
+                               Color? tint = null, bool brick = true,
+                               string[] tilePaths = null, float parallax = 1f)
     {
         this.seed = seed;
         this.tileDesignH = tileDesignH;
-        this.tileDesignW = tileDesignH * (1448f / 1086f); // tiles are 4:3
+        this.tileDesignW = tileDesignH * (4f / 3f); // tiles are 4:3
         this.feather = Math.Clamp(feather, 0.02f, 0.49f);
         this.tint = tint ?? Color.White;
+        this.brick = brick;
+        this.parallax = parallax;
+        // Default tile set = the 12 full-frame nebula tiles (the far/background field).
+        if (tilePaths == null)
+        {
+            tilePaths = new string[12];
+            for (int i = 0; i < 12; i++) tilePaths[i] = $"GFX/Game/space/space{i:00}";
+        }
+        this.tilePaths = tilePaths;
+        this.tileCount = tilePaths.Length;
     }
 
     public void LoadContent(ContentManager content, GraphicsDevice graphicsDevice)
@@ -73,9 +108,9 @@ internal sealed class ProceduralStarfield : IDisposable
         gd = graphicsDevice;
         batch = new SpriteBatch(gd);
         window = content.Load<Effect>("GFX/Effects/starwindow");
-        tiles = new Texture2D[TileCount];
-        for (int i = 0; i < TileCount; i++)
-            tiles[i] = content.Load<Texture2D>($"GFX/Game/space/space{i:00}");
+        tiles = new Texture2D[tileCount];
+        for (int i = 0; i < tileCount; i++)
+            tiles[i] = content.Load<Texture2D>(tilePaths[i]);
     }
 
     // Advance the field by a per-frame scroll delta (design units), matching how
@@ -86,12 +121,12 @@ internal sealed class ProceduralStarfield : IDisposable
         // scrollspeed must DECREASE the offset to move the field the same way the legacy
         // BackgroundImage.Move did (which added to a position drawn top-down). Adding here
         // scrolled the field the exact opposite direction.
-        scrollDesign -= designDelta;
-        // keep within one pitch to preserve precision; pattern is per-cell so this
-        // is invisible.
+        scrollDesign -= designDelta * parallax;
+        // keep within a whole (even) number of pitches to preserve precision AND the
+        // brick row parity; pattern is per-cell so this is invisible.
         float px = tileDesignW * (1f - feather), py = tileDesignH * (1f - feather);
-        scrollDesign.X = MyMath.Mod(scrollDesign.X, px * TileCount * 4f);
-        scrollDesign.Y = MyMath.Mod(scrollDesign.Y, py * TileCount * 4f);
+        scrollDesign.X = MyMath.Mod(scrollDesign.X, px * tileCount * 4f);
+        scrollDesign.Y = MyMath.Mod(scrollDesign.Y, py * tileCount * 4f);
     }
 
     public void Draw()
@@ -112,6 +147,9 @@ internal sealed class ProceduralStarfield : IDisposable
         int cx1 = (int)Math.Ceiling((scrollR.X + rw + tileRW) / pitchRX);
         int cy0 = (int)Math.Floor((scrollR.Y - tileRH) / pitchRY);
         int cy1 = (int)Math.Ceiling((scrollR.Y + rh + tileRH) / pitchRY);
+        // brick rows shift up to half a pitch sideways, so widen the column range by
+        // one cell each side to guarantee full edge coverage for the shifted rows.
+        if (brick) { cx0--; cx1++; }
 
         window.Parameters["Feather"].SetValue(new Vector2(feather, feather));
         // Brightness rides in the draw alpha only (rgb stays 1): the shader outputs
@@ -128,7 +166,9 @@ internal sealed class ProceduralStarfield : IDisposable
                 Pick(cx, cy, out int idx, out SpriteEffects fx);
                 Texture2D tex = tiles[idx];
                 float sTex = tileRW / tex.Width; // uniform: tile aspect == texture aspect
-                Vector2 center = new Vector2(cx * pitchRX - scrollR.X, cy * pitchRY - scrollR.Y);
+                // running-bond: odd rows are nudged half a pitch to the right.
+                float rowShift = (brick && (cy & 1) != 0) ? pitchRX * 0.5f : 0f;
+                Vector2 center = new Vector2(cx * pitchRX + rowShift - scrollR.X, cy * pitchRY - scrollR.Y);
                 Vector2 origin = new Vector2(tex.Width * 0.5f, tex.Height * 0.5f);
                 batch.Draw(tex, center, null, drawColor, 0f, origin, sTex, fx, 0f);
             }
@@ -137,15 +177,23 @@ internal sealed class ProceduralStarfield : IDisposable
     }
 
     // Deterministic per-cell choice of (texture index, mirror), avoiding a direct
-    // repeat against the already-decided left / up / up-left neighbours (their base
-    // pick). Pure function of (cx, cy, seed) -> identical every run, infinite scroll.
+    // repeat against the neighbours this cell actually overlaps (their base pick).
+    // Pure function of (cx, cy, seed) -> identical every run, infinite scroll.
     private void Pick(int cx, int cy, out int idx, out SpriteEffects fx)
     {
-        idx = (int)(Hash(cx, cy, seed) % TileCount);
+        // The two cells in the row above that this cell straddles. In a plain grid the
+        // overlap is the cell directly above (up) plus up-left; in brick layout the
+        // half-pitch row stagger shifts which pair it is, by row parity.
+        int upA, upB;
+        if (brick && (cy & 1) == 0) { upA = cx - 1; upB = cx; }      // even row beneath right-shifted odd row
+        else if (brick) { upA = cx; upB = cx + 1; }                  // odd row beneath even row
+        else { upA = cx - 1; upB = cx; }                             // aligned grid: up-left + up
+
+        idx = (int)(Hash(cx, cy, seed) % tileCount);
         int salt = 1;
-        while (salt <= 8 && (idx == BaseIdx(cx - 1, cy) || idx == BaseIdx(cx, cy - 1) || idx == BaseIdx(cx - 1, cy - 1)))
+        while (salt <= 8 && (idx == BaseIdx(cx - 1, cy) || idx == BaseIdx(upA, cy - 1) || idx == BaseIdx(upB, cy - 1)))
         {
-            idx = (int)(Hash(cx, cy, seed ^ (uint)(salt * 0x9E3779B9)) % TileCount);
+            idx = (int)(Hash(cx, cy, seed ^ (uint)(salt * 0x9E3779B9)) % tileCount);
             salt++;
         }
         uint m = (Hash(cx, cy, seed ^ 0xA5A5A5A5u) >> 3) & 3u;
@@ -158,7 +206,7 @@ internal sealed class ProceduralStarfield : IDisposable
         };
     }
 
-    private int BaseIdx(int cx, int cy) => (int)(Hash(cx, cy, seed) % TileCount);
+    private int BaseIdx(int cx, int cy) => (int)(Hash(cx, cy, seed) % tileCount);
 
     private static uint Hash(int x, int y, uint seed)
     {

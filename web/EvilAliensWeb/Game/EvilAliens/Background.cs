@@ -65,6 +65,12 @@ public class Background : Scene
 	// SetSpace (which then leaves backgroundLayers empty); null for every other scene.
 	private ProceduralStarfield starfield;
 
+	// The near (foreground) star layer: a handful of INDIVIDUAL stars (DriftingStars)
+	// drawn additively on top of the far nebula, each with its own speed / scale / twinkle
+	// so they don't read as one uniform moving wall. Set alongside starfield in SetSpace;
+	// null otherwise.
+	private DriftingStars nearStars;
+
 	// Holodeck (trial-simulation chamber). When the simulator background is active, Jump()
 	// fires a brief, deliberate "projection hiccup" instead of teleporting the layers:
 	// a stutter-slip and/or a brightness flicker driven over glitchTimer.
@@ -125,10 +131,13 @@ public class Background : Scene
 		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
-			doodadname = "GFX/Sprites/earth";
+			// Minor "earth in the corner" appearance uses a dedicated small texture
+			// (256px) so we don't decode the 1480px hero sheet just to draw a ~110px
+			// dot. scale 0.45 on the 243px disk == the old 730px disk at 0.15.
+			doodadname = "GFX/Sprites/earth_small";
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			doodadscale = 0.15f;
+			doodadscale = 0.45f;
 			doodadscrollspeed = new Vector2(1f, 1f);
 			doodadPos = new Vector2(620f, (float)(-doodad.Height) * doodadscale / 2f);
 			doodadcolor = Color.White;
@@ -157,7 +166,10 @@ public class Background : Scene
 			doodadblendmode = (SpriteBlendMode)1;
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			doodadscale = 1.6f;
+			// Hi-res NASA Blue Marble hero disk: earth.png is now a 1480px frame
+			// (1460px disk) vs the old 735px, so scale 0.8 (not 1.6) keeps the
+			// on-screen fly-by size identical (1460*0.8 == old 730*1.6 == 1168 px).
+			doodadscale = 0.8f;
 			doodadscrollspeed = new Vector2(1.55f, 1.55f);
 			doodadcolor = Color.White;
 			doodadblendmode = (SpriteBlendMode)1;
@@ -274,9 +286,16 @@ public class Background : Scene
 		{
 			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
 		}
+		Vector2 starDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier;
 		if (starfield != null)
 		{
-			starfield.Advance(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
+			starfield.Advance(starDelta);
+		}
+		// The near stars get the same base scroll delta (each applies its own per-star
+		// parallax) plus the elapsed time for their twinkle.
+		if (nearStars != null)
+		{
+			nearStars.Advance(starDelta, (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 		}
 		UpdateHoloGlitch(gameTime);
 		UpdateHoloPulse(gameTime);
@@ -352,6 +371,13 @@ public class Background : Scene
 			base.SpriteBatch.Flush();
 			starfield.Brightness = DebugToggles.Active ? DebugToggles.StarfieldBrightness : 1f;
 			starfield.Draw();
+		}
+		// Near drifting stars ON TOP of the far nebula (its own additive SpriteBatch, so no
+		// flush needed). Drawn before the doodad/planet so the planet still occludes them.
+		if (nearStars != null)
+		{
+			nearStars.Brightness = DebugToggles.Active ? DebugToggles.StarfieldBrightness : 1f;
+			nearStars.Draw();
 		}
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
@@ -520,6 +546,10 @@ public class Background : Scene
 		DisposeStarfield();
 		starfield = new ProceduralStarfield();
 		starfield.LoadContent(Content, base.GraphicsDevice);
+		// Near (foreground) star layer: a handful of individual drifting stars cut from the
+		// space_near tiles, each with its own speed / scale / twinkle (see DriftingStars).
+		nearStars = new DriftingStars();
+		nearStars.LoadContent(Content, base.GraphicsDevice);
 		scrollspeedreset = new Vector2(0f, 0.2f) / 16.666666f;
 		oscilatereach = 0.1f;
 		oscilatespeed = 0.001f;
@@ -625,6 +655,11 @@ public class Background : Scene
 		{
 			starfield.Dispose();
 			starfield = null;
+		}
+		if (nearStars != null)
+		{
+			nearStars.Dispose();
+			nearStars = null;
 		}
 	}
 
@@ -915,7 +950,8 @@ public class Background : Scene
 			doodadblendmode = (SpriteBlendMode)1;
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			doodadscale = 1.6f;
+			// Same hi-res hero disk as QueueEarth -> scale 0.8 (see note there).
+			doodadscale = 0.8f;
 			doodadscrollspeed = new Vector2(1.55f, 1.55f);
 			doodadcolor = new Color(0.7f, 0.7f, 0.7f, 1f);
 			doodadblendmode = (SpriteBlendMode)2;

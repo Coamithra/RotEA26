@@ -50,11 +50,14 @@ public class StartScreen : Scene
 		//IL_0088: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		base.GraphicsDevice.Clear(Color.Black);
+		// Metallic chrome sheen on the marquee text (Stage 13). Same position/origin/scale
+		// the original DrawString used (so centering + brain-curve pulsate are unchanged);
+		// `time` drives the glint sweep.
 		float x = font.MeasureString(text).X;
 		float num = (x * scale - x) / 2f;
-		Vector2 origin = default(Vector2);
-		(origin) = new Vector2(num, (float)(font.LineSpacing / 2));
-		base.SpriteBatch.DrawString(font, text, new Vector2(400f - x / 2f, 300f), Color.AliceBlue, 0f, origin, scale, (SpriteEffects)0, 0f);
+		Vector2 origin = new Vector2(num, (float)(font.LineSpacing / 2));
+		float time = (float)gameTime.TotalGameTime.TotalSeconds;
+		base.SpriteBatch.DrawMetalString(text, new Vector2(400f - x / 2f, 300f), Color.AliceBlue, 0f, origin, scale, time);
 	}
 
 	public override void Update(GameTime gameTime)

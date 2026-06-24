@@ -79,7 +79,7 @@ internal class SubMenuAwardmentText : MenuSub1
 		//IL_00b8: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00c2: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = font.MeasureString(awardmentName) / 2f;
-		base.SpriteBatch.DrawString(font, awardmentName, new Vector2(400f, 50f), Color.AliceBlue, 0f, val, 1f, (SpriteEffects)0, 0f);
+		base.SpriteBatch.DrawMetalString(font, awardmentName, new Vector2(400f, 50f), Color.AliceBlue, 0f, val, 1f);
 		val = font.MeasureString(awardmentExplanation) / 2f;
 		val.Y = 0f;
 		if (awardmentStatus)

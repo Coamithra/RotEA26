@@ -59,7 +59,7 @@ internal class PausedScene : MenuSub1
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.DrawMenu(gameTime, yoffset + 75f);
 		Vector2 val = font.MeasureString("Paused..") / 2f + new Vector2(0f, 60f);
-		base.SpriteBatch.DrawString(font, "Paused..", new Vector2(400f, 300f), Color.AliceBlue, 0f, val, 1f, (SpriteEffects)0, 1f);
+		base.SpriteBatch.DrawMetalString(font, "Paused..", new Vector2(400f, 300f), Color.AliceBlue, 0f, val, 1f);
 	}
 
 	public override void Draw(GameTime gameTime)

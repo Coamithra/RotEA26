@@ -723,6 +723,9 @@ public class Game1 : Game
 
 	private void DrawInner(GameTime gameTime)
 	{
+		// Stage 13: feed the chrome-sheen glint clock once per frame so every DrawMetalString
+		// call site (the bespoke menu renderers) animates without needing GameTime in scope.
+		spriteBatchWrapper.MetalTime = (float)gameTime.TotalGameTime.TotalSeconds;
 		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00e9: Unknown result type (might be due to invalid IL or missing references)

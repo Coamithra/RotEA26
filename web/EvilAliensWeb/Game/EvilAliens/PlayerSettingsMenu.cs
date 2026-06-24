@@ -75,7 +75,7 @@ internal class PlayerSettingsMenu : MenuSub1
 			{
 				num6 = 1000;
 			}
-			base.SpriteBatch.DrawString(controlDevice.ToString(), new Vector2(num, num5), Color.AliceBlue, 0f, centered: true, num3, (SpriteEffects)0, 1f);
+			base.SpriteBatch.DrawMetalString(controlDevice.ToString(), new Vector2(num, num5), Color.AliceBlue, 0f, centered: true, num3);
 			num5 += num4 * 2f;
 			num5 = drawSetting(num, num3, num4, num5, "Rumble", !playerSettings.DisableRumble, num6 == 0, gameTime);
 			num5 = drawSetting(num, num3, num4, num5, "Swap Sticks", playerSettings.InvertSticks, num6 == 1, gameTime);
@@ -83,7 +83,7 @@ internal class PlayerSettingsMenu : MenuSub1
 		}
 		else
 		{
-			base.SpriteBatch.DrawString("Press\nStart", new Vector2(num, 100f), Color.AliceBlue, 0f, centered: true, 1f, (SpriteEffects)0, 1f);
+			base.SpriteBatch.DrawMetalString("Press\nStart", new Vector2(num, 100f), Color.AliceBlue, 0f, centered: true, 1f);
 		}
 	}
 
@@ -213,11 +213,11 @@ internal class PlayerSettingsMenu : MenuSub1
 		{
 			color = Color.Gray;
 		}
-		base.SpriteBatch.DrawString(name, new Vector2(x, y), color, 0f, centered: true, scale, (SpriteEffects)0, 1f);
+		base.SpriteBatch.DrawMetalString(name, new Vector2(x, y), color, 0f, centered: true, scale);
 		if (value.HasValue)
 		{
 			y += ystep;
-			base.SpriteBatch.DrawString(MenuScene.boolToGameString(value.Value), new Vector2(x, y), color, 0f, centered: true, scale, (SpriteEffects)0, 1f);
+			base.SpriteBatch.DrawMetalString(MenuScene.boolToGameString(value.Value), new Vector2(x, y), color, 0f, centered: true, scale);
 		}
 		y += ystep * 2f;
 		return y;

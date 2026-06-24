@@ -18,6 +18,26 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	private EffectHandler effectHandler;
 
+	// Stage 13: shared text render target for DrawMetalString (the chrome-sheen font
+	// path). GROW-ONLY — it expands to the largest string seen and is then reused for
+	// every metal string in a frame (the menu draws several; recreating per call would
+	// thrash). Each string renders into the top-left corner; the composite passes its
+	// used sub-rect to the shader as UvExtent so the local UV stays 0..1.
+	private RenderTarget2D metalRT;
+
+	// The chrome-sheen effect (metal.fx), owned here so call sites don't each load/pass
+	// it. Loaded in LoadContent; null => DrawMetalString degrades to a plain DrawString.
+	private Effect metalEffect;
+
+	// Transparent border (design px) baked around the text in the metal RT so the glint
+	// sweep and bloom have overshoot room and don't clip at the glyph edges.
+	private const int MetalPad = 6;
+
+	// Per-frame glint clock for the no-time DrawMetalString overloads, set once by
+	// Game1.DrawInner so any call site works without threading GameTime through every
+	// menu/draw helper (many bespoke menu renderers don't have it in scope).
+	public float MetalTime;
+
 	public StaticAlphaEffect staticAlphaEffect => effectHandler.StaticAlphaEffect;
 
 	public InterpolateEffect interpolateEffect => effectHandler.InterpolateEffect;
@@ -144,6 +164,138 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effect, RenderScale.Matrix);
 		spriteBatch.Draw(texture, designRect, Color.White);
 		spriteBatch.End();
+	}
+
+	// Stage 13: draw `text` centered at design-space `center` with a metallic chrome
+	// sheen (metal.fx). The string is first rasterised into a text-only render target at
+	// render resolution (reusing the supersampled DrawStringScaled glyph walk, so it
+	// stays crisp), then composited as ONE quad through the metal effect. Because the
+	// composite is a single full-texture quad, the shader's texCoord is 0..1 LOCAL to the
+	// text element — the sheen is relative to the letters, not the screen, so stacked
+	// strings at different heights all get the identical look (a screen-space VPOS
+	// gradient would slice them differently). The text is drawn in its real `tint`, which
+	// the shader modulates (white -> chrome-white, red -> chrome-red). `scale` is an extra
+	// (e.g. pulsate) factor applied to the COMPOSITE only; `time` (seconds) animates the
+	// glint. A null `metal` (missing on a partial deploy) degrades to a plain DrawString.
+	public void DrawMetalString(string text, Vector2 position, Color tint, float rotation, Vector2 origin, float scale, float time)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		if (string.IsNullOrEmpty(text) || font == null)
+		{
+			return;
+		}
+		if (scale <= 0f)
+		{
+			// Nothing visible (e.g. the redwarning flicker drops scale to 0) — skip the RT work.
+			return;
+		}
+		if (metalEffect == null)
+		{
+			// Effect missing (partial deploy): plain string at the same transform.
+			DrawString(font, text, position, tint, rotation, origin, scale, (SpriteEffects)0, 0f);
+			return;
+		}
+
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		Vector2 textSz = font.MeasureString(text);                 // unscaled design size
+		float boxW = textSz.X + 2 * MetalPad;
+		float boxH = textSz.Y + 2 * MetalPad;
+		int usedW = Math.Max(1, (int)Math.Ceiling(boxW * rs));     // render-px the text fills
+		int usedH = Math.Max(1, (int)Math.Ceiling(boxH * rs));
+
+		// Grow-only shared RT: expand to fit the biggest string ever seen, then reuse it
+		// for every metal string this frame (each renders into the top-left corner). The
+		// composite passes its used sub-rect as UvExtent so the shader's local UV is 0..1.
+		int haveW = (metalRT != null && !((GraphicsResource)metalRT).IsDisposed) ? ((Texture2D)metalRT).Width : 0;
+		int haveH = (metalRT != null && !((GraphicsResource)metalRT).IsDisposed) ? ((Texture2D)metalRT).Height : 0;
+		if (haveW < usedW || haveH < usedH)
+		{
+			if (metalRT != null && !((GraphicsResource)metalRT).IsDisposed)
+			{
+				((GraphicsResource)metalRT).Dispose();
+			}
+			metalRT = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, usedW), Math.Max(haveH, usedH), false, SurfaceFormat.Color, DepthFormat.None);
+		}
+
+		// --- Pass 1: rasterise the text into the RT's top-left corner at render res ---
+		// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the
+		// straight-alpha glyphs verbatim (dst is 0, so the InvSrcAlpha*dst term vanishes).
+		// NonPremultiplied here would instead square the alpha (srcA*srcA) and premultiply
+		// the colour, thinning the edges — invisible over black but haloed over the menu.
+		Flush();                                                   // end any active scene batch
+		base.GraphicsDevice.SetRenderTarget(0, metalRT);
+		base.GraphicsDevice.Clear(Color.Transparent);
+		// design -> RT: translate the padded box to the RT origin, then scale to render res.
+		Matrix m = Matrix.CreateTranslation(MetalPad, MetalPad, 0f) * Matrix.CreateScale(rs);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, m);
+		DrawStringScaled(font, text, Vector2.Zero, tint, 0f, Vector2.Zero, new Vector2(1f, 1f), (SpriteEffects)0, 0f);
+		spriteBatch.End();
+		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);   // restore the scene target
+
+		// --- Pass 2: composite the RT's used sub-rect through metal.fx ---
+		// FLOAT-precise (sub-pixel) draw mirroring DrawString's transform EXACTLY: the RT
+		// holds the text offset by MetalPad at render scale, so origin (in RT texels) =
+		// (origin + pad) * rs and drawScale = scale / rs reproduce DrawString's placement
+		// for any design `origin` (incl. centred) while applying the sheen. Integer dest
+		// rects are avoided on purpose — rounding a pulsating rect each frame wobbles.
+		Rectangle used = new Rectangle(0, 0, usedW, usedH);
+		int texW = ((Texture2D)metalRT).Width;
+		int texH = ((Texture2D)metalRT).Height;
+		Vector2 padFrac = new Vector2((float)MetalPad / boxW, (float)MetalPad / boxH);
+		Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
+		SetParam(metalEffect, "Time", time);
+		SetParam(metalEffect, "GradTop", 1.18f);
+		SetParam(metalEffect, "GradMid", 0.50f);
+		SetParam(metalEffect, "GradBot", 0.95f);
+		SetParam(metalEffect, "GlintStrength", 0.9f);
+		SetParam(metalEffect, "GlintWidth", 0.06f);
+		SetParam(metalEffect, "SweepPeriod", 9f);    // glint sweeps ~every 9s — a rare treat
+		SetParam(metalEffect, "SweepActive", 0.12f); // ~1.1s crossing, then a long rest
+		SetParam(metalEffect, "PadFrac", padFrac);
+		SetParam(metalEffect, "UvExtent", uvExtent);
+		float drawScale = scale / rs;
+		Vector2 rtOrigin = (origin + new Vector2(MetalPad, MetalPad)) * rs;
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, metalEffect, RenderScale.Matrix);
+		spriteBatch.Draw(metalRT, position, (Rectangle?)used, Color.White, rotation, rtOrigin, drawScale, (SpriteEffects)0, 0f);
+		spriteBatch.End();
+	}
+
+	// Convenience overloads mirroring the DrawString signatures so a menu call site is a
+	// literal DrawString -> DrawMetalString rename (time comes from MetalTime). The
+	// SpriteFont arg is ignored — every text call site uses the one supersampled menufont.
+	public void DrawMetalString(string text, Vector2 position, Color tint, float rotation, Vector2 origin, float scale)
+	{
+		DrawMetalString(text, position, tint, rotation, origin, scale, MetalTime);
+	}
+
+	public void DrawMetalString(SpriteFont spritefont, string text, Vector2 position, Color tint, float rotation, Vector2 origin, float scale)
+	{
+		DrawMetalString(text, position, tint, rotation, origin, scale, MetalTime);
+	}
+
+	public void DrawMetalString(string text, Vector2 position, Color tint, float rotation, bool centered, float scale)
+	{
+		Vector2 origin = (centered && font != null) ? font.MeasureString(text) / 2f : Vector2.Zero;
+		DrawMetalString(text, position, tint, rotation, origin, scale, MetalTime);
+	}
+
+	private static void SetParam(Effect e, string name, float value)
+	{
+		EffectParameter p = e.Parameters[name];
+		if (p != null)
+		{
+			p.SetValue(value);
+		}
+	}
+
+	private static void SetParam(Effect e, string name, Vector2 value)
+	{
+		EffectParameter p = e.Parameters[name];
+		if (p != null)
+		{
+			p.SetValue(value);
+		}
 	}
 
 	public void DrawString(SpriteFont spritefont, string text, Vector2 position, Color color, float rotation, Vector2 origin, float scale, SpriteEffects spriteeffect, float layerdepth)
@@ -481,6 +633,17 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		spriteBatch = new SpriteBatch(ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice);
 		font = contentManager.Load<SpriteFont>("GFX/menu/menufont");
+		// Chrome-sheen effect (Stage 13). Owned here so every DrawMetalString call site
+		// stays a one-liner; degrade gracefully if it's missing on a partial deploy.
+		try
+		{
+			metalEffect = contentManager.Load<Effect>("GFX/Effects/metal");
+		}
+		catch (System.Exception ex)
+		{
+			metalEffect = null;
+			System.Console.WriteLine("[metal] effect load failed: " + ex);
+		}
 		effectHandler.LoadGraphicsContent(loadAllContent: true);
 	}
 

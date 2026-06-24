@@ -123,7 +123,9 @@ compensate. Fix = divide the draw scale by the factor. We did it centrally:
 | `align_difference.py` | difference-minimization GIF (the sub-pixel/scale pass) |
 | `process_padded.py` | key + auto-crop banner + auto-strip strays + dome strip + GIF |
 | `make_gifs.py` / `keycompare.py` | preview GIFs + the shared `key_magenta()` chroma keyer |
-| `repack_diffmin.py` | GENERALISED difference-min: key -> bbox-centre -> SAD-vs-prev sub-pixel align -> footprint repack. For morphing/spinning/symmetric sheets (faceofdeath, deathstar). Args incl. crop + cols/rows. |
+| `repack_diffmin.py` | GENERALISED difference-min: key -> bbox-centre -> SAD-vs-prev sub-pixel align -> footprint repack. For morphing sheets with real interior features to lock onto (`faceofdeath`). Args incl. crop + cols/rows. NOT for a bare spinning sphere -- it wobbles; see `repack_circlecentre.py`. |
+| `repack_circlecentre.py` | RADIALLY-SYMMETRIC sheets (a spinning sphere with a featureless circular silhouette, e.g. `deathstar`): key -> footprint-match by circle-fit DIAMETER -> least-squares circle-fit CENTRE (ignores both the rotating surface and the glow) -> pack. diffmin wobbles ~5px here (chases the surface), bbox-centre ~1.6px (glow pulls it); this pins to <0.3px. Optional 8th arg `circle`\|`bbox`. |
+| `compare_methods.py` | render N method-sheets as a side-by-side animated GIF (fixed crop + crosshair, labelled with each method's wobble) + a centre-scatter proof PNG, so you eyeball which registration to ship. `python compare_methods.py <out> label=sheet.png ...` |
 | `repack_landed.py` | single still frame: key -> match sprite WIDTH to origW*factor -> place at orig bbox-centre*factor in an origW*factor canvas (the landed stills + the `powerupbw` HD bubble). |
 | `pack_small_asteroids.py` | slice a magenta GRID of variants -> key -> footprint-match each to origW*factor at a LOWER factor (for sprites drawn small). Built `AsteroidSmall1..4`. |
 | `pack_anchored_anim.py` | FIXED-CAMERA frame folder -> ONE shared union-bbox crop (no per-frame jitter) -> key -> grid sheet. For anchored AnimGen anims (the spider rear-up). |
@@ -136,13 +138,22 @@ Heavy/scratch (gitignored): `models/` (ESRGAN weights, re-downloadable), `out/` 
 
 - **Rigid single blob** (translates/rotates as one piece): `repack_for_engine.py`
   (overlap-to-original). Used: `ufosheet`, `smallship`.
-- **Morphing / internally-animating / radially-symmetric** (a face whose eyes+mouth change;
-  a spinning sphere whose silhouette is a featureless circle, so overlap-to-original is
+- **Morphing / internally-animating WITH real interior features** (a face whose eyes+mouth
+  change -- there IS interior structure to lock onto, but overlap-to-original is
   degenerate/wobbly): `repack_diffmin.py` (difference-minimisation — SAD vs previous frame,
-  then de-trend). Used: `faceofdeath`, `deathstar`. It's the generalised cousin of
+  then de-trend). Used: `faceofdeath` (NOT `deathstar` -- see the bare-sphere bullet below). It's the generalised cousin of
   `repack_player_engine.py` (which is hardcoded to the player's dark-panel feature-lock);
   diffmin uses **bbox-centre** as the initial placement instead. Rule of thumb the owner uses:
-  "needs the Difference method" == use `repack_diffmin.py`.
+  "needs the Difference method" == use `repack_diffmin.py` -- with ONE exception, below.
+- **Radially-symmetric / bare spinning sphere** (a featureless circular silhouette -- the
+  `deathstar`): `repack_circlecentre.py`, NOT diffmin. diffmin is WRONG here even though the
+  sprite obviously "needs centring": SAD-vs-prev chases the rotating surface (a rotated radial
+  pattern looks locally translated), so the sphere wanders ~5px and de-trend only removes the
+  mean; bbox-centre is pulled ~1.6px by the moving glow. A least-squares circle fit on the
+  silhouette EDGE ignores both the surface and the glow and pins the centre to <0.3px. The
+  proof for deathstar is `compare_methods.py`'s centre-scatter (18.5px vs 7.7px vs 1.0px span).
+  General rule when unsure which registration wins: render the candidates with
+  `compare_methods.py` and eyeball the GIFs side-by-side rather than trusting a heuristic.
 - **Single still frame** (a "landed" sprite, one frame): `repack_landed.py`.
 
 Find grid + crop the SAME way every time: original dims / `AnimationData(name, rows, cols, ...)`

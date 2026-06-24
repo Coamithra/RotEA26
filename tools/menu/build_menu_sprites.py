@@ -26,15 +26,30 @@ def save(img, name, size):
 
 
 def build_pointer():
-    base, S = 128, 4
+    # base 256 (was 128): the draw site normalises on-screen size by the texture
+    # height (MenuSubWithSkull: scale = ptrH / pointer.Height), so a higher-res
+    # texture draws at the SAME size, just crisp -- it was eff ~1.46 (magnified ->
+    # soft) at the 1440 render cap.
+    base, S = 256, 4
     W = base * S
     img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     # A solid right-pointing triangle (the ► selection cursor in the mockups),
-    # slightly inset so the AA edge isn't clipped.
-    pts = [(34, 20), (34, 108), (110, 64)]
-    d.polygon([(x * S, y * S) for x, y in pts], fill=(255, 255, 255, 255))
-    save(img, "pointer.png", base)
+    # slightly inset so the AA edge isn't clipped. NORMALISED coords keep the exact
+    # same shape/placement as the original 128px art (34/128, 20/128, ... of base).
+    pts = [(0.265625, 0.156250), (0.265625, 0.843750), (0.859375, 0.500000)]
+    d.polygon([(x * W, y * W) for x, y in pts], fill=(255, 255, 255, 255))
+    img = img.resize((base, base), Image.LANCZOS)
+    # Flood RGB to white EVERYWHERE, keeping the AA'd alpha as the shape. The straight-
+    # alpha transparent pixels were (0,0,0,0); the engine's bilinear magnify + violet
+    # tint then pulled the AA edge's RGB toward black -> a thin dark fringe (the "black
+    # line"). White-everywhere makes edge interpolation white->white (only alpha varies),
+    # so the tinted edge stays clean. (build_star already does this; pointer didn't.)
+    white = Image.new("L", (base, base), 255)
+    img = Image.merge("RGBA", (white, white, white, img.getchannel("A")))
+    path = os.path.join(OUT, "pointer.png")
+    img.save(path)
+    print("wrote", path, img.size)
 
 
 def build_hudring():

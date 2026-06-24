@@ -42,6 +42,9 @@ tools/audio/_t2.ogg
 tools/font/_*.png
 tools/font/editor/data.json
 *.orig
+# Pre-shrink HD sprite backups (tools/upscale/shrink_sheet.py); local-only revert
+# copies, so they never bloat the repo or the published site. The shrunk PNG ships.
+*.png.hd4x
 
 # ---- Texture DXT build (tools/textures/build_dxt.py) -------------------------
 # The script ships; the texconv.exe encoder is a ~1 MB Microsoft DirectXTex

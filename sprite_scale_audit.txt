@@ -54,9 +54,10 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
 2.40  lowpri   sprites/explosion, explosionpurple, smoke  512   ~512   particle blasts (big explosions); soft glow
 2.40  lowpri   sprites/shadow                             82   ~115   ground shadow; dynamic ~1.7-3.4x
 1.92  lowpri   game/tileablestarfield                   1280   1024   menu/space starfield, drawn 0.8x; bg
-1.88  TODO     menu/planet, menu/vignette               1024    800   fullscreen menu backdrop + vignette
+1.33  DONE     menu/planet (-> menuplanetraw)            1448    800   hi-res backdrop swap 2026-06-24 (+0.8MB)
+1.88  skip     menu/vignette                             1024    800   left as-is: soft radial darkener, blurry by design
 1.81  TODO     menu/hudring                              768    580   menu targeting reticle
-1.46  lowpri   menu/pointer                              128     78   menu list pointer
+0.73  DONE     menu/pointer                              256     78   2x + RGB flooded white (kills black-fringe), 2026-06-24
 1.33  ok       splash/easplashredone, uglysplash22-     1448    800   redone splash; near-crisp, fine
               revenged
 1.20  ok       sprites/powerupbw (help-screen draw)      128     64   help/instructions; preview small_face_a/b also ~1.20
@@ -71,17 +72,17 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
 0.72  shrink   sprites/AsteroidSmall1-4 (small asteroids)268     81   drawn scale 0.45; ~half the texels would do
 0.72  shrink   menu/evilskull (awardment decoration)     752    226   2x still drawn at 0.6 scale
 0.61  shrink   sprites/AsteroidSmall* via Ball (balls)   268   ~102   JunkBoss balls (now AsteroidSmall, updated 2026-06-22)
-0.60  shrink   sprites/ufosheet, smallship               192     48   small UFOs; 4x sheets, oversampled even @cap
-0.60  shrink   sprites/faceofdeathspritesheet (skull)    192     48   4x sheet
-0.60  shrink   sprites/deathstarsheet2 (DeathStar/Mine)  192     48   4x sheet
-0.60  shrink   sprites/playersheet (player ship)         192     48   4x sheet
+0.80  DONE     sprites/ufosheet, smallship               144     48   3x (was 4x), shrunk 2026-06-24
+0.80  DONE     sprites/faceofdeathspritesheet (skull)    144     48   3x (was 4x), shrunk 2026-06-24
+0.80  DONE     sprites/deathstarsheet2 (DeathStar/Mine)  144     48   3x (was 4x), shrunk 2026-06-24
+0.80  DONE     sprites/playersheet (player ship)         144     48   3x (was 4x), shrunk 2026-06-24
 0.60  shrink   sprites/powerupbw (Powerup entity)        128     32   4x bubble
-0.60  shrink   sprites/ufometpootjes, smallship_landed,  varies  =df   landed UFO stills (4x); mediumship_landed too
+0.80  DONE     sprites/ufometpootjes, smallship_landed,  varies  =df   3x (was 4x), shrunk 2026-06-24; mediumship_landed too
               mediumship_landed
 0.60  shrink   sprites/andromeda (background)            840    210   far backdrop, scale 0.25
 0.60  shrink   sprites/plasmaball2 (PlasmaBall)          697   ~174   drawn scale 0.25; native 697 is big waste
 0.60  shrink   sprites/parachute (Parachute)             366    ~92   grows to 0.25 max
-0.60  shrink   sprites/wing1 (FlyingSpider wing)         368     92   4x; 0.40 in foreground
+0.80  DONE     sprites/wing1 (FlyingSpider wing)         276     92   3x (was 4x), shrunk 2026-06-24; 0.40 in foreground
 0.48  shrink   sprites/braingoo, blooddrop, blooddrop_   15-45   ~9   blood/goo particles; tiny anyway
               green
 0.48  shrink   sprites/brainlargetransglow (Braineroid   519   ~104   medium braineroid; SAME texture as BrainBoss (keep big for boss)
@@ -94,6 +95,15 @@ EFF   STATUS   SPRITE (texture)                       NATIVE  ONSCR  NOTES
  DELETED this session (dead assets, ~3.7MB): menu/title, cursor22, hud/barunlit,
  sprites/{secretcow,testsprite,lazertop,lazerbottom}, tutorial/twistedcheckerboard,
  2 splash scratch PNGs, sprites/asteroid2 (replaced by large_asteroid).
+================================================================================
+ SHRUNK 2026-06-24 (tools/upscale/shrink_sheet.py, 4x->3x, eff 0.60->0.80, -2.5MB):
+ ufosheet smallship deathstarsheet2 faceofdeathspritesheet playersheet wing1
+ ufometpootjes smallship_landed mediumship_landed. Originals kept as *.png.hd4x;
+ the pre-upscale 48px sources are still in *.png.orig. Verified in-browser via the
+ ?harness= path (deathstar/smallship/faceofdeath/flyingspider) - crisp, 1:1 size,
+ 0 console errors. Those DONE rows above show POST-shrink eff (out of eff sort).
+ SKIPPED on purpose: powerupbw (shared w/ help screen @ eff 1.20 -> shrink softens
+ it); title-revenged + mothership_landed (eff ~0.8 already; hero / already-3x art).
 ================================================================================
  NOTES
  - "4096 cap" sprites (mediumship, mothership*): a single crisp@cap sheet exceeds

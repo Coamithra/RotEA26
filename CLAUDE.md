@@ -227,27 +227,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   that target via `Xna3GraphicsDeviceCompat.BaseRenderTarget`. Don't re-introduce a pinned
   `PreferredBackBuffer`. Stage 5 applies the gamma shader on the present blit of this target, and
   the game's 800×600-design draws scale up to fill it via `RenderScale.Matrix` (applied at the `SpriteBatchWrapper` Begin choke), and bloom + the menu/background offscreen targets are all sized to `RenderScale` and recreated on resize. Stage 9 adds fullscreen; **Stage 10** drew the hi-res art (menu title, splash channel-flip) straight into this one scene — the separate `HiResOverlay` pass is GONE — so it shares the same bloom/gamma. A render-sized offscreen target composited back uses `SpriteBatchWrapper.DrawPresent` (identity, not a scaled draw); full-screen overlays use `(0,0,800,600)` design coords, never the viewport.
-- **"Boss key" office decoy + Games folder (main-menu Exit).** Exit doesn't quit (can't, in a tab) —
-  it hands off to a fake corporate desktop OS, **`wwwroot/office/`**, a deliberately **separate,
-  dependency-free stack** (plain HTML/CSS/JS, no build) so it can never touch the Blazor/KNI game.
-  Flow: `MenuScene.mainMenu_ExitSelected` → `Compat/ExitInterop.Quit()` → `window.eaQuit` (in
-  `index.html`) fades the canvas to black and navigates to **`office/index.html`** — the EXPLICIT file,
-  **not `office/`**: the local dev server routes a bare directory through the SPA fallback ("Not found"),
-  while the explicit file serves statically on both dev and Pages. The office is
-  `office/{index.html,office.css,office.js}` — a windowed desktop (draggable files + windows, a queued
-  modal/toast system, fake Files/Sheets/Docs/Mail apps, ambient corporate nags). Getting back to a game
-  is the **Games folder** (desktop icon + Start menu → `openGames`): **Revenge of the Evil Aliens**
-  launches `../` (this game), **Legends of Amara** launches its live URL, **ProtoFighter** is an
-  eternal-"installing" gag that never boots. Launch URLs resolve from
-  `RETURN_TO_GAME = new URL("../", location.href)` (the game's base — so `../rudybrunsman`/`../protofighter`
-  map to `coamithra.github.io/<repo>/` on Pages); Start → **Shut Down** also returns to the game. Cover
-  art in **`office/covers/`** is REAL art lifted from each game's repo and downscaled with Pillow
-  (Evil Aliens `Content/gfx/menu/title-revenged.png`; ProtoFighter `…/Fighterproto/assets/title/logo.png`
-  + `stage/title_night.png`; Amara `…/rudybrunsman/docs/world_map.png` + a hero sprite). It's all static
-  under `wwwroot` (lowercase `office/` + `covers/`, so case-safe) and ships with the normal
-  `dotnet publish`; the office loads NO game asset at runtime, so it stays fully isolated. Verify office
-  changes via claude-in-chrome (a static page yields no paint when backgrounded, so `preview_screenshot`
-  wedges — same class of issue as the game's rAF loop).
+- **"Boss key" decoy + Games launcher = the SEPARATE `meridian` repo (main-menu Exit).** Exit doesn't
+  quit (can't, in a tab) -- it hands off to **Meridian Workspace**, a fake corporate desktop OS that is
+  now its OWN private repo/site (`github.com/Coamithra/meridian`), NO LONGER in this tree (it used to
+  live in `wwwroot/office/`; extracted with history via `git subtree split`). It's a dependency-free
+  stack (plain HTML/CSS/JS, no build) that can never touch the Blazor/KNI game. Flow:
+  `MenuScene.mainMenu_ExitSelected` -> `Compat/ExitInterop.Quit()` -> `window.eaQuit` (in `index.html`)
+  fades the canvas to black and navigates to the Meridian base (`MERIDIAN_BASE`, default the relative
+  sibling `"../meridian/"`) at `index.html?from=evilaliens`. The `?from=<id>` tells Meridian where
+  "Shut Down" should return. Hub-and-spoke: every game deploys as a SIBLING of meridian on one origin
+  (`coamithra.github.io/<repo>/` now, a private server later), so the relative scheme works unchanged
+  everywhere; for a cross-origin transition set `MERIDIAN_BASE` (game side) or `CONFIG.GAME_ORIGIN`
+  (meridian side) to an absolute base. Meridian's `games.json` is the games registry -- add a game with
+  no code edit (drop cover art, add one entry; see that repo's README + the `office.js` CONFIG block).
+  **To edit the decoy/launcher itself, work in the meridian repo** -- this repo now keeps only the tiny
+  `eaQuit` handoff. NOTE: the meridian repo is PRIVATE, and GitHub Pages won't serve a public site from
+  a private repo without a paid plan -- so the live game's Exit (-> `coamithra.github.io/meridian/`)
+  only works once meridian is actually hosted there (GitHub Pro), made public, or `MERIDIAN_BASE` is
+  pointed at wherever it's deployed.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

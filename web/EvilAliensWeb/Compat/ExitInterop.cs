@@ -2,12 +2,13 @@
 // ExitInterop — the "boss key" bridge (C# -> JS).
 //
 // A browser tab can't really "quit" the way the Xbox build's Exit did, so the
-// main-menu Exit instead navigates to the fake corporate productivity suite that
-// lives in wwwroot/office/ (a deliberately separate, dependency-free stack so it
-// can never interfere with the game). MenuScene.mainMenu_ExitSelected calls
-// Quit() -> window.eaQuit (defined in wwwroot/index.html), which fades the canvas
-// to black and navigates to "office/". The office's Start -> Shut Down navigates
-// back to the game. See FullscreenInterop for the same Init/IJSInProcessRuntime
+// main-menu Exit instead hands off to the shared "Meridian" desktop -- the fake
+// corporate decoy + games launcher, now its OWN repo/site (a deliberately
+// separate, dependency-free stack that can never interfere with the game).
+// MenuScene.mainMenu_ExitSelected calls Quit() -> window.eaQuit (defined in
+// wwwroot/index.html), which fades the canvas to black and navigates to the
+// Meridian base (default "../meridian/") with ?from=evilaliens so its Shut Down
+// returns to the game. See FullscreenInterop for the same Init/IJSInProcessRuntime
 // pattern.
 // ---------------------------------------------------------------------------
 using Microsoft.JSInterop;

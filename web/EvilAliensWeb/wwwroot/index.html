@@ -141,19 +141,22 @@
         };
 
         // eaQuit: the main-menu "Exit" "boss key". A browser tab can't really quit, so
-        // we "close" the game (fade the canvas to black) and navigate to the fake
-        // corporate productivity suite in office/ — a separate, dependency-free decoy
-        // (see office/index.html). C# reaches this via Compat/ExitInterop.Quit().
-        // Resolved against document.baseURI so it works at "/" locally and "/RotEA26/"
-        // on GitHub Pages; the office's Start -> Shut Down navigates back to "../".
+        // we "close" the game (fade the canvas to black) and hand off to the shared
+        // Meridian desktop -- now its own repo/site (the fake corporate decoy + the
+        // games launcher). We pass ?from=evilaliens so Meridian's Shut Down returns
+        // here. C# reaches this via Compat/ExitInterop.Quit().
         window.eaQuit = function ()
         {
-            // Navigate to the explicit index.html (not the "office/" directory): the local
-            // dev server routes a bare directory request through the SPA fallback, while the
-            // explicit file is served statically on both dev and GitHub Pages.
+            // Single knob: where Meridian lives. Default is the relative sibling
+            // "../meridian/", which works on any origin where the game and Meridian are
+            // siblings (GitHub Pages now, a private server later). For a cross-origin
+            // setup, set an absolute base, e.g. "https://coamithra.github.io/meridian/".
+            // Target the explicit index.html (not the bare directory): the local dev
+            // server routes a bare dir through the SPA fallback; the file serves statically.
+            var MERIDIAN_BASE = "../meridian/";
             var url;
-            try { url = new URL("office/index.html", document.baseURI).href; }
-            catch (e) { url = "office/index.html"; }
+            try { url = new URL("index.html?from=evilaliens", new URL(MERIDIAN_BASE, document.baseURI)).href; }
+            catch (e) { url = MERIDIAN_BASE + "index.html?from=evilaliens"; }
             var ov = document.createElement("div");
             ov.style.cssText = "position:fixed;inset:0;background:#000;opacity:0;z-index:99999;transition:opacity .5s ease";
             document.body.appendChild(ov);

@@ -276,10 +276,10 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 		case MessageType.redwarning:
 		{
 			Vector2 origin4 = font.MeasureString(text) / 2f;
-			// Stage 13: chrome sheen on the red "Warning!" / "Danger!" alert (the rotating
-			// arrow stays plain). The sheen modulates the tint, so it reads as chrome-red and
-			// the alpha flicker/fade is preserved.
-			spriteBatch.DrawMetalString(font, text, position, color, 0f, origin4, scale);
+			// In-game "Warning!" / "Danger!" alert: plain text. The chrome sheen was removed
+			// here (card 2b5867da) - it read wrong during actual gameplay. The tint alpha
+			// flicker/fade is preserved; the rotating arrow was always plain.
+			spriteBatch.DrawString(font, text, position, color, 0f, origin4, scale, (SpriteEffects)0, 0f);
 			MyMath.Mod(warningDirection, (float)Math.PI * 2f);
 			Vector2 val2 = new Vector2(400f, 300f) + MyMath.AngleToVector(warningDirection) * 275f;
 			spriteBatch.Draw(arrow, val2, warningDirection + (float)Math.PI / 2f, 1f, center: true, color);
@@ -289,8 +289,9 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 		{
 			Vector2 origin2 = font.MeasureString("Unlocked!") / 2f;
 			Vector2 origin3 = font.MeasureString(text) / 2f;
-			spriteBatch.DrawMetalString(font, "Unlocked!", position, color, 0f, origin2, scale);
-			spriteBatch.DrawMetalString(font, text, new Vector2(800f - position.X, position.Y + 125f), color, 0f, origin3, scale);
+			// In-game unlock popup: plain text (chrome sheen removed, card 2b5867da - read wrong in gameplay).
+			spriteBatch.DrawString(font, "Unlocked!", position, color, 0f, origin2, scale, (SpriteEffects)0, 0f);
+			spriteBatch.DrawString(font, text, new Vector2(800f - position.X, position.Y + 125f), color, 0f, origin3, scale, (SpriteEffects)0, 0f);
 			break;
 		}
 		case MessageType.defeat:

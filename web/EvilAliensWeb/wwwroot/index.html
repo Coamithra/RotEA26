@@ -147,13 +147,13 @@
         // here. C# reaches this via Compat/ExitInterop.Quit().
         window.eaQuit = function ()
         {
-            // Single knob: where Meridian lives. Default is the relative sibling
-            // "../meridian/", which works on any origin where the game and Meridian are
-            // siblings (GitHub Pages now, a private server later). For a cross-origin
-            // setup, set an absolute base, e.g. "https://coamithra.github.io/meridian/".
-            // Target the explicit index.html (not the bare directory): the local dev
-            // server routes a bare dir through the SPA fallback; the file serves statically.
-            var MERIDIAN_BASE = "../meridian/";
+            // Single knob: where Meridian lives. The game is on GitHub Pages while
+            // Meridian is hosted at haraldmaassen.com/meridian (Hetzner), so this is absolute
+            // cross-origin base. Flip back to the relative sibling "../meridian/" once
+            // the game and Meridian live on the same origin (e.g. both on the server).
+            // Target the explicit index.html (not the bare directory) so a static host
+            // serves the file directly rather than through any SPA fallback.
+            var MERIDIAN_BASE = "https://haraldmaassen.com/meridian/";
             var url;
             try { url = new URL("index.html?from=evilaliens", new URL(MERIDIAN_BASE, document.baseURI)).href; }
             catch (e) { url = MERIDIAN_BASE + "index.html?from=evilaliens"; }

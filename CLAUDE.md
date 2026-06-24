@@ -233,18 +233,23 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   live in `wwwroot/office/`; extracted with history via `git subtree split`). It's a dependency-free
   stack (plain HTML/CSS/JS, no build) that can never touch the Blazor/KNI game. Flow:
   `MenuScene.mainMenu_ExitSelected` -> `Compat/ExitInterop.Quit()` -> `window.eaQuit` (in `index.html`)
-  fades the canvas to black and navigates to the Meridian base (`MERIDIAN_BASE`, default the relative
-  sibling `"../meridian/"`) at `index.html?from=evilaliens`. The `?from=<id>` tells Meridian where
-  "Shut Down" should return. Hub-and-spoke: every game deploys as a SIBLING of meridian on one origin
-  (`coamithra.github.io/<repo>/` now, a private server later), so the relative scheme works unchanged
-  everywhere; for a cross-origin transition set `MERIDIAN_BASE` (game side) or `CONFIG.GAME_ORIGIN`
-  (meridian side) to an absolute base. Meridian's `games.json` is the games registry -- add a game with
-  no code edit (drop cover art, add one entry; see that repo's README + the `office.js` CONFIG block).
+  fades the canvas to black and navigates to the Meridian base (`MERIDIAN_BASE` in `index.html`) at
+  `index.html?from=evilaliens`. The `?from=<id>` tells Meridian where "Shut Down" should return.
+  Hub-and-spoke: every game deploys as a SIBLING of meridian on one origin, so when co-hosted the
+  default relative `"../meridian/"` scheme works unchanged; for a cross-origin split set `MERIDIAN_BASE`
+  (game side) or `CONFIG.GAME_ORIGIN` (meridian side) to an absolute base. **LIVE TOPOLOGY (2026-06):
+  cross-origin** -- the game is on GitHub Pages (`coamithra.github.io/RotEA26/`) while Meridian is
+  deployed on the Hetzner host (web root `/public_html`) at `https://haraldmaassen.com/meridian/`. So
+  `MERIDIAN_BASE` is set to that absolute URL (game side) and `office.js` `CONFIG.GAME_ORIGIN` is set to
+  `"https://coamithra.github.io/"` (meridian side). Flip both back to the relative default once the
+  games move onto Meridian's origin. Meridian's `games.json` is the games registry -- add a game with no
+  code edit (drop cover art, add one entry; see that repo's README + the `office.js` CONFIG block).
   **To edit the decoy/launcher itself, work in the meridian repo** -- this repo now keeps only the tiny
-  `eaQuit` handoff. NOTE: the meridian repo is PRIVATE, and GitHub Pages won't serve a public site from
-  a private repo without a paid plan -- so the live game's Exit (-> `coamithra.github.io/meridian/`)
-  only works once meridian is actually hosted there (GitHub Pro), made public, or `MERIDIAN_BASE` is
-  pointed at wherever it's deployed.
+  `eaQuit` handoff. **Deploy Meridian** with `meridian/tools/deploy.py` (SFTP creds from the game repo's
+  `.env`; `--base /public_html/meridian` -- prefix `MSYS_NO_PATHCONV=1` so Git Bash doesn't mangle the
+  leading-slash arg; `--list`/`--dry-run`/`--rm` for inspect/preview/cleanup).
+  The meridian repo stays PRIVATE on GitHub (source hidden); the deployed Hetzner site is public so the
+  easter egg stays reachable.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

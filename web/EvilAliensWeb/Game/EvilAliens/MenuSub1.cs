@@ -400,6 +400,8 @@ internal class MenuSub1 : Scene
 			(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
 		}
 		Vector2 val = default(Vector2);
+		// Stage 13: metal-sheen glint clock — shared by every entry so the rows glint in sync.
+		float time = (float)gameTime.TotalGameTime.TotalSeconds;
 		for (int i = 0; i < menuEntries.Count; i++)
 		{
 			Color color;
@@ -458,7 +460,11 @@ internal class MenuSub1 : Scene
 						}
 					}
 				}
-				base.SpriteBatch.DrawString(font, menuEntries[i], position, color, 0f, val, num4, (SpriteEffects)0, 0f);
+				// Stage 13: the entry's main text gets the chrome sheen; the drop shadow + the
+					// selection glow rings (above) stay as the frame. Per-entry RT composite => each
+					// row's sheen is local to itself, so stacked rows read identically regardless of
+					// height. The MenuTheme colour is preserved (the sheen modulates it).
+					base.SpriteBatch.DrawMetalString(menuEntries[i], position, color, 0f, val, num4, time);
 				position.Y += (float)font.LineSpacing;
 			}
 		}

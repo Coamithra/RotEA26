@@ -137,7 +137,10 @@ internal class MenuSubWithSkull : MenuSub1
 				foreach (Vector2 off in ring)
 					base.SpriteBatch.DrawString(font, label, rowCentre + off, aura, 0f, origin, scale, (SpriteEffects)0, 0f);
 			}
-			base.SpriteBatch.DrawString(font, label, rowCentre, textColor, 0f, origin, scale, (SpriteEffects)0, 0f);
+			// Stage 13: the entry text gets the chrome sheen; the frame fill, the selection
+			// glow ring (above) and the frame outline (below) stay as its setting. Per-entry
+			// RT composite => each row's sheen is local to itself regardless of height.
+			base.SpriteBatch.DrawMetalString(label, rowCentre, textColor, 0f, origin, scale, t);
 
 			// Frame outline LAST, on top of the text + glow, so the edges stay crisp.
 			DrawFrameOutline(rowCentre, frameW, frameH, selected, pulse01);

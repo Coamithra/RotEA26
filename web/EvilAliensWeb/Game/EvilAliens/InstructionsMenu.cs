@@ -179,7 +179,7 @@ internal class InstructionsMenu : DrawableGameComponent
 			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.Width), center: true, color2);
 			spriteBatch.Flush();
 			string text2 = "Enhancements";
-			spriteBatch.DrawString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f, (SpriteEffects)0, 0f);
+			spriteBatch.DrawMetalString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f);
 			spriteBatch.Flush();
 			float num3 = 220f;
 			float num4 = 40f;
@@ -215,7 +215,7 @@ internal class InstructionsMenu : DrawableGameComponent
 			Color color = default(Color);
 			(color) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 			string text = "Power Up";
-			spriteBatch.DrawString(font, text, new Vector2(400f, 100f), color, 0f, font.MeasureString(text) / 2f, 1.5f, (SpriteEffects)0, 0f);
+			spriteBatch.DrawMetalString(font, text, new Vector2(400f, 100f), color, 0f, font.MeasureString(text) / 2f, 1.5f);
 			spriteBatch.Flush();
 			text = "Hit enemies to Power Up your current Enhancement.";
 			spriteBatch.DrawString(font, text, new Vector2(400f, 140f), color, 0f, new Vector2((font.MeasureString(text) / 2f).X, 0f), 0.8f, (SpriteEffects)0, 0f);

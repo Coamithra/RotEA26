@@ -107,7 +107,7 @@ internal class DifficultyMenu : MenuSub1
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		string text = "Select Difficulty..";
 		Vector2 val = font.MeasureString(text) / 2f;
-		base.SpriteBatch.DrawString(text, new Vector2(400f, 100f), Color.Azure, 0f, val, 1.2f, (SpriteEffects)0, 1f);
+		base.SpriteBatch.DrawMetalString(text, new Vector2(400f, 100f), Color.Azure, 0f, val, 1.2f);
 		yoffset = 40f;
 		Vector2 val2 = default(Vector2);
 		(val2) = new Vector2(400f, 300f);
@@ -150,7 +150,7 @@ internal class DifficultyMenu : MenuSub1
 				float x = font.MeasureString(menuEntries[j]).X;
 				float num6 = (x * num5 - x) / 2f;
 				(val3) = new Vector2(num6, (float)(font.LineSpacing / 2));
-				base.SpriteBatch.DrawString(font, menuEntries[j], position, aliceBlue, 0f, val3, num5, (SpriteEffects)0, 0f);
+				base.SpriteBatch.DrawMetalString(font, menuEntries[j], position, aliceBlue, 0f, val3, num5);
 				position.Y += (float)font.LineSpacing;
 			}
 		}

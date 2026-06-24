@@ -336,7 +336,9 @@ internal class SplashScene : Scene
 			Vector2 pos = new Vector2(400f - w / 2f, top + (float)i * gap);
 			// Straight alpha (NonPremultiplied blend): keep RGB full, vary only alpha.
 			Color c = new Color((byte)240, (byte)248, (byte)255, (byte)(a * 255f));
-			base.SpriteBatch.DrawString(textFont, lines[i], pos, c, 0f, Vector2.Zero, scale, (SpriteEffects)0, 0f);
+			// Stage 13: chrome sheen on the text splash (the "lovingly crafted without AI" gag).
+			// The per-stanza fade rides in the tint alpha, which DrawMetalString preserves.
+			base.SpriteBatch.DrawMetalString(textFont, lines[i], pos, c, 0f, Vector2.Zero, scale);
 		}
 	}
 

@@ -228,7 +228,7 @@ internal class SubMenuLevelChoice : MenuSub1
 		float step2 = 0.5f + 0.33f * MyMath.DifferenceMod(a, num5, num);
 		DrawEntryAt(targetSelected, step2);
 		Vector2 val = font.MeasureString(menuEntries[selectedEntry]) / 2f;
-		base.SpriteBatch.DrawString(font, menuEntries[selectedEntry], new Vector2(400f, 50f), Color.AliceBlue, 0f, val, 1f, (SpriteEffects)0, 0f);
+		base.SpriteBatch.DrawMetalString(font, menuEntries[selectedEntry], new Vector2(400f, 50f), Color.AliceBlue, 0f, val, 1f);
 		val = font.MeasureString(briefings[selectedEntry]) / 2f;
 		val.Y = 0f;
 		base.SpriteBatch.DrawString(font, briefings[selectedEntry], new Vector2(400f, 350f), Color.AliceBlue, 0f, val, 0.7f, (SpriteEffects)0, 0f);

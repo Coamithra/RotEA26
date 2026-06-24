@@ -82,7 +82,11 @@ internal sealed class ProceduralStarfield : IDisposable
     // Background moves its layers (scrollspeed * elapsedMs * scrollspeedmodifier).
     public void Advance(Vector2 designDelta)
     {
-        scrollDesign += designDelta;
+        // Subtract: the draw maps cell -> screen as (cell*pitch - scroll), so a positive
+        // scrollspeed must DECREASE the offset to move the field the same way the legacy
+        // BackgroundImage.Move did (which added to a position drawn top-down). Adding here
+        // scrolled the field the exact opposite direction.
+        scrollDesign -= designDelta;
         // keep within one pitch to preserve precision; pattern is per-cell so this
         // is invisible.
         float px = tileDesignW * (1f - feather), py = tileDesignH * (1f - feather);

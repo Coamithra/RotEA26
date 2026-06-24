@@ -58,6 +58,17 @@ public class Background : Scene
 
 	private SpriteBlendMode doodadblendmode;
 
+	// Earth fly-by parallax fix (card: "Physics of star background and earth"). While a planet
+	// doodad crosses, the BACKGROUND speed (scrollspeedmodifier — which the earth doodad ignores)
+	// is ramped down so both starfields nearly freeze and the earth reads as the fastest, nearest
+	// object instead of being overtaken by the near drifting stars. doodadStarSlowdown is the target
+	// star-speed fraction while THIS doodad crosses (1 = no effect: andromeda / holodeck sim-earth).
+	// doodadEnterFromTop is the crossing direction, captured at queue time. These describe the
+	// doodad (like doodadscale/doodadcolor); they are NOT a second speed modifier.
+	private float doodadStarSlowdown = 1f;
+
+	private bool doodadEnterFromTop = true;
+
 	private float fadeFactor;
 
 	// Stage 13 reskin: the new space background — a procedural, infinite, scrolling
@@ -142,6 +153,9 @@ public class Background : Scene
 			doodadPos = new Vector2(620f, (float)(-doodad.Height) * doodadscale / 2f);
 			doodadcolor = Color.White;
 			doodadblendmode = (SpriteBlendMode)1;
+			// Milder than the hero earth (small corner planet): slow the stars to ~25%.
+			doodadStarSlowdown = 0.25f;
+			doodadEnterFromTop = true;
 		}
 	}
 
@@ -173,6 +187,9 @@ public class Background : Scene
 			doodadscrollspeed = new Vector2(1.55f, 1.55f);
 			doodadcolor = Color.White;
 			doodadblendmode = (SpriteBlendMode)1;
+			// Hero earth: near-freeze the starfields (~12%) while it glides across.
+			doodadStarSlowdown = 0.12f;
+			doodadEnterFromTop = scrollspeed.Y > 0f;
 			if (scrollspeed.Y > 0f)
 			{
 				doodadPos = new Vector2(400f, (float)(-doodad.Height) * doodadscale / 2f);
@@ -204,6 +221,8 @@ public class Background : Scene
 			showdoodad = true;
 			doodadscale = 1f;
 			doodadscrollspeed = new Vector2(1f, 1f);
+			// A distant galaxy, not a planet — no star slowdown (also clears a prior earth's value).
+			doodadStarSlowdown = 1f;
 			if (scrollspeed.Y > 0f)
 			{
 				doodadPos = new Vector2(400f, (float)(-doodad.Height) * doodadscale / 2f);
@@ -324,6 +343,11 @@ public class Background : Scene
 			}
 			break;
 		}
+		// Earth fly-by parallax fix: fold the planet-crossing slowdown into the SAME background
+		// speed knob the hyperspace/End ramps above drive. The earth doodad moves on scrollspeed
+		// alone (no scrollspeedmodifier), so this slows ONLY the starfields/bg layers, letting the
+		// earth read as the fastest, nearest object. No-op (factor 1) when no planet is crossing.
+		scrollspeedmodifier *= DoodadStarSlowdownFactor();
 		if (XFade.Active)
 		{
 			XFade.Update(gameTime);
@@ -332,6 +356,53 @@ public class Background : Scene
 				this.OnXFadeFinished();
 			}
 		}
+	}
+
+	// Star-slowdown envelope for the earth fly-by (card: "Physics of star background and earth").
+	// Returns the factor (<= 1) to multiply into scrollspeedmodifier so the starfields slow while a
+	// planet doodad crosses; 1 means no change. Keyed to the doodad's own on-screen progress (its
+	// centre vs the screen edges, accounting for the disk's half-height) so it is robust to any
+	// scrollspeed and to both crossing directions. Shape over the full visible crossing:
+	//   hold full -> ramp down to doodadStarSlowdown -> hold slow -> ramp back to full as it leaves,
+	// which gives "earth pops in at high speed, the stars slow massively, then speed up as it exits".
+	private float DoodadStarSlowdownFactor()
+	{
+		if (!showdoodad || doodad == null || doodadStarSlowdown >= 1f)
+		{
+			return 1f;
+		}
+		float halfH = (float)doodad.Height * doodadscale * 0.5f;
+		// enter/exit edges of the doodad centre across the screen, by crossing direction.
+		float enter = doodadEnterFromTop ? (0f - halfH) : (600f + halfH);
+		float exit = doodadEnterFromTop ? (600f + halfH) : (0f - halfH);
+		float span = exit - enter;
+		if (Math.Abs(span) < 0.0001f)
+		{
+			return 1f;
+		}
+		float prog = (doodadPos.Y - enter) / span; // 0 = just appearing, 1 = fully gone
+		const float holdIn = 0.1f;   // earth pops in while stars still streak
+		const float rampIn = 0.15f;  // stars decelerate
+		const float rampOut = 0.22f; // stars re-accelerate as the trailing edge leaves
+		float t; // 0 = full star speed, 1 = fully slowed
+		if (prog < holdIn)
+		{
+			t = 0f;
+		}
+		else if (prog < holdIn + rampIn)
+		{
+			t = (prog - holdIn) / rampIn;
+		}
+		else if (prog <= 1f - rampOut)
+		{
+			t = 1f;
+		}
+		else
+		{
+			t = (1f - prog) / rampOut;
+		}
+		t = MathHelper.SmoothStep(0f, 1f, MathHelper.Clamp(t, 0f, 1f));
+		return MathHelper.Lerp(1f, doodadStarSlowdown, t);
 	}
 
 	public void DrawForeground(GameTime gameTime)
@@ -955,6 +1026,8 @@ public class Background : Scene
 			doodadscrollspeed = new Vector2(1.55f, 1.55f);
 			doodadcolor = new Color(0.7f, 0.7f, 0.7f, 1f);
 			doodadblendmode = (SpriteBlendMode)2;
+			// Holodeck sim-earth (projected, over the grid starfield) is out of scope — no slowdown.
+			doodadStarSlowdown = 1f;
 			if (scrollspeed.Y > 0f)
 			{
 				doodadPos = new Vector2(400f, (float)(-doodad.Height) * doodadscale / 2f);

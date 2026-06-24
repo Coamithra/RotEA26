@@ -21,6 +21,11 @@ it lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programmin
   stage; the now-archived `plans/plan.md` holds the full per-stage detail. When a stage's status changes, `card move <id> <listId>`
   it and keep the description in sync.
 - Browse it visually with `trello --backend local --board 10989a3d serve` (drag-drop kanban web app).
+- **When picking up a card/task, FOLLOW [`CONTRIBUTING.md`](CONTRIBUTING.md).** It's the step-by-step
+  runbook for this repo — claim the card (Backlog → In Progress), tracker doc, branch/worktree,
+  research → design → implement, the visual+console verification gate (no unit tests here), PR
+  self-merge (every push to `main` auto-deploys to Pages), and the card-close paperwork (move to
+  Done, comment, follow-ups). Read it at the start of any card and work the phases in order.
 
 ## Build / run / verify
 ```sh

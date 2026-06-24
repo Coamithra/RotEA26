@@ -210,11 +210,11 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 			switch (currentlyDisplaying)
 			{
 			case Displays.Keyboard:
-				spriteBatch.Draw(keyboardlayout, Vector2.Zero, new Color(new Vector4(1f, 1f, 1f, visibility)));
+				spriteBatch.Draw(keyboardlayout, Vector2.Zero, 0f, 800f / (float)keyboardlayout.Width, center: false, new Color(new Vector4(1f, 1f, 1f, visibility)));
 				spriteBatch.Flush();
 				break;
 			case Displays.Gamepad:
-				spriteBatch.Draw(controllerlayout, Vector2.Zero, new Color(new Vector4(1f, 1f, 1f, visibility)));
+				spriteBatch.Draw(controllerlayout, Vector2.Zero, 0f, 800f / (float)controllerlayout.Width, center: false, new Color(new Vector4(1f, 1f, 1f, visibility)));
 				spriteBatch.Flush();
 				break;
 			case Displays.Powerups:

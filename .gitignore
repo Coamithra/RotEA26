@@ -45,6 +45,8 @@ tools/font/editor/data.json
 # Pre-shrink HD sprite backups (tools/upscale/shrink_sheet.py); local-only revert
 # copies, so they never bloat the repo or the published site. The shrunk PNG ships.
 *.png.hd4x
+# Chroma-key preview composites (tools/help/key_help.py); scratch, the keyed PNG ships.
+tools/help/preview/
 
 # ---- Texture DXT build (tools/textures/build_dxt.py) -------------------------
 # The script ships; the texconv.exe encoder is a ~1 MB Microsoft DirectXTex

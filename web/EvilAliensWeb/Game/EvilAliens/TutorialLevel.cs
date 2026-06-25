@@ -64,7 +64,7 @@ internal class TutorialLevel : GameScene
 		wait(1f);
 		message("Enhancements:", isCheckpoint: true);
 		message("Pick up B's for a bomb");
-		message("Press Left or Right Trigger to activate a bomb");
+		message("Press Left or Right Trigger to activate a\nbomb");
 		message("You can carry up to 3 bombs");
 		bonusWave(Powerup.PowerupType.Blast);
 		wait(9.5f);
@@ -81,14 +81,14 @@ internal class TutorialLevel : GameScene
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += displayEnhancement;
 		eventList.SetLastEventAsCheckPoint();
-		message("Your last Enhancement is stored under your score", 7f);
-		message("The number next to it displays its current Power Level", 8.5f);
+		message("Your last Enhancement is stored under your\nscore", 7f);
+		message("The number next to it displays its current\nPower Level", 8.5f);
 		wait(3f);
 		waitEvent = new WaitEvent(base.Game, 3f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += displayPowerbar;
-		message("Power up your Enhancement by filling the Power Bar");
-		message("The Power Bar can be filled by shooting enemies");
+		message("Power up your Enhancement by filling the\nPower Bar");
+		message("The Power Bar can be filled by shooting\nenemies");
 		message("High combos fill the Power Bar faster");
 		wait(3f);
 		waitEvent = new WaitEvent(base.Game, 0.01f);

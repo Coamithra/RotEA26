@@ -74,8 +74,8 @@
 <script>
 const $ = id => document.getElementById(id);
 let img = null, cols = 8, rows = 4, sep = 1, cw = 0, ch = 0, N = 0, cur = 0;
-let onion = false, diff = false, playing = false, playTimer = null, gridWarn = '';
-const SCALE = 3;            // magnify the big view by this factor (nearest-neighbor)
+let onion = false, diff = false, playing = false, playTimer = null, gridWarn = '', fps = 12;
+let SCALE = 3;              // big-view magnification (nearest-neighbor); set adaptively per sheet in load()
 
 function cellRect(i) {
   const r = Math.floor(i / cols), c = i % cols;
@@ -153,7 +153,7 @@ function stop() { playing = false; $('play').classList.remove('on'); $('play').t
                   if (playTimer) { clearInterval(playTimer); playTimer = null; } }
 function play() {
   playing = true; $('play').classList.add('on'); $('play').textContent = 'pause';
-  playTimer = setInterval(() => go(1), 1000 / 12);   // 12 fps, the in-game rate
+  playTimer = setInterval(() => go(1), 1000 / fps);   // default 12 fps; ?fps= to speed-match
 }
 
 function load() {
@@ -164,6 +164,7 @@ function load() {
     img = im;
     cw = Math.floor((img.naturalWidth - (cols - 1) * sep) / cols);
     ch = Math.floor((img.naturalHeight - (rows - 1) * sep) / rows);
+    SCALE = Math.max(1, Math.min(4, Math.round(440 / Math.max(cw, ch))));   // fit big sprites, magnify small ones
     N = cols * rows; cur = Math.min(cur, N - 1);
     const fitW = cols * cw + (cols - 1) * sep, fitH = rows * ch + (rows - 1) * sep;
     gridWarn = (fitW === img.naturalWidth && fitH === img.naturalHeight)
@@ -198,6 +199,7 @@ window.addEventListener('keydown', e => {
   if (p.has('rows')) $('rows').value = p.get('rows');
   if (p.has('sep')) $('sep').value = p.get('sep');
   if (p.has('label')) document.title = p.get('label') + ' — frame stepper';
+  if (p.has('fps')) fps = +p.get('fps');
   window.__startFrame = p.has('frame') ? +p.get('frame') : null;
   window.__autoplay = p.has('play');
 })();

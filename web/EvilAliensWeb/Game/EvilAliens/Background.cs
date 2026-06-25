@@ -148,8 +148,8 @@ public class Background : Scene
 		if (!showdoodad)
 		{
 			// Minor "earth in the corner" appearance uses a dedicated small texture
-			// (256px) so we don't decode the 1480px hero sheet just to draw a ~110px
-			// dot. scale 0.45 on the 243px disk == the old 730px disk at 0.15.
+			// (256px) so we don't decode the big hero strip (~1392x1822) just to draw
+			// a ~110px dot. scale 0.45 on the 243px disk == the old 730px disk at 0.15.
 			doodadname = "GFX/Sprites/earth_small";
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;

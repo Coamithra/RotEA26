@@ -26,8 +26,8 @@
 #   The HERO disk is now the FULL source crop (no downscale) -> on-screen size is
 #   kept the same by lowering doodadscale, NOT by resizing the texture. The solid
 #   disk (R_IN) must still land at ~1168 design px, so doodadscale = 1168/solid
-#   where solid = DISK_HERO * R_IN/R_OUT (~1806). The script PRINTS this value;
-#   set Background.QueueEarth AND QueueEarthSim doodadscale to it.
+#   where solid = full disk (R_OUT*2) * R_IN/R_OUT = R_IN*2 (~1806). The script
+#   PRINTS this value; set Background.QueueEarth AND QueueEarthSim doodadscale to it.
 #   new SMALL: disk DISK_SMALL(243) in FRAME_SMALL(256), so QueueSmallEarth must
 #             use scale 0.45 (243*0.45 ~= 109.5, == old 730*0.15).
 #   STRIP NOTE: the hero is cropped to a central vertical band (STRIP_W wide). This
@@ -66,7 +66,7 @@ R_IN = 903.0                # inner radius: solid disk extends to here
 # --- output framing --------------------------------------------------------
 # HERO: keep the FULL source resolution (NO downscale) so the Level-1 fly-by is
 # crisp (1 texel ~= 1 pixel on a typical window) instead of the old ~1.3-1.9x
-# bilinear upscale. DISK_HERO is the masked source crop at its native ~1822 px.
+# bilinear upscale. The masked source crop is used at its native ~1822 px (R_OUT*2).
 #
 # The hero earth is WIDER than the screen and stays HORIZONTALLY CENTRED -- it
 # only scrolls vertically (Background.QueueEarth/QueueEarthSim zero the doodad's
@@ -75,7 +75,6 @@ R_IN = 903.0                # inner radius: solid disk extends to here
 # store the never-seen sides. STRIP_W must cover the 800-design visible band at
 # the earth's on-screen scale (~0.647): 800/0.647 ~= 1237 px, + ~50px margin each
 # side -> 1392. On-screen disk size is UNCHANGED (doodadscale falls 0.8 -> ~0.647).
-DISK_HERO = int(round(R_OUT * 2))      # full-res disk, no downscale (~1822 px)
 STRIP_W = 1392                         # central band width (>= visible 800 design px + margin)
 DISK_SMALL, FRAME_SMALL = 243, 256     # -> doodadscale 0.45 (243*0.45 = 109.4)
 

@@ -20,12 +20,13 @@ internal class WaitForDoodadEvent : GameEvent
 	public WaitForDoodadEvent(Game game, Background background)
 		: base(game, 0f)
 	{
-		this.background = background;
+		// Fail loud at wiring time rather than silently skipping the gate later.
+		this.background = background ?? throw new System.ArgumentNullException(nameof(background));
 	}
 
 	public override void Update(GameTime gameTime)
 	{
-		if (background == null || !background.DoodadActive)
+		if (!background.DoodadActive)
 		{
 			Terminate();
 			return;

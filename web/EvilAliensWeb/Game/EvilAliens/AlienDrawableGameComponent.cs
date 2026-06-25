@@ -110,7 +110,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{ "GFX/Sprites/braingoo", 45 },
 		{ "GFX/Sprites/photocamera", 54 },
 		{ "GFX/Sprites/awardmentblade", 487 },
-		{ "GFX/Sprites/arrow", 49 }
+		{ "GFX/Sprites/arrow", 49 },
+		// glow sprites (also upscaled). connector + blast draw through the component
+		// (base.Draw) so the registry auto-corrects; singleconnectorglow (PlayerShip,
+		// Quad) + shadow (Floor) draw DIRECTLY and divide by SuperSampleFactor there.
+		{ "GFX/Sprites/connector", 180 },
+		{ "GFX/Sprites/blast", 384 },
+		{ "GFX/Sprites/singleconnectorglow", 89 },
+		{ "GFX/Sprites/shadow", 82 }
 	};
 
 	// effective on-screen draw scale once the supersample factor is removed

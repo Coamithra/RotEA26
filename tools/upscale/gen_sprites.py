@@ -30,9 +30,11 @@ SS = 4  # supersample factor
 
 
 def sphere(size, base, *, ambient=0.22, gloss=0.85, shininess=55.0,
-           light=(-0.45, -0.55, 0.70), rim=0.28):
-    """A shaded sphere: lambert + blinn-phong specular + a subtle back rim, with
-    a soft anti-aliased circular alpha edge. `base` is the 0..1 RGB ball colour."""
+           light=(-0.45, -0.55, 0.70), outline=0.5, outline_start=0.58):
+    """A shaded sphere: lambert + blinn-phong specular, a soft anti-aliased circular
+    alpha edge, and a subtle darkened OUTLINE toward the silhouette (radial, light-
+    independent) so the ball reads with definition against any background -- like the
+    original 16px bullets' darker rim. `base` is the 0..1 RGB ball colour."""
     n = size * SS
     yy, xx = np.mgrid[0:n, 0:n].astype(np.float64)
     nx = (xx - (n - 1) / 2) / (n / 2)
@@ -49,15 +51,17 @@ def sphere(size, base, *, ambient=0.22, gloss=0.85, shininess=55.0,
     ndotl = np.clip(nx * L[0] + ny * L[1] + nz * L[2], 0.0, 1.0)
     ndoth = np.clip(nx * H[0] + ny * H[1] + nz * H[2], 0.0, 1.0)
     spec = ndoth ** shininess
-    rimterm = np.clip(1.0 - nz, 0.0, 1.0) ** 3 * rim
 
     base = np.asarray(base, float)
-    col = (base * (ambient + gloss * ndotl)[..., None]
-           + np.array([1.0, 1.0, 1.0]) * spec[..., None]
-           + base * rimterm[..., None])
-    col = np.clip(col, 0.0, 1.0)
+    col = base * (ambient + gloss * ndotl)[..., None] + np.array([1.0, 1.0, 1.0]) * spec[..., None]
 
     r = np.sqrt(r2)
+    # radial darkened outline (light-independent) -> definition, like the OG bullets
+    t = np.clip((r - outline_start) / (1.0 - outline_start), 0.0, 1.0)
+    edged = t * t * (3.0 - 2.0 * t)                 # smoothstep
+    col = col * (1.0 - outline * edged)[..., None]
+    col = np.clip(col, 0.0, 1.0)
+
     edge = 1.6 / (n / 2)                       # ~1.6 hi-res px of feather
     alpha = np.clip((1.0 - r) / edge, 0.0, 1.0)
 

@@ -14,7 +14,11 @@ internal class PlasmaBall : AlienDrawableGameComponent
 
 	private const float scalemodifier = 0.25f;
 
-	private float[] rotations = new float[3];
+	// Drawn additively at each rotation to fake a flickering-lightning ball. The
+	// original art was a soft dim plasma so it took 3 layers; the upscaled sprite is a
+	// fully-rendered bright electric orb, so 2 additive layers already read as lightning
+	// without blowing out to white (was 3 -- small-sprite upscale effort).
+	private float[] rotations = new float[2];
 
 	private PlasmaBallState state;
 

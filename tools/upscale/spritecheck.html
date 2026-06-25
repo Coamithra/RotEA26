@@ -76,11 +76,11 @@
 <script>
 const SPR = "../../web/EvilAliensWeb/wwwroot/Content/gfx/sprites/";
 const GROUPS = [
-  { title: "Procedural (drawn, not AI)", cmpOrig: true, items: ["bulletevil","bulletgood","arrow"] },
-  { title: "Keyed + repacked (in game)", cmpOrig: true,
+  { title: "Procedural (drawn, not AI)", items: ["bulletevil","bulletgood","arrow"] },
+  { title: "Keyed + repacked",
     items: ["blooddrop","blooddrop_green","option","braingoo","photocamera","awardmentblade","parachute","plasmaball2"] },
-  { title: "Glows — NOT swapped in (pending decision: new = candidate from gen_out, orig = current)",
-    cmpOrig: true, gen: true, items: ["singleconnectorglow","connector","shadow","blast"] },
+  { title: "Glows (connector alpha-lifted for a glowier read)",
+    items: ["connector","singleconnectorglow","shadow","blast"] },
 ];
 
 function srcs(name, gen) {

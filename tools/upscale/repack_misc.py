@@ -53,6 +53,20 @@ JOBS = {
     "awardmentblade":     ("misc2.png", (634, 682, 1248, 1246), 1.2, False),
 }
 
+# Optional alpha gamma per sprite (alpha' = alpha**g, g<1 LIFTS the faint halo so a
+# glow reads stronger/airier). connector's AI redraw had a solid core + faint halo;
+# lifting the halo makes it more of a glow.
+ABOOST = { "connector": 0.6 }
+
+# Per-sprite key knee override (default 0.14). blast's white-hot centre is pinkish over
+# magenta, so the default knee eats into it -- use a gentle knee there.
+KNEE = { "blast": 0.05 }
+
+# Sprites the AI drew as a hollow ring (transparent centre) that should read SOLID:
+# fill the enclosed interior with a radial glow in the ring's colour. blast is a
+# shockwave ring; the old buggy key hid the hole behind residue, the clean key exposed it.
+FILLGLOW = { "blast" }
+
 
 def fuchsia_key(rgb, knee=0.14):
     """RGB-on-magenta -> straight-alpha RGBA. Magenta-ness is the green deficit
@@ -105,6 +119,30 @@ def orig_ref(name):
     return o if os.path.exists(o) else os.path.join(SPRITES, name + ".png")
 
 
+def fill_glow(rgba, strength=1.0, falloff=0.75):
+    """Fill the enclosed transparent interior of a ring-shaped sprite with a radial
+    glow in the ring's own colour, so a hollow shockwave reads as a solid burst."""
+    a = rgba[..., 3].astype(np.float32) / 255.0
+    solid = ndimage.binary_fill_holes(a > 0.2)
+    ys, xs = np.where(solid)
+    if len(ys) == 0:
+        return rgba
+    cy, cx = ys.mean(), xs.mean()
+    R = 0.5 * max(np.ptp(ys), np.ptp(xs)) + 1.0
+    yy, xx = np.mgrid[0:a.shape[0], 0:a.shape[1]]
+    radial = np.clip(1.0 - np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2) / (R * 0.98), 0.0, 1.0) ** falloff
+    radial = radial * strength * solid
+    bright = a > 0.5
+    col = rgba[..., :3][bright].mean(0) if bright.any() else np.array([190, 220, 235])
+    fill = radial > a
+    out = rgba.copy()
+    for c in range(3):
+        ch = out[..., c]
+        ch[fill] = col[c]
+    out[..., 3] = (np.clip(np.maximum(a, radial), 0, 1) * 255 + 0.5).astype(np.uint8)
+    return out
+
+
 def alpha_bbox(a, thr=12):
     ys, xs = np.where(a > thr)
     return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
@@ -142,9 +180,15 @@ def run(name):
     sheet_file, box, factor, wash = JOBS[name]
     sheet = np.asarray(Image.open(os.path.join(RAW, sheet_file)).convert("RGB"))
     x0, y0, x1, y1 = box
-    rgba = keep_real_blobs(fuchsia_key(sheet[y0:y1, x0:x1]))
+    rgba = keep_real_blobs(fuchsia_key(sheet[y0:y1, x0:x1], knee=KNEE.get(name, 0.14)))
+    if name in FILLGLOW:
+        rgba = fill_glow(rgba)
     if wash:
         rgba = wash_out(rgba)
+    g = ABOOST.get(name, 1.0)
+    if g != 1.0:
+        a = (rgba[..., 3].astype(np.float32) / 255.0) ** g
+        rgba[..., 3] = (np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8)
     out, ow = footprint_match(rgba, orig_ref(name), factor)
     os.makedirs(OUT, exist_ok=True)
     out.save(os.path.join(OUT, name + ".png"))

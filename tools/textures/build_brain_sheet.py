@@ -61,8 +61,15 @@ MARGIN = 0.07           # fractional padding added around the union content bbox
 # the art (keyness <= ~215, mostly < 0), so the ramp sits in the gap: keyness >= K_HI
 # fully transparent, <= K_LO fully opaque, between = anti-aliased edge.
 K_LO, K_HI = 15.0, 215.0
-# Glow look
-GLOW_BLUR_FRAC = 0.11   # gaussian sigma as a fraction of cell width
+# Glow look. The card asks for a STEEP falloff so the glow reads as a tight blue
+# OUTLINE hugging the brain's silhouette (like the original brainlargetransglow),
+# not a wide diffuse blob. Two levers: a small blur sigma keeps the halo tight and
+# lets it follow the silhouette CONTOUR (a large sigma smears it into a featureless
+# ellipse), and a >1 gamma on the normalised alpha crushes the faint gaussian tail so
+# the rim drops off sharply instead of hazing far out. The brain is drawn ON TOP of
+# the glow, so only the rim that extends past the silhouette is visible = the outline.
+GLOW_BLUR_FRAC = 0.03     # gaussian sigma as a fraction of cell width (~15px on a 512 cell)
+GLOW_FALLOFF_GAMMA = 1.6  # >1 steepens the outer falloff (1.0 = pure gaussian)
 GLOW_RGB = (90, 150, 255)
 
 
@@ -186,7 +193,8 @@ def main():
     pad = int(np.ceil(sigma * 3.5))
     glow_a = ndimage.gaussian_filter(np.pad(silhouette, pad), sigma)
     if glow_a.max() > 0:
-        glow_a = glow_a / glow_a.max() * 255.0
+        glow_a = glow_a / glow_a.max()           # normalise to 0..1
+        glow_a = np.power(glow_a, GLOW_FALLOFF_GAMMA) * 255.0  # steepen the falloff
     gh, gw = glow_a.shape
     glow = np.zeros((gh, gw, 4), np.uint8)
     glow[..., 0], glow[..., 1], glow[..., 2] = GLOW_RGB

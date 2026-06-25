@@ -102,7 +102,22 @@ worktree is what keeps them from clobbering each other's files and `main`. The r
 ## Phase 1: Pick Up the Card
 
 > **The board is local and single-user — claiming is just a move.** Unlike a shared remote board,
-> there's no claim-comment race to win here. View the top of Backlog and move it to In Progress:
+> there's no claim-comment race to win here.
+>
+> **When the user's pickup request is VAGUE -- "grab the top ticket", "grab a random ticket", "grab a
+> card", "grab me something", "pick up the next one" -- reach for the atomic `grab` command.** It claims
+> the top card of Backlog and moves it to In Progress in ONE locked step, returning the card it got you
+> (`--json` for the full dict). `--from`/`--to` are REQUIRED on this board (the CLI's "To Do"/"Doing"
+> defaults don't exist here); exit 1 means Backlog is empty. On the local backend `grab` is **truly
+> atomic** (store lock), so any number of parallel agents can grab at once and no two ever get the same
+> card -- the comment-handshake fallback below is obsolete here:
+>
+> ```
+> trello --backend local --board 10989a3d grab --from 79158996 --to 3b43cba3
+> trello --backend local --board 10989a3d grab --from 79158996 --to 3b43cba3 --json   # full card dict
+> ```
+>
+> **When you've already picked a SPECIFIC card**, view the top of Backlog and move it to In Progress:
 >
 > ```
 > trello --backend local --board 10989a3d card ls 79158996      # Backlog (top card = next)
@@ -110,7 +125,8 @@ worktree is what keeps them from clobbering each other's files and `main`. The r
 > ```
 >
 > Do the move *before* reading the card or pulling main, so the board reflects what's being worked.
-> If several agents are genuinely running in tandem on the same column, fall back to the comment
+> _(Only relevant on the `trello` backend -- local `grab` is atomic, so you never need this here.)_ If
+> several agents are genuinely running in tandem on the same column, fall back to the comment
 > handshake: post `trello --backend local --board 10989a3d comment add <card_id> "I am doing this now
 > — claim <id>"`, wait ~10–30s, re-read `--json comment ls <card_id>`, and the earliest claim wins
 > (back off and take the next card otherwise). For a single picked card, skip the handshake.

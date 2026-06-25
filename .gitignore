@@ -74,3 +74,7 @@ tools/tts/_alex_oneshot_full.mp3
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.
 .env
+
+# Mars stitch raw inputs / scratch (large, regenerable)
+tools/mars/sources/
+tools/mars/_analysis/

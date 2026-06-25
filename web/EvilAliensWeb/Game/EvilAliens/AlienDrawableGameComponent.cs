@@ -94,7 +94,23 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		// fixes on-screen size = 100*scale regardless of cell px (the cell resolution
 		// only adds crispness); the Braineroid draws at scale ~2/1/0.35 (huge/med/small)
 		// to match the original brainlargetransglow on-screen size.
-		{ "GFX/Sprites/brainanimated", 100 }
+		{ "GFX/Sprites/brainanimated", 100 },
+		// small-sprite upscale effort (Trello): solid sprites re-rendered at higher res.
+		// bullets + arrow are procedural (tools/upscale/gen_sprites.py); blooddrop(_green),
+		// option, braingoo, photocamera, awardmentblade are keyed/repacked AI redraws
+		// (tools/upscale/repack_misc.py). Component-drawn ones (bulletevil/good, blooddrop,
+		// option) auto-correct via this registry; the direct-draw ones (arrow,
+		// blooddrop_green, braingoo, photocamera, awardmentblade) ALSO divide their draw
+		// scale by SuperSampleFactor at their site.
+		{ "GFX/Sprites/bulletevil", 16 },
+		{ "GFX/Sprites/bulletgood", 16 },
+		{ "GFX/Sprites/blooddrop", 15 },
+		{ "GFX/Sprites/blooddrop_green", 15 },
+		{ "GFX/Sprites/option", 24 },
+		{ "GFX/Sprites/braingoo", 45 },
+		{ "GFX/Sprites/photocamera", 54 },
+		{ "GFX/Sprites/awardmentblade", 487 },
+		{ "GFX/Sprites/arrow", 49 }
 	};
 
 	// effective on-screen draw scale once the supersample factor is removed

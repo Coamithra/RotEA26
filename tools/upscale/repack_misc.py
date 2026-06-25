@@ -49,7 +49,7 @@ JOBS = {
     "shadow":             ("misc1.png", (909, 388, 1199, 691), 4.0, False),
     "singleconnectorglow": ("misc1.png", (6, 737, 296, 1039), 4.0, False),
     "connector":          ("misc1.png", (307, 737, 597, 1039), 4.0, False),
-    "blast":              ("misc2.png", (634, 55, 1248, 620), 1.5, False),
+    "blast":              ("blast_new.png", None, 1.5, False),   # green-bg redo; None = whole image
     "awardmentblade":     ("misc2.png", (634, 682, 1248, 1246), 1.2, False),
 }
 
@@ -67,12 +67,26 @@ KNEE = { "blast": 0.05 }
 # the AI redraw it on GREEN and key 'green' here. When blast's green-bg version lands:
 # point its JOBS sheet at it, set KEY['blast']='green', and drop it from FILLGLOW (the
 # real streaked sphere will key clean, no fill hack needed).
-KEY = {}
+KEY = { "blast": "green" }
 
 # Sprites the AI drew as a hollow ring (transparent centre) that should read SOLID:
-# fill the enclosed interior with a radial glow in the ring's colour. blast is a
-# shockwave ring; the old buggy key hid the hole behind residue, the clean key exposed it.
-FILLGLOW = { "blast" }
+# fill the enclosed interior with a radial glow in the ring's colour. (blast's green-bg
+# redo keys clean, so it no longer needs this.)
+FILLGLOW = set()
+
+# Sprites whose opaque AI fill should be reduced to FOLLOW the glow's own brightness
+# (bright = opaque, dark = transparent) -- turns a solid sphere into a glow. For blast's
+# bright-rim/dark-centre plasma this drops the opaque navy core and leaves the glowing
+# cyan structure, reading as the centre->edge alpha gradient. (value = brightness boost)
+LUMA_ALPHA = { "blast": 1.35 }
+
+
+def glow_alpha(rgba, boost):
+    lum = (rgba[..., :3].astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)) / 255.0
+    a = rgba[..., 3].astype(np.float32) / 255.0
+    out = rgba.copy()
+    out[..., 3] = (np.clip(a * np.clip(lum * boost, 0.0, 1.0), 0.0, 1.0) * 255 + 0.5).astype(np.uint8)
+    return out
 
 
 GREEN = np.array([0.0, 255.0, 0.0], np.float32)
@@ -198,9 +212,11 @@ def checker(img, tile=16):
 def run(name):
     sheet_file, box, factor, wash = JOBS[name]
     sheet = np.asarray(Image.open(os.path.join(RAW, sheet_file)).convert("RGB"))
-    x0, y0, x1, y1 = box
+    x0, y0, x1, y1 = box if box is not None else (0, 0, sheet.shape[1], sheet.shape[0])
     rgba = keep_real_blobs(fuchsia_key(sheet[y0:y1, x0:x1], knee=KNEE.get(name, 0.14),
                                        key=KEY.get(name, "magenta")))
+    if name in LUMA_ALPHA:
+        rgba = glow_alpha(rgba, LUMA_ALPHA[name])
     if name in FILLGLOW:
         rgba = fill_glow(rgba)
     if wash:

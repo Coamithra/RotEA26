@@ -204,6 +204,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
   "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
   outside-`#app` pattern.
+- **Trailers (Stage 14)** are an embedded **YouTube** overlay, NOT ported video. The original
+  `Content/VFX/*.wmv` (VC-1) won't play in a browser and there's no video loader, so the old
+  `TrailerScene`'s `Content.Load<Video>("VFX/..")` crashed the loop — it's now DEAD (constructed but
+  never added; don't re-wire it / don't reintroduce any `VFX/*` `Content.Load`). The Options ->
+  "Trailers" submenu's two handlers call `Compat/TrailerInterop.Play(youtubeId)` -> `window.eaTrailer(id)`
+  in `index.html` (sibling of `eaFullscreen`/`eaMusic`, built **outside `#app`**), which overlays a
+  `youtube-nocookie.com/embed?autoplay=1&rel=0` iframe + a Back button, pauses menu music
+  (`eaMusic.pause()`/`resume()` = AudioContext suspend/resume, seamless) and on close (Back/Esc/backdrop,
+  all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
+  (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
 - **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no

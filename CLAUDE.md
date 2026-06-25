@@ -268,10 +268,12 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
   + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff
   (which never displayed the menu before) -- appears in a single frame instead of revealing in ~0.5s
-  stages as each uncached MB-scale PNG decodes mid-transition on the WASM main thread. All menu scenes
-  share ONE content manager (`Scene.Content` == `IContentManagerService.ContentManager` == `Game1.content`),
-  so warming that one instance populates the exact cache keys their `Load()` calls hit (same idea as a
-  level's `PreloadGraphicalContent`). Pairs with skipping the brag interstitial: on web `BragScene` is
+  stages as each uncached MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
+  (`MenuScene`/`MenuSub1`/`MenuSubWithSkull`) all load through ONE shared content manager (`Scene.Content`
+  == `IContentManagerService.ContentManager` == `Game1.content`), so warming that one instance populates
+  the exact cache keys their `Load()` calls hit (same idea as a level's `PreloadGraphicalContent`).
+  (`CreditsScene` uses its OWN content manager, so its bg isn't warmed -- but the crawl fades its bg in,
+  so a cold decode there isn't the jarring part.) Pairs with skipping the brag interstitial: on web `BragScene` is
   always immediately `Done` (no signed-in gamer), so `Game1.creditsScene_OnFinished` checks
   `BragScene.WouldShow()` and routes credits -> menu directly instead of flashing one bare starfield frame.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to

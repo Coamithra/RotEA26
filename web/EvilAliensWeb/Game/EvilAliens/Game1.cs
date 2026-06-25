@@ -406,31 +406,43 @@ public class Game1 : Game
 	// stages as each uncached MB-scale PNG (the planet backdrop, the title logo) decodes
 	// on the WASM main thread mid-transition. This is what made the end-of-level
 	// credits -> menu handoff (a path that never displayed the menu before) pop in
-	// piecemeal. Every menu scene shares this one content manager
-	// (Scene.Content == IContentManagerService.ContentManager == this `content`), whose
-	// cache is keyed by resolved path, so warming it here populates the exact entries
-	// their Load() calls hit. Same pattern as a level's PreloadGraphicalContent: a
-	// synchronous batch decode behind a loading indicator. Best-effort — a missing or
-	// unreadable asset must never block boot, so the whole pass is guarded.
+	// piecemeal. It warms the menu's whole first-frame set; the heavy decodes are the
+	// planet backdrop and the title logo (the MB-scale ones), the rest are cheap but
+	// warmed too so the first frame is fully ready. The menu scenes
+	// (MenuScene/MenuSub1/MenuSubWithSkull) all load through this one shared content
+	// manager (Scene.Content == IContentManagerService.ContentManager == this `content`),
+	// whose cache is keyed by resolved path, so warming it here populates the exact
+	// entries their Load() calls hit. (CreditsScene uses its OWN content manager, so its
+	// bg isn't warmed — but the credits crawl fades its bg in, so a cold decode there
+	// isn't the jarring part.) Same pattern as a level's PreloadGraphicalContent: a
+	// synchronous batch decode behind a loading indicator.
 	private void WarmMenuContent()
+	{
+		Warm<Texture2D>("GFX/Menu/planet");
+		Warm<Texture2D>("GFX/Menu/title-revenged");
+		Warm<Texture2D>("GFX/Menu/star");
+		Warm<Texture2D>("GFX/Menu/blank");
+		Warm<Texture2D>("GFX/Menu/pointer");
+		Warm<Texture2D>("GFX/Menu/hudring");
+		Warm<Texture2D>("GFX/Menu/vignette");
+		Warm<Texture2D>("GFX/Preview/small_face_a");
+		Warm<Texture2D>("GFX/Preview/small_face_b");
+		Warm<SpriteFont>("GFX/Menu/menufont");
+		Warm<Curve>("GFX/Effects/BrainCurve");
+	}
+
+	// Best-effort warm of a single asset into the shared content manager's cache. Guarded
+	// per-asset (not as one batch) so a single missing or unreadable asset can't abort
+	// warming the others — and must never block boot.
+	private void Warm<T>(string assetName)
 	{
 		try
 		{
-			content.Load<Texture2D>("GFX/Menu/planet");
-			content.Load<Texture2D>("GFX/Menu/title-revenged");
-			content.Load<Texture2D>("GFX/Menu/star");
-			content.Load<Texture2D>("GFX/Menu/blank");
-			content.Load<Texture2D>("GFX/Menu/pointer");
-			content.Load<Texture2D>("GFX/Menu/hudring");
-			content.Load<Texture2D>("GFX/Menu/vignette");
-			content.Load<Texture2D>("GFX/Preview/small_face_a");
-			content.Load<Texture2D>("GFX/Preview/small_face_b");
-			content.Load<SpriteFont>("GFX/Menu/menufont");
-			content.Load<Curve>("GFX/Effects/BrainCurve");
+			content.Load<T>(assetName);
 		}
 		catch (Exception ex)
 		{
-			System.Console.WriteLine("[menu-warm] menu content warm failed: " + ex);
+			System.Console.WriteLine("[menu-warm] " + assetName + " warm failed: " + ex.Message);
 		}
 	}
 

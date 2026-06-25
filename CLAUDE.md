@@ -305,6 +305,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `preload/manifest.txt`. NOTE:
   `Braineroid.Initialize` sets `pulsate = 1f` (not 0) — Update overwrites it in-game, but the sprite harness
   freezes Update, so a 0 baseline would draw the whole sprite at scale 0 (invisible).
+- **Earth fly-by sprite (Level 1 hero earth) -- `tools/earth/build_earth.py`.** `GFX/Sprites/earth` is
+  the masked NASA Blue Marble globe (`sources/globe_west_2048.jpg`, ~1822px disk). It's emitted at the
+  FULL source resolution (NO downscale) so the fly-by renders crisp (1 texel ~= 1 pixel on a typical
+  window) instead of the old ~1.3-1.9x bilinear upscale -- and because the hero earth is wider than the
+  screen and stays HORIZONTALLY CENTRED, only a central VERTICAL STRIP ever shows, so the output is
+  cropped to that strip (~1392x1822) and the never-seen sides aren't stored. `doodadscale` is **0.6467**
+  (= 1168/solid-disk) so the on-screen size is unchanged; the script PRINTS the value to use if you
+  change framing. **INVARIANT: the strip is only valid while the earth can't drift sideways into the
+  cropped edge** -- `Background.QueueEarth` AND `QueueEarthSim` set `doodadscrollspeed.X = 0` (vertical
+  descent only); don't re-enable X drift on the hero earth or the cut sides show. Level 1 also holds the
+  sideways asteroid-belt phase until the earth leaves: **`WaitForDoodadEvent`** (polls
+  `Background.DoodadActive`, race-free) gates `spawner_OnFinished`; Demo 1's earth is covered by the same
+  X-lock. It's a PNG decoded at level preload (not in `textures.config`); `earth_small` is unchanged.
+  Re-run `build_earth.py` after changing the source/knobs; don't hand-edit `earth.png`.
 - **Menu art is warmed at boot to kill the level->menu pop-in.** `Game1.WarmMenuContent()` (end of
   `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
   + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff

@@ -21,3 +21,22 @@
 # commander drone" eye sheets decode cold mid-fight. Warm them here.
 TeamChallenge|gfx/sprites/eye_idle
 TeamChallenge|gfx/sprites/eye_attract
+
+# Animated Braineroid sheet + its blue glow (replace the old static brainlargetransglow
+# the Braineroid used). Warmed for every scene that spawns Braineroids so the 5 MB
+# brainanimated sheet doesn't upload mid-spawn. (.rtex => no PNG decode; this just
+# avoids the GPU-upload hitch.)
+Level1|gfx/sprites/brainanimated
+Level1|gfx/sprites/brainanimatedglow
+Level2|gfx/sprites/brainanimated
+Level2|gfx/sprites/brainanimatedglow
+Braineroids|gfx/sprites/brainanimated
+Braineroids|gfx/sprites/brainanimatedglow
+InsaneBossI|gfx/sprites/brainanimated
+InsaneBossI|gfx/sprites/brainanimatedglow
+TeamChallenge|gfx/sprites/brainanimated
+TeamChallenge|gfx/sprites/brainanimatedglow
+Demo1|gfx/sprites/brainanimated
+Demo1|gfx/sprites/brainanimatedglow
+Demo2|gfx/sprites/brainanimated
+Demo2|gfx/sprites/brainanimatedglow

@@ -110,8 +110,20 @@ namespace EvilAliensWeb.Compat
             obj.Enabled = false;   // freeze: no gameplay Update
             obj.Visible = true;    // but keep drawing itself
 
-            label = DebugFlags.Harness.ToLowerInvariant()
-                + "   frame " + (int)frozenFrame + "/" + total
+            label = BuildLabel();
+        }
+
+        // The caption, rebuilt each frame so ?play's frame counter tracks the live
+        // curframe (it's a field only so Draw can read the latest build).
+        private string BuildLabel()
+        {
+            if (obj == null)
+            {
+                return label;
+            }
+            int total = Math.Max(1, obj.rows * obj.columns);
+            return DebugFlags.Harness.ToLowerInvariant()
+                + "   frame " + (int)obj.curframe + "/" + total
                 + (DebugFlags.HarnessPlay ? "  (playing)" : "")
                 + (obj.texturename != null ? "   " + obj.texturename : "");
         }
@@ -163,6 +175,7 @@ namespace EvilAliensWeb.Compat
                 {
                     obj.curframe = frozenFrame;
                 }
+                label = BuildLabel();
             }
 
             if (base.InputHandler.Pressed(MyKeys.Esc) && OnExitToMenu != null)

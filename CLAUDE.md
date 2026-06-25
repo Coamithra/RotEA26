@@ -238,6 +238,32 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   It's OFFLINE (texconv is Windows-only); CI just ships the committed outputs (like `tools/shaders`,
   `tools/audio`). Per-sprite dxt-vs-raw choices are pending the art rescale (Trello: "Revisit per-sprite
   texture format").
+- **Animated Braineroid sprite (the lvl-1 brain enemy) — `tools/textures/build_brain_sheet.py`.** The
+  `Braineroid` (huge/medium/small, `Game/EvilAliens/Braineroid.cs`) uses an animated cyborg-brain sheet
+  built from an AnimGen export (81 magenta-backdrop frames). The builder chroma-keys the magenta to
+  STRAIGHT alpha (reuses `tools/chroma_key_title.py`'s decontaminate+edge-bleed, plus a connected-component
+  pass that keeps only the brain blob so noisy-backdrop corner speckles are dropped), fixed-crops to the
+  union bbox, decimates to **20 frames**, packs a **5×4** grid of **512px cells** (near-native res, so the
+  OG-size draw isn't upscaled) → `wwwroot/Content/gfx/sprites/brainanimated.png`, and builds a **blue glow**
+  (blurred silhouette, padded so the falloff isn't clipped) → `brainanimatedglow.png`. The brain sheet is
+  **`dxt`** in `textures.config` (→ `.dds`, ~4.6 MB vs ~18 MB raw; the brain's high-frequency detail hides BC3
+  artifacts, like `spider_sheet2`); the **glow stays `raw`** (a smooth gradient DXT would band). Re-run the
+  script then `build_textures.py` after a new export; don't hand-edit the outputs. The sheet is **drawn
+  through the interpolation shader** (`Braineroid` sets `interpolationOptions = always`), so the low frame
+  count + rate (`fps 0.4f` → ~50s loop) still plays smooth — the `interpolate.fx` path cross-fades frame
+  N→N+1 (which is why 20 frames suffice). The glow is drawn additively *behind* the brain in `Braineroid.Draw`
+  (BrainBoss-aura recipe, blue, subtle sine pulse) and sits under the bonus-colorize so a powerup Braineroid
+  hue-shifts brain+glow together. `brainanimated` is registered in
+  `AlienDrawableGameComponent.DesignFrameWidth` at **100** (the design width fixes on-screen size = 100×scale
+  regardless of cell px, so bumping cell resolution only adds crispness); the Braineroid draws at scale
+  **2/1/0.35** (huge/med/small) to match the original `brainlargetransglow` on-screen size. GOTCHA: the sheet
+  is multi-frame, so `texture.Width` is the WHOLE frame row — `Braineroid`'s off-screen wrap margin must use
+  `texture.Width/columns * DrawScale` (one frame), not `texture.Width * scale`, or brains drift far off-screen
+  and the Braineroids minigame never clears a wave. Each instance also randomizes its start frame + pulse
+  phases in `Initialize` so a cluster isn't lock-step. Preloads for every Braineroid scene are in
+  `preload/manifest.txt`. NOTE:
+  `Braineroid.Initialize` sets `pulsate = 1f` (not 0) — Update overwrites it in-game, but the sprite harness
+  freezes Update, so a 0 baseline would draw the whole sprite at scale 0 (invisible).
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it

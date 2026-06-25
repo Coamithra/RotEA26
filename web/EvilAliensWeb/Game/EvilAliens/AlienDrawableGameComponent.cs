@@ -87,9 +87,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{ "GFX/Sprites/eye_attract", 61 },
 		// Brain final boss (InsaneBossI/Level3): the HD cyborg brain+cables (brainbosshd) and its
 		// additive animated glow aura (brainbossaura) share ONE design width so they draw aligned.
-		// Boss-specific art — the small Braineroids still use the old brainlargetransglow.
+		// Boss-specific art. (The Braineroids now use the animated brainanimated sheet below.)
 		{ "GFX/Sprites/brainbosshd", 850 },
-		{ "GFX/Sprites/brainbossaura", 850 }
+		{ "GFX/Sprites/brainbossaura", 850 },
+		// Animated Braineroid sheet (5 cols x 4 rows, 512px cells). Design width 100
+		// fixes on-screen size = 100*scale regardless of cell px (the cell resolution
+		// only adds crispness); the Braineroid draws at scale ~2/1/0.35 (huge/med/small)
+		// to match the original brainlargetransglow on-screen size.
+		{ "GFX/Sprites/brainanimated", 100 }
 	};
 
 	// effective on-screen draw scale once the supersample factor is removed

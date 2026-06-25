@@ -1,5 +1,6 @@
 using System;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
@@ -23,6 +24,21 @@ internal class Braineroid : KillableAlien
 
 	private float pulsatespeed;
 
+	// Blue glow drawn additively behind the brain (BrainBoss-aura recipe, blue tinted).
+	private Texture2D glowTexture;
+
+	private const float GlowOmega = 2.6f;          // ~2.4s shimmer period
+
+	private const float GlowScaleBase = 1.05f;     // glow drawn at brain DrawScale * this
+
+	private const float GlowScaleShimmer = 0.04f;  // +/-4% breathe
+
+	private const float GlowAlphaBase = 0.5f;
+
+	private const float GlowAlphaShimmer = 0.12f;  // alpha rides 0.38..0.62
+
+	private float glowPhase;   // per-instance offset so glows don't pulse in unison
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -45,7 +61,14 @@ internal class Braineroid : KillableAlien
 	public Braineroid(Game game)
 		: base(game)
 	{
-		LoadAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
+		// Animated cyborg brain (5 cols x 4 rows, 20 frames). interpolationOptions =
+		// always so the interpolate.fx shader cross-fades frame N->N+1 regardless of
+		// the global Interpolate setting — that's what lets the low frame rate still
+		// play smooth (0.4 fps => a very slow ~50s loop, the shader fills the gaps;
+		// 20 frames is enough because the motion interpolates cleanly).
+		LoadAnimation(new AnimationData("GFX/Sprites/brainanimated", 4, 5, 0, 0.4f, 0, 20));
+		interpolationOptions = InterpolationOptions.always;
+		glowTexture = content.Load<Texture2D>("GFX/Sprites/brainanimatedglow");
 		base.DrawOrder = 20;
 		base.MaxSpeed = 100f;
 		base.Colorize = false;
@@ -116,12 +139,17 @@ internal class Braineroid : KillableAlien
 		//IL_019d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01a3: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01a8: Unknown result type (might be due to invalid IL or missing references)
-		pulsate = 0f;
-		_time = 0f;
+		// Baseline 1 (not 0): Update overwrites this before the first in-game Draw, but
+		// the sprite harness never runs Update — pulsate 0 there would draw scale*0 = nothing.
+		pulsate = 1f;
+		// Desync per-instance so a cluster of brains isn't lock-step: random scale-pulse
+		// phase (_time) and glow-pulse phase. The animation frame is randomised below.
+		_time = RandomHelper.RandomNextFloat(0f, 10f);
+		glowPhase = RandomHelper.RandomNextFloat(0f, MathHelper.TwoPi);
 		switch (size)
 		{
 		case BrainSize.huge:
-			scale = 0.4f;
+			scale = 2f;
 			base.Speed = 0.06f * (1f + (Settings.GetInstance().DifficultyModifier - 1f) / 2f);
 			rotationspeed = RandomHelper.RandomNextFloat(-5E-05f, 5E-05f);
 			pulsatespeed = 3.32f;
@@ -130,7 +158,7 @@ internal class Braineroid : KillableAlien
 			PointValue = 10f;
 			break;
 		case BrainSize.medium:
-			scale = 0.2f;
+			scale = 1f;
 			base.Speed = 0.18f * (1f + (Settings.GetInstance().DifficultyModifier - 1f) / 2f);
 			rotationspeed = RandomHelper.RandomNextFloat(-0.0002f, 0.0002f);
 			pulsatespeed = 5f;
@@ -139,7 +167,7 @@ internal class Braineroid : KillableAlien
 			PointValue = 25f;
 			break;
 		case BrainSize.small:
-			scale = 0.07f;
+			scale = 0.35f;
 			base.Speed = 0.3f * (1f + (Settings.GetInstance().DifficultyModifier - 1f) / 2f);
 			rotationspeed = RandomHelper.RandomNextFloat(-0.001f, 0.001f);
 			pulsatespeed = 12f;
@@ -160,6 +188,10 @@ internal class Braineroid : KillableAlien
 			SetHitPoints(3, scaleWithDifficulty: false);
 		}
 		base.Initialize();
+		// Random starting animation frame so a cluster of brains isn't perfectly in
+		// sync. (Set after base.Initialize so it isn't reset; the harness overrides
+		// curframe afterwards for a deterministic frozen frame.)
+		curframe = RandomHelper.RandomNextFloat(0f, Math.Max(1, rows * columns));
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -177,10 +209,32 @@ internal class Braineroid : KillableAlien
 			}
 			spriteBatch.colorizeEffect.Enable();
 		}
+		DrawGlow(gameTime);
 		base.Draw(gameTime);
 		spriteBatch.colorizeEffect.Disable();
 		spriteBatch.fadeEffect.Disable();
 		scale = num;
+	}
+
+	// Soft blue glow behind the brain — additive, tracks the brain's (pulsated) size,
+	// with its own subtle shimmer. The glow texture is pre-tinted blue, so it's drawn
+	// white-with-alpha (like BrainAura over brainbossaura). Caller has already set
+	// scale = num * pulsate (so DrawScale tracks the brain) and, for a bonus-carrying
+	// Braineroid, enabled colorize — so the glow gets hue-shifted with the brain.
+	private void DrawGlow(GameTime gameTime)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		if (glowTexture == null)
+		{
+			return;
+		}
+		float t = (float)gameTime.TotalGameTime.TotalSeconds;
+		float s = (float)Math.Sin(t * GlowOmega + glowPhase);
+		float glowScale = DrawScale * GlowScaleBase * (1f + GlowScaleShimmer * s);
+		float alpha = GlowAlphaBase + GlowAlphaShimmer * s;
+		spriteBatch.BlendMode = (SpriteBlendMode)2;
+		spriteBatch.Draw(glowTexture, Position, rotation, glowScale, center: true, new Color(new Vector4(1f, 1f, 1f, alpha)));
+		spriteBatch.BlendMode = blendMode;
 	}
 
 	public override void Update(GameTime gameTime)
@@ -214,7 +268,11 @@ internal class Braineroid : KillableAlien
 		Move(gameTime);
 		base.Update(gameTime);
 		rotation += rotationspeed;
-		float num = (float)texture.Width * scale / 2f;
+		// Off-screen margin = half the ON-SCREEN sprite width. texture.Width is now the
+		// whole 8-frame sheet, so divide by columns for one frame and use DrawScale (not
+		// raw scale) to account for the supersample factor — otherwise brains wrap/despawn
+		// hundreds of px off-screen and the Braineroids minigame never clears a wave.
+		float num = (float)(texture.Width / columns) * DrawScale / 2f;
 		if (!wrapping)
 		{
 			if ((base.Position.X > 800f + num) & (base.DirectionalVector.X > 0f))

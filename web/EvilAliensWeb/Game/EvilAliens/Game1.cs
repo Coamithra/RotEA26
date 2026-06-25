@@ -226,7 +226,7 @@ public class Game1 : Game
 			"GFX/Splash/uglysplash22-revenged-pure", "GFX/Splash/uglysplash22-revenged-pure-glasses");
 		splashScene.AddTextSplash(new string[]
 		{
-			"This game has been lovingly crafted without the use of AI",
+			"This game was lovingly crafted without the use of AI",
 			".. in 2008",
 			"Then, in 2026, I used a BUNCH of AI",
 			"Like, a LOT",

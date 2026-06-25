@@ -326,9 +326,9 @@ internal class MenuScene : Scene
 		playtestMenu.AddEntryEvent(playtestMenu_OnExit);
 		playtestMenu.OnExit += playtestMenu_OnExit;
 		trailerMenu = new MenuSub1(base.Game);
-		trailerMenu.AddEntry("Revenge of the Evil Aliens");
+		trailerMenu.AddEntry("Revenge of the Evil Aliens (2008)");
 		trailerMenu.AddEntryEvent(trailerMenu_EvilAliensSelected);
-		trailerMenu.AddEntry("Rocket Riot");
+		trailerMenu.AddEntry("Rocket Riot (2009)");
 		trailerMenu.AddEntryEvent(trailerMenu_RocketRiotSelected);
 		trailerMenu.AddEntry("Back");
 		trailerMenu.AddEntryEvent(trailerMenu_BackSelected);

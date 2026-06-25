@@ -23,6 +23,8 @@ Usage:
 Run from the repo root (Content paths are resolved relative to the web project).
 Outputs: tools/upscale/contact_sheets/<set>.png  +  <set>.json
 """
+# PIL.Image.LANCZOS / .NEAREST resolve at runtime but Pyright's Pillow stubs miss them:
+# pyright: reportAttributeAccessIssue=false
 import json
 import os
 import sys
@@ -40,22 +42,26 @@ SPRITES = os.path.join(REPO, "web", "EvilAliensWeb", "wwwroot", "Content", "gfx"
 OUT_DIR = os.path.join(HERE, "contact_sheets")
 
 # Sprite sets — Content/gfx/sprites base names, confirmed still at original .xnb
-# resolution (current png == original xnb dims) and in-use in Game/.
-SETS = {
+# resolution (current png == original xnb dims) and in-use in Game/. Each set is
+# (list of names, layout dict) — kept separate so the layout values stay int-typed.
+SETS: dict[str, tuple[list[str], dict[str, int]]] = {
     # The genuinely small single-frame gameplay sprites ("bullets and what not").
-    "smalls": dict(
-        names=[
+    "smalls": (
+        [
             "bulletevil", "bulletgood", "blooddrop", "blooddrop_green",
             "option", "braingoo", "arrow", "photocamera", "shadow",
             "block", "singleconnectorglow", "connector",
             "spiderdebris1", "spiderdebris2", "spiderdebris3",
         ],
-        cols=5, fit=224, area=288, label_h=44, font_px=18,
+        dict(cols=5, fit=224, area=288, label_h=44, font_px=18),
     ),
-    # The bigger still-original single frames — shown near-native with margin.
-    "mediums": dict(
-        names=["parachute", "blast", "plasmaball2", "awardmentblade"],
-        cols=2, fit=680, area=760, label_h=52, font_px=26,
+    # The bigger still-original single frames that are actually UNDER-sampled on
+    # screen — drawn large relative to their native res (footprint*2.4 > texels).
+    # plasmaball2 (697px @scale .25 -> ~174px) and parachute (366px @scale .25 ->
+    # ~91px) are already oversampled, so they're deliberately NOT here.
+    "mediums": (
+        ["blast", "awardmentblade"],
+        dict(cols=2, fit=680, area=760, label_h=52, font_px=26),
     ),
 }
 
@@ -70,8 +76,8 @@ def load_font(px):
 
 
 def build(set_name):
-    cfg = SETS[set_name]
-    names, cols = cfg["names"], cfg["cols"]
+    names, cfg = SETS[set_name]
+    cols = cfg["cols"]
     fit, area, label_h = cfg["fit"], cfg["area"], cfg["label_h"]
     rows = (len(names) + cols - 1) // cols
     cell_w, cell_h = area, area + label_h

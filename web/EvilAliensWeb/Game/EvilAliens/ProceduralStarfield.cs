@@ -73,10 +73,14 @@ internal sealed class ProceduralStarfield : IDisposable
     private SpriteBatch batch;
     private GraphicsDevice gd;
 
-    // Scroll position in DESIGN units; advanced by Advance(), wrapped to the grid
-    // pitch so it never loses float precision over a long session (the pattern is
-    // keyed by integer cell coords, so wrapping by a whole pitch keeps it aligned).
-    private Vector2 scrollDesign;
+    // Scroll position in DESIGN units; advanced by Advance(). Accumulated UNBOUNDED as double
+    // and never wrapped: the per-cell pattern (Pick/Hash) is not periodic, so wrapping the
+    // scroll by any fixed span would teleport the visible field at the wrap boundary. (Contrast
+    // DriftingStars, which CAN wrap its float field: its star set really is periodic.) double
+    // plus the per-scene SetSpace() recreation keep Draw()'s float math sub-pixel for any
+    // realistic scene runtime. See Advance for the full story.
+    private double scrollDesignX;
+    private double scrollDesignY;
 
     // Live brightness multiplier (the ?fx tuning panel drives this via Background). Applied
     // to the draw alpha so it scales each tile's additive contribution linearly (1 = full).
@@ -121,12 +125,19 @@ internal sealed class ProceduralStarfield : IDisposable
         // scrollspeed must DECREASE the offset to move the field the same way the legacy
         // BackgroundImage.Move did (which added to a position drawn top-down). Adding here
         // scrolled the field the exact opposite direction.
-        scrollDesign -= designDelta * parallax;
-        // keep within a whole (even) number of pitches to preserve precision AND the
-        // brick row parity; pattern is per-cell so this is invisible.
-        float px = tileDesignW * (1f - feather), py = tileDesignH * (1f - feather);
-        scrollDesign.X = MyMath.Mod(scrollDesign.X, px * tileCount * 4f);
-        scrollDesign.Y = MyMath.Mod(scrollDesign.Y, py * tileCount * 4f);
+        //
+        // Do NOT wrap (mod) the accumulator. The old code wrapped to `pitch * tileCount * 4`,
+        // assuming the field repeats over that span; but the pattern is keyed by a NON-periodic
+        // per-cell Hash, so Hash(cx) != Hash(cx + tileCount*4): crossing a wrap boundary shifts
+        // every cell index by a whole period and instantly swaps the entire visible nebula. The
+        // worst case is the X axis, which stays 0 until a scene first adds a horizontal speed
+        // (level 1's asteroid section): the first sub-zero step wrapped X from 0 to ~modulus
+        // (MyMath.Mod returns [0, m)), so the field visibly jumped the instant it scrolled
+        // sideways. (Y wrapped the same way on frame 1 of a level, but the hyperspace fade-in's
+        // near-opaque white overlay covers it.) Accumulating as double, with the field recreated
+        // each SetSpace(), keeps Draw()'s float math sub-pixel for any realistic scene; no wrap.
+        scrollDesignX -= (double)designDelta.X * parallax;
+        scrollDesignY -= (double)designDelta.Y * parallax;
     }
 
     public void Draw()
@@ -138,7 +149,7 @@ internal sealed class ProceduralStarfield : IDisposable
         float tileRH = tileDesignH * scale;
         float pitchRX = tileDesignW * (1f - feather) * scale;
         float pitchRY = tileDesignH * (1f - feather) * scale;
-        Vector2 scrollR = scrollDesign * scale;
+        Vector2 scrollR = new Vector2((float)(scrollDesignX * scale), (float)(scrollDesignY * scale));
 
         // Cell index range whose tiles (centred at cx*pitchRX - scrollR) touch the
         // screen, plus a one-tile margin so every visible pixel has full sum-to-1

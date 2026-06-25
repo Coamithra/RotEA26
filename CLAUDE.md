@@ -204,6 +204,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
   "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
   outside-`#app` pattern.
+- **Trailers (Stage 14)** are an embedded **YouTube** overlay, NOT ported video. The original
+  `Content/VFX/*.wmv` (VC-1) won't play in a browser and there's no video loader, so the old
+  `TrailerScene`'s `Content.Load<Video>("VFX/..")` crashed the loop — it's now DEAD (constructed but
+  never added; don't re-wire it / don't reintroduce any `VFX/*` `Content.Load`). The Options ->
+  "Trailers" submenu's two handlers call `Compat/TrailerInterop.Play(youtubeId)` -> `window.eaTrailer(id)`
+  in `index.html` (sibling of `eaFullscreen`/`eaMusic`, built **outside `#app`**), which overlays a
+  `youtube-nocookie.com/embed?autoplay=1&rel=0` iframe + a Back button, pauses menu music
+  (`eaMusic.pause()`/`resume()` = AudioContext suspend/resume, seamless) and on close (Back/Esc/backdrop,
+  all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
+  (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
 - **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no
@@ -276,6 +286,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `preload/manifest.txt`. NOTE:
   `Braineroid.Initialize` sets `pulsate = 1f` (not 0) — Update overwrites it in-game, but the sprite harness
   freezes Update, so a 0 baseline would draw the whole sprite at scale 0 (invisible).
+- **Menu art is warmed at boot to kill the level->menu pop-in.** `Game1.WarmMenuContent()` (end of
+  `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
+  + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff
+  (which never displayed the menu before) -- appears in a single frame instead of revealing in ~0.5s
+  stages as each uncached MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
+  (`MenuScene`/`MenuSub1`/`MenuSubWithSkull`) all load through ONE shared content manager (`Scene.Content`
+  == `IContentManagerService.ContentManager` == `Game1.content`), so warming that one instance populates
+  the exact cache keys their `Load()` calls hit (same idea as a level's `PreloadGraphicalContent`).
+  (`CreditsScene` uses its OWN content manager, so its bg isn't warmed -- but the crawl fades its bg in,
+  so a cold decode there isn't the jarring part.) Pairs with skipping the brag interstitial: on web `BragScene` is
+  always immediately `Done` (no signed-in gamer), so `Game1.creditsScene_OnFinished` checks
+  `BragScene.WouldShow()` and routes credits -> menu directly instead of flashing one bare starfield frame.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it

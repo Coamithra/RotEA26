@@ -1,0 +1,125 @@
+{
+  "sheet": "mediums",
+  "background": "#FF00FF",
+  "grid": {
+    "cols": 2,
+    "rows": 2
+  },
+  "cell": {
+    "w": 760,
+    "h": 812,
+    "area": 760,
+    "label_h": 52,
+    "fit": 680
+  },
+  "size": [
+    1520,
+    1624
+  ],
+  "cells": [
+    {
+      "id": "A1",
+      "name": "parachute",
+      "src": "gfx/sprites/parachute.png",
+      "native": [
+        366,
+        400
+      ],
+      "scale": 1,
+      "cell_xy": [
+        0,
+        0
+      ],
+      "sprite_area": [
+        0,
+        52,
+        760,
+        760
+      ],
+      "placed": [
+        197,
+        232,
+        366,
+        400
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "blast",
+      "src": "gfx/sprites/blast.png",
+      "native": [
+        384,
+        366
+      ],
+      "scale": 1,
+      "cell_xy": [
+        760,
+        0
+      ],
+      "sprite_area": [
+        760,
+        52,
+        760,
+        760
+      ],
+      "placed": [
+        948,
+        249,
+        384,
+        366
+      ]
+    },
+    {
+      "id": "B1",
+      "name": "plasmaball2",
+      "src": "gfx/sprites/plasmaball2.png",
+      "native": [
+        697,
+        675
+      ],
+      "scale": 0.9756,
+      "cell_xy": [
+        0,
+        812
+      ],
+      "sprite_area": [
+        0,
+        864,
+        760,
+        760
+      ],
+      "placed": [
+        40,
+        914,
+        680,
+        659
+      ]
+    },
+    {
+      "id": "B2",
+      "name": "awardmentblade",
+      "src": "gfx/sprites/awardmentblade.png",
+      "native": [
+        487,
+        90
+      ],
+      "scale": 1,
+      "cell_xy": [
+        760,
+        812
+      ],
+      "sprite_area": [
+        760,
+        864,
+        760,
+        760
+      ],
+      "placed": [
+        896,
+        1199,
+        487,
+        90
+      ]
+    }
+  ]
+}

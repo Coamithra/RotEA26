@@ -168,6 +168,42 @@ public class BragScene : Scene
 		}
 	}
 
+	// True only when an active, LIVE, comm-privileged gamer is signed in — the
+	// necessary condition for the brag prompt to actually show something (mirrors the
+	// early-Done guard at the top of Initialize). On the web build SignedInGamers is
+	// always empty, so this is always false and Game1 skips the brag interstitial
+	// straight to the menu instead of letting it flash one bare starfield frame (and
+	// cold-load its art) before falling through to Done. If sign-in is ever restored
+	// this re-enables brag and Initialize still does the finer difficulty check.
+	public bool WouldShow()
+	{
+		try
+		{
+			SignedInGamer val = null;
+			GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
+			try
+			{
+				while (enumerator.MoveNext())
+				{
+					SignedInGamer current = enumerator.Current;
+					if (current.PlayerIndex == Storage.ActivePlayer)
+					{
+						val = current;
+					}
+				}
+			}
+			finally
+			{
+				((IDisposable)enumerator).Dispose();
+			}
+			return val != null && val.IsSignedInToLive && (int)val.Privileges.AllowCommunication != 0;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
 	public override void Initialize()
 	{
 		//IL_000d: Unknown result type (might be due to invalid IL or missing references)

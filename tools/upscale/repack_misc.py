@@ -54,11 +54,18 @@ JOBS = {
 }
 
 
-def fuchsia_key(rgb):
+def fuchsia_key(rgb, knee=0.14):
+    """RGB-on-magenta -> straight-alpha RGBA. Magenta-ness is the green deficit
+    NORMALISED BY LOCAL BRIGHTNESS ((min(R,B)-G)/min(R,B)), so a DARK or off-magenta
+    background (the AI rarely renders pure #FF00FF -- noise, vignette, jpeg) still
+    keys to ~0 instead of a faint reddish haze. A small alpha knee snaps the last
+    near-background residue to 0; the un-mix recovers the straight colour."""
     f = rgb.astype(np.float32)
     R, G, B = f[..., 0], f[..., 1], f[..., 2]
-    d = np.clip(np.minimum(R, B) - G, 0.0, 255.0)
-    alpha = np.clip(1.0 - d / 255.0, 0.0, 1.0)
+    mn = np.minimum(R, B)
+    m = np.clip((mn - G) / np.maximum(mn, 1.0), 0.0, 1.0)     # 1 on any-brightness magenta, 0 on white/red/green/blue
+    alpha = np.clip(1.0 - m, 0.0, 1.0)
+    alpha = np.clip((alpha - knee) / (1.0 - knee), 0.0, 1.0)  # kill residual background
     a3 = alpha[..., None]
     F = np.where(a3 > 1e-3, (f - (1.0 - a3) * MAGENTA) / np.maximum(a3, 1e-3), 0.0)
     out = np.zeros((*rgb.shape[:2], 4), np.uint8)

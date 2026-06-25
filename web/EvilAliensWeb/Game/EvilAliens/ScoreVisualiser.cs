@@ -492,7 +492,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			Color color2 = default(Color);
 			(color2) = new Color(new Vector4((snapshotcolor).ToVector3(), num));
 			float photoSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/photocamera", photocamera.Width);
-				spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.Height / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
+			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.Height / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 	}
@@ -579,9 +579,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor);
 			}
 		}
+		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/option", bomb.Width);
 		for (int j = 0; j < scores[i].bombs; j++)
 		{
-			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.Width * j), 45f), Color.Red);
+			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.Width / bombSsf * j), 45f), 0f, 1f / bombSsf, center: false, Color.Red);
 		}
 	}
 

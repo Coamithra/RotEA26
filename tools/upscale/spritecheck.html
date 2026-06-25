@@ -83,10 +83,8 @@ const GROUPS = [
     items: ["connector","singleconnectorglow","shadow","blast"] },
 ];
 
-function srcs(name, gen) {
-  return gen
-    ? { neu: "gen_out/" + name + ".png", old: SPR + name + ".png" }
-    : { neu: SPR + name + ".png", old: SPR + name + ".png.orig" };
+function srcs(name) {
+  return { neu: SPR + name + ".png", old: SPR + name + ".png.orig" };
 }
 
 let scaleMode = "fit";
@@ -118,7 +116,7 @@ function build() {
     const h = document.createElement("h2"); h.textContent = g.title; root.appendChild(h);
     const grid = document.createElement("div"); grid.className = "grid";
     for (const name of g.items) {
-      const s = srcs(name, g.gen);
+      const s = srcs(name);
       const card = document.createElement("div"); card.className = "card";
       const nm = document.createElement("div"); nm.className = "name";
       nm.innerHTML = "<span>" + name + "</span>"; card.appendChild(nm);

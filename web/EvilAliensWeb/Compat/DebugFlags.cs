@@ -21,6 +21,8 @@ namespace EvilAliensWeb.Compat
 	//   ?unlockall     reveal every gated menu option (Cheats, all challenges, Level 2/3,
 	//                  Challenges/Awardments) so the whole menu can be walked through;
 	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
+	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
+	//                  text (it is ON by default) to A/B the plain flattened drop shadow
 	//   ?harness=<Obj> SPRITE HARNESS: boot straight onto a space background showing ONE
 	//                  game object (an enemy/boss/projectile), FROZEN on a frame, drawn by
 	//                  the real in-game Draw path (same SpriteBatchWrapper / RenderScale /
@@ -95,6 +97,13 @@ namespace EvilAliensWeb.Compat
 		// (a shipped build never appends to the list). Does NOT alter the boot path.
 		public static bool LoadLog { get; private set; }
 
+		// Route the in-game score / "Player X — Press Start" text through the chrome-sheen
+		// effect (metal.fx) instead of the plain flattened drop-shadow draw. ON by default
+		// (the card author kept the chrome look); ?metalscore=0 / =false disables it to A/B
+		// the plain flatten. Does NOT alter the boot path — purely a render look, so it is
+		// deliberately left OUT of `Active` (a clean boot stays "no debug flags").
+		public static bool MetalScore { get; private set; } = true;
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -152,6 +161,9 @@ namespace EvilAliensWeb.Compat
 				case "loadlog":
 				case "profileloads":
 					LoadLog = IsOn(val);
+					break;
+				case "metalscore":
+					MetalScore = IsOn(val);
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
@@ -219,6 +231,7 @@ namespace EvilAliensWeb.Compat
 					+ " autoStart=" + AutoStart + " noAttract=" + NoAttract
 					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
 					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln + " loadLog=" + LoadLog
+						+ " metalScore=" + MetalScore
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

@@ -295,6 +295,74 @@
     </script>
 
     <script>
+        // ----- eaTrailer: in-menu trailer player via embedded YouTube (Stage 14) -----
+        // The original Xbox trailers (Content/VFX/*.wmv, VC-1) can't play in a browser and
+        // the web port has no video loader, so the Options -> Trailers menu hands off to an
+        // embedded youtube-nocookie player overlaid on the canvas. Built OUTSIDE #app so
+        // Blazor's mount can't wipe it; menu music pauses while it's up and resumes on close.
+        // C# reaches eaTrailer(id) via Compat/TrailerInterop; the overlay owns its own close
+        // (Back button / Esc / backdrop click), which refocuses the canvas.
+        window.eaTrailer = (function ()
+        {
+            var overlay = null;
+
+            function close()
+            {
+                if (!overlay) return;
+                var ov = overlay; overlay = null;
+                if (ov.parentNode) ov.parentNode.removeChild(ov);
+                window.removeEventListener('keydown', onKey, true);
+                try { if (window.eaMusic) window.eaMusic.resume(); } catch (e) { }
+                var c = document.getElementById('theCanvas');
+                if (c && c.focus) { try { c.focus(); } catch (e) { } }
+            }
+
+            // While a trailer is up the overlay OWNS the keyboard: swallow every key
+            // (window capture, before KNI's canvas listener) so the menu hidden under
+            // the opaque overlay can't be blind-navigated; Escape closes. Keys typed
+            // inside the cross-origin YouTube iframe don't reach here, so its own
+            // controls still work when it has focus.
+            function onKey(e)
+            {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                if (e.key === 'Escape' || e.keyCode === 27) close();
+            }
+
+            function open(id)
+            {
+                if (!id) return;
+                close();                                  // replace any open trailer
+                try { if (window.eaMusic) window.eaMusic.pause(); } catch (e) { }
+
+                var ov = document.createElement('div');
+                ov.id = 'ea-trailer';
+                // youtube-nocookie + autoplay (the menu keypress/click is the gesture) + rel=0
+                // so end cards don't suggest unrelated channels; playsinline for iOS.
+                ov.innerHTML =
+                    '<div class="ea-trailer-frame">' +
+                        '<iframe allow="autoplay; encrypted-media; fullscreen" allowfullscreen ' +
+                            'src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(id) +
+                            '?autoplay=1&rel=0&modestbranding=1&playsinline=1"></iframe>' +
+                    '</div>' +
+                    '<button type="button" class="ea-trailer-close" aria-label="Close trailer">&#9664; Back</button>';
+                document.body.appendChild(ov);
+                overlay = ov;
+
+                ov.querySelector('.ea-trailer-close')
+                    .addEventListener('click', function (e) { e.preventDefault(); close(); });
+                // Click on the dim backdrop (outside the video frame) closes too.
+                ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+                window.addEventListener('keydown', onKey, true);
+            }
+
+            window.eaTrailerClose = close;
+            return open;
+        })();
+    </script>
+
+    <script>
         // ----- ?fx live FX tuning panel (dev only) --------------------------
         // On-screen buttons to toggle render features while dialing in the new
         // starfield. Built ONLY when the URL query contains `fx`, so normal play
@@ -417,13 +485,17 @@
                 return manifestPromise;
             }
 
+            // Authored Music category (alienssfx.xgs): ReplaceOldest with 2.5s
+            // fadeIn/fadeOut, so a cue change crossfades over 2.5s.
+            var MUSIC_FADE = 2.5;
+
             function fadeOut(entry)
             {
                 if (!entry) return;
                 var t = ctx.currentTime;
                 entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
-                entry.gain.gain.linearRampToValueAtTime(0.0001, t + 0.4);
-                try { entry.src.stop(t + 0.45); } catch (e) { }
+                entry.gain.gain.linearRampToValueAtTime(0.0001, t + MUSIC_FADE);
+                try { entry.src.stop(t + MUSIC_FADE + 0.05); } catch (e) { }
             }
 
             function startTrack(cue)
@@ -456,7 +528,11 @@
                         }
                         src.playbackRate.value = curRate;
                         var g = ctx.createGain();
-                        g.gain.value = 0.6;
+                        // Fade the new track in over the authored 2.5s (crossfades
+                        // against the outgoing track's matching fadeOut).
+                        var t0 = ctx.currentTime;
+                        g.gain.setValueAtTime(0.0001, t0);
+                        g.gain.linearRampToValueAtTime(0.6, t0 + MUSIC_FADE);
                         src.connect(g).connect(master);
                         src.start();
                         current = { cue: cue, src: src, gain: g };
@@ -492,10 +568,16 @@
                     curRate = 1;
                     if (current) { fadeOut(current); current = null; }
                 },
+                // pause/resume suspend the AudioContext clock, so the track resumes
+                // from the exact same sample (seamless) — used while a trailer overlay
+                // is up so its audio isn't fighting the menu music (Stage 14).
+                pause: function () { if (ctx && started) { try { ctx.suspend(); } catch (e) { } } },
+                resume: function () { if (ctx && started) { try { ctx.resume(); } catch (e) { } } },
                 setRate: function (rate)
                 {
-                    // XACT "Pitch" ~50 = normal -> AudioBufferSourceNode.playbackRate
-                    curRate = Math.max(0.25, rate / 50);
+                    // `rate` is already the AudioBufferSourceNode.playbackRate: the C#
+                    // side (MusicInterop) applies the authored XACT Pitch RPC curve.
+                    curRate = Math.max(0.25, rate);
                     if (current && ctx)
                     {
                         try { current.src.playbackRate.setTargetAtTime(curRate, ctx.currentTime, 0.05); }

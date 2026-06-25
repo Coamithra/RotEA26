@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using EvilAliens.Constants;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -609,21 +610,29 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00f6: Unknown result type (might be due to invalid IL or missing references)
-		Color color2 = default(Color);
-		Color color3 = default(Color);
+		// Shadow + text COLOURS (opaque); the shadow is the base hue, the text a brightened
+		// version — exactly the two-tone drop the score always had. Transparency is applied
+		// once to the whole flattened sprite below, not per layer.
+		Color shadowColor = default(Color);
+		Color textColor = default(Color);
 		if (color == Color.White)
 		{
-			byte b = (byte)(alpha * 255f * 0.55f);
-			(color2) = new Color((byte)0, (byte)0, byte.MaxValue, b);
-			(color3) = new Color((byte)173, (byte)216, (byte)230, b);
+			(shadowColor) = new Color((byte)0, (byte)0, byte.MaxValue, byte.MaxValue);
+			(textColor) = new Color((byte)173, (byte)216, (byte)230, byte.MaxValue);
 		}
 		else
 		{
-			(color2) = new Color(new Vector4((color).ToVector3(), alpha * 0.55f));
-			(color3) = new Color(new Vector4((color).ToVector3() + new Vector3(0.65f, 0.65f, 0.65f), alpha * 0.55f));
+			(shadowColor) = new Color((color).ToVector3());
+			(textColor) = new Color((color).ToVector3() + new Vector3(0.65f, 0.65f, 0.65f));
 		}
-		spriteBatch.DrawString(font, str, position + new Vector2(2f, 2f), color2, 0f, new Vector2(0f, 0f), scale, (SpriteEffects)0, 1f);
-		spriteBatch.DrawString(font, str, position, color3, 0f, new Vector2(0f, 0f), scale, (SpriteEffects)0, 1f);
+		// Flatten shadow+text into ONE semi-transparent sprite so the translucent shadow no
+		// longer shows through the translucent text where they overlap. DebugFlags.MetalScore
+		// (chrome-sheen, ON by default — the card author kept it; ?metalscore=0 A/Bs the plain
+		// flatten) routes it through metal.fx. The chrome darkens the mid-band, so the metal
+		// score reads a touch more solid (0.7) than the plain flatten (0.55) to compensate.
+		bool metal = DebugFlags.MetalScore;
+		float opacity = alpha * (metal ? 0.7f : 0.55f);
+		spriteBatch.DrawShadowString(str, position, scale, shadowColor, textColor, new Vector2(2f, 2f), opacity, metal);
 	}
 
 	public override void Update(GameTime gameTime)

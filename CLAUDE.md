@@ -172,6 +172,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the banks or the ElevenLabs renders; don't hand-edit the outputs.** SFX/speech play on KNI
   `SoundEffect`; **music** is a WebAudio layer (`index.html` `eaMusic`, via `Compat/MusicInterop.cs`)
   for seamless loop points. `SoundManager.Play()` now returns a `SoundEffectInstance` (not `Cue`).
+- **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
+  WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
+  (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;
+  `cue_mix` = the resolved `category x sound` table) — these document the numbers; they don't
+  regenerate assets (no re-run needed unless the banks change). The **volume law is MonoGame's logistic
+  fit** `vol_to_linear` (byte `0xB4`=180 -> 0 dB; the modal SFX byte 90 -> **-12 dB**), NOT the old
+  `(byte-90)*0.25` estimate — `SoundManager.VolToLinear` mirrors it. Consequences baked into
+  `SoundManager`: (1) per-cue volume comes from the authored byte (`_cfg` lists only the deviating
+  cues; default = byte 90); every played cue is <= ~0.57 linear so **no WAV needs boosting** and KNI's
+  `Volume<=1` cap is never hit. (2) **Category gains are all 0 dB (unity)** per the `.xgs` — no
+  SFX/Speech/Music cross-bus trim (the old `SfxGain=0.75` is gone); baseline SFX (~0.25) sits ~level
+  with the music layer (`eaMusic` master .55 x track .6 = .33). (3) **Instance limits are per-CATEGORY**,
+  not per-cue: Default(SFX)=32 concurrent **FailToPlay** (`SfxMaxInstances`, `CountActive`), Speech
+  unlimited, Music one-at-a-time. (4) Variation: the bank authored none; a **subtle 5% vol / ~0.35-semi
+  humanize** is kept as a deliberate embellishment. (5) **RPC**: the one authored preset (var "Pitch"
+  -> Pitch, 0..100 -> +/-1200 cents) is the BrainBoss/Level3 music-rate sweep; `MusicInterop.SetRate`
+  now applies the faithful curve `2^((Pitch-50)/50)` and `eaMusic.setRate` just sets `playbackRate`.
+  (6) Music uses the authored **2.5s crossfade** (`MUSIC_FADE` in `index.html`). **There is NO DSP/reverb
+  in the bank** (0 presets) — that XACT feature was never authored, nothing to port.
 - **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
   the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
   keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`
@@ -204,6 +223,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
   "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
   outside-`#app` pattern.
+- **Trailers (Stage 14)** are an embedded **YouTube** overlay, NOT ported video. The original
+  `Content/VFX/*.wmv` (VC-1) won't play in a browser and there's no video loader, so the old
+  `TrailerScene`'s `Content.Load<Video>("VFX/..")` crashed the loop — it's now DEAD (constructed but
+  never added; don't re-wire it / don't reintroduce any `VFX/*` `Content.Load`). The Options ->
+  "Trailers" submenu's two handlers call `Compat/TrailerInterop.Play(youtubeId)` -> `window.eaTrailer(id)`
+  in `index.html` (sibling of `eaFullscreen`/`eaMusic`, built **outside `#app`**), which overlays a
+  `youtube-nocookie.com/embed?autoplay=1&rel=0` iframe + a Back button, pauses menu music
+  (`eaMusic.pause()`/`resume()` = AudioContext suspend/resume, seamless) and on close (Back/Esc/backdrop,
+  all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
+  (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
 - **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no
@@ -220,6 +249,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
   authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
   `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
+- **In-game score / "Player X — Press Start" text = ONE flattened sprite, chrome by default
+  (`SpriteBatchWrapper.DrawShadowString`).** `ScoreVisualiser.DrawStr` no longer draws the
+  drop shadow and the text as two separate translucent `DrawString`s (the old "shadow bleeds
+  THROUGH the text" bug — both were at the same partial alpha, so the 2px-offset shadow showed
+  through the glyph strokes). It now calls `DrawShadowString`, which rasterises shadow-then-text
+  at FULL opacity into the shared grow-only text RT (`metalRT`, via the extracted `EnsureTextRT`,
+  same plumbing as Stage-13 `DrawMetalString`) and composites the whole element ONCE at the
+  target alpha — so shadow+text fade as a single sprite, no bleed-through. The chrome sheen
+  (`metal.fx`) is ON by default (`DebugFlags.MetalScore`, default true; **`?metalscore=0`** A/Bs
+  the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
+  sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
+  back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
 - **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second
@@ -278,6 +319,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.DoodadActive`, race-free) gates `spawner_OnFinished`; Demo 1's earth is covered by the same
   X-lock. It's a PNG decoded at level preload (not in `textures.config`); `earth_small` is unchanged.
   Re-run `build_earth.py` after changing the source/knobs; don't hand-edit `earth.png`.
+- **Menu art is warmed at boot to kill the level->menu pop-in.** `Game1.WarmMenuContent()` (end of
+  `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
+  + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff
+  (which never displayed the menu before) -- appears in a single frame instead of revealing in ~0.5s
+  stages as each uncached MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
+  (`MenuScene`/`MenuSub1`/`MenuSubWithSkull`) all load through ONE shared content manager (`Scene.Content`
+  == `IContentManagerService.ContentManager` == `Game1.content`), so warming that one instance populates
+  the exact cache keys their `Load()` calls hit (same idea as a level's `PreloadGraphicalContent`).
+  (`CreditsScene` uses its OWN content manager, so its bg isn't warmed -- but the crawl fades its bg in,
+  so a cold decode there isn't the jarring part.) Pairs with skipping the brag interstitial: on web `BragScene` is
+  always immediately `Done` (no signed-in gamer), so `Game1.creditsScene_OnFinished` checks
+  `BragScene.WouldShow()` and routes credits -> menu directly instead of flashing one bare starfield frame.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it

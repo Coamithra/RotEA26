@@ -103,6 +103,11 @@ public class Background : Scene
 
 	public Vector2 ScrollSpeed => scrollspeed;
 
+	// True while a fly-by doodad (hero earth / sim-earth / small earth / andromeda)
+	// is crossing the screen. WaitForDoodadEvent polls this so Level 1 can hold the
+	// sideways asteroid-belt phase until the earth has left the screen.
+	public bool DoodadActive => showdoodad;
+
 	public event XFadeFinishedEvent OnXFadeFinished;
 
 	public Background(Game game)
@@ -180,11 +185,14 @@ public class Background : Scene
 			doodadblendmode = (SpriteBlendMode)1;
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			// Hi-res NASA Blue Marble hero disk: earth.png is now a 1480px frame
-			// (1460px disk) vs the old 735px, so scale 0.8 (not 1.6) keeps the
-			// on-screen fly-by size identical (1460*0.8 == old 730*1.6 == 1168 px).
-			doodadscale = 0.8f;
-			doodadscrollspeed = new Vector2(1.55f, 1.55f);
+			// Hi-res NASA Blue Marble hero disk: earth.png is now the FULL-res source
+			// crop (~1822px disk), cropped to a central vertical strip (tools/earth/
+			// build_earth.py), so scale falls 0.8 -> 0.6467 to keep the on-screen size
+			// identical (1806*0.6467 == old 730*1.6 == 1168 px) while rendering crisp.
+			doodadscale = 0.6467f;
+			// X scroll is ZERO: the hero earth only descends vertically, staying
+			// horizontally centred so its cropped sides never reach the screen edge.
+			doodadscrollspeed = new Vector2(0f, 1.55f);
 			doodadcolor = Color.White;
 			doodadblendmode = (SpriteBlendMode)1;
 			// Hero earth: near-freeze the starfields (~12%) while it glides across.
@@ -1021,9 +1029,10 @@ public class Background : Scene
 			doodadblendmode = (SpriteBlendMode)1;
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			// Same hi-res hero disk as QueueEarth -> scale 0.8 (see note there).
-			doodadscale = 0.8f;
-			doodadscrollspeed = new Vector2(1.55f, 1.55f);
+			// Same full-res hero strip as QueueEarth -> scale 0.6467, X scroll 0
+			// (centred vertical descent so the cropped strip's sides never show).
+			doodadscale = 0.6467f;
+			doodadscrollspeed = new Vector2(0f, 1.55f);
 			doodadcolor = new Color(0.7f, 0.7f, 0.7f, 1f);
 			doodadblendmode = (SpriteBlendMode)2;
 			// Holodeck sim-earth (projected, over the grid starfield) is out of scope — no slowdown.

@@ -348,7 +348,20 @@ public class Game1 : Game
 
 	private void creditsScene_OnFinished(object sender, Levels nextlevel)
 	{
-		collectionHelper.Add((GameComponent)(object)bragScene);
+		// The "brag to a friend" interstitial only displays anything when an Xbox LIVE
+		// gamer is signed in — never on the web build (SignedInGamers is empty). When it
+		// would immediately fall through to Done it still costs a wasted tick: a bare
+		// starfield frame plus a cold content load before it hands to the menu, which is
+		// the first visible "stage" of the jarring end-of-level -> menu pop-in. Skip
+		// straight to the menu in that case; only route through brag when it would show.
+		if (bragScene.WouldShow())
+		{
+			collectionHelper.Add((GameComponent)(object)bragScene);
+		}
+		else
+		{
+			collectionHelper.Add((GameComponent)(object)menuScene);
+		}
 	}
 
 	protected override void UnloadContent()
@@ -384,6 +397,40 @@ public class Game1 : Game
 		{
 			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
 			gamma = null;
+		}
+		WarmMenuContent();
+	}
+
+	// Decode the main menu's art ONCE at boot, behind the loading screen, so the first
+	// time the menu is shown it appears in a single frame instead of revealing in ~0.5s
+	// stages as each uncached MB-scale PNG (the planet backdrop, the title logo) decodes
+	// on the WASM main thread mid-transition. This is what made the end-of-level
+	// credits -> menu handoff (a path that never displayed the menu before) pop in
+	// piecemeal. Every menu scene shares this one content manager
+	// (Scene.Content == IContentManagerService.ContentManager == this `content`), whose
+	// cache is keyed by resolved path, so warming it here populates the exact entries
+	// their Load() calls hit. Same pattern as a level's PreloadGraphicalContent: a
+	// synchronous batch decode behind a loading indicator. Best-effort — a missing or
+	// unreadable asset must never block boot, so the whole pass is guarded.
+	private void WarmMenuContent()
+	{
+		try
+		{
+			content.Load<Texture2D>("GFX/Menu/planet");
+			content.Load<Texture2D>("GFX/Menu/title-revenged");
+			content.Load<Texture2D>("GFX/Menu/star");
+			content.Load<Texture2D>("GFX/Menu/blank");
+			content.Load<Texture2D>("GFX/Menu/pointer");
+			content.Load<Texture2D>("GFX/Menu/hudring");
+			content.Load<Texture2D>("GFX/Menu/vignette");
+			content.Load<Texture2D>("GFX/Preview/small_face_a");
+			content.Load<Texture2D>("GFX/Preview/small_face_b");
+			content.Load<SpriteFont>("GFX/Menu/menufont");
+			content.Load<Curve>("GFX/Effects/BrainCurve");
+		}
+		catch (Exception ex)
+		{
+			System.Console.WriteLine("[menu-warm] menu content warm failed: " + ex);
 		}
 	}
 

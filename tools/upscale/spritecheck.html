@@ -1,0 +1,144 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sprite check — upscale review</title>
+<!--
+  Quick visual review of the upscaled/repacked sprites. Open this file directly in a
+  browser (double-click / file://). Reads the live PNGs straight off disk, so it
+  reflects whatever is currently swapped into Content (re-run the build, refresh here).
+  Toggle the background to judge transparency (checker), in-game look (space), dark
+  fringing (white), or leftover key bleed (magenta). "Compare original" shows the
+  pristine *.png.orig next to each new one. NOT shipped (lives under tools/).
+-->
+<style>
+  :root { --bg: #2a2d33; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #15171b; color: #d6d9de; }
+  header { position: sticky; top: 0; z-index: 5; background: #1d2026; border-bottom: 1px solid #333;
+           padding: 10px 16px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; }
+  .grp { display: flex; gap: 6px; align-items: center; }
+  .grp b { color: #888; font-weight: 500; margin-right: 2px; }
+  button { background: #2a2e36; color: #cfd3d9; border: 1px solid #3a3f48; border-radius: 5px;
+           padding: 4px 10px; cursor: pointer; font: inherit; }
+  button.on { background: #3d6fe0; border-color: #3d6fe0; color: #fff; }
+  label.chk { cursor: pointer; user-select: none; }
+  h2 { margin: 22px 16px 4px; font-size: 13px; color: #8b93a0; font-weight: 600;
+       letter-spacing: .04em; text-transform: uppercase; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 12px; padding: 8px 16px 40px; }
+  .card { background: #1d2026; border: 1px solid #2e323a; border-radius: 8px; overflow: hidden; }
+  .card .name { padding: 6px 9px; font-weight: 600; display: flex; justify-content: space-between; }
+  .card .name small { color: #7c8493; font-weight: 400; }
+  .pair { display: flex; }
+  .pane { flex: 1; min-width: 0; }
+  .pane .lbl { text-align: center; color: #6f7686; padding: 2px; font-size: 11px; border-top: 1px solid #2e323a; }
+  .stage { height: 190px; display: flex; align-items: center; justify-content: center;
+           background-color: var(--bg); overflow: hidden; }
+  /* checker */
+  body.bg-checker .stage { background-image:
+      conic-gradient(#3a3d44 25%, #23262c 0 50%, #3a3d44 0 75%, #23262c 0);
+      background-size: 22px 22px; }
+  body.bg-space .stage  { --bg:#05060d; background-image: radial-gradient(#10132a 1px, transparent 1px),
+                          radial-gradient(#0a0c18 1px, transparent 1px); background-size: 26px 26px, 14px 14px; }
+  body.bg-white .stage  { --bg:#e9ebef; }
+  body.bg-magenta .stage{ --bg:#ff00ff; }
+  .stage img { image-rendering: auto; }
+  body.pixelated .stage img { image-rendering: pixelated; }
+  .note { color:#9aa3b2; padding: 2px 16px 0; font-size:12px; }
+  .note code { color:#cdd3db; }
+</style>
+<body class="bg-checker">
+<header>
+  <h1>Sprite check</h1>
+  <div class="grp"><b>bg</b>
+    <button data-bg="checker" class="on">checker</button>
+    <button data-bg="space">space</button>
+    <button data-bg="white">white</button>
+    <button data-bg="magenta">magenta</button>
+  </div>
+  <div class="grp"><b>scale</b>
+    <button data-sc="fit" class="on">fit</button>
+    <button data-sc="1">1×</button>
+    <button data-sc="2">2×</button>
+    <button data-sc="4">4×</button>
+  </div>
+  <div class="grp">
+    <label class="chk"><input type="checkbox" id="cmp" checked> compare original</label>
+    <label class="chk"><input type="checkbox" id="px"> pixelated</label>
+  </div>
+</header>
+
+<p class="note">Checker reveals transparency/keying (look for pink bleed or hard halos). Space ≈ in-game.
+  <code>plasmaball2</code> draws <b>additive + tinted</b> in-game, so it'll look brighter there than here.</p>
+
+<div id="root"></div>
+
+<script>
+const SPR = "../../web/EvilAliensWeb/wwwroot/Content/gfx/sprites/";
+const GROUPS = [
+  { title: "Procedural (drawn, not AI)", items: ["bulletevil","bulletgood","arrow"] },
+  { title: "Keyed + repacked",
+    items: ["blooddrop","blooddrop_green","option","braingoo","photocamera","awardmentblade","parachute","plasmaball2"] },
+  { title: "Glows (connector alpha-lifted for a glowier read)",
+    items: ["connector","singleconnectorglow","shadow","blast"] },
+];
+
+function srcs(name) {
+  return { neu: SPR + name + ".png", old: SPR + name + ".png.orig" };
+}
+
+let scaleMode = "fit";
+const FIT = { w: 200, h: 168 };   // fit box; small sprites scale UP so they're viewable
+function applyScale(img) {
+  img.style.maxWidth = img.style.maxHeight = "none";
+  const nW = img.naturalWidth || 1, nH = img.naturalHeight || 1;
+  const f = scaleMode === "fit" ? Math.min(FIT.w / nW, FIT.h / nH) : +scaleMode;
+  img.style.width = Math.round(nW * f) + "px";
+  img.style.height = Math.round(nH * f) + "px";
+}
+
+const allImgs = [];
+function pane(src, label) {
+  const p = document.createElement("div"); p.className = "pane";
+  const st = document.createElement("div"); st.className = "stage";
+  const img = document.createElement("img"); img.src = src; img.alt = label;
+  img.onerror = () => { st.innerHTML = "<span style='color:#a55'>missing</span>"; };
+  img.onload = () => { applyScale(img); lbl.textContent = label + "  " + img.naturalWidth + "×" + img.naturalHeight; };
+  st.appendChild(img); allImgs.push(img);
+  const lbl = document.createElement("div"); lbl.className = "lbl"; lbl.textContent = label;
+  p.appendChild(st); p.appendChild(lbl); return p;
+}
+
+function build() {
+  const root = document.getElementById("root"); root.innerHTML = ""; allImgs.length = 0;
+  const cmp = document.getElementById("cmp").checked;
+  for (const g of GROUPS) {
+    const h = document.createElement("h2"); h.textContent = g.title; root.appendChild(h);
+    const grid = document.createElement("div"); grid.className = "grid";
+    for (const name of g.items) {
+      const s = srcs(name);
+      const card = document.createElement("div"); card.className = "card";
+      const nm = document.createElement("div"); nm.className = "name";
+      nm.innerHTML = "<span>" + name + "</span>"; card.appendChild(nm);
+      const pair = document.createElement("div"); pair.className = "pair";
+      if (cmp) pair.appendChild(pane(s.old, "original"));
+      pair.appendChild(pane(s.neu, "new"));
+      card.appendChild(pair); grid.appendChild(card);
+    }
+    root.appendChild(grid);
+  }
+}
+
+document.querySelectorAll("[data-bg]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-bg]").forEach(x => x.classList.remove("on")); b.classList.add("on");
+  document.body.className = document.body.className.replace(/bg-\w+/, "") + " bg-" + b.dataset.bg;
+});
+document.querySelectorAll("[data-sc]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-sc]").forEach(x => x.classList.remove("on")); b.classList.add("on");
+  scaleMode = b.dataset.sc; allImgs.forEach(applyScale);
+});
+document.getElementById("cmp").onchange = build;
+document.getElementById("px").onchange = e => document.body.classList.toggle("pixelated", e.target.checked);
+build();
+</script>
+</body>

@@ -1,0 +1,411 @@
+{
+  "sheet": "smalls",
+  "background": "#FF00FF",
+  "grid": {
+    "cols": 5,
+    "rows": 3
+  },
+  "cell": {
+    "w": 288,
+    "h": 332,
+    "area": 288,
+    "label_h": 44,
+    "fit": 224
+  },
+  "size": [
+    1440,
+    996
+  ],
+  "cells": [
+    {
+      "id": "A1",
+      "name": "bulletevil",
+      "src": "gfx/sprites/bulletevil.png",
+      "native": [
+        16,
+        16
+      ],
+      "scale": 14,
+      "cell_xy": [
+        0,
+        0
+      ],
+      "sprite_area": [
+        0,
+        44,
+        288,
+        288
+      ],
+      "placed": [
+        32,
+        76,
+        224,
+        224
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "bulletgood",
+      "src": "gfx/sprites/bulletgood.png",
+      "native": [
+        16,
+        16
+      ],
+      "scale": 14,
+      "cell_xy": [
+        288,
+        0
+      ],
+      "sprite_area": [
+        288,
+        44,
+        288,
+        288
+      ],
+      "placed": [
+        320,
+        76,
+        224,
+        224
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "blooddrop",
+      "src": "gfx/sprites/blooddrop.png",
+      "native": [
+        15,
+        18
+      ],
+      "scale": 12,
+      "cell_xy": [
+        576,
+        0
+      ],
+      "sprite_area": [
+        576,
+        44,
+        288,
+        288
+      ],
+      "placed": [
+        630,
+        80,
+        180,
+        216
+      ]
+    },
+    {
+      "id": "A4",
+      "name": "blooddrop_green",
+      "src": "gfx/sprites/blooddrop_green.png",
+      "native": [
+        15,
+        18
+      ],
+      "scale": 12,
+      "cell_xy": [
+        864,
+        0
+      ],
+      "sprite_area": [
+        864,
+        44,
+        288,
+        288
+      ],
+      "placed": [
+        918,
+        80,
+        180,
+        216
+      ]
+    },
+    {
+      "id": "A5",
+      "name": "option",
+      "src": "gfx/sprites/option.png",
+      "native": [
+        24,
+        24
+      ],
+      "scale": 9,
+      "cell_xy": [
+        1152,
+        0
+      ],
+      "sprite_area": [
+        1152,
+        44,
+        288,
+        288
+      ],
+      "placed": [
+        1188,
+        80,
+        216,
+        216
+      ]
+    },
+    {
+      "id": "B1",
+      "name": "braingoo",
+      "src": "gfx/sprites/braingoo.png",
+      "native": [
+        45,
+        34
+      ],
+      "scale": 4,
+      "cell_xy": [
+        0,
+        332
+      ],
+      "sprite_area": [
+        0,
+        376,
+        288,
+        288
+      ],
+      "placed": [
+        54,
+        452,
+        180,
+        136
+      ]
+    },
+    {
+      "id": "B2",
+      "name": "arrow",
+      "src": "gfx/sprites/arrow.png",
+      "native": [
+        49,
+        40
+      ],
+      "scale": 4,
+      "cell_xy": [
+        288,
+        332
+      ],
+      "sprite_area": [
+        288,
+        376,
+        288,
+        288
+      ],
+      "placed": [
+        334,
+        440,
+        196,
+        160
+      ]
+    },
+    {
+      "id": "B3",
+      "name": "photocamera",
+      "src": "gfx/sprites/photocamera.png",
+      "native": [
+        54,
+        50
+      ],
+      "scale": 4,
+      "cell_xy": [
+        576,
+        332
+      ],
+      "sprite_area": [
+        576,
+        376,
+        288,
+        288
+      ],
+      "placed": [
+        612,
+        420,
+        216,
+        200
+      ]
+    },
+    {
+      "id": "B4",
+      "name": "shadow",
+      "src": "gfx/sprites/shadow.png",
+      "native": [
+        82,
+        40
+      ],
+      "scale": 2,
+      "cell_xy": [
+        864,
+        332
+      ],
+      "sprite_area": [
+        864,
+        376,
+        288,
+        288
+      ],
+      "placed": [
+        926,
+        480,
+        164,
+        80
+      ]
+    },
+    {
+      "id": "B5",
+      "name": "block",
+      "src": "gfx/sprites/block.png",
+      "native": [
+        80,
+        80
+      ],
+      "scale": 2,
+      "cell_xy": [
+        1152,
+        332
+      ],
+      "sprite_area": [
+        1152,
+        376,
+        288,
+        288
+      ],
+      "placed": [
+        1216,
+        440,
+        160,
+        160
+      ]
+    },
+    {
+      "id": "C1",
+      "name": "singleconnectorglow",
+      "src": "gfx/sprites/singleconnectorglow.png",
+      "native": [
+        89,
+        87
+      ],
+      "scale": 2,
+      "cell_xy": [
+        0,
+        664
+      ],
+      "sprite_area": [
+        0,
+        708,
+        288,
+        288
+      ],
+      "placed": [
+        55,
+        765,
+        178,
+        174
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "connector",
+      "src": "gfx/sprites/connector.png",
+      "native": [
+        180,
+        95
+      ],
+      "scale": 1,
+      "cell_xy": [
+        288,
+        664
+      ],
+      "sprite_area": [
+        288,
+        708,
+        288,
+        288
+      ],
+      "placed": [
+        342,
+        804,
+        180,
+        95
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "spiderdebris1",
+      "src": "gfx/sprites/spiderdebris1.png",
+      "native": [
+        136,
+        82
+      ],
+      "scale": 1,
+      "cell_xy": [
+        576,
+        664
+      ],
+      "sprite_area": [
+        576,
+        708,
+        288,
+        288
+      ],
+      "placed": [
+        652,
+        811,
+        136,
+        82
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "spiderdebris2",
+      "src": "gfx/sprites/spiderdebris2.png",
+      "native": [
+        258,
+        71
+      ],
+      "scale": 0.8682,
+      "cell_xy": [
+        864,
+        664
+      ],
+      "sprite_area": [
+        864,
+        708,
+        288,
+        288
+      ],
+      "placed": [
+        896,
+        821,
+        224,
+        62
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "spiderdebris3",
+      "src": "gfx/sprites/spiderdebris3.png",
+      "native": [
+        219,
+        132
+      ],
+      "scale": 1,
+      "cell_xy": [
+        1152,
+        664
+      ],
+      "sprite_area": [
+        1152,
+        708,
+        288,
+        288
+      ],
+      "placed": [
+        1186,
+        786,
+        219,
+        132
+      ]
+    }
+  ]
+}

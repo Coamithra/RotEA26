@@ -237,7 +237,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (readyToConnect)
 		{
 			spriteBatch.BlendMode = (SpriteBlendMode)2;
-			spriteBatch.Draw(gloweffect, base.Position, 0f, 1f, center: true, Color.White);
+			spriteBatch.Draw(gloweffect, base.Position, 0f, 1f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/singleconnectorglow", gloweffect.Width), center: true, Color.White);
 			spriteBatch.BlendMode = (SpriteBlendMode)1;
 		}
 		base.Draw(gameTime);

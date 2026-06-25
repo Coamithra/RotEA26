@@ -1,0 +1,73 @@
+{
+  "sheet": "mediums",
+  "background": "#FF00FF",
+  "grid": {
+    "cols": 2,
+    "rows": 1
+  },
+  "cell": {
+    "w": 760,
+    "h": 812,
+    "area": 760,
+    "label_h": 52,
+    "fit": 680
+  },
+  "size": [
+    1520,
+    812
+  ],
+  "cells": [
+    {
+      "id": "A1",
+      "name": "blast",
+      "src": "gfx/sprites/blast.png",
+      "native": [
+        384,
+        366
+      ],
+      "scale": 1,
+      "cell_xy": [
+        0,
+        0
+      ],
+      "sprite_area": [
+        0,
+        52,
+        760,
+        760
+      ],
+      "placed": [
+        188,
+        249,
+        384,
+        366
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "awardmentblade",
+      "src": "gfx/sprites/awardmentblade.png",
+      "native": [
+        487,
+        90
+      ],
+      "scale": 1,
+      "cell_xy": [
+        760,
+        0
+      ],
+      "sprite_area": [
+        760,
+        52,
+        760,
+        760
+      ],
+      "placed": [
+        896,
+        387,
+        487,
+        90
+      ]
+    }
+  ]
+}

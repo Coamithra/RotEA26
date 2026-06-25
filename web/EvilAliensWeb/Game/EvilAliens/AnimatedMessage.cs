@@ -282,7 +282,7 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 			spriteBatch.DrawString(font, text, position, color, 0f, origin4, scale, (SpriteEffects)0, 0f);
 			MyMath.Mod(warningDirection, (float)Math.PI * 2f);
 			Vector2 val2 = new Vector2(400f, 300f) + MyMath.AngleToVector(warningDirection) * 275f;
-			spriteBatch.Draw(arrow, val2, warningDirection + (float)Math.PI / 2f, 1f, center: true, color);
+			spriteBatch.Draw(arrow, val2, warningDirection + (float)Math.PI / 2f, 1f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/arrow", arrow.Width), center: true, color);
 			break;
 		}
 		case MessageType.unlocked:

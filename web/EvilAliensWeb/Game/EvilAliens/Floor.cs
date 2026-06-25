@@ -60,7 +60,7 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 		foreach (Shadow shadow in shadows)
 		{
 			(color) = new Color(new Vector4(1f, 1f, 1f, shadow.height));
-			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height)), 0f, shadow.size * (2f - shadow.height), center: true, color);
+			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height)), 0f, shadow.size * (2f - shadow.height) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/shadow", shadowimage.Width), center: true, color);
 		}
 		base.Draw(gameTime);
 	}

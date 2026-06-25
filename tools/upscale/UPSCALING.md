@@ -30,6 +30,46 @@ factor"). Read this before doing the next sprite; it's mostly *traps we already 
 5. **Register + draw fixes** — see "Engine integration" below.
 6. **Build, restart server, verify in-browser** — see "Verification" below.
 
+## Bulk contact sheet (many small STATIC sprites in one pass)
+
+For the little single-frame sprites (bullets, blood drops, debris, the option icon
+— "bullets and what not") the per-sprite pipeline above is overkill: batch them. The
+Trello "small sprites upscale effort" card is this path.
+
+1. **Build the sheet** — `python tools/upscale/build_contact_sheet.py smalls|mediums|all`
+   (run from repo root). Each sprite is composited onto flat `#FF00FF`, nearest-neighbour
+   upscaled to fill its cell with a generous magenta margin, under a dark label strip
+   (`<cell-id> <name> <WxH>`). Uniform grid → part 2 slices by geometry, not by reading
+   labels. Outputs `tools/upscale/contact_sheets/<set>.png` + a `<set>.json` manifest
+   (per-cell `native`, `scale`, `placed`/`sprite_area` rects — everything part 2 needs).
+   Which sprites are in which set, and the cell geometry, live in `SETS` at the top of the
+   script — edit there to add/move a sprite, then re-run. Only sprites still at original
+   `.xnb` resolution belong here (confirm with `tools/xnb/xnb.py <dir>` vs the current png).
+2. **Generate** — drop the whole sheet into ChatGPT/Gemini with the prompt below. The
+   model regenerates the *entire* image, so cell positions/sizes DRIFT — that's fine, part 3
+   re-aligns each sprite to its low-res original (overlap-to-original), so the AI result need
+   not be pixel-accurate, only crisp + faithful + still one-sprite-per-cell on magenta.
+3. **Slice + repack (part 2, when the gen comes back)** — for each cell: crop by the
+   manifest's `sprite_area`, chroma-key the magenta (`make_gifs.key_magenta`), then run the
+   single-still repack (`repack_landed.py`) to footprint-match each sprite to `origW*factor`
+   and place it at the original bbox-centre. Register its name in
+   `AlienDrawableGameComponent.DesignFrameWidth` and fix any direct-draw site (see the
+   size-trap section). These are static single frames, so no registration/wobble pass.
+
+**Ready-to-paste prompt** (tune the per-sprite hints — the model invents garbage on details
+it can't resolve):
+
+> Redraw this sprite sheet at much higher resolution. It is a grid of separate small
+> game sprites on a flat magenta (#FF00FF) background, each in its own cell with a dark
+> label bar on top. For EACH sprite: redraw it faithfully — identical shape, colours,
+> silhouette, and viewing angle — just crisper and higher-detail, as if the original
+> pixel art were drawn at 4× the resolution. Keep every sprite in its OWN cell at the
+> same position and roughly the same size. Keep the flat #FF00FF magenta background and
+> the dark label bars exactly as they are. Do NOT add anything that isn't already there:
+> no stars, sparkles, glows, drop shadows, outlines, banners, captions, borders, or
+> background detail. Do not merge, move, swap, or restyle sprites between cells. Output
+> the same grid in the same layout.
+
 ## Path A vs Path B (which AI)
 
 - **Path A — super-resolution** (Real-ESRGAN, etc.): faithful, preserves motion exactly,
@@ -129,6 +169,9 @@ compensate. Fix = divide the draw scale by the factor. We did it centrally:
 | `repack_landed.py` | single still frame: key -> match sprite WIDTH to origW*factor -> place at orig bbox-centre*factor in an origW*factor canvas (the landed stills + the `powerupbw` HD bubble). |
 | `pack_small_asteroids.py` | slice a magenta GRID of variants -> key -> footprint-match each to origW*factor at a LOWER factor (for sprites drawn small). Built `AsteroidSmall1..4`. |
 | `pack_anchored_anim.py` | FIXED-CAMERA frame folder -> ONE shared union-bbox crop (no per-frame jitter) -> key -> grid sheet. For anchored AnimGen anims (the spider rear-up). |
+| `build_contact_sheet.py` | bulk INPUT sheet: composite many static sprites onto a magenta grid (nearest-neighbour upscaled, labelled cells) + a JSON manifest for slicing the gen back. `smalls`/`mediums`/`all`. See "Bulk contact sheet" above. |
+| `repack_misc.py` | slice single-frame sprites from a contact sheet, chroma-key (magenta or green, translucency-aware) + footprint-match each to original-dims*factor. Per-sprite KNEE/KEY/ABOOST/LUMA_ALPHA/FILLGLOW. See "Bulk contact sheet". |
+| `gen_sprites.py` | procedurally draw sprites better than AI: bulletevil/good (shaded spheres + outline), arrow (traced from the original contour). |
 | `interp_frame.py` | PATCH ONE bad cell of an already-packed sheet with the half-way blend of its two neighbours (`frame i := lerp(i-1, i+1, 0.5)`). `premult` (clean edges) or `straight` (raw RGBA lerp, exactly what sprite.fx INTERPOLATE does). For a single flickery/duplicate frame, no re-repack. |
 | `flow_tween_frame.py` | same single-cell patch but MOTION-COMPENSATED: bidirectional Farneback optical flow warps each neighbour halfway toward the midpoint, then blends (premultiplied). Cleaner than `interp_frame` when features MOVE; for a pure brightness/glow morph it collapses to the same blend (no displacement to compensate). Adapted from `Fighter/scripts/make_seam_tween.py`. Used to de-flicker `faceofdeath` frame 7. |
 | `flow_interp_sheet.py` | 2x-FRAME interpolation: insert a tween between every consecutive pair (cyclic) of a GRID sheet (or several read in order, e.g. mothershipA+B) -> doubled-frame sheet. `flow` (Farneback) / `blend` (naive lerp) / `none` (repack baseline). For evaluating whether frame-interpolation smooths a given animation. |

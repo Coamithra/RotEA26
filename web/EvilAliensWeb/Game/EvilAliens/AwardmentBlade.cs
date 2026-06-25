@@ -147,14 +147,14 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		{
 			float num5 = MathHelper.SmoothStep(0f, 1f, 1f - bladeTimer.Normalized);
 			float num6 = MathHelper.SmoothStep(0.5f, 1f, 1f - bladeTimer.Normalized);
-			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num6, num5), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
+			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num6, num5) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
 			break;
 		}
 		case State.Show:
 		{
 			float num3 = 1f;
 			float num4 = 1f;
-			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num4, num3), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
+			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num4, num3) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
 			batch.DrawString("Awardment Unlocked!", new Vector2(400f, 433f), Color.AliceBlue, 0f, centered: true, new Vector2(num4, num3) * 0.8f, (SpriteEffects)0, 1f);
 			batch.DrawString(awardmentStrings[(int)currentlyDisplaying], new Vector2(400f, 467f), Color.AliceBlue, 0f, centered: true, new Vector2(num4, num3), (SpriteEffects)0, 1f);
 			break;
@@ -163,7 +163,7 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		{
 			float num = MathHelper.SmoothStep(1f, 0f, 1f - bladeTimer.Normalized);
 			float num2 = MathHelper.SmoothStep(1f, 0.5f, 1f - bladeTimer.Normalized);
-			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num2, num), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
+			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num2, num) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
 			break;
 		}
 		}

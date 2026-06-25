@@ -310,7 +310,8 @@ trust the markers.
 
 ## Phase 7: Clean up
 
-Stop any dev servers you started. :)
+Stop any dev servers you started, and close any Chrome tabs you opened for verification
+(claude-in-chrome) — close the tab(s) and let the empty MCP tab group auto-remove. :)
 
 ---
 

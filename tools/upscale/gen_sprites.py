@@ -89,6 +89,13 @@ def arrow(orig_path, factor=8, *, color=(255, 255, 255)):
     return im.resize((W, H), Image.LANCZOS)
 
 
+def orig_ref(name):
+    """Pristine original of a sprite -- the .png.orig backup if a swap already
+    happened (so a re-run doesn't read our own upscaled output back in), else .png."""
+    o = os.path.join(SPRITES, name + ".png.orig")
+    return o if os.path.exists(o) else os.path.join(SPRITES, name + ".png")
+
+
 def save(img, name):
     os.makedirs(OUT, exist_ok=True)
     img.save(os.path.join(OUT, name + ".png"))
@@ -97,10 +104,13 @@ def save(img, name):
 
 def main():
     print("generating procedural sprites -> tools/upscale/gen_out/")
+    # Sized for ~1:1 texel:pixel at the worst case (presenter caps at 2.4x), with a
+    # little AA headroom -- NOT oversized. bullets draw at design 16 * scale 1 * 2.4
+    # ~= 38px on screen -> 48px; arrow design 49 * 1 * 2.4 ~= 118px -> 49*3 = 147px.
     sprites = {
-        "bulletevil": sphere(128, (0.90, 0.12, 0.12)),     # red energy ball
-        "bulletgood": sphere(128, (0.18, 0.82, 0.24)),     # green energy ball
-        "arrow": arrow(os.path.join(SPRITES, "arrow.png")),   # traced, 49x40 * 8
+        "bulletevil": sphere(48, (0.90, 0.12, 0.12)),      # red energy ball
+        "bulletgood": sphere(48, (0.18, 0.82, 0.24)),      # green energy ball
+        "arrow": arrow(orig_ref("arrow"), factor=3),   # traced from the pristine 49x40, * 3
     }
     for name, img in sprites.items():
         save(img, name)

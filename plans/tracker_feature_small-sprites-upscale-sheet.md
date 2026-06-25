@@ -36,11 +36,20 @@ then hand the result back for re-integration.
 - [ ] Hand sheets + ChatGPT prompt to user; keep card In Progress for part 2
 - [ ] Comment on card (part 1 done, awaiting user's ChatGPT pass)
 
-## PART 2 (later — when user returns the HD result)
-- [ ] Slice each cell by manifest sprite_area, chroma-key magenta
-- [ ] repack_landed.py footprint-match each to origW*factor at original bbox-centre
-- [ ] Register names in AlienDrawableGameComponent.DesignFrameWidth + fix direct-draw sites
-- [ ] Swap pngs in (back up *.png.orig), verify in-game (cache-bust!), then ship + close card
+## PART 2 (user returned misc1 = smalls, misc2 = mediums)
+DONE + verified in-game (Level1: bullets correct size, 0 console errors):
+- [x] Procedural: bulletevil/good (spheres), arrow (traced from orig contour) — gen_sprites.py
+- [x] Keyed+repacked (repack_misc.py, translucency key): blooddrop, blooddrop_green, option,
+      braingoo, photocamera (washed), awardmentblade; parachute + plasmaball2 (factor-1 drop-ins)
+- [x] DesignFrameWidth registry + direct-draw SuperSampleFactor fixes (AnimatedMessage, BloodExplosion
+      x3, ScoreVisualiser, AwardmentBlade x3). Build clean.
+PENDING:
+- [ ] plasmaball2 additive-blend harness check (?harness=plasmaball) — may blow out, dim if so
+- [ ] GLOWS decision (singleconnectorglow, connector, shadow, blast): recommend KEEP ORIGINALS
+      (smooth gradients get no benefit from upscale + key poorly). blast could be swapped for the
+      AI restyle if wanted.
+- [ ] Verify parachute (Level2/3 paratroopers), awardmentblade (awardment screen), arrow (warning)
+- [ ] Final: /review, PR + merge, move card to Done, delete tracker, drop *.orig backups
 
 ## Notes
 - 2-part card: PART 1 (now) = produce the upscale-prep sheets. PART 2 (later, when user

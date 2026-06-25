@@ -31,15 +31,21 @@ OUT = os.path.join(HERE, "gen_out")
 MAGENTA = np.array([255.0, 0.0, 255.0], np.float32)
 
 # name -> (sheet, (x0,y0,x1,y1) sprite region with label text + grid lines excluded,
-#          factor, wash). factor = output size / original (registry design = OW).
+#          factor, wash). factor = output texels / original. Because the engine
+# decouples texture resolution from on-screen size (DesignFrameWidth registry), the
+# factor is chosen ONLY for ~1:1 texel:pixel at the worst case + a little AA headroom
+# -- NOT for "max upscale". On-screen px = designW * maxDrawScale * 2.4 (presenter cap),
+# so factor ~= maxDrawScale * 2.4 * 1.25. maxDrawScale: bullets/option/photocamera/arrow
+# =1, blooddrop ~size*0.22 (size<=6 -> ~1.3), braingoo ~size*0.044 (-> ~0.26),
+# parachute/plasmaball2 =0.25, awardmentblade ~1 (capped by AI source res).
 JOBS = {
-    "parachute":          ("misc2.png", (12, 60, 620, 622), 1.0, False),
-    "plasmaball2":        ("misc2.png", (12, 686, 620, 1246), 1.0, False),
-    "blooddrop":          ("misc1.png", (608, 40, 898, 343), 4.0, False),
-    "blooddrop_green":    ("misc1.png", (909, 40, 1199, 343), 4.0, False),
-    "option":             ("misc1.png", (1210, 40, 1500, 343), 4.0, False),
-    "braingoo":           ("misc1.png", (6, 388, 296, 691), 4.0, False),
-    "photocamera":        ("misc1.png", (608, 388, 898, 691), 4.0, True),
+    "parachute":          ("misc2.png", (12, 60, 620, 622), 0.8, False),
+    "plasmaball2":        ("misc2.png", (12, 686, 620, 1246), 0.75, False),
+    "blooddrop":          ("misc1.png", (608, 40, 898, 343), 3.0, False),
+    "blooddrop_green":    ("misc1.png", (909, 40, 1199, 343), 3.0, False),
+    "option":             ("misc1.png", (1210, 40, 1500, 343), 3.0, False),
+    "braingoo":           ("misc1.png", (6, 388, 296, 691), 1.0, False),
+    "photocamera":        ("misc1.png", (608, 388, 898, 691), 3.0, True),
     "shadow":             ("misc1.png", (909, 388, 1199, 691), 4.0, False),
     "singleconnectorglow": ("misc1.png", (6, 737, 296, 1039), 4.0, False),
     "connector":          ("misc1.png", (307, 737, 597, 1039), 4.0, False),
@@ -85,6 +91,13 @@ def wash_out(rgba, lift=0.5):
     return np.asarray(im)
 
 
+def orig_ref(name):
+    """Pristine original -- the .png.orig backup if a swap already happened (so a
+    re-run doesn't footprint-match against our own upscaled output), else .png."""
+    o = os.path.join(SPRITES, name + ".png.orig")
+    return o if os.path.exists(o) else os.path.join(SPRITES, name + ".png")
+
+
 def alpha_bbox(a, thr=12):
     ys, xs = np.where(a > thr)
     return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
@@ -125,7 +138,7 @@ def run(name):
     rgba = keep_real_blobs(fuchsia_key(sheet[y0:y1, x0:x1]))
     if wash:
         rgba = wash_out(rgba)
-    out, ow = footprint_match(rgba, os.path.join(SPRITES, name + ".png"), factor)
+    out, ow = footprint_match(rgba, orig_ref(name), factor)
     os.makedirs(OUT, exist_ok=True)
     out.save(os.path.join(OUT, name + ".png"))
     print("  %-20s -> %dx%d  (design width %d, factor %.2g)" % (name, out.width, out.height, ow, factor))

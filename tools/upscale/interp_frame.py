@@ -43,8 +43,8 @@ else:                                                         # premultiplied le
     pa = np.dstack([a[:, :, :3] * (a[:, :, 3:4] / 255.0), a[:, :, 3]])
     pb = np.dstack([b[:, :, :3] * (b[:, :, 3:4] / 255.0), b[:, :, 3]])
     p = 0.5 * pa + 0.5 * pb
-    al = p[:, :, 3:4]
-    rgb = np.where(al > 1e-4, p[:, :, :3] / np.maximum(al / 255.0, 1e-4), 0)
+    al = p[:, :, 3:4] / 255.0                                 # normalise once so mask + divisor share a scale
+    rgb = np.where(al > 1e-4, p[:, :, :3] / np.maximum(al, 1e-4), 0)
     out = np.dstack([rgb, p[:, :, 3]])
 
 out = np.clip(out, 0, 255).astype(np.uint8)

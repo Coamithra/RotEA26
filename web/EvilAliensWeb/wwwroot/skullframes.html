@@ -74,7 +74,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let img = null, cols = 8, rows = 4, sep = 1, cw = 0, ch = 0, N = 0, cur = 0;
-let onion = false, diff = false, playing = false, playTimer = null;
+let onion = false, diff = false, playing = false, playTimer = null, gridWarn = '';
 const SCALE = 3;            // magnify the big view by this factor (nearest-neighbor)
 
 function cellRect(i) {
@@ -121,7 +121,7 @@ function render() {
   drawInto($('prevc'), prevI, { ghost: true });
   drawInto($('nextc'), nextI, { ghost: true });
   const rc = cellRect(cur);
-  $('num').innerHTML = `frame <b>${cur}</b> / ${N} &nbsp;<small>row ${rc.r}, col ${rc.c}</small>`;
+  $('num').innerHTML = `frame <b>${cur}</b> / ${N - 1} &nbsp;<small>row ${rc.r}, col ${rc.c}${gridWarn}</small>`;
   $('plabel').textContent = 'prev (' + prevI + ')';
   $('clabel').textContent = 'current (' + cur + ')';
   $('nlabel').textContent = 'next (' + nextI + ')';
@@ -165,6 +165,9 @@ function load() {
     cw = Math.floor((img.naturalWidth - (cols - 1) * sep) / cols);
     ch = Math.floor((img.naturalHeight - (rows - 1) * sep) / rows);
     N = cols * rows; cur = Math.min(cur, N - 1);
+    const fitW = cols * cw + (cols - 1) * sep, fitH = rows * ch + (rows - 1) * sep;
+    gridWarn = (fitW === img.naturalWidth && fitH === img.naturalHeight)
+      ? '' : `  ⚠ ${cols}×${rows} doesn't divide ${img.naturalWidth}×${img.naturalHeight}`;
     buildStrip(); render();
     if (window.__startFrame != null) { cur = ((window.__startFrame % N) + N) % N; render(); window.__startFrame = null; }
     if (window.__autoplay) { window.__autoplay = false; play(); }

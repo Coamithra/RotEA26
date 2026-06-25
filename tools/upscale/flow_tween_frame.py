@@ -57,7 +57,8 @@ def warp_half(img, fl, t):                       # backward-remap: sample img al
     gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
     mapx = (gx + t * fl[..., 0]).astype(np.float32)
     mapy = (gy + t * fl[..., 1]).astype(np.float32)
-    return cv2.remap(img, mapx, mapy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    # premult content: out-of-bounds should read transparent (0), not smear the opaque edge
+    return cv2.remap(img, mapx, mapy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 
 
 A, B = cell((FRAME - 1) % N), cell((FRAME + 1) % N)
@@ -68,8 +69,8 @@ wA = warp_half(pA, F_BA, T)                      # move A toward midpoint along 
 wB = warp_half(pB, F_AB, 1 - T)
 mid = (1 - T) * wA + T * wB                      # premultiplied midpoint
 
-al = mid[:, :, 3:4]
-rgb = np.where(al > 1e-4, mid[:, :, :3] / np.maximum(al / 255.0, 1e-4), 0)
+al = mid[:, :, 3:4] / 255.0                      # normalise once so mask + divisor share a scale
+rgb = np.where(al > 1e-4, mid[:, :, :3] / np.maximum(al, 1e-4), 0)
 out = np.clip(np.dstack([rgb, mid[:, :, 3]]), 0, 255).astype(np.uint8)
 
 ys, xs = box(FRAME)

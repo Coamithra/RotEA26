@@ -68,7 +68,7 @@ K_LO, K_HI = 15.0, 215.0
 # ellipse), and a >1 gamma on the normalised alpha crushes the faint gaussian tail so
 # the rim drops off sharply instead of hazing far out. The brain is drawn ON TOP of
 # the glow, so only the rim that extends past the silhouette is visible = the outline.
-GLOW_BLUR_FRAC = 0.03     # gaussian sigma as a fraction of cell width (~15px on a 512 cell)
+GLOW_BLUR_FRAC = 0.03     # gaussian sigma as a fraction of cell width (~15px at the default CELL_W=512)
 GLOW_FALLOFF_GAMMA = 1.6  # >1 steepens the outer falloff (1.0 = pure gaussian)
 GLOW_RGB = (90, 150, 255)
 

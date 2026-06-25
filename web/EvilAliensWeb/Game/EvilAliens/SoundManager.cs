@@ -73,7 +73,7 @@ public class SoundManager : ISoundManagerService
 	private const int SfxMaxInstances = 32;
 
 	// XACT volume byte -> linear amplitude. MonoGame's logistic law: byte 0xB4=180
-	// is 0 dB (unity); the modal SFX byte 90 is -12 dB. Mirrors tools/audio/xact.py
+	// is ~0 dB (unity); the modal SFX byte 90 is ~-12 dB. Mirrors tools/audio/xact.py
 	// vol_to_linear (validated against XACT's 8 calibration points). Every played
 	// cue lands <= ~0.57 linear, so no offline boost / clip is ever needed.
 	private static float VolToLinear(int b)
@@ -94,7 +94,7 @@ public class SoundManager : ISoundManagerService
 		{ "bees", new CueConfig(loop: true, volByte: 135, vary: false) },
 		{ "blast", new CueConfig(volByte: 107) },
 		{ "evillaugh", new CueConfig(volByte: 113, vary: false) },
-		// Authored ~15 dB below baseline (byte 39 vs 90) -- a full-scale recording
+		// Authored ~14.7 dB below baseline (byte 39 vs 90) -- a full-scale recording
 		// the original cut hard; that authored cut is the whole reason the un-attenuated
 		// port "bzzzt" was so loud. Now applied straight from the bank.
 		{ "usepowerup", new CueConfig(volByte: 39, vary: false) },
@@ -196,13 +196,22 @@ public class SoundManager : ISoundManagerService
 		return inst;
 	}
 
+	// A cue's category without allocating a CueConfig (ConfigFor builds one for
+	// unlisted cues). Only ttf_ cues are Speech; everything else is Default.
+	private static Category CategoryOf(string cue)
+	{
+		if (_cfg.TryGetValue(cue, out var c))
+			return c.Cat;
+		return cue.StartsWith("ttf_") ? Category.Speech : Category.Default;
+	}
+
 	// Live count of active instances in a category (across all of its cues).
 	private int CountActive(Category cat)
 	{
 		int n = 0;
 		foreach (KeyValuePair<string, List<SoundEffectInstance>> kv in _active)
 		{
-			if (ConfigFor(kv.Key).Cat != cat)
+			if (CategoryOf(kv.Key) != cat)
 				continue;
 			foreach (SoundEffectInstance inst in kv.Value)
 				if (!inst.IsDisposed && inst.State != SoundState.Stopped)

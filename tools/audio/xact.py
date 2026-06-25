@@ -357,7 +357,9 @@ def parse_xgs(path):
 def cue_mix(sb_path, xgs_path):
     """Resolve each cue's authored mix = category gain x sound-header gain, the way
     the XACT runtime did. Returns dict cue -> {category, vol_byte, vol_linear (the
-    sound gain), cat_linear, final_linear}. This is the table SoundManager mirrors."""
+    sound gain), cat_linear, final_linear}. SoundManager applies the per-cue sound
+    gain (vol_linear); every category here is ~unity (byte 0xB4), so final_linear is
+    ~= what it plays (within ~0.4%) -- this table is the reference, not a literal."""
     meta = parse_soundbank_meta(sb_path)
     cats = parse_xgs(xgs_path)["categories"]
     out = {}

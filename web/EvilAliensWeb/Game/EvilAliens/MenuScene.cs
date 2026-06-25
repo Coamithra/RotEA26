@@ -278,10 +278,12 @@ internal class MenuScene : Scene
 		optionsMenu.AddEntry("Controller Settings");
 		optionsMenu.AddEntryEvent(optionsMenu_PlayerOptionsSelected);
 		playerSettingsMenu.OnExit += playerSettingsMenu_OnExit;
-		// "Trailers" is removed on the web build: the trailer videos (VFX/*) were never
-		// ported (Stage 6 did audio, not video), so selecting one throws "content file not
-		// found" and wedges the loop. optionsMenu_OnTrailersSelected + trailerMenu/trailerScene
-		// are now unused but kept in place for if/when video is ported.
+		// "Trailers" plays the two 2008 promo videos. The original VFX/*.wmv (VC-1) can't play
+		// in a browser and the web port has no video loader, so the trailer menu now hands off
+		// to an embedded YouTube player (Compat/TrailerInterop -> eaTrailer) instead of the dead
+		// video TrailerScene — no Content.Load<Video>("VFX/..") (the old crash path, Stage 14).
+		optionsMenu.AddEntry("Trailers");
+		optionsMenu.AddEntryEvent(optionsMenu_OnTrailersSelected);
 		optionsMenu.AddEntry("Back");
 		optionsMenu.AddEntryEvent(optionsMenu_OnExit);
 		optionsMenu.OnExit += optionsMenu_OnExit;
@@ -324,9 +326,9 @@ internal class MenuScene : Scene
 		playtestMenu.AddEntryEvent(playtestMenu_OnExit);
 		playtestMenu.OnExit += playtestMenu_OnExit;
 		trailerMenu = new MenuSub1(base.Game);
-		trailerMenu.AddEntry("Revenge of the Evil Aliens");
+		trailerMenu.AddEntry("Revenge of the Evil Aliens (2008)");
 		trailerMenu.AddEntryEvent(trailerMenu_EvilAliensSelected);
-		trailerMenu.AddEntry("Rocket Riot");
+		trailerMenu.AddEntry("Rocket Riot (2009)");
 		trailerMenu.AddEntryEvent(trailerMenu_RocketRiotSelected);
 		trailerMenu.AddEntry("Back");
 		trailerMenu.AddEntryEvent(trailerMenu_BackSelected);
@@ -336,18 +338,18 @@ internal class MenuScene : Scene
 		base.DrawOrder = 1;
 	}
 
+	// Trailers play in an embedded YouTube overlay (Compat/TrailerInterop -> eaTrailer in
+	// index.html), NOT the dead video TrailerScene — the original VFX/*.wmv can't play in a
+	// browser. The trailerMenu stays shown underneath the full-screen overlay, so closing it
+	// (Back/Esc, JS-owned) returns here. YouTube ids map TrailerScene.TrailerMode 1:1.
 	private void trailerMenu_RocketRiotSelected(object sender)
 	{
-		trailerMenu.Remove();
-		trailerScene.Setup(TrailerScene.TrailerMode.RocketRiot);
-		Collection.Add((GameComponent)(object)trailerScene);
+		EvilAliensWeb.Compat.TrailerInterop.Play("4zN0h1xmwF8");
 	}
 
 	private void trailerMenu_EvilAliensSelected(object sender)
 	{
-		trailerMenu.Remove();
-		trailerScene.Setup(TrailerScene.TrailerMode.EvilAliens);
-		Collection.Add((GameComponent)(object)trailerScene);
+		EvilAliensWeb.Compat.TrailerInterop.Play("v732YJ4wHjc");
 	}
 
 	private void trailerMenu_BackSelected(object sender)

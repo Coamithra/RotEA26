@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sprite frame stepper</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #15151c; color: #d8d8e0; font: 14px/1.4 system-ui, sans-serif; }
+  header { padding: 10px 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+           border-bottom: 1px solid #333; position: sticky; top: 0; background: #15151c; }
+  header input { width: 360px; background: #222; color: #ddd; border: 1px solid #444; padding: 4px 6px; }
+  header label { opacity: .8; }
+  .num { font-size: 22px; font-weight: 700; min-width: 210px; }
+  .num small { font-weight: 400; opacity: .7; font-size: 14px; }
+  button { background: #2a2a38; color: #ddd; border: 1px solid #555; border-radius: 5px;
+           padding: 6px 12px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #38384a; }
+  button.on { background: #3a5; border-color: #4c7; color: #061; }
+  main { display: flex; gap: 24px; padding: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .stage { display: flex; gap: 20px; align-items: flex-start; }
+  .frameview { text-align: center; }
+  .frameview h3 { margin: 0 0 6px; font-weight: 500; opacity: .65; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  canvas { image-rendering: pixelcrisp; image-rendering: pixelated;
+           background: conic-gradient(#2c2c34 90deg, #23232b 90deg 180deg, #2c2c34 180deg 270deg, #23232b 270deg) 0 0/24px 24px; }
+  .big { border: 1px solid #444; }
+  .neighbor { opacity: .55; }
+  .strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; max-width: 560px; }
+  .strip .cell { position: relative; cursor: pointer; border: 2px solid transparent; border-radius: 3px; }
+  .strip .cell.sel { border-color: #5cf; }
+  .strip .cell canvas { width: 100%; display: block; background-size: 12px 12px; }
+  .strip .cell span { position: absolute; left: 2px; top: 1px; font-size: 10px; color: #fff;
+                      text-shadow: 0 0 3px #000, 0 0 3px #000; }
+  .hint { opacity: .6; font-size: 12px; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Sprite frame stepper</strong>
+  <label>sheet <input id="sheet" value="Content/gfx/sprites/faceofdeathspritesheet.png"></label>
+  <label>cols <input id="cols" value="8" style="width:42px"></label>
+  <label>rows <input id="rows" value="4" style="width:42px"></label>
+  <label>sep <input id="sep" value="1" style="width:42px"></label>
+  <button id="reload">load</button>
+</header>
+<header>
+  <div class="controls">
+    <button id="prev">&#9664; prev</button>
+    <button id="next">next &#9654;</button>
+    <span class="num" id="num">frame 0 / 0</span>
+    <button id="play">play</button>
+    <button id="onion">onion-skin</button>
+    <button id="diff">diff vs prev</button>
+    <span class="hint">&larr;/&rarr; step &middot; space = play &middot; o = onion &middot; d = diff</span>
+  </div>
+</header>
+<main>
+  <div class="stage">
+    <div class="frameview">
+      <h3 id="plabel">prev</h3>
+      <canvas id="prevc" class="big neighbor"></canvas>
+    </div>
+    <div class="frameview">
+      <h3 id="clabel">current</h3>
+      <canvas id="curc" class="big"></canvas>
+    </div>
+    <div class="frameview">
+      <h3 id="nlabel">next</h3>
+      <canvas id="nextc" class="big neighbor"></canvas>
+    </div>
+  </div>
+  <div class="strip" id="strip"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let img = null, cols = 8, rows = 4, sep = 1, cw = 0, ch = 0, N = 0, cur = 0;
+let onion = false, diff = false, playing = false, playTimer = null, gridWarn = '', fps = 12;
+let SCALE = 3;              // big-view magnification (nearest-neighbor); set adaptively per sheet in load()
+
+function cellRect(i) {
+  const r = Math.floor(i / cols), c = i % cols;
+  return { sx: c * (cw + sep), sy: r * (ch + sep), r, c };
+}
+
+function drawInto(canvas, i, { ghost = false, ghostOf = null } = {}) {
+  canvas.width = cw * SCALE; canvas.height = ch * SCALE;
+  const g = canvas.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  if (i == null) return;
+  if (ghostOf != null) {           // diff mode: |cur - prev| style overlay
+    const a = cellRect(ghostOf), b = cellRect(i);
+    g.globalCompositeOperation = 'source-over';
+    g.drawImage(img, a.sx, a.sy, cw, ch, 0, 0, canvas.width, canvas.height);
+    g.globalCompositeOperation = 'difference';
+    g.drawImage(img, b.sx, b.sy, cw, ch, 0, 0, canvas.width, canvas.height);
+    g.globalCompositeOperation = 'source-over';
+    return;
+  }
+  if (ghost) g.globalAlpha = 0.45;
+  const rc = cellRect(i);
+  g.drawImage(img, rc.sx, rc.sy, cw, ch, 0, 0, canvas.width, canvas.height);
+  g.globalAlpha = 1;
+}
+
+function render() {
+  const prevI = (cur - 1 + N) % N, nextI = (cur + 1) % N;
+  // current (optionally with onion-skin of prev, or diff-vs-prev)
+  if (diff) {
+    drawInto($('curc'), cur, { ghostOf: prevI });
+  } else {
+    drawInto($('curc'), cur);
+    if (onion) {
+      const g = $('curc').getContext('2d');
+      g.globalAlpha = 0.4;
+      const rc = cellRect(prevI);
+      g.drawImage(img, rc.sx, rc.sy, cw, ch, 0, 0, $('curc').width, $('curc').height);
+      g.globalAlpha = 1;
+    }
+  }
+  drawInto($('prevc'), prevI, { ghost: true });
+  drawInto($('nextc'), nextI, { ghost: true });
+  const rc = cellRect(cur);
+  $('num').innerHTML = `frame <b>${cur}</b> / ${N - 1} &nbsp;<small>row ${rc.r}, col ${rc.c}${gridWarn}</small>`;
+  $('plabel').textContent = 'prev (' + prevI + ')';
+  $('clabel').textContent = 'current (' + cur + ')';
+  $('nlabel').textContent = 'next (' + nextI + ')';
+  document.querySelectorAll('.strip .cell').forEach((el, i) =>
+    el.classList.toggle('sel', i === cur));
+}
+
+function buildStrip() {
+  const strip = $('strip');
+  strip.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  strip.innerHTML = '';
+  for (let i = 0; i < N; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    const cv = document.createElement('canvas');
+    cv.width = cw; cv.height = ch;
+    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false;
+    const rc = cellRect(i);
+    g.drawImage(img, rc.sx, rc.sy, cw, ch, 0, 0, cw, ch);
+    const tag = document.createElement('span'); tag.textContent = i;
+    cell.appendChild(cv); cell.appendChild(tag);
+    cell.onclick = () => { cur = i; stop(); render(); };
+    strip.appendChild(cell);
+  }
+}
+
+function go(d) { cur = (cur + d + N) % N; render(); }
+function stop() { playing = false; $('play').classList.remove('on'); $('play').textContent = 'play';
+                  if (playTimer) { clearInterval(playTimer); playTimer = null; } }
+function play() {
+  playing = true; $('play').classList.add('on'); $('play').textContent = 'pause';
+  playTimer = setInterval(() => go(1), 1000 / fps);   // default 12 fps; ?fps= to speed-match
+}
+
+function load() {
+  cols = +$('cols').value; rows = +$('rows').value; sep = +$('sep').value;
+  const src = $('sheet').value + (($('sheet').value.includes('?') ? '&' : '?') + 'v=' + Date.now());
+  const im = new Image();
+  im.onload = () => {
+    img = im;
+    cw = Math.floor((img.naturalWidth - (cols - 1) * sep) / cols);
+    ch = Math.floor((img.naturalHeight - (rows - 1) * sep) / rows);
+    SCALE = Math.max(1, Math.min(4, Math.round(440 / Math.max(cw, ch))));   // fit big sprites, magnify small ones
+    N = cols * rows; cur = Math.min(cur, N - 1);
+    const fitW = cols * cw + (cols - 1) * sep, fitH = rows * ch + (rows - 1) * sep;
+    gridWarn = (fitW === img.naturalWidth && fitH === img.naturalHeight)
+      ? '' : `  ⚠ ${cols}×${rows} doesn't divide ${img.naturalWidth}×${img.naturalHeight}`;
+    buildStrip(); render();
+    if (window.__startFrame != null) { cur = ((window.__startFrame % N) + N) % N; render(); window.__startFrame = null; }
+    if (window.__autoplay) { window.__autoplay = false; play(); }
+  };
+  im.onerror = () => $('num').textContent = 'FAILED to load ' + src;
+  im.src = src;
+}
+
+$('prev').onclick = () => { stop(); go(-1); };
+$('next').onclick = () => { stop(); go(1); };
+$('play').onclick = () => playing ? stop() : play();
+$('onion').onclick = () => { onion = !onion; diff = false; $('onion').classList.toggle('on', onion); $('diff').classList.remove('on'); render(); };
+$('diff').onclick = () => { diff = !diff; onion = false; $('diff').classList.toggle('on', diff); $('onion').classList.remove('on'); render(); };
+$('reload').onclick = load;
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight') { stop(); go(1); }
+  else if (e.key === 'ArrowLeft') { stop(); go(-1); }
+  else if (e.key === ' ') { e.preventDefault(); playing ? stop() : play(); }
+  else if (e.key === 'o') $('onion').click();
+  else if (e.key === 'd') $('diff').click();
+});
+// URL params let each candidate open self-loaded: ?sheet=..&frame=..&cols=..&rows=..&sep=..&play
+(function initFromParams() {
+  const p = new URLSearchParams(location.search);
+  if (p.has('sheet')) $('sheet').value = p.get('sheet');
+  if (p.has('cols')) $('cols').value = p.get('cols');
+  if (p.has('rows')) $('rows').value = p.get('rows');
+  if (p.has('sep')) $('sep').value = p.get('sep');
+  if (p.has('label')) document.title = p.get('label') + ' — frame stepper';
+  if (p.has('fps')) fps = +p.get('fps');
+  window.__startFrame = p.has('frame') ? +p.get('frame') : null;
+  window.__autoplay = p.has('play');
+})();
+load();
+</script>
+</body>
+</html>

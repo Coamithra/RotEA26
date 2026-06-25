@@ -170,10 +170,36 @@ compensate. Fix = divide the draw scale by the factor. We did it centrally:
 | `pack_small_asteroids.py` | slice a magenta GRID of variants -> key -> footprint-match each to origW*factor at a LOWER factor (for sprites drawn small). Built `AsteroidSmall1..4`. |
 | `pack_anchored_anim.py` | FIXED-CAMERA frame folder -> ONE shared union-bbox crop (no per-frame jitter) -> key -> grid sheet. For anchored AnimGen anims (the spider rear-up). |
 | `build_contact_sheet.py` | bulk INPUT sheet: composite many static sprites onto a magenta grid (nearest-neighbour upscaled, labelled cells) + a JSON manifest for slicing the gen back. `smalls`/`mediums`/`all`. See "Bulk contact sheet" above. |
+| `repack_misc.py` | slice single-frame sprites from a contact sheet, chroma-key (magenta or green, translucency-aware) + footprint-match each to original-dims*factor. Per-sprite KNEE/KEY/ABOOST/LUMA_ALPHA/FILLGLOW. See "Bulk contact sheet". |
+| `gen_sprites.py` | procedurally draw sprites better than AI: bulletevil/good (shaded spheres + outline), arrow (traced from the original contour). |
+| `interp_frame.py` | PATCH ONE bad cell of an already-packed sheet with the half-way blend of its two neighbours (`frame i := lerp(i-1, i+1, 0.5)`). `premult` (clean edges) or `straight` (raw RGBA lerp, exactly what sprite.fx INTERPOLATE does). For a single flickery/duplicate frame, no re-repack. |
+| `flow_tween_frame.py` | same single-cell patch but MOTION-COMPENSATED: bidirectional Farneback optical flow warps each neighbour halfway toward the midpoint, then blends (premultiplied). Cleaner than `interp_frame` when features MOVE; for a pure brightness/glow morph it collapses to the same blend (no displacement to compensate). Adapted from `Fighter/scripts/make_seam_tween.py`. Used to de-flicker `faceofdeath` frame 7. |
+| `flow_interp_sheet.py` | 2x-FRAME interpolation: insert a tween between every consecutive pair (cyclic) of a GRID sheet (or several read in order, e.g. mothershipA+B) -> doubled-frame sheet. `flow` (Farneback) / `blend` (naive lerp) / `none` (repack baseline). For evaluating whether frame-interpolation smooths a given animation. |
+| `flow_interp_atlas.py` | same 2x interpolation but the input is an AnimatedSprite ATLAS (`.png`+`.dat`, e.g. the spider-boss `GFX/Spider/*`): parses the `.dat` (.NET BinaryReader), reconstructs each frame into its authored canvas, union-bbox-crops, then tweens. |
 | `esrgan_test.py` | the Path-A experiment (kept for reference; not the chosen path) |
 
 Heavy/scratch (gitignored): `models/` (ESRGAN weights, re-downloadable), `out/` (previews).
 `*.png.orig` backups sit next to each swapped asset for easy revert.
+
+**Inspecting a packed sheet frame-by-frame:** `wwwroot/skullframes.html` (served by the dev
+server) slices any sheet into its grid and lets you step frames (←/→), play the loop (space),
+onion-skin (o) or diff-vs-prev (d) — for spotting a single bad/flickery frame. URL-driven:
+`…/skullframes.html?sheet=Content/gfx/sprites/<name>.png&cols=8&rows=4&frame=7&play&fps=24`
+(`fps=` sets the play rate so you can speed-match a 2x-interpolated sheet against its original;
+big sprites auto-fit, small ones magnify). To pin the exact off frame objectively, compute
+per-frame SAD-to-neighbours + mean luma and look for the spike / non-monotonic blip (how
+`faceofdeath` frame 7 was found).
+
+**Frame-interpolation verdict (explored, NOT adopted).** `flow_interp_*.py` were used to test
+whether 2x flow-interpolation should smooth the boss animations. Conclusion: payoff ≈ (per-frame
+motion) × (motion coherence). It wins on large coherent textured motion (a spider's leg-leap:
+clean tween vs blend's ghost) but **loses** on thin *spinning* detail (the mothership rim spikes —
+flow can't track them, degenerates to crossfade) and on **occlusion** (a spider leg passing over
+its face — disocclusion has no valid correspondence, so the warp tears; only neural methods like
+RIFE/FILM fix that). No current sheet is a clean win (none is simultaneously choppy-enough,
+coherent, and occlusion-free), so animations are left at their authored frame counts. Runtime flow
+in a shader is a non-starter (WebGL has no compute; the cheap `interpolate.fx` lerp == the ghosting
+blend). Keep these tools for the next animation that IS a good candidate.
 
 ## Method decision (which repack script) — pick by HOW it animates, not how it looks
 

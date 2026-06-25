@@ -27,8 +27,11 @@ float GlintStrength; // white-hot streak intensity (added, then masked by alpha)
 float GlintWidth;    // half-width of the sweep band, in UV
 float SweepPeriod;   // seconds per glint cycle (crossing + rest gap)
 float SweepActive;   // fraction of the period the glint spends crossing (0..1)
-float2 PadFrac;      // (padX/boxW, padY/boxH): the transparent inset baked into the RT,
-                     // so the gradient spans the GLYPHS, not the padded box.
+float PadFracTop;    // top transparent inset baked into the RT, as a fraction of box height.
+float PadFracBot;    // bottom transparent inset, as a fraction of box height. Separate top/bottom
+                     // so the gradient spans the GLYPH band, not the padded box, even when the box
+                     // is vertically ASYMMETRIC (DrawShadowString's +Npx drop shadow extends the
+                     // bottom). Equal top==bottom for the symmetric DrawMetalString (menu titles).
 float2 UvExtent;     // the (u,v) sub-rect of the RT the text actually occupies. The RT is
                      // GROW-ONLY and shared across many strings per frame, so a given
                      // string fills only its top-left corner; UvExtent = (usedW/texW,
@@ -41,8 +44,10 @@ float4 PixelShaderFunction(float4 color : COLOR0, float2 tc : TEXCOORD0) : COLOR
     float2 local = tc / max(UvExtent, float2(1e-4, 1e-4)); // 0..1 across THIS text element
 
     // Remap V across just the glyph band (drop the transparent padding) so the chrome
-    // highlight / shadow / rim always land on the letters regardless of pad size.
-    float gv = saturate((local.y - PadFrac.y) / max(1e-3, 1.0 - 2.0 * PadFrac.y));
+    // highlight / shadow / rim always land on the letters regardless of pad size. Top and
+    // bottom insets are independent so an asymmetric box (drop-shadow overshoot at the
+    // bottom) doesn't drag the gradient ~2px below the real glyphs.
+    float gv = saturate((local.y - PadFracTop) / max(1e-3, 1.0 - PadFracTop - PadFracBot));
 
     // Chrome vertical gradient: bright top -> shadow mid -> rim-light bottom.
     float topToMid = lerp(GradTop, GradMid, smoothstep(0.0, 0.55, gv));

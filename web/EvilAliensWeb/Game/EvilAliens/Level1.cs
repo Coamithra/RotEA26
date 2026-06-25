@@ -115,7 +115,14 @@ internal class Level1 : GameScene
 		eventList.AddEvent(gameEvent4);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
-		gameEvent4.OnFinished += spawner_OnFinished;
+		// Earth fly-by gate: hold the sideways asteroid-belt scroll (spawner_OnFinished
+		// sets the (0.25,0.6) speed) until the hero earth has finished crossing and left
+		// the screen. The fly-by is purely vertical + centred, so it never drifts off-axis
+		// into the cropped strip's edges. If the earth is already gone this passes instantly.
+		WaitForDoodadEvent earthFlybyGate = new WaitForDoodadEvent(base.Game, Background);
+		eventList.AddEvent(earthFlybyGate);
+		eventList.AddHalt();
+		earthFlybyGate.OnFinished += spawner_OnFinished;
 		gameEvent5 = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 2.5f);
 		gameEvent5.SetupAsWarning(MyMath.VectorToAngle(new Vector2(-800f, -600f)));
 		eventList.AddEvent(gameEvent5, halting: true);

@@ -171,3 +171,55 @@ html, body {
     font-size: 13px;
     letter-spacing: 0.06em;
 }
+
+/* ---- Stage 14: embedded-trailer overlay (built OUTSIDE #app by eaTrailer) ----
+   Full-screen dim backdrop above all in-game UI, holding a 16:9 YouTube iframe
+   and a Back button. Same dark/green theme as the Stage 9 on-screen UI. */
+#ea-trailer {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 1, 6, 0.92);
+}
+#ea-trailer .ea-trailer-frame {
+    position: relative;
+    width: min(96vw, 169vh);          /* 16:9, capped to the viewport either way */
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border: 1px solid rgba(124, 252, 0, 0.45);
+    box-shadow: 0 0 32px rgba(124, 252, 0, 0.18);
+}
+#ea-trailer .ea-trailer-frame iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+#ea-trailer .ea-trailer-close {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top, 0px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    z-index: 2001;
+    padding: 0.5rem 1rem;
+    color: #d8ffd0;
+    background: rgba(5, 3, 10, 0.65);
+    border: 2px solid rgba(124, 252, 0, 0.5);
+    border-radius: 8px;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+#ea-trailer .ea-trailer-close:hover,
+#ea-trailer .ea-trailer-close:focus-visible {
+    background: rgba(124, 252, 0, 0.3);
+    border-color: #7CFC00;
+    color: #fff;
+    outline: none;
+}

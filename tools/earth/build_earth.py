@@ -18,22 +18,26 @@
 #   centred at (1021, 1026).
 #
 # OUTPUTS (committed; offline build like tools/textures, tools/audio, tools/font):
-#   web/EvilAliensWeb/wwwroot/Content/gfx/sprites/earth.png        (HERO fly-by, 1480px)
+#   web/EvilAliensWeb/wwwroot/Content/gfx/sprites/earth.png        (HERO fly-by, full-res
+#       central vertical STRIP, ~1392 x ~1822 -- crisp, sides cropped; see below)
 #   web/EvilAliensWeb/wwwroot/Content/gfx/sprites/earth_small.png  (minor appearances, 256px)
 #
 # COMPOSITION INVARIANT (keep the on-screen size identical to the old asset):
-#   old: 735px frame, disk ~730px, drawn at doodadscale 1.6 -> ~1168 design px.
-#   new HERO: disk DISK_HERO(1460) in FRAME_HERO(1480), so Background.QueueEarth
-#             must use scale 0.8  (1460*0.8 = 1168, unchanged).
+#   The HERO disk is now the FULL source crop (no downscale) -> on-screen size is
+#   kept the same by lowering doodadscale, NOT by resizing the texture. The solid
+#   disk (R_IN) must still land at ~1168 design px, so doodadscale = 1168/solid
+#   where solid = full disk (R_OUT*2) * R_IN/R_OUT = R_IN*2 (~1806). The script
+#   PRINTS this value; set Background.QueueEarth AND QueueEarthSim doodadscale to it.
 #   new SMALL: disk DISK_SMALL(243) in FRAME_SMALL(256), so QueueSmallEarth must
 #             use scale 0.45 (243*0.45 ~= 109.5, == old 730*0.15).
-#   The script PRINTS the scales to use; if you change the frame sizes here,
-#   update the doodadscale constants in Game/EvilAliens/Background.cs to match.
+#   STRIP NOTE: the hero is cropped to a central vertical band (STRIP_W wide). This
+#   is ONLY valid because the hero earth stays horizontally centred -- QueueEarth/
+#   QueueEarthSim zero its X scroll so it can't drift sideways into the cropped edge.
 #
-# Straight (non-premultiplied) alpha out, to match the rest of the content
-# pipeline (SpriteBatchWrapper maps AlphaBlend -> NonPremultiplied). The resize
-# is done in premultiplied space then un-premultiplied so the downscale doesn't
-# bleed the black background into the limb.
+# Straight (non-premultiplied) alpha out, to match the rest of the content pipeline
+# (SpriteBatchWrapper maps AlphaBlend -> NonPremultiplied). The HERO strip is emitted
+# straight from the masked source (no resize). The SMALL disk is downscaled in
+# premultiplied space then un-premultiplied so the limb doesn't bleed black.
 #
 # Re-run after changing the source or knobs:  python tools/earth/build_earth.py
 # Don't hand-edit the output PNGs.
@@ -60,9 +64,18 @@ R_OUT = 911.0               # outer radius: alpha hits 0 just past the bright li
 R_IN = 903.0                # inner radius: solid disk extends to here
 
 # --- output framing --------------------------------------------------------
-# DISK_HERO is sized so the SOLID disk (the R_IN boundary) lands at on-screen
-# radius 730 at doodadscale 0.8 -> 1168 design px == the old 730px disk at 1.6.
-DISK_HERO, FRAME_HERO = 1473, 1480     # solid edge -> 1168 design px at scale 0.8
+# HERO: keep the FULL source resolution (NO downscale) so the Level-1 fly-by is
+# crisp (1 texel ~= 1 pixel on a typical window) instead of the old ~1.3-1.9x
+# bilinear upscale. The masked source crop is used at its native ~1822 px (R_OUT*2).
+#
+# The hero earth is WIDER than the screen and stays HORIZONTALLY CENTRED -- it
+# only scrolls vertically (Background.QueueEarth/QueueEarthSim zero the doodad's
+# X scroll), so its left/right limb NEVER reaches the screen edge. We therefore
+# crop to a central VERTICAL STRIP (STRIP_W wide, full disk height) and don't
+# store the never-seen sides. STRIP_W must cover the 800-design visible band at
+# the earth's on-screen scale (~0.647): 800/0.647 ~= 1237 px, + ~50px margin each
+# side -> 1392. On-screen disk size is UNCHANGED (doodadscale falls 0.8 -> ~0.647).
+STRIP_W = 1392                         # central band width (>= visible 800 design px + margin)
 DISK_SMALL, FRAME_SMALL = 243, 256     # -> doodadscale 0.45 (243*0.45 = 109.4)
 
 
@@ -107,15 +120,28 @@ def resize_straight(rgba, disk, frame):
     return canvas
 
 
+def crop_strip_straight(rgba, strip_w):
+    """Full-res straight-alpha PNG, cropped to a central vertical strip of width
+    `strip_w` (full disk height). No resize -> native crispness. The float rgba
+    is already straight (non-premultiplied) alpha from make_masked_rgba."""
+    straight = np.clip(rgba * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    w = straight.shape[1]
+    x0 = max(0, (w - strip_w) // 2)
+    return Image.fromarray(straight[:, x0:x0 + strip_w, :], "RGBA")
+
+
 def main():
-    rgba = make_masked_rgba()
-    hero = resize_straight(rgba, DISK_HERO, FRAME_HERO)
+    rgba = make_masked_rgba()                       # ~1822x1822 straight-alpha float disk
+    hero = crop_strip_straight(rgba, STRIP_W)       # full-res central strip (no downscale)
     small = resize_straight(rgba, DISK_SMALL, FRAME_SMALL)
     os.makedirs(OUT_DIR, exist_ok=True)
     hero.save(os.path.join(OUT_DIR, "earth.png"))
     small.save(os.path.join(OUT_DIR, "earth_small.png"))
-    print(f"wrote earth.png       {hero.size}  -> Background.QueueEarth/QueueEarthSim doodadscale = {1168/DISK_HERO:.4f}")
-    print(f"wrote earth_small.png {small.size}  -> Background.QueueSmallEarth doodadscale = {109.5/DISK_SMALL:.4f}")
+    disk = rgba.shape[0]                             # full disk diameter (alpha-0)
+    solid = disk * R_IN / R_OUT                      # solid disk diameter (R_IN)
+    print(f"wrote earth.png       {hero.size} (strip of {disk}px disk)  -> "
+          f"Background.QueueEarth/QueueEarthSim doodadscale = {1168 / solid:.4f}")
+    print(f"wrote earth_small.png {small.size}  -> Background.QueueSmallEarth doodadscale = {109.5 / DISK_SMALL:.4f}")
 
 
 if __name__ == "__main__":

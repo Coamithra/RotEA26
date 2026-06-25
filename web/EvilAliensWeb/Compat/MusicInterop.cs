@@ -38,16 +38,20 @@ namespace EvilAliensWeb.Compat
             _js?.InvokeVoid("eaMusic.stop");
         }
 
-        // rate is the game's XACT "Pitch" value (~50 = normal); the JS layer maps
-        // it to AudioBufferSourceNode.playbackRate. Called every frame by the
-        // BrainBoss HP sweep, so skip redundant calls.
+        // `rate` is the game's XACT "Pitch" variable (~50 = normal). The authored RPC
+        // preset (alienssfx.xgs: one curve, var "Pitch" -> RpcParameter Pitch) maps
+        // Pitch 0..100 linearly to -1200..+1200 cents, so the faithful playback rate is
+        // 2^((Pitch-50)/50)  (Pitch 50 -> 1.0x, 68 -> 1.28x, 100 -> 2.0x). Apply that
+        // curve here and hand the JS layer a ready AudioBufferSourceNode.playbackRate.
+        // Called every frame by the BrainBoss HP sweep, so skip redundant calls.
         public static void SetRate(string cue, double rate)
         {
             if (rate == _lastRate && cue == _lastRateCue)
                 return;
             _lastRate = rate;
             _lastRateCue = cue;
-            _js?.InvokeVoid("eaMusic.setRate", rate);
+            double playbackRate = System.Math.Pow(2.0, (rate - 50.0) / 50.0);
+            _js?.InvokeVoid("eaMusic.setRate", playbackRate);
         }
     }
 }

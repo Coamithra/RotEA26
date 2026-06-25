@@ -29,6 +29,24 @@ CODEC_PCM, CODEC_XMA, CODEC_ADPCM, CODEC_WMA = 0, 1, 2, 3
 _CODEC_NAME = {0: "PCM", 1: "XMA", 2: "ADPCM", 3: "xWMA"}
 
 
+# XACT volume bytes (category / sound-header / clip / variation) are NOT raw dB.
+# MonoGame's XactHelpers maps the byte through a 4-param logistic fit, then dB->linear.
+# Validated against the calibration points baked into the MonoGame source:
+#   0x00->-96dB  0x14->-38  0x5A->-12  0x8F->-4  0xB4->0  0xBF->+1  0xCA->+2  0xFF->+6
+# (so the modal byte 0x5A=90 is -12 dB, NOT 0 dB -- the unity anchor is 0xB4=180.)
+_VOL_A, _VOL_B, _VOL_C, _VOL_D = -96.0, 0.432254984608615, 80.1748600297963, 67.7385212334047
+
+
+def vol_to_db(b):
+    """XACT volume byte (0..255) -> decibels, via MonoGame's logistic fit."""
+    return (_VOL_A - _VOL_D) / (1.0 + (b / _VOL_C) ** _VOL_B) + _VOL_D
+
+
+def vol_to_linear(b):
+    """XACT volume byte (0..255) -> linear amplitude (== 10^(dB/20))."""
+    return 10.0 ** (vol_to_db(b) / 20.0)
+
+
 @dataclass
 class WaveEntry:
     index: int
@@ -154,11 +172,13 @@ def parse_soundbank_meta(path):
     this exposes them. Layout per sound (Xbox big-endian, validated against the
     clustering of the returned values):
         flags(1) category(2) volume(1) pitch(2) priority(1) filter(2)
-    `volume` is a single byte; higher = louder. There is no reliable absolute
-    byte->dB law for this Xbox bank (MonoGame's PC ParseVolumeFromDecibels yields
-    nonsense here -> every cue at ~-50 dBFS), so callers should treat it as a
-    RELATIVE ranking and anchor it to a known-good cue. 90 is the modal baseline
-    (most SFX + all music); only 'usepowerup' (39) sits below it.
+    `volume` is a single byte decoded with the real MonoGame law (vol_to_db /
+    vol_to_linear): byte 0xB4=180 is unity (0 dB), the modal byte 90 is -12 dB.
+    (An earlier estimate used (byte-90)*0.25 dB and wrongly treated 90 as 0 dB;
+    the logistic fit above matches XACT's 8 calibration points exactly.) The
+    decoded linear is the cue's authored gain; combined with its category's gain
+    (parse_xgs) and the recording it gives the original mix with no offline boost
+    needed -- every played cue lands <= ~0.57 linear, under the runtime 1.0 cap.
     """
     d = open(path, "rb").read()
     if d[:4] != b"KBDS":
@@ -177,22 +197,20 @@ def parse_soundbank_meta(path):
         if s:
             names.append(s)
 
-    BASELINE = 90  # modal volume byte (most SFX + all music); the 0 dB anchor.
     meta = {}
     for i in range(num_simple):
         so = u32(simple_cues_off + i * 5 + 1)
         flags = d[so]
+        vb = d[so + 3]
         meta[names[i]] = {
             "complex": bool(flags & 0x01),
             "has_rpc": bool(flags & 0x0E),
             "has_dsp": bool(flags & 0x10),
             "category": u16(so + 1),       # 1=Default 2=Music 3=Speech (per .xgs)
-            "vol_byte": d[so + 3],
+            "vol_byte": vb,
             "pitch": s16(so + 4) / 1000.0,
-            # relative gain vs the baseline cue, in linear amplitude. Only ever
-            # <= 1 here (usepowerup) since every other cue is at/above baseline
-            # and the recordings are already ~full-scale (can't boost w/o clip).
-            "rel_gain": min(1.0, 10.0 ** (((d[so + 3] - BASELINE) * 0.25) / 20.0)),
+            "vol_db": vol_to_db(vb),       # authored sound-header gain (real law)
+            "vol_linear": vol_to_linear(vb),
         }
     return meta
 
@@ -255,3 +273,104 @@ def decode(entry):
     if entry.codec == CODEC_WMA:
         return decode_xwma(entry)
     raise NotImplementedError(f"codec {entry.codec_name} not supported (entry {entry.index})")
+
+
+# --- .xgs global settings (categories + RPC) -----------------------------
+
+_RPC_PARAM = ["Volume", "Pitch", "ReverbSend", "FilterFreq", "FilterQ"]
+_MAX_INSTANCE_BEHAVIOR = ["FailToPlay", "Queue", "ReplaceOldest",
+                          "ReplaceQuietest", "ReplaceLowestPriority"]
+
+
+def parse_xgs(path):
+    """Parse a .xgs (FSGX = big-endian Xbox 'XGSF') -> the global settings the
+    XACT runtime applied: category mix/limits and RPC presets. The field order is
+    MonoGame's AudioEngine layout (the Xbox file uses it verbatim, big-endian -- no
+    shortening, validated against the offsets resolving to the in-file name tables).
+
+    Returns {"categories": [..], "variables": [names], "rpc": [..]} where each
+    category is {name, max_instances (None=unlimited), fade_in, fade_out, behavior,
+    vol_byte, vol_linear} and each rpc is {variable, parameter, points:[(x,y,type)]}.
+    """
+    d = open(path, "rb").read()
+    if d[:4] != b"FSGX":
+        raise ValueError(f"{path}: not a big-endian Xbox global-settings bank (sig={d[:4]!r})")
+    be = ">"
+    u16 = lambda o: struct.unpack_from(be + "H", d, o)[0]
+    u32 = lambda o: struct.unpack_from(be + "I", d, o)[0]
+    f32 = lambda o: struct.unpack_from(be + "f", d, o)[0]
+
+    num_cats = u16(0x13)
+    num_vars = u16(0x15)
+    num_rpc = u16(0x1B)
+    cats_off = u32(0x21)
+    cat_names_off = u32(0x39)
+    var_names_off = u32(0x3D)
+    rpc_off = u32(0x41)
+
+    def names_at(off, n):
+        out, o = [], off
+        for _ in range(n):
+            s, o = _read_cstr(d, o)
+            out.append(s)
+        return out
+
+    cat_names = names_at(cat_names_off, num_cats)
+    var_names = names_at(var_names_off, num_vars)
+
+    categories = []
+    for i in range(num_cats):
+        o = cats_off + i * 10           # 10-byte AudioCategory record
+        max_inst = d[o]
+        iflags = d[o + 5]
+        vb = d[o + 8]
+        beh = iflags >> 3
+        categories.append({
+            "name": cat_names[i],
+            "max_instances": None if max_inst == 0xFF else max_inst,
+            "fade_in": u16(o + 1) / 1000.0,
+            "fade_out": u16(o + 3) / 1000.0,
+            "behavior": _MAX_INSTANCE_BEHAVIOR[beh] if beh < len(_MAX_INSTANCE_BEHAVIOR) else beh,
+            "vol_byte": vb,
+            "vol_linear": vol_to_linear(vb),
+        })
+
+    rpc, o = [], rpc_off
+    for _ in range(num_rpc):
+        var_idx = u16(o)
+        npts = d[o + 2]
+        param = u16(o + 3)
+        o += 5
+        pts = []
+        for _ in range(npts):
+            pts.append((f32(o), f32(o + 4), d[o + 8]))  # position, value, curve type
+            o += 9
+        rpc.append({
+            "variable": var_names[var_idx] if var_idx < len(var_names) else var_idx,
+            "parameter": _RPC_PARAM[param] if param < len(_RPC_PARAM) else f"dsp{param - 5}",
+            "points": pts,
+        })
+
+    return {"categories": categories, "variables": var_names, "rpc": rpc}
+
+
+def cue_mix(sb_path, xgs_path):
+    """Resolve each cue's authored mix = category gain x sound-header gain, the way
+    the XACT runtime did. Returns dict cue -> {category, vol_byte, vol_linear (the
+    sound gain), cat_linear, final_linear}. SoundManager applies the per-cue sound
+    gain (vol_linear); every category here is ~unity (byte 0xB4), so final_linear is
+    ~= what it plays (within ~0.4%) -- this table is the reference, not a literal."""
+    meta = parse_soundbank_meta(sb_path)
+    cats = parse_xgs(xgs_path)["categories"]
+    out = {}
+    for cue, m in meta.items():
+        ci = m["category"]
+        cat_lin = cats[ci]["vol_linear"] if ci < len(cats) else 1.0
+        out[cue] = {
+            "category": cats[ci]["name"] if ci < len(cats) else ci,
+            "vol_byte": m["vol_byte"],
+            "vol_linear": m["vol_linear"],
+            "cat_linear": cat_lin,
+            "final_linear": cat_lin * m["vol_linear"],
+        }
+    return out

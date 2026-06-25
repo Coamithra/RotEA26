@@ -172,6 +172,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the banks or the ElevenLabs renders; don't hand-edit the outputs.** SFX/speech play on KNI
   `SoundEffect`; **music** is a WebAudio layer (`index.html` `eaMusic`, via `Compat/MusicInterop.cs`)
   for seamless loop points. `SoundManager.Play()` now returns a `SoundEffectInstance` (not `Cue`).
+- **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
+  WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
+  (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;
+  `cue_mix` = the resolved `category x sound` table) — these document the numbers; they don't
+  regenerate assets (no re-run needed unless the banks change). The **volume law is MonoGame's logistic
+  fit** `vol_to_linear` (byte `0xB4`=180 -> 0 dB; the modal SFX byte 90 -> **-12 dB**), NOT the old
+  `(byte-90)*0.25` estimate — `SoundManager.VolToLinear` mirrors it. Consequences baked into
+  `SoundManager`: (1) per-cue volume comes from the authored byte (`_cfg` lists only the deviating
+  cues; default = byte 90); every played cue is <= ~0.57 linear so **no WAV needs boosting** and KNI's
+  `Volume<=1` cap is never hit. (2) **Category gains are all 0 dB (unity)** per the `.xgs` — no
+  SFX/Speech/Music cross-bus trim (the old `SfxGain=0.75` is gone); baseline SFX (~0.25) sits ~level
+  with the music layer (`eaMusic` master .55 x track .6 = .33). (3) **Instance limits are per-CATEGORY**,
+  not per-cue: Default(SFX)=32 concurrent **FailToPlay** (`SfxMaxInstances`, `CountActive`), Speech
+  unlimited, Music one-at-a-time. (4) Variation: the bank authored none; a **subtle 5% vol / ~0.35-semi
+  humanize** is kept as a deliberate embellishment. (5) **RPC**: the one authored preset (var "Pitch"
+  -> Pitch, 0..100 -> +/-1200 cents) is the BrainBoss/Level3 music-rate sweep; `MusicInterop.SetRate`
+  now applies the faithful curve `2^((Pitch-50)/50)` and `eaMusic.setRate` just sets `playbackRate`.
+  (6) Music uses the authored **2.5s crossfade** (`MUSIC_FADE` in `index.html`). **There is NO DSP/reverb
+  in the bank** (0 presets) — that XACT feature was never authored, nothing to port.
 - **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
   the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
   keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`

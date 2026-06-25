@@ -417,13 +417,17 @@
                 return manifestPromise;
             }
 
+            // Authored Music category (alienssfx.xgs): ReplaceOldest with 2.5s
+            // fadeIn/fadeOut, so a cue change crossfades over 2.5s.
+            var MUSIC_FADE = 2.5;
+
             function fadeOut(entry)
             {
                 if (!entry) return;
                 var t = ctx.currentTime;
                 entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
-                entry.gain.gain.linearRampToValueAtTime(0.0001, t + 0.4);
-                try { entry.src.stop(t + 0.45); } catch (e) { }
+                entry.gain.gain.linearRampToValueAtTime(0.0001, t + MUSIC_FADE);
+                try { entry.src.stop(t + MUSIC_FADE + 0.05); } catch (e) { }
             }
 
             function startTrack(cue)
@@ -456,7 +460,11 @@
                         }
                         src.playbackRate.value = curRate;
                         var g = ctx.createGain();
-                        g.gain.value = 0.6;
+                        // Fade the new track in over the authored 2.5s (crossfades
+                        // against the outgoing track's matching fadeOut).
+                        var t0 = ctx.currentTime;
+                        g.gain.setValueAtTime(0.0001, t0);
+                        g.gain.linearRampToValueAtTime(0.6, t0 + MUSIC_FADE);
                         src.connect(g).connect(master);
                         src.start();
                         current = { cue: cue, src: src, gain: g };
@@ -494,8 +502,9 @@
                 },
                 setRate: function (rate)
                 {
-                    // XACT "Pitch" ~50 = normal -> AudioBufferSourceNode.playbackRate
-                    curRate = Math.max(0.25, rate / 50);
+                    // `rate` is already the AudioBufferSourceNode.playbackRate: the C#
+                    // side (MusicInterop) applies the authored XACT Pitch RPC curve.
+                    curRate = Math.max(0.25, rate);
                     if (current && ctx)
                     {
                         try { current.src.playbackRate.setTargetAtTime(curRate, ctx.currentTime, 0.05); }

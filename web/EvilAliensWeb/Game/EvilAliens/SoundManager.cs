@@ -11,9 +11,11 @@ namespace EvilAliens;
 // backend has no runtime for. Instead the banks were cracked offline
 // (tools/audio/build_audio.py) to plain assets, and this manager plays them
 // natively:
-//   * SFX + speech -> KNI SoundEffect / SoundEffectInstance (per-cue instance
-//     caps + steal-oldest, random pitch/volume variation so repeats don't sound
-//     machine-stamped, loop flags, Default/Speech gain groups).
+//   * SFX + speech -> KNI SoundEffect / SoundEffectInstance with the authored XACT
+//     mix re-applied: per-cue volume from the recovered sound-header byte (real
+//     logistic law), per-CATEGORY instance limits (Default=32 FailToPlay, Speech
+//     unlimited), loop flags, and a subtle 5% humanize on repeats. Category gains
+//     are all 0 dB (unity) per the .xgs -- no cross-bus trim.
 //   * Music -> the WebAudio JS layer via MusicInterop (seamless loop points).
 // The public surface the game calls is unchanged except Play()/Stop() now use
 // SoundEffectInstance instead of the XACT Cue type.
@@ -45,41 +47,57 @@ public class SoundManager : ISoundManagerService
 	private sealed class CueConfig
 	{
 		public bool Loop;
-		public int Cap;
 		public Category Cat;
-		public float Volume;
+		public int VolByte;   // authored XACT sound-header volume byte (-> VolToLinear)
 		public bool Vary;
 
-		public CueConfig(bool loop = false, int cap = 6, Category cat = Category.Default,
-			float vol = 1f, bool vary = true)
+		public CueConfig(bool loop = false, Category cat = Category.Default,
+			int volByte = 90, bool vary = true)
 		{
 			Loop = loop;
-			Cap = cap;
 			Cat = cat;
-			Volume = vol;
+			VolByte = volByte;
 			Vary = vary;
 		}
 	}
 
-	// Group gains (the game has only a Music on/off toggle, no volume sliders).
-	private const float SfxGain = 0.75f;
-	private const float SpeechGain = 1f;
+	// XACT category gains (alienssfx.xgs): Default / Music / Speech are ALL 0 dB
+	// (unity) -- the original authored no cross-bus trim, so there is no SFX/speech
+	// attenuation here. A cue's level comes entirely from its sound-header volume
+	// byte below. (The old SfxGain=0.75 was a port guess; dropped for the authored
+	// flat mix, which puts baseline SFX ~level with the music layer.)
 
-	// Per-cue overrides; anything not listed uses the default CueConfig. Looping
-	// cues are the sustained ones the game holds a handle to (Lazer/bees/charge).
+	// Default (SFX) category instance cap from the .xgs: max 32 concurrent, and the
+	// authored behavior is FailToPlay (it never steals). Speech is unlimited; music
+	// is one-at-a-time on the WebAudio layer.
+	private const int SfxMaxInstances = 32;
+
+	// XACT volume byte -> linear amplitude. MonoGame's logistic law: byte 0xB4=180
+	// is ~0 dB (unity); the modal SFX byte 90 is ~-12 dB. Mirrors tools/audio/xact.py
+	// vol_to_linear (validated against XACT's 8 calibration points). Every played
+	// cue lands <= ~0.57 linear, so no offline boost / clip is ever needed.
+	private static float VolToLinear(int b)
+	{
+		double db = (-96.0 - 67.7385212334047)
+			/ (1.0 + Math.Pow(b / 80.1748600297963, 0.432254984608615)) + 67.7385212334047;
+		return (float)Math.Pow(10.0, db / 20.0);
+	}
+
+	// Per-cue overrides; anything not listed defaults to (Default, byte 90, vary).
+	// Volume bytes are the authored values recovered from Sound Bank.xsb (xact.py
+	// parse_soundbank_meta). Looping cues are the sustained ones the game holds a
+	// handle to; lazercharge's loop is a port addition (gameplay holds the charge).
 	private static readonly Dictionary<string, CueConfig> _cfg = new()
 	{
-		{ "lazershot", new CueConfig(loop: true, cap: 8, vol: 0.6f, vary: false) },
-		{ "lazercharge", new CueConfig(loop: true, cap: 2, vol: 0.7f, vary: false) },
-		{ "bees", new CueConfig(loop: true, cap: 1, vol: 0.5f, vary: false) },
-		{ "lazershotnoloop", new CueConfig(cap: 8, vol: 0.6f) },
-		{ "fire", new CueConfig(cap: 8, vol: 0.55f) },
-		{ "evillaugh", new CueConfig(cap: 1, vol: 0.9f, vary: false) },
-		// XACT authored this ~12.8 dB below baseline (vol byte 39 vs 90) -- it's a
-		// full-scale recording the original cut hard; we play it raw, hence the
-		// "super loud bzzzt" on power-up. A cut KNI can do at runtime. (0.23 =
-		// (39-90)*0.25 dB/unit; tunable by ear.)
-		{ "usepowerup", new CueConfig(cap: 2, vol: 0.23f, vary: false) },
+		{ "lazershot", new CueConfig(loop: true, volByte: 90, vary: false) },
+		{ "lazercharge", new CueConfig(loop: true, volByte: 135, vary: false) },
+		{ "bees", new CueConfig(loop: true, volByte: 135, vary: false) },
+		{ "blast", new CueConfig(volByte: 107) },
+		{ "evillaugh", new CueConfig(volByte: 113, vary: false) },
+		// Authored ~14.7 dB below baseline (byte 39 vs 90) -- a full-scale recording
+		// the original cut hard; that authored cut is the whole reason the un-attenuated
+		// port "bzzzt" was so loud. Now applied straight from the bank.
+		{ "usepowerup", new CueConfig(volByte: 39, vary: false) },
 	};
 
 	private readonly Game game;
@@ -110,7 +128,7 @@ public class SoundManager : ISoundManagerService
 		if (_cfg.TryGetValue(cue, out var c))
 			return c;
 		if (cue.StartsWith("ttf_"))
-			return new CueConfig(cap: 1, cat: Category.Speech, vary: false);
+			return new CueConfig(cat: Category.Speech, volByte: 130, vary: false);
 		return new CueConfig();
 	}
 
@@ -146,24 +164,27 @@ public class SoundManager : ISoundManagerService
 			return null;
 		CueConfig cfg = ConfigFor(cue);
 
-		List<SoundEffectInstance> list = ActiveList(cue);
-		list.RemoveAll(i => i.IsDisposed || i.State == SoundState.Stopped);
-		while (list.Count >= cfg.Cap)
-		{
-			SoundEffectInstance oldest = list[0];
-			list.RemoveAt(0);
-			try { oldest.Stop(); oldest.Dispose(); } catch (Exception) { }
-		}
+		// Authored XACT instance limiting is per-CATEGORY, not per-cue: the Default
+		// (SFX) category caps at 32 concurrent and fails-to-play when full (it never
+		// steals); Speech is unlimited. Reap finished instances first so the count is
+		// live, then enforce the Default pool.
+		ReapStopped();
+		if (cfg.Cat == Category.Default && CountActive(Category.Default) >= SfxMaxInstances)
+			return null;
 
 		SoundEffectInstance inst;
 		try { inst = fx.CreateInstance(); }
 		catch (Exception) { return null; }
 		inst.IsLooped = cfg.Loop;
-		float gain = (cfg.Cat == Category.Speech ? SpeechGain : SfxGain) * cfg.Volume;
+		float gain = VolToLinear(cfg.VolByte);   // category gain is unity (0 dB)
 		if (cfg.Vary)
 		{
-			inst.Volume = Clamp01(gain * (0.9f + 0.1f * (float)_rng.NextDouble()));
-			inst.Pitch = (float)((_rng.NextDouble() - 0.5) * 0.12); // +/- ~0.7 semitone
+			// Subtle ~5% humanize so rapid repeats aren't machine-stamped. The bank
+			// authored no variation; this is a small deliberate port embellishment.
+			float rv = (float)(_rng.NextDouble() * 2.0 - 1.0);
+			float rp = (float)(_rng.NextDouble() * 2.0 - 1.0);
+			inst.Volume = Clamp01(gain * (1f + 0.05f * rv));
+			inst.Pitch = 0.03f * rp;   // +/- ~0.35 semitone
 		}
 		else
 		{
@@ -171,8 +192,50 @@ public class SoundManager : ISoundManagerService
 			inst.Pitch = 0f;
 		}
 		try { inst.Play(); } catch (Exception) { }
-		list.Add(inst);
+		ActiveList(cue).Add(inst);
 		return inst;
+	}
+
+	// A cue's category without allocating a CueConfig (ConfigFor builds one for
+	// unlisted cues). Only ttf_ cues are Speech; everything else is Default.
+	private static Category CategoryOf(string cue)
+	{
+		if (_cfg.TryGetValue(cue, out var c))
+			return c.Cat;
+		return cue.StartsWith("ttf_") ? Category.Speech : Category.Default;
+	}
+
+	// Live count of active instances in a category (across all of its cues).
+	private int CountActive(Category cat)
+	{
+		int n = 0;
+		foreach (KeyValuePair<string, List<SoundEffectInstance>> kv in _active)
+		{
+			if (CategoryOf(kv.Key) != cat)
+				continue;
+			foreach (SoundEffectInstance inst in kv.Value)
+				if (!inst.IsDisposed && inst.State != SoundState.Stopped)
+					n++;
+		}
+		return n;
+	}
+
+	// Dispose + drop finished instances from every cue list (frees their WebAudio
+	// nodes and keeps CountActive accurate). Called each frame and before each spawn.
+	private void ReapStopped()
+	{
+		foreach (List<SoundEffectInstance> list in _active.Values)
+		{
+			for (int i = list.Count - 1; i >= 0; i--)
+			{
+				SoundEffectInstance inst = list[i];
+				if (inst.IsDisposed || inst.State == SoundState.Stopped)
+				{
+					try { if (!inst.IsDisposed) inst.Dispose(); } catch (Exception) { }
+					list.RemoveAt(i);
+				}
+			}
+		}
 	}
 
 	public string GetTTSName()
@@ -232,7 +295,7 @@ public class SoundManager : ISoundManagerService
 		try
 		{
 			_narration = fx.CreateInstance();
-			_narration.Volume = SpeechGain;
+			_narration.Volume = 1f;   // credits narrator (a port feature, not a bank cue)
 			_narration.Play();
 		}
 		catch (Exception) { }
@@ -288,18 +351,7 @@ public class SoundManager : ISoundManagerService
 	public void Update(GameTime gameTime)
 	{
 		// Reap finished one-shots so their WebAudio nodes don't pile up.
-		foreach (List<SoundEffectInstance> list in _active.Values)
-		{
-			for (int i = list.Count - 1; i >= 0; i--)
-			{
-				SoundEffectInstance inst = list[i];
-				if (inst.IsDisposed || inst.State == SoundState.Stopped)
-				{
-					try { if (!inst.IsDisposed) inst.Dispose(); } catch (Exception) { }
-					list.RemoveAt(i);
-				}
-			}
-		}
+		ReapStopped();
 	}
 
 	public void Stop(SoundEffectInstance inst)

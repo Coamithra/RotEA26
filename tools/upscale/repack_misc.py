@@ -62,26 +62,45 @@ ABOOST = { "connector": 0.6 }
 # magenta, so the default knee eats into it -- use a gentle knee there.
 KNEE = { "blast": 0.05 }
 
+# Per-sprite chroma colour (default magenta). A magenta-ADJACENT subject (pink/purple/
+# blue plasma) can't be separated from a magenta bg -- the key eats its interior. Have
+# the AI redraw it on GREEN and key 'green' here. When blast's green-bg version lands:
+# point its JOBS sheet at it, set KEY['blast']='green', and drop it from FILLGLOW (the
+# real streaked sphere will key clean, no fill hack needed).
+KEY = {}
+
 # Sprites the AI drew as a hollow ring (transparent centre) that should read SOLID:
 # fill the enclosed interior with a radial glow in the ring's colour. blast is a
 # shockwave ring; the old buggy key hid the hole behind residue, the clean key exposed it.
 FILLGLOW = { "blast" }
 
 
-def fuchsia_key(rgb, knee=0.14):
-    """RGB-on-magenta -> straight-alpha RGBA. Magenta-ness is the green deficit
-    NORMALISED BY LOCAL BRIGHTNESS ((min(R,B)-G)/min(R,B)), so a DARK or off-magenta
-    background (the AI rarely renders pure #FF00FF -- noise, vignette, jpeg) still
-    keys to ~0 instead of a faint reddish haze. A small alpha knee snaps the last
-    near-background residue to 0; the un-mix recovers the straight colour."""
+GREEN = np.array([0.0, 255.0, 0.0], np.float32)
+
+
+def fuchsia_key(rgb, knee=0.14, key="magenta"):
+    """RGB-on-chroma -> straight-alpha RGBA. "Keyness" is the deficit of the channel
+    the subject HAS vs the chroma's dominant channel(s), NORMALISED BY LOCAL BRIGHTNESS,
+    so a dark/off/noisy background still keys to ~0 (not a faint hase); a small knee
+    snaps the last residue away; the un-mix recovers the straight colour.
+
+    key='magenta' (default): keys (min(R,B)-G) -- for subjects with NO magenta.
+    key='green': keys (G-max(R,B)) -- for magenta-ADJACENT subjects (pink/purple/blue
+    plasma) that can't be separated from a magenta bg. Pick the chroma the subject lacks."""
     f = rgb.astype(np.float32)
     R, G, B = f[..., 0], f[..., 1], f[..., 2]
-    mn = np.minimum(R, B)
-    m = np.clip((mn - G) / np.maximum(mn, 1.0), 0.0, 1.0)     # 1 on any-brightness magenta, 0 on white/red/green/blue
+    if key == "green":
+        g = np.maximum(R, B)
+        m = np.clip((G - g) / np.maximum(G, 1.0), 0.0, 1.0)  # 1 on any-brightness green, 0 on white/red/blue/magenta
+        K = GREEN
+    else:
+        mn = np.minimum(R, B)
+        m = np.clip((mn - G) / np.maximum(mn, 1.0), 0.0, 1.0)  # 1 on any-brightness magenta
+        K = MAGENTA
     alpha = np.clip(1.0 - m, 0.0, 1.0)
     alpha = np.clip((alpha - knee) / (1.0 - knee), 0.0, 1.0)  # kill residual background
     a3 = alpha[..., None]
-    F = np.where(a3 > 1e-3, (f - (1.0 - a3) * MAGENTA) / np.maximum(a3, 1e-3), 0.0)
+    F = np.where(a3 > 1e-3, (f - (1.0 - a3) * K) / np.maximum(a3, 1e-3), 0.0)
     out = np.zeros((*rgb.shape[:2], 4), np.uint8)
     out[..., :3] = np.clip(F, 0, 255).astype(np.uint8)
     out[..., 3] = (alpha * 255 + 0.5).astype(np.uint8)
@@ -180,7 +199,8 @@ def run(name):
     sheet_file, box, factor, wash = JOBS[name]
     sheet = np.asarray(Image.open(os.path.join(RAW, sheet_file)).convert("RGB"))
     x0, y0, x1, y1 = box
-    rgba = keep_real_blobs(fuchsia_key(sheet[y0:y1, x0:x1], knee=KNEE.get(name, 0.14)))
+    rgba = keep_real_blobs(fuchsia_key(sheet[y0:y1, x0:x1], knee=KNEE.get(name, 0.14),
+                                       key=KEY.get(name, "magenta")))
     if name in FILLGLOW:
         rgba = fill_glow(rgba)
     if wash:

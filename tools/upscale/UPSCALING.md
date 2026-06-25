@@ -129,10 +129,19 @@ compensate. Fix = divide the draw scale by the factor. We did it centrally:
 | `repack_landed.py` | single still frame: key -> match sprite WIDTH to origW*factor -> place at orig bbox-centre*factor in an origW*factor canvas (the landed stills + the `powerupbw` HD bubble). |
 | `pack_small_asteroids.py` | slice a magenta GRID of variants -> key -> footprint-match each to origW*factor at a LOWER factor (for sprites drawn small). Built `AsteroidSmall1..4`. |
 | `pack_anchored_anim.py` | FIXED-CAMERA frame folder -> ONE shared union-bbox crop (no per-frame jitter) -> key -> grid sheet. For anchored AnimGen anims (the spider rear-up). |
+| `interp_frame.py` | PATCH ONE bad cell of an already-packed sheet with the half-way blend of its two neighbours (`frame i := lerp(i-1, i+1, 0.5)`). `premult` (clean edges) or `straight` (raw RGBA lerp, exactly what sprite.fx INTERPOLATE does). For a single flickery/duplicate frame, no re-repack. |
+| `flow_tween_frame.py` | same single-cell patch but MOTION-COMPENSATED: bidirectional Farneback optical flow warps each neighbour halfway toward the midpoint, then blends (premultiplied). Cleaner than `interp_frame` when features MOVE; for a pure brightness/glow morph it collapses to the same blend (no displacement to compensate). Adapted from `Fighter/scripts/make_seam_tween.py`. Used to de-flicker `faceofdeath` frame 7. |
 | `esrgan_test.py` | the Path-A experiment (kept for reference; not the chosen path) |
 
 Heavy/scratch (gitignored): `models/` (ESRGAN weights, re-downloadable), `out/` (previews).
 `*.png.orig` backups sit next to each swapped asset for easy revert.
+
+**Inspecting a packed sheet frame-by-frame:** `wwwroot/skullframes.html` (served by the dev
+server) slices any sheet into its grid and lets you step frames (←/→), play the loop (space),
+onion-skin (o) or diff-vs-prev (d) — for spotting a single bad/flickery frame. URL-driven:
+`…/skullframes.html?sheet=Content/gfx/sprites/<name>.png&cols=8&rows=4&frame=7&play`. To pin the
+exact off frame objectively, compute per-frame SAD-to-neighbours + mean luma and look for the
+spike / non-monotonic blip (how `faceofdeath` frame 7 was found).
 
 ## Method decision (which repack script) — pick by HOW it animates, not how it looks
 

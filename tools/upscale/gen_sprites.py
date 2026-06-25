@@ -18,10 +18,13 @@ SOURCE; swapping into Content/gfx/sprites + the engine wiring is a separate step
 # pyright: reportAttributeAccessIssue=false
 import os
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+SPRITES = os.path.join(REPO, "web", "EvilAliensWeb", "wwwroot", "Content", "gfx", "sprites")
 OUT = os.path.join(HERE, "gen_out")
 SS = 4  # supersample factor
 
@@ -65,26 +68,25 @@ def sphere(size, base, *, ambient=0.22, gloss=0.85, shininess=55.0,
     return img.resize((size, size), Image.LANCZOS)
 
 
-def arrow(w, h, *, color=(255, 255, 255)):
-    """A solid up-pointing arrow matching the original arrow.png silhouette: a
-    wide, short triangular head over a rectangular shaft. Filled, white, AA'd
-    (supersample then box-down). w x h is the design aspect (49 x 40)."""
-    W, H = w * SS, h * SS
-    apex_y = 0.05 * H            # tip near the top
-    base_y = 0.32 * H            # head base ~ top third (orig: 12/40)
-    bot_y = 0.93 * H            # shaft foot near the bottom (orig: 36/40)
-    hx = 0.02 * W               # head base spans nearly full width
-    sl, sr = 0.275 * W, 0.725 * W   # shaft ~45% width, centred (orig: 22/49)
-    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    # outline walked clockwise from the tip: down the right head edge, in to the
-    # shaft, down to the foot, across, up the left shaft + left head edge.
-    poly = [
-        (W / 2, apex_y),
-        (W - hx, base_y), (sr, base_y), (sr, bot_y),
-        (sl, bot_y), (sl, base_y), (hx, base_y),
-    ]
-    ImageDraw.Draw(im).polygon(poly, fill=(*color, 255))
-    return im.resize((w, h), Image.LANCZOS)
+def arrow(orig_path, factor=8, *, color=(255, 255, 255)):
+    """Trace the EXACT original arrow.png silhouette and re-render it crisp at
+    `factor`x. Find the alpha contour, simplify the 1px staircase to clean straight
+    edges (Douglas-Peucker), scale the corners by `factor`, fill anti-aliased
+    (supersample then box-down). Output is (49 x 40) * factor; design width = 49."""
+    a = np.asarray(Image.open(orig_path).convert("RGBA"))[:, :, 3]
+    h, w = a.shape
+    mask = ((a > 64).astype(np.uint8)) * 255
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnt = max(cnts, key=cv2.contourArea)
+    approx = cv2.approxPolyDP(cnt, 1.5, True).reshape(-1, 2).astype(np.float64)
+    print("    arrow contour: %d corners" % len(approx))
+
+    s = factor * SS
+    W, H = w * factor, h * factor
+    im = Image.new("RGBA", (W * SS, H * SS), (0, 0, 0, 0))
+    ImageDraw.Draw(im).polygon([(float(x * s), float(y * s)) for x, y in approx],
+                               fill=(*color, 255))
+    return im.resize((W, H), Image.LANCZOS)
 
 
 def save(img, name):
@@ -98,7 +100,7 @@ def main():
     sprites = {
         "bulletevil": sphere(128, (0.90, 0.12, 0.12)),     # red energy ball
         "bulletgood": sphere(128, (0.18, 0.82, 0.24)),     # green energy ball
-        "arrow": arrow(196, 160),                          # 49x40 * 4
+        "arrow": arrow(os.path.join(SPRITES, "arrow.png")),   # traced, 49x40 * 8
     }
     for name, img in sprites.items():
         save(img, name)

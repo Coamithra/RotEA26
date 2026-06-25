@@ -3,6 +3,9 @@
 models/
 # preview GIFs, diagnostics, HD repacks (~30MB scratch):
 out/
+# staging for gen_sprites.py / repack_misc.py outputs (regenerable from the scripts;
+# the committed copies live under Content/gfx/sprites once swapped in):
+gen_out/
 # intermediate per-frame export for manual tweaking:
 player_frames/
 # scratch reference tiles / captures:

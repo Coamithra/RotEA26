@@ -1,0 +1,124 @@
+"""
+Procedurally generate the sprites that are better drawn than AI-upscaled:
+  - bulletevil / bulletgood : simple red / green shaded spheres with a specular
+    highlight (the originals are 16px blurry blobs; a generative redraw adds junk
+    detail a clean glossy ball shouldn't have).
+  - arrow : the Warning!/Danger! directional arrow (original 49x40: a wide short
+    triangular head + a rectangular shaft, drawn at AnimatedMessage.cs:285 rotating
+    round screen-centre at scale 1, so it blurs when the presenter magnifies it).
+    A crisp filled vector arrow at the same silhouette.
+
+All straight-alpha RGBA, supersampled then box-down for clean edges. Output ->
+tools/upscale/gen_out/<name>.png + a gen_preview.png contact strip. These are the
+SOURCE; swapping into Content/gfx/sprites + the engine wiring is a separate step.
+
+    python tools/upscale/gen_sprites.py
+"""
+# PIL.Image.LANCZOS resolves at runtime but Pyright's Pillow stubs miss it:
+# pyright: reportAttributeAccessIssue=false
+import os
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "gen_out")
+SS = 4  # supersample factor
+
+
+def sphere(size, base, *, ambient=0.22, gloss=0.85, shininess=55.0,
+           light=(-0.45, -0.55, 0.70), rim=0.28):
+    """A shaded sphere: lambert + blinn-phong specular + a subtle back rim, with
+    a soft anti-aliased circular alpha edge. `base` is the 0..1 RGB ball colour."""
+    n = size * SS
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float64)
+    nx = (xx - (n - 1) / 2) / (n / 2)
+    ny = (yy - (n - 1) / 2) / (n / 2)
+    r2 = nx * nx + ny * ny
+    nz = np.sqrt(np.clip(1.0 - r2, 0.0, 1.0))
+
+    L = np.asarray(light, float)
+    L /= np.linalg.norm(L)
+    V = np.array([0.0, 0.0, 1.0])
+    H = L + V
+    H /= np.linalg.norm(H)
+
+    ndotl = np.clip(nx * L[0] + ny * L[1] + nz * L[2], 0.0, 1.0)
+    ndoth = np.clip(nx * H[0] + ny * H[1] + nz * H[2], 0.0, 1.0)
+    spec = ndoth ** shininess
+    rimterm = np.clip(1.0 - nz, 0.0, 1.0) ** 3 * rim
+
+    base = np.asarray(base, float)
+    col = (base * (ambient + gloss * ndotl)[..., None]
+           + np.array([1.0, 1.0, 1.0]) * spec[..., None]
+           + base * rimterm[..., None])
+    col = np.clip(col, 0.0, 1.0)
+
+    r = np.sqrt(r2)
+    edge = 1.6 / (n / 2)                       # ~1.6 hi-res px of feather
+    alpha = np.clip((1.0 - r) / edge, 0.0, 1.0)
+
+    rgba = np.zeros((n, n, 4), np.float64)
+    rgba[..., :3] = col
+    rgba[..., 3] = alpha
+    img = Image.fromarray((rgba * 255 + 0.5).astype(np.uint8), "RGBA")
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def arrow(w, h, *, color=(255, 255, 255)):
+    """A solid up-pointing arrow matching the original arrow.png silhouette: a
+    wide, short triangular head over a rectangular shaft. Filled, white, AA'd
+    (supersample then box-down). w x h is the design aspect (49 x 40)."""
+    W, H = w * SS, h * SS
+    apex_y = 0.05 * H            # tip near the top
+    base_y = 0.32 * H            # head base ~ top third (orig: 12/40)
+    bot_y = 0.93 * H            # shaft foot near the bottom (orig: 36/40)
+    hx = 0.02 * W               # head base spans nearly full width
+    sl, sr = 0.275 * W, 0.725 * W   # shaft ~45% width, centred (orig: 22/49)
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    # outline walked clockwise from the tip: down the right head edge, in to the
+    # shaft, down to the foot, across, up the left shaft + left head edge.
+    poly = [
+        (W / 2, apex_y),
+        (W - hx, base_y), (sr, base_y), (sr, bot_y),
+        (sl, bot_y), (sl, base_y), (hx, base_y),
+    ]
+    ImageDraw.Draw(im).polygon(poly, fill=(*color, 255))
+    return im.resize((w, h), Image.LANCZOS)
+
+
+def save(img, name):
+    os.makedirs(OUT, exist_ok=True)
+    img.save(os.path.join(OUT, name + ".png"))
+    print("  %-14s %dx%d" % (name, img.width, img.height))
+
+
+def main():
+    print("generating procedural sprites -> tools/upscale/gen_out/")
+    sprites = {
+        "bulletevil": sphere(128, (0.90, 0.12, 0.12)),     # red energy ball
+        "bulletgood": sphere(128, (0.18, 0.82, 0.24)),     # green energy ball
+        "arrow": arrow(196, 160),                          # 49x40 * 4
+    }
+    for name, img in sprites.items():
+        save(img, name)
+
+    # preview strip on a neutral grey so the highlight + edges read
+    pad, cellh = 24, 220
+    cells = []
+    for name in ("bulletevil", "bulletgood", "arrow"):
+        im = Image.open(os.path.join(OUT, name + ".png")).convert("RGBA")
+        cell = Image.new("RGBA", (cellh, cellh), (90, 90, 96, 255))
+        sc = (cellh - 2 * pad) / max(im.width, im.height)
+        rs = im.resize((round(im.width * sc), round(im.height * sc)), Image.LANCZOS)
+        cell.alpha_composite(rs, ((cellh - rs.width) // 2, (cellh - rs.height) // 2))
+        cells.append(cell)
+    strip = Image.new("RGBA", (cellh * len(cells), cellh), (90, 90, 96, 255))
+    for i, c in enumerate(cells):
+        strip.alpha_composite(c, (i * cellh, 0))
+    strip.convert("RGB").save(os.path.join(OUT, "gen_preview.png"))
+    print("  gen_preview.png")
+
+
+if __name__ == "__main__":
+    main()

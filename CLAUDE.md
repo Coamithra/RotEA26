@@ -220,6 +220,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
   authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
   `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
+- **In-game score / "Player X — Press Start" text = ONE flattened sprite, chrome by default
+  (`SpriteBatchWrapper.DrawShadowString`).** `ScoreVisualiser.DrawStr` no longer draws the
+  drop shadow and the text as two separate translucent `DrawString`s (the old "shadow bleeds
+  THROUGH the text" bug — both were at the same partial alpha, so the 2px-offset shadow showed
+  through the glyph strokes). It now calls `DrawShadowString`, which rasterises shadow-then-text
+  at FULL opacity into the shared grow-only text RT (`metalRT`, via the extracted `EnsureTextRT`,
+  same plumbing as Stage-13 `DrawMetalString`) and composites the whole element ONCE at the
+  target alpha — so shadow+text fade as a single sprite, no bleed-through. The chrome sheen
+  (`metal.fx`) is ON by default (`DebugFlags.MetalScore`, default true; **`?metalscore=0`** A/Bs
+  the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
+  sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
+  back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
 - **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second

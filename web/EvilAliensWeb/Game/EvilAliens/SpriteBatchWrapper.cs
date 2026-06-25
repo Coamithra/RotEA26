@@ -207,16 +207,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// Grow-only shared RT: expand to fit the biggest string ever seen, then reuse it
 		// for every metal string this frame (each renders into the top-left corner). The
 		// composite passes its used sub-rect as UvExtent so the shader's local UV is 0..1.
-		int haveW = (metalRT != null && !((GraphicsResource)metalRT).IsDisposed) ? ((Texture2D)metalRT).Width : 0;
-		int haveH = (metalRT != null && !((GraphicsResource)metalRT).IsDisposed) ? ((Texture2D)metalRT).Height : 0;
-		if (haveW < usedW || haveH < usedH)
-		{
-			if (metalRT != null && !((GraphicsResource)metalRT).IsDisposed)
-			{
-				((GraphicsResource)metalRT).Dispose();
-			}
-			metalRT = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, usedW), Math.Max(haveH, usedH), false, SurfaceFormat.Color, DepthFormat.None);
-		}
+		EnsureTextRT(usedW, usedH);
 
 		// --- Pass 1: rasterise the text into the RT's top-left corner at render res ---
 		// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the
@@ -320,6 +311,122 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			p.SetValue(value);
 		}
+	}
+
+	// Grow the shared text RT (metalRT) to at least w x h render-px, reusing it otherwise.
+	// Shared by DrawMetalString and DrawShadowString. CONTRACT: a caller must rasterise into
+	// the RT AND composite its result before the next text-composite string runs — each string
+	// renders into the RT's top-left corner, so a deferred composite would be clobbered by the
+	// next rasterise. Both callers honour this (rasterise + composite back-to-back per call),
+	// which lets one RT serve every text-composite string in a frame. Grow-only — it expands to
+	// the largest string seen.
+	private void EnsureTextRT(int w, int h)
+	{
+		int haveW = (metalRT != null && !((GraphicsResource)metalRT).IsDisposed) ? ((Texture2D)metalRT).Width : 0;
+		int haveH = (metalRT != null && !((GraphicsResource)metalRT).IsDisposed) ? ((Texture2D)metalRT).Height : 0;
+		if (haveW < w || haveH < h)
+		{
+			if (metalRT != null && !((GraphicsResource)metalRT).IsDisposed)
+			{
+				((GraphicsResource)metalRT).Dispose();
+			}
+			metalRT = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, w), Math.Max(haveH, h), false, SurfaceFormat.Color, DepthFormat.None);
+		}
+	}
+
+	// Card "Score text minor visual tweak": draw `text` with a drop shadow flattened into ONE
+	// semi-transparent sprite. The old score drew shadow and text each at the SAME partial
+	// alpha, so the translucent shadow showed THROUGH the translucent text where they overlap
+	// (shadow offset is only 2px, so they overlap almost entirely). Fix: rasterise shadow then
+	// text at FULL opacity into the shared text RT (text on top fully hides the shadow it
+	// covers), then composite the whole element ONCE at `alpha` — so shadow+text fade together
+	// as a single sprite and no shadow bleeds through. Reuses DrawMetalString's RT plumbing
+	// (grow-only RT + mid-draw target capture/restore). `metal=true` runs the composite through
+	// the chrome-sheen effect (the card's "try the chrome shader on the score" experiment).
+	//
+	// position/origin are 800x600 design space (origin 0,0 = top-left, as the score uses);
+	// shadowOffset is a FIXED design-px drop (NOT multiplied by scale, matching the original
+	// 2px offset). shadowColor/textColor supply the RGB for each layer (their alpha is ignored
+	// — the layers are opaque in the RT; `alpha` is the only transparency). The font is the
+	// shared menufont (DrawStringScaled keeps it crisp at render resolution).
+	public void DrawShadowString(string text, Vector2 position, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float alpha, bool metal)
+	{
+		if (string.IsNullOrEmpty(text) || font == null)
+		{
+			return;
+		}
+		if (scale <= 0f || alpha <= 0f)
+		{
+			return;
+		}
+
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		Vector2 textSz = font.MeasureString(text) * scale;          // scaled glyph extent (design px)
+		float boxW = textSz.X + Math.Abs(shadowOffset.X) + 2 * MetalPad;
+		float boxH = textSz.Y + Math.Abs(shadowOffset.Y) + 2 * MetalPad;
+		int usedW = Math.Max(1, (int)Math.Ceiling(boxW * rs));      // render-px the element fills
+		int usedH = Math.Max(1, (int)Math.Ceiling(boxH * rs));
+		EnsureTextRT(usedW, usedH);
+
+		// --- Pass 1: rasterise shadow then text into the RT's top-left corner at render res ---
+		// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the
+		// straight-alpha glyphs verbatim (same trick DrawMetalString documents). The text top-
+		// left sits at the MetalPad inset; the shadow is offset from there by shadowOffset, so
+		// the whole drop fits inside the padded box. Where the opaque text covers the opaque
+		// shadow, the text wins — that's the bleed-through fix.
+		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
+		Flush();
+		base.GraphicsDevice.SetRenderTarget(0, metalRT);
+		base.GraphicsDevice.Clear(Color.Transparent);
+		Matrix m = Matrix.CreateTranslation(MetalPad, MetalPad, 0f) * Matrix.CreateScale(rs);
+		Color shadowOpaque = new Color(shadowColor.R, shadowColor.G, shadowColor.B, byte.MaxValue);
+		Color textOpaque = new Color(textColor.R, textColor.G, textColor.B, byte.MaxValue);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, m);
+		DrawStringScaled(font, text, shadowOffset, shadowOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
+		DrawStringScaled(font, text, Vector2.Zero, textOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
+		spriteBatch.End();
+		// Restore whatever target was bound on entry (scene target, or a menu's own RT), NOT a
+		// hardcoded null — see the long note in DrawMetalString for why.
+		if (prevTargets != null && prevTargets.Length > 0)
+		{
+			base.GraphicsDevice.SetRenderTargets(prevTargets);
+		}
+		else
+		{
+			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
+		}
+
+		// --- Pass 2: composite the used sub-rect ONCE at `alpha` (optionally through metal.fx) ---
+		// The RT holds a straight-alpha image; composite with the current BlendMode
+		// (NonPremultiplied for the score) and a white tint carrying `alpha`, so the element
+		// fades as one sprite. metal.fx returns float4(rgb, mask) * color, so the same tint
+		// alpha carries through the chrome path too.
+		Rectangle used = new Rectangle(0, 0, usedW, usedH);
+		Color composite = new Color((byte)255, (byte)255, (byte)255, (byte)MathHelper.Clamp(alpha * 255f, 0f, 255f));
+		Effect fx = (metal && metalEffect != null) ? metalEffect : null;
+		if (fx != null)
+		{
+			int texW = ((Texture2D)metalRT).Width;
+			int texH = ((Texture2D)metalRT).Height;
+			Vector2 padFrac = new Vector2((float)MetalPad / boxW, (float)MetalPad / boxH);
+			Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
+			SetParam(metalEffect, "Time", MetalTime);
+			SetParam(metalEffect, "GradTop", 1.18f);
+			SetParam(metalEffect, "GradMid", 0.50f);
+			SetParam(metalEffect, "GradBot", 0.95f);
+			SetParam(metalEffect, "GlintStrength", 0.9f);
+			SetParam(metalEffect, "GlintWidth", 0.06f);
+			SetParam(metalEffect, "SweepPeriod", 9f);
+			SetParam(metalEffect, "SweepActive", 0.12f);
+			SetParam(metalEffect, "PadFrac", padFrac);
+			SetParam(metalEffect, "UvExtent", uvExtent);
+		}
+		float drawScale = 1f / rs;
+		Vector2 rtOrigin = new Vector2(MetalPad, MetalPad) * rs;    // text top-left in RT texels
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, fx, RenderScale.Matrix);
+		spriteBatch.Draw(metalRT, position, (Rectangle?)used, composite, 0f, rtOrigin, drawScale, (SpriteEffects)0, 0f);
+		spriteBatch.End();
 	}
 
 	public void DrawString(SpriteFont spritefont, string text, Vector2 position, Color color, float rotation, Vector2 origin, float scale, SpriteEffects spriteeffect, float layerdepth)

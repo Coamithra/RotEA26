@@ -257,7 +257,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Rectangle used = new Rectangle(0, 0, usedW, usedH);
 		int texW = ((Texture2D)metalRT).Width;
 		int texH = ((Texture2D)metalRT).Height;
-		Vector2 padFrac = new Vector2((float)MetalPad / boxW, (float)MetalPad / boxH);
+		// Symmetric box (no drop shadow): equal top/bottom glyph-band inset.
+		float padFracY = (float)MetalPad / boxH;
 		Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
 		SetParam(metalEffect, "Time", time);
 		SetParam(metalEffect, "GradTop", 1.18f);
@@ -267,7 +268,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		SetParam(metalEffect, "GlintWidth", 0.06f);
 		SetParam(metalEffect, "SweepPeriod", 9f);    // glint sweeps ~every 9s — a rare treat
 		SetParam(metalEffect, "SweepActive", 0.12f); // ~1.1s crossing, then a long rest
-		SetParam(metalEffect, "PadFrac", padFrac);
+		SetParam(metalEffect, "PadFracTop", padFracY);
+		SetParam(metalEffect, "PadFracBot", padFracY);
 		SetParam(metalEffect, "UvExtent", uvExtent);
 		float drawScale = scale / rs;
 		Vector2 rtOrigin = (origin + new Vector2(MetalPad, MetalPad)) * rs;
@@ -409,7 +411,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			int texW = ((Texture2D)metalRT).Width;
 			int texH = ((Texture2D)metalRT).Height;
-			Vector2 padFrac = new Vector2((float)MetalPad / boxW, (float)MetalPad / boxH);
+			// Asymmetric box: the drop shadow extends the bottom, so the glyph band sits MetalPad
+			// from the top but MetalPad + |shadowOffset.Y| from the bottom. Pass both insets so the
+			// chrome gradient lands on the letters, not ~2px low onto the shadow overshoot.
+			float padFracTop = (float)MetalPad / boxH;
+			float padFracBot = (float)(MetalPad + Math.Abs(shadowOffset.Y)) / boxH;
 			Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
 			SetParam(metalEffect, "Time", MetalTime);
 			SetParam(metalEffect, "GradTop", 1.18f);
@@ -419,7 +425,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			SetParam(metalEffect, "GlintWidth", 0.06f);
 			SetParam(metalEffect, "SweepPeriod", 9f);
 			SetParam(metalEffect, "SweepActive", 0.12f);
-			SetParam(metalEffect, "PadFrac", padFrac);
+			SetParam(metalEffect, "PadFracTop", padFracTop);
+			SetParam(metalEffect, "PadFracBot", padFracBot);
 			SetParam(metalEffect, "UvExtent", uvExtent);
 		}
 		float drawScale = 1f / rs;

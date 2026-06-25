@@ -406,9 +406,10 @@ public class Game1 : Game
 	// stages as each uncached MB-scale PNG (the planet backdrop, the title logo) decodes
 	// on the WASM main thread mid-transition. This is what made the end-of-level
 	// credits -> menu handoff (a path that never displayed the menu before) pop in
-	// piecemeal. It warms the menu's whole first-frame set; the heavy decodes are the
-	// planet backdrop and the title logo (the MB-scale ones), the rest are cheap but
-	// warmed too so the first frame is fully ready. The menu scenes
+	// piecemeal. It warms the menu's whole first-frame set (plus one deep
+	// submenu asset that would otherwise pop on first open — see evilskull below); the
+	// heavy decodes are the planet backdrop and the title logo (the MB-scale ones), the
+	// rest are cheap but warmed too so the first frame is fully ready. The menu scenes
 	// (MenuScene/MenuSub1/MenuSubWithSkull) all load through this one shared content
 	// manager (Scene.Content == IContentManagerService.ContentManager == this `content`),
 	// whose cache is keyed by resolved path, so warming it here populates the exact
@@ -429,6 +430,12 @@ public class Game1 : Game
 		Warm<Texture2D>("GFX/Preview/small_face_b");
 		Warm<SpriteFont>("GFX/Menu/menufont");
 		Warm<Curve>("GFX/Effects/BrainCurve");
+		// Not a first-frame asset: the supersampled skull shown in the awardment text view
+		// (Main menu -> Awardments -> select). SubMenuAwardmentText.LoadContent loads it cold
+		// on first Show, so that deep submenu popped once as the ~0.4MP PNG decoded on the WASM
+		// main thread. Warming it here moves that decode to boot, behind the loading screen --
+		// a small fixed cost paid every boot (like the rest of this list) to kill the pop.
+		Warm<Texture2D>("GFX/Menu/evilskull");
 	}
 
 	// Best-effort warm of a single asset into the shared content manager's cache. Guarded

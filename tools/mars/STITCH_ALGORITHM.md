@@ -45,6 +45,14 @@ close. Instead:
   (the global curve is the shared reference). Sub-pixel, edge-replicating. (`shear_v`)
 
 ## Per-junction blend (run at all 12 junctions, including the wrap)
+> **Implementation status.** In the ring build (`build_strip.junction_w`) only steps 2–3
+> are active; **step 1 (Poisson tone leveling) is NOT folded into the ring** — there, tone
+> is handled *solely* by `recolor()` upfront, which is why the wrap colour-shift / residual
+> per-junction tone drift remains. Step 1 is a *validated pairwise primitive* (experiments
+> `12_…poisson` / `13_…level_then_feather`), kept here as the designed recipe; wiring it
+> into the ring (together with the global ring exposure-comp) is the main open task — see
+> "Known gaps".
+
 For each adjacent pair (`A` = left quarter's right region, `B` = right quarter's left
 region) over the `OVL`-wide overlap:
 
@@ -54,8 +62,9 @@ region) over the `OVL`-wide overlap:
    and `−offset/2` into B (−offset/2 at seam → 0 at B's far edge). The two sides now
    **meet in tone** with no step; the correction is a sub-perceptual low-freq tilt and
    the **far edges are pinned (loop-safe)**. Texture is untouched (adding a smooth field
-   doesn't change gradients). This is the key fix for the "colour-flip": feather only
-   *blurs* a tone offset; the membrane *removes* it.
+   doesn't change gradients). This is the designed fix for the "colour-flip" (feather only
+   *blurs* a tone offset; the membrane *removes* it) — **validated pairwise (exp 12/13) but
+   not yet active in the ring; see the status note above.**
 2. **Per-row best seam + adaptive feather.** With tone matched, only *structure*
    mismatch remains. For each row find the column where A and B are closest
    (`color_diff`, blue/green-weighted for the brown spectrum) → that row's cut point
@@ -92,7 +101,8 @@ region) over the `OVL`-wide overlap:
 | Failure at a seam | Fix | Loop-safe via |
 |---|---|---|
 | horizon height step | global-horizon warp | one shared smooth global curve |
-| colour cast drift | recolour→original + Poisson membrane | membrane far-edge pinning |
+| colour cast drift | recolour→original (active in ring) · Poisson membrane (pairwise only, NOT yet in ring) | membrane far-edge pinning |
+| wrap colour shift (tone loops) | global ring exposure-comp + circular Poisson | **OPEN — not implemented** |
 | rocks don't line up | per-row best-seam + adaptive feather | static thresholds, per-junction |
 | magenta/cyan halo | fringe-aware alpha + recomposite + 1px erode | — |
 | mask blur leaks magenta | edge-extended composite | — |

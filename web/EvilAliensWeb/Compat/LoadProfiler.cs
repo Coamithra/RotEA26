@@ -71,6 +71,15 @@ namespace EvilAliensWeb.Compat
         private static int _preloadCount, _preloadMs, _preloadMaxMs;
         private static string _preloadSlowest;
 
+        // Frame-hitch watchdog (NoteFrame). A tick this long is a visible freeze — a cold
+        // texture decode, a GC pause, a shader compile, whatever. ALWAYS-ON (independent of
+        // ?loadlog) so a "the game froze here" report has a number + the active level even in
+        // a shipped build; the cost is one comparison per frame.
+        private const double HitchMs = 120;     // ~7 dropped frames at 60fps
+        private static bool _wasHitch;           // edge-detect: log only a hitch spike's first frame
+        private static bool _sawPreloadThisTick; // a level's whole LoadContent preload runs inside ONE
+                                                 // tick (the loading screen) — don't flag that tick
+
         // Recording / persisting is debug-only; reading the shipped manifest is not.
         private static bool Recording => DebugFlags.LoadLog;
 
@@ -124,6 +133,35 @@ namespace EvilAliensWeb.Compat
             }
         }
 
+        // Frame-hitch watchdog. Called once per tick from Index.razor.cs TickDotNet with the
+        // wall time the whole Game.Tick() (Update+Draw) took. Logs the LEADING frame of each
+        // hitch spike (edge-detected — a single long decode = one line, and a persistently slow
+        // scene doesn't spam). Skips the preload phase (the loading screen is meant to be slow)
+        // and the boot/menu warm-up (Game1.QueueMenuWarm deliberately decodes there). Always-on,
+        // so it complements ?loadlog: ?loadlog attributes the texture; this catches ANY long
+        // tick (incl. non-texture hangs ?loadlog can't see).
+        public static void NoteFrame(double ms)
+        {
+            // The level-load tick (BeginPreload..EndPreload all run within it) is the loading
+            // screen, not a gameplay freeze — _preloadActive is already back to false by the time
+            // this runs at tick-end, so a one-shot flag set in EndPreload excuses exactly that tick.
+            if (_sawPreloadThisTick)
+            {
+                _sawPreloadThisTick = false;
+                _wasHitch = false;
+                return;
+            }
+            if (_preloadActive || _currentLevel == SentinelBoot)
+                return;
+            bool hitch = ms >= HitchMs;
+            if (hitch && !_wasHitch)
+                Console.WriteLine($"[hitch] {(int)Math.Round(ms)}ms frame in {_currentLevel}"
+                    + (Recording
+                        ? " — see the [loadprofile] line above for the asset, if a decode caused it"
+                        : " — long tick (texture decode / GC / shader compile?); add ?loadlog to attribute texture decodes"));
+            _wasHitch = hitch;
+        }
+
         // Bracket a level's preload phase: loads in [BeginPreload, EndPreload) are
         // "preload" (intended), loads after it for the same level are "cold" misses.
         // _currentLevel persists past EndPreload so in-game spawns still attribute to
@@ -133,12 +171,14 @@ namespace EvilAliensWeb.Compat
         {
             _currentLevel = string.IsNullOrEmpty(level) ? SentinelBoot : level;
             _preloadActive = true;
+            _wasHitch = false;   // the long preload ticks aren't hitches; start gameplay clean
             _preloadCount = 0; _preloadMs = 0; _preloadMaxMs = 0; _preloadSlowest = null;
         }
 
         public static void EndPreload()
         {
             _preloadActive = false;
+            _sawPreloadThisTick = true;   // excuse this (load-screen) tick in NoteFrame
             if (!Recording)
                 return;
             Persist();

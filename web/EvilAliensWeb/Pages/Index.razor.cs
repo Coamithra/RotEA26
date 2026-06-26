@@ -53,8 +53,12 @@ namespace EvilAliensWeb.Pages
                 _game.Run();
             }
 
-            // run gameloop
+            // run gameloop, timing it so the frame-hitch watchdog can flag a long tick
+            // (a cold texture decode, GC pause, etc.) to the console — see LoadProfiler.NoteFrame.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             _game.Tick();
+            sw.Stop();
+            EvilAliensWeb.Compat.LoadProfiler.NoteFrame(sw.Elapsed.TotalMilliseconds);
         }
     }
 }

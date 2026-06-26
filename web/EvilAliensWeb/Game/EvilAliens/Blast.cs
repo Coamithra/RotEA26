@@ -170,6 +170,10 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		scale *= scaleMul;
 	}
 
+	// Harness readout only: the blast's current fade alpha, read straight from the live color the
+	// curve just set — so the viz can never drift from ApplyLifecycle if the fade is ever retuned.
+	internal float CurrentFadeAlpha => color.ToVector4().W;
+
 	public override void CollidesWith(ICollidable other)
 	{
 		base.CollidesWith(other);

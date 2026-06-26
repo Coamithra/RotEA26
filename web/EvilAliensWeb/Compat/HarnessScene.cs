@@ -114,7 +114,8 @@ namespace EvilAliensWeb.Compat
             frozenFrame = ((DebugFlags.HarnessFrame % total) + total) % total;
 
             obj.Position = objPos;
-            obj.scale *= DebugFlags.HarnessScale;
+            obj.scale *= DebugFlags.HarnessScale;   // for a blast this is overwritten every frame by
+                                                    // HarnessApplyPhase (which re-applies HarnessScale itself)
             obj.rotation = MathHelper.ToRadians(DebugFlags.HarnessRot);
             obj.curframe = frozenFrame;
             obj.Enabled = false;   // freeze: no gameplay Update
@@ -139,7 +140,8 @@ namespace EvilAliensWeb.Compat
         {
             const int size = 128;
             const float half = size / 2f;
-            const float inner = 0.88f;   // band spans normalised radius 0.88..1.0 (outer edge = hit radius)
+            const float inner = 0.92f;   // band spans normalised radius 0.92..1.0 so its bright peak hugs
+                                         // the outer edge (= the true hit radius), not a few % inside it
             var data = new Color[size * size];
             for (int y = 0; y < size; y++)
             {
@@ -291,7 +293,7 @@ namespace EvilAliensWeb.Compat
                 return;
             }
 
-            float fade = MathHelper.SmoothStep(1f, 0f, blastPhase);
+            float fade = harnessBlast.CurrentFadeAlpha;   // live value the curve set, not a copy of it
             bool active = harnessBlast.Collides;
             float radius = (harnessBlast.CollisionType is CollisionSimpleCircle circle) ? circle.Radius : 0f;
 

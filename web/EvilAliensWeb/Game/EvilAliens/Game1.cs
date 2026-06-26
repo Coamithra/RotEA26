@@ -63,6 +63,11 @@ public class Game1 : Game
 	// startScreen_OnFinished instead of the menu when DebugFlags.Harness is set.
 	private EvilAliensWeb.Compat.HarnessScene harnessScene;
 
+	// Web-port bullet showcase (?bulletshot): a frozen tableau of the ship + UFOs + both
+	// bullet types on the starfield, for redrawing the bullet sprites. Created in Initialize,
+	// launched from startScreen_OnFinished instead of the menu when DebugFlags.Bulletshot is set.
+	private EvilAliensWeb.Compat.BulletShowcaseScene bulletShowcaseScene;
+
 	private AsteroidChase spaceDodge;
 
 	private BraineroidsLevel braineroids;
@@ -279,6 +284,8 @@ public class Game1 : Game
 		newPreviewScene.onExit = (NewPreviewScene.ExitEvent)Delegate.Combine(newPreviewScene.onExit, new NewPreviewScene.ExitEvent(previewScene_onExit));
 		harnessScene = new EvilAliensWeb.Compat.HarnessScene((Game)(object)this);
 		harnessScene.OnExitToMenu = harnessScene_OnExitToMenu;
+		bulletShowcaseScene = new EvilAliensWeb.Compat.BulletShowcaseScene((Game)(object)this);
+		bulletShowcaseScene.OnExitToMenu = bulletShowcaseScene_OnExitToMenu;
 		creditsScene = new CreditsScene((Game)(object)this);
 		creditsScene.OnFinished += creditsScene_OnFinished;
 		bragScene = new BragScene((Game)(object)this);
@@ -315,6 +322,12 @@ public class Game1 : Game
 		if (DebugFlags.Harness != null)
 		{
 			collectionHelper.Add((GameComponent)(object)harnessScene);
+		}
+		// Debug (?bulletshot): bypass the menu and boot straight into the bullet showcase.
+		// menuScene is still wired above, so Esc drops back via bulletShowcaseScene_OnExitToMenu.
+		else if (DebugFlags.Bulletshot)
+		{
+			collectionHelper.Add((GameComponent)(object)bulletShowcaseScene);
 		}
 		// Debug (?level=...): bypass the menu and boot straight into the requested level.
 		// menuScene is still created + wired above, so returning from the level (or losing)
@@ -594,6 +607,13 @@ public class Game1 : Game
 	{
 		harnessScene.Teardown();
 		collectionHelper.Remove((GameComponent)(object)harnessScene);
+		collectionHelper.Add((GameComponent)(object)menuScene);
+	}
+
+	private void bulletShowcaseScene_OnExitToMenu()
+	{
+		bulletShowcaseScene.Teardown();
+		collectionHelper.Remove((GameComponent)(object)bulletShowcaseScene);
 		collectionHelper.Add((GameComponent)(object)menuScene);
 	}
 

@@ -69,6 +69,17 @@ public class Background : Scene
 
 	private bool doodadEnterFromTop = true;
 
+	// Wall-clock durations for the planet-crossing star-slowdown envelope (see
+	// DoodadStarSlowdownFactor). The card wants a RAPID slow-down as the earth enters, a long
+	// hold while it crosses, then a gentler ~1.6s speed-up as it leaves -- in real seconds, not
+	// as fractions of the (very slow, ~90s) crossing, which would stretch the "rapid" ramp to
+	// ~14s. They are converted to progress fractions each frame via the doodad's crossing speed.
+	private const float DoodadSlowHoldInMs = 350f;
+
+	private const float DoodadSlowRampInMs = 1200f;
+
+	private const float DoodadSlowRampOutMs = 1600f;
+
 	private float fadeFactor;
 
 	// Stage 13 reskin: the new space background — a procedural, infinite, scrolling
@@ -195,8 +206,12 @@ public class Background : Scene
 			doodadscrollspeed = new Vector2(0f, 1.55f);
 			doodadcolor = Color.White;
 			doodadblendmode = (SpriteBlendMode)1;
-			// Hero earth: near-freeze the starfields (~12%) while it glides across.
-			doodadStarSlowdown = 0.12f;
+			// Hero earth: freeze the starfields so the earth reads as 5x the fastest near
+			// ("hero") star -- the "it's closer, so it zooms past" parallax cue (card: "earth
+			// animation improvements"). The earth keeps its own descent speed; the stars are
+			// what slow. 5x target: slow = doodadspeed.Y / (5 * maxHeroStarParallax)
+			// = 1.55 / (5 * 3.8) ~= 0.082 (DriftingStars caps parallax at 3.8).
+			doodadStarSlowdown = 0.082f;
 			doodadEnterFromTop = scrollspeed.Y > 0f;
 			if (scrollspeed.Y > 0f)
 			{
@@ -366,13 +381,15 @@ public class Background : Scene
 		}
 	}
 
-	// Star-slowdown envelope for the earth fly-by (card: "Physics of star background and earth").
-	// Returns the factor (<= 1) to multiply into scrollspeedmodifier so the starfields slow while a
-	// planet doodad crosses; 1 means no change. Keyed to the doodad's own on-screen progress (its
-	// centre vs the screen edges, accounting for the disk's half-height) so it is robust to any
-	// scrollspeed and to both crossing directions. Shape over the full visible crossing:
-	//   hold full -> ramp down to doodadStarSlowdown -> hold slow -> ramp back to full as it leaves,
-	// which gives "earth pops in at high speed, the stars slow massively, then speed up as it exits".
+	// Star-slowdown envelope for the earth fly-by (cards: "Physics of star background and earth",
+	// "earth animation improvements"). Returns the factor (<= 1) to multiply into scrollspeedmodifier
+	// so the starfields slow while a planet doodad crosses; 1 means no change. Keyed to the doodad's
+	// own on-screen progress (its centre vs the screen edges, accounting for the disk's half-height)
+	// so it is robust to any scrollspeed and to both crossing directions. Shape over the crossing:
+	//   hold full -> RAPID ramp down to doodadStarSlowdown -> long hold slow -> ~1.6s ramp back to
+	// full as it leaves. The ramp durations are WALL-CLOCK seconds (converted to progress via the
+	// doodad's crossing speed), so the slow-down stays snappy even though the earth itself drifts
+	// across over ~90s -- the near-frozen stars make the slow earth read as the fast, nearest object.
 	private float DoodadStarSlowdownFactor()
 	{
 		if (!showdoodad || doodad == null || doodadStarSlowdown >= 1f)
@@ -389,9 +406,28 @@ public class Background : Scene
 			return 1f;
 		}
 		float prog = (doodadPos.Y - enter) / span; // 0 = just appearing, 1 = fully gone
-		const float holdIn = 0.1f;   // earth pops in while stars still streak
-		const float rampIn = 0.15f;  // stars decelerate
-		const float rampOut = 0.22f; // stars re-accelerate as the trailing edge leaves
+		// Convert the wall-clock ramp durations to progress fractions via the doodad's CURRENT
+		// crossing speed, so the slow-down is rapid and the speed-up is ~1.6s no matter how
+		// slowly the earth actually descends. progress-per-ms = |doodad vertical speed| / span.
+		float progPerMs = Math.Abs(doodadscrollspeed.Y * scrollspeed.Y) / Math.Abs(span);
+		float holdIn, rampIn, rampOut;
+		if (progPerMs > 1E-07f)
+		{
+			holdIn = DoodadSlowHoldInMs * progPerMs;   // brief: a sliver of earth shows first
+			rampIn = DoodadSlowRampInMs * progPerMs;   // rapid star deceleration on entry
+			rampOut = DoodadSlowRampOutMs * progPerMs; // gentler re-acceleration on exit
+		}
+		else
+		{
+			// Doodad momentarily not scrolling (scrollspeed ~0): fall back to fixed fractions.
+			holdIn = 0.04f;
+			rampIn = 0.12f;
+			rampOut = 0.18f;
+		}
+		// Keep each ramp finite (no div-by-zero) and ensure in + out still fit inside [0,1].
+		holdIn = MathHelper.Clamp(holdIn, 0f, 0.1f);
+		rampIn = MathHelper.Clamp(rampIn, 0.002f, 0.45f);
+		rampOut = MathHelper.Clamp(rampOut, 0.002f, 0.45f);
 		float t; // 0 = full star speed, 1 = fully slowed
 		if (prog < holdIn)
 		{

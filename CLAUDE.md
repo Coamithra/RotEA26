@@ -319,6 +319,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.DoodadActive`, race-free) gates `spawner_OnFinished`; Demo 1's earth is covered by the same
   X-lock. It's a PNG decoded at level preload (not in `textures.config`); `earth_small` is unchanged.
   Re-run `build_earth.py` after changing the source/knobs; don't hand-edit `earth.png`.
+  **Fly-by choreography (card "earth animation improvements"):** the earth KEEPS its own descent
+  speed; what sells "it's closer, so it zooms past" is freezing the STARS, not speeding up the
+  earth. `Background.DoodadStarSlowdownFactor()` multiplies `scrollspeedmodifier` (which the earth
+  ignores) down to `doodadStarSlowdown` while a planet crosses — `0.082` for the hero earth, set so
+  the earth = **5x the fastest near ("hero") star** (`1.55 / (5 * 3.8)`, `3.8` = `DriftingStars` max
+  parallax). The ramps are WALL-CLOCK timed (converted to crossing-progress each frame via the
+  doodad's speed): a rapid ~1.2s slow-down on entry, a long hold, a ~1.6s speed-up on exit — so the
+  feel stays snappy even though the earth itself drifts across over ~90s. In Level 1 `QueueEarth()`
+  is called from `demo_OnFinished` (player pop-in), NOT at level start, so the earth enters after the
+  UFO intro as the player takes control; the slow-down engages with it and the asteroid belt waits on
+  the same `WaitForDoodadEvent` gate.
 - **Menu art is warmed at boot to kill the level->menu pop-in.** `Game1.WarmMenuContent()` (end of
   `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
   + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff

@@ -98,6 +98,10 @@ public class SoundManager : ISoundManagerService
 		// the original cut hard; that authored cut is the whole reason the un-attenuated
 		// port "bzzzt" was so loud. Now applied straight from the bank.
 		{ "usepowerup", new CueConfig(volByte: 39, vary: false) },
+		// Port addition (no XACT cue): the splash channel-flip "static channel swap"
+		// burst. A touch above baseline so it carries the transition, no humanize
+		// (static shouldn't be pitch-wobbled).
+		{ "channelswap", new CueConfig(volByte: 100, vary: false) },
 	};
 
 	private readonly Game game;

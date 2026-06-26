@@ -60,6 +60,9 @@ internal class SplashScene : Scene
 
 	private bool variantPicked;
 
+	// One-shot: the static "channel swap" SFX fires once as the glitch starts.
+	private bool flipSoundPlayed;
+
 	private readonly Random rng = new Random();
 
 	private double holdMs;                  // old image visible before the flip fires (= showtime * HOLD_FRAC)
@@ -236,6 +239,7 @@ internal class SplashScene : Scene
 			effShowtime = (double)showtime + (isFlip ? (holdMs + FLIP_MS) : 0.0);
 		}
 		variantPicked = false;
+		flipSoundPlayed = false;
 		if (isFlip)
 		{
 			PickFlipVariant();
@@ -458,6 +462,16 @@ internal class SplashScene : Scene
 			break;
 		case SplashSceneState.displaying:
 		{
+			// Punctuate the channel-flip with the static "channel swap" burst, fired
+			// once the instant the glitch starts (stateTimer reaches the hold). Gated
+			// on variantPicked, so it only sounds when the flip actually renders (the
+			// shader + a reveal are present); silent on a degraded plain splash.
+			if (!flipSoundPlayed && variantPicked && currentTextureNumber == flipIndex
+				&& stateTimer.TotalMilliseconds >= holdMs)
+			{
+				flipSoundPlayed = true;
+				base.SoundManager.PlayCue("channelswap");
+			}
 			double num = 255f / (float)fadetime;
 			if (stateTimer.TotalMilliseconds < (double)fadetime)
 			{

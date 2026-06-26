@@ -205,6 +205,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   now applies the faithful curve `2^((Pitch-50)/50)` and `eaMusic.setRate` just sets `playbackRate`.
   (6) Music uses the authored **2.5s crossfade** (`MUSIC_FADE` in `index.html`). **There is NO DSP/reverb
   in the bank** (0 presets) — that XACT feature was never authored, nothing to port.
+- **Splash "static channel swap" SFX (a port-era cue, not in the banks) — `tools/audio/build_channelswap.py`.**
+  The "I made this!" splash (`SplashScene` index 1) channel-flips the old meme into the revenged image
+  (`channelflip.fx`); a bright TV-static burst now punctuates it. `SplashScene.Update` fires
+  `SoundManager.PlayCue("channelswap")` ONCE the instant the glitch starts (`stateTimer >= holdMs`),
+  gated on `variantPicked` so it only sounds when the flip actually renders (shader + reveal present),
+  one-shot via `flipSoundPlayed` (reset in `BeginDisplay`). The cue is synthesized offline (numpy,
+  deterministic seed) to `Content/sfx/channelswap.wav` (mono 16-bit PCM, 22050 Hz) — re-run the script
+  after changing a knob; don't hand-edit the WAV. Its `SoundManager._cfg` entry is `volByte:100, vary:false`
+  (a touch above baseline, no pitch/vol humanize). **Autoplay caveat:** the splash runs BEFORE any user
+  gesture, so on a truly cold first load the AudioContext may be suspended and the burst is silently
+  dropped (standard browser policy); it sounds once anything has unlocked audio (any prior click/key).
+  Don't add a click-to-start gate to "fix" it — the project boots straight through by design.
 - **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
   the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
   keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`
@@ -322,7 +334,13 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   *outside* a level's preload phase (the stutters), accumulates a per-level set in localStorage that the
   preloader feeds back (`GameScene.LoadContent` → `BeginPreload`/`ApplyManifest`/`EndPreload`), and exports
   a committable list via **`eaPreloadExport()`** in the console → `wwwroot/Content/preload/manifest.txt`
-  (read by ALL builds at preload; release never writes). (2) **`tools/textures/build_textures.py`** reads
+  (read by ALL builds at preload; release never writes). `LoadProfiler` also runs an **always-on frame-hitch
+  watchdog**: `TickDotNet` times each `Game.Tick()` and `LoadProfiler.NoteFrame` logs a **`[hitch] <ms>ms
+  frame in <level>`** line whenever a single tick exceeds `HitchMs` (120ms) — edge-detected (one line per
+  spike, no spam), skipping the preload phase + boot warm-up. It's NOT gated by `?loadlog` (so a "the game
+  froze here" report has a number + level even in a shipped build) and catches ANY long tick, incl.
+  non-texture hangs `?loadlog` can't see; pair it with `?loadlog` to attribute a texture decode. (2)
+  **`tools/textures/build_textures.py`** reads
   **`tools/textures/textures.config`** and precompiles listed sprites to a GPU-ready sibling:
   **`.dds`** (BC3/DXT5, lossy, ~2.4× the PNG on disk, ~0 decode — needs `texconv.exe`, gitignored; dims
   auto-cropped to a mult-of-4 that preserves the `floor(W/cols)` cell pitch, since Chrome/ANGLE→D3D11
@@ -383,6 +401,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   is called from `demo_OnFinished` (player pop-in), NOT at level start, so the earth enters after the
   UFO intro as the player takes control; the slow-down engages with it and the asteroid belt waits on
   the same `WaitForDoodadEvent` gate.
+- **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
+  browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
+  now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet
+  `GFX/Sprites/ufosheet`, tight-cropped and composited onto the menu near-black rounded tile (`#05030a`,
+  for contrast on light tab bars) -> `wwwroot/favicon.ico` (multi-res 16/32/48/64) + `favicon-180.png`
+  (apple-touch). `index.html` references both (NO `favicon.svg` link -- browsers prefer SVG when offered,
+  so leaving it would keep showing the old alien). Re-run `python tools/favicon/build_favicon.py` after
+  changing the source sheet or the `FRAME`/margin knobs; don't hand-edit the `.ico`/`.png`. Offline
+  (Pillow only), like the other `tools/` asset steps; CI just ships the committed outputs.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

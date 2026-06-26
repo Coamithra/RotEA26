@@ -276,6 +276,11 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
   sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
   back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
+  The floating **"Power Up!" / combo pops** (`FloatingText.ShowType.pop`, shown for powerup
+  level-ups and every 10th combo) had the SAME bleed-through (two translucent `DrawString`s, a
+  dark drop + bright text at one alpha) and now route through the same `DrawShadowString`
+  (flattened, `metal:false` so the plain pop look is unchanged); the `scrollup` floating-score
+  type is a single `DrawString` and was never affected.
 - **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second

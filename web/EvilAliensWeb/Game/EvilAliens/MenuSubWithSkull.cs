@@ -225,10 +225,11 @@ internal class MenuSubWithSkull : MenuSub1
 
 		if (selected)
 		{
-			// Dim, wide under-stroke for glow, then the bright crisp stroke.
+			// Dim, wide under-stroke for glow (already soft — no feather), then the
+			// bright crisp stroke (feathered for AA).
 			Color glow = MenuTheme.WithAlpha(MenuTheme.FrameSelected, (int)(60f + 50f * pulse01));
 			for (int k = 0; k < 8; k++)
-				DrawLine(o[k], o[(k + 1) % 8], 6f, glow);
+				DrawLine(o[k], o[(k + 1) % 8], 6f, glow, feather: false);
 			for (int k = 0; k < 8; k++)
 				DrawLine(o[k], o[(k + 1) % 8], 2.5f, MenuTheme.FrameSelected);
 		}
@@ -247,9 +248,20 @@ internal class MenuSubWithSkull : MenuSub1
 			(int)Math.Round(w), (int)Math.Round(h)), color);
 	}
 
+	// Exact mitre extension for THIS octagon's corners. Every vertex of the chamfered
+	// rectangle is a 135-degree interior angle (a 90-degree corner cut once at 45), so to
+	// make two centred stroke quads meet in a clean mitre — no gap, no overshoot — each
+	// edge extends past the vertex by (thickness/2) * cot(67.5 deg) = thickness * 0.2071.
+	// The old value (thickness * 0.5) is the 90-degree-corner mitre, which OVER-extends
+	// these shallower corners by 0.29*thickness on every end — the funky bumps the edges
+	// showed (worst on the 6px selected glow: a ~1.8px blob at each of the 8 corners).
+	private const float Miter135 = 0.20710678f;
+
 	// A line segment a->b of the given thickness, drawn from the 10x10 white `blank`
 	// stretched + rotated, offset half a stroke so the path is centred on the line.
-	private void DrawLine(Vector2 a, Vector2 b, float thickness, Color color)
+	// `feather` lays a slightly wider, dim pass under the crisp core so the aliased 45
+	// chamfer diagonals get a soft 1px fringe (cheap AA — the menu RT has no MSAA).
+	private void DrawLine(Vector2 a, Vector2 b, float thickness, Color color, bool feather = true)
 	{
 		Vector2 delta = b - a;
 		float len = delta.Length();
@@ -257,14 +269,18 @@ internal class MenuSubWithSkull : MenuSub1
 			return;
 		Vector2 dir = delta / len;
 		float ang = (float)Math.Atan2(dir.Y, dir.X);
-		// Extend half a stroke past BOTH ends so neighbouring segments overlap at the
-		// chamfer vertices and fill the little V-shaped mitre gap (each edge is its own
-		// rotated quad, so unextended ends leave a wedge on the outer side of a corner).
-		// Also offset half a stroke perpendicular so the stroke is centred on the path.
-		float ext = thickness * 0.5f;
+		float ext = thickness * Miter135;
 		Vector2 perp = new Vector2(-dir.Y, dir.X);
-		Vector2 pos = a - dir * ext - perp * (thickness / 2f);
 		float fullLen = len + 2f * ext;
+		if (feather)
+		{
+			// One soft, ~1px-wider underlay at reduced alpha — feathers the long edges.
+			float fThick = thickness + 1.3f;
+			Vector2 fpos = a - dir * ext - perp * (fThick / 2f);
+			Color fcol = MenuTheme.WithAlpha(color, (int)(color.A * 0.4f));
+			base.SpriteBatch.Draw(blank, fpos, ang, new Vector2(fullLen / blank.Width, fThick / blank.Height), center: false, fcol);
+		}
+		Vector2 pos = a - dir * ext - perp * (thickness / 2f);
 		base.SpriteBatch.Draw(blank, pos, ang, new Vector2(fullLen / blank.Width, thickness / blank.Height), center: false, color);
 	}
 }

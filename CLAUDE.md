@@ -172,6 +172,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the banks or the ElevenLabs renders; don't hand-edit the outputs.** SFX/speech play on KNI
   `SoundEffect`; **music** is a WebAudio layer (`index.html` `eaMusic`, via `Compat/MusicInterop.cs`)
   for seamless loop points. `SoundManager.Play()` now returns a `SoundEffectInstance` (not `Cue`).
+- **Music loop points are pymusiclooper-refined, not raw whole-wave — `tools/audio/refine_loops.py`.**
+  XACT looped the whole wave (`loopStart=0, loopEnd=duration`), but WebAudio's native loop does a HARD
+  SPLICE at the boundary, so a whole-wave point whose end doesn't connect to its start CLICKS every loop
+  (worst on `stage1`/lvl1 — measured ~617× the signal's normal sample-step in Chrome's decoded buffer;
+  the sister project Fighterproto loops cleanly for exactly this reason — its points are pymusiclooper
+  samples). `refine_loops.py` measures each track's actual splice click and, for the few that click
+  audibly (only `stage1`/`stage2`/`classic` on the committed banks), replaces the points with a
+  waveform-matched pymusiclooper loop written into `music.json` (others kept byte-identical — re-looping
+  an already-clean track only discards music). It's **click-aware + idempotent** (a refined low-click
+  loop falls below the threshold and is left alone on re-run) and **intro-preserving** (won't pull
+  `loopStart` in front of `introEnd`, the once-only intro; `build_audio.py` now records `introEnd`).
+  `build_audio.py` calls it as its last step; re-run `python tools/audio/refine_loops.py` standalone
+  after a bank rebuild (needs `pymusiclooper`; absent → whole-wave points are left in place). Per-track
+  hand-tunes go in its `OVERRIDES`; don't hand-edit the loop points. `--dry-run` previews.
 - **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
   WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
   (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;

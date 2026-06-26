@@ -783,28 +783,29 @@ public class Background : Scene
 		backgroundImage.scrollspeedmodifier = 0.7f;
 		backgroundLayers.Add(backgroundImage);
 		backgroundImage = new BackgroundImage();
-		backgroundImage.position = Vector2.Zero;
-		backgroundImage.textures = new Texture2D[6, 1];
-		backgroundImage.texturenames = new string[6, 1];
-		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/MarsBG/mars1");
-		backgroundImage.texturenames[0, 0] = "GFX/MarsBG/mars1";
-		backgroundImage.textures[1, 0] = Content.Load<Texture2D>("GFX/MarsBG/mars2");
-		backgroundImage.texturenames[1, 0] = "GFX/MarsBG/mars2";
-		backgroundImage.textures[2, 0] = Content.Load<Texture2D>("GFX/MarsBG/mars3");
-		backgroundImage.texturenames[2, 0] = "GFX/MarsBG/mars3";
-		backgroundImage.textures[3, 0] = Content.Load<Texture2D>("GFX/MarsBG/mars4");
-		backgroundImage.texturenames[3, 0] = "GFX/MarsBG/mars4";
-		backgroundImage.textures[4, 0] = Content.Load<Texture2D>("GFX/MarsBG/mars5");
-		backgroundImage.texturenames[4, 0] = "GFX/MarsBG/mars5";
-		backgroundImage.textures[5, 0] = Content.Load<Texture2D>("GFX/MarsBG/mars6");
-		backgroundImage.texturenames[5, 0] = "GFX/MarsBG/mars6";
-		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)(backgroundImage.textures[0, 0].Width + backgroundImage.textures[1, 0].Width + backgroundImage.textures[2, 0].Width + backgroundImage.textures[3, 0].Width + backgroundImage.textures[4, 0].Width + backgroundImage.textures[5, 0].Width) * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		// HD looping Mars floor (mars-bg-remaster). The 12 `marsloop` tiles are the stitched,
+		// seamless, natively-LOOPABLE ground strip (tools/mars/STITCH_ALGORITHM.md), upscaled
+		// ~3.238x. They REPLACE the old mars1..6 + horizontal
+		// mirror: the strip closes on itself, so mirrorX is OFF (and the old realsize.X*=2 is
+		// gone). Drawn at size 1/3.238 so every tile is the SAME on-screen size as the original
+		// art, and at position.Y=300 (design) so this half-height (bottom-half) ground sits
+		// EXACTLY where the old 600-tall tile's ground did -- no top padding needed. realsize.Y
+		// stays the full 600 so the 300-tall band is not repeated vertically.
+		backgroundImage.position = new Vector2(0f, 300f);
+		backgroundImage.textures = new Texture2D[12, 1];
+		backgroundImage.texturenames = new string[12, 1];
+		float marsWidth = 0f;
+		for (int mi = 0; mi < 12; mi++)
+		{
+			backgroundImage.texturenames[mi, 0] = "GFX/MarsBG/marsloop" + (mi + 1);
+			backgroundImage.textures[mi, 0] = Content.Load<Texture2D>(backgroundImage.texturenames[mi, 0]);
+			marsWidth += (float)backgroundImage.textures[mi, 0].Width;
+		}
+		backgroundImage.size = 1f / 3.238f;
+		backgroundImage.realsize.X = marsWidth * backgroundImage.size;
+		backgroundImage.realsize.Y = 600f;
 		backgroundImage.scrollspeedmodifier = 1f;
-		backgroundImage.mirrorX = true;
-		ref Vector2 realsize = ref backgroundImage.realsize;
-		realsize.X *= 2f;
+		backgroundImage.mirrorX = false;
 		backgroundLayers.Add(backgroundImage);
 		backgroundImage = new BackgroundImage();
 		backgroundImage.position = Vector2.Zero;

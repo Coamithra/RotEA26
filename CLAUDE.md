@@ -334,16 +334,23 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.DoodadActive`, race-free) gates `spawner_OnFinished`; Demo 1's earth is covered by the same
   X-lock. It's a PNG decoded at level preload (not in `textures.config`); `earth_small` is unchanged.
   Re-run `build_earth.py` after changing the source/knobs; don't hand-edit `earth.png`.
-- **Menu art is warmed at boot to kill the level->menu pop-in.** `Game1.WarmMenuContent()` (end of
-  `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
-  + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff
-  (which never displayed the menu before) -- appears in a single frame instead of revealing in ~0.5s
-  stages as each uncached MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
+- **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
+  of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
+  first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed
+  the menu before) -- appears in a single frame instead of revealing in ~0.5s stages as each uncached
+  MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
   (`MenuScene`/`MenuSub1`/`MenuSubWithSkull`) all load through ONE shared content manager (`Scene.Content`
   == `IContentManagerService.ContentManager` == `Game1.content`), so warming that one instance populates
   the exact cache keys their `Load()` calls hit (same idea as a level's `PreloadGraphicalContent`).
   (`CreditsScene` uses its OWN content manager, so its bg isn't warmed -- but the crawl fades its bg in,
-  so a cold decode there isn't the jarring part.) Pairs with skipping the brag interstitial: on web `BragScene` is
+  so a cold decode there isn't the jarring part.) **The warm no longer blocks `LoadContent`** (which
+  lengthened the black loading screen BEFORE the first splash, while the multi-second splash sequence --
+  the natural place to hide loading -- sat idle): `QueueMenuWarm` ENQUEUES the decodes and `PumpWarmQueue`
+  (in `UpdateInner`) drains ONE per Update tick during the splash / Press-Start idle time, so the splash
+  appears sooner and the warm hides behind it. The "menu fully warm before first shown" invariant is
+  preserved on every path by `DrainWarmQueue()` at the top of `startScreen_OnFinished` (the instant before
+  `new MenuScene`): if a player mashes past the whole splash before the pump finishes, the drain decodes
+  the rest synchronously (worst case == the old blocking batch). Pairs with skipping the brag interstitial: on web `BragScene` is
   always immediately `Done` (no signed-in gamer), so `Game1.creditsScene_OnFinished` checks
   `BragScene.WouldShow()` and routes credits -> menu directly instead of flashing one bare starfield frame.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to

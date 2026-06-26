@@ -302,6 +302,19 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
   sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
   back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
+  The chrome **glint sweep is EVENT-DRIVEN on the score, not on a timer.** The static chrome
+  gradient (GradTop/Mid/Bot) is time-independent and always shows; only the moving white-hot
+  glint streak is gated. It used to ride the shared continuous `MetalTime` clock (the menu
+  marquee's ~9s `SweepPeriod`), so the score glinted every ~9s regardless of play — read as
+  "random". Now each player's score sweeps ONCE when its leading (most-significant) digit rolls
+  over (9->10, 1900->2000, …) and rests otherwise. `ScoreInfo.UpdateGlint` arms a one-shot clock
+  on a leading-char change (skipping reset-to-"0" and `Load()` checkpoint restores), and
+  `GlintTime(player)` feeds either that live sweep time or a parked value (`MetalSweepPeriod*0.5`,
+  mid-rest → glint off) into `DrawShadowString(…, glintTime)`. The sweep window length is
+  `SpriteBatchWrapper.MetalSweepDuration` (= `MetalSweepPeriod*MetalSweepActive` ≈ 1.08s); those
+  two consts are public so the score and the shader params stay in lockstep. Menus keep the old
+  periodic marquee sweep (the no-`glintTime` `DrawShadowString`/`DrawMetalString` overloads still
+  use `MetalTime`) — only the score is event-driven.
   The floating **"Power Up!" / combo pops** (`FloatingText.ShowType.pop`, shown for powerup
   level-ups and every 10th combo) had the SAME bleed-through (two translucent `DrawString`s, a
   dark drop + bright text at one alpha) and now route through the same `DrawShadowString`

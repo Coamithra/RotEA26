@@ -33,6 +33,14 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// sweep and bloom have overshoot room and don't clip at the glyph edges.
 	private const int MetalPad = 6;
 
+	// Glint-sweep timing fed to metal.fx (Time mod SweepPeriod in [0, Period*Active] = one
+	// crossing). Public so an event-driven caller (the score, which sweeps on a digit
+	// rollover rather than the continuous menu marquee clock) can compute the matching
+	// one-shot window and a parked "glint off" value without duplicating the magic numbers.
+	public const float MetalSweepPeriod = 9f;   // seconds per glint cycle (crossing + rest gap)
+	public const float MetalSweepActive = 0.12f; // fraction of the period the glint spends crossing
+	public static float MetalSweepDuration => MetalSweepPeriod * MetalSweepActive; // ~1.08s crossing
+
 	// Per-frame glint clock for the no-time DrawMetalString overloads, set once by
 	// Game1.DrawInner so any call site works without threading GameTime through every
 	// menu/draw helper (many bespoke menu renderers don't have it in scope).
@@ -266,8 +274,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		SetParam(metalEffect, "GradBot", 0.95f);
 		SetParam(metalEffect, "GlintStrength", 0.9f);
 		SetParam(metalEffect, "GlintWidth", 0.06f);
-		SetParam(metalEffect, "SweepPeriod", 9f);    // glint sweeps ~every 9s — a rare treat
-		SetParam(metalEffect, "SweepActive", 0.12f); // ~1.1s crossing, then a long rest
+		SetParam(metalEffect, "SweepPeriod", MetalSweepPeriod); // glint sweeps ~every 9s — a rare treat
+		SetParam(metalEffect, "SweepActive", MetalSweepActive); // ~1.1s crossing, then a long rest
 		SetParam(metalEffect, "PadFracTop", padFracY);
 		SetParam(metalEffect, "PadFracBot", padFracY);
 		SetParam(metalEffect, "UvExtent", uvExtent);
@@ -351,7 +359,18 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// 2px offset). shadowColor/textColor supply the RGB for each layer (their alpha is ignored
 	// — the layers are opaque in the RT; `alpha` is the only transparency). The font is the
 	// shared menufont (DrawStringScaled keeps it crisp at render resolution).
+	//
+	// `glintTime` drives the metal.fx sweep clock (only when metal=true). The default overload
+	// passes the shared MetalTime (the continuous menu-marquee clock); callers that want an
+	// event-driven one-shot sweep (the score, on a leading-digit rollover) pass their own clock
+	// — see ScoreVisualiser. The static chrome gradient is time-independent and always shows;
+	// only the moving glint streak depends on this clock.
 	public void DrawShadowString(string text, Vector2 position, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float alpha, bool metal)
+	{
+		DrawShadowString(text, position, scale, shadowColor, textColor, shadowOffset, alpha, metal, MetalTime);
+	}
+
+	public void DrawShadowString(string text, Vector2 position, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float alpha, bool metal, float glintTime)
 	{
 		if (string.IsNullOrEmpty(text) || font == null)
 		{
@@ -417,14 +436,14 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			float padFracTop = (float)MetalPad / boxH;
 			float padFracBot = (float)(MetalPad + Math.Abs(shadowOffset.Y)) / boxH;
 			Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
-			SetParam(metalEffect, "Time", MetalTime);
+			SetParam(metalEffect, "Time", glintTime);
 			SetParam(metalEffect, "GradTop", 1.18f);
 			SetParam(metalEffect, "GradMid", 0.50f);
 			SetParam(metalEffect, "GradBot", 0.95f);
 			SetParam(metalEffect, "GlintStrength", 0.9f);
 			SetParam(metalEffect, "GlintWidth", 0.06f);
-			SetParam(metalEffect, "SweepPeriod", 9f);
-			SetParam(metalEffect, "SweepActive", 0.12f);
+			SetParam(metalEffect, "SweepPeriod", MetalSweepPeriod);
+			SetParam(metalEffect, "SweepActive", MetalSweepActive);
 			SetParam(metalEffect, "PadFracTop", padFracTop);
 			SetParam(metalEffect, "PadFracBot", padFracBot);
 			SetParam(metalEffect, "UvExtent", uvExtent);

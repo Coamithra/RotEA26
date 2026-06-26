@@ -32,6 +32,16 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 		public int bombs;
 
+		// Chrome-sheen glint is event-driven on the score: it sweeps once when the leading
+		// (most-significant) digit of scoreString rolls over (9->10, 1900->2000, ...), then
+		// rests. lastLeadDigit tracks the previous frame's first char; glintElapsed counts the
+		// one-shot sweep while glinting (see UpdateGlint / GlintTime).
+		public char lastLeadDigit = '0';
+
+		public float glintElapsed;
+
+		public bool glinting;
+
 		public Dictionary<Powerup.PowerupType, PowerupData> powerupDatas = new Dictionary<Powerup.PowerupType, PowerupData>();
 
 		public void SetScore(float score)
@@ -43,6 +53,30 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		public void AddCombo()
 		{
 			combo++;
+		}
+
+		// Arm a one-shot glint sweep when the leading digit changes (skip the reset-to-"0"
+		// and the empty edge case), then count the sweep down once armed.
+		public void UpdateGlint(float dtSeconds)
+		{
+			char lead = (scoreString != null && scoreString.Length > 0) ? scoreString[0] : '0';
+			if (lead != lastLeadDigit)
+			{
+				lastLeadDigit = lead;
+				if (scoreString != "0")
+				{
+					glinting = true;
+					glintElapsed = 0f;
+				}
+			}
+			if (glinting)
+			{
+				glintElapsed += dtSeconds;
+				if (glintElapsed >= SpriteBatchWrapper.MetalSweepDuration)
+				{
+					glinting = false;
+				}
+			}
 		}
 	}
 
@@ -224,6 +258,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		for (int i = 0; i < 4; i++)
 		{
 			scores[i].SetScore(saved[i]);
+			// Checkpoint restore (post-death revert), not a scored rollover — re-baseline the
+			// glint so the leading digit snapping back doesn't fire a spurious sweep.
+			ScoreInfo s = scores[i];
+			s.lastLeadDigit = (s.scoreString != null && s.scoreString.Length > 0) ? s.scoreString[0] : '0';
+			s.glinting = false;
+			s.glintElapsed = 0f;
 		}
 	}
 
@@ -252,6 +292,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			scoreInfo.combotimer.Stop();
 			scoreInfo.bombs = 0;
 			scoreInfo.powerupactive = false;
+			// Re-baseline the glint so the reset-to-"0" doesn't read as a digit change next frame.
+			scoreInfo.lastLeadDigit = '0';
+			scoreInfo.glinting = false;
+			scoreInfo.glintElapsed = 0f;
 			foreach (PowerupData value in scoreInfo.powerupDatas.Values)
 			{
 				((DrawableGameComponent)value).Visible = false;
@@ -538,7 +582,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				_ => "Gah?", 
 			};
 			string str = ((!showPressStart) ? "Press Start" : text);
-			DrawStr(str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color);
+			DrawStr(str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color, GlintTime(i));
 		}
 	}
 
@@ -565,19 +609,20 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		//IL_01c9: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01ce: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01d3: Unknown result type (might be due to invalid IL or missing references)
-		DrawStr(scores[i].scoreString, startpos + new Vector2(0f, -5f), 0.9f, 1f, playercolor);
+		float glint = GlintTime(i);
+		DrawStr(scores[i].scoreString, startpos + new Vector2(0f, -5f), 0.9f, 1f, playercolor, glint);
 		if (scores[i].combo > 5)
 		{
 			float alpha = 0.2f + 0.8f * MathHelper.SmoothStep(0f, 1f, scores[i].combotimer.TimeLeft / 1000f);
 			float num = MathHelper.Max(font.MeasureString(scores[i].scoreString).X * 0.9f + 17f, 100f);
-			DrawStr("Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor);
+			DrawStr("Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor, glint);
 			if (scores[i].combo < 1000)
 			{
-				DrawStr(comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor);
+				DrawStr(comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor, glint);
 			}
 			else
 			{
-				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor);
+				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, glint);
 			}
 		}
 		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/option", bomb.Width);
@@ -591,10 +636,22 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	{
 		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		DrawStr(str, position, scale, alpha, new Color((byte)100, (byte)100, byte.MaxValue, byte.MaxValue));
+		DrawStr(str, position, scale, alpha, new Color((byte)100, (byte)100, byte.MaxValue, byte.MaxValue), ParkedGlint);
 	}
 
-	private void DrawStr(string str, Vector2 position, float scale, float alpha, Color color)
+	// metal.fx glint clock for a player's score readout: the live one-shot sweep time while a
+	// leading-digit rollover is animating, else a value parked mid-rest so the glint stays off
+	// (the static chrome gradient is time-independent and always shows). Replaces the old
+	// always-on periodic sweep that fired every ~9s regardless of play.
+	private static float ParkedGlint => SpriteBatchWrapper.MetalSweepPeriod * 0.5f;
+
+	private float GlintTime(int player)
+	{
+		ScoreInfo s = scores[player];
+		return s.glinting ? s.glintElapsed : ParkedGlint;
+	}
+
+	private void DrawStr(string str, Vector2 position, float scale, float alpha, Color color, float glintTime)
 	{
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
@@ -634,7 +691,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		// score reads a touch more solid (0.7) than the plain flatten (0.55) to compensate.
 		bool metal = DebugFlags.MetalScore;
 		float opacity = alpha * (metal ? 0.7f : 0.55f);
-		spriteBatch.DrawShadowString(str, position, scale, shadowColor, textColor, new Vector2(2f, 2f), opacity, metal);
+		spriteBatch.DrawShadowString(str, position, scale, shadowColor, textColor, new Vector2(2f, 2f), opacity, metal, glintTime);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -654,6 +711,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		{
 			explosion.Update(gameTime);
 		}
+		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 		foreach (ScoreInfo score in scores)
 		{
 			score.combotimer.Update(gameTime);
@@ -661,6 +719,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			{
 				ResetCombo(scores.IndexOf(score));
 			}
+			score.UpdateGlint(dt);
 		}
 		for (int i = 0; i < floatingtexts.Count; i++)
 		{

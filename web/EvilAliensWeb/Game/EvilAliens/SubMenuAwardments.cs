@@ -53,6 +53,7 @@ internal class SubMenuAwardments : MenuSub1
 			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
 			{
 				float x = font.MeasureString(menuEntries[i]).X;
+				RecordEntryHit(i, position, x, font.LineSpacing); // mouse hit box (centred on origin.X)
 				(val) = new Vector2(x / 2f, (float)(font.LineSpacing / 2)); // centre on origin.X
 				base.SpriteBatch.DrawMetalString(font, menuEntries[i], position, color, 0f, val, num4);
 				position.Y += (float)font.LineSpacing;

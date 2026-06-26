@@ -71,14 +71,13 @@ internal class Level1 : GameScene
 		//IL_02cf: Unknown result type (might be due to invalid IL or missing references)
 		DevCommentEvent gameEvent = new DevCommentEvent(base.Game, DevCommentEvent.CommentVersion.level1_1);
 		eventList.AddEvent(gameEvent, halting: false);
-		WaitEvent waitEvent = new WaitEvent(base.Game, 0.01f);
-		eventList.AddEvent(waitEvent, halting: false);
-		waitEvent.OnFinished += waitevent_OnFinished3;
+		// The hero earth is queued at player pop-in (demo_OnFinished), NOT here at level start,
+		// so it enters after the UFO intro -- see that handler + Background.DoodadStarSlowdownFactor.
 		Lvl1StartDemoEvent lvl1StartDemoEvent = new Lvl1StartDemoEvent(base.Game);
 		eventList.AddEvent(lvl1StartDemoEvent);
 		eventList.AddHalt();
 		lvl1StartDemoEvent.OnFinished += demo_OnFinished;
-		waitEvent = new WaitEvent(base.Game, 0.1f);
+		WaitEvent waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
@@ -301,11 +300,6 @@ internal class Level1 : GameScene
 		Collection.ClearCache();
 	}
 
-	private void waitevent_OnFinished3(GameEvent sender)
-	{
-		Background.QueueEarth();
-	}
-
 	private void spawner_OnFinished(GameEvent sender)
 	{
 		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
@@ -317,6 +311,11 @@ internal class Level1 : GameScene
 	{
 		SpawnAllPlayers(invulnerable: true);
 		base.spawnPlayerNormally = true;
+		// Card "earth animation improvements": the hero earth enters AS the player pops in
+		// (not at level start during the UFO intro). Queuing it here syncs its entrance with
+		// the rapid starfield slow-down (Background.DoodadStarSlowdownFactor) so the near-frozen
+		// stars sell the earth as the fast, nearest object while the player takes control.
+		Background.QueueEarth();
 	}
 
 	private void jbspawner_OnFinished(GameEvent sender)

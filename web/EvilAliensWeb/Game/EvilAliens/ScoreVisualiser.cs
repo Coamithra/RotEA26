@@ -274,7 +274,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		powerbar = content.Load<Texture2D>("GFX/Menu/powerbar");
 		playersheet = content.Load<Texture2D>("GFX/Sprites/playersheet");
 		photocamera = content.Load<Texture2D>("GFX/Sprites/photocamera");
-		bomb = content.Load<Texture2D>("GFX/Sprites/option");
+		bomb = content.Load<Texture2D>("GFX/Sprites/bombicon");
 		collection = ServiceHelper.Get<IComponentBinService>().ComponentBin;
 		explosion.LoadGraphics();
 	}
@@ -627,10 +627,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 		}
-		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/option", bomb.Width);
+		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/bombicon", bomb.Width);
 		for (int j = 0; j < scores[i].bombs; j++)
 		{
-			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.Width / bombSsf * j), 45f), 0f, 1f / bombSsf, center: false, Color.Red);
+			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.Width / bombSsf * j), 45f), 0f, 1f / bombSsf, center: false, Color.White);
 		}
 	}
 

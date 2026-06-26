@@ -122,6 +122,12 @@ public class Game1 : Game
 	// Recreated when the render size changes (Draw).
 	private RenderTarget2D sceneTarget;
 
+	// Incremental menu warm: the heavy menu PNG decodes that used to block LoadContent
+	// are queued (QueueMenuWarm) and drained one-per-Update-tick during the splash /
+	// Press-Start idle time (PumpWarmQueue), with a synchronous drain (DrainWarmQueue)
+	// guaranteed before the menu is first built. See QueueMenuWarm for the why.
+	private readonly Queue<Action> warmQueue = new Queue<Action>();
+
 	public Game1()
 	{
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
@@ -291,6 +297,10 @@ public class Game1 : Game
 
 	private void startScreen_OnFinished(object sender)
 	{
+		// Guarantee the menu's art is fully decoded before it's built/shown. The per-tick
+		// pump normally finishes warming during the splash; this catches anything still
+		// queued (e.g. the splash was mashed past) so the menu never pops in piecemeal.
+		DrainWarmQueue();
 		// Debug (?invuln): turn the Invulnerability cheat on before any level can spawn a
 		// player. Settings has loaded by the time Press Start completes, so this sticks.
 		if (DebugFlags.Invuln)
@@ -398,44 +408,77 @@ public class Game1 : Game
 			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
 			gamma = null;
 		}
-		WarmMenuContent();
+		QueueMenuWarm();
 	}
 
-	// Decode the main menu's art ONCE at boot, behind the loading screen, so the first
-	// time the menu is shown it appears in a single frame instead of revealing in ~0.5s
-	// stages as each uncached MB-scale PNG (the planet backdrop, the title logo) decodes
-	// on the WASM main thread mid-transition. This is what made the end-of-level
-	// credits -> menu handoff (a path that never displayed the menu before) pop in
-	// piecemeal. It warms the menu's whole first-frame set (plus one deep
-	// submenu asset that would otherwise pop on first open — see evilskull below); the
-	// heavy decodes are the planet backdrop and the title logo (the MB-scale ones), the
-	// rest are cheap but warmed too so the first frame is fully ready. The menu scenes
-	// (MenuScene/MenuSub1/MenuSubWithSkull) all load through this one shared content
-	// manager (Scene.Content == IContentManagerService.ContentManager == this `content`),
-	// whose cache is keyed by resolved path, so warming it here populates the exact
-	// entries their Load() calls hit. (CreditsScene uses its OWN content manager, so its
-	// bg isn't warmed — but the credits crawl fades its bg in, so a cold decode there
-	// isn't the jarring part.) Same pattern as a level's PreloadGraphicalContent: a
-	// synchronous batch decode behind a loading indicator.
-	private void WarmMenuContent()
+	// Decode the main menu's art ONCE so the first time the menu is shown it appears in a
+	// single frame instead of revealing in ~0.5s stages as each uncached MB-scale PNG (the
+	// planet backdrop, the title logo) decodes on the WASM main thread mid-transition. This
+	// is what made the end-of-level credits -> menu handoff (a path that never displayed the
+	// menu before) pop in piecemeal. It warms the menu's whole first-frame set (plus one deep
+	// submenu asset that would otherwise pop on first open — see evilskull below); the heavy
+	// decodes are the planet backdrop and the title logo (the MB-scale ones), the rest are
+	// cheap but warmed too so the first frame is fully ready. The menu scenes
+	// (MenuScene/MenuSub1/MenuSubWithSkull) all load through this one shared content manager
+	// (Scene.Content == IContentManagerService.ContentManager == this `content`), whose cache
+	// is keyed by resolved path, so warming it here populates the exact entries their Load()
+	// calls hit. (CreditsScene uses its OWN content manager, so its bg isn't warmed — but the
+	// credits crawl fades its bg in, so a cold decode there isn't the jarring part.)
+	//
+	// Rather than decode synchronously in LoadContent (which lengthened the black loading
+	// screen BEFORE the first splash, while the multi-second splash sequence — the natural
+	// place to hide loading — sat idle), the decodes are ENQUEUED here and pumped one-per-
+	// Update-tick (PumpWarmQueue) during the splash / Press-Start idle time, then drained
+	// synchronously the instant before the menu is first built (DrainWarmQueue in
+	// startScreen_OnFinished). So the splash appears sooner and the warm hides behind it,
+	// while the "menu is fully warm before it's shown" invariant is preserved on every path
+	// (including a player mashing past the whole splash, where the drain catches the rest).
+	private void QueueMenuWarm()
 	{
-		Warm<Texture2D>("GFX/Menu/planet");
-		Warm<Texture2D>("GFX/Menu/title-revenged");
-		Warm<Texture2D>("GFX/Menu/star");
-		Warm<Texture2D>("GFX/Menu/blank");
-		Warm<Texture2D>("GFX/Menu/pointer");
-		Warm<Texture2D>("GFX/Menu/hudring");
-		Warm<Texture2D>("GFX/Menu/vignette");
-		Warm<Texture2D>("GFX/Preview/small_face_a");
-		Warm<Texture2D>("GFX/Preview/small_face_b");
-		Warm<SpriteFont>("GFX/Menu/menufont");
-		Warm<Curve>("GFX/Effects/BrainCurve");
+		EnqueueWarm<Texture2D>("GFX/Menu/planet");
+		EnqueueWarm<Texture2D>("GFX/Menu/title-revenged");
+		EnqueueWarm<Texture2D>("GFX/Menu/star");
+		EnqueueWarm<Texture2D>("GFX/Menu/blank");
+		EnqueueWarm<Texture2D>("GFX/Menu/pointer");
+		EnqueueWarm<Texture2D>("GFX/Menu/hudring");
+		EnqueueWarm<Texture2D>("GFX/Menu/vignette");
+		EnqueueWarm<Texture2D>("GFX/Preview/small_face_a");
+		EnqueueWarm<Texture2D>("GFX/Preview/small_face_b");
+		EnqueueWarm<SpriteFont>("GFX/Menu/menufont");
+		EnqueueWarm<Curve>("GFX/Effects/BrainCurve");
 		// Not a first-frame asset: the supersampled skull shown in the awardment text view
 		// (Main menu -> Awardments -> select). SubMenuAwardmentText.LoadContent loads it cold
 		// on first Show, so that deep submenu popped once as the ~0.4MP PNG decoded on the WASM
-		// main thread. Warming it here moves that decode to boot, behind the loading screen --
-		// a small fixed cost paid every boot (like the rest of this list) to kill the pop.
-		Warm<Texture2D>("GFX/Menu/evilskull");
+		// main thread. Warming it here moves that decode off the first-show path -- a small
+		// fixed cost paid every boot (like the rest of this list) to kill the pop.
+		EnqueueWarm<Texture2D>("GFX/Menu/evilskull");
+	}
+
+	// Queue one asset to be warmed later (during splash idle, or the pre-menu drain).
+	private void EnqueueWarm<T>(string assetName)
+	{
+		warmQueue.Enqueue(() => Warm<T>(assetName));
+	}
+
+	// Warm at most ONE queued asset per call — invoked once per Update tick so the heavy
+	// MB-scale decodes spread across the splash's idle frames instead of blocking boot.
+	private void PumpWarmQueue()
+	{
+		if (warmQueue.Count > 0)
+		{
+			warmQueue.Dequeue()();
+		}
+	}
+
+	// Decode every still-queued asset NOW. Called the instant before the menu is first
+	// built so the menu is guaranteed fully warm even if the splash was skipped before the
+	// per-tick pump could finish — worst case this is the old synchronous batch decode.
+	private void DrainWarmQueue()
+	{
+		while (warmQueue.Count > 0)
+		{
+			warmQueue.Dequeue()();
+		}
 	}
 
 	// Best-effort warm of a single asset into the shared content manager's cache. Guarded
@@ -671,6 +714,9 @@ public class Game1 : Game
 			base.Update(gameTime);
 			collectionHelper.Update();
 			collisionHandler.DetectCollisions();
+			// Warm one queued menu asset per tick, hiding the heavy decodes behind the
+			// splash / Press-Start idle time (see QueueMenuWarm). No-op once drained.
+			PumpWarmQueue();
 		}
 		else
 		{

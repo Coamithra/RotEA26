@@ -306,8 +306,10 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   gradient (GradTop/Mid/Bot) is time-independent and always shows; only the moving white-hot
   glint streak is gated. It used to ride the shared continuous `MetalTime` clock (the menu
   marquee's ~9s `SweepPeriod`), so the score glinted every ~9s regardless of play — read as
-  "random". Now each player's score sweeps ONCE when its leading (most-significant) digit rolls
-  over (9->10, 1900->2000, …) and rests otherwise. `ScoreInfo.UpdateGlint` arms a one-shot clock
+  "random". Now each player's score NUMBER sweeps ONCE when its leading (most-significant) digit
+  rolls over (9->10, 1900->2000, …) and rests otherwise; the combo readout and the inactive-slot
+  "Press Start"/"Player N" prompts keep the static chrome with NO sweep (`ParkedGlint`) — they
+  have no "first digit" to roll over. `ScoreInfo.UpdateGlint` arms a one-shot clock
   on a leading-char change (skipping reset-to-"0" and `Load()` checkpoint restores), and
   `GlintTime(player)` feeds either that live sweep time or a parked value (`MetalSweepPeriod*0.5`,
   mid-rest → glint off) into `DrawShadowString(…, glintTime)`. The sweep window length is

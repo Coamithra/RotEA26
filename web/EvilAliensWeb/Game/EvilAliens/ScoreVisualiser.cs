@@ -56,7 +56,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 
 		// Arm a one-shot glint sweep when the leading digit changes (skip the reset-to-"0"
-		// and the empty edge case), then count the sweep down once armed.
+		// and the empty edge case), then count the sweep up to its duration once armed.
 		public void UpdateGlint(float dtSeconds)
 		{
 			char lead = (scoreString != null && scoreString.Length > 0) ? scoreString[0] : '0';
@@ -582,7 +582,8 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				_ => "Gah?", 
 			};
 			string str = ((!showPressStart) ? "Press Start" : text);
-			DrawStr(str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color, GlintTime(i));
+			// Inactive-slot prompt: static chrome, never a sweep (no score to roll over).
+			DrawStr(str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color, ParkedGlint);
 		}
 	}
 
@@ -609,20 +610,21 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		//IL_01c9: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01ce: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01d3: Unknown result type (might be due to invalid IL or missing references)
-		float glint = GlintTime(i);
-		DrawStr(scores[i].scoreString, startpos + new Vector2(0f, -5f), 0.9f, 1f, playercolor, glint);
+		// Only the score NUMBER is event-driven (sweeps on a leading-digit rollover); the combo
+		// readout has no "first digit", so it keeps the static chrome with no sweep (ParkedGlint).
+		DrawStr(scores[i].scoreString, startpos + new Vector2(0f, -5f), 0.9f, 1f, playercolor, GlintTime(i));
 		if (scores[i].combo > 5)
 		{
 			float alpha = 0.2f + 0.8f * MathHelper.SmoothStep(0f, 1f, scores[i].combotimer.TimeLeft / 1000f);
 			float num = MathHelper.Max(font.MeasureString(scores[i].scoreString).X * 0.9f + 17f, 100f);
-			DrawStr("Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor, glint);
+			DrawStr("Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor, ParkedGlint);
 			if (scores[i].combo < 1000)
 			{
-				DrawStr(comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor, glint);
+				DrawStr(comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 			else
 			{
-				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, glint);
+				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 		}
 		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/option", bomb.Width);
@@ -630,13 +632,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		{
 			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.Width / bombSsf * j), 45f), 0f, 1f / bombSsf, center: false, Color.Red);
 		}
-	}
-
-	private void DrawStr(string str, Vector2 position, float scale, float alpha)
-	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		DrawStr(str, position, scale, alpha, new Color((byte)100, (byte)100, byte.MaxValue, byte.MaxValue), ParkedGlint);
 	}
 
 	// metal.fx glint clock for a player's score readout: the live one-shot sweep time while a
@@ -649,6 +644,13 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	{
 		ScoreInfo s = scores[player];
 		return s.glinting ? s.glintElapsed : ParkedGlint;
+	}
+
+	private void DrawStr(string str, Vector2 position, float scale, float alpha)
+	{
+		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
+		DrawStr(str, position, scale, alpha, new Color((byte)100, (byte)100, byte.MaxValue, byte.MaxValue), ParkedGlint);
 	}
 
 	private void DrawStr(string str, Vector2 position, float scale, float alpha, Color color, float glintTime)

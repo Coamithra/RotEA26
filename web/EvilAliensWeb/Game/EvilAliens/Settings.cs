@@ -28,7 +28,11 @@ public class Settings : Savable
 
 	public bool PlayMusic = true;
 
-	public bool HWMouse = true;
+	// Web default: software reticle (MousePointer) instead of the OS arrow for aiming.
+	// false => MousePointer.Draw runs every frame the cursor is Visible (spinning intro
+	// via showtimer, then the static reticle) and never forces Game.IsMouseVisible true,
+	// so the OS cursor stays hidden over the canvas and reverts naturally off-canvas.
+	public bool HWMouse = false;
 
 	public bool VSync = true;
 

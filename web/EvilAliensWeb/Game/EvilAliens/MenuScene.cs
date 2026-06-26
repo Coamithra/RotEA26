@@ -149,6 +149,8 @@ internal class MenuScene : Scene
 
 	private MenuSub1 difficultyCaller;
 
+	private MousePointer _cursor;
+
 	private SpriteFont font;
 
 	private Texture2D AButton;
@@ -176,6 +178,7 @@ internal class MenuScene : Scene
 	{
 		content = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		oracle = ServiceHelper.Get<IOracleService>().Oracle;
+		_cursor = ServiceHelper.Get<IMousePointerService>().MousePointer;
 		mainMenu = new MenuSubWithSkull(base.Game);
 		if (General.IsTrial)
 		{
@@ -1022,6 +1025,17 @@ internal class MenuScene : Scene
 		base.Initialize();
 	}
 
+	public override void OnComponentRemoved(GameComponentCollectionEventArgs e)
+	{
+		base.OnComponentRemoved(e);
+		// Leaving the menu (-> level / attract demo): hide the reticle so it doesn't
+		// linger; the next scene (GameScene) decides its own cursor visibility.
+		if (e.GameComponent == this)
+		{
+			((DrawableGameComponent)_cursor).Visible = false;
+		}
+	}
+
 	protected override void UnloadContent()
 	{
 		base.UnloadContent();
@@ -1328,6 +1342,17 @@ internal class MenuScene : Scene
 
 	public override void Update(GameTime gameTime)
 	{
+		// While the menu is up, show the reticle cursor so mouse users see where they're
+		// pointing (the menus are hover/click-selectable). Re-show only when found hidden,
+		// so each off->on edge (notably menu entry) replays the cursor's intro spin once
+		// rather than every tick; hidden again when the scene is removed (OnComponentRemoved),
+		// mirroring GameScene. Unconditional by design: in menus no player is added yet, so
+		// GameScene's keyboard-device gate would hide it; HWMouse mode is handled inside
+		// MousePointer (OS cursor) regardless.
+		if (!((DrawableGameComponent)_cursor).Visible)
+		{
+			((DrawableGameComponent)_cursor).Visible = true;
+		}
 		if (!General.IsTrial)
 		{
 			RemovePreviewOption();

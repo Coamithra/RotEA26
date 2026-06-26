@@ -22,6 +22,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using EvilAliens;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -44,6 +45,15 @@ namespace EvilAliensWeb.Compat
         private string label = "";
         private bool error;
         private List<string> errorLines;
+
+        // Blast lifetime visualiser (?harness=blast). The Blast's look + hit window are driven by
+        // its lifetime curve, which the frozen harness never runs — so for a Blast we instead LOOP
+        // an elapsed-fraction phase (0..1) and feed it to Blast.HarnessApplyPhase, drawing the real
+        // collision ring + a live readout on top. Lets the bomb's fade/active window be tuned by eye
+        // (?blastactive=/?blasthit=) — the card this was built for. Non-blast objects ignore all this.
+        private Blast harnessBlast;
+        private float blastPhase;
+        private Texture2D ringTex;
 
         public HarnessScene(Game game)
             : base(game)
@@ -104,13 +114,54 @@ namespace EvilAliensWeb.Compat
             frozenFrame = ((DebugFlags.HarnessFrame % total) + total) % total;
 
             obj.Position = objPos;
-            obj.scale *= DebugFlags.HarnessScale;
+            obj.scale *= DebugFlags.HarnessScale;   // for a blast this is overwritten every frame by
+                                                    // HarnessApplyPhase (which re-applies HarnessScale itself)
             obj.rotation = MathHelper.ToRadians(DebugFlags.HarnessRot);
             obj.curframe = frozenFrame;
             obj.Enabled = false;   // freeze: no gameplay Update
             obj.Visible = true;    // but keep drawing itself
 
+            // A Blast's appearance lives entirely in its lifetime curve (which the freeze stops),
+            // so loop a phase through it instead and build the collision-ring overlay texture.
+            harnessBlast = obj as Blast;
+            if (harnessBlast != null)
+            {
+                blastPhase = 0f;
+                ringTex = BuildRingTexture();
+            }
+
             label = BuildLabel();
+        }
+
+        // A 128x128 ring (annulus) with a smooth band near the outer edge, transparent elsewhere.
+        // Drawn additively over the blast at the live collision radius so the hit boundary is
+        // visible against the sprite. White; the draw tints it per active/idle state.
+        private Texture2D BuildRingTexture()
+        {
+            const int size = 128;
+            const float half = size / 2f;
+            const float inner = 0.92f;   // band spans normalised radius 0.92..1.0 so its bright peak hugs
+                                         // the outer edge (= the true hit radius), not a few % inside it
+            var data = new Color[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x + 0.5f - half) / half;
+                    float dy = (y + 0.5f - half) / half;
+                    float r = (float)Math.Sqrt(dx * dx + dy * dy);
+                    float a = 0f;
+                    if (r >= inner && r <= 1f)
+                    {
+                        float t = (r - inner) / (1f - inner);      // 0..1 across the band
+                        a = (float)Math.Sin(t * Math.PI) * 0.8f;   // smooth bump, peak ~0.94 radius
+                    }
+                    data[y * size + x] = new Color(1f, 1f, 1f, a);
+                }
+            }
+            var tex = new Texture2D(base.GraphicsDevice, size, size);
+            tex.SetData(data);
+            return tex;
         }
 
         // The caption, rebuilt each frame so ?play's frame counter tracks the live
@@ -175,6 +226,17 @@ namespace EvilAliensWeb.Compat
                 {
                     obj.curframe = frozenFrame;
                 }
+
+                // Loop the blast through its lifetime so the growth/fade/active window animate
+                // (its own Update stays frozen; we scrub the same curve via HarnessApplyPhase).
+                if (harnessBlast != null)
+                {
+                    float loop = Math.Max(0.25f, DebugFlags.BlastLoopSeconds);
+                    blastPhase = (blastPhase + (float)gameTime.ElapsedGameTime.TotalSeconds / loop) % 1f;
+                    harnessBlast.HarnessApplyPhase(blastPhase, DebugFlags.HarnessScale);
+                    harnessBlast.Position = objPos;
+                }
+
                 label = BuildLabel();
             }
 
@@ -193,6 +255,12 @@ namespace EvilAliensWeb.Compat
                 Collection.Remove((GameComponent)(object)obj);
                 obj = null;
             }
+            harnessBlast = null;
+            if (ringTex != null)
+            {
+                ringTex.Dispose();
+                ringTex = null;
+            }
             Collection.Remove((GameComponent)(object)background);
         }
 
@@ -210,8 +278,50 @@ namespace EvilAliensWeb.Compat
                 }
                 return;
             }
+            DrawBlastOverlay();
             base.SpriteBatch.DrawString(label, new Vector2(16f, 12f), new Color(Color.White, 0.85f), 0f, centered: false, 0.55f, (SpriteEffects)0, 0f);
             base.SpriteBatch.DrawString("Esc: menu", new Vector2(16f, 574f), new Color(Color.White, 0.5f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
+        }
+
+        // Blast viz: draw the real collision ring over the sprite (green = dealing damage, red =
+        // inert) plus a live readout of the lifetime curve + the tunable params. The whole point of
+        // the card — see at a glance that "dangerous" matches "visible" in both time and area.
+        private void DrawBlastOverlay()
+        {
+            if (harnessBlast == null || ringTex == null)
+            {
+                return;
+            }
+
+            float fade = harnessBlast.CurrentFadeAlpha;   // live value the curve set, not a copy of it
+            bool active = harnessBlast.Collides;
+            float radius = (harnessBlast.CollisionType is CollisionSimpleCircle circle) ? circle.Radius : 0f;
+
+            // Ring at the live hit radius (texture half = 64px maps to the ring's outer edge).
+            if (radius > 1f)
+            {
+                Color tint = active ? new Color(0.35f, 1f, 0.45f) : new Color(1f, 0.4f, 0.3f);
+                base.SpriteBatch.BlendMode = SpriteBlendMode.Additive;
+                base.SpriteBatch.Draw(ringTex, objPos, 0f, radius / 64f, center: true, tint, (SpriteEffects)0);
+                base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
+            }
+
+            string r2 = radius.ToString("0", CultureInfo.InvariantCulture);
+            float activeAlpha = DebugFlags.BlastActiveAlpha ?? 0.5f;
+            float hitFactor = DebugFlags.BlastHitFactor ?? 0.8f;
+            string l1 = "blast lifetime viz   loop " + DebugFlags.BlastLoopSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "s";
+            string l2 = "phase " + blastPhase.ToString("0.00", CultureInfo.InvariantCulture)
+                + "   alpha " + fade.ToString("0.00", CultureInfo.InvariantCulture)
+                + "   scale " + harnessBlast.scale.ToString("0.00", CultureInfo.InvariantCulture)
+                + "   hit r " + r2 + "px";
+            string l3 = active ? "ACTIVE (dealing damage)" : "idle (sprite still fading)";
+            string l4 = "activeAlpha " + activeAlpha.ToString("0.00", CultureInfo.InvariantCulture) + " (?blastactive=)"
+                + "   hit " + hitFactor.ToString("0.00", CultureInfo.InvariantCulture) + " (?blasthit=)";
+
+            base.SpriteBatch.DrawString(l1, new Vector2(16f, 40f), new Color(Color.White, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
+            base.SpriteBatch.DrawString(l2, new Vector2(16f, 62f), new Color(Color.White, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
+            base.SpriteBatch.DrawString(l3, new Vector2(16f, 84f), active ? new Color(0.5f, 1f, 0.55f, 0.95f) : new Color(1f, 0.6f, 0.5f, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
+            base.SpriteBatch.DrawString(l4, new Vector2(16f, 106f), new Color(Color.White, 0.7f), 0f, centered: false, 0.4f, (SpriteEffects)0, 0f);
         }
 
         private static List<string> BuildUnknownMessage(string requested)

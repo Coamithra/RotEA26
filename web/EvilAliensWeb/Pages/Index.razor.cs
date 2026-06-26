@@ -8,6 +8,10 @@ namespace EvilAliensWeb.Pages
     {
         Game _game;
 
+        // Reused per tick by the frame-hitch watchdog (don't allocate a Stopwatch each
+        // frame — that would feed the very GC pauses NoteFrame is meant to surface).
+        readonly System.Diagnostics.Stopwatch _tickSw = new System.Diagnostics.Stopwatch();
+
         protected override void OnAfterRender(bool firstRender)
         {
             base.OnAfterRender(firstRender);
@@ -53,8 +57,12 @@ namespace EvilAliensWeb.Pages
                 _game.Run();
             }
 
-            // run gameloop
+            // run gameloop, timing it so the frame-hitch watchdog can flag a long tick
+            // (a cold texture decode, GC pause, etc.) to the console — see LoadProfiler.NoteFrame.
+            _tickSw.Restart();
             _game.Tick();
+            _tickSw.Stop();
+            EvilAliensWeb.Compat.LoadProfiler.NoteFrame(_tickSw.Elapsed.TotalMilliseconds);
         }
     }
 }

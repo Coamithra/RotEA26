@@ -41,6 +41,11 @@ namespace EvilAliensWeb.Compat
 	//     ?pos=<x,y>   object position in 800x600 design space (default 400,300 = centre)
 	//     ?objscale=<f> multiply the object's natural draw scale (default 1; alias ?size)
 	//     ?rot=<deg>   object rotation in degrees (default 0; alias ?rotation)
+	//   With ?harness=blast the harness LOOPS the blast through its lifetime and overlays the
+	//   real collision ring + a live readout, for tuning the bomb's fade/active window:
+	//     ?blastactive=<0..1> fade-alpha floor below which the blast stops dealing damage (def 0.5)
+	//     ?blasthit=<f>       fraction of the visible radius that deals damage (default 0.8)
+	//     ?blastloop=<sec>    seconds for one spawn->fade sweep in the viz (default 3)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
 	//            ?harness=Spider&frame=2   ?harness=DeathStar&play   ?harness=UFO&pos=300,260
@@ -114,6 +119,19 @@ namespace EvilAliensWeb.Compat
 		// deliberately left OUT of `Active` (a clean boot stays "no debug flags").
 		public static bool MetalScore { get; private set; } = true;
 
+		// Blast (bomb) tuning knobs for the sprite-harness lifetime visualiser (?harness=blast).
+		// All null/default => Blast.cs uses its baked-in constants, so a shipped build is unchanged.
+		//   ?blastactive=<0..1>  the blast stops dealing damage once its fade alpha drops below this
+		//                        (default 0.5 — collide while at least half-opaque; higher = shorter
+		//                        active window, so "dangerous" tracks "clearly visible").
+		//   ?blasthit=<f>        fraction of the visible radius that deals damage (default 0.8).
+		//   ?blastloop=<sec>     viz only: seconds for one spawn->fade sweep in the harness (default 3).
+		public static float? BlastActiveAlpha { get; private set; }
+
+		public static float? BlastHitFactor { get; private set; }
+
+		public static float BlastLoopSeconds { get; private set; } = 3f;
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -174,6 +192,24 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "metalscore":
 					MetalScore = IsOn(val);
+					break;
+				case "blastactive":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))
+					{
+						BlastActiveAlpha = (ba < 0f) ? 0f : (ba > 1f) ? 1f : ba;
+					}
+					break;
+				case "blasthit":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bh) && bh > 0f)
+					{
+						BlastHitFactor = bh;
+					}
+					break;
+				case "blastloop":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bl) && bl > 0f)
+					{
+						BlastLoopSeconds = bl;
+					}
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness

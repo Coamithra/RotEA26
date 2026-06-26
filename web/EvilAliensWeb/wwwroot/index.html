@@ -136,6 +136,15 @@
             // disable context menu on right click
             document.getElementById('theCanvas').addEventListener("contextmenu", e => e.preventDefault());
 
+            // Tell the game when the mouse is over the canvas so the software reticle
+            // (MousePointer) hides off-canvas and the OS cursor takes over there.
+            var eaSetOnCanvas = function (on) {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'eaPointerOnCanvas', !!on); }
+                catch (e) { /* game not booted yet */ }
+            };
+            document.getElementById('theCanvas').addEventListener("pointerenter", () => eaSetOnCanvas(true));
+            document.getElementById('theCanvas').addEventListener("pointerleave", () => eaSetOnCanvas(false));
+
             // begin game loop
             scheduleTick();
         };

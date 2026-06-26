@@ -205,6 +205,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   now applies the faithful curve `2^((Pitch-50)/50)` and `eaMusic.setRate` just sets `playbackRate`.
   (6) Music uses the authored **2.5s crossfade** (`MUSIC_FADE` in `index.html`). **There is NO DSP/reverb
   in the bank** (0 presets) — that XACT feature was never authored, nothing to port.
+- **Splash "static channel swap" SFX (a port-era cue, not in the banks) — `tools/audio/build_channelswap.py`.**
+  The "I made this!" splash (`SplashScene` index 1) channel-flips the old meme into the revenged image
+  (`channelflip.fx`); a bright TV-static burst now punctuates it. `SplashScene.Update` fires
+  `SoundManager.PlayCue("channelswap")` ONCE the instant the glitch starts (`stateTimer >= holdMs`),
+  gated on `variantPicked` so it only sounds when the flip actually renders (shader + reveal present),
+  one-shot via `flipSoundPlayed` (reset in `BeginDisplay`). The cue is synthesized offline (numpy,
+  deterministic seed) to `Content/sfx/channelswap.wav` (mono 16-bit PCM, 22050 Hz) — re-run the script
+  after changing a knob; don't hand-edit the WAV. Its `SoundManager._cfg` entry is `volByte:100, vary:false`
+  (a touch above baseline, no pitch/vol humanize). **Autoplay caveat:** the splash runs BEFORE any user
+  gesture, so on a truly cold first load the AudioContext may be suspended and the burst is silently
+  dropped (standard browser policy); it sounds once anything has unlocked audio (any prior click/key).
+  Don't add a click-to-start gate to "fix" it — the project boots straight through by design.
 - **Sign-in / keyboard:** `SignedInGamers` is still empty, but the XBLIG sign-in gate is gone —
   the PC keyboard path was recreated, incl. **reconstructing the `#if WINDOWS`-stripped
   keyboard-read block in `InputHandler.Update()`** (the Xbox build discarded `Keyboard.GetState()`

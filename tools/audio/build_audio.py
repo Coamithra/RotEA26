@@ -145,6 +145,9 @@ def build_music(entries, cues):
             "loopStart": round(loop_start, 4),
             "loopEnd": round(loop_end, 4),
             "duration": round(total, 4),
+            # End of the once-only intro (0.0 for whole-wave cues). Records the
+            # loop floor so refine_loops.py won't pull loopStart in front of it.
+            "introEnd": round(loop_start, 4),
         }
         size = os.path.getsize(out) / 1024
         print(f"  mus  {cue:10} wave{waves} {total:6.1f}s {kind:10} "
@@ -166,6 +169,16 @@ def main():
     build_narration()
     print("Music:")
     build_music(entries, cues)
+    # The loop points written above are the raw XACT whole-wave points, which
+    # seam under WebAudio's hard-splice loop. Refine them to waveform-matched
+    # points (pymusiclooper). Optional — a missing pymusiclooper just leaves the
+    # whole-wave points in place (re-run tools/audio/refine_loops.py later).
+    print("Refining music loop points:")
+    try:
+        import refine_loops
+        refine_loops.run(dry_run=False)
+    except ImportError:
+        print("  (pymusiclooper not installed — skipped; run refine_loops.py later)")
     print("\ndone.")
 
 

@@ -1,14 +1,14 @@
 {
   "stage1": {
     "file": "Content/music/stage1.ogg",
-    "loopStart": 0.0,
-    "loopEnd": 138.0659,
+    "loopStart": 0.2069,
+    "loopEnd": 132.2351,
     "duration": 138.0659
   },
   "stage2": {
     "file": "Content/music/stage2.ogg",
-    "loopStart": 13.7462,
-    "loopEnd": 116.6106,
+    "loopStart": 16.1287,
+    "loopEnd": 115.5527,
     "duration": 116.6106
   },
   "stage3": {
@@ -25,8 +25,8 @@
   },
   "classic": {
     "file": "Content/music/classic.ogg",
-    "loopStart": 0.0,
-    "loopEnd": 109.7375,
+    "loopStart": 22.335,
+    "loopEnd": 107.9975,
     "duration": 109.7375
   },
   "sjaak": {

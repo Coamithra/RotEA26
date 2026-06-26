@@ -74,6 +74,29 @@ namespace EvilAliensWeb.Compat
 			}
 		}
 
+		// JS bridge for QA/demo of the cinematic slow-motion effect (eaSlowmo in
+		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugSlowmo', seconds).
+		// Triggers the same slow-motion burst the fully-powered 1up does (Oracle.SetSlowmotion)
+		// so the ghost-trail look can be seen on demand without grinding a powerup. No-op
+		// unless a game with an Oracle and a live ship is running (Oracle clears slowmo the
+		// instant no ships are alive, so it does nothing in menus). Not gameplay input.
+		[JSInvokable("debugSlowmo")]
+		public static void Slowmo(float seconds)
+		{
+			if (seconds <= 0f)
+			{
+				seconds = 12f;
+			}
+			EvilAliens.IOracleService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>();
+			if (svc?.Oracle == null)
+			{
+				Console.WriteLine("[debug] eaSlowmo: no oracle (not in a game)");
+				return;
+			}
+			svc.Oracle.SetSlowmotion(seconds);
+			Console.WriteLine("[debug] eaSlowmo " + seconds + "s");
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first

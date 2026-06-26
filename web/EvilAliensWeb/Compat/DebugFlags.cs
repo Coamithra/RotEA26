@@ -23,6 +23,11 @@ namespace EvilAliensWeb.Compat
 	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
 	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (it is ON by default) to A/B the plain flattened drop shadow
+	//   ?slowmotrail=0 disable the cinematic slow-motion ghost-trail post-process (ON by default;
+	//                  reverts the 1up slowmo to the plain time-scale + bloom look). Tune the look
+	//                  with ?slowmotraildecay=<0..0.99> (ghost persistence) and
+	//                  ?slowmotrailstrength=<0..1> (how strongly trails mix over the live frame).
+	//                  See it on demand without grinding a 1up: console eaSlowmo() in a level.
 	//   ?bulletshot    BULLET SHOWCASE: boot straight onto a frozen reference tableau --
 	//                  the player ship + a UFO cluster + both bullet types on the starfield,
 	//                  drawn by the real pipeline. A composed cousin of ?harness, built for
@@ -112,6 +117,21 @@ namespace EvilAliensWeb.Compat
 		// (a shipped build never appends to the list). Does NOT alter the boot path.
 		public static bool LoadLog { get; private set; }
 
+		// Cinematic slow-motion motion-trail post-process (Game1.ApplySlowmoTrail). While the
+		// 1up-powerup slowmo is active, the scene is fed through a feedback buffer so moving
+		// objects smear into fading "ghost" trails (movie bullet-time look). ON by default;
+		// ?slowmotrail=0 / =false A/Bs it off (reverts to the plain time-scale + bloom slowmo).
+		// Like MetalScore it is a pure render look, deliberately OUT of `Active`.
+		public static bool SlowmoTrail { get; private set; } = true;
+
+		// Per-frame feedback retention of the trail buffer (0..1, higher = longer ghosts).
+		// null => the baked-in default (Game1), so a shipped build is unchanged. ?slowmotraildecay=
+		public static float? SlowmoTrailDecay { get; private set; }
+
+		// How strongly the ghost trail is mixed back over the crisp current frame (0..1).
+		// null => the baked-in default (Game1). ?slowmotrailstrength=
+		public static float? SlowmoTrailStrength { get; private set; }
+
 		// Route the in-game score / "Player X — Press Start" text through the chrome-sheen
 		// effect (metal.fx) instead of the plain flattened drop-shadow draw. ON by default
 		// (the card author kept the chrome look); ?metalscore=0 / =false disables it to A/B
@@ -192,6 +212,21 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "metalscore":
 					MetalScore = IsOn(val);
+					break;
+				case "slowmotrail":
+					SlowmoTrail = IsOn(val);
+					break;
+				case "slowmotraildecay":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var smd))
+					{
+						SlowmoTrailDecay = (smd < 0f) ? 0f : (smd > 0.99f) ? 0.99f : smd;
+					}
+					break;
+				case "slowmotrailstrength":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var sms))
+					{
+						SlowmoTrailStrength = (sms < 0f) ? 0f : (sms > 1f) ? 1f : sms;
+					}
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))

@@ -63,18 +63,19 @@ internal class MenuSub1 : Scene
 
 	// --- Mouse selection (card: menus should be mouse selectable & clickable) ---
 	// The menus' layouts differ too much (centred lists, the framed main menu, the
-	// difficulty column, the level carousel) to hit-test from one formula, so each
-	// DrawMenu records the design-space (800x600) box of every entry it actually draws
-	// (RecordEntryHit; locked entries are skipped, so they never become hittable).
-	// HandleMouse then maps the cursor onto an entry — InputHandler.MousePosition is
-	// already in design space (RenderScale.WindowToDesign), so it compares directly.
-	// Captured in Draw, read in the NEXT Update (XNA runs all Updates then all Draws,
-	// so the one-frame-old box is invisible at 60fps).
+	// difficulty column, the level carousel) to hit-test from one formula, so each DrawMenu
+	// records the design-space (800x600) box of every entry it draws (RecordEntryHit;
+	// locked/undrawn entries are skipped, so they never become hittable). HandleMouse maps
+	// the cursor onto one of those boxes — see it for the full design.
 	private readonly List<(int index, Rectangle rect)> entryHitBounds = new List<(int index, Rectangle rect)>();
 
 	private Vector2 lastMousePos;
 
 	private bool mouseInitialised;
+
+	// Set by HandleMouse when a click invokes an entry's event; HandleInput then returns
+	// before running its keyboard blocks against a menu the click may have removed.
+	private bool mouseActivated;
 
 	// The level/challenge carousel opts out of hover-select: gliding the cursor across a
 	// flying screenshot shouldn't snap the selection — only a click selects there.
@@ -189,6 +190,9 @@ internal class MenuSub1 : Scene
 		fadeTimer.Reset();
 		fadeTimer.Start();
 		firstUpdate = true;
+		// Re-seed mouse tracking each time the menu is shown so the first frame can't read a
+		// stale movement delta (these menus are long-lived and re-Show()n).
+		mouseInitialised = false;
 	}
 
 	public override void Update(GameTime gameTime)
@@ -236,6 +240,13 @@ internal class MenuSub1 : Scene
 		if (HandleMouse())
 		{
 			flag = true;
+		}
+		if (mouseActivated)
+		{
+			// A click already activated an entry; the handler may have removed this menu or
+			// shown another, so don't fall through to the keyboard blocks this frame.
+			timeouttimer.Reset();
+			return;
 		}
 		bool flag2 = false;
 		for (int i = 0; i < 4; i++)
@@ -324,20 +335,27 @@ internal class MenuSub1 : Scene
 		}
 	}
 
-	// Maps the cursor onto a menu entry using the boxes captured by the last DrawMenu.
-	// Hover highlights (set selectedEntry); a left-click selects AND activates that entry —
-	// the same effect as arrowing to it and pressing Enter. Returns true if it changed the
-	// selection or activated an entry, so HandleInput resets the attract-demo timeout.
-	// Gated on the normal state so it never runs against the entry/exit zoom (when the
-	// composited menu is scaled away from its design-space boxes).
+	// Maps the cursor onto a menu entry using the boxes captured by the last DrawMenu's
+	// RecordEntryHit calls. InputHandler.MousePosition is already in 800x600 design space
+	// (RenderScale.WindowToDesign), so it compares directly to the boxes. Hover highlights
+	// (set selectedEntry); a left-click selects AND activates that entry — the same effect
+	// as arrowing to it and pressing Enter. Returns true if it changed the selection or
+	// activated an entry, so HandleInput resets the attract-demo timeout.
+	// Gated on the normal state: only there is the layout static frame-to-frame (so the
+	// box captured last frame is still exactly right), and the composited menu sits 1:1 on
+	// its design-space coords rather than mid entry/exit zoom.
 	private bool HandleMouse()
 	{
+		mouseActivated = false;
 		if (state != SubMenuState.normal || entryHitBounds.Count == 0)
 		{
 			return false;
 		}
 		Vector2 m = base.InputHandler.MousePosition;
-		bool moved = !mouseInitialised || (m - lastMousePos).LengthSquared() > 1f;
+		// The first frame after the menu (re)appears only SEEDS the position: a cursor that
+		// happens to rest over a different entry must not snap the selection away from what
+		// Reset()/Initialize() chose — hover-select waits for a real movement delta.
+		bool moved = mouseInitialised && (m - lastMousePos).LengthSquared() > 1f;
 		lastMousePos = m;
 		mouseInitialised = true;
 		int hovered = -1;
@@ -369,6 +387,7 @@ internal class MenuSub1 : Scene
 			{
 				ItemSelectedEvents[selectedEntry](this);
 			}
+			mouseActivated = true;
 			changed = true;
 		}
 		return changed;

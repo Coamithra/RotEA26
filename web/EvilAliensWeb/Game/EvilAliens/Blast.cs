@@ -91,15 +91,18 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		base.Initialize();
 	}
 
-	// One static disc that only grew + faded looked lifeless. Draw TWO half-opacity copies
-	// counter-rotating about the centre so the crackly plasma rim churns against itself and
-	// the blast reads as alive (Trello card: "layer 2 together, each half the alpha, rotate
-	// both in different directions"). Spin is time-based so it animates even in the frozen
-	// sprite harness; the per-blast random base rotation desynchronises overlapping blasts.
+	// One static disc that only grew + faded looked lifeless. Draw TWO copies of the plasma
+	// sprite, each at HALF the lifetime alpha, counter-rotating about the centre so the crackly
+	// rim churns against itself and the blast reads as alive (Trello card: "layer 2 together,
+	// each half the alpha, rotate both in different directions"). Two straight-alpha halves
+	// composite a touch dimmer than the old single full-alpha disc — that softening is the
+	// intended look, per the card. Spin is time-based so it animates even in the frozen sprite
+	// harness; the per-blast random base rotation (Initialize) desyncs overlapping blasts in
+	// gameplay (the harness overrides rotation via ?rot, so that desync isn't visible there).
 	public override void Draw(GameTime gameTime)
 	{
 		spriteBatch.BlendMode = blendMode;
-		float spin = (float)gameTime.TotalGameTime.TotalSeconds * SpinSpeed;
+		float spin = ((float)gameTime.TotalGameTime.TotalSeconds * SpinSpeed) % MathHelper.TwoPi;
 		Vector4 c = color.ToVector4();
 		Color layer = new Color(new Vector4(c.X, c.Y, c.Z, c.W * 0.5f));
 		spriteBatch.Draw(texture, Position, rotation + spin, DrawScale, center: true, layer, spriteEffects);

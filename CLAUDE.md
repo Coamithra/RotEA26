@@ -315,7 +315,13 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   *outside* a level's preload phase (the stutters), accumulates a per-level set in localStorage that the
   preloader feeds back (`GameScene.LoadContent` → `BeginPreload`/`ApplyManifest`/`EndPreload`), and exports
   a committable list via **`eaPreloadExport()`** in the console → `wwwroot/Content/preload/manifest.txt`
-  (read by ALL builds at preload; release never writes). (2) **`tools/textures/build_textures.py`** reads
+  (read by ALL builds at preload; release never writes). `LoadProfiler` also runs an **always-on frame-hitch
+  watchdog**: `TickDotNet` times each `Game.Tick()` and `LoadProfiler.NoteFrame` logs a **`[hitch] <ms>ms
+  frame in <level>`** line whenever a single tick exceeds `HitchMs` (120ms) — edge-detected (one line per
+  spike, no spam), skipping the preload phase + boot warm-up. It's NOT gated by `?loadlog` (so a "the game
+  froze here" report has a number + level even in a shipped build) and catches ANY long tick, incl.
+  non-texture hangs `?loadlog` can't see; pair it with `?loadlog` to attribute a texture decode. (2)
+  **`tools/textures/build_textures.py`** reads
   **`tools/textures/textures.config`** and precompiles listed sprites to a GPU-ready sibling:
   **`.dds`** (BC3/DXT5, lossy, ~2.4× the PNG on disk, ~0 decode — needs `texconv.exe`, gitignored; dims
   auto-cropped to a mult-of-4 that preserves the `floor(W/cols)` cell pitch, since Chrome/ANGLE→D3D11

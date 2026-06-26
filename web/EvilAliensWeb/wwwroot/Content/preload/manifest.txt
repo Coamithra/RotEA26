@@ -40,3 +40,35 @@ Demo1|gfx/sprites/brainanimated
 Demo1|gfx/sprites/brainanimatedglow
 Demo2|gfx/sprites/brainanimated
 Demo2|gfx/sprites/brainanimatedglow
+
+# Asteroids. The AsteroidSpawner picks AsteroidSmall1..4 at RANDOM per spawn
+# (Asteroid.Setup), and the big level-opener uses large_asteroid. None of the four
+# small variants are in any PreloadGraphicalContent() code list, so each first-seen
+# variant decodes cold mid-wave (~100ms each, 268x276 PNG -- measured in SpaceDodge with
+# ?loadlog). Warm all four wherever asteroids spawn (random pick => must preload them
+# all). large_asteroid is already in the code preload for Level1/Demo1/SpaceDodge/Tutorial;
+# TeamChallenge has NO PreloadGraphicalContent override at all, so warm large_asteroid here
+# too -- it ships as .rtex (~0 decode) but this also warms its one-time GPU upload off the
+# gameplay path. (Asteroid scenes: Level1, Demo1, SpaceDodge=AsteroidChase, Tutorial,
+# TeamChallenge.)
+Level1|gfx/sprites/asteroidsmall1
+Level1|gfx/sprites/asteroidsmall2
+Level1|gfx/sprites/asteroidsmall3
+Level1|gfx/sprites/asteroidsmall4
+Demo1|gfx/sprites/asteroidsmall1
+Demo1|gfx/sprites/asteroidsmall2
+Demo1|gfx/sprites/asteroidsmall3
+Demo1|gfx/sprites/asteroidsmall4
+SpaceDodge|gfx/sprites/asteroidsmall1
+SpaceDodge|gfx/sprites/asteroidsmall2
+SpaceDodge|gfx/sprites/asteroidsmall3
+SpaceDodge|gfx/sprites/asteroidsmall4
+Tutorial|gfx/sprites/asteroidsmall1
+Tutorial|gfx/sprites/asteroidsmall2
+Tutorial|gfx/sprites/asteroidsmall3
+Tutorial|gfx/sprites/asteroidsmall4
+TeamChallenge|gfx/sprites/large_asteroid
+TeamChallenge|gfx/sprites/asteroidsmall1
+TeamChallenge|gfx/sprites/asteroidsmall2
+TeamChallenge|gfx/sprites/asteroidsmall3
+TeamChallenge|gfx/sprites/asteroidsmall4

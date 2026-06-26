@@ -23,6 +23,10 @@ namespace EvilAliensWeb.Compat
 	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
 	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (it is ON by default) to A/B the plain flattened drop shadow
+	//   ?bulletshot    BULLET SHOWCASE: boot straight onto a frozen reference tableau --
+	//                  the player ship + a UFO cluster + both bullet types on the starfield,
+	//                  drawn by the real pipeline. A composed cousin of ?harness, built for
+	//                  redrawing the bullet sprites (see Compat/BulletShowcaseScene.cs).
 	//   ?harness=<Obj> SPRITE HARNESS: boot straight onto a space background showing ONE
 	//                  game object (an enemy/boss/projectile), FROZEN on a frame, drawn by
 	//                  the real in-game Draw path (same SpriteBatchWrapper / RenderScale /
@@ -90,6 +94,12 @@ namespace EvilAliensWeb.Compat
 
 		// Object rotation in degrees (default 0).
 		public static float HarnessRot { get; private set; }
+
+		// Bullet showcase scene (Compat/BulletShowcaseScene.cs): a frozen reference tableau
+		// (player ship + a UFO cluster + both bullet types on the starfield) drawn through the
+		// real pipeline, for redrawing the bullet sprites. Like ?harness but COMPOSED of several
+		// objects; non-null => SkipSplash + AutoStart and the boot routes into the showcase.
+		public static bool Bulletshot { get; private set; }
 
 		// Record every texture decode (time + size), flag ones that load outside a
 		// level's preload phase, and accumulate a self-improving preload manifest in
@@ -209,6 +219,14 @@ namespace EvilAliensWeb.Compat
 							HarnessRot = rt;
 						}
 						break;
+case "bulletshot":
+						Bulletshot = IsOn(val);
+						if (Bulletshot)
+						{
+							SkipSplash = true;
+							AutoStart = true;
+						}
+						break;
 					case "level":
 					if (Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl))
 					{
@@ -224,7 +242,7 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

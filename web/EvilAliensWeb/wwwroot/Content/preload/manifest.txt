@@ -48,8 +48,8 @@ Demo2|gfx/sprites/brainanimatedglow
 # ?loadlog). Warm all four wherever asteroids spawn (random pick => must preload them
 # all). large_asteroid is already in the code preload for Level1/Demo1/SpaceDodge/Tutorial;
 # TeamChallenge has NO PreloadGraphicalContent override at all, so warm large_asteroid here
-# too -- it ships as .rtex (~0 decode) but this avoids the ~6 MB GPU-upload hitch when the
-# big one spawns. (Asteroid scenes: Level1, Demo1, SpaceDodge=AsteroidChase, Tutorial,
+# too -- it ships as .rtex (~0 decode) but this also warms its one-time GPU upload off the
+# gameplay path. (Asteroid scenes: Level1, Demo1, SpaceDodge=AsteroidChase, Tutorial,
 # TeamChallenge.)
 Level1|gfx/sprites/asteroidsmall1
 Level1|gfx/sprites/asteroidsmall2

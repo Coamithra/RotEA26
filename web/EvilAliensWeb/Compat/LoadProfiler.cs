@@ -139,7 +139,9 @@ namespace EvilAliensWeb.Compat
         // scene doesn't spam). Skips the preload phase (the loading screen is meant to be slow)
         // and the boot/menu warm-up (Game1.QueueMenuWarm deliberately decodes there). Always-on,
         // so it complements ?loadlog: ?loadlog attributes the texture; this catches ANY long
-        // tick (incl. non-texture hangs ?loadlog can't see).
+        // tick (incl. non-texture hangs ?loadlog can't see). Note: _currentLevel persists past a
+        // level (see BeginPreload), so a hitch on the menu AFTER playing carries the last level's
+        // name — fine for a "froze here" report, just don't read the level name as authoritative.
         public static void NoteFrame(double ms)
         {
             // The level-load tick (BeginPreload..EndPreload all run within it) is the loading

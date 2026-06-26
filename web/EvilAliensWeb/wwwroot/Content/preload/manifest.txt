@@ -72,3 +72,88 @@ TeamChallenge|gfx/sprites/asteroidsmall1
 TeamChallenge|gfx/sprites/asteroidsmall2
 TeamChallenge|gfx/sprites/asteroidsmall3
 TeamChallenge|gfx/sprites/asteroidsmall4
+
+# Base-preload "dummy" component textures (deferred-load gap). GameScene.PreloadGraphicalContent
+# constructs throwaway Explosion / BloodExplosion / Lazer / big-UFO instances at (-1000,-1000) to
+# warm their art, BUT an AlienDrawableGameComponent loads its textures in LoadContent(), which XNA
+# runs on the FIRST Update tick AFTER the component is added -- i.e. AFTER EndPreload() -- so those
+# decodes land in live gameplay (logged COLD) instead of on the loading screen. The synchronous
+# cm.Load() in ApplyManifest (inside the preload bracket) is what actually warms them. Scenes whose
+# own PreloadGraphicalContent override already cm.Load()s these (Level3, InsaneBossI, Demo*, ...)
+# are fine; SpaceDodge only preloads asteroids/ufos and TeamChallenge has no override at all, so
+# both pay these cold mid-fight. Per object:
+#   Explosion      -> block + explosionpurple   (explosion.cs LoadContent; explosionpurple 512x512 ~170ms)
+#   BloodExplosion -> braingoo + blooddrop_green (the base dummy loads them even where no brain spawns)
+#   Lazer          -> lazermiddle                (likewise, even where no JunkBoss spawns)
+# Plus the UFO landed/stationary variants: UFO.Initialize ALWAYS cm.Load()s its stationarySprite
+# (not just when it lands), so every spawned UFO decodes its landed sheet cold -- big UFOs
+# (incl. the base dummy) use mediumship_landed (648x648 ~270ms), small UFOs randomly use
+# ufometpootjes or smallship_landed. And the powerup HUD: ScoreVisualiser loads gfx/menu/powerbar,
+# PowerupData loads the three HUD bars, all on first powerup -- a BonusSpawner runs in both scenes.
+SpaceDodge|gfx/sprites/block
+SpaceDodge|gfx/sprites/explosionpurple
+SpaceDodge|gfx/sprites/braingoo
+SpaceDodge|gfx/sprites/blooddrop_green
+SpaceDodge|gfx/sprites/lazermiddle
+SpaceDodge|gfx/sprites/mediumship_landed
+SpaceDodge|gfx/sprites/ufometpootjes
+SpaceDodge|gfx/sprites/smallship_landed
+SpaceDodge|gfx/menu/powerbar
+SpaceDodge|gfx/hud/barlit
+SpaceDodge|gfx/hud/barunlit2
+SpaceDodge|gfx/hud/barlitedge
+TeamChallenge|gfx/sprites/block
+TeamChallenge|gfx/sprites/explosionpurple
+TeamChallenge|gfx/sprites/braingoo
+TeamChallenge|gfx/sprites/blooddrop_green
+TeamChallenge|gfx/sprites/lazermiddle
+TeamChallenge|gfx/sprites/mediumship_landed
+TeamChallenge|gfx/sprites/ufometpootjes
+TeamChallenge|gfx/sprites/smallship_landed
+TeamChallenge|gfx/menu/powerbar
+TeamChallenge|gfx/hud/barlit
+TeamChallenge|gfx/hud/barunlit2
+TeamChallenge|gfx/hud/barlitedge
+
+# Level3 + InsaneBossI: the OTHER two JunkBoss scenes (not asteroid-wave scenes).
+# (1) JunkBoss "balls" (Ball.cs) are small asteroids -- each ball picks AsteroidSmall1..4 at random,
+#     same as the asteroid waves -- so the first ball spawn cold-decodes its variant. Warm all four.
+# (2) ?loadlog confirms these scenes ALSO hit the same base-preload dummy / UFO-landed / HUD gap as
+#     SpaceDodge/TeamChallenge above -- e.g. mediumship_landed (648x648) decodes cold mid-fight and
+#     spikes a ~350ms [hitch] in Level3. So warm the same shared set here. ApplyManifest cache-dedups
+#     against each scene's PreloadGraphicalContent code list, so the entries a scene already preloads
+#     (Level3/InsaneBossI code-load explosionpurple, braingoo, lazermiddle, etc.) are free no-ops --
+#     only the genuine gaps actually decode. Listing the full set keeps all gameplay scenes uniform.
+# (TeamChallenge is the third JunkBoss scene but already has its own block above + asteroid wave.)
+Level3|gfx/sprites/asteroidsmall1
+Level3|gfx/sprites/asteroidsmall2
+Level3|gfx/sprites/asteroidsmall3
+Level3|gfx/sprites/asteroidsmall4
+Level3|gfx/sprites/block
+Level3|gfx/sprites/explosionpurple
+Level3|gfx/sprites/braingoo
+Level3|gfx/sprites/blooddrop_green
+Level3|gfx/sprites/lazermiddle
+Level3|gfx/sprites/mediumship_landed
+Level3|gfx/sprites/ufometpootjes
+Level3|gfx/sprites/smallship_landed
+Level3|gfx/menu/powerbar
+Level3|gfx/hud/barlit
+Level3|gfx/hud/barunlit2
+Level3|gfx/hud/barlitedge
+InsaneBossI|gfx/sprites/asteroidsmall1
+InsaneBossI|gfx/sprites/asteroidsmall2
+InsaneBossI|gfx/sprites/asteroidsmall3
+InsaneBossI|gfx/sprites/asteroidsmall4
+InsaneBossI|gfx/sprites/block
+InsaneBossI|gfx/sprites/explosionpurple
+InsaneBossI|gfx/sprites/braingoo
+InsaneBossI|gfx/sprites/blooddrop_green
+InsaneBossI|gfx/sprites/lazermiddle
+InsaneBossI|gfx/sprites/mediumship_landed
+InsaneBossI|gfx/sprites/ufometpootjes
+InsaneBossI|gfx/sprites/smallship_landed
+InsaneBossI|gfx/menu/powerbar
+InsaneBossI|gfx/hud/barlit
+InsaneBossI|gfx/hud/barunlit2
+InsaneBossI|gfx/hud/barlitedge

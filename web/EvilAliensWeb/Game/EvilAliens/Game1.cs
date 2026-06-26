@@ -929,14 +929,20 @@ public class Game1 : Game
 			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
 			spriteBatch.Draw(blackPixel, full, new Color(0f, 0f, 0f, 1f - decay));
 			spriteBatch.End();
-			// trail += scene*(1-decay)  (Additive; sceneTarget alpha is ~1 everywhere).
+			// trail.rgb += scene*(1-decay)  (Additive; sceneTarget alpha is ~1 everywhere).
+			// The trail's ALPHA channel is intentionally let run (additive add of ~1/frame),
+			// so it stays saturated at 1 on this 8-bit UNORM render target (pp.BackBufferFormat
+			// is never a float format on BlazorGL/WebGL). The composite below depends on that:
+			// trail.a == 1 makes the NonPremultiplied lerp's effective alpha == k.
 			float w = 1f - decay;
 			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive);
 			spriteBatch.Draw((Texture2D)(object)sceneTarget, full, new Color(w, w, w, 1f));
 			spriteBatch.End();
 		}
 
-		// scene = lerp(scene, trail, k)  (NonPremultiplied trail over scene at alpha k).
+		// scene = lerp(scene, trail, k). NonPremultiplied draws trail over scene with effective
+		// alpha = trail.a * k; trail.a is saturated to 1 (see the feed step), so this is exactly
+		// scene*(1-k) + trail*k.
 		base.GraphicsDevice.SetRenderTarget(sceneTarget);
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
 		spriteBatch.Draw((Texture2D)(object)slowmoTrail, full, new Color(1f, 1f, 1f, k));

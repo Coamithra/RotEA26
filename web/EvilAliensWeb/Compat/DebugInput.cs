@@ -77,9 +77,11 @@ namespace EvilAliensWeb.Compat
 		// JS bridge for QA/demo of the cinematic slow-motion effect (eaSlowmo in
 		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugSlowmo', seconds).
 		// Triggers the same slow-motion burst the fully-powered 1up does (Oracle.SetSlowmotion)
-		// so the ghost-trail look can be seen on demand without grinding a powerup. No-op
-		// unless a game with an Oracle and a live ship is running (Oracle clears slowmo the
-		// instant no ships are alive, so it does nothing in menus). Not gameplay input.
+		// so the ghost-trail look can be seen on demand without grinding a powerup. The Oracle
+		// service is registered for the whole game's life, so this only no-ops meaningfully in a
+		// menu because Oracle.Update resets slowmo to 1f whenever no player ship is alive — i.e.
+		// it bites only inside a level with a live ship. Not gameplay input. The null guard
+		// below is purely defensive (before the game is constructed).
 		[JSInvokable("debugSlowmo")]
 		public static void Slowmo(float seconds)
 		{
@@ -90,7 +92,7 @@ namespace EvilAliensWeb.Compat
 			EvilAliens.IOracleService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>();
 			if (svc?.Oracle == null)
 			{
-				Console.WriteLine("[debug] eaSlowmo: no oracle (not in a game)");
+				Console.WriteLine("[debug] eaSlowmo: oracle not ready (game not constructed yet)");
 				return;
 			}
 			svc.Oracle.SetSlowmotion(seconds);

@@ -127,6 +127,15 @@ public class Game1 : Game
 	// Recreated when the render size changes (Draw).
 	private RenderTarget2D sceneTarget;
 
+	// Cinematic slow-motion motion-trail feedback buffer (ApplySlowmoTrail). Holds an
+	// exponential moving average of the scene so moving objects smear into fading ghost
+	// trails while the 1up-powerup slowmo is active. Lazily created the first time slowmo
+	// engages; recreated on resize (same lifecycle as sceneTarget). slowmoTrailMix ramps
+	// the effect in/out (0 = off) so engaging/leaving slowmo doesn't pop.
+	private RenderTarget2D slowmoTrail;
+
+	private float slowmoTrailMix;
+
 	// Incremental menu warm: the heavy menu PNG decodes that used to block LoadContent
 	// are queued (QueueMenuWarm) and drained one-per-Update-tick during the splash /
 	// Press-Start idle time (PumpWarmQueue), with a synchronous drain (DrainWarmQueue)
@@ -824,6 +833,12 @@ public class Game1 : Game
 			DrawInner(gameTime);
 		}
 
+		// Cinematic slow-motion ghost trails: post-process the fully composited (and
+		// bloomed) frame in sceneTarget before the present blit. No-op unless the 1up
+		// slowmo is active (and ramping). Leaves the render target on sceneTarget, which
+		// the present block immediately switches off below.
+		ApplySlowmoTrail();
+
 		// Present the scene target to the real (window-sized) back buffer, letterboxed.
 		Xna3GraphicsDeviceCompat.BaseRenderTarget = null;
 		base.GraphicsDevice.SetRenderTarget((RenderTarget2D)null);
@@ -844,6 +859,93 @@ public class Game1 : Game
 		}
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gx);
 		spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
+		spriteBatch.End();
+	}
+
+	// Cinematic slow-motion motion blur ("ghost trails"). The base slowmo (1up powerup ->
+	// Oracle.SetSlowmotion) only scales game time + swaps a bloom preset; this adds a real
+	// movie bullet-time smear on top. Technique: a frame-feedback / accumulation buffer
+	// (the established post-process motion-blur approach) -- slowmoTrail holds an exponential
+	// moving average of the scene (trail = trail*decay + scene*(1-decay)), which is then mixed
+	// back over the crisp current frame as scene = lerp(scene, trail, k). Because the EMA
+	// converges to the input for a STATIC pixel, still areas (HUD, idle sprites) are left
+	// unchanged -- only moving objects, where the trail lags the current frame, leave fading
+	// echoes in the direction of motion. slowmoTrailMix eases the whole thing in/out so
+	// engaging/leaving slowmo doesn't pop. Runs after DrawInner, so it post-processes the
+	// already-bloomed sceneTarget (the ghosts carry the glow too).
+	private void ApplySlowmoTrail()
+	{
+		if (!DebugFlags.SlowmoTrail)
+		{
+			return;
+		}
+		bool active = oracle.Slowmotion != 1f;
+		bool wasZero = slowmoTrailMix <= 0f;
+		// Ease toward fully-on (active) or fully-off; ~0.15/frame is a snappy ~0.25s ramp.
+		float target = active ? 1f : 0f;
+		slowmoTrailMix += (target - slowmoTrailMix) * 0.15f;
+		if (slowmoTrailMix < 0.004f)
+		{
+			slowmoTrailMix = 0f;
+			return;
+		}
+		if (slowmoTrailMix > 1f)
+		{
+			slowmoTrailMix = 1f;
+		}
+
+		bool seed = wasZero && active;
+		if (slowmoTrail == null || ((GraphicsResource)slowmoTrail).IsDisposed
+			|| ((Texture2D)slowmoTrail).Width != RenderScale.Width
+			|| ((Texture2D)slowmoTrail).Height != RenderScale.Height)
+		{
+			if (slowmoTrail != null && !((GraphicsResource)slowmoTrail).IsDisposed)
+			{
+				((GraphicsResource)slowmoTrail).Dispose();
+			}
+			PresentationParameters pp = base.GraphicsDevice.PresentationParameters;
+			slowmoTrail = new RenderTarget2D(base.GraphicsDevice, RenderScale.Width, RenderScale.Height, false,
+				pp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+			seed = true;
+		}
+
+		float decay = DebugFlags.SlowmoTrailDecay ?? 0.88f;
+		float strength = DebugFlags.SlowmoTrailStrength ?? 0.8f;
+		float k = strength * slowmoTrailMix;
+		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);
+
+		base.GraphicsDevice.SetRenderTarget(slowmoTrail);
+		if (seed)
+		{
+			// First slowmo frame: seed the trail with the current frame so the lerp below
+			// doesn't briefly darken the image while the buffer fills from black.
+			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque);
+			spriteBatch.Draw((Texture2D)(object)sceneTarget, full, Color.White);
+			spriteBatch.End();
+		}
+		else
+		{
+			// trail *= decay  (NonPremultiplied black at alpha (1-decay): dest*decay + 0).
+			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
+			spriteBatch.Draw(blackPixel, full, new Color(0f, 0f, 0f, 1f - decay));
+			spriteBatch.End();
+			// trail.rgb += scene*(1-decay)  (Additive; sceneTarget alpha is ~1 everywhere).
+			// The trail's ALPHA channel is intentionally let run (additive add of ~1/frame),
+			// so it stays saturated at 1 on this 8-bit UNORM render target (pp.BackBufferFormat
+			// is never a float format on BlazorGL/WebGL). The composite below depends on that:
+			// trail.a == 1 makes the NonPremultiplied lerp's effective alpha == k.
+			float w = 1f - decay;
+			spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive);
+			spriteBatch.Draw((Texture2D)(object)sceneTarget, full, new Color(w, w, w, 1f));
+			spriteBatch.End();
+		}
+
+		// scene = lerp(scene, trail, k). NonPremultiplied draws trail over scene with effective
+		// alpha = trail.a * k; trail.a is saturated to 1 (see the feed step), so this is exactly
+		// scene*(1-k) + trail*k.
+		base.GraphicsDevice.SetRenderTarget(sceneTarget);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
+		spriteBatch.Draw((Texture2D)(object)slowmoTrail, full, new Color(1f, 1f, 1f, k));
 		spriteBatch.End();
 	}
 

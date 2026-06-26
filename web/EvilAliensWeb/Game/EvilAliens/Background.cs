@@ -209,8 +209,8 @@ public class Background : Scene
 			// Hero earth: freeze the starfields so the earth reads as 5x the fastest near
 			// ("hero") star -- the "it's closer, so it zooms past" parallax cue (card: "earth
 			// animation improvements"). The earth keeps its own descent speed; the stars are
-			// what slow. 5x target: slow = doodadspeed.Y / (5 * maxHeroStarParallax)
-			// = 1.55 / (5 * 3.8) ~= 0.082 (DriftingStars caps parallax at 3.8).
+			// what slow. 5x target (at the modifier=1 gameplay baseline): slow = doodadspeed.Y
+			// / (5 * maxHeroStarParallax) = 1.55 / (5 * 3.8) ~= 0.082 (DriftingStars caps at 3.8).
 			doodadStarSlowdown = 0.082f;
 			doodadEnterFromTop = scrollspeed.Y > 0f;
 			if (scrollspeed.Y > 0f)
@@ -409,6 +409,8 @@ public class Background : Scene
 		// Convert the wall-clock ramp durations to progress fractions via the doodad's CURRENT
 		// crossing speed, so the slow-down is rapid and the speed-up is ~1.6s no matter how
 		// slowly the earth actually descends. progress-per-ms = |doodad vertical speed| / span.
+		// (During a SetSpeed lerp this uses the instantaneous speed, so the ramp duration is
+		// momentarily off; negligible -- the ramps are ~seconds against a ~90s crossing.)
 		float progPerMs = Math.Abs(doodadscrollspeed.Y * scrollspeed.Y) / Math.Abs(span);
 		float holdIn, rampIn, rampOut;
 		if (progPerMs > 1E-07f)

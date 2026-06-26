@@ -118,6 +118,8 @@ internal class MenuSubWithSkull : MenuSub1
 			float pulse01 = brainPulsate.Evaluate(MyMath.Mod(t / 2f, 1f));
 
 			Vector2 rowCentre = new Vector2(cx, curY);
+			// Mouse hit box = the whole frame, so a click anywhere in the panel selects it.
+			RecordEntryHit(i, rowCentre, frameW, frameH);
 			DrawFrameFill(rowCentre, frameW, frameH, selected);
 
 			// Text — centred in the frame. No drop shadow: the panel fill already lifts

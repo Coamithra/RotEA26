@@ -7,6 +7,10 @@ Procedurally generate the sprites that are better drawn than AI-upscaled:
     triangular head + a rectangular shaft, drawn at AnimatedMessage.cs:285 rotating
     round screen-centre at scale 1, so it blurs when the presenter magnifies it).
     A crisp filled vector arrow at the same silhouette.
+  - bombicon : the HUD bomb-count icon (next to the score), a red energy
+    shockwave/starburst -- the bomb is the screen-clearing Blast, theme colour
+    red. Replaces the old reuse of the blue `option` powerup sprite, which read
+    as a tinted gadget rather than a bomb in HD.
 
 All straight-alpha RGBA, supersampled then box-down for clean edges. Output ->
 tools/upscale/gen_out/<name>.png + a gen_preview.png contact strip. These are the
@@ -99,8 +103,10 @@ def blast_burst(size, *, rays=8):
     core fading orange->red, N sharp radiating rays (a long set + a shorter offset set
     for a jagged burst), and a thin glowing shockwave ring. Red is baked into the art
     (drawn with Color.White at the HUD site, not tinted). Straight-alpha RGBA,
-    supersampled then box-down for clean edges. Design width 24 (matches the old
-    `option` reuse, so the HUD layout/spacing is unchanged)."""
+    supersampled then box-down for clean edges. Design width 24, so the HUD
+    layout/spacing is unchanged from the old `option` reuse (parity is by design
+    width, not texel size: old option was 72px -> 3x, this is 96px -> 4x, both
+    reduce to 24px on screen via SuperSampleFactor)."""
     n = size * SS
     yy, xx = np.mgrid[0:n, 0:n].astype(np.float64)
     nx = (xx - (n - 1) / 2) / (n / 2)

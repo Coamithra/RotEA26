@@ -7,6 +7,10 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 {
 	private Timer lifetime = new Timer(2500f, repeating: false);
 
+	// Counter-rotation rate of the two blast layers (radians/sec); the opposite signs
+	// churn the crackly plasma rim against itself so the blast reads as alive.
+	private const float SpinSpeed = 1.3f;
+
 	private float power;
 
 	private bool mini;
@@ -72,12 +76,34 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		lifetime.Start();
 		lifetime.Reset();
 		scale = 0f;
+		// Update() overwrites scale + color from the lifetime curve before the first Draw,
+		// so in-game this 0 baseline is never seen. The sprite harness freezes Update, though,
+		// so a 0 scale would draw the blast invisibly there; park a visible size, gated on the
+		// harness so gameplay (incl. the spawn-frame collision radius derived from scale) stays
+		// byte-identical. See HarnessRegistry "blast" / the Braineroid pulsate=1 precedent.
+		if (EvilAliensWeb.Compat.DebugFlags.Harness != null)
+		{
+			scale = 2.5f;
+		}
+		// A random starting angle so the counter-rotating layers (see Draw) start at a
+		// different phase per blast — overlapping bombs never look stamped from one frame.
+		rotation = RandomHelper.RandomNextAngle();
 		base.Initialize();
 	}
 
+	// One static disc that only grew + faded looked lifeless. Draw TWO half-opacity copies
+	// counter-rotating about the centre so the crackly plasma rim churns against itself and
+	// the blast reads as alive (Trello card: "layer 2 together, each half the alpha, rotate
+	// both in different directions"). Spin is time-based so it animates even in the frozen
+	// sprite harness; the per-blast random base rotation desynchronises overlapping blasts.
 	public override void Draw(GameTime gameTime)
 	{
-		base.Draw(gameTime);
+		spriteBatch.BlendMode = blendMode;
+		float spin = (float)gameTime.TotalGameTime.TotalSeconds * SpinSpeed;
+		Vector4 c = color.ToVector4();
+		Color layer = new Color(new Vector4(c.X, c.Y, c.Z, c.W * 0.5f));
+		spriteBatch.Draw(texture, Position, rotation + spin, DrawScale, center: true, layer, spriteEffects);
+		spriteBatch.Draw(texture, Position, rotation - spin, DrawScale, center: true, layer, spriteEffects);
 	}
 
 	public override void Update(GameTime gameTime)

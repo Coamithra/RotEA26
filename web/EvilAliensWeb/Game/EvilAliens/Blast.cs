@@ -19,6 +19,16 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
+	// Default fraction of the visible radius that deals damage, and the fade-alpha floor below
+	// which the blast goes inert. Both are overridable from the URL (?blasthit= / ?blastactive=)
+	// so the look can be tuned live in the sprite harness; null override => these bake into a
+	// shipped build unchanged. See ApplyLifecycle + Compat/DebugFlags.cs.
+	private const float DefaultHitRadiusFactor = 0.8f;
+	private const float DefaultActiveAlpha = 0.5f;
+
+	private static float HitRadiusFactor => EvilAliensWeb.Compat.DebugFlags.BlastHitFactor ?? DefaultHitRadiusFactor;
+	private static float ActiveAlpha => EvilAliensWeb.Compat.DebugFlags.BlastActiveAlpha ?? DefaultActiveAlpha;
+
 	public bool IsMini => mini;
 
 	public override ICollisionType CollisionType
@@ -27,7 +37,12 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		{
 			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 			c.Position = base.Position;
-			c.Radius = (float)texture.Width * 0.5f * 0.8f * scale;
+			// DrawScale (not raw scale): blast.png is a 1.5x supersampled sheet, so sizing the
+			// hitbox off texture.Width * scale made it 1.5x too big — damage reached well outside
+			// the visible disc (the "active bigger than the sprite suggests" half of the bug).
+			// DrawScale divides the supersample back out, restoring the intended 0.8x-of-visible
+			// radius regardless of the sheet's texel resolution.
+			c.Radius = (float)texture.Width * 0.5f * HitRadiusFactor * DrawScale;
 			return c;
 		}
 	}
@@ -111,29 +126,53 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
-		float num = MyMath.PowerCurve(0f, 1f, 0.3f, 1f - lifetime.Normalized);
-		if (!mini)
-		{
-			scale = num * MyMath.PowerCurve(1.3f, 3.5f, 1.5f, (power - 1f) / 4f);
-		}
-		else
-		{
-			scale = num * 0.45f;
-		}
-		color = new Color(new Vector4(1f, 1f, 1f, 1f - num));
-		if (num >= 0.81f)
-		{
-			base.Collides = false;
-		}
+		ApplyLifecycle(1f - lifetime.Normalized);
 		if (lifetime.Finished)
 		{
 			Die();
 		}
 		base.Update(gameTime);
 	}
+
+	// Drive the blast's appearance + hit state from its elapsed fraction p (0 = just spawned,
+	// 1 = end of life). Pulled out of Update so the sprite harness can scrub the SAME curve
+	// without running gameplay (see HarnessApplyPhase).
+	//
+	// scale grows on the old punchy power-0.3 curve (unchanged). The fade, though, is now a
+	// SMOOTHSTEP instead of `1 - p^0.3`: the old curve dimmed the disc to ~half opacity within
+	// the first ~10% of life, so the blast "looked gone" long before it stopped dealing damage —
+	// the "active longer than the sprite suggests" complaint. SmoothStep holds the blast clearly
+	// visible through its active window, then eases cleanly to 0. Collision is tied to that fade
+	// (active while alpha >= ActiveAlpha), so "dangerous" now coincides with "clearly visible".
+	private void ApplyLifecycle(float p)
+	{
+		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
+		float grow = MyMath.PowerCurve(0f, 1f, 0.3f, p);
+		if (!mini)
+		{
+			scale = grow * MyMath.PowerCurve(1.3f, 3.5f, 1.5f, (power - 1f) / 4f);
+		}
+		else
+		{
+			scale = grow * 0.45f;
+		}
+		float fade = MathHelper.SmoothStep(1f, 0f, p);
+		color = new Color(new Vector4(1f, 1f, 1f, fade));
+		base.Collides = fade >= ActiveAlpha;
+	}
+
+	// Harness-only: park the blast at elapsed fraction p and apply the harness's scale multiplier,
+	// so the sprite harness can LOOP + visualise the growth/fade/active window without running the
+	// gameplay Update (which would Die at end of life). Production never calls this.
+	internal void HarnessApplyPhase(float p, float scaleMul)
+	{
+		ApplyLifecycle(MathHelper.Clamp(p, 0f, 1f));
+		scale *= scaleMul;
+	}
+
+	// Harness readout only: the blast's current fade alpha, read straight from the live color the
+	// curve just set — so the viz can never drift from ApplyLifecycle if the fade is ever retuned.
+	internal float CurrentFadeAlpha => color.ToVector4().W;
 
 	public override void CollidesWith(ICollidable other)
 	{

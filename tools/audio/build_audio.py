@@ -188,11 +188,12 @@ def main():
     # points (pymusiclooper). Optional — a missing pymusiclooper just leaves the
     # whole-wave points in place (re-run tools/audio/refine_loops.py later).
     print("Refining music loop points:")
-    try:
+    import importlib.util
+    if importlib.util.find_spec("pymusiclooper") is None:
+        print("  (pymusiclooper not installed — skipped; run refine_loops.py later)")
+    else:
         import refine_loops
         refine_loops.run(dry_run=False)
-    except ImportError:
-        print("  (pymusiclooper not installed — skipped; run refine_loops.py later)")
     print("\ndone.")
 
 

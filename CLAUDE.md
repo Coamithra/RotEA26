@@ -376,6 +376,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   is called from `demo_OnFinished` (player pop-in), NOT at level start, so the earth enters after the
   UFO intro as the player takes control; the slow-down engages with it and the asteroid belt waits on
   the same `WaitForDoodadEvent` gate.
+- **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
+  browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
+  now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet
+  `GFX/Sprites/ufosheet`, tight-cropped and composited onto the menu near-black rounded tile (`#05030a`,
+  for contrast on light tab bars) -> `wwwroot/favicon.ico` (multi-res 16/32/48/64) + `favicon-180.png`
+  (apple-touch). `index.html` references both (NO `favicon.svg` link -- browsers prefer SVG when offered,
+  so leaving it would keep showing the old alien). Re-run `python tools/favicon/build_favicon.py` after
+  changing the source sheet or the `FRAME`/margin knobs; don't hand-edit the `.ico`/`.png`. Offline
+  (Pillow only), like the other `tools/` asset steps; CI just ships the committed outputs.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

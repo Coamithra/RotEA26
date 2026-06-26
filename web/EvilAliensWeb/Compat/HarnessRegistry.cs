@@ -66,7 +66,9 @@ namespace EvilAliensWeb.Compat
                 // --- projectiles ---
                 ["bullet"] = (bin, g, p) => { var b = Bullet.NewBullet(bin, g); b.Setup(p, (float)Math.PI / 2f, 999999f, 0); return b; },
                 ["evilbullet"] = (bin, g, p) => { var b = EvilBullet.NewEvilBullet(bin, g); b.Setup(p, (float)Math.PI); return b; },
-                ["blast"] = (bin, g, p) => { var b = Blast.NewBlast(bin, g); b.Setup(p, 3, 0); return b; },
+                // power 1 (a small-ish bomb) so the default viz fits on screen — the fade/active
+                // curve being tuned is power-independent. Use ?objscale to shrink a bigger one.
+                ["blast"] = (bin, g, p) => { var b = Blast.NewBlast(bin, g); b.Setup(p, 1, 0); return b; },
 
                 // --- bosses (best-effort: shown in their spawned/idle pose, not mid-attack) ---
                 ["deathstar"] = (bin, g, p) => { var d = DeathStar.NewDeathStar(bin, g); d.Setup(p, EnemyBehaviour.normal); return d; },

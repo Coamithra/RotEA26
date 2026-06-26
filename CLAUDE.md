@@ -295,6 +295,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   dark drop + bright text at one alpha) and now route through the same `DrawShadowString`
   (flattened, `metal:false` so the plain pop look is unchanged); the `scrollup` floating-score
   type is a single `DrawString` and was never affected.
+- **Bomb blast (`Blast.cs`) — fade is a SMOOTHSTEP and the hitbox uses `DrawScale`, so "dangerous"
+  matches "clearly visible" in both time and area.** Two bugs made the bomb "active longer/bigger
+  than the sprite suggests": (1) SPATIAL — `blast.png` is a 1.5x supersampled sheet, but
+  `CollisionType` sized the radius off raw `texture.Width * scale`, so the hitbox grew from the
+  intended 0.8x-of-visible to 1.2x (damage reached outside the disc); it now uses `DrawScale`
+  (supersample divided out), restoring 0.8x at any sheet resolution. (2) TEMPORAL — alpha was
+  `1 - p^0.3`, which dimmed the disc to ~half within the first ~10% of life while collision stayed
+  active to ~50%; the fade is now `MathHelper.SmoothStep(1,0,p)` so the blast holds visible through
+  its active window then eases out, and collision is tied to that fade (`Collides = fade >=
+  ActiveAlpha`, default 0.5 — same ~half-life active duration as before, but ending while the blast
+  is still clearly visible). The growth curve (scale) is unchanged. The lifecycle math lives in
+  `ApplyLifecycle(p)`, shared by the live `Update` and the harness scrubber `HarnessApplyPhase`.
+  Tunables are constants (`DefaultActiveAlpha` 0.5 / `DefaultHitRadiusFactor` 0.8), overridable from
+  the URL (`?blastactive=` / `?blasthit=`) so the feel can be tweaked live; null override => the
+  baked consts ship unchanged. **Visualise/tune with `?harness=blast`**: the sprite harness LOOPS
+  the blast through its lifetime (its own `Update` stays frozen — the harness drives the phase) and
+  overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
+  (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
+  `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
 - **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second

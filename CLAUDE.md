@@ -198,6 +198,21 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
 - **Game loop is JS-driven:** `wwwroot/index.html` (`initRenderJS`/`tickJS`) →
   `Pages/Index.razor.cs` `TickDotNet()` → now `new EvilAliens.Game1()`. `ContentTestGame.cs` /
   `SpikeGame.cs` are dead harnesses, safe to delete.
+- **Menus are mouse-selectable + clickable (hover highlights, left-click selects+activates).**
+  Every list menu derives from `MenuSub1` and shares a `selectedEntry` + `ItemSelectedEvents`
+  model. The menus' layouts differ too much (centred lists, the framed main menu `MenuSubWithSkull`,
+  the left-aligned `DifficultyMenu` column, the `SubMenuLevelChoice` carousel) to hit-test from one
+  formula, so **each `DrawMenu` records the design-space (800x600) box of every entry it draws** via
+  `MenuSub1.RecordEntryHit(index, centre, w, h)` (locked/undrawn entries are skipped, so they never
+  become hittable). `MenuSub1.HandleMouse()` (in `HandleInput`, gated on the `normal` state so it
+  never fights the entry/exit zoom) maps the cursor — `InputHandler.MousePosition`, already design
+  space via `RenderScale.WindowToDesign` — onto an entry: hover sets `selectedEntry`, `MyKeys.Mouse1`
+  (already wired to the left button in `InputHandler`) selects+invokes it, and either resets the
+  attract-demo idle timeout. **A new `DrawMenu` override must call `RecordEntryHit` per entry or its
+  menu won't be clickable.** The carousel sets `mouseHoverSelects = false` (gliding over a flying
+  screenshot shouldn't snap the selection; a click picks the mission directly). Out of scope: the
+  `GammaMenu`/`ScreenResizeMenu` sliders (not `MenuSub1`, no entry list) and `PlayerSettingsMenu`
+  (gamepad-config, its own per-device selection model, empty `menuEntries`).
 - **Real keyboard input works** — KNI maps keys via **`event.keyCode`** (decompiled from
   `Kni.Platform`: `Keys = (Keys)keyCode`), so Enter/arrows/WASD/Esc are correct for real users.
   When *driving* the browser, prefer **real OS keys** via the claude-in-chrome `computer` `key`
@@ -324,6 +339,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.DoodadActive`, race-free) gates `spawner_OnFinished`; Demo 1's earth is covered by the same
   X-lock. It's a PNG decoded at level preload (not in `textures.config`); `earth_small` is unchanged.
   Re-run `build_earth.py` after changing the source/knobs; don't hand-edit `earth.png`.
+  **Fly-by choreography (card "earth animation improvements"):** the earth KEEPS its own descent
+  speed; what sells "it's closer, so it zooms past" is freezing the STARS, not speeding up the
+  earth. `Background.DoodadStarSlowdownFactor()` multiplies `scrollspeedmodifier` (which the earth
+  ignores) down to `doodadStarSlowdown` while a planet crosses — `0.082` for the hero earth, set so
+  the earth = **5x the fastest near ("hero") star** (`1.55 / (5 * 3.8)`, `3.8` = `DriftingStars` max
+  parallax). The ramps are WALL-CLOCK timed (converted to crossing-progress each frame via the
+  doodad's speed): a rapid ~1.2s slow-down on entry, a long hold, a ~1.6s speed-up on exit — so the
+  feel stays snappy even though the earth itself drifts across over ~90s. In Level 1 `QueueEarth()`
+  is called from `demo_OnFinished` (player pop-in), NOT at level start, so the earth enters after the
+  UFO intro as the player takes control; the slow-down engages with it and the asteroid belt waits on
+  the same `WaitForDoodadEvent` gate.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

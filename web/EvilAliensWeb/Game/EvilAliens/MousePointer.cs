@@ -1,4 +1,5 @@
 using System;
+using Microsoft.JSInterop;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -13,6 +14,17 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 	private SpriteBatchWrapper spriteBatch;
 
 	private Timer showtimer;
+
+	// Set from JS (canvas pointerenter/leave, see wwwroot/index.html). When the mouse
+	// leaves the game surface we stop drawing the software reticle so it doesn't sit
+	// clamped at the screen edge while the OS cursor (shown off-canvas) takes over.
+	private static bool pointerOnCanvas = true;
+
+	[JSInvokable("eaPointerOnCanvas")]
+	public static void SetPointerOnCanvas(bool onCanvas)
+	{
+		pointerOnCanvas = onCanvas;
+	}
 
 	MousePointer IMousePointerService.MousePointer => this;
 
@@ -58,6 +70,12 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
 		if (!Settings.GetInstance().HWMouse || showtimer.Active)
 		{
+			// Software-cursor mode: hide the reticle while the pointer is off-canvas so
+			// the OS cursor alone shows there (no reticle stuck clamped at the edge).
+			if (!Settings.GetInstance().HWMouse && !pointerOnCanvas)
+			{
+				return;
+			}
 			Vector2 mousePosition = input.MousePosition;
 			if (!Settings.GetInstance().HWMouse)
 			{

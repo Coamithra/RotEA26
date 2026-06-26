@@ -148,6 +148,9 @@ internal class DifficultyMenu : MenuSub1
 			if (!unLockableDataEntries[j].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[j].item))
 			{
 				float x = font.MeasureString(menuEntries[j]).X;
+				// Mouse hit box: this entry is left-anchored at position (origin x ~= 0), so
+				// its centre sits half a label-width to the right.
+				RecordEntryHit(j, new Vector2(position.X + x / 2f, position.Y), x, font.LineSpacing);
 				float num6 = (x * num5 - x) / 2f;
 				(val3) = new Vector2(num6, (float)(font.LineSpacing / 2));
 				base.SpriteBatch.DrawMetalString(font, menuEntries[j], position, aliceBlue, 0f, val3, num5);

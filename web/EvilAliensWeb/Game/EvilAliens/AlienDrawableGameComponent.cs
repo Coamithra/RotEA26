@@ -108,6 +108,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{ "GFX/Sprites/blooddrop", 15 },
 		{ "GFX/Sprites/blooddrop_green", 15 },
 		{ "GFX/Sprites/option", 24 },
+		// HUD bomb-count icon: a procedural red blast/shockwave (tools/upscale/gen_sprites.py
+		// blast_burst). Drawn directly in ScoreVisualiser, which divides its scale by
+		// SuperSampleFactor; design width 24 keeps the same on-screen size/spacing as the
+		// old `option` reuse it replaced.
+		{ "GFX/Sprites/bombicon", 24 },
 		{ "GFX/Sprites/braingoo", 45 },
 		{ "GFX/Sprites/photocamera", 54 },
 		{ "GFX/Sprites/awardmentblade", 487 },

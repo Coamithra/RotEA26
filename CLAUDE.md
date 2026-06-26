@@ -302,6 +302,21 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
   sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
   back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
+  The chrome **glint sweep is EVENT-DRIVEN on the score, not on a timer.** The static chrome
+  gradient (GradTop/Mid/Bot) is time-independent and always shows; only the moving white-hot
+  glint streak is gated. It used to ride the shared continuous `MetalTime` clock (the menu
+  marquee's ~9s `SweepPeriod`), so the score glinted every ~9s regardless of play — read as
+  "random". Now each player's score NUMBER sweeps ONCE when its leading (most-significant) digit
+  rolls over (9->10, 1900->2000, …) and rests otherwise; the combo readout and the inactive-slot
+  "Press Start"/"Player N" prompts keep the static chrome with NO sweep (`ParkedGlint`) — they
+  have no "first digit" to roll over. `ScoreInfo.UpdateGlint` arms a one-shot clock
+  on a leading-char change (skipping reset-to-"0" and `Load()` checkpoint restores), and
+  `GlintTime(player)` feeds either that live sweep time or a parked value (`MetalSweepPeriod*0.5`,
+  mid-rest → glint off) into `DrawShadowString(…, glintTime)`. The sweep window length is
+  `SpriteBatchWrapper.MetalSweepDuration` (= `MetalSweepPeriod*MetalSweepActive` ≈ 1.08s); those
+  two consts are public so the score and the shader params stay in lockstep. Menus keep the old
+  periodic marquee sweep (the no-`glintTime` `DrawShadowString`/`DrawMetalString` overloads still
+  use `MetalTime`) — only the score is event-driven.
   The floating **"Power Up!" / combo pops** (`FloatingText.ShowType.pop`, shown for powerup
   level-ups and every 10th combo) had the SAME bleed-through (two translucent `DrawString`s, a
   dark drop + bright text at one alpha) and now route through the same `DrawShadowString`
@@ -326,6 +341,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
   (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
   `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
+- **Cinematic slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up-powerup slowmo
+  (`PlayerShip` -> `Oracle.SetSlowmotion(12f)`) used to be ONLY a time-scale (0.4x) + a bloom-preset
+  swap; it now also gets a movie bullet-time **motion blur** so moving objects smear into fading
+  "ghost" echoes. It's a present-time post-process in `Game1.Draw`, run on the fully composited +
+  bloomed `sceneTarget` *before* the gamma present blit (so the ghosts carry the glow). Technique =
+  a frame-feedback / accumulation buffer (`slowmoTrail` RT, lazily created on first slowmo, recreated
+  on resize like `sceneTarget`): `trail = trail*decay + scene*(1-decay)` (an EMA), then mixed back as
+  `scene = lerp(scene, trail, k)`. The EMA converges to the input for a STATIC pixel, so still areas
+  (HUD, idle sprites, background) are **unchanged — no blow-out**; only moving content, where the
+  trail lags the live frame, leaves directional echoes. `slowmoTrailMix` eases the whole effect in/out
+  (~0.25s) and the first slowmo frame **seeds** the trail with the current frame so engaging slowmo
+  doesn't flash dark. Blends use straight alpha (`NonPremultiplied` decay-via-black + lerp, `Additive`
+  feed); `blackPixel` is the shared white pixel tinted black. Defaults `decay 0.88` / `strength 0.8`
+  (clearly cinematic but not muddy); ON by default. Tune/A-B live with `?slowmotrail=0` /
+  `?slowmotraildecay=` / `?slowmotrailstrength=` (`DebugFlags`; like `MetalScore`, kept OUT of
+  `Active` since it's a pure render look). **QA/demo:** console `eaSlowmo()` (or `eaSlowmo(6)`) fires
+  the same slowmo burst on demand in a level — `Compat/DebugInput.Slowmo` ([JSInvokable]) ->
+  `Oracle.SetSlowmotion`; no-op unless a level with a live ship is running (Oracle clears slowmo the
+  instant no ships are alive). A new full-frame post-process should follow this same place in `Draw`
+  (operate on `sceneTarget`, leave RT on it for the present block) and use the raw `spriteBatch`
+  (identity), not `spriteBatchWrapper` (which applies `RenderScale.Matrix`).
 - **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second

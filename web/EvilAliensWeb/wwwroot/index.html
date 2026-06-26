@@ -94,6 +94,14 @@
             catch (e) { console.warn('[debug] eaPress failed (game not booted yet?): ' + e.message); }
         };
 
+        // QA/demo: trigger the cinematic slow-motion (ghost-trail) effect on demand, as if a
+        // 1up powerup was fully charged. Only does anything inside a level with a live ship.
+        // Console: eaSlowmo() for the default 12s, or eaSlowmo(6) for a custom duration.
+        window.eaSlowmo = (seconds) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSlowmo', Number(seconds) || 12); }
+            catch (e) { console.warn('[debug] eaSlowmo failed (game not booted yet?): ' + e.message); }
+        };
+
         function tickJS()
         {
             window.theInstance.invokeMethod('TickDotNet');

@@ -7,6 +7,10 @@ Procedurally generate the sprites that are better drawn than AI-upscaled:
     triangular head + a rectangular shaft, drawn at AnimatedMessage.cs:285 rotating
     round screen-centre at scale 1, so it blurs when the presenter magnifies it).
     A crisp filled vector arrow at the same silhouette.
+  - bombicon : the HUD bomb-count icon (next to the score), a red energy
+    shockwave/starburst -- the bomb is the screen-clearing Blast, theme colour
+    red. Replaces the old reuse of the blue `option` powerup sprite, which read
+    as a tinted gadget rather than a bomb in HD.
 
 All straight-alpha RGBA, supersampled then box-down for clean edges. Output ->
 tools/upscale/gen_out/<name>.png + a gen_preview.png contact strip. These are the
@@ -93,6 +97,61 @@ def arrow(orig_path, factor=8, *, color=(255, 255, 255)):
     return im.resize((W, H), Image.LANCZOS)
 
 
+def blast_burst(size, *, rays=8):
+    """The HUD bomb-count icon: a red energy shockwave/starburst (the bomb is the
+    screen-clearing Blast, whose powerup theme colour is red). A white-hot detonation
+    core fading orange->red, N sharp radiating rays (a long set + a shorter offset set
+    for a jagged burst), and a thin glowing shockwave ring. Red is baked into the art
+    (drawn with Color.White at the HUD site, not tinted). Straight-alpha RGBA,
+    supersampled then box-down for clean edges. Design width 24, so the HUD
+    layout/spacing is unchanged from the old `option` reuse (parity is by design
+    width, not texel size: old option was 72px -> 3x, this is 96px -> 4x, both
+    reduce to 24px on screen via SuperSampleFactor)."""
+    n = size * SS
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float64)
+    nx = (xx - (n - 1) / 2) / (n / 2)
+    ny = (yy - (n - 1) / 2) / (n / 2)
+    r = np.sqrt(nx * nx + ny * ny)
+    theta = np.arctan2(ny, nx)
+
+    glow = np.exp(-(r / 0.52) ** 2 * 1.8)                          # filled red fireball body
+    core = np.exp(-(r / 0.16) ** 2 * 2.6)                          # white-hot detonation core
+
+    ang_long = (0.5 + 0.5 * np.cos(rays * theta)) ** 5.0           # long spokes punching out
+    rad_long = np.clip(1.0 - r / 0.99, 0.0, 1.0) ** 0.9
+    rays_long = ang_long * rad_long
+
+    ang_short = (0.5 + 0.5 * np.cos(rays * theta + np.pi)) ** 8.0  # short spokes, between
+    rad_short = np.clip(1.0 - r / 0.62, 0.0, 1.0) ** 1.0
+    rays_short = ang_short * rad_short * 0.7
+
+    ring = np.exp(-((r - 0.82) / 0.07) ** 2) * 0.35                # faint shockwave ring
+
+    inten = np.clip(glow * 0.9 + core * 1.3 + rays_long * 0.85
+                    + rays_short * 0.5 + ring, 0.0, 1.0)
+
+    # fire ramp by intensity: stays RED through the body, only the core goes white-hot
+    stops = np.array([
+        [0.00, 0.45, 0.02, 0.01],
+        [0.40, 0.90, 0.05, 0.03],
+        [0.66, 1.00, 0.22, 0.05],
+        [0.85, 1.00, 0.58, 0.16],
+        [1.00, 1.00, 0.98, 0.90],
+    ])
+    col = np.empty(inten.shape + (3,), np.float64)
+    for c in range(3):
+        col[..., c] = np.interp(inten, stops[:, 0], stops[:, c + 1])
+
+    alpha = np.clip(inten * 1.25, 0.0, 1.0)
+    alpha *= np.clip((1.0 - r) / (3.0 / (n / 2)), 0.0, 1.0)        # feather the canvas edge
+
+    rgba = np.zeros((n, n, 4), np.float64)
+    rgba[..., :3] = col
+    rgba[..., 3] = alpha
+    img = Image.fromarray((rgba * 255 + 0.5).astype(np.uint8), "RGBA")
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def orig_ref(name):
     """Pristine original of a sprite -- the .png.orig backup if a swap already
     happened (so a re-run doesn't read our own upscaled output back in), else .png."""
@@ -115,6 +174,7 @@ def main():
         "bulletevil": sphere(48, (0.90, 0.12, 0.12)),      # red energy ball
         "bulletgood": sphere(48, (0.18, 0.82, 0.24)),      # green energy ball
         "arrow": arrow(orig_ref("arrow"), factor=3),   # traced from the pristine 49x40, * 3
+        "bombicon": blast_burst(96),                   # red blast/shockwave HUD bomb icon (design 24 * 4)
     }
     for name, img in sprites.items():
         save(img, name)
@@ -122,7 +182,7 @@ def main():
     # preview strip on a neutral grey so the highlight + edges read
     pad, cellh = 24, 220
     cells = []
-    for name in ("bulletevil", "bulletgood", "arrow"):
+    for name in ("bulletevil", "bulletgood", "arrow", "bombicon"):
         im = Image.open(os.path.join(OUT, name + ".png")).convert("RGBA")
         cell = Image.new("RGBA", (cellh, cellh), (90, 90, 96, 255))
         sc = (cellh - 2 * pad) / max(im.width, im.height)

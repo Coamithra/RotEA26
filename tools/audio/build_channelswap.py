@@ -36,7 +36,7 @@ def movavg(x, k):
 
 def build():
     rng = np.random.default_rng(SEED)
-    n = int(SR * DUR)
+    n = int(SR * DUR)   # floor to whole frames
     t = np.arange(n) / SR
 
     # Broadband static bed, brightened toward hiss: subtract a short moving

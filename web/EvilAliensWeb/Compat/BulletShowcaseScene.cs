@@ -109,9 +109,9 @@ namespace EvilAliensWeb.Compat
                 Freeze(u, pos);
             }
 
-            // --- player bullets (bulletgood): rising stream from the ship toward the
-            //     UFOs, fanned slightly. Kept in the clear band (y ~250..460) between
-            //     the ship and the UFOs. ---
+            // --- player bullets (bulletgood): laid out as a fan climbing from the ship
+            //     toward the UFOs, in the clear band (y ~250..460) between them. (The
+            //     sprite always draws upright, as in-game -- only the layout "rises".) ---
             Vector2[] goodBullets =
             {
                 new Vector2(400f, 445f), new Vector2(399f, 385f), new Vector2(401f, 325f), new Vector2(400f, 268f),
@@ -125,8 +125,8 @@ namespace EvilAliensWeb.Compat
                 Freeze(b, pos);
             }
 
-            // --- evil bullets (bulletevil): falling stream from the UFOs toward the
-            //     ship, on different columns so both streams stay readable. ---
+            // --- evil bullets (bulletevil): laid out descending from the UFOs toward the
+            //     ship, on different columns so both sets stay readable. ---
             Vector2[] evilBullets =
             {
                 new Vector2(250f, 205f), new Vector2(284f, 295f),

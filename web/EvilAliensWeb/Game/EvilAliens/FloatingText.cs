@@ -128,16 +128,23 @@ public class FloatingText
 			}
 			case ShowType.pop:
 			{
-				Vector2 origin = font.MeasureString(text) / 2f;
+				// "Power Up!" / combo pops. The original drew the dark drop shadow and the bright
+				// text as two SEPARATE translucent DrawStrings at the SAME alpha (text offset
+				// up-left by 3px), so the translucent shadow showed THROUGH the translucent text
+				// where they overlap — the same bleed-through the score had. Flatten them into ONE
+				// sprite via DrawShadowString (shadow+text rasterised opaque, the text on top hides
+				// the shadow it covers, then composited once at `alpha`), so they fade as a single
+				// sprite with no bleed. Placement is preserved exactly: DrawShadowString lands the
+				// text top-left at `position`, so we pass the original centred top-left
+				// (centre position-(3,3), origin = measure/2) and the shadow sits +3,+3 from the
+				// text as before. metal:false keeps the plain floating-text look (no chrome sheen).
 				float num = MathHelper.SmoothStep(0f, 1f, lifetime / 923.07697f);
-				float num2 = 2f + 1.2f * (1f - num);
-				byte b = (byte)(225f * num);
-				Color color = default(Color);
-				(color) = new Color(byte.MaxValue, byte.MaxValue, (byte)128, b);
-				Color color2 = default(Color);
-				(color2) = new Color((byte)118, (byte)118, (byte)21, b);
-				wrapper.DrawString(font, text, position - new Vector2(0f, 0f), color2, 0f, origin, num2 * scale, (SpriteEffects)0, 1f);
-				wrapper.DrawString(font, text, position - new Vector2(3f, 3f), color, 0f, origin, num2 * scale, (SpriteEffects)0, 1f);
+				float popscale = (2f + 1.2f * (1f - num)) * scale;
+				float alpha = 225f / 255f * num;
+				Color textColor = new Color(byte.MaxValue, byte.MaxValue, (byte)128, byte.MaxValue);
+				Color shadowColor = new Color((byte)118, (byte)118, (byte)21, byte.MaxValue);
+				Vector2 textTopLeft = position - new Vector2(3f, 3f) - font.MeasureString(text) / 2f * popscale;
+				wrapper.DrawShadowString(text, textTopLeft, popscale, shadowColor, textColor, new Vector2(3f, 3f), alpha, metal: false);
 				break;
 			}
 			}

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -59,6 +60,26 @@ internal class MenuSub1 : Scene
 	protected List<UnlockableData> unLockableDataEntries = new List<UnlockableData>();
 
 	protected int selectedEntry;
+
+	// --- Mouse selection (card: menus should be mouse selectable & clickable) ---
+	// The menus' layouts differ too much (centred lists, the framed main menu, the
+	// difficulty column, the level carousel) to hit-test from one formula, so each DrawMenu
+	// records the design-space (800x600) box of every entry it draws (RecordEntryHit;
+	// locked/undrawn entries are skipped, so they never become hittable). HandleMouse maps
+	// the cursor onto one of those boxes — see it for the full design.
+	private readonly List<(int index, Rectangle rect)> entryHitBounds = new List<(int index, Rectangle rect)>();
+
+	private Vector2 lastMousePos;
+
+	private bool mouseInitialised;
+
+	// Set by HandleMouse when a click invokes an entry's event; HandleInput then returns
+	// before running its keyboard blocks against a menu the click may have removed.
+	private bool mouseActivated;
+
+	// The level/challenge carousel opts out of hover-select: gliding the cursor across a
+	// flying screenshot shouldn't snap the selection — only a click selects there.
+	protected bool mouseHoverSelects = true;
 
 	protected SpriteFont font;
 
@@ -169,6 +190,9 @@ internal class MenuSub1 : Scene
 		fadeTimer.Reset();
 		fadeTimer.Start();
 		firstUpdate = true;
+		// Re-seed mouse tracking each time the menu is shown so the first frame can't read a
+		// stale movement delta (these menus are long-lived and re-Show()n).
+		mouseInitialised = false;
 	}
 
 	public override void Update(GameTime gameTime)
@@ -211,6 +235,17 @@ internal class MenuSub1 : Scene
 		if (firstUpdate)
 		{
 			firstUpdate = false;
+			return;
+		}
+		if (HandleMouse())
+		{
+			flag = true;
+		}
+		if (mouseActivated)
+		{
+			// A click already activated an entry; the handler may have removed this menu or
+			// shown another, so don't fall through to the keyboard blocks this frame.
+			timeouttimer.Reset();
 			return;
 		}
 		bool flag2 = false;
@@ -298,6 +333,74 @@ internal class MenuSub1 : Scene
 		{
 			timeouttimer.Reset();
 		}
+	}
+
+	// Maps the cursor onto a menu entry using the boxes captured by the last DrawMenu's
+	// RecordEntryHit calls. InputHandler.MousePosition is already in 800x600 design space
+	// (RenderScale.WindowToDesign), so it compares directly to the boxes. Hover highlights
+	// (set selectedEntry); a left-click selects AND activates that entry — the same effect
+	// as arrowing to it and pressing Enter. Returns true if it changed the selection or
+	// activated an entry, so HandleInput resets the attract-demo timeout.
+	// Gated on the normal state: only there is the layout static frame-to-frame (so the
+	// box captured last frame is still exactly right), and the composited menu sits 1:1 on
+	// its design-space coords rather than mid entry/exit zoom.
+	private bool HandleMouse()
+	{
+		mouseActivated = false;
+		if (state != SubMenuState.normal || entryHitBounds.Count == 0)
+		{
+			return false;
+		}
+		Vector2 m = base.InputHandler.MousePosition;
+		// The first frame after the menu (re)appears only SEEDS the position: a cursor that
+		// happens to rest over a different entry must not snap the selection away from what
+		// Reset()/Initialize() chose — hover-select waits for a real movement delta.
+		bool moved = mouseInitialised && (m - lastMousePos).LengthSquared() > 1f;
+		lastMousePos = m;
+		mouseInitialised = true;
+		int hovered = -1;
+		Point p = new Point((int)m.X, (int)m.Y);
+		// Iterate back-to-front so an entry drawn later (e.g. the carousel's centred,
+		// overlapping screenshot) wins the hit over the ones drawn under it.
+		for (int i = entryHitBounds.Count - 1; i >= 0; i--)
+		{
+			if (entryHitBounds[i].rect.Contains(p))
+			{
+				hovered = entryHitBounds[i].index;
+				break;
+			}
+		}
+		if (hovered < 0)
+		{
+			return false;
+		}
+		bool changed = false;
+		if (mouseHoverSelects && moved && hovered != selectedEntry)
+		{
+			selectedEntry = hovered;
+			changed = true;
+		}
+		if (base.InputHandler.Pressed(MyKeys.Mouse1))
+		{
+			selectedEntry = hovered;
+			if (ItemSelectedEvents[selectedEntry] != null)
+			{
+				ItemSelectedEvents[selectedEntry](this);
+			}
+			mouseActivated = true;
+			changed = true;
+		}
+		return changed;
+	}
+
+	// Records entry `index`'s clickable box (design space, 800x600), centred at `centre`.
+	// Each DrawMenu calls this for every entry it actually draws; consumed by HandleMouse
+	// on the next frame.
+	protected void RecordEntryHit(int index, Vector2 centre, float width, float height)
+	{
+		int w = (int)Math.Ceiling(width);
+		int h = (int)Math.Ceiling(height);
+		entryHitBounds.Add((index, new Rectangle((int)Math.Round(centre.X - (float)w / 2f), (int)Math.Round(centre.Y - (float)h / 2f), w, h)));
 	}
 
 	private int controlDeviceToInt(ControlDevice device)
@@ -422,6 +525,8 @@ internal class MenuSub1 : Scene
 			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
 			{
 				float x = font.MeasureString(menuEntries[i]).X;
+				// Mouse hit box: this entry is centred on `position` (origin = (x/2, LineSpacing/2)).
+				RecordEntryHit(i, position, x, font.LineSpacing);
 				// Centre each entry on origin.X (was left-aligned at origin.X-75); the centre
 				// origin keeps the selected-row pulse symmetric. Matches the framed main menu
 				// so the HUD ring (which centres on the menu) lines up for the submenus too.
@@ -482,6 +587,9 @@ internal class MenuSub1 : Scene
 		EnsureRenderTarget();
 		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
 		((Texture2D)myRenderTarget).GraphicsDevice.Clear(new Color(new Vector4(0f, 0f, 0f, 0f)));
+		// Mouse hit boxes are rebuilt every frame by the DrawMenu pass below (HandleMouse
+		// reads them next Update). Clear here so a removed/relaid-out entry can't linger.
+		entryHitBounds.Clear();
 		DrawMenu(gameTime, 0f);
 		base.SpriteBatch.Flush();
 		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);

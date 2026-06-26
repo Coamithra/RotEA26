@@ -71,6 +71,22 @@ desktop.ini
 new_assets_raw/
 tools/tts/_alex_oneshot_full.mp3
 
+# ---- Mars-BG stitch pipeline (tools/mars/) -----------------------------------
+# The doc + wip/00..08 scripts + the low-res originals + hand-made horizon{1,2}.png
+# ARE tracked. The 27 MB AI-upscaled source quarters (hr/) and every regenerated
+# intermediate stay LOCAL (re-run wip/00..08 to rebuild; the shipped tiles live in
+# wwwroot/Content/GFX/MarsBG/marsloop*.png). See tools/mars/STITCH_ALGORITHM.md.
+tools/mars/hr/
+tools/mars/wip/matte/
+tools/mars/wip/recolor/
+tools/mars/wip/exposure/
+tools/mars/wip/registered/
+tools/mars/wip/sheared/
+tools/mars/wip/horizon_out/
+tools/mars/wip/strip_*.png
+tools/mars/wip/_*.png
+tools/mars/**/__pycache__/
+
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.
 .env

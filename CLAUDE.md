@@ -198,6 +198,21 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
 - **Game loop is JS-driven:** `wwwroot/index.html` (`initRenderJS`/`tickJS`) →
   `Pages/Index.razor.cs` `TickDotNet()` → now `new EvilAliens.Game1()`. `ContentTestGame.cs` /
   `SpikeGame.cs` are dead harnesses, safe to delete.
+- **Menus are mouse-selectable + clickable (hover highlights, left-click selects+activates).**
+  Every list menu derives from `MenuSub1` and shares a `selectedEntry` + `ItemSelectedEvents`
+  model. The menus' layouts differ too much (centred lists, the framed main menu `MenuSubWithSkull`,
+  the left-aligned `DifficultyMenu` column, the `SubMenuLevelChoice` carousel) to hit-test from one
+  formula, so **each `DrawMenu` records the design-space (800x600) box of every entry it draws** via
+  `MenuSub1.RecordEntryHit(index, centre, w, h)` (locked/undrawn entries are skipped, so they never
+  become hittable). `MenuSub1.HandleMouse()` (in `HandleInput`, gated on the `normal` state so it
+  never fights the entry/exit zoom) maps the cursor — `InputHandler.MousePosition`, already design
+  space via `RenderScale.WindowToDesign` — onto an entry: hover sets `selectedEntry`, `MyKeys.Mouse1`
+  (already wired to the left button in `InputHandler`) selects+invokes it, and either resets the
+  attract-demo idle timeout. **A new `DrawMenu` override must call `RecordEntryHit` per entry or its
+  menu won't be clickable.** The carousel sets `mouseHoverSelects = false` (gliding over a flying
+  screenshot shouldn't snap the selection; a click picks the mission directly). Out of scope: the
+  `GammaMenu`/`ScreenResizeMenu` sliders (not `MenuSub1`, no entry list) and `PlayerSettingsMenu`
+  (gamepad-config, its own per-device selection model, empty `menuEntries`).
 - **Real keyboard input works** — KNI maps keys via **`event.keyCode`** (decompiled from
   `Kni.Platform`: `Keys = (Keys)keyCode`), so Enter/arrows/WASD/Esc are correct for real users.
   When *driving* the browser, prefer **real OS keys** via the claude-in-chrome `computer` `key`
@@ -330,16 +345,23 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   is called from `demo_OnFinished` (player pop-in), NOT at level start, so the earth enters after the
   UFO intro as the player takes control; the slow-down engages with it and the asteroid belt waits on
   the same `WaitForDoodadEvent` gate.
-- **Menu art is warmed at boot to kill the level->menu pop-in.** `Game1.WarmMenuContent()` (end of
-  `LoadContent`, behind the loading screen) decodes the menu's heavy PNGs (`planet`, `title-revenged`,
-  + the rest) ONCE so the first menu show -- and especially the cold end-of-level credits->menu handoff
-  (which never displayed the menu before) -- appears in a single frame instead of revealing in ~0.5s
-  stages as each uncached MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
+- **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
+  of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
+  first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed
+  the menu before) -- appears in a single frame instead of revealing in ~0.5s stages as each uncached
+  MB-scale PNG decodes mid-transition on the WASM main thread. The menu scenes
   (`MenuScene`/`MenuSub1`/`MenuSubWithSkull`) all load through ONE shared content manager (`Scene.Content`
   == `IContentManagerService.ContentManager` == `Game1.content`), so warming that one instance populates
   the exact cache keys their `Load()` calls hit (same idea as a level's `PreloadGraphicalContent`).
   (`CreditsScene` uses its OWN content manager, so its bg isn't warmed -- but the crawl fades its bg in,
-  so a cold decode there isn't the jarring part.) Pairs with skipping the brag interstitial: on web `BragScene` is
+  so a cold decode there isn't the jarring part.) **The warm no longer blocks `LoadContent`** (which
+  lengthened the black loading screen BEFORE the first splash, while the multi-second splash sequence --
+  the natural place to hide loading -- sat idle): `QueueMenuWarm` ENQUEUES the decodes and `PumpWarmQueue`
+  (in `UpdateInner`) drains ONE per Update tick during the splash / Press-Start idle time, so the splash
+  appears sooner and the warm hides behind it. The "menu fully warm before first shown" invariant is
+  preserved on every path by `DrainWarmQueue()` at the top of `startScreen_OnFinished` (the instant before
+  `new MenuScene`): if a player mashes past the whole splash before the pump finishes, the drain decodes
+  the rest synchronously (worst case == the old blocking batch). Pairs with skipping the brag interstitial: on web `BragScene` is
   always immediately `Done` (no signed-in gamer), so `Game1.creditsScene_OnFinished` checks
   `BragScene.WouldShow()` and routes credits -> menu directly instead of flashing one bare starfield frame.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to

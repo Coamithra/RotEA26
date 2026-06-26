@@ -22,7 +22,9 @@ internal class DifficultyMenu : MenuSub1
 
 	private List<Settings.DifficultyLevel> difficultyLevelValues = Game1.GetEnumValues<Settings.DifficultyLevel>();
 
-	private int dir;
+	// Default +1 so the Update() validity-clamp loop (selectedEntry += dir) can never spin
+	// with a zero step before the first arrow press sets a real direction.
+	private int dir = 1;
 
 	public LevelType levelType
 	{
@@ -148,6 +150,11 @@ internal class DifficultyMenu : MenuSub1
 			if (!unLockableDataEntries[j].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[j].item))
 			{
 				float x = font.MeasureString(menuEntries[j]).X;
+				// Mouse hit box: non-selected rows are left-anchored at position (origin x = 0),
+				// so the centre sits half a label-width to the right. The selected row's pulse
+				// shifts/scales its draw slightly, but re-hovering the already-selected row is a
+				// no-op, so the unscaled box is fine.
+				RecordEntryHit(j, new Vector2(position.X + x / 2f, position.Y), x, font.LineSpacing);
 				float num6 = (x * num5 - x) / 2f;
 				(val3) = new Vector2(num6, (float)(font.LineSpacing / 2));
 				base.SpriteBatch.DrawMetalString(font, menuEntries[j], position, aliceBlue, 0f, val3, num5);

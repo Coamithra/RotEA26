@@ -522,7 +522,15 @@ internal class SplashScene : Scene
 			break;
 		}
 		bool flag = false;
-		flag |= base.InputHandler.Pressed(MyKeys.Enter) || base.InputHandler.Pressed(MyKeys.Esc);
+		// Skip the whole splash sequence on Enter/Esc, a mouse click / touch tap (Mouse1),
+		// or any gamepad Start/Back/A/B/LTRT (below) — landing on "Press Start". The click/
+		// tap path is what lets TOUCH/MOBILE players skip at all: there's no keyboard and the
+		// touch D-pad isn't shown during the splash, so a Return-only skip left them watching
+		// the whole intro with no way out. (The handoff to StartScreen can't double-consume
+		// the same press — StartScreen is added mid-Update and first reads input next tick,
+		// by which point this one-tick Pressed edge is already spent.)
+		flag |= base.InputHandler.Pressed(MyKeys.Enter) || base.InputHandler.Pressed(MyKeys.Esc)
+			|| base.InputHandler.Pressed(MyKeys.Mouse1);
 		for (int i = 0; i < 4; i++)
 		{
 			flag |= base.InputHandler.PadPressed(PadKeys.Start, i);

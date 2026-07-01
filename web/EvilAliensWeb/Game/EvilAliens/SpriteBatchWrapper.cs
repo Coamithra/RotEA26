@@ -896,6 +896,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			// Invariant metal.fx params are identical for every DrawMetalString / DrawShadowString
 			// call, so set them ONCE here rather than re-looking-up + re-setting all 11 per call.
+			// Safe because metalEffect is created once and never recreated: BlazorGL/WASM has no
+			// device-lost/reset cycle, so neither the set-once values nor the cached param handles
+			// below can go stale. (On a backend that reloaded effects on a graphics reset, both
+			// would need to be re-applied/re-fetched after the reset.)
 			SetParam(metalEffect, "GradTop", 1.18f);
 			SetParam(metalEffect, "GradMid", 0.50f);
 			SetParam(metalEffect, "GradBot", 0.95f);

@@ -141,7 +141,9 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	// re-doing the content lookup + SuperSampleFactor for a sheet that hadn't changed. Each cast
 	// state holds a single sheet for its whole duration, so reload only when the sheet name
 	// actually differs from what's loaded (the boss state flips its texture mid-state, which
-	// changes texturename, so a name compare covers that case too).
+	// changes texturename, so a name compare covers that case too). ASSUMES a texture name
+	// uniquely determines its grid/fps — true for every cast state today; a future state that
+	// reused a name with a different grid would need to compare the full AnimationData.
 	private void EnsureAnimation(AnimationData animationData)
 	{
 		if (texturename == animationData.TextureName)

@@ -29,6 +29,38 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// it. Loaded in LoadContent; null => DrawMetalString degrades to a plain DrawString.
 	private Effect metalEffect;
 
+	// Cached metal.fx EffectParameter handles for the params that VARY per call (Time / the two
+	// glyph-band insets / the used-subrect UV). The invariant params (GradTop/Mid/Bot, Glint*,
+	// Sweep*) are identical for every call and are set ONCE in LoadContent, so the per-call path
+	// avoids ~11 string-keyed Parameters[name] dictionary lookups. Populated when metalEffect loads.
+	private EffectParameter mpTime;
+	private EffectParameter mpPadTop;
+	private EffectParameter mpPadBot;
+	private EffectParameter mpUvExtent;
+
+	// Per-key cached rasterised shadow-string element for the in-game score HUD (DrawShadowStringCached).
+	// The score re-drew every HUD string through the full RT pipeline every frame (2 RT switches, a
+	// metalRT clear, 3 Begin/End flushes, an allocating GetRenderTargets(), per-string) for text that
+	// changes at most a few times a second. Each entry owns a persistent RT holding its rasterised
+	// shadow+text; Pass 1 (the RT ping-pong) re-runs only when the text/scale/colours/render-scale
+	// change, while Pass 2 (the composite) still runs every frame because alpha + glintTime vary and
+	// are composite-time inputs.
+	private sealed class CachedTextSprite
+	{
+		public RenderTarget2D Rt;
+		public string Text;
+		public float Scale;
+		public Color ShadowColor;
+		public Color TextColor;
+		public Vector2 ShadowOffset;
+		public float BuiltRs;    // RenderScale.Scale the RT was rasterised at (rebuild on a res change)
+		public int UsedW;        // render-px the element fills within Rt (Pass-2 sub-rect + UvExtent)
+		public int UsedH;
+		public float BoxH;       // padded design-space box height (metal padFrac math)
+	}
+
+	private readonly System.Collections.Generic.Dictionary<int, CachedTextSprite> textSpriteCache = new System.Collections.Generic.Dictionary<int, CachedTextSprite>();
+
 	// Transparent border (design px) baked around the text in the metal RT so the glint
 	// sweep and bloom have overshoot room and don't clip at the glyph edges.
 	private const int MetalPad = 6;
@@ -268,17 +300,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// Symmetric box (no drop shadow): equal top/bottom glyph-band inset.
 		float padFracY = (float)MetalPad / boxH;
 		Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
-		SetParam(metalEffect, "Time", time);
-		SetParam(metalEffect, "GradTop", 1.18f);
-		SetParam(metalEffect, "GradMid", 0.50f);
-		SetParam(metalEffect, "GradBot", 0.95f);
-		SetParam(metalEffect, "GlintStrength", 0.9f);
-		SetParam(metalEffect, "GlintWidth", 0.06f);
-		SetParam(metalEffect, "SweepPeriod", MetalSweepPeriod); // glint sweeps ~every 9s — a rare treat
-		SetParam(metalEffect, "SweepActive", MetalSweepActive); // ~1.1s crossing, then a long rest
-		SetParam(metalEffect, "PadFracTop", padFracY);
-		SetParam(metalEffect, "PadFracBot", padFracY);
-		SetParam(metalEffect, "UvExtent", uvExtent);
+		// Invariant params (Grad*/Glint*/Sweep*) are set once in LoadContent; only these vary per call.
+		mpTime?.SetValue(time);
+		mpPadTop?.SetValue(padFracY);
+		mpPadBot?.SetValue(padFracY);
+		mpUvExtent?.SetValue(uvExtent);
 		float drawScale = scale / rs;
 		Vector2 rtOrigin = (origin + new Vector2(MetalPad, MetalPad)) * rs;
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, metalEffect, RenderScale.Matrix);
@@ -389,16 +415,86 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		int usedW = Math.Max(1, (int)Math.Ceiling(boxW * rs));      // render-px the element fills
 		int usedH = Math.Max(1, (int)Math.Ceiling(boxH * rs));
 		EnsureTextRT(usedW, usedH);
+		RasteriseShadowText(metalRT, text, scale, shadowColor, textColor, shadowOffset, rs);
+		CompositeShadowText(metalRT, usedW, usedH, boxH, shadowOffset, position, alpha, metal, glintTime, rs);
+	}
 
-		// --- Pass 1: rasterise shadow then text into the RT's top-left corner at render res ---
-		// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the
-		// straight-alpha glyphs verbatim (same trick DrawMetalString documents). The text top-
-		// left sits at the MetalPad inset; the shadow is offset from there by shadowOffset, so
-		// the whole drop fits inside the padded box. Where the opaque text covers the opaque
-		// shadow, the text wins — that's the bleed-through fix.
+	// Cached variant of DrawShadowString for the in-game score HUD (called every frame per player
+	// slot). `cacheKey` identifies a persistent per-slot element: Pass 1 (the RT ping-pong
+	// rasterise) re-runs only when the text / scale / colours / render-scale change since the last
+	// call for that key; Pass 2 (the composite) runs every frame because `alpha` + `glintTime`
+	// vary and are composite-time inputs. Output is pixel-identical to DrawShadowString for the
+	// same inputs — it just skips re-rasterising unchanged text. See ScoreVisualiser.DrawStr.
+	public void DrawShadowStringCached(int cacheKey, string text, Vector2 position, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float alpha, bool metal, float glintTime)
+	{
+		if (string.IsNullOrEmpty(text) || font == null)
+		{
+			return;
+		}
+		if (scale <= 0f || alpha <= 0f)
+		{
+			return;
+		}
+
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		if (!textSpriteCache.TryGetValue(cacheKey, out CachedTextSprite sprite))
+		{
+			sprite = new CachedTextSprite();
+			textSpriteCache[cacheKey] = sprite;
+		}
+
+		bool dirty = sprite.Rt == null || ((GraphicsResource)sprite.Rt).IsDisposed
+			|| sprite.BuiltRs != rs || sprite.Scale != scale
+			|| sprite.ShadowColor != shadowColor || sprite.TextColor != textColor
+			|| sprite.ShadowOffset != shadowOffset || sprite.Text != text;
+
+		if (dirty)
+		{
+			Vector2 textSz = font.MeasureString(text) * scale;
+			float boxW = textSz.X + Math.Abs(shadowOffset.X) + 2 * MetalPad;
+			float boxH = textSz.Y + Math.Abs(shadowOffset.Y) + 2 * MetalPad;
+			int usedW = Math.Max(1, (int)Math.Ceiling(boxW * rs));
+			int usedH = Math.Max(1, (int)Math.Ceiling(boxH * rs));
+			// Per-slot grow-only RT, independent of the shared metalRT so a cached sprite survives
+			// other text draws (menus/pops/other slots) between frames.
+			int haveW = (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed) ? ((Texture2D)sprite.Rt).Width : 0;
+			int haveH = (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed) ? ((Texture2D)sprite.Rt).Height : 0;
+			if (haveW < usedW || haveH < usedH)
+			{
+				if (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed)
+				{
+					((GraphicsResource)sprite.Rt).Dispose();
+				}
+				sprite.Rt = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, usedW), Math.Max(haveH, usedH), false, SurfaceFormat.Color, DepthFormat.None);
+			}
+			RasteriseShadowText(sprite.Rt, text, scale, shadowColor, textColor, shadowOffset, rs);
+			sprite.Text = text;
+			sprite.Scale = scale;
+			sprite.ShadowColor = shadowColor;
+			sprite.TextColor = textColor;
+			sprite.ShadowOffset = shadowOffset;
+			sprite.BuiltRs = rs;
+			sprite.UsedW = usedW;
+			sprite.UsedH = usedH;
+			sprite.BoxH = boxH;
+		}
+
+		CompositeShadowText(sprite.Rt, sprite.UsedW, sprite.UsedH, sprite.BoxH, sprite.ShadowOffset, position, alpha, metal, glintTime, rs);
+	}
+
+	// Pass 1: rasterise shadow-then-text OPAQUE into `rt`'s top-left corner at render res.
+	// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the straight-alpha
+	// glyphs verbatim (same trick DrawMetalString documents). The text top-left sits at the
+	// MetalPad inset; the shadow is offset from there by shadowOffset, so the whole drop fits inside
+	// the padded box. Where the opaque text covers the opaque shadow, the text wins — the
+	// bleed-through fix. Does the mid-draw target ping-pong and restores whatever was bound on entry
+	// (scene target, or a menu's own RT), NOT a hardcoded null — see the long note in DrawMetalString.
+	private void RasteriseShadowText(RenderTarget2D rt, string text, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float rs)
+	{
 		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
 		Flush();
-		base.GraphicsDevice.SetRenderTarget(0, metalRT);
+		base.GraphicsDevice.SetRenderTarget(0, rt);
 		base.GraphicsDevice.Clear(Color.Transparent);
 		Matrix m = Matrix.CreateTranslation(MetalPad, MetalPad, 0f) * Matrix.CreateScale(rs);
 		Color shadowOpaque = new Color(shadowColor.R, shadowColor.G, shadowColor.B, byte.MaxValue);
@@ -407,8 +503,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		DrawStringScaled(font, text, shadowOffset, shadowOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
 		DrawStringScaled(font, text, Vector2.Zero, textOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
 		spriteBatch.End();
-		// Restore whatever target was bound on entry (scene target, or a menu's own RT), NOT a
-		// hardcoded null — see the long note in DrawMetalString for why.
 		if (prevTargets != null && prevTargets.Length > 0)
 		{
 			base.GraphicsDevice.SetRenderTargets(prevTargets);
@@ -417,41 +511,40 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 		}
+	}
 
-		// --- Pass 2: composite the used sub-rect ONCE at `alpha` (optionally through metal.fx) ---
-		// The RT holds a straight-alpha image; composite with the current BlendMode
-		// (NonPremultiplied for the score) and a white tint carrying `alpha`, so the element
-		// fades as one sprite. metal.fx returns float4(rgb, mask) * color, so the same tint
-		// alpha carries through the chrome path too.
+	// Pass 2: composite `rt`'s used sub-rect (usedW x usedH) ONCE at `position`/`alpha`, optionally
+	// through metal.fx. The RT holds a straight-alpha image; composite with the current BlendMode
+	// (NonPremultiplied for the score) and a white tint carrying `alpha`, so the element fades as one
+	// sprite. metal.fx returns float4(rgb, mask) * color, so the same tint alpha carries through the
+	// chrome path too. boxH + shadowOffset.Y feed the asymmetric glyph-band insets (the drop shadow
+	// extends the bottom) so the chrome gradient lands on the letters, not on the shadow overshoot.
+	private void CompositeShadowText(RenderTarget2D rt, int usedW, int usedH, float boxH, Vector2 shadowOffset, Vector2 position, float alpha, bool metal, float glintTime, float rs)
+	{
+		// End any active wrapper batch before opening our own. RasteriseShadowText already flushes,
+		// but on the cached fast path (clean sprite) Pass 1 is skipped, so an earlier _beginDrawing
+		// batch may still be open here — flush it or spriteBatch.Begin throws "Begin cannot be called
+		// again until End". Idempotent when a rasterise just ran (enabled is already false).
+		Flush();
 		Rectangle used = new Rectangle(0, 0, usedW, usedH);
 		Color composite = new Color((byte)255, (byte)255, (byte)255, (byte)MathHelper.Clamp(alpha * 255f, 0f, 255f));
 		Effect fx = (metal && metalEffect != null) ? metalEffect : null;
 		if (fx != null)
 		{
-			int texW = ((Texture2D)metalRT).Width;
-			int texH = ((Texture2D)metalRT).Height;
-			// Asymmetric box: the drop shadow extends the bottom, so the glyph band sits MetalPad
-			// from the top but MetalPad + |shadowOffset.Y| from the bottom. Pass both insets so the
-			// chrome gradient lands on the letters, not ~2px low onto the shadow overshoot.
+			int texW = ((Texture2D)rt).Width;
+			int texH = ((Texture2D)rt).Height;
+			// Invariant params (Grad*/Glint*/Sweep*) are set once in LoadContent; only these vary.
 			float padFracTop = (float)MetalPad / boxH;
 			float padFracBot = (float)(MetalPad + Math.Abs(shadowOffset.Y)) / boxH;
-			Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
-			SetParam(metalEffect, "Time", glintTime);
-			SetParam(metalEffect, "GradTop", 1.18f);
-			SetParam(metalEffect, "GradMid", 0.50f);
-			SetParam(metalEffect, "GradBot", 0.95f);
-			SetParam(metalEffect, "GlintStrength", 0.9f);
-			SetParam(metalEffect, "GlintWidth", 0.06f);
-			SetParam(metalEffect, "SweepPeriod", MetalSweepPeriod);
-			SetParam(metalEffect, "SweepActive", MetalSweepActive);
-			SetParam(metalEffect, "PadFracTop", padFracTop);
-			SetParam(metalEffect, "PadFracBot", padFracBot);
-			SetParam(metalEffect, "UvExtent", uvExtent);
+			mpTime?.SetValue(glintTime);
+			mpPadTop?.SetValue(padFracTop);
+			mpPadBot?.SetValue(padFracBot);
+			mpUvExtent?.SetValue(new Vector2((float)usedW / texW, (float)usedH / texH));
 		}
 		float drawScale = 1f / rs;
 		Vector2 rtOrigin = new Vector2(MetalPad, MetalPad) * rs;    // text top-left in RT texels
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, fx, RenderScale.Matrix);
-		spriteBatch.Draw(metalRT, position, (Rectangle?)used, composite, 0f, rtOrigin, drawScale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(rt, position, (Rectangle?)used, composite, 0f, rtOrigin, drawScale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
 	}
 
@@ -542,13 +635,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 				offX = 0f; offY += sf.LineSpacing; first = true;
 				continue;
 			}
-			char c = ch;
-			if (!sf.Glyphs.ContainsKey(c))
+			if (!sf.Glyphs.TryGetValue(ch, out SpriteFont.Glyph g))
 			{
-				if (sf.DefaultCharacter.HasValue) c = sf.DefaultCharacter.Value;
-				else continue;
+				if (!sf.DefaultCharacter.HasValue || !sf.Glyphs.TryGetValue(sf.DefaultCharacter.Value, out g))
+					continue;
 			}
-			SpriteFont.Glyph g = sf.Glyphs[c];
 			if (first) { offX = Math.Max(g.LeftSideBearing, 0f); first = false; }
 			else offX += sf.Spacing + g.LeftSideBearing;
 			float vx = offX + g.Cropping.X;
@@ -801,6 +892,23 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			metalEffect = null;
 			System.Console.WriteLine("[metal] effect load failed: " + ex);
 		}
+		if (metalEffect != null)
+		{
+			// Invariant metal.fx params are identical for every DrawMetalString / DrawShadowString
+			// call, so set them ONCE here rather than re-looking-up + re-setting all 11 per call.
+			SetParam(metalEffect, "GradTop", 1.18f);
+			SetParam(metalEffect, "GradMid", 0.50f);
+			SetParam(metalEffect, "GradBot", 0.95f);
+			SetParam(metalEffect, "GlintStrength", 0.9f);
+			SetParam(metalEffect, "GlintWidth", 0.06f);
+			SetParam(metalEffect, "SweepPeriod", MetalSweepPeriod);
+			SetParam(metalEffect, "SweepActive", MetalSweepActive);
+			// Cache the handles for the params that vary per call (set every draw).
+			mpTime = metalEffect.Parameters["Time"];
+			mpPadTop = metalEffect.Parameters["PadFracTop"];
+			mpPadBot = metalEffect.Parameters["PadFracBot"];
+			mpUvExtent = metalEffect.Parameters["UvExtent"];
+		}
 		effectHandler.LoadGraphicsContent(loadAllContent: true);
 	}
 
@@ -808,6 +916,14 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	{
 		Flush();
 		effectHandler.UnloadGraphicsContent(unloadAllContent: true);
+		foreach (CachedTextSprite sprite in textSpriteCache.Values)
+		{
+			if (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed)
+			{
+				((GraphicsResource)sprite.Rt).Dispose();
+			}
+		}
+		textSpriteCache.Clear();
 		spriteBatch.Dispose();
 		base.UnloadContent();
 	}

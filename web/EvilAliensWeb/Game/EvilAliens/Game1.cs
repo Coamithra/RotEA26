@@ -691,9 +691,6 @@ public class Game1 : Game
 
 	protected override void Update(GameTime gameTime)
 	{
-		//IL_00b3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ba: Expected O, but got Unknown
-		MyDebug.Assert(((Collection<IGameComponent>)(object)base.Components).Contains((IGameComponent)(object)gamerServicesComponent));
 		Settings.GetInstance().Update();
 		Achievements.GetInstance().Update();
 		Unlockables.GetInstance().Update();

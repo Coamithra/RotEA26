@@ -126,10 +126,20 @@ namespace EvilAliensWeb.Compat
 				return false;
 			}
 			string k = key.Trim();
-			if (Enum.TryParse<EvilAliens.MyKeys>(k, ignoreCase: true, out mk))
+			// Enum.TryParse ALSO accepts raw numeric strings ("42") and any undefined
+			// underlying value, which would flow straight into holdTicks[(int)mk]/
+			// touchHeld[(int)mk] in Press/Hold and throw IndexOutOfRangeException. Only a
+			// real, defined member name may map — reject a leading digit/sign and verify
+			// the parsed value is actually defined.
+			if (k.Length > 0 && !char.IsDigit(k[0]) && k[0] != '+' && k[0] != '-'
+				&& Enum.TryParse<EvilAliens.MyKeys>(k, ignoreCase: true, out mk)
+				&& Enum.IsDefined(typeof(EvilAliens.MyKeys), mk))
 			{
 				return true;
 			}
+			// Clear any bogus value a successful-but-out-of-range TryParse left in mk before
+			// falling through to the alias switch (which sets mk itself on a hit).
+			mk = default(EvilAliens.MyKeys);
 			switch (k.ToLowerInvariant())
 			{
 			case "up":

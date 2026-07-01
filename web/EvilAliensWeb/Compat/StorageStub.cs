@@ -132,17 +132,19 @@ namespace Microsoft.Xna.Framework.Storage
                 }
 
                 // Prune entries the game removed from MEMFS since the last sync.
-                if (_mirror.Count != present.Count)
+                // Run unconditionally (O(n) over a handful of names): a count-equality
+                // shortcut is unsound — a quota-failed Set (which leaves _mirror short one
+                // ADD) coinciding with a same-Sync deletion can keep _mirror.Count ==
+                // present.Count while a deleted name is still mirrored, so the shortcut
+                // would skip the prune and the deleted save resurrects on next hydrate.
+                var gone = new List<string>();
+                foreach (string name in _mirror.Keys)
+                    if (!present.Contains(name))
+                        gone.Add(name);
+                foreach (string name in gone)
                 {
-                    var gone = new List<string>();
-                    foreach (string name in _mirror.Keys)
-                        if (!present.Contains(name))
-                            gone.Add(name);
-                    foreach (string name in gone)
-                    {
-                        SaveInterop.Remove(name);
-                        _mirror.Remove(name);
-                    }
+                    SaveInterop.Remove(name);
+                    _mirror.Remove(name);
                 }
             }
             catch

@@ -393,13 +393,16 @@ internal abstract class GameScene : Scene
 		{
 			starter = ControlDevice.PadThree;
 		}
+		else if (base.InputHandler.PadPressed(PadKeys.Start, 3) || base.InputHandler.PadPressed(PadKeys.A, 3))
+		{
+			starter = ControlDevice.PadFour;
+		}
 		else
 		{
-			if (!base.InputHandler.PadPressed(PadKeys.Start, 3) && !base.InputHandler.PadPressed(PadKeys.A, 3))
-			{
-				throw new NotSupportedException();
-			}
-			starter = ControlDevice.PadFour;
+			// Mouse-click activation (Stage 13 made every MenuSub1 entry clickable) presses
+			// none of the device keys; on web the mouse is the keyboard player, so default to
+			// Keyboard instead of throwing (the old NotSupportedException froze the whole tab).
+			starter = ControlDevice.Keyboard;
 		}
 		playerOptions.Starter = starter;
 		pausedScene.Remove();
@@ -486,7 +489,6 @@ internal abstract class GameScene : Scene
 
 	protected void Victory()
 	{
-		System.Console.WriteLine("[trace] GameScene.Victory() level=" + level + " difficulty=" + Settings.GetInstance().CurrentDifficulty);
 		_state = GameState.Victory;
 		if (!Settings.GetInstance().CheckForCheats())
 		{
@@ -672,7 +674,6 @@ internal abstract class GameScene : Scene
 		}
 		if (_timer.TotalMilliseconds >= 7000.0)
 		{
-			System.Console.WriteLine("[trace] UpdateWin -> Terminate(finishedlevel) level=" + level);
 			Terminate(FinishedMode.finishedlevel);
 		}
 	}
@@ -766,7 +767,6 @@ internal abstract class GameScene : Scene
 
 	protected void Terminate(FinishedMode mode)
 	{
-		System.Console.WriteLine("[trace] GameScene.Terminate(" + mode + ") level=" + level);
 		Collection.Purge<AnimatedMessage>();
 		Collection.Purge<TutorialMessage>();
 		Collection.Purge<AlienDrawableGameComponent>();

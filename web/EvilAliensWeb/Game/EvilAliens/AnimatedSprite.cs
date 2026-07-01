@@ -31,8 +31,9 @@ public class AnimatedSprite
 		// TitleContainer (the same root WebContentManager uses) instead of File.OpenRead.
 		// Keep the "Content/" root capitalised (case-sensitive GitHub Pages); only the
 		// filename under it is lowercased to match the on-disk lowercase names.
-		Stream input = TitleContainer.OpenStream("Content/" + filename.Replace('\\', '/').ToLowerInvariant());
-		BinaryReader binaryReader = new BinaryReader(input);
+		// using: a malformed .dat throws mid-parse below; without it the stream + reader leak.
+		using Stream input = TitleContainer.OpenStream("Content/" + filename.Replace('\\', '/').ToLowerInvariant());
+		using BinaryReader binaryReader = new BinaryReader(input);
 		binaryReader.ReadInt32();
 		binaryReader.ReadString();
 		int num = binaryReader.ReadInt32();
@@ -57,7 +58,6 @@ public class AnimatedSprite
 				frames.Add(item);
 			}
 		}
-		binaryReader.Close();
 	}
 
 	public void Draw(int frame, Vector2 position, Color color, float scale, bool center, SpriteEffects e)

@@ -31,8 +31,9 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	// Cached metal.fx EffectParameter handles for the params that VARY per call (Time / the two
 	// glyph-band insets / the used-subrect UV). The invariant params (GradTop/Mid/Bot, Glint*,
-	// Sweep*) are identical for every call and are set ONCE in LoadContent, so the per-call path
-	// avoids ~11 string-keyed Parameters[name] dictionary lookups. Populated when metalEffect loads.
+	// Sweep*) are identical for every call and are set ONCE in LoadContent, so SetMetalParams
+	// avoids ~11 string-keyed Parameters[name] dictionary lookups per call. Populated when
+	// metalEffect loads; null when the effect is missing (partial deploy) — SetMetalParams no-ops.
 	private EffectParameter mpTime;
 	private EffectParameter mpPadTop;
 	private EffectParameter mpPadBot;
@@ -300,11 +301,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// Symmetric box (no drop shadow): equal top/bottom glyph-band inset.
 		float padFracY = (float)MetalPad / boxH;
 		Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
-		// Invariant params (Grad*/Glint*/Sweep*) are set once in LoadContent; only these vary per call.
-		mpTime?.SetValue(time);
-		mpPadTop?.SetValue(padFracY);
-		mpPadBot?.SetValue(padFracY);
-		mpUvExtent?.SetValue(uvExtent);
+		SetMetalParams(time, padFracY, padFracY, uvExtent);
 		float drawScale = scale / rs;
 		Vector2 rtOrigin = (origin + new Vector2(MetalPad, MetalPad)) * rs;
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, metalEffect, RenderScale.Matrix);
@@ -347,6 +344,20 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			p.SetValue(value);
 		}
+	}
+
+	// The metal.fx per-call parameter block, in ONE place so the menu marquee (DrawMetalString) and
+	// the score chrome (DrawShadowString) can't silently diverge. Only the glint clock `time` and
+	// the top/bottom glyph-band insets + used-subrect UV differ per call site; the chrome gradient +
+	// glint sweep tuning is invariant and set ONCE in LoadContent (SweepPeriod/Active make the glint
+	// cross ~every 9s then rest ~1.1s). Uses the cached handles so a per-call draw does no
+	// string-keyed Parameters[name] lookups.
+	private void SetMetalParams(float time, float padFracTop, float padFracBot, Vector2 uvExtent)
+	{
+		mpTime?.SetValue(time);
+		mpPadTop?.SetValue(padFracTop);
+		mpPadBot?.SetValue(padFracBot);
+		mpUvExtent?.SetValue(uvExtent);
 	}
 
 	// Grow the shared text RT (metalRT) to at least w x h render-px, reusing it otherwise.
@@ -533,13 +544,12 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			int texW = ((Texture2D)rt).Width;
 			int texH = ((Texture2D)rt).Height;
-			// Invariant params (Grad*/Glint*/Sweep*) are set once in LoadContent; only these vary.
+			// Asymmetric box: the drop shadow extends the bottom, so the glyph band sits MetalPad
+			// from the top but MetalPad + |shadowOffset.Y| from the bottom.
 			float padFracTop = (float)MetalPad / boxH;
 			float padFracBot = (float)(MetalPad + Math.Abs(shadowOffset.Y)) / boxH;
-			mpTime?.SetValue(glintTime);
-			mpPadTop?.SetValue(padFracTop);
-			mpPadBot?.SetValue(padFracBot);
-			mpUvExtent?.SetValue(new Vector2((float)usedW / texW, (float)usedH / texH));
+			Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
+			SetMetalParams(glintTime, padFracTop, padFracBot, uvExtent);
 		}
 		float drawScale = 1f / rs;
 		Vector2 rtOrigin = new Vector2(MetalPad, MetalPad) * rs;    // text top-left in RT texels
@@ -635,11 +645,13 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 				offX = 0f; offY += sf.LineSpacing; first = true;
 				continue;
 			}
-			if (!sf.Glyphs.TryGetValue(ch, out SpriteFont.Glyph g))
+			char c = ch;
+			if (!sf.Glyphs.ContainsKey(c))
 			{
-				if (!sf.DefaultCharacter.HasValue || !sf.Glyphs.TryGetValue(sf.DefaultCharacter.Value, out g))
-					continue;
+				if (sf.DefaultCharacter.HasValue) c = sf.DefaultCharacter.Value;
+				else continue;
 			}
+			SpriteFont.Glyph g = sf.Glyphs[c];
 			if (first) { offX = Math.Max(g.LeftSideBearing, 0f); first = false; }
 			else offX += sf.Spacing + g.LeftSideBearing;
 			float vx = offX + g.Cropping.X;
@@ -894,12 +906,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		}
 		if (metalEffect != null)
 		{
-			// Invariant metal.fx params are identical for every DrawMetalString / DrawShadowString
-			// call, so set them ONCE here rather than re-looking-up + re-setting all 11 per call.
-			// Safe because metalEffect is created once and never recreated: BlazorGL/WASM has no
-			// device-lost/reset cycle, so neither the set-once values nor the cached param handles
-			// below can go stale. (On a backend that reloaded effects on a graphics reset, both
-			// would need to be re-applied/re-fetched after the reset.)
+			// Invariant metal.fx params are identical for every SetMetalParams call, so set them
+			// ONCE here rather than re-looking-up + re-setting all 11 per call. Safe because
+			// metalEffect is created once and never recreated: BlazorGL/WASM has no device-lost/reset
+			// cycle, so neither the set-once values nor the cached param handles below can go stale.
+			// (On a backend that reloaded effects on a graphics reset, both would need re-applying.)
 			SetParam(metalEffect, "GradTop", 1.18f);
 			SetParam(metalEffect, "GradMid", 0.50f);
 			SetParam(metalEffect, "GradBot", 0.95f);
@@ -907,7 +918,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			SetParam(metalEffect, "GlintWidth", 0.06f);
 			SetParam(metalEffect, "SweepPeriod", MetalSweepPeriod);
 			SetParam(metalEffect, "SweepActive", MetalSweepActive);
-			// Cache the handles for the params that vary per call (set every draw).
+			// Cache the handles for the params SetMetalParams sets every call.
 			mpTime = metalEffect.Parameters["Time"];
 			mpPadTop = metalEffect.Parameters["PadFracTop"];
 			mpPadBot = metalEffect.Parameters["PadFracBot"];

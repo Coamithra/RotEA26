@@ -56,8 +56,6 @@ public class Game1 : Game
 
 	private CreditsScene creditsScene;
 
-	private NewPreviewScene previewScene;
-
 	// Web-port debug sprite harness (?harness=...): a single frozen object on a space
 	// background drawn through the real pipeline. Created in Initialize, launched from
 	// startScreen_OnFinished instead of the menu when DebugFlags.Harness is set.
@@ -294,9 +292,6 @@ public class Game1 : Game
 		paratrooper.OnFinished += gameScene_OnFinished;
 		tutorialLevel = new TutorialLevel((Game)(object)this);
 		tutorialLevel.OnFinished += gameScene_OnFinished;
-		previewScene = new NewPreviewScene((Game)(object)this);
-		NewPreviewScene newPreviewScene = previewScene;
-		newPreviewScene.onExit = (NewPreviewScene.ExitEvent)Delegate.Combine(newPreviewScene.onExit, new NewPreviewScene.ExitEvent(previewScene_onExit));
 		harnessScene = new EvilAliensWeb.Compat.HarnessScene((Game)(object)this);
 		harnessScene.OnExitToMenu = harnessScene_OnExitToMenu;
 		bulletShowcaseScene = new EvilAliensWeb.Compat.BulletShowcaseScene((Game)(object)this);
@@ -331,7 +326,6 @@ public class Game1 : Game
 		menuScene.OnFinished += MenuFinished;
 		menuScene.OnFullScreen += GoFullScreen;
 		menuScene.OnVSyncChange += menuScene_OnVSyncChange;
-		menuScene.OnPreviewSelected += menuScene_previewSelected;
 		menuScene.OnResetSelected += menuScene_OnResetSelected;
 		menuScene.OnBragSelected += menuScene_OnBragSelected;
 		((Collection<IGameComponent>)(object)base.Components).Remove((IGameComponent)(object)startScreen);
@@ -647,14 +641,8 @@ public class Game1 : Game
 		}
 	}
 
-	private void previewScene_onExit()
-	{
-		collectionHelper.Remove((GameComponent)(object)previewScene);
-		collectionHelper.Add((GameComponent)(object)menuScene);
-	}
-
 	// Esc out of the sprite harness: drop the harness (and the object + background it
-	// added) and show the normal menu. Mirrors previewScene_onExit.
+	// added) and show the normal menu.
 	private void harnessScene_OnExitToMenu()
 	{
 		harnessScene.Teardown();
@@ -680,13 +668,6 @@ public class Game1 : Game
 	{
 		graphics.SynchronizeWithVerticalRetrace = Settings.GetInstance().VSync;
 		graphics.ApplyChanges();
-	}
-
-	private void menuScene_previewSelected(object sender, bool showExplanation)
-	{
-		previewScene.Setup(showExplanation);
-		collectionHelper.Remove((GameComponent)(object)menuScene);
-		collectionHelper.Add((GameComponent)(object)previewScene);
 	}
 
 	protected override void Update(GameTime gameTime)
@@ -834,16 +815,15 @@ public class Game1 : Game
 		// bloomed) frame in sceneTarget before the present blit. No-op unless the 1up
 		// slowmo is active (and ramping). Leaves the render target on sceneTarget, which
 		// the present block immediately switches off below.
-		ApplySlowmoTrail();
+		ApplySlowmoTrail(gameTime);
 
 		// Present the scene target to the real (window-sized) back buffer, letterboxed.
 		Xna3GraphicsDeviceCompat.BaseRenderTarget = null;
 		base.GraphicsDevice.SetRenderTarget((RenderTarget2D)null);
 		base.GraphicsDevice.Clear(Color.Black);
-		float scale = Math.Min((float)pp.BackBufferWidth / 800f, (float)pp.BackBufferHeight / 600f);
-		int destW = (int)(800f * scale);
-		int destH = (int)(600f * scale);
-		Rectangle dest = new Rectangle((pp.BackBufferWidth - destW) / 2, (pp.BackBufferHeight - destH) / 2, destW, destH);
+		// Letterbox geometry from the single source of truth (RenderScale), so the present
+		// blit and the inverse mouse mapping (WindowToDesign) round identically.
+		Rectangle dest = RenderScale.WindowDestRect(pp.BackBufferWidth, pp.BackBufferHeight);
 		// Gamma correction is applied here, on the final present blit. sceneTarget holds
 		// the fully composited frame (legacy + hi-res, bloomed). Blitting it through the
 		// gamma pixel shader as it's scaled+letterboxed to the window is equivalent to a
@@ -870,7 +850,7 @@ public class Game1 : Game
 	// echoes in the direction of motion. slowmoTrailMix eases the whole thing in/out so
 	// engaging/leaving slowmo doesn't pop. Runs after DrawInner, so it post-processes the
 	// already-bloomed sceneTarget (the ghosts carry the glow too).
-	private void ApplySlowmoTrail()
+	private void ApplySlowmoTrail(GameTime gameTime)
 	{
 		if (!DebugFlags.SlowmoTrail)
 		{
@@ -878,9 +858,19 @@ public class Game1 : Game
 		}
 		bool active = oracle.Slowmotion != 1f;
 		bool wasZero = slowmoTrailMix <= 0f;
-		// Ease toward fully-on (active) or fully-off; ~0.15/frame is a snappy ~0.25s ramp.
+		// dt-correct the two per-frame constants below (ease 0.15, decay 0.88) so the trail
+		// looks the same at any refresh rate — IsFixedTimeStep is false, so a 120Hz display
+		// would otherwise ease twice as fast and decay twice as much per frame (half-length
+		// trails). `frames` re-expresses the real frame delta in 60Hz-frame units; clamped so
+		// a stall (tab refocus, GC hitch) can't over-correct into a black flash.
+		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+		if (dt <= 0f) dt = 1f / 60f;
+		if (dt > 0.1f) dt = 0.1f;
+		float frames = dt * 60f;
+		// Ease toward fully-on (active) or fully-off; ~0.15/60Hz-frame is a snappy ~0.25s ramp.
 		float target = active ? 1f : 0f;
-		slowmoTrailMix += (target - slowmoTrailMix) * 0.15f;
+		float easeAlpha = 1f - (float)Math.Pow(1.0 - 0.15, frames);
+		slowmoTrailMix += (target - slowmoTrailMix) * easeAlpha;
 		if (slowmoTrailMix < 0.004f)
 		{
 			slowmoTrailMix = 0f;
@@ -906,7 +896,10 @@ public class Game1 : Game
 			seed = true;
 		}
 
-		float decay = DebugFlags.SlowmoTrailDecay ?? 0.88f;
+		// The tunable decay is authored per 60Hz-frame; raise it to `frames` so the effective
+		// per-frame decay yields a frame-rate-independent trail length. Everything downstream
+		// (the black decay draw + the additive feed's 1-decay) reads this corrected value.
+		float decay = (float)Math.Pow(DebugFlags.SlowmoTrailDecay ?? 0.88f, frames);
 		float strength = DebugFlags.SlowmoTrailStrength ?? 0.8f;
 		float k = strength * slowmoTrailMix;
 		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);

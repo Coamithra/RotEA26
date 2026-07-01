@@ -299,7 +299,12 @@ case "bulletshot":
 						}
 						break;
 					case "level":
-					if (Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl))
+					// Enum.TryParse also accepts numeric strings ("999" -> (Levels)999) and
+					// undefined values; require a real defined member so an invalid ?level=
+					// falls into the unknown-level branch instead of booting a bogus level.
+					if (val.Length > 0 && !char.IsDigit(val[0]) && val[0] != '+' && val[0] != '-'
+						&& Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl)
+						&& Enum.IsDefined(typeof(EvilAliens.Levels), lvl))
 					{
 						Level = lvl;
 						SkipSplash = true;

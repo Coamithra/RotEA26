@@ -375,6 +375,11 @@ public class UFO : KillableAlien
 		//IL_041e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_044f: Unknown result type (might be due to invalid IL or missing references)
 		invincibilityTimer.Update(gameTime);
+		// NOTE: inert by design, preserved faithful to the 2008 Xbox build. bonusrandomizer
+		// is never AddTimer'd (see the ctor), so it is never Update'd and .Finished never
+		// becomes true — bonus.Randomize() therefore never runs and the carried bonus keeps
+		// its initial type. Wiring the timer up would ADD bonus-type cycling the shipped game
+		// never had, so this stays as-is intentionally rather than being "fixed" blind.
 		if (hasbonus && bonusrandomizer.Finished)
 		{
 			bonus.Randomize();

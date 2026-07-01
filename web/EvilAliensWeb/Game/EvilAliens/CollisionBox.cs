@@ -176,7 +176,11 @@ public class CollisionBox : ICollisionType
 		else
 		{
 			_topleft = new Vector2(x, y);
-			_bottomright = new Vector2(x + width, y + width);
+			// Corrected from the 2008 original's `y + width` — the non-centred ctor ignored
+			// the height param entirely (copy-paste typo). No live callers today, so this is
+			// a latent-defect fix, not a behaviour change; kept so any future caller of this
+			// overload gets a correctly-sized box.
+			_bottomright = new Vector2(x + width, y + height);
 		}
 	}
 

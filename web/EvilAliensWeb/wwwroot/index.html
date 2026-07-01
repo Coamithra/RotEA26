@@ -102,10 +102,44 @@
             catch (e) { console.warn('[debug] eaSlowmo failed (game not booted yet?): ' + e.message); }
         };
 
+        // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
+        // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
+        // and permanently freezes the tab. We swallow a bad frame and keep looping so one
+        // transient throw survives, but stop after N straight failures so a hard-broken game
+        // doesn't spam the console forever.
+        var tickFailures = 0;
+        var TICK_MAX_FAILURES = 30;
+
         function tickJS()
         {
-            window.theInstance.invokeMethod('TickDotNet');
+            try {
+                window.theInstance.invokeMethod('TickDotNet');
+                tickFailures = 0;
+            } catch (e) {
+                tickFailures++;
+                console.error('[loop] TickDotNet threw (' + tickFailures + '/' + TICK_MAX_FAILURES + '): ' + ((e && e.message) || e));
+                if (tickFailures >= TICK_MAX_FAILURES) {
+                    console.error('[loop] too many consecutive tick failures — game loop stopped.');
+                    showLoopStopped(); // the canvas is frozen; tell the player it's not just slow
+                    return; // stop rescheduling: the game is wedged, not just hiccuping
+                }
+            }
             scheduleTick();
+        }
+
+        // Terminal-stop notice: once the loop gives up, the canvas is a frozen frame with no
+        // hint that the game died. Drop a minimal overlay pointing the player at a reload so
+        // they aren't left staring at a stuck screen. Built outside #app so it survives Blazor.
+        function showLoopStopped()
+        {
+            if (document.getElementById('eaLoopStopped')) return; // one-shot
+            var ov = document.createElement('div');
+            ov.id = 'eaLoopStopped';
+            ov.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;'
+                + 'background:rgba(0,0,0,.82);color:#e8e8f0;font:600 18px/1.5 system-ui,sans-serif;'
+                + 'text-align:center;padding:24px;z-index:99999';
+            ov.innerHTML = 'The game hit an unrecoverable error and stopped.<br>Please reload the page to restart.';
+            document.body.appendChild(ov);
         }
 
         function scheduleTick()

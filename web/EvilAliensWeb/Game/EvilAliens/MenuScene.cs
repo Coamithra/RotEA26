@@ -135,8 +135,6 @@ internal class MenuScene : Scene
 
 	private MenuSub1 playerSettingsMenu;
 
-	private MenuSub1 playtestMenu;
-
 	private MenuSub1 trailerMenu;
 
 	private DifficultyMenu difficultyMenu;
@@ -320,14 +318,6 @@ internal class MenuScene : Scene
 		awardmentsMenu.OnExit += awardmentsMenu_OnExit;
 		awardmentTextMenu = new SubMenuAwardmentText(game);
 		awardmentTextMenu.OnExit += awardmentTextMenu_OnExit;
-		playtestMenu = new MenuSub1(base.Game);
-		playtestMenu.AddEntry("Unlock Everything");
-		playtestMenu.AddEntryEvent(playtestMenu_UnlockAllSelected);
-		playtestMenu.AddEntry("Invincibility: " + boolToGameString(Settings.GetInstance().Invulnerability));
-		playtestMenu.AddEntryEvent(playtestMenu_InvincibilitySelected);
-		playtestMenu.AddEntry("Back");
-		playtestMenu.AddEntryEvent(playtestMenu_OnExit);
-		playtestMenu.OnExit += playtestMenu_OnExit;
 		trailerMenu = new MenuSub1(base.Game);
 		trailerMenu.AddEntry("Revenge of the Evil Aliens (2008)");
 		trailerMenu.AddEntryEvent(trailerMenu_EvilAliensSelected);
@@ -489,29 +479,6 @@ internal class MenuScene : Scene
 			Settings.GetInstance().Friends = 0;
 		}
 		sender.SetEntry("Mechanical Friends: " + Settings.GetInstance().Friends);
-	}
-
-	private void playtestMenu_UnlockAllSelected(MenuSub1 sender)
-	{
-		for (int i = 0; i < Unlockables.GetInstance().Collection.Count; i++)
-		{
-			Unlockables.GetInstance().Collection[(Unlockables.Items)i] = true;
-		}
-		Unlockables.GetInstance().Collection[Unlockables.Items.Friends] = false;
-		Unlockables.GetInstance().Collection[Unlockables.Items.TeamChallenge] = false;
-		Unlockables.GetInstance().SaveThreaded();
-	}
-
-	private void playtestMenu_InvincibilitySelected(MenuSub1 sender)
-	{
-		Settings.GetInstance().Invulnerability = !Settings.GetInstance().Invulnerability;
-		sender.SetEntry("Invulnerability: " + boolToGameString(Settings.GetInstance().Invulnerability));
-	}
-
-	private void playtestMenu_OnExit(MenuSub1 sender)
-	{
-		playtestMenu.Remove();
-		optionsMenu.Show();
 	}
 
 	private void difficultyMenu_OnExit(MenuSub1 sender)
@@ -702,12 +669,6 @@ internal class MenuScene : Scene
 		base.Enabled = false;
 		((DrawableGameComponent)optionsMenu).Visible = false;
 		((GameComponent)optionsMenu).Enabled = false;
-	}
-
-	private void optionsMenu_PlaytestOptionsSelected(MenuSub1 sender)
-	{
-		playtestMenu.Show();
-		optionsMenu.Remove();
 	}
 
 	private void optionsMenu_PlayerOptionsSelected(MenuSub1 sender)
@@ -1381,10 +1342,10 @@ internal class MenuScene : Scene
 			this.OnFinished(this, starter, selectedLevel);
 			break;
 		case NextState.StartPreview:
-			this.OnPreviewSelected(this, showExplanation: false);
+			this.OnPreviewSelected?.Invoke(this, showExplanation: false);
 			break;
 		case NextState.StartPreviewForced:
-			this.OnPreviewSelected(this, showExplanation: true);
+			this.OnPreviewSelected?.Invoke(this, showExplanation: true);
 			break;
 		}
 		foreach (Star star in stars)

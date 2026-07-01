@@ -370,25 +370,28 @@ internal class MenuSub1 : Scene
 				break;
 			}
 		}
-		if (hovered < 0)
+		// Any real cursor movement counts as the player being present, so it resets the
+		// attract-demo idle timeout (the caller resets on a true return) — even when the
+		// cursor isn't over an entry. Without this, only selection changes and clicks kept
+		// the demo away, so nudging the mouse around blank menu space still dropped to attract.
+		bool changed = moved;
+		if (hovered >= 0)
 		{
-			return false;
-		}
-		bool changed = false;
-		if (mouseHoverSelects && moved && hovered != selectedEntry)
-		{
-			selectedEntry = hovered;
-			changed = true;
-		}
-		if (base.InputHandler.Pressed(MyKeys.Mouse1))
-		{
-			selectedEntry = hovered;
-			if (ItemSelectedEvents[selectedEntry] != null)
+			if (mouseHoverSelects && moved && hovered != selectedEntry)
 			{
-				ItemSelectedEvents[selectedEntry](this);
+				selectedEntry = hovered;
+				changed = true;
 			}
-			mouseActivated = true;
-			changed = true;
+			if (base.InputHandler.Pressed(MyKeys.Mouse1))
+			{
+				selectedEntry = hovered;
+				if (ItemSelectedEvents[selectedEntry] != null)
+				{
+					ItemSelectedEvents[selectedEntry](this);
+				}
+				mouseActivated = true;
+				changed = true;
+			}
 		}
 		return changed;
 	}

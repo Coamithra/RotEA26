@@ -167,7 +167,7 @@ internal class MenuSubWithSkull : MenuSub1
 	}
 
 	// The vertical centre of the visible row list, in 800x600 design space, computed the
-	// same way DrawRows lays them out (yoffset 75, centred from the FULL entry count with
+	// same way DrawRows lays them out (yoffset RowsYOffset=96, centred from the FULL entry count with
 	// locked entries skipped). MenuScene centres the HUD ring on this so the reticle tracks
 	// the menu as rows unlock (Challenges/Awardments/Cheats change the visible count, and
 	// thus the centre). Falls back to a sane value before content (font) has loaded.

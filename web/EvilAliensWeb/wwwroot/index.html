@@ -335,17 +335,36 @@
                 if (c && c.focus) { try { c.focus(); } catch (e) { } }
             }
 
-            // While a trailer is up the overlay OWNS the keyboard: swallow every key
-            // (window capture, before KNI's canvas listener) so the menu hidden under
-            // the opaque overlay can't be blind-navigated; Escape closes. Keys typed
-            // inside the cross-origin YouTube iframe don't reach here, so its own
-            // controls still work when it has focus.
+            // While a trailer is up the overlay owns the GAME keys: swallow just the menu
+            // navigation/activation keys (window capture, before KNI's canvas listener) so the
+            // menu hidden under the opaque overlay can't be blind-navigated; Escape closes.
+            // Everything else — F5/Ctrl+R reload, F12 devtools, Ctrl+T, tab switching, and any
+            // modified chord — passes straight through so the browser stays usable. Keys typed
+            // inside the cross-origin YouTube iframe don't reach here, so its own controls work
+            // when it has focus.
+            var GAME_KEYS = {
+                ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1,
+                Enter: 1, ' ': 1, Spacebar: 1,
+                w: 1, a: 1, s: 1, d: 1, W: 1, A: 1, S: 1, D: 1
+            };
             function onKey(e)
             {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-                if (e.key === 'Escape' || e.keyCode === 27) close();
+                if (e.key === 'Escape' || e.keyCode === 27)
+                {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                    close();
+                    return;
+                }
+                // Never intercept a browser shortcut chord (reload, new tab, etc.).
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                if (GAME_KEYS[e.key])
+                {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                }
             }
 
             function open(id)

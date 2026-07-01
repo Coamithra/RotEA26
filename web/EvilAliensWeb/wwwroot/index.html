@@ -511,6 +511,10 @@
             {
                 if (!entry) return;
                 var t = ctx.currentTime;
+                // Drop any ramp still queued on this node (e.g. its own fade-in to
+                // 0.6 if we're crossfading it out mid-rise) — else WebAudio replays
+                // that event in time order and the dying track audibly swells first.
+                entry.gain.gain.cancelScheduledValues(t);
                 entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
                 entry.gain.gain.linearRampToValueAtTime(0.0001, t + MUSIC_FADE);
                 try { entry.src.stop(t + MUSIC_FADE + 0.05); } catch (e) { }
@@ -523,7 +527,10 @@
                 {
                     var info = m[cue];
                     if (!info) return;
-                    if (current && current.cue === cue) return;   // already on it
+                    // Bump the token so a load still in flight for a *different*
+                    // cue is superseded — otherwise play(A)->play(B,in flight)->play(A)
+                    // early-returns here yet B's load still passes its token check and wins.
+                    if (current && current.cue === cue) { token++; return; }   // already on it
                     var myToken = ++token;
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
@@ -549,6 +556,7 @@
                         // Fade the new track in over the authored 2.5s (crossfades
                         // against the outgoing track's matching fadeOut).
                         var t0 = ctx.currentTime;
+                        g.gain.cancelScheduledValues(t0);
                         g.gain.setValueAtTime(0.0001, t0);
                         g.gain.linearRampToValueAtTime(0.6, t0 + MUSIC_FADE);
                         src.connect(g).connect(master);
@@ -584,6 +592,9 @@
                 {
                     pending = null;
                     curRate = 1;
+                    // Supersede any load still in flight so it can't start looping
+                    // after we've stopped (cold fetch+decode takes seconds).
+                    token++;
                     if (current) { fadeOut(current); current = null; }
                 },
                 // pause/resume suspend the AudioContext clock, so the track resumes

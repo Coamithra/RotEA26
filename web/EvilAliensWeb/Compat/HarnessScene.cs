@@ -127,8 +127,12 @@ namespace EvilAliensWeb.Compat
             if (harnessBlast != null)
             {
                 blastPhase = 0f;
-                ringTex = BuildRingTexture();
             }
+            // Ring overlay texture. The blast drives it through its lifetime scrubber; any other
+            // object exposing a circular hitbox gets a static ring at its collision radius, so a
+            // sprite-vs-hitbox size mismatch (the supersample bug class — Blast / Braineroid /
+            // PlasmaBall, whose hand-rolled radius forgot DrawScale) is obvious at a glance.
+            ringTex = BuildRingTexture();
 
             label = BuildLabel();
         }
@@ -278,7 +282,14 @@ namespace EvilAliensWeb.Compat
                 }
                 return;
             }
-            DrawBlastOverlay();
+            if (harnessBlast != null)
+            {
+                DrawBlastOverlay();
+            }
+            else
+            {
+                DrawCircleCollisionOverlay();
+            }
             base.SpriteBatch.DrawString(label, new Vector2(16f, 12f), new Color(Color.White, 0.85f), 0f, centered: false, 0.55f, (SpriteEffects)0, 0f);
             base.SpriteBatch.DrawString("Esc: menu", new Vector2(16f, 574f), new Color(Color.White, 0.5f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
         }
@@ -322,6 +333,31 @@ namespace EvilAliensWeb.Compat
             base.SpriteBatch.DrawString(l2, new Vector2(16f, 62f), new Color(Color.White, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
             base.SpriteBatch.DrawString(l3, new Vector2(16f, 84f), active ? new Color(0.5f, 1f, 0.55f, 0.95f) : new Color(1f, 0.6f, 0.5f, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
             base.SpriteBatch.DrawString(l4, new Vector2(16f, 106f), new Color(Color.White, 0.7f), 0f, centered: false, 0.4f, (SpriteEffects)0, 0f);
+        }
+
+        // Generic hitbox viz for any parked object whose CollisionType is a circle: draw the real
+        // collision ring at its radius over the sprite so a sprite-vs-hitbox size mismatch (the
+        // supersample bug class — a re/downscaled sheet whose hand-rolled radius forgot DrawScale)
+        // is visible by eye. Objects with a box hitbox (most enemies) simply show no ring. Scale is
+        // ratio-preserving, so ?objscale up (e.g. a plasmaball's tiny 0.025 entry scale) to inspect.
+        private void DrawCircleCollisionOverlay()
+        {
+            if (obj == null || ringTex == null || !(obj.CollisionType is CollisionSimpleCircle circle))
+            {
+                return;
+            }
+
+            float radius = circle.Radius;
+            if (radius > 1f)
+            {
+                base.SpriteBatch.BlendMode = SpriteBlendMode.Additive;
+                base.SpriteBatch.Draw(ringTex, objPos, 0f, radius / 64f, center: true, new Color(0.35f, 1f, 0.45f), (SpriteEffects)0);
+                base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
+            }
+
+            string line = "hitbox r " + radius.ToString("0", CultureInfo.InvariantCulture) + "px"
+                + "   scale " + obj.scale.ToString("0.000", CultureInfo.InvariantCulture);
+            base.SpriteBatch.DrawString(line, new Vector2(16f, 40f), new Color(Color.White, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
         }
 
         private static List<string> BuildUnknownMessage(string requested)

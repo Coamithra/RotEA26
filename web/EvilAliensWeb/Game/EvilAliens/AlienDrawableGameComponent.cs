@@ -127,7 +127,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{ "GFX/Sprites/shadow", 82 },
 		// parachute + plasmaball2: AI redraws DOWNSCALED below the original res for ~1:1
 		// texels (366->293, 697->523); registering the ORIGINAL width keeps on-screen size
-		// unchanged (both component-drawn -> auto-corrects, incl. PlasmaBall's collision).
+		// unchanged (both component-drawn -> the draw auto-corrects; PlasmaBall's hand-rolled
+		// collision radius multiplies by DrawScale, not raw scale, to track the visible disc).
 		{ "GFX/Sprites/parachute", 366 },
 		{ "GFX/Sprites/plasmaball2", 697 }
 	};

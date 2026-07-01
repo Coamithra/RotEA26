@@ -99,6 +99,20 @@ public class CollisionHandler
 				FillCollisionMatrixLine(collidable, boxes, l);
 				continue;
 			}
+			// Perf batch 2: circles (Blast/Ball/StarMine/PlasmaBall/JunkBoss) used to fall
+			// through to the O(n) full-scan below, which also fired BOTH callbacks per pair —
+			// so a circle-circle pair got its separation nudge applied twice per frame. Grid
+			// them by their bounding box instead: the shared box/line resolution loop below
+			// then handles them like every other gridded collider (one callback per direction),
+			// which both removes the O(n)/O(n^2) scan and fixes the double nudge. The bounding
+			// box fully covers the disc, so no overlapping pair can miss a shared cell.
+			if (collidable.GetCollisionType() is CollisionSimpleCircle)
+			{
+				FillCollisionMatrixCircle(collidable, boxes, l);
+				continue;
+			}
+			// Remaining non-gridded types (CollisionMultibox / CollisionLevelMap — level walls,
+			// at most one per level) keep the original all-pairs scan with both callbacks.
 			foreach (ICollidable collidable2 in collidables)
 			{
 				if ((((GameComponent)collidable2).Enabled & ((GameComponent)collidable).Enabled) && collidable2 != collidable && collidable.DetectCollision(collidable2))
@@ -325,6 +339,40 @@ public class CollisionHandler
 		for (int j = num2; j < num3 + 1; j++)
 		{
 			for (int k = num; k < num4 + 1; k++)
+			{
+				boxes[i].Add(new BoxInfo(j, k));
+				fieldMatrix[j, k].Add(collidable);
+			}
+		}
+	}
+
+	private void FillCollisionMatrixCircle(ICollidable collidable, List<List<BoxInfo>> boxes, int i)
+	{
+		CollisionSimpleCircle circle = (CollisionSimpleCircle)collidable.GetCollisionType();
+		float r = circle.Radius;
+		int left = (int)((circle.Position.X - r) / 80f);
+		int right = (int)((circle.Position.X + r) / 80f);
+		int top = (int)((circle.Position.Y - r) / 80f);
+		int bottom = (int)((circle.Position.Y + r) / 80f);
+		if (left < 0)
+		{
+			left = 0;
+		}
+		if (top < 0)
+		{
+			top = 0;
+		}
+		if (right >= 10)
+		{
+			right = 9;
+		}
+		if (bottom >= 8)
+		{
+			bottom = 7;
+		}
+		for (int j = left; j < right + 1; j++)
+		{
+			for (int k = top; k < bottom + 1; k++)
 			{
 				boxes[i].Add(new BoxInfo(j, k));
 				fieldMatrix[j, k].Add(collidable);

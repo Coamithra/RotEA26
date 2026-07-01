@@ -21,7 +21,17 @@ public class ComponentBin : IComponentBinService
 
 	private Game game;
 
-	private List<IComponentWatcher> tmp = new List<IComponentWatcher>();
+	// Perf batch 2: a persistently-maintained list of every IComponentWatcher present in the
+	// world, so an add/remove no longer rescans all of (collection + birthList + idleList +
+	// inactive) and type-checks each to find the watchers — the notify is now O(watchers).
+	// This list mirrors the multiset (collection + idleList + Σinactive); the small, transient
+	// birthList (this frame's pending adds) is iterated directly at notify time, matching the
+	// original scan order (collection/birth/idle/inactive) closely enough — every watcher's
+	// reaction keys off e.GameComponent alone, so notify order is immaterial. Collection
+	// membership is tracked via the ComponentAdded/Removed events (which also fire for the few
+	// components added straight to Game.Components, bypassing Add()); the other sub-lists are
+	// tracked at their own mutation sites (Recycle/Push/Pop/Purge/ClearCache/FullReset).
+	private List<IComponentWatcher> watchers = new List<IComponentWatcher>();
 
 	private List<GameComponent> birthListCopy = new List<GameComponent>();
 
@@ -35,11 +45,39 @@ public class ComponentBin : IComponentBinService
 		deathList.Clear();
 		idleList.Clear();
 		inactive.Clear();
+		RebuildWatchers();
 	}
 
 	public void ClearCache()
 	{
 		idleList.Clear();
+		RebuildWatchers();
+	}
+
+	// Rebuild the persistent watcher list from scratch (the multiset the notify path iterates:
+	// collection + idleList + Σinactive; birthList is iterated separately at notify time). Cheap
+	// because it only runs at the rare reset/cache-clear boundaries — it also re-syncs `watchers`
+	// so any incremental drift can't survive past a level load.
+	private void RebuildWatchers()
+	{
+		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
+		//IL_001c: Expected O, but got Unknown
+		watchers.Clear();
+		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
+		{
+			WatcherAdd(item);
+		}
+		foreach (GameComponent idle in idleList)
+		{
+			WatcherAdd(idle);
+		}
+		foreach (List<GameComponent> list in inactive)
+		{
+			foreach (GameComponent item in list)
+			{
+				WatcherAdd(item);
+			}
+		}
 	}
 
 	public int idleSize()
@@ -88,6 +126,7 @@ public class ComponentBin : IComponentBinService
 			{
 				birthList.RemoveAt(i);
 				idleList.Add(val2);
+				WatcherAdd(val2);
 				i--;
 			}
 		}
@@ -106,6 +145,7 @@ public class ComponentBin : IComponentBinService
 			{
 				val.Enabled = false;
 				list.Add(val);
+				WatcherAdd(val);
 			}
 		}
 		foreach (GameComponent birth in birthList)
@@ -119,6 +159,24 @@ public class ComponentBin : IComponentBinService
 		foreach (GameComponent item in inactive.Dequeue())
 		{
 			item.Enabled = true;
+			WatcherRemove(item);
+		}
+	}
+
+	// Add/remove a component from the persistent watcher multiset (no-op if it isn't a watcher).
+	private void WatcherAdd(GameComponent g)
+	{
+		if (g is IComponentWatcher w)
+		{
+			watchers.Add(w);
+		}
+	}
+
+	private void WatcherRemove(GameComponent g)
+	{
+		if (g is IComponentWatcher w)
+		{
+			watchers.Remove(w);
 		}
 	}
 
@@ -126,112 +184,76 @@ public class ComponentBin : IComponentBinService
 	{
 		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0019: Expected O, but got Unknown
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Expected O, but got Unknown
-		if (args.GameComponent is GameComponent)
+		if (args.GameComponent is GameComponent item)
 		{
-			GameComponent item = (GameComponent)args.GameComponent;
+			// The component just entered `collection`; if it was sitting in idleList (a re-add
+			// that didn't go through Recycle) it now leaves idle. Both are mirrored in `watchers`.
 			if (idleList.Contains(item))
 			{
 				idleList.Remove(item);
+				WatcherRemove(item);
 			}
+			WatcherAdd(item);
 		}
-		MyDebug.Assert(tmp.Count == 0);
-		for (int i = 0; i < ((Collection<IGameComponent>)(object)collection).Count; i++)
-		{
-			GameComponent val = (GameComponent)((Collection<IGameComponent>)(object)collection)[i];
-			if (val is IComponentWatcher)
-			{
-				tmp.Add((IComponentWatcher)val);
-			}
-		}
-		foreach (GameComponent birth in birthList)
-		{
-			if (birth is IComponentWatcher)
-			{
-				tmp.Add((IComponentWatcher)birth);
-			}
-		}
-		foreach (GameComponent idle in idleList)
-		{
-			if (idle is IComponentWatcher)
-			{
-				tmp.Add((IComponentWatcher)idle);
-			}
-		}
-		foreach (List<GameComponent> item2 in inactive)
-		{
-			foreach (GameComponent item3 in item2)
-			{
-				if (item3 is IComponentWatcher)
-				{
-					tmp.Add((IComponentWatcher)item3);
-				}
-			}
-		}
-		foreach (IComponentWatcher item4 in tmp)
-		{
-			item4.OnComponentAdded(args);
-		}
-		tmp.Clear();
+		NotifyWatchers(args, added: true);
 	}
 
 	private void Components_ComponentRemoved(object src, GameComponentCollectionEventArgs args)
 	{
 		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0019: Expected O, but got Unknown
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Expected O, but got Unknown
-		if (args.GameComponent is GameComponent)
+		if (args.GameComponent is GameComponent item)
 		{
-			GameComponent item = (GameComponent)args.GameComponent;
+			// The component left `collection` and (per the original) joins idleList — a net-zero
+			// move for `watchers`. It also drops out of any inactive list it was pushed into.
+			WatcherRemove(item);
 			idleList.Add(item);
+			WatcherAdd(item);
 			foreach (List<GameComponent> item2 in inactive)
 			{
 				if (item2.Contains(item))
 				{
 					item2.Remove(item);
+					WatcherRemove(item);
 				}
 			}
 		}
-		MyDebug.Assert(tmp.Count == 0);
-		for (int i = 0; i < ((Collection<IGameComponent>)(object)collection).Count; i++)
+		NotifyWatchers(args, added: false);
+	}
+
+	// Notify the persistent watcher set, then this frame's still-pending birthList adds (which
+	// the original scan also covered). Snapshot the counts so a reaction that queues an add/
+	// remove (deferred to deathList/birthList) can't disturb the in-flight iteration.
+	private void NotifyWatchers(GameComponentCollectionEventArgs args, bool added)
+	{
+		int n = watchers.Count;
+		for (int i = 0; i < n; i++)
 		{
-			GameComponent val = (GameComponent)((Collection<IGameComponent>)(object)collection)[i];
-			if (val is IComponentWatcher)
+			IComponentWatcher w = watchers[i];
+			if (added)
 			{
-				tmp.Add((IComponentWatcher)val);
+				w.OnComponentAdded(args);
+			}
+			else
+			{
+				w.OnComponentRemoved(args);
 			}
 		}
-		foreach (GameComponent birth in birthList)
+		int m = birthList.Count;
+		for (int i = 0; i < m; i++)
 		{
-			if (birth is IComponentWatcher)
+			if (birthList[i] is IComponentWatcher w)
 			{
-				tmp.Add((IComponentWatcher)birth);
-			}
-		}
-		foreach (GameComponent idle in idleList)
-		{
-			if (idle is IComponentWatcher)
-			{
-				tmp.Add((IComponentWatcher)idle);
-			}
-		}
-		foreach (List<GameComponent> item3 in inactive)
-		{
-			foreach (GameComponent item4 in item3)
-			{
-				if (item4 is IComponentWatcher)
+				if (added)
 				{
-					tmp.Add((IComponentWatcher)item4);
+					w.OnComponentAdded(args);
+				}
+				else
+				{
+					w.OnComponentRemoved(args);
 				}
 			}
 		}
-		foreach (IComponentWatcher item5 in tmp)
-		{
-			item5.OnComponentRemoved(args);
-		}
-		tmp.Clear();
 	}
 
 	private void test(List<GameComponent> list, string name)
@@ -285,6 +307,7 @@ public class ComponentBin : IComponentBinService
 		if (val != null)
 		{
 			idleList.Remove((GameComponent)(object)val);
+			WatcherRemove((GameComponent)(object)val);
 		}
 		return val;
 	}

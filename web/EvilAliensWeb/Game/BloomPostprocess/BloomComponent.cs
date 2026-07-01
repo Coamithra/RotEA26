@@ -44,7 +44,20 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	private float[] sampleWeights = new float[15];
 
-	private Vector2[] sampleOffsets = (Vector2[])(object)new Vector2[15];
+	// Perf batch 2: the Gaussian weights depend only on BlurAmount and the two directional
+	// offset sets depend only on the render size, yet the original recomputed all of them
+	// (15 exp/sqrt) AND re-marshalled the weight array to the GPU twice every frame. Cache
+	// them and rebuild only when BlurAmount or the render size actually changes; the weights
+	// (identical for both passes) are pushed once on change, the two offset arrays alternate.
+	private Vector2[] sampleOffsetsH = (Vector2[])(object)new Vector2[15];
+
+	private Vector2[] sampleOffsetsV = (Vector2[])(object)new Vector2[15];
+
+	private float cachedBlurAmount = float.NaN;
+
+	private int cachedBlurW = -1;
+
+	private int cachedBlurH = -1;
 
 	public BloomSettings Settings
 	{
@@ -165,12 +178,13 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		//IL_0177: Unknown result type (might be due to invalid IL or missing references)
 		batch.Flush();
 		EnsureTargets();
+		EnsureBlurKernel();
 		base.GraphicsDevice.ResolveBackBuffer(resolveTarget);
 		bloomExtractEffect.Parameters["BloomThreshold"].SetValue(Settings.BloomThreshold);
 		DrawFullscreenQuad((Texture2D)(object)resolveTarget, renderTarget1, bloomExtractEffect, IntermediateBuffer.PreBloom);
-		SetBlurEffectParameters(1f / (float)((Texture2D)renderTarget1).Width, 0f);
+		gaussianBlurEffect.Parameters["SampleOffsets"].SetValue(sampleOffsetsH);
 		DrawFullscreenQuad(renderTarget1.GetTexture(), renderTarget2, gaussianBlurEffect, IntermediateBuffer.BlurredHorizontally);
-		SetBlurEffectParameters(0f, 1f / (float)((Texture2D)renderTarget1).Height);
+		gaussianBlurEffect.Parameters["SampleOffsets"].SetValue(sampleOffsetsV);
 		DrawFullscreenQuad(renderTarget2.GetTexture(), renderTarget1, gaussianBlurEffect, IntermediateBuffer.BlurredBothWays);
 		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 		EffectParameterCollection parameters = bloomCombineEffect.Parameters;
@@ -190,9 +204,12 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	private void DrawFullscreenQuad(Texture2D texture, RenderTarget2D renderTarget, Effect effect, IntermediateBuffer currentBuffer)
 	{
+		// Perf batch 2: only bind the intermediate target and draw — don't restore the scene
+		// target here. Each of the three intermediate passes is immediately followed by another
+		// SetRenderTarget (the next pass's target, or the explicit rebind before the combine
+		// pass in Draw), so the old trailing restore was three redundant rebinds per frame.
 		base.GraphicsDevice.SetRenderTarget(0, renderTarget);
 		DrawFullscreenQuad(texture, ((Texture2D)renderTarget).Width, ((Texture2D)renderTarget).Height, effect, currentBuffer);
-		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 	}
 
 	private void DrawFullscreenQuad(Texture2D texture, int width, int height, Effect effect, IntermediateBuffer currentBuffer)
@@ -206,25 +223,27 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		spriteBatch.End();
 	}
 
-	private void SetBlurEffectParameters(float dx, float dy)
+	// Recompute the blur weights (BlurAmount) + the horizontal/vertical offset arrays (render
+	// size) only when one of those inputs changes, and push the invariant weights to the GPU
+	// once per change. The per-pass offset arrays are set in Draw (they alternate on the same
+	// effect, so they must be re-marshalled each pass regardless).
+	private void EnsureBlurKernel()
 	{
 		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ff: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0104: Unknown result type (might be due to invalid IL or missing references)
-		EffectParameter val = gaussianBlurEffect.Parameters["SampleWeights"];
-		EffectParameter val2 = gaussianBlurEffect.Parameters["SampleOffsets"];
-		int count = val.Elements.Count;
+		int w = ((Texture2D)renderTarget1).Width;
+		int h = ((Texture2D)renderTarget1).Height;
+		float blur = Settings.BlurAmount;
+		if (blur == cachedBlurAmount && w == cachedBlurW && h == cachedBlurH)
+		{
+			return;
+		}
+		cachedBlurAmount = blur;
+		cachedBlurW = w;
+		cachedBlurH = h;
+		EffectParameter weightsParam = gaussianBlurEffect.Parameters["SampleWeights"];
+		int count = weightsParam.Elements.Count;
 		MyDebug.Assert(count == 15);
 		sampleWeights[0] = ComputeGaussian(0f);
-		ref Vector2 reference = ref sampleOffsets[0];
-		reference = new Vector2(0f);
 		float num = sampleWeights[0];
 		for (int i = 0; i < count / 2; i++)
 		{
@@ -232,18 +251,29 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 			sampleWeights[i * 2 + 1] = num2;
 			sampleWeights[i * 2 + 2] = num2;
 			num += num2 * 2f;
-			float num3 = (float)(i * 2) + 1.5f;
-			Vector2 val3 = new Vector2(dx, dy) * num3;
-			sampleOffsets[i * 2 + 1] = val3;
-			ref Vector2 reference2 = ref sampleOffsets[i * 2 + 2];
-			reference2 = -val3;
 		}
 		for (int j = 0; j < sampleWeights.Length; j++)
 		{
 			sampleWeights[j] /= num;
 		}
-		val.SetValue(sampleWeights);
-		val2.SetValue(sampleOffsets);
+		FillSampleOffsets(sampleOffsetsH, 1f / (float)w, 0f, count);
+		FillSampleOffsets(sampleOffsetsV, 0f, 1f / (float)h, count);
+		weightsParam.SetValue(sampleWeights);
+	}
+
+	private void FillSampleOffsets(Vector2[] dst, float dx, float dy, int count)
+	{
+		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
+		ref Vector2 reference = ref dst[0];
+		reference = new Vector2(0f);
+		for (int i = 0; i < count / 2; i++)
+		{
+			float num3 = (float)(i * 2) + 1.5f;
+			Vector2 val3 = new Vector2(dx, dy) * num3;
+			dst[i * 2 + 1] = val3;
+			ref Vector2 reference2 = ref dst[i * 2 + 2];
+			reference2 = -val3;
+		}
 	}
 
 	private float ComputeGaussian(float n)

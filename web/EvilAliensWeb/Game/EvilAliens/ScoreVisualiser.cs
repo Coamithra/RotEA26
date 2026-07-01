@@ -33,10 +33,13 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		public int bombs;
 
 		// Chrome-sheen glint is event-driven on the score: it sweeps once when the leading
-		// (most-significant) digit of scoreString rolls over (9->10, 1900->2000, ...), then
-		// rests. lastLeadDigit tracks the previous frame's first char; glintElapsed counts the
+		// (most-significant) digit of scoreString rolls over (9->10, 1900->2000, ...) OR the
+		// digit count grows (180 + 900 -> 1080, same lead char), then rests. lastLeadDigit +
+		// lastLen track the previous frame's first char and length; glintElapsed counts the
 		// one-shot sweep while glinting (see UpdateGlint / GlintTime).
 		public char lastLeadDigit = '0';
+
+		public int lastLen;
 
 		public float glintElapsed;
 
@@ -55,14 +58,18 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			combo++;
 		}
 
-		// Arm a one-shot glint sweep when the leading digit changes (skip the reset-to-"0"
-		// and the empty edge case), then count the sweep up to its duration once armed.
+		// Arm a one-shot glint sweep when the leading digit OR the digit count changes (skip
+		// the reset-to-"0" and the empty edge case), then count the sweep up to its duration
+		// once armed. Tracking length too catches a rollover that keeps the lead char but
+		// gains a place (180 + 900 -> 1080), which a lead-char-only compare would miss.
 		public void UpdateGlint(float dtSeconds)
 		{
 			char lead = (scoreString != null && scoreString.Length > 0) ? scoreString[0] : '0';
-			if (lead != lastLeadDigit)
+			int len = (scoreString != null) ? scoreString.Length : 0;
+			if (lead != lastLeadDigit || len != lastLen)
 			{
 				lastLeadDigit = lead;
+				lastLen = len;
 				if (scoreString != "0")
 				{
 					glinting = true;
@@ -77,6 +84,16 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 					glinting = false;
 				}
 			}
+		}
+
+		// Snap the glint baseline to the current scoreString WITHOUT arming a sweep — used on
+		// checkpoint restore (Load) and score reset so a non-scored change doesn't glint.
+		public void ResetGlintBaseline()
+		{
+			lastLeadDigit = (scoreString != null && scoreString.Length > 0) ? scoreString[0] : '0';
+			lastLen = (scoreString != null) ? scoreString.Length : 0;
+			glinting = false;
+			glintElapsed = 0f;
 		}
 	}
 
@@ -260,10 +277,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			scores[i].SetScore(saved[i]);
 			// Checkpoint restore (post-death revert), not a scored rollover — re-baseline the
 			// glint so the leading digit snapping back doesn't fire a spurious sweep.
-			ScoreInfo s = scores[i];
-			s.lastLeadDigit = (s.scoreString != null && s.scoreString.Length > 0) ? s.scoreString[0] : '0';
-			s.glinting = false;
-			s.glintElapsed = 0f;
+			scores[i].ResetGlintBaseline();
 		}
 	}
 
@@ -293,9 +307,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			scoreInfo.bombs = 0;
 			scoreInfo.powerupactive = false;
 			// Re-baseline the glint so the reset-to-"0" doesn't read as a digit change next frame.
-			scoreInfo.lastLeadDigit = '0';
-			scoreInfo.glinting = false;
-			scoreInfo.glintElapsed = 0f;
+			scoreInfo.ResetGlintBaseline();
 			foreach (PowerupData value in scoreInfo.powerupDatas.Values)
 			{
 				((DrawableGameComponent)value).Visible = false;

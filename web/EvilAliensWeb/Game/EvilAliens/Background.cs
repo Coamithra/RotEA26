@@ -320,15 +320,21 @@ public class Background : Scene
 			scrollspeed = targetscrollspeed;
 			scrollspeedchangetimer.Reset();
 		}
+		// Fold the planet-crossing star-slowdown in LOCALLY, never into the field. The End
+		// state leaves scrollspeedmodifier unwritten for its first 3.5s, so multiplying the
+		// factor into the field there would compound it geometrically frame-over-frame and
+		// slam the stars to a halt in a few frames (then snap back once End starts rewriting
+		// the field). A per-frame local keeps the doodad factor applied exactly once.
+		float effectiveModifier = scrollspeedmodifier * DoodadStarSlowdownFactor();
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
-			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
+			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
 		}
 		foreach (BackgroundImage foregroundLayer in foregroundLayers)
 		{
-			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier);
+			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
 		}
-		Vector2 starDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * scrollspeedmodifier;
+		Vector2 starDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
 		if (starfield != null)
 		{
 			starfield.Advance(starDelta);
@@ -366,11 +372,11 @@ public class Background : Scene
 			}
 			break;
 		}
-		// Earth fly-by parallax fix: fold the planet-crossing slowdown into the SAME background
-		// speed knob the hyperspace/End ramps above drive. The earth doodad moves on scrollspeed
-		// alone (no scrollspeedmodifier), so this slows ONLY the starfields/bg layers, letting the
-		// earth read as the fastest, nearest object. No-op (factor 1) when no planet is crossing.
-		scrollspeedmodifier *= DoodadStarSlowdownFactor();
+		// Earth fly-by parallax: the planet-crossing slowdown is folded into effectiveModifier
+		// at the top of Update (a per-frame local, applied to the star/bg moves), NOT mutated
+		// into scrollspeedmodifier here — see the comment there. The earth doodad moves on
+		// scrollspeed alone, so only the starfields/bg layers slow, letting the earth read as
+		// the fastest, nearest object.
 		if (XFade.Active)
 		{
 			XFade.Update(gameTime);

@@ -130,8 +130,9 @@ namespace EvilAliensWeb.Compat
             }
             // Ring overlay texture. The blast drives it through its lifetime scrubber; any other
             // object exposing a circular hitbox gets a static ring at its collision radius, so a
-            // sprite-vs-hitbox size mismatch (the supersample bug class — Blast / Braineroid /
-            // PlasmaBall, whose hand-rolled radius forgot DrawScale) is obvious at a glance.
+            // sprite-vs-hitbox size mismatch (the supersample bug class — Blast / PlasmaBall,
+            // whose hand-rolled radius forgot DrawScale) is obvious at a glance. Only CIRCULAR
+            // hitboxes get a ring; box-hitbox members of the class (e.g. Braineroid) show none.
             ringTex = BuildRingTexture();
 
             label = BuildLabel();

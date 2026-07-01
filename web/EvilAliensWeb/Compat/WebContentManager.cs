@@ -102,6 +102,38 @@ namespace EvilAliensWeb.Compat
             return (T)asset;
         }
 
+        // Free every asset this manager loaded. The base ContentManager only tracks
+        // assets it loaded itself (loadedAssets/disposableAssets), but Load<T> above
+        // routes textures/fonts/effects/sounds into our own _cache and never touches
+        // that tracking — so base.Unload() alone frees NONE of them, and every
+        // localContent.Unload() in the game was a silent no-op (a permanent GPU/texture
+        // leak; meaningful on mobile). Dispose the cached GPU/audio resources ourselves,
+        // then clear the cache. Each WebContentManager owns its own instances (no cache
+        // is shared between managers — a miss always decodes fresh), so disposing one
+        // manager's assets never affects another's; callers must still only Unload a
+        // manager they own (audited: per-scene localContent, Bloom/Credits' own content,
+        // Game1.content only at game teardown). base.Unload() still handles anything that
+        // fell through to base.Load<T> (Song/Video, later stages).
+        public override void Unload()
+        {
+            foreach (var asset in _cache.Values)
+            {
+                switch (asset)
+                {
+                    // SpriteFont isn't IDisposable, but its glyph atlas Texture2D is —
+                    // free it explicitly or the font atlas leaks.
+                    case SpriteFont font:
+                        font.Texture?.Dispose();
+                        break;
+                    case IDisposable disposable:
+                        disposable.Dispose();
+                        break;
+                }
+            }
+            _cache.Clear();
+            base.Unload();
+        }
+
         private Texture2D LoadTexture(string key)
         {
             // Time the load. A PNG goes through Texture2D.FromStream -> StbImageSharp

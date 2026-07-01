@@ -523,15 +523,19 @@
             function startTrack(cue)
             {
                 ensureCtx();
+                // Claim the load slot SYNCHRONOUSLY. Keeping the token bookkeeping inside
+                // the async loadManifest().then below would race: a stop() or a newer
+                // play() that fires before this callback runs bumps token, but if myToken
+                // was not yet assigned the stale load still passes its guard and wins.
+                // (Bumping on the "already on it" path supersedes any in-flight load for a
+                // different cue, so play(A)->play(B,in flight)->play(A) keeps A, not B.)
+                if (current && current.cue === cue) { token++; return; }   // already on it
+                var myToken = ++token;
                 loadManifest().then(function (m)
                 {
+                    if (myToken !== token) return;            // superseded before manifest resolved
                     var info = m[cue];
                     if (!info) return;
-                    // Bump the token so a load still in flight for a *different*
-                    // cue is superseded — otherwise play(A)->play(B,in flight)->play(A)
-                    // early-returns here yet B's load still passes its token check and wins.
-                    if (current && current.cue === cue) { token++; return; }   // already on it
-                    var myToken = ++token;
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
                         if (!resp.ok) throw 0;
@@ -554,9 +558,9 @@
                         src.playbackRate.value = curRate;
                         var g = ctx.createGain();
                         // Fade the new track in over the authored 2.5s (crossfades
-                        // against the outgoing track's matching fadeOut).
+                        // against the outgoing track's matching fadeOut). g is a fresh
+                        // node with no prior schedule, so no cancelScheduledValues needed.
                         var t0 = ctx.currentTime;
-                        g.gain.cancelScheduledValues(t0);
                         g.gain.setValueAtTime(0.0001, t0);
                         g.gain.linearRampToValueAtTime(0.6, t0 + MUSIC_FADE);
                         src.connect(g).connect(master);

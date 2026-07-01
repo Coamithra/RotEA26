@@ -729,13 +729,16 @@ internal class MenuScene : Scene
 		{
 			controlDevice = ControlDevice.PadThree;
 		}
+		else if (base.InputHandler.PadPressed(PadKeys.Start, 3) || base.InputHandler.PadPressed(PadKeys.A, 3))
+		{
+			controlDevice = ControlDevice.PadFour;
+		}
 		else
 		{
-			if (!base.InputHandler.PadPressed(PadKeys.Start, 3) && !base.InputHandler.PadPressed(PadKeys.A, 3))
-			{
-				throw new NotSupportedException();
-			}
-			controlDevice = ControlDevice.PadFour;
+			// Mouse-click activation (Stage 13 made every MenuSub1 entry clickable) presses
+			// none of the device keys; on web the mouse is the keyboard player, so default to
+			// Keyboard instead of throwing (the old NotSupportedException froze the whole tab).
+			controlDevice = ControlDevice.Keyboard;
 		}
 		((PlayerSettingsMenu)playerSettingsMenu).Starter = controlDevice;
 		playerSettingsMenu.Show();

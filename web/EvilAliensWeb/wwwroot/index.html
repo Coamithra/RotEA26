@@ -102,9 +102,27 @@
             catch (e) { console.warn('[debug] eaSlowmo failed (game not booted yet?): ' + e.message); }
         };
 
+        // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
+        // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
+        // and permanently freezes the tab. We swallow a bad frame and keep looping so one
+        // transient throw survives, but stop after N straight failures so a hard-broken game
+        // doesn't spam the console forever.
+        var tickFailures = 0;
+        var TICK_MAX_FAILURES = 30;
+
         function tickJS()
         {
-            window.theInstance.invokeMethod('TickDotNet');
+            try {
+                window.theInstance.invokeMethod('TickDotNet');
+                tickFailures = 0;
+            } catch (e) {
+                tickFailures++;
+                console.error('[loop] TickDotNet threw (' + tickFailures + '/' + TICK_MAX_FAILURES + '): ' + ((e && e.message) || e));
+                if (tickFailures >= TICK_MAX_FAILURES) {
+                    console.error('[loop] too many consecutive tick failures — game loop stopped.');
+                    return; // stop rescheduling: the game is wedged, not just hiccuping
+                }
+            }
             scheduleTick();
         }
 

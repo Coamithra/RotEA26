@@ -545,6 +545,10 @@
             {
                 if (!entry) return;
                 var t = ctx.currentTime;
+                // Drop any ramp still queued on this node (e.g. its own fade-in to
+                // 0.6 if we're crossfading it out mid-rise) — else WebAudio replays
+                // that event in time order and the dying track audibly swells first.
+                entry.gain.gain.cancelScheduledValues(t);
                 entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
                 entry.gain.gain.linearRampToValueAtTime(0.0001, t + MUSIC_FADE);
                 try { entry.src.stop(t + MUSIC_FADE + 0.05); } catch (e) { }
@@ -553,12 +557,19 @@
             function startTrack(cue)
             {
                 ensureCtx();
+                // Claim the load slot SYNCHRONOUSLY. Keeping the token bookkeeping inside
+                // the async loadManifest().then below would race: a stop() or a newer
+                // play() that fires before this callback runs bumps token, but if myToken
+                // was not yet assigned the stale load still passes its guard and wins.
+                // (Bumping on the "already on it" path supersedes any in-flight load for a
+                // different cue, so play(A)->play(B,in flight)->play(A) keeps A, not B.)
+                if (current && current.cue === cue) { token++; return; }   // already on it
+                var myToken = ++token;
                 loadManifest().then(function (m)
                 {
+                    if (myToken !== token) return;            // superseded before manifest resolved
                     var info = m[cue];
                     if (!info) return;
-                    if (current && current.cue === cue) return;   // already on it
-                    var myToken = ++token;
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
                         if (!resp.ok) throw 0;
@@ -581,7 +592,8 @@
                         src.playbackRate.value = curRate;
                         var g = ctx.createGain();
                         // Fade the new track in over the authored 2.5s (crossfades
-                        // against the outgoing track's matching fadeOut).
+                        // against the outgoing track's matching fadeOut). g is a fresh
+                        // node with no prior schedule, so no cancelScheduledValues needed.
                         var t0 = ctx.currentTime;
                         g.gain.setValueAtTime(0.0001, t0);
                         g.gain.linearRampToValueAtTime(0.6, t0 + MUSIC_FADE);
@@ -618,6 +630,9 @@
                 {
                     pending = null;
                     curRate = 1;
+                    // Supersede any load still in flight so it can't start looping
+                    // after we've stopped (cold fetch+decode takes seconds).
+                    token++;
                     if (current) { fadeOut(current); current = null; }
                 },
                 // pause/resume suspend the AudioContext clock, so the track resumes

@@ -143,10 +143,17 @@ namespace EvilAliensWeb.Compat
             //   .dds  — BC3/DXT5 blocks uploaded as-is (lossy, small). Preferred.
             //   .rtex — uncompressed straight-alpha RGBA8 (lossless, large). Use where
             //           DXT artifacts are unacceptable; still beats a PNG decode.
-            // Precedence dds -> rtex -> png; per asset, the build step ships exactly one
-            // precompiled form (or none). Stopwatch is sub-microsecond; harmless in release.
+            // Per asset, the offline build ships exactly ONE precompiled form (or none), recorded
+            // in the generated PrecompiledTextures.Siblings map. Probe that one sibling only —
+            // most textures are PNG-only, and the old blind "dds ?? rtex" probe cost two
+            // guaranteed-failing OpenStream calls + two thrown/caught exceptions per PNG-only
+            // texture (dear on the interpreted WASM runtime; two blocking 404s on the live host).
+            // An unlisted key (or a missing/stale sibling) falls through to the .png below.
+            // Stopwatch is sub-microsecond; harmless in release.
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            Texture2D tex = TryLoadDds(key) ?? TryLoadRaw(key);
+            Texture2D tex = null;
+            if (PrecompiledTextures.Siblings.TryGetValue(key, out string sib))
+                tex = sib == ".dds" ? TryLoadDds(key) : TryLoadRaw(key);
             if (tex == null)
             {
                 using Stream s = TitleContainer.OpenStream(key + ".png");

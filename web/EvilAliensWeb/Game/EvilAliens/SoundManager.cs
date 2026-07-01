@@ -127,13 +127,19 @@ public class SoundManager : ISoundManagerService
 		get { return _content ??= ServiceHelper.Get<IContentManagerService>().ContentManager; }
 	}
 
+	// Shared fallbacks for cues not in _cfg, so a Play of an unlisted cue doesn't allocate a
+	// CueConfig every time. CueConfig is treated as immutable after construction (nothing mutates
+	// a returned config), so one instance each is safe to hand out repeatedly.
+	private static readonly CueConfig _defaultCfg = new();
+	private static readonly CueConfig _ttfSpeechCfg = new CueConfig(cat: Category.Speech, volByte: 130, vary: false);
+
 	private static CueConfig ConfigFor(string cue)
 	{
 		if (_cfg.TryGetValue(cue, out var c))
 			return c;
 		if (cue.StartsWith("ttf_"))
-			return new CueConfig(cat: Category.Speech, volByte: 130, vary: false);
-		return new CueConfig();
+			return _ttfSpeechCfg;
+		return _defaultCfg;
 	}
 
 	private SoundEffect GetEffect(string cue)

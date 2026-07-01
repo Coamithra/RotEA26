@@ -137,6 +137,22 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		color = Color.White;
 	}
 
+	// The per-state Update code used to call LoadAnimation(new AnimationData(...)) EVERY tick,
+	// re-doing the content lookup + SuperSampleFactor for a sheet that hadn't changed. Each cast
+	// state holds a single sheet for its whole duration, so reload only when the sheet name
+	// actually differs from what's loaded (the boss state flips its texture mid-state, which
+	// changes texturename, so a name compare covers that case too). ASSUMES a texture name
+	// uniquely determines its grid/fps — true for every cast state today; a future state that
+	// reused a name with a different grid would need to compare the full AnimationData.
+	private void EnsureAnimation(AnimationData animationData)
+	{
+		if (texturename == animationData.TextureName)
+		{
+			return;
+		}
+		LoadAnimation(animationData);
+	}
+
 	public override void Initialize()
 	{
 		collection = ServiceHelper.Get<IComponentBinService>().ComponentBin;
@@ -232,7 +248,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.ufo:
 			alienname = "UFO";
 			alientext = "Various forms of UFOs make up the\nbrunt of the alien fleet.\n\nLarge UFOs can sometimes be seen\nleading squadrons of smaller ones\ninto battle.";
-			LoadAnimation(new AnimationData("GFX/Sprites/ufosheet", 4, 8, 1, 25f));
+			EnsureAnimation(new AnimationData("GFX/Sprites/ufosheet", 4, 8, 1, 25f));
 			scale = 1f;
 			if (flag2)
 			{
@@ -244,7 +260,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		{
 			alienname = "Brain Spawn";
 			alientext = "Their eons-long goal is to destroy all other intelligent life,\nsince the thoughts of other beings screech at them like the\nforced laughs of a billion art-house movie patrons.";
-			LoadAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
+			EnsureAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
 			_time += (float)gameTime.ElapsedGameTime.TotalSeconds;
 			float num2 = 1f + (1f + (float)Math.Sin(_time * 3.32f)) * 0.07f;
 			scale = 0.4f * num2;
@@ -258,7 +274,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.boss:
 			alienname = "Alien Battleship";
 			alientext = "These massive UFOs serve as command stations for\nthe generals of the Evil Alien invasion fleet.\n\nThey are usually equipped with multiple lazer arrays.";
-			LoadAnimation(new AnimationData(bossTextureName, 4, 4, 1, 16f));
+			EnsureAnimation(new AnimationData(bossTextureName, 4, 4, 1, 16f));
 			scale = 1f;
 			if (flag2)
 			{
@@ -269,7 +285,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.junkboss:
 			alienname = "Fleet Commander Drone";
 			alientext = "Robotic field probes that are in direct\ncontact with the Alien Overmind.\n\nOften equipped with ultragraviton field.";
-			LoadAnimation(new AnimationData("GFX/Sprites/eye_idle", 4, 2, 1, 12f));
+			EnsureAnimation(new AnimationData("GFX/Sprites/eye_idle", 4, 2, 1, 12f));
 			scale = 1f;
 			if (flag2)
 			{
@@ -282,7 +298,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			alientext = "Indigenous life form to Mars.\n\nThese resilient bugs have been brought\nout of hiding by the Evil Aliens'\nactivities, and threaten both you and\nthe Aliens indifferently.";
 			// Same shared rear-up sheet + reared sub-range loop as the FlyingSpider (was the old
 			// 1x4 crawl slicing, which broke when the sheet became the 49-frame rear-up).
-			LoadAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 7, 7, 1, 12f, 22, 31));
+			EnsureAnimation(new AnimationData("GFX/Sprites/spider_sheet2", 7, 7, 1, 12f, 22, 31));
 			scale = 1f;
 			if (flag2)
 			{
@@ -303,7 +319,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.evilskull:
 			alienname = "Evil Grinning Face of Death";
 			alientext = "These foes are able to bend time and space\nand shoot volleys of bullets after appearing\nright behind you!";
-			LoadAnimation(new AnimationData("GFX/Sprites/faceofdeathspritesheet", 4, 8, 1, 12f));
+			EnsureAnimation(new AnimationData("GFX/Sprites/faceofdeathspritesheet", 4, 8, 1, 12f));
 			scale = 1f;
 			if (flag2)
 			{
@@ -324,7 +340,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.deathstar:
 			alienname = "Death Star";
 			alientext = "Special heat seeking space mines that\nlock on to their target and explode into\nraw electromagnetic energy!";
-			LoadAnimation(new AnimationData("GFX/Sprites/deathstarsheet2", 4, 8, 1, 25f));
+			EnsureAnimation(new AnimationData("GFX/Sprites/deathstarsheet2", 4, 8, 1, 25f));
 			scale = 1f;
 			if (flag2)
 			{
@@ -335,7 +351,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.brainboss:
 			alienname = "Alien Overmind";
 			alientext = "Pure.. throbbing.. evil!\n\nGood thing you killed it.";
-			LoadAnimation(new AnimationData("GFX/Sprites/brainbosshd"));
+			EnsureAnimation(new AnimationData("GFX/Sprites/brainbosshd"));
 			scale = 1f;
 			if (flag2)
 			{
@@ -346,7 +362,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		case CastState.playership:
 			alienname = "The Unnamed Hero";
 			alientext = "That's actually the name of the ship.\nHmm hmm.";
-			LoadAnimation(new AnimationData("GFX/Sprites/playersheet", 4, 8, 1, 6f));
+			EnsureAnimation(new AnimationData("GFX/Sprites/playersheet", 4, 8, 1, 6f));
 			if (flag2)
 			{
 				AsplodePlayer();

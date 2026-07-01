@@ -597,8 +597,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				_ => "Gah?", 
 			};
 			string str = ((!showPressStart) ? "Press Start" : text);
-			// Inactive-slot prompt: static chrome, never a sweep (no score to roll over).
-			DrawStr(str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color, ParkedGlint);
+			// Inactive-slot prompt: static chrome, never a sweep (no score to roll over). Shares the
+			// slot's primary-line cache key with the active-player score (only one is drawn per slot
+			// per frame; the dirty check rebuilds when a slot flips between prompt and score).
+			DrawStr(i * 4, str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color, ParkedGlint);
 		}
 	}
 
@@ -627,19 +629,20 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		//IL_01d3: Unknown result type (might be due to invalid IL or missing references)
 		// Only the score NUMBER is event-driven (sweeps on a leading-digit rollover); the combo
 		// readout has no "first digit", so it keeps the static chrome with no sweep (ParkedGlint).
-		DrawStr(scores[i].scoreString, startpos + new Vector2(0f, -5f), 0.9f, 1f, playercolor, GlintTime(i));
+		// Cache keys: i*4 = primary line (score), i*4+1 = "Combo!" label, i*4+2 = combo count.
+		DrawStr(i * 4, scores[i].scoreString, startpos + new Vector2(0f, -5f), 0.9f, 1f, playercolor, GlintTime(i));
 		if (scores[i].combo > 5)
 		{
 			float alpha = 0.2f + 0.8f * MathHelper.SmoothStep(0f, 1f, scores[i].combotimer.TimeLeft / 1000f);
 			float num = MathHelper.Max(font.MeasureString(scores[i].scoreString).X * 0.9f + 17f, 100f);
-			DrawStr("Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor, ParkedGlint);
+			DrawStr(i * 4 + 1, "Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor, ParkedGlint);
 			if (scores[i].combo < 1000)
 			{
-				DrawStr(comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
+				DrawStr(i * 4 + 2, comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 			else
 			{
-				DrawStr(scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
+				DrawStr(i * 4 + 2, scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 		}
 		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/bombicon", bomb.Width);
@@ -661,14 +664,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		return s.glinting ? s.glintElapsed : ParkedGlint;
 	}
 
-	private void DrawStr(string str, Vector2 position, float scale, float alpha)
-	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		DrawStr(str, position, scale, alpha, new Color((byte)100, (byte)100, byte.MaxValue, byte.MaxValue), ParkedGlint);
-	}
-
-	private void DrawStr(string str, Vector2 position, float scale, float alpha, Color color, float glintTime)
+	// cacheKey identifies the persistent HUD element this string belongs to (per player slot + role,
+	// see the call sites) so SpriteBatchWrapper.DrawShadowStringCached re-rasterises it only when the
+	// text/scale/colour actually change instead of every frame.
+	private void DrawStr(int cacheKey, string str, Vector2 position, float scale, float alpha, Color color, float glintTime)
 	{
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
@@ -708,7 +707,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		// score reads a touch more solid (0.7) than the plain flatten (0.55) to compensate.
 		bool metal = DebugFlags.MetalScore;
 		float opacity = alpha * (metal ? 0.7f : 0.55f);
-		spriteBatch.DrawShadowString(str, position, scale, shadowColor, textColor, new Vector2(2f, 2f), opacity, metal, glintTime);
+		spriteBatch.DrawShadowStringCached(cacheKey, str, position, scale, shadowColor, textColor, new Vector2(2f, 2f), opacity, metal, glintTime);
 	}
 
 	public override void Update(GameTime gameTime)

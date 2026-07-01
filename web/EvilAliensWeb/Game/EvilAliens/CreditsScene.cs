@@ -44,6 +44,8 @@ internal class CreditsScene : Scene
 
 	private bool castWillBeDisplayed;
 
+	private bool terminated;
+
 	public event FinishedHandler OnFinished;
 
 	public CreditsScene(Game game)
@@ -397,6 +399,15 @@ internal class CreditsScene : Scene
 
 	private void Terminate()
 	{
+		// Idempotent: Terminate is reachable twice in one Update (a skip press AND
+		// fadeouttimer.Finished on the same tick) and across ticks. A second call would
+		// fire OnFinished again and double-add menuScene/bragScene to the component
+		// collection, which KNI rejects. Guard so only the first call takes effect.
+		if (terminated)
+		{
+			return;
+		}
+		terminated = true;
 		base.SoundManager.StopNarration();
 		if (this.OnFinished != null)
 		{

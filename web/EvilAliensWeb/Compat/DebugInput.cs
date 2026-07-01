@@ -137,6 +137,8 @@ namespace EvilAliensWeb.Compat
 			{
 				return true;
 			}
+			// Clear any bogus value a successful-but-out-of-range TryParse left in mk before
+			// falling through to the alias switch (which sets mk itself on a hit).
 			mk = default(EvilAliens.MyKeys);
 			switch (k.ToLowerInvariant())
 			{

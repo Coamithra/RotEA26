@@ -39,6 +39,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		// one-shot sweep while glinting (see UpdateGlint / GlintTime).
 		public char lastLeadDigit = '0';
 
+		// Defaults to 0 while scoreString starts as "0" (len 1); the first UpdateTick's
+		// change-branch then syncs it, and the scoreString == "0" guard suppresses any glint,
+		// so the initial mismatch never fires a spurious sweep.
 		public int lastLen;
 
 		public float glintElapsed;

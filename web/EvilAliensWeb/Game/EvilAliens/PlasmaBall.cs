@@ -32,7 +32,10 @@ internal class PlasmaBall : AlienDrawableGameComponent
 		{
 			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 			c.Position = base.Position;
-			c.Radius = (float)texture.Width * 0.32f * scale;
+			// texture.Width is the DOWNSCALED redraw (plasmaball2: 523px vs design 697); DrawScale
+			// removes the supersample factor so the hitbox tracks the visible disc, not the raw PNG
+			// (matches Draw's DrawScale — the Blast/Braineroid supersample bug class, inverted).
+			c.Radius = (float)texture.Width * 0.32f * DrawScale;
 			return c;
 		}
 	}

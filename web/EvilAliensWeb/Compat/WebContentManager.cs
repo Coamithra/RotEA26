@@ -102,6 +102,38 @@ namespace EvilAliensWeb.Compat
             return (T)asset;
         }
 
+        // Free every asset this manager loaded. The base ContentManager only tracks
+        // assets it loaded itself (loadedAssets/disposableAssets), but Load<T> above
+        // routes textures/fonts/effects/sounds into our own _cache and never touches
+        // that tracking — so base.Unload() alone frees NONE of them, and every
+        // localContent.Unload() in the game was a silent no-op (a permanent GPU/texture
+        // leak; meaningful on mobile). Dispose the cached GPU/audio resources ourselves,
+        // then clear the cache. Each WebContentManager owns its own instances (no cache
+        // is shared between managers — a miss always decodes fresh), so disposing one
+        // manager's assets never affects another's; callers must still only Unload a
+        // manager they own (audited: per-scene localContent, Bloom/Credits' own content,
+        // Game1.content only at game teardown). base.Unload() still handles anything that
+        // fell through to base.Load<T> (Song/Video, later stages).
+        public override void Unload()
+        {
+            foreach (var asset in _cache.Values)
+            {
+                switch (asset)
+                {
+                    // SpriteFont isn't IDisposable, but its glyph atlas Texture2D is —
+                    // free it explicitly or the font atlas leaks.
+                    case SpriteFont font:
+                        font.Texture?.Dispose();
+                        break;
+                    case IDisposable disposable:
+                        disposable.Dispose();
+                        break;
+                }
+            }
+            _cache.Clear();
+            base.Unload();
+        }
+
         private Texture2D LoadTexture(string key)
         {
             // Time the load. A PNG goes through Texture2D.FromStream -> StbImageSharp
@@ -111,10 +143,17 @@ namespace EvilAliensWeb.Compat
             //   .dds  — BC3/DXT5 blocks uploaded as-is (lossy, small). Preferred.
             //   .rtex — uncompressed straight-alpha RGBA8 (lossless, large). Use where
             //           DXT artifacts are unacceptable; still beats a PNG decode.
-            // Precedence dds -> rtex -> png; per asset, the build step ships exactly one
-            // precompiled form (or none). Stopwatch is sub-microsecond; harmless in release.
+            // Per asset, the offline build ships exactly ONE precompiled form (or none), recorded
+            // in the generated PrecompiledTextures.Siblings map. Probe that one sibling only —
+            // most textures are PNG-only, and the old blind "dds ?? rtex" probe cost two
+            // guaranteed-failing OpenStream calls + two thrown/caught exceptions per PNG-only
+            // texture (dear on the interpreted WASM runtime; two blocking 404s on the live host).
+            // An unlisted key (or a missing/stale sibling) falls through to the .png below.
+            // Stopwatch is sub-microsecond; harmless in release.
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            Texture2D tex = TryLoadDds(key) ?? TryLoadRaw(key);
+            Texture2D tex = null;
+            if (PrecompiledTextures.Siblings.TryGetValue(key, out string sib))
+                tex = sib == ".dds" ? TryLoadDds(key) : TryLoadRaw(key);
             if (tex == null)
             {
                 using Stream s = TitleContainer.OpenStream(key + ".png");

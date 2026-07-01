@@ -269,7 +269,7 @@ internal class Braineroid : KillableAlien
 		base.Update(gameTime);
 		rotation += rotationspeed;
 		// Off-screen margin = half the ON-SCREEN sprite width. texture.Width is now the
-		// whole 8-frame sheet, so divide by columns for one frame and use DrawScale (not
+		// whole 20-frame (5x4) sheet, so divide by columns for one frame and use DrawScale (not
 		// raw scale) to account for the supersample factor — otherwise brains wrap/despawn
 		// hundreds of px off-screen and the Braineroids minigame never clears a wave.
 		float num = (float)(texture.Width / columns) * DrawScale / 2f;

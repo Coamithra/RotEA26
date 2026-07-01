@@ -539,7 +539,11 @@ internal class SplashScene : Scene
 			flag |= base.InputHandler.PadPressed(PadKeys.B, i);
 			flag |= base.InputHandler.PadPressed(PadKeys.LTRT, i);
 		}
-		if (flag)
+		// Gate on state != stopped so a skip press landing on the exact tick the natural
+		// finish (case paused) already fired OnFinished + set stopped doesn't fire it a
+		// SECOND time — a double OnFinished double-adds startScreen to Game.Components,
+		// which KNI's collection rejects (would freeze the boot).
+		if (flag && state != SplashSceneState.stopped)
 		{
 			state = SplashSceneState.stopped;
 			displaySplash = false;

@@ -102,10 +102,44 @@
             catch (e) { console.warn('[debug] eaSlowmo failed (game not booted yet?): ' + e.message); }
         };
 
+        // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
+        // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
+        // and permanently freezes the tab. We swallow a bad frame and keep looping so one
+        // transient throw survives, but stop after N straight failures so a hard-broken game
+        // doesn't spam the console forever.
+        var tickFailures = 0;
+        var TICK_MAX_FAILURES = 30;
+
         function tickJS()
         {
-            window.theInstance.invokeMethod('TickDotNet');
+            try {
+                window.theInstance.invokeMethod('TickDotNet');
+                tickFailures = 0;
+            } catch (e) {
+                tickFailures++;
+                console.error('[loop] TickDotNet threw (' + tickFailures + '/' + TICK_MAX_FAILURES + '): ' + ((e && e.message) || e));
+                if (tickFailures >= TICK_MAX_FAILURES) {
+                    console.error('[loop] too many consecutive tick failures — game loop stopped.');
+                    showLoopStopped(); // the canvas is frozen; tell the player it's not just slow
+                    return; // stop rescheduling: the game is wedged, not just hiccuping
+                }
+            }
             scheduleTick();
+        }
+
+        // Terminal-stop notice: once the loop gives up, the canvas is a frozen frame with no
+        // hint that the game died. Drop a minimal overlay pointing the player at a reload so
+        // they aren't left staring at a stuck screen. Built outside #app so it survives Blazor.
+        function showLoopStopped()
+        {
+            if (document.getElementById('eaLoopStopped')) return; // one-shot
+            var ov = document.createElement('div');
+            ov.id = 'eaLoopStopped';
+            ov.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;'
+                + 'background:rgba(0,0,0,.82);color:#e8e8f0;font:600 18px/1.5 system-ui,sans-serif;'
+                + 'text-align:center;padding:24px;z-index:99999';
+            ov.innerHTML = 'The game hit an unrecoverable error and stopped.<br>Please reload the page to restart.';
+            document.body.appendChild(ov);
         }
 
         function scheduleTick()
@@ -335,17 +369,36 @@
                 if (c && c.focus) { try { c.focus(); } catch (e) { } }
             }
 
-            // While a trailer is up the overlay OWNS the keyboard: swallow every key
-            // (window capture, before KNI's canvas listener) so the menu hidden under
-            // the opaque overlay can't be blind-navigated; Escape closes. Keys typed
-            // inside the cross-origin YouTube iframe don't reach here, so its own
-            // controls still work when it has focus.
+            // While a trailer is up the overlay owns the GAME keys: swallow just the menu
+            // navigation/activation keys (window capture, before KNI's canvas listener) so the
+            // menu hidden under the opaque overlay can't be blind-navigated; Escape closes.
+            // Everything else — F5/Ctrl+R reload, F12 devtools, Ctrl+T, tab switching, and any
+            // modified chord — passes straight through so the browser stays usable. Keys typed
+            // inside the cross-origin YouTube iframe don't reach here, so its own controls work
+            // when it has focus.
+            var GAME_KEYS = {
+                ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1,
+                Enter: 1, ' ': 1, Spacebar: 1,
+                w: 1, a: 1, s: 1, d: 1, W: 1, A: 1, S: 1, D: 1
+            };
             function onKey(e)
             {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-                if (e.key === 'Escape' || e.keyCode === 27) close();
+                if (e.key === 'Escape' || e.keyCode === 27)
+                {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                    close();
+                    return;
+                }
+                // Never intercept a browser shortcut chord (reload, new tab, etc.).
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                if (GAME_KEYS[e.key])
+                {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                }
             }
 
             function open(id)
@@ -511,6 +564,10 @@
             {
                 if (!entry) return;
                 var t = ctx.currentTime;
+                // Drop any ramp still queued on this node (e.g. its own fade-in to
+                // 0.6 if we're crossfading it out mid-rise) — else WebAudio replays
+                // that event in time order and the dying track audibly swells first.
+                entry.gain.gain.cancelScheduledValues(t);
                 entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
                 entry.gain.gain.linearRampToValueAtTime(0.0001, t + MUSIC_FADE);
                 try { entry.src.stop(t + MUSIC_FADE + 0.05); } catch (e) { }
@@ -519,12 +576,19 @@
             function startTrack(cue)
             {
                 ensureCtx();
+                // Claim the load slot SYNCHRONOUSLY. Keeping the token bookkeeping inside
+                // the async loadManifest().then below would race: a stop() or a newer
+                // play() that fires before this callback runs bumps token, but if myToken
+                // was not yet assigned the stale load still passes its guard and wins.
+                // (Bumping on the "already on it" path supersedes any in-flight load for a
+                // different cue, so play(A)->play(B,in flight)->play(A) keeps A, not B.)
+                if (current && current.cue === cue) { token++; return; }   // already on it
+                var myToken = ++token;
                 loadManifest().then(function (m)
                 {
+                    if (myToken !== token) return;            // superseded before manifest resolved
                     var info = m[cue];
                     if (!info) return;
-                    if (current && current.cue === cue) return;   // already on it
-                    var myToken = ++token;
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
                         if (!resp.ok) throw 0;
@@ -547,7 +611,8 @@
                         src.playbackRate.value = curRate;
                         var g = ctx.createGain();
                         // Fade the new track in over the authored 2.5s (crossfades
-                        // against the outgoing track's matching fadeOut).
+                        // against the outgoing track's matching fadeOut). g is a fresh
+                        // node with no prior schedule, so no cancelScheduledValues needed.
                         var t0 = ctx.currentTime;
                         g.gain.setValueAtTime(0.0001, t0);
                         g.gain.linearRampToValueAtTime(0.6, t0 + MUSIC_FADE);
@@ -584,6 +649,9 @@
                 {
                     pending = null;
                     curRate = 1;
+                    // Supersede any load still in flight so it can't start looping
+                    // after we've stopped (cold fetch+decode takes seconds).
+                    token++;
                     if (current) { fadeOut(current); current = null; }
                 },
                 // pause/resume suspend the AudioContext clock, so the track resumes

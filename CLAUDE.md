@@ -88,7 +88,12 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   path. Human picker: **`wwwroot/harness.html`** (dropdown + fields → builds the URL; keep its
   list in sync with the registry). Caveat: objects whose Draw depends on state only their Update
   reaches (mid-attack bosses, the spider's airborne sheet) show their spawned/idle pose — bosses
-  are best-effort; the common per-frame sprite-sheet enemies are exact. Verify like any game
+  are best-effort; the common per-frame sprite-sheet enemies are exact. Any parked object with a
+  CIRCULAR hitbox also gets its REAL collision ring drawn at the live radius (green; the blast has a
+  richer lifetime viz) -- so a sprite-vs-hitbox size mismatch (the supersample bug class, e.g.
+  Blast/PlasmaBall, a re/downscaled sheet whose hand-rolled radius forgot `DrawScale`) is
+  visible by eye; `?objscale` up a tiny entry-scale sprite (e.g. a plasmaball) to inspect. Only
+  CIRCULAR hitboxes show a ring; box-hitbox members of the class (e.g. Braineroid) show none. Verify like any game
   change: real Chrome, not `preview_screenshot` (the rAF loop pauses when the tab is backgrounded).
 
 ## Toolchain (already installed)

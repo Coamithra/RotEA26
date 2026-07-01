@@ -91,24 +91,52 @@ namespace EvilAliensWeb.Compat
             Matrix = Matrix.CreateScale((float)w / DesignWidth, (float)h / DesignHeight, 1f);
         }
 
+        // Uncapped design->window fit scalar (min axis, so the 4:3 design fits inside the
+        // window with letterbox bars). Shared by WindowDestRect and WindowToDesign so the
+        // present blit and the inverse mouse mapping round identically. Distinct from Scale
+        // above (the CAPPED internal render-target scalar); the on-screen letterbox is not
+        // capped, it always fills the window's short axis.
+        private static float FitScale(int windowWidth, int windowHeight)
+        {
+            float s = Math.Min((float)windowWidth / DesignWidth, (float)windowHeight / DesignHeight);
+            if (s <= 0f || float.IsNaN(s) || float.IsInfinity(s))
+            {
+                s = 1f;
+            }
+            return s;
+        }
+
+        // The on-screen letterbox rectangle: where sceneTarget is blitted inside a window of
+        // the given back-buffer size (centered, uncapped 4:3 fit, rounded). The SINGLE source
+        // of truth for the present blit in Game1.Draw AND the inverse mouse mapping below, so
+        // the two can't drift (they used to hand-keep the same math with different rounding —
+        // Game1 truncated, this rounds).
+        public static Rectangle WindowDestRect(int windowWidth, int windowHeight)
+        {
+            float s = FitScale(windowWidth, windowHeight);
+            int destW = (int)Math.Round((double)(DesignWidth * s));
+            int destH = (int)Math.Round((double)(DesignHeight * s));
+            if (destW < 1) destW = 1;
+            if (destH < 1) destH = 1;
+            return new Rectangle((windowWidth - destW) / 2, (windowHeight - destH) / 2, destW, destH);
+        }
+
         // Map a window/back-buffer pixel (where the browser reports the mouse, full
         // viewport — see wwwroot/index.html: clientX/clientY into a 100vw/100vh canvas)
         // back into 800x600 design space. This is the EXACT inverse of the letterbox
-        // present blit in Game1.Draw (uncapped scale = min(W/800, H/600), centered), so a
+        // present blit in Game1.Draw — it inverts the very same WindowDestRect — so a
         // click on the ship's target lands on the matching design coord. Without this the
         // mouse arrives in window pixels (Stage 10's presenter makes the back buffer the
         // browser-window size, not 800x600), so PlayerShip's mouse-fire aims at the wrong
         // point and the software cursor sits in the wrong place.
         public static Vector2 WindowToDesign(Vector2 windowPos)
         {
-            float s = Math.Min((float)WindowWidth / DesignWidth, (float)WindowHeight / DesignHeight);
-            if (s <= 0f || float.IsNaN(s) || float.IsInfinity(s))
-            {
-                s = 1f;
-            }
-            float offX = (WindowWidth - DesignWidth * s) * 0.5f;
-            float offY = (WindowHeight - DesignHeight * s) * 0.5f;
-            return new Vector2((windowPos.X - offX) / s, (windowPos.Y - offY) / s);
+            Rectangle dest = WindowDestRect(WindowWidth, WindowHeight);
+            float sx = (float)dest.Width / DesignWidth;
+            float sy = (float)dest.Height / DesignHeight;
+            if (sx <= 0f) sx = 1f;
+            if (sy <= 0f) sy = 1f;
+            return new Vector2((windowPos.X - dest.X) / sx, (windowPos.Y - dest.Y) / sy);
         }
     }
 }

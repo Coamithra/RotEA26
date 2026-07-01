@@ -87,6 +87,30 @@ internal class MenuSub1 : Scene
 
 	private Timer fadeTimer = new Timer(400f, repeating: false);
 
+	// Perf batch 2: the selected-entry glow was two rings (r=4 and r=8) of 8 offsets each,
+	// rebuilt into fresh float[]/Vector2[] arrays every frame. The offsets are constant, so
+	// hoist them into one static array (flattened; each is drawn with the same glow colour).
+	private static readonly Vector2[] SelectionGlowRing = BuildGlowRing(4f, 8f);
+
+	private static Vector2[] BuildGlowRing(params float[] radii)
+	{
+		Vector2[] result = new Vector2[radii.Length * 8];
+		int n = 0;
+		foreach (float r in radii)
+		{
+			float d = r * 0.7071f;
+			result[n++] = new Vector2(r, 0f);
+			result[n++] = new Vector2(0f - r, 0f);
+			result[n++] = new Vector2(0f, r);
+			result[n++] = new Vector2(0f, 0f - r);
+			result[n++] = new Vector2(d, d);
+			result[n++] = new Vector2(0f - d, d);
+			result[n++] = new Vector2(d, 0f - d);
+			result[n++] = new Vector2(0f - d, 0f - d);
+		}
+		return result;
+	}
+
 	public List<ItemSelected> ItemSelectedEvents = new List<ItemSelected>();
 
 	public int GetSelectedEntry => selectedEntry;
@@ -551,18 +575,9 @@ internal class MenuSub1 : Scene
 					float glowPulse = brainPulsate.Evaluate(MyMath.Mod((float)gameTime.TotalGameTime.TotalSeconds / 2f, 1f)); // same phase as the scale pulse
 					byte ga = (byte)(70f + 45f * glowPulse);
 					Color glow = MenuTheme.WithAlpha(MenuTheme.Glow, ga);
-					foreach (float r in new float[] { 4f, 8f })
+					foreach (Vector2 off in SelectionGlowRing)
 					{
-						float d = r * 0.7071f;
-						Vector2[] ring = new Vector2[]
-						{
-							new Vector2(r, 0f), new Vector2(-r, 0f), new Vector2(0f, r), new Vector2(0f, -r),
-							new Vector2(d, d), new Vector2(-d, d), new Vector2(d, -d), new Vector2(-d, -d)
-						};
-						foreach (Vector2 off in ring)
-						{
-							base.SpriteBatch.DrawString(font, menuEntries[i], position + off, glow, 0f, val, num4, (SpriteEffects)0, 0f);
-						}
+						base.SpriteBatch.DrawString(font, menuEntries[i], position + off, glow, 0f, val, num4, (SpriteEffects)0, 0f);
 					}
 				}
 				// Stage 13: the entry's main text gets the chrome sheen; the drop shadow + the

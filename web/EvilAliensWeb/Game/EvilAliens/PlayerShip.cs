@@ -454,9 +454,16 @@ public class PlayerShip : AlienDrawableGameComponent
 					}
 					break;
 				case ControlDevice.AI:
-					DoAIMove(ref direction, gameTime);
-					DoAIFire(gameTime);
+				{
+					// Perf batch 2: GetBaddies() rebuilds its list by scanning every game
+					// component; it was called three times per AI ship per frame (DoAIMove,
+					// DoAIFire, doAIBomb). Build it once and thread it through — the component
+					// set can't change mid-frame (adds/removes are deferred to ComponentBin.Update).
+					List<AlienDrawableGameComponent> baddies = oracle.GetBaddies();
+					DoAIMove(ref direction, gameTime, baddies);
+					DoAIFire(gameTime, baddies);
 					break;
+				}
 				}
 				Move(direction, gameTime);
 			}
@@ -505,7 +512,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 	}
 
-	private void DoAIFire(GameTime gameTime)
+	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		//IL_00ea: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00f0: Unknown result type (might be due to invalid IL or missing references)
@@ -528,7 +535,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		float num = (float)Math.PI / 12f;
 		float num2 = float.MaxValue;
 		AlienDrawableGameComponent alienDrawableGameComponent = null;
-		foreach (AlienDrawableGameComponent baddy in oracle.GetBaddies())
+		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
 			if (baddy is UFO || baddy is Braineroid || (baddy is Ball && ((Ball)baddy).IsConnected()) || baddy is JunkBoss || baddy is Boss || baddy is Spider || baddy is MarsBoss || baddy is DeathStar || baddy is ClassicBoss || baddy is BattleSkull || (baddy is FlyingSpider && baddy.Collides) || baddy is StarMine || (baddy is EvilSkull && !((EvilSkull)baddy).Fading) || baddy is SweepUFO)
 			{
@@ -557,10 +564,10 @@ public class PlayerShip : AlienDrawableGameComponent
 				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position) + RandomHelper.RandomNextFloat(0f - num, num));
 			}
 		}
-		doAIBomb();
+		doAIBomb(baddies);
 	}
 
-	private void doAIBomb()
+	private void doAIBomb(List<AlienDrawableGameComponent> baddies)
 	{
 		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
 		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
@@ -590,7 +597,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		int num2 = 0;
 		float num3 = 200 * (1 + Score.GetPowerupLevel(Powerup.PowerupType.Blast, player));
-		foreach (AlienDrawableGameComponent baddy in oracle.GetBaddies())
+		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
 			if (isBlastable(baddy))
 			{
@@ -616,7 +623,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		return true;
 	}
 
-	private void DoAIMove(ref Vector2 direction, GameTime gameTime)
+	private void DoAIMove(ref Vector2 direction, GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		//IL_00ff: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0104: Unknown result type (might be due to invalid IL or missing references)
@@ -829,7 +836,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			num4 = -(float)Math.PI / 6f;
 		}
 		Vector2 val;
-		foreach (AlienDrawableGameComponent baddy in oracle.GetBaddies())
+		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
 			if (isBlastable(baddy) && blast != null && blast.Collides)
 			{

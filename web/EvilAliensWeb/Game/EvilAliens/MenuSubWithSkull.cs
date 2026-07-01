@@ -29,6 +29,23 @@ internal class MenuSubWithSkull : MenuSub1
 	// both key off this so they stay in lockstep.
 	private const float RowsYOffset = 96f;
 
+	// Perf batch 2: the selected row's glow ring (constant offsets, r=4.5) and the octagon
+	// outline's 8-point array were allocated fresh every frame — the outline one per visible
+	// row. Hoist the constant ring; reuse a scratch array for the per-row outline points.
+	private static readonly Vector2[] SelectionGlowRing = BuildGlowRing(4.5f);
+
+	private readonly Vector2[] frameOutlinePts = new Vector2[8];
+
+	private static Vector2[] BuildGlowRing(float r)
+	{
+		float d = r * 0.7071f;
+		return new Vector2[8]
+		{
+			new Vector2(r, 0f), new Vector2(0f - r, 0f), new Vector2(0f, r), new Vector2(0f, 0f - r),
+			new Vector2(d, d), new Vector2(0f - d, d), new Vector2(d, 0f - d), new Vector2(0f - d, 0f - d)
+		};
+	}
+
 	public MenuSubWithSkull(Game game)
 		: base(game)
 	{
@@ -129,14 +146,7 @@ internal class MenuSubWithSkull : MenuSub1
 			if (selected)
 			{
 				Color aura = MenuTheme.WithAlpha(MenuTheme.Glow, (int)(70f + 50f * pulse01));
-				float r = 4.5f;
-				float d = r * 0.7071f;
-				Vector2[] ring = new Vector2[]
-				{
-					new Vector2(r, 0f), new Vector2(-r, 0f), new Vector2(0f, r), new Vector2(0f, -r),
-					new Vector2(d, d), new Vector2(-d, d), new Vector2(d, -d), new Vector2(-d, -d)
-				};
-				foreach (Vector2 off in ring)
+				foreach (Vector2 off in SelectionGlowRing)
 					base.SpriteBatch.DrawString(font, label, rowCentre + off, aura, 0f, origin, scale, (SpriteEffects)0, 0f);
 			}
 			// Stage 13: the entry text gets the chrome sheen; the frame fill, the selection
@@ -219,11 +229,16 @@ internal class MenuSubWithSkull : MenuSub1
 	{
 		float hw = w / 2f, hh = h / 2f, c = 12f;
 		Vector2 P(float x, float y) => centre + new Vector2(x, y);
-		Vector2[] o = new Vector2[]
-		{
-			P(-hw + c, -hh), P(hw - c, -hh), P(hw, -hh + c), P(hw, hh - c),
-			P(hw - c, hh), P(-hw + c, hh), P(-hw, hh - c), P(-hw, -hh + c)
-		};
+		// Perf batch 2: reuse a scratch array instead of allocating one octagon per row per frame.
+		Vector2[] o = frameOutlinePts;
+		o[0] = P(-hw + c, -hh);
+		o[1] = P(hw - c, -hh);
+		o[2] = P(hw, -hh + c);
+		o[3] = P(hw, hh - c);
+		o[4] = P(hw - c, hh);
+		o[5] = P(-hw + c, hh);
+		o[6] = P(-hw, hh - c);
+		o[7] = P(-hw, -hh + c);
 
 		if (selected)
 		{

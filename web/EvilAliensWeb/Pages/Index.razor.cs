@@ -43,7 +43,21 @@ namespace EvilAliensWeb.Pages
                 // render loop starts, so _js is ready before the first texture decode.
                 EvilAliensWeb.Compat.LoadProfiler.Init(JsRuntime);
 
-                JsRuntime.InvokeAsync<object>("initRenderJS", DotNetObjectReference.Create(this));
+                // Fire-and-forget, but OBSERVE the fault: if initRenderJS throws the render
+                // loop never starts, and an unobserved InvokeAsync would swallow the reason.
+                _ = ObserveInitRender(JsRuntime.InvokeAsync<object>("initRenderJS", DotNetObjectReference.Create(this)));
+            }
+        }
+
+        static async System.Threading.Tasks.Task ObserveInitRender(System.Threading.Tasks.ValueTask<object> init)
+        {
+            try
+            {
+                await init;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[loop] initRenderJS failed (render loop did not start): " + ex.Message);
             }
         }
 
@@ -59,10 +73,18 @@ namespace EvilAliensWeb.Pages
 
             // run gameloop, timing it so the frame-hitch watchdog can flag a long tick
             // (a cold texture decode, GC pause, etc.) to the console — see LoadProfiler.NoteFrame.
+            // try/finally so a throw out of Tick() still stops the stopwatch + records the frame,
+            // and the exception propagates to tickJS (which counts it and keeps the loop alive).
             _tickSw.Restart();
-            _game.Tick();
-            _tickSw.Stop();
-            EvilAliensWeb.Compat.LoadProfiler.NoteFrame(_tickSw.Elapsed.TotalMilliseconds);
+            try
+            {
+                _game.Tick();
+            }
+            finally
+            {
+                _tickSw.Stop();
+                EvilAliensWeb.Compat.LoadProfiler.NoteFrame(_tickSw.Elapsed.TotalMilliseconds);
+            }
         }
     }
 }

@@ -1,5 +1,14 @@
 # Review of 2026-07-01 merges to main (PRs #44–#52)
 
+> **Update (2026-07-02):** H1–H3 are FIXED on this branch (`CreditsScene` guard reset
+> per showing; `InstructionsMenu`/`HelpText` re-load their localContent textures each
+> showing). H2's repro was verified end-to-end in a real browser: pre-fix, the second
+> pause → Instructions open draws a black screen with `WebGL: INVALID_OPERATION:
+> texParameter: no texture bound to target`; post-fix, three open/close cycles render
+> identically with a clean console. H3 shares the exact mechanism and fix; H1 is
+> verified by code reasoning (its repro needs two full level completions). M1–M4 and
+> below are still open.
+
 Follow-up review of the nine PRs merged to `main` on 2026-07-01 — the batch implementing
 fixes from the 2026-06-30 code review. Eight are substantive; #49 only deletes two
 per-card tracker docs (standard card-close paperwork, nothing to review).

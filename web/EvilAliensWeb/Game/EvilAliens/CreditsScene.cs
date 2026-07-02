@@ -102,6 +102,11 @@ internal class CreditsScene : Scene
 		shutup = false;
 		textpos = 650f;
 		displayingcast = false;
+		// The Terminate() guard must be per-showing: this scene is a boot-time singleton
+		// re-added after every level completion, and Initialize() is its reset point. Left
+		// set, the second showing's Terminate() early-returns and the credits never hand
+		// off to the menu.
+		terminated = false;
 	}
 
 	public void SetupLevel1()

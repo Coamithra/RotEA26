@@ -376,10 +376,15 @@
             // modified chord — passes straight through so the browser stays usable. Keys typed
             // inside the cross-origin YouTube iframe don't reach here, so its own controls work
             // when it has focus.
+            // Keyed by e.keyCode, not e.key: KNI maps keys by event.keyCode too (see
+            // CLAUDE.md), so a WASD keyCode (87/65/83/68) is layout-independent — on a
+            // non-Latin layout keyCode 87 is still "W" for the game even though e.key is
+            // 'ц', so matching the physical code keeps the menu unreachable there too.
             var GAME_KEYS = {
-                ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1,
-                Enter: 1, ' ': 1, Spacebar: 1,
-                w: 1, a: 1, s: 1, d: 1, W: 1, A: 1, S: 1, D: 1
+                38: 1, 40: 1, 37: 1, 39: 1,   // Arrow Up/Down/Left/Right
+                13: 1,                        // Enter
+                32: 1,                        // Space
+                87: 1, 65: 1, 83: 1, 68: 1    // W A S D
             };
             function onKey(e)
             {
@@ -393,7 +398,7 @@
                 }
                 // Never intercept a browser shortcut chord (reload, new tab, etc.).
                 if (e.ctrlKey || e.metaKey || e.altKey) return;
-                if (GAME_KEYS[e.key])
+                if (GAME_KEYS[e.keyCode])
                 {
                     e.preventDefault();
                     e.stopPropagation();
@@ -567,8 +572,13 @@
                 // Drop any ramp still queued on this node (e.g. its own fade-in to
                 // 0.6 if we're crossfading it out mid-rise) — else WebAudio replays
                 // that event in time order and the dying track audibly swells first.
+                // Read the LIVE gain BEFORE the cancel: cancelScheduledValues drops the
+                // pending ramp and .value then recomputes from the remaining timeline
+                // (the initial setValueAtTime(0.0001,...)), so reading it after would
+                // snap a mid-fade-in track to ~0 and cut it instead of fading.
+                var v = entry.gain.gain.value;
                 entry.gain.gain.cancelScheduledValues(t);
-                entry.gain.gain.setValueAtTime(entry.gain.gain.value, t);
+                entry.gain.gain.setValueAtTime(v, t);
                 entry.gain.gain.linearRampToValueAtTime(0.0001, t + MUSIC_FADE);
                 try { entry.src.stop(t + MUSIC_FADE + 0.05); } catch (e) { }
             }
@@ -582,7 +592,15 @@
                 // was not yet assigned the stale load still passes its guard and wins.
                 // (Bumping on the "already on it" path supersedes any in-flight load for a
                 // different cue, so play(A)->play(B,in flight)->play(A) keeps A, not B.)
-                if (current && current.cue === cue) { token++; return; }   // already on it
+                if (current && current.cue === cue)
+                {
+                    token++;                                  // already on it
+                    // play() reset curRate to 1, but a prior setRate sweep (Level3/
+                    // BrainBoss) left the live node at the swept rate — re-assert the
+                    // intended rate so the node and curRate agree (matches setRate below).
+                    if (ctx) { try { current.src.playbackRate.setTargetAtTime(curRate, ctx.currentTime, 0.05); } catch (e) { } }
+                    return;
+                }
                 var myToken = ++token;
                 loadManifest().then(function (m)
                 {
@@ -643,6 +661,11 @@
                 {
                     curRate = 1;
                     if (!started) { pending = cue; return; }
+                    // Once unlocked, this play() is the live intent — clear any cue that
+                    // was queued pre-gesture so the unlocking ctx.resume() callback can't
+                    // later start it and supersede us (play(A)-pre-unlock -> gesture ->
+                    // play(B)-in-window would otherwise still hear A win).
+                    pending = null;
                     startTrack(cue);
                 },
                 stop: function ()

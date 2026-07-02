@@ -93,6 +93,14 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
 		base.Initialize();
 		base.LoadContent();
+		// KNI runs LoadContent() once per component instance EVER (guarded), but each
+		// demo's HelpText is a boot-time singleton that Unload()s itself on removal
+		// (OnComponentRemoved) and is re-added on every attract run. Re-load the
+		// localContent textures every showing: a no-op cache hit while nothing was
+		// unloaded, a fresh decode after Unload() — otherwise a demo's second attract
+		// cycle draws disposed textures.
+		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls Keyboard");
+		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls Joypad");
 	}
 
 	public void SetDisplay(Displays display)

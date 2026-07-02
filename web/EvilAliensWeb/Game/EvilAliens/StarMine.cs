@@ -438,7 +438,11 @@ public class StarMine : KillableAlien
 				_ = junkBoss.r;
 				Vector2 val5 = val4;
 				(val5).Normalize();
-				base.Position -= val5;
+				// Fidelity (review M4): the spatial grid fires each circle pair once per direction
+				// per frame; the shipped 2008 build's all-pairs scan fired this ungated 1px push-out
+				// twice per frame — the x2 preserves the original net separation rate so
+				// attached StarMines don't sink deeper into the JunkBoss.
+				base.Position -= val5 * 2f;
 			}
 		}
 	}

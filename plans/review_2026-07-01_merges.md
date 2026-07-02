@@ -9,6 +9,34 @@
 > verified by code reasoning (its repro needs two full level completions). M1–M4 and
 > below are still open.
 
+> **Update 2 (2026-07-02, later):** M1–M4 and the three actionable LOWs are now FIXED
+> on this branch too (each implemented by an independent agent, then adversarially
+> re-verified and built clean):
+> - **M1** — the difficulty + Tutorial handlers got the same final `else →
+>   ControlDevice.Keyboard`; all four sites of the class now covered (swept; the
+>   `CheckPlayerJoins` match is not a member — no fall-through to a stale field).
+>   Verified end-to-end headless: mouse-only Start → Mission 1 → Easy boots the level
+>   and gameplay runs (score ticking, no instant pause loop).
+> - **M2** — `eaMusic.fadeOut` captures the live gain BEFORE `cancelScheduledValues`,
+>   so interrupting a mid-fade-in crossfade fades from the true level instead of
+>   cutting. **LOW #47a** — `play()` clears `pending` on the started path (stale
+>   pre-gesture cue can't supersede a newer play). **LOW #47b** — the `startTrack`
+>   "already on it" early-return re-asserts `curRate` on the live node. **LOW #48
+>   (GAME_KEYS)** — the trailer overlay swallow list matches `e.keyCode`, not `e.key`
+>   (layout-independent, consistent with KNI's own mapping).
+> - **M3** — `BloomComponent.LoadContent` resets `cachedBlurAmount = float.NaN` so a
+>   reload re-pushes the kernel onto the fresh effect (NaN forces the miss; the one
+>   miss path also rebuilds the offsets/size keys).
+> - **M4** — resolved as COMPENSATE (fidelity): the two ungated fixed-1px JunkBoss
+>   push-outs (connected Ball, attached StarMine — the latter a same-shape sibling
+>   this review missed) are doubled to 2px/call, restoring the shipped 2px/frame net
+>   rate the grid's once-per-direction firing had halved. Pre-#52 double-fire
+>   confirmed against `55601a4~1`; the proportional Ball↔Ball / StarMine↔StarMine
+>   separations are self-limiting and correctly left alone. A JunkBoss playtest
+>   remains a nice-to-have to sanity-check the feel.
+> The remaining LOWs/NITs are documented assumptions or latent-only seams left as
+> written (the #48 trial-preview strip is still a candidate follow-up card).
+
 Follow-up review of the nine PRs merged to `main` on 2026-07-01 — the batch implementing
 fixes from the 2026-06-30 code review. Eight are substantive; #49 only deletes two
 per-card tracker docs (standard card-close paperwork, nothing to review).

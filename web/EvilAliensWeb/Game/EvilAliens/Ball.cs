@@ -345,7 +345,8 @@ internal class Ball : AlienDrawableGameComponent
 					_ = junkBoss.r;
 					Vector2 val4 = val3;
 					(val4).Normalize();
-					base.Position -= val4;
+					// Fidelity (review M4): the spatial grid fires each circle pair once per direction per frame; the shipped 2008 build's all-pairs scan fired this ungated 1px push-out twice per frame — the x2 preserves the original net separation rate so connected Balls don't sink deeper into the JunkBoss.
+					base.Position -= val4 * 2f;
 				}
 			}
 			break;

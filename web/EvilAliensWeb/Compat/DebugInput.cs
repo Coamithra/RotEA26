@@ -99,6 +99,36 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaSlowmo " + seconds + "s");
 		}
 
+		// JS bridge for QA/demo of the screen shake (eaShake in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugShake', trauma). Adds shake trauma
+		// (0..1; 0/omitted => a solid 0.6 burst) so the camera shake can be seen/tuned on
+		// demand anywhere — it's a pure present-blit effect, so it works even in a menu.
+		[JSInvokable("debugShake")]
+		public static void Shake(float trauma)
+		{
+			if (trauma <= 0f)
+			{
+				trauma = 0.6f;
+			}
+			Juice.AddTrauma(trauma > 1f ? 1f : trauma);
+			Console.WriteLine("[debug] eaShake " + trauma);
+		}
+
+		// JS bridge for QA/demo of the hit-stop (eaHitstop in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitstop', ms). Freezes game time for
+		// `ms` milliseconds of real time (0/omitted => 120ms) — most visible in a level
+		// with things moving, e.g. ?level=Level1.
+		[JSInvokable("debugHitstop")]
+		public static void Hitstop(float ms)
+		{
+			if (ms <= 0f)
+			{
+				ms = 120f;
+			}
+			Juice.AddHitStop(ms / 1000f);
+			Console.WriteLine("[debug] eaHitstop " + ms + "ms");
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first

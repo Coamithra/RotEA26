@@ -682,9 +682,15 @@ public class Game1 : Game
 			vibrator.DisableVibrations();
 		}
 		float slowmotion = oracle.Slowmotion;
-		if (num != 100 || slowmotion != 1f)
+		// Game juice (Compat/Juice.cs): tick the screen shake + hit-stop with the UNSCALED
+		// frame delta, BEFORE the time scaling below — the shake must keep moving and the
+		// freeze must be able to end while game time is stopped. The hit-stop then folds
+		// into the same turbo*slowmotion scale the game already applies (0 while frozen).
+		Juice.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+		float hitstop = Juice.TimeScale;
+		if (num != 100 || slowmotion != 1f || hitstop != 1f)
 		{
-			float num2 = (float)num / 100f * slowmotion;
+			float num2 = (float)num / 100f * slowmotion * hitstop;
 			gameTime = new GameTime(new TimeSpan((long)((float)gameTime.TotalGameTime.Ticks * num2)), new TimeSpan((long)((float)gameTime.ElapsedGameTime.Ticks * num2)));
 		}
 		if (graphics.IsFullScreen)
@@ -835,7 +841,28 @@ public class Game1 : Game
 			gx.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
 		}
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gx);
-		spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
+		if (Juice.ShakeActive)
+		{
+			// Screen shake (Compat/Juice.cs): jolt the present blit itself — offset + a small
+			// roll + a slight zoom so the shaken frame keeps covering the letterbox instead of
+			// flashing background at the edges. Shaking here (not the game's draw matrix) means
+			// the WHOLE composited frame moves as one (scene, HUD, bloom) and no gameplay
+			// coordinate (collision, mouse aim via WindowToDesign) is ever affected. The zoom
+			// scales with the sampled magnitude, so ?shake= tuning keeps edges covered too.
+			float toWindow = (float)dest.Width / RenderScale.DesignWidth;
+			Vector2 center = new Vector2(dest.X + dest.Width * 0.5f, dest.Y + dest.Height * 0.5f)
+				+ Juice.ShakeOffset * toWindow;
+			float zoom = 1f + 0.06f * Juice.ShakeMagnitude;
+			Vector2 blitScale = new Vector2(
+				(float)dest.Width / ((Texture2D)sceneTarget).Width,
+				(float)dest.Height / ((Texture2D)sceneTarget).Height) * zoom;
+			Vector2 origin = new Vector2(((Texture2D)sceneTarget).Width * 0.5f, ((Texture2D)sceneTarget).Height * 0.5f);
+			spriteBatch.Draw((Texture2D)(object)sceneTarget, center, null, Color.White, Juice.ShakeRoll, origin, blitScale, SpriteEffects.None, 0f);
+		}
+		else
+		{
+			spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
+		}
 		spriteBatch.End();
 	}
 

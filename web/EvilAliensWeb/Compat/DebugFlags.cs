@@ -21,6 +21,10 @@ namespace EvilAliensWeb.Compat
 	//   ?unlockall     reveal every gated menu option (Cheats, all challenges, Level 2/3,
 	//                  Challenges/Awardments) so the whole menu can be walked through;
 	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
+	//   ?shake=<f>     scale the trauma-based screen shake (Compat/Juice.cs): 0 = off,
+	//                  1 = default, up to 3 to exaggerate while tuning. Pure camera look.
+	//   ?hitstop=0     disable the hit-stop freeze frames (kill micro-stop, player death,
+	//                  boss kill — Compat/Juice.cs). ON by default.
 	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (it is ON by default) to A/B the plain flattened drop shadow
 	//   ?slowmotrail=0 disable the cinematic slow-motion ghost-trail post-process (ON by default;
@@ -132,6 +136,16 @@ namespace EvilAliensWeb.Compat
 		// null => the baked-in default (Game1). ?slowmotrailstrength=
 		public static float? SlowmoTrailStrength { get; private set; }
 
+		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
+		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
+		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
+		public static float ShakeAmount { get; private set; } = 1f;
+
+		// Hit-stop freeze frames (Compat/Juice.cs): the per-kill micro-stop + the longer
+		// player-death/boss-kill stops. ON by default; ?hitstop=0 disables. Technically a
+		// (tiny) gameplay-time effect, but like the shake it's a feel toggle — OUT of `Active`.
+		public static bool Hitstop { get; private set; } = true;
+
 		// Route the in-game score / "Player X — Press Start" text through the chrome-sheen
 		// effect (metal.fx) instead of the plain flattened drop-shadow draw. ON by default
 		// (the card author kept the chrome look); ?metalscore=0 / =false disables it to A/B
@@ -212,6 +226,21 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "metalscore":
 					MetalScore = IsOn(val);
+					break;
+				case "shake":
+				case "screenshake":
+					// Bare ?shake / =true keeps the default 1; a number scales it (0 = off).
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shk))
+					{
+						ShakeAmount = (shk < 0f) ? 0f : (shk > 3f) ? 3f : shk;
+					}
+					else
+					{
+						ShakeAmount = IsOn(val) ? 1f : 0f;
+					}
+					break;
+				case "hitstop":
+					Hitstop = IsOn(val);
 					break;
 				case "slowmotrail":
 					SlowmoTrail = IsOn(val);

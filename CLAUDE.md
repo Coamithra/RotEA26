@@ -346,6 +346,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
   (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
   `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
+- **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
+  was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
+  particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research
+  -> mapping). **Shake** is the trauma model: events call `Juice.AddTrauma` (`Explosion.Initialize`
+  sized by explosion size, `Blast.Initialize` by bomb power, player death), strength = trauma^2 (so
+  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 14
+  design px) + roll (max 2 deg). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
+  slight zoom so edges stay covered) — a pure camera effect: no gameplay coordinate, collision, or
+  mouse mapping (`WindowToDesign`) is touched. **Hit-stop** freezes GAME time (folded into
+  `Game1.Update`'s existing turbo x slowmotion scale as `Juice.TimeScale`) while REAL time keeps
+  ticking Juice/shake/input: every kill lands a ~1.5-frame micro-stop (`Juice.KillPunch` in
+  `KillableAlien.HitBy`, rate-limited 250ms so a bomb-cleared wave is one punch, not a stutter),
+  boss kills 90ms + real shake, player death 180ms + extra trauma (`PlayerShip.Asplode`/
+  `AsplodeWall`). Draw-time cosmetics (the Blast rim spin, metal sheen) keep animating during a
+  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=0`; QA from
+  the console anywhere: `eaShake()`/`eaShake(1)`, `eaHitstop()`/`eaHitstop(500)` (DebugInput +
+  index.html, same seam as eaSlowmo). Both are feel toggles kept OUT of `DebugFlags.Active`.
+  GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs in `Game1.Update` BEFORE the
+  time scale) — a scaled-time timer would freeze and never thaw.
 - **Cinematic slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up-powerup slowmo
   (`PlayerShip` -> `Oracle.SetSlowmotion(12f)`) used to be ONLY a time-scale (0.4x) + a bloom-preset
   swap; it now also gets a movie bullet-time **motion blur** so moving objects smear into fading

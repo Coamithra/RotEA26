@@ -247,6 +247,12 @@ internal class MenuScene : Scene
 		challengeSelector.AddEntry("Team Challenge", Unlockables.Items.TeamChallenge);
 		challengeSelector.AddEntryData("GFX/Screenshots/teamchallengess", "Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players", Levels.TeamChallenge);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
+		// Web-port addition, deliberately UNGATED (no Unlockables item): the remake of
+		// the 2004 webcam game the "I made this!" splash is from. The screenshot is the
+		// meme's embedded mini-screenshot (tools/webcam/build_webcam_assets.py).
+		challengeSelector.AddEntry("I Made This!");
+		challengeSelector.AddEntryData("GFX/Screenshots/webcamss", "The legendary 2004 webcam game, remade. YOU are the ship:\nyour camera puts you in the starfield. Swat the saucers with\nyour body before they blink, aim... and FIRE.\nRequires a webcam", Levels.WebcamAliens);
+		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		cheatsMenu = new MenuSub1(base.Game);
 		cheatsMenu.AddEntry("Infinite Lives: " + boolToGameString(Settings.GetInstance().InfiniteLives), Unlockables.Items.InfiniteLives);
 		cheatsMenu.AddEntryEvent(cheatsMenu_InfiniteLivesSelected);

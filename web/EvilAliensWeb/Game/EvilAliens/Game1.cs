@@ -94,6 +94,8 @@ public class Game1 : Game
 
 	private Paratrooper paratrooper;
 
+	private WebcamLevel webcamLevel;
+
 	private TutorialLevel tutorialLevel;
 
 	private BragScene bragScene;
@@ -290,6 +292,8 @@ public class Game1 : Game
 		crazyGame.OnFinished += gameScene_OnFinished;
 		paratrooper = new Paratrooper((Game)(object)this);
 		paratrooper.OnFinished += gameScene_OnFinished;
+		webcamLevel = new WebcamLevel((Game)(object)this);
+		webcamLevel.OnFinished += gameScene_OnFinished;
 		tutorialLevel = new TutorialLevel((Game)(object)this);
 		tutorialLevel.OnFinished += gameScene_OnFinished;
 		harnessScene = new EvilAliensWeb.Compat.HarnessScene((Game)(object)this);
@@ -590,6 +594,9 @@ public class Game1 : Game
 			break;
 		case Levels.Paratrooper:
 			collectionHelper.Add((GameComponent)(object)paratrooper);
+			break;
+		case Levels.WebcamAliens:
+			collectionHelper.Add((GameComponent)(object)webcamLevel);
 			break;
 		default:
 			throw new Exception("Level not implemented!");

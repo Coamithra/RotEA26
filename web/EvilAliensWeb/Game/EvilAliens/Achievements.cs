@@ -155,11 +155,21 @@ public class Achievements : Savable
 
 	protected override bool checkData()
 	{
-		bool flag = true;
+		// Forward-compat migration: a save written before a Levels member was added
+		// (e.g. the web port's WebcamAliens) is VALID, just missing the new key —
+		// backfill it instead of failing, which would route through onLoadError and
+		// wipe every achievement. A genuinely broken save (null Data) still fails.
+		if (instance.Data == null)
+		{
+			return false;
+		}
 		foreach (Levels enumValue in Game1.GetEnumValues<Levels>())
 		{
-			flag &= instance.Data.ContainsKey(enumValue);
+			if (!instance.Data.ContainsKey(enumValue))
+			{
+				instance.Data[enumValue] = new LevelAchievement();
+			}
 		}
-		return flag;
+		return true;
 	}
 }

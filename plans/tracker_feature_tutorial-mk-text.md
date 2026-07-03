@@ -37,5 +37,5 @@ mouse&keyboard text rather than joystick in the tutorial mode.
 
 ## Phase 6: Ship
 - [x] Commit + push
-- [~] Peer review (foreground reviewer per coordinator policy)
-- [ ] PR --fill (DO NOT MERGE — pause for orchestrator)
+- [~] Peer review: foreground reviewer did not return in-run -> "review pending: orchestrator"
+- [x] PR #65 --fill created (DO NOT MERGE — paused for orchestrator)

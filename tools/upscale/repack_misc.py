@@ -46,7 +46,10 @@ JOBS = {
     "option":             ("misc1.png", (1210, 40, 1500, 343), 3.0, False),
     "braingoo":           ("misc1.png", (6, 388, 296, 691), 1.0, False),
     "photocamera":        ("misc1.png", (608, 388, 898, 691), 3.0, True),
-    "shadow":             ("misc1.png", (909, 388, 1199, 691), 4.0, False),
+    # "shadow" was dropped: its misc1 AI redraw keys to a scattered speckle, not a
+    # filled gradient (the "Mars shadow" bug), and the original 82x40 radial blob has
+    # no detail an upscale could add. The pristine original is committed; Floor.cs
+    # self-normalises via shadowimage.Width, so no registry entry / factor is needed.
     "singleconnectorglow": ("misc1.png", (6, 737, 296, 1039), 4.0, False),
     "connector":          ("misc1.png", (307, 737, 597, 1039), 4.0, False),
     "blast":              ("blast_new.png", None, 1.5, False),   # green-bg redo; None = whole image
@@ -157,6 +160,8 @@ def fill_glow(rgba, strength=1.0, falloff=0.75):
     glow in the ring's own colour, so a hollow shockwave reads as a solid burst."""
     a = rgba[..., 3].astype(np.float32) / 255.0
     solid = ndimage.binary_fill_holes(a > 0.2)
+    if solid is None:  # scipy typing: only possible with output=; unreachable here
+        return rgba
     ys, xs = np.where(solid)
     if len(ys) == 0:
         return rgba

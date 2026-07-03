@@ -523,6 +523,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the rest synchronously (worst case == the old blocking batch). Pairs with skipping the brag interstitial: on web `BragScene` is
   always immediately `Done` (no signed-in gamer), so `Game1.creditsScene_OnFinished` checks
   `BragScene.WouldShow()` and routes credits -> menu directly instead of flashing one bare starfield frame.
+  **A second, LOW-priority warm queue (`idleWarmQueue` / `QueueIdleWarm`) warms the space-background
+  tile set** (`gfx/game/space/space00..11` + `star00..07` + the `starwindow` effect): `Background.SetSpace()`
+  loads those synchronously inside a level's `Initialize()` -- BEFORE the level's preload bracket -- so
+  neither `PreloadGraphicalContent` nor the manifest can ever warm them first; a one-time boot warm makes
+  every `SetSpace` a session-long cache hit instead of ~0.5s extra on the first space level's loading tick.
+  `PumpWarmQueue` drains it only after the menu queue empties, and `DrainWarmQueue` deliberately does NOT
+  touch it (the menu must never wait on background tiles; a level entered before it drains just decodes
+  the leftovers in `SetSpace` as before -- either order is safe). Put menu-critical art in `QueueMenuWarm`,
+  pre-level art in `QueueIdleWarm`.
 - **Resolution = a unified presenter (Stage 10), not a pinned back buffer.** KNI's BlazorGL forces the back buffer to
   the browser window size and rewrites `PreferredBackBuffer` on every resize, so a fixed 800×600
   reverts. `Game1.Draw` renders the WHOLE frame into one offscreen `sceneTarget` sized to the window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it

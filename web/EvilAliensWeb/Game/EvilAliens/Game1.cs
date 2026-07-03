@@ -142,6 +142,15 @@ public class Game1 : Game
 	// guaranteed before the menu is first built. See QueueMenuWarm for the why.
 	private readonly Queue<Action> warmQueue = new Queue<Action>();
 
+	// Low-priority warm: assets a level will want but the MENU doesn't (currently the
+	// space-background tile set — see QueueIdleWarm). Pumped one-per-tick only after
+	// warmQueue is empty, and deliberately NOT part of DrainWarmQueue: a player mashing
+	// past the splash must never wait on these before the menu shows. Worst case (a
+	// level entered before the queue drains) the leftovers decode where they always did
+	// — synchronously in Background.SetSpace() on the level's loading tick — and the
+	// queued entries become free cache hits afterwards; either order is safe.
+	private readonly Queue<Action> idleWarmQueue = new Queue<Action>();
+
 	public Game1()
 	{
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
@@ -429,6 +438,7 @@ public class Game1 : Game
 			gamma = null;
 		}
 		QueueMenuWarm();
+		QueueIdleWarm();
 	}
 
 	// Decode the main menu's art ONCE so the first time the menu is shown it appears in a
@@ -474,25 +484,60 @@ public class Game1 : Game
 		EnqueueWarm<Texture2D>("GFX/Menu/evilskull");
 	}
 
+	// Space-background tile set (card 97727578). Background.SetSpace() loads all of these
+	// synchronously inside a level's Initialize() — BEFORE base.Initialize() reaches the
+	// LoadContent preload bracket — so neither PreloadGraphicalContent nor the manifest can
+	// ever warm them first, and the FIRST space scene of a session paid ~0.5s extra on its
+	// loading tick (12 nebula .dds uploads + 8 star PNG decodes + a shader compile). The
+	// shared content manager never unloads mid-session, so warming once at boot turns every
+	// SetSpace into cache hits. Low-priority (idleWarmQueue): needed before the first LEVEL,
+	// not before the menu.
+	private void QueueIdleWarm()
+	{
+		for (int i = 0; i < 12; i++)
+		{
+			EnqueueIdleWarm<Texture2D>($"GFX/Game/space/space{i:00}");
+		}
+		for (int i = 0; i < 8; i++)
+		{
+			EnqueueIdleWarm<Texture2D>($"GFX/Game/space/star{i:00}");
+		}
+		// ProceduralStarfield's crossfade shader — same first-SetSpace load moment.
+		EnqueueIdleWarm<Effect>("GFX/Effects/starwindow");
+	}
+
 	// Queue one asset to be warmed later (during splash idle, or the pre-menu drain).
 	private void EnqueueWarm<T>(string assetName)
 	{
 		warmQueue.Enqueue(() => Warm<T>(assetName));
 	}
 
+	private void EnqueueIdleWarm<T>(string assetName)
+	{
+		idleWarmQueue.Enqueue(() => Warm<T>(assetName));
+	}
+
 	// Warm at most ONE queued asset per call — invoked once per Update tick so the heavy
 	// MB-scale decodes spread across the splash's idle frames instead of blocking boot.
+	// Menu assets first (the pre-menu drain depends on that queue emptying fastest), then
+	// the low-priority idle set.
 	private void PumpWarmQueue()
 	{
 		if (warmQueue.Count > 0)
 		{
 			warmQueue.Dequeue()();
 		}
+		else if (idleWarmQueue.Count > 0)
+		{
+			idleWarmQueue.Dequeue()();
+		}
 	}
 
 	// Decode every still-queued asset NOW. Called the instant before the menu is first
 	// built so the menu is guaranteed fully warm even if the splash was skipped before the
 	// per-tick pump could finish — worst case this is the old synchronous batch decode.
+	// Deliberately leaves idleWarmQueue alone: nothing there is needed for the menu, and
+	// blocking the menu on ~20 background tiles would trade a hidden warm for a visible wait.
 	private void DrainWarmQueue()
 	{
 		while (warmQueue.Count > 0)

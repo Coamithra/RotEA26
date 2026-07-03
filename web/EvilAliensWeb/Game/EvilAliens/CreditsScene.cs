@@ -241,6 +241,9 @@ internal class CreditsScene : Scene
 		lines.Add("PROGRAMMING AND DESIGN: ");
 		lines.Add("Harald (CoamIthra) Maassen");
 		lines.Add("");
+		lines.Add("ADDITIONAL PROGRAMMING:");
+		lines.Add("Claude Opus 4.6");
+		lines.Add("");
 		lines.Add("MUSIC:");
 		lines.Add("Peter Brannan");
 		lines.Add("");
@@ -261,6 +264,10 @@ internal class CreditsScene : Scene
 		lines.Add("(www.evilsuperbrain.com)");
 		lines.Add("Slawek Wojtowicz ");
 		lines.Add("Tom Rutjens");
+		lines.Add("");
+		lines.Add("ADDITIONAL GRAPHICS:");
+		lines.Add("ChatGPT (GPT Image)");
+		lines.Add("Gemini (Nano Banana)");
 		lines.Add("");
 		lines.Add("PLAYTESTING: ");
 		lines.Add("Rucky Brunsman");
@@ -289,6 +296,8 @@ internal class CreditsScene : Scene
 		lines.Add("");
 		lines.Add("SPECIAL THANKS TO:");
 		lines.Add("The XNA team and community ");
+		lines.Add("The KNI engine");
+		lines.Add("Nikos Kastellanos (nkast)");
 		lines.Add("Andy (The ZMan) Dunn");
 		lines.Add("Carl (BogTurtleCarl) Erikson");
 		lines.Add("Tom Claus");

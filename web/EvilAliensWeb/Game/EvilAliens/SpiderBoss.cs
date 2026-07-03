@@ -25,11 +25,15 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private const float yposstatic = 400f;
 
-	// Pause the boss off-screen between fly segments so the "Danger!" warning leads the arrival
-	// instead of coinciding with it. The two mid-air turns (flyleft->flyright, flyup->flyleft)
-	// already used the waittimer's default 1000ms; the flyright->land turn (fly off the right edge,
-	// then drop from top for the landing) had NO pause, so the warning appeared exactly as the boss
-	// began its descent. It now waits landWarningLeadMs, giving the player time to fly clear.
+	// Off-screen holds between fly segments, so the "Danger!" warning leads the boss's arrival
+	// instead of coinciding with it. All three turns share the single `waittimer`; its Duration is
+	// set explicitly at each site because Duration persists across Reset(), so the land value below
+	// would otherwise leak into the next fly turn. The two mid-air turns (flyleft->flyright,
+	// flyup->flyleft) already paused for the waittimer's old default 1000ms (flyPauseMs preserves
+	// that exactly -- don't drop those two assignments or the land value leaks in). The
+	// flyright->land turn (fly off the right edge, then drop from the top to land) had NO pause, so
+	// the warning fired the instant the descent began; it now holds for the longer landWarningLeadMs
+	// -- deliberately > flyPauseMs -- to give the player time to fly clear before the boss drops in.
 	private const float flyPauseMs = 1000f;
 
 	private const float landWarningLeadMs = 1500f;

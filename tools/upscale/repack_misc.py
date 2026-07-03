@@ -160,6 +160,8 @@ def fill_glow(rgba, strength=1.0, falloff=0.75):
     glow in the ring's own colour, so a hollow shockwave reads as a solid burst."""
     a = rgba[..., 3].astype(np.float32) / 255.0
     solid = ndimage.binary_fill_holes(a > 0.2)
+    if solid is None:  # scipy typing: only possible with output=; unreachable here
+        return rgba
     ys, xs = np.where(solid)
     if len(ys) == 0:
         return rgba

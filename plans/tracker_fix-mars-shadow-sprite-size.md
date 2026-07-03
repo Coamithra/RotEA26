@@ -20,18 +20,18 @@
 - [x] Restores exact original on-screen size (matches decompiled Floor.cs)
 
 ## Phase 4: Implement
-- [ ] Revert shadow.png to d8753c2 version (82x40)
-- [ ] Floor.cs: remove / SuperSampleFactor(...) from draw
-- [ ] AlienDrawableGameComponent.cs: drop shadow registry entry + comment ref
+- [x] Revert shadow.png to d8753c2 version (82x40)
+- [x] Floor.cs: remove / SuperSampleFactor(...) from draw
+- [x] AlienDrawableGameComponent.cs: drop shadow registry entry + comment ref
 
 ## Phase 5: Verify
-- [ ] dotnet build -c Debug clean
-- [ ] Verify shadow.png dims 82x40, gradient content (Pillow)
-- [ ] Re-read diff
+- [x] dotnet build -c Debug clean
+- [x] Verify shadow.png dims 82x40, gradient content (Pillow)
+- [x] Re-read diff
 - [ ] Note: needs live Mars/Level2 visual check post-hoc
 
 ## Phase 6: Ship (PAUSE before merge per orchestrator)
-- [ ] Commit + push
+- [x] Commit + push
 - [ ] /review
 - [ ] pull main
 - [ ] PR create --fill (NO merge)

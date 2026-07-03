@@ -495,6 +495,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   is called from `demo_OnFinished` (player pop-in), NOT at level start, so the earth enters after the
   UFO intro as the player takes control; the slow-down engages with it and the asteroid belt waits on
   the same `WaitForDoodadEvent` gate.
+  **Asteroid-belt star-slowdown (card "same as earth but for the asteroid field"):** the SAME depth
+  cue is applied to Level 1's sideways asteroid-belt phase, because at the gameplay baseline the
+  fastest near star (`scrollspeedmag 0.039 * maxParallax 3.8 ~= 0.148` design px/ms) was as fast as
+  (and sometimes past) the slowest asteroid class — the dim decorative **background** asteroids
+  (`0.38 * 0.4 ~= 0.152`, `-10%` jitter -> ~0.137 px/ms; the collidable foreground ones are 0.38).
+  The belt is a WAVE (an `AsteroidSpawner` over ~42s), NOT a crossing doodad, so it does NOT ride the
+  per-doodad `DoodadStarSlowdownFactor()` position hook — instead `Background.BeltStarSlowdownFactor()`
+  is a SECOND factor multiplied into `effectiveModifier` alongside the doodad one, driven by an
+  explicit engage/disengage + a wall-clock ramp (`EngageBeltSlowdown`/`DisengageBeltSlowdown`, stepped
+  by `UpdateBeltSlowdown` over `BeltRampInMs 1200` / `BeltRampOutMs 1600`, smoothstep-eased like the
+  doodad envelope). `BeltStarSlowdown = 0.37` pulls the fastest star to ~0.055 px/ms so the decor
+  asteroid is ~2.5x it (mirrors the earth's "Nx" reasoning; foreground asteroids end up 5x+). Level1
+  `spawner_OnFinished` (which sets the belt scroll speed) calls `EngageBeltSlowdown()`; the
+  `AsteroidSpawner.OnFinished` calls `DisengageBeltSlowdown()`. `Demo1` (the attract-mode twin of the
+  Level 1 belt) is wired identically so the mismatch is fixed in the menu attract loop too. The
+  standalone `AsteroidChase`/`SpaceDodge` minigame is deliberately OUT of scope (its `SetSpeed(0.3,
+  0.72)` is a raw, ~20x-faster "warp" scroll — a different feel, not the Level 1 field). The belt and the earth fly-by can
+  never overlap (the belt gates on the earth leaving via `WaitForDoodadEvent`), so the two factors
+  never double-slow in practice; `Background.Reset()` clears the belt state on every fresh level entry.
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet

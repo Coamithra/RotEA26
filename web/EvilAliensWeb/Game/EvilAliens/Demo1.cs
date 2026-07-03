@@ -106,6 +106,7 @@ internal class Demo1 : GameScene
 		eventList.SetLastEventAsCheckPoint();
 		gameEvent3.OnFinished += spawner_OnFinished;
 		AsteroidSpawner gameEvent4 = new AsteroidSpawner(base.Game, 42f, 4f, startWithBig: true);
+		gameEvent4.OnFinished += asteroids_OnFinished;
 		eventList.AddEvent(gameEvent4, halting: true);
 		gameEvent2 = new BonusSpawner(base.Game, 10f, 0.3f, randomly: false);
 		eventList.AddEvent(gameEvent2, halting: false);
@@ -267,6 +268,14 @@ internal class Demo1 : GameScene
 		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0.25f, 0.6f) / 16.666666f);
+		// Attract-mode demo mirrors Level 1's belt: slow the near stars so the fastest star reads
+		// clearly slower than the slowest asteroid (see Background.BeltStarSlowdownFactor).
+		Background.EngageBeltSlowdown();
+	}
+
+	private void asteroids_OnFinished(GameEvent sender)
+	{
+		Background.DisengageBeltSlowdown();
 	}
 
 	private void demo_OnFinished(GameEvent sender)

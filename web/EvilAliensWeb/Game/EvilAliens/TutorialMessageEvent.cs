@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace EvilAliens;
@@ -8,12 +9,24 @@ internal class TutorialMessageEvent : GameEvent
 
 	private string text;
 
+	// Optional lazy text, resolved when the message is actually shown (during play)
+	// rather than when the event list is built (at boot, before any player exists).
+	// Used for control prompts that depend on the tutorial player's input device.
+	private Func<string> textResolver;
+
 	private TutorialMessage message;
 
 	public TutorialMessageEvent(Game game, float lifetime, string text)
 		: base(game, lifetime)
 	{
 		this.text = text;
+		base.OnFinished += TutorialMessageEvent_OnFinished;
+	}
+
+	public TutorialMessageEvent(Game game, float lifetime, Func<string> textResolver)
+		: base(game, lifetime)
+	{
+		this.textResolver = textResolver;
 		base.OnFinished += TutorialMessageEvent_OnFinished;
 	}
 
@@ -35,7 +48,7 @@ internal class TutorialMessageEvent : GameEvent
 		{
 			displayed = true;
 			message = TutorialMessage.NewTutorialMessage(collectionHelper, game);
-			message.Setup(text);
+			message.Setup(textResolver != null ? textResolver() : text);
 			collectionHelper.Add((GameComponent)(object)message);
 		}
 	}

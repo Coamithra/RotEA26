@@ -127,6 +127,7 @@ internal class Level1 : GameScene
 		eventList.AddEvent(gameEvent5, halting: true);
 		eventList.AddHalt();
 		AsteroidSpawner gameEvent6 = new AsteroidSpawner(base.Game, 42f, 4f, startWithBig: true);
+		gameEvent6.OnFinished += asteroids_OnFinished;
 		eventList.AddEvent(gameEvent6, halting: true);
 		gameEvent3 = new BonusSpawner(base.Game, 10f, 0.3f, randomly: false);
 		eventList.AddEvent(gameEvent3, halting: false);
@@ -305,6 +306,16 @@ internal class Level1 : GameScene
 		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0.25f, 0.6f) / 16.666666f);
+		// Card "asteroid field animation": as the sideways belt starts scrolling, slow the near
+		// stars so the fastest star reads clearly slower than the slowest asteroid (the same
+		// depth cue as the earth fly-by). Disengaged when the belt wave finishes (asteroids_OnFinished).
+		Background.EngageBeltSlowdown();
+	}
+
+	private void asteroids_OnFinished(GameEvent sender)
+	{
+		// The belt wave has run its course -- ramp the near stars back up to full speed.
+		Background.DisengageBeltSlowdown();
 	}
 
 	private void demo_OnFinished(GameEvent sender)

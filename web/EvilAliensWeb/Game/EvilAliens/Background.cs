@@ -80,6 +80,32 @@ public class Background : Scene
 
 	private const float DoodadSlowRampOutMs = 1600f;
 
+	// Asteroid-belt star-slowdown (card: "same as earth but for the asteroid field"). The Level 1
+	// sideways asteroid belt is a WAVE (many asteroids over ~42s), not a single crossing doodad, so
+	// it can't ride the per-doodad DoodadStarSlowdownFactor position hook. Instead Level1 EXPLICITLY
+	// engages/disengages this while the belt wave is active. Same idea + ramp feel as the earth: slow
+	// the near stars so the SLOWEST asteroid class (the dim decorative background asteroids, ~0.137
+	// design px/ms) reads clearly faster than the fastest near star. At the modifier=1 gameplay
+	// baseline the fastest near star is scrollspeedmag(0.039) * maxParallax(3.8) ~= 0.148 px/ms -- as
+	// fast as (and sometimes past) the ~0.137 px/ms decor asteroids, which is the "some stars are
+	// faster than asteroids" weirdness. BeltStarSlowdown = 0.37 pulls the fastest star to ~0.055 px/ms
+	// so the decor asteroid is ~2.5x it and the collidable foreground asteroids (~0.342 px/ms) are 5x+.
+	private const float BeltStarSlowdown = 0.37f;
+
+	// Wall-clock ramp durations for the belt envelope, mirroring the doodad ramps: a rapid slow-down
+	// as the belt engages and a gentler speed-up as it leaves. Unlike the doodad's crossing-progress
+	// mapping, the belt has no position, so the envelope is driven directly by beltRampMs over real
+	// time (0 = full star speed, 1 = fully slowed to BeltStarSlowdown).
+	private const float BeltRampInMs = 1200f;
+
+	private const float BeltRampOutMs = 1600f;
+
+	private bool beltSlowActive;
+
+	// Eased 0..1 slowdown amount for the belt: rises to 1 while engaged, falls to 0 while disengaged,
+	// stepped each frame in Update by the ramp durations above.
+	private float beltSlowAmount;
+
 	private float fadeFactor;
 
 	// Stage 13 reskin: the new space background — a procedural, infinite, scrolling
@@ -325,7 +351,15 @@ public class Background : Scene
 		// factor into the field there would compound it geometrically frame-over-frame and
 		// slam the stars to a halt in a few frames (then snap back once End starts rewriting
 		// the field). A per-frame local keeps the doodad factor applied exactly once.
-		float effectiveModifier = scrollspeedmodifier * DoodadStarSlowdownFactor();
+		UpdateBeltSlowdown(gameTime);
+		// Combine the doodad and belt star-slowdowns by taking the STRONGER (smaller) factor, not the
+		// product. In Level 1 they're temporally disjoint (the belt gates on the earth leaving via
+		// WaitForDoodadEvent), so one is always 1 and min == product. But the Level 1 ATTRACT demo
+		// (Demo1) has no such gate -- its earth fly-by can still be crossing when the belt engages --
+		// and multiplying would double-slow the stars to a crawl. min() applies whichever slowdown is
+		// currently deeper and never stacks them, so the composition is correct on both paths.
+		float starSlowdown = MathHelper.Min(DoodadStarSlowdownFactor(), BeltStarSlowdownFactor());
+		float effectiveModifier = scrollspeedmodifier * starSlowdown;
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
 			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
@@ -455,6 +489,60 @@ public class Background : Scene
 		}
 		t = MathHelper.SmoothStep(0f, 1f, MathHelper.Clamp(t, 0f, 1f));
 		return MathHelper.Lerp(1f, doodadStarSlowdown, t);
+	}
+
+	// Engage the asteroid-belt star-slowdown (Level 1 sideways belt phase). Called from
+	// Level1.spawner_OnFinished when the belt scroll speed is set; the near stars ramp DOWN over
+	// BeltRampInMs so the fastest star drops below the slowest asteroid. Idempotent.
+	//
+	// Death-mid-belt is self-correcting: GameEventList.RevertToCheckpoint clears active events
+	// WITHOUT terminating them, so a death during the belt drops the AsteroidSpawner's OnFinished
+	// (i.e. Disengage never fires for that run). It's harmless because the ONLY checkpoint reachable
+	// from mid-belt is the pre-belt one (Level1/Demo1 place their checkpoint before the belt gate),
+	// so the belt replays: Engage is called again (fine -- the belt IS active again) and the fresh
+	// spawner's OnFinished eventually disengages. INVARIANT: don't place a checkpoint INSIDE the
+	// belt, or a death there would strand beltSlowActive = true with no re-engage to correct it.
+	public void EngageBeltSlowdown()
+	{
+		beltSlowActive = true;
+	}
+
+	// Disengage the belt slowdown (Level 1 belt wave finished). Called from the AsteroidSpawner's
+	// OnFinished; the stars ramp BACK UP to full speed over BeltRampOutMs. Idempotent. (A death
+	// mid-belt can skip this call -- see EngageBeltSlowdown; it's self-correcting.)
+	public void DisengageBeltSlowdown()
+	{
+		beltSlowActive = false;
+	}
+
+	// Step the belt slowdown envelope each frame: rise to full slow while engaged (BeltRampInMs),
+	// fall back to none while disengaged (BeltRampOutMs). Wall-clock driven (no doodad position),
+	// so the ramp feel matches the earth's regardless of the belt's long, variable duration.
+	private void UpdateBeltSlowdown(GameTime gameTime)
+	{
+		float dt = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+		if (beltSlowActive)
+		{
+			beltSlowAmount += dt / BeltRampInMs;
+		}
+		else
+		{
+			beltSlowAmount -= dt / BeltRampOutMs;
+		}
+		beltSlowAmount = MathHelper.Clamp(beltSlowAmount, 0f, 1f);
+	}
+
+	// The belt star-slowdown factor (<= 1), combined with the doodad factor via MathHelper.Min in
+	// Update (see there). Smoothstep-eased like the doodad envelope so engage/disengage aren't linear
+	// jerks.
+	private float BeltStarSlowdownFactor()
+	{
+		if (beltSlowAmount <= 0f)
+		{
+			return 1f;
+		}
+		float t = MathHelper.SmoothStep(0f, 1f, beltSlowAmount);
+		return MathHelper.Lerp(1f, BeltStarSlowdown, t);
 	}
 
 	public void DrawForeground(GameTime gameTime)
@@ -764,6 +852,8 @@ public class Background : Scene
 		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 		XFade.Stop();
 		showdoodad = false;
+		beltSlowActive = false;
+		beltSlowAmount = 0f;
 		state = BackgroundState.LeavingHyperspace;
 		fadeFactor = 0.998f;
 		scrollspeed = scrollspeedreset;

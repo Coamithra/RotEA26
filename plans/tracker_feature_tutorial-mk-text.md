@@ -29,13 +29,13 @@ mouse&keyboard text rather than joystick in the tutorial mode.
 - [x] Swap the 3 device strings conditionally; keep gamepad phrasing for gamepad users.
 
 ## Phase 4: Implement
-- [ ] Edit TutorialLevel.cs
+- [x] Edit TutorialLevel.cs + TutorialMessageEvent.cs (deferred resolver)
 
 ## Phase 5: Verify
-- [ ] dotnet build -c Debug (no live browser per orchestrator override)
-- [ ] Re-read full diff
+- [x] dotnet build -c Debug (0 errors; no new warnings; no live browser per override)
+- [x] Re-read full diff
 
 ## Phase 6: Ship
-- [ ] Commit + push
-- [ ] Self-review (rtk git diff main...HEAD)
+- [x] Commit + push
+- [~] Peer review (foreground reviewer per coordinator policy)
 - [ ] PR --fill (DO NOT MERGE — pause for orchestrator)

@@ -319,7 +319,7 @@ namespace EvilAliensWeb.Compat
 							HarnessRot = rt;
 						}
 						break;
-case "bulletshot":
+						case "bulletshot":
 						Bulletshot = IsOn(val);
 						if (Bulletshot)
 						{

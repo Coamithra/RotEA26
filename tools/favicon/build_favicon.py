@@ -24,11 +24,13 @@ SHEET = os.path.join(ROOT, "web", "EvilAliensWeb", "wwwroot",
                      "Content", "gfx", "sprites", "ufosheet.png")
 OUT_DIR = os.path.join(ROOT, "web", "EvilAliensWeb", "wwwroot")
 
-# ufosheet is a uniform 8-col x 4-row spin sheet (no .dat sidecar; the player
-# UFO slices it as a grid via AlienDrawableGameComponent). Frame 28 is the
-# top-3/4 "hero" pose: full elliptical disc, bright teal dome, the alien
-# silhouette just visible inside -- the most legible UFO at 16px.
-COLS, ROWS = 8, 4
+# ufosheet is an 8-col x 4-row spin sheet (no .dat sidecar; the player UFO
+# slices it as a grid via AlienDrawableGameComponent) with a 1px separator
+# between cells -- mirror the engine's slicing so we extract the exact frame it
+# draws (AlienDrawableGameComponent.cs ~L560). Frame 28 is the top-3/4 "hero"
+# pose: full elliptical disc, bright teal dome, the alien silhouette just
+# visible inside -- the most legible UFO at 16px.
+COLS, ROWS, SEP = 8, 4, 1
 FRAME = 28
 
 BG = (5, 3, 10, 255)     # menu near-black (#05030a), matches the old favicon tile
@@ -40,9 +42,11 @@ TOUCH_SIZE = 180
 
 def extract_frame(sheet, idx):
     w, h = sheet.size
-    cw, ch = w // COLS, h // ROWS
+    cw = (w - (COLS - 1) * SEP) // COLS      # engine cell pitch (separator-aware)
+    ch = (h - (ROWS - 1) * SEP) // ROWS
     r, c = divmod(idx, COLS)
-    cell = sheet.crop((c * cw, r * ch, (c + 1) * cw, (r + 1) * ch))
+    x, y = c * (cw + SEP), r * (ch + SEP)
+    cell = sheet.crop((x, y, x + cw, y + ch))
     bbox = cell.getbbox()           # tight-crop to the saucer's alpha bounds
     return cell.crop(bbox) if bbox else cell
 

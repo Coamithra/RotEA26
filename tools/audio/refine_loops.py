@@ -19,7 +19,10 @@
 # actual splice CLICK first and refine only the ones above an audible threshold,
 # choosing the candidate that minimises the click while staying long & musical.
 # Measured on the committed banks, only stage1 / stage2 / classic click audibly
-# (62.9 / 41.0 / 17.6, vs <6 for the rest, which matches "not so bad past lvl1").
+# (this tool's offline metric: 62.9 / 41.0 / 17.6, vs <6 for the rest, which
+# matches "not so bad past lvl1"). The live Chrome decode reads even higher —
+# its OGG priming worsens the raw end->start wrap (stage1 ~617) — but the ranking
+# and the refined-loop verdict are the same.
 #
 # It only rewrites loopStart/loopEnd in music.json (file/duration/introEnd are
 # preserved). build_audio.py calls this at the end of a full rebuild; it is also
@@ -79,12 +82,14 @@ def splice_click(audio, rate, ls, le):
     """Per-sample step at the loop join, normalised by the local step size."""
     n = audio.shape[0]
     a = int(round(ls * rate)) % n
-    b = min(int(round(le * rate)), n - 1)
+    b = max(1, min(int(round(le * rate)), n - 1))
     pre = audio[max(0, b - 256):b]
     post = audio[a:a + 256]
     step = float(np.sqrt(np.mean((audio[b - 1] - audio[a]) ** 2)))
-    base = float(np.median(np.concatenate(
-        [np.abs(np.diff(pre, axis=0)), np.abs(np.diff(post, axis=0))]))) + 1e-9
+    local = [np.abs(d) for d in (np.diff(pre, axis=0), np.diff(post, axis=0)) if d.size]
+    if not local:                                   # degenerate window: treat as bad
+        return float("inf")
+    base = float(np.median(np.concatenate(local))) + 1e-9
     return step / base
 
 
@@ -127,6 +132,10 @@ def run(dry_run=False):
             continue
         ov = OVERRIDES.get(cue, {})
         old_s, old_e = info["loopStart"], info["loopEnd"]
+        # Persist the intro floor so the manifest is self-describing and a later
+        # standalone run is data-driven rather than reliant on FLOORS (build_audio
+        # writes this too; setdefault keeps its value when present).
+        info.setdefault("introEnd", FLOORS.get(cue, 0.0))
 
         if "loopStart" in ov and "loopEnd" in ov:        # exact manual pin
             new_s, new_e, score = ov["loopStart"], ov["loopEnd"], None
@@ -138,7 +147,7 @@ def run(dry_run=False):
                 continue
             ml = MusicLooper(path)
             dur = ml.samples_to_seconds(ml.mlaudio.length)
-            floor = ov.get("floor", info.get("introEnd", FLOORS.get(cue, 0.0)))
+            floor = ov.get("floor", info["introEnd"])
             min_len = ov.get("min_len", max(MIN_LEN_ABS, MIN_LEN_FRAC * dur))
             pick = choose_loop(ml, audio, rate, floor, min_len, c_old)
             if pick is None:

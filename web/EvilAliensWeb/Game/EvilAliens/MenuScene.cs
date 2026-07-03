@@ -519,6 +519,14 @@ internal class MenuScene : Scene
 		{
 			starter = ControlDevice.Generic;
 		}
+		else
+		{
+			// Mouse-click activation (Stage 13 made every MenuSub1 entry clickable) presses
+			// none of the device keys; on web the mouse is the keyboard player, so default to
+			// Keyboard instead of leaving starter at the enum default (PadOne), which would
+			// bind the level to a nonexistent gamepad (instant pause loop).
+			starter = ControlDevice.Keyboard;
+		}
 		sender.Remove();
 	}
 
@@ -925,6 +933,14 @@ internal class MenuScene : Scene
 		else if (base.InputHandler.Pressed(MyKeys.Generic_Start))
 		{
 			starter = ControlDevice.Generic;
+		}
+		else
+		{
+			// Mouse-click activation (Stage 13 made every MenuSub1 entry clickable) presses
+			// none of the device keys; on web the mouse is the keyboard player, so default to
+			// Keyboard instead of leaving starter at the enum default (PadOne), which would
+			// bind the level to a nonexistent gamepad (instant pause loop).
+			starter = ControlDevice.Keyboard;
 		}
 		sender.Remove();
 	}

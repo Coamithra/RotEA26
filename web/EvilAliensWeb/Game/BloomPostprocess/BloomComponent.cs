@@ -125,6 +125,19 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 		bloomExtractEffect = content.Load<Effect>("BloomExtract");
 		bloomCombineEffect = content.Load<Effect>("BloomCombine");
 		gaussianBlurEffect = content.Load<Effect>("GaussianBlur");
+		// The blur-kernel cache (EnsureBlurKernel) keys off BlurAmount + the half-res
+		// target size and only re-pushes SampleWeights to the effect on a miss. A content
+		// reload (UnloadContent -> LoadContent) hands us a BRAND-NEW gaussianBlurEffect with
+		// zeroed SampleWeights, but the cache keys still match the old state — so without
+		// this reset EnsureBlurKernel would early-return and never SetValue the weights on
+		// the new instance (until a resize/preset change), and bloom would render black.
+		// Reset here (not UnloadContent): LoadContent is the site that actually creates the
+		// zero-weight effect, and it always runs (initial load + every reload), whereas
+		// UnloadContent may be skipped. NaN forces the miss: `blur == cachedBlurAmount` is
+		// always false when cachedBlurAmount is NaN (NaN != NaN), so the whole cache-hit &&
+		// short-circuits to a miss, which recomputes AND re-marshals the weights + offsets —
+		// so the size part of the key needs no separate reset (the single miss rebuilds it).
+		cachedBlurAmount = float.NaN;
 		// 'sketch' was loaded by the original but never applied in Draw; its .fx is
 		// lost and it's dead, so we don't ship/load it (Stage 5).
 		EnsureTargets();

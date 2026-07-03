@@ -48,6 +48,13 @@ internal class InstructionsMenu : DrawableGameComponent
 		base.Initialize();
 		currentlyDisplaying = HelpText.Displays.Lead;
 		base.LoadContent();
+		// KNI runs LoadContent() once per component instance EVER (guarded), but this menu
+		// is a per-GameScene singleton whose Unload() (pause-menu exit) disposes the
+		// localContent textures. Re-load them every showing: a no-op cache hit while
+		// nothing was unloaded, a fresh decode after Unload() — otherwise the second
+		// pause -> Instructions draws disposed textures.
+		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls Keyboard");
+		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls Joypad");
 	}
 
 	protected override void LoadContent()

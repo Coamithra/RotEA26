@@ -171,6 +171,11 @@ InsaneBossI|gfx/hud/barlitedge
 # credits scene, so warming them on Level3's loading screen kills every one of those stutters.
 # (In-level spider art is NOT the problem: Level2/InsaneBossI/Demo2 code-preload everything their
 # spiders use -- verified per load site.)
+# DELIBERATE TRADEOFF: every Level3 run at every difficulty pays this warm on its loading screen,
+# though only Hard+ winners see the cast. Accepted: the alternative (warming from CreditsScene,
+# pumped during the crawl) still blocks a tick per decode -- a 1.4 MB PNG is a visible stutter in
+# continuously-scrolling text, the exact bug class being fixed -- and the manifest has no
+# difficulty gate. Loading-screen cost for maybe-unseen content matches the rest of this file.
 Level3|gfx/sprites/spider_sheet2
 Level3|gfx/spider/spiderfly
 Level3|gfx/sprites/wing1

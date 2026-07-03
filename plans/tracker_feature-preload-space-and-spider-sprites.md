@@ -70,8 +70,10 @@ pause BEFORE merge; report live-test items.
       off per code reading; fix still worthwhile + implemented as above.
 
 ## Phase 4: Implement
-- [ ] Code changes
-- [ ] CLAUDE.md update if a new convention is introduced
+- [x] Code changes (Game1 idleWarmQueue; manifest Level3 cast block)
+- [x] CLAUDE.md updated (idle-warm convention appended to the menu-warm bullet)
+- [x] Post-review fixes: [warm] log prefix, UpdateInner call-site comment,
+      ?level= non-space edge documented on idleWarmQueue, manifest tradeoff note
 
 ## Phase 5: Verify (no live)
 - [x] dotnet build -c Debug clean (0 errors, pre-existing warnings only; rebuilt after main pull)

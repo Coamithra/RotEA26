@@ -149,6 +149,11 @@ public class Game1 : Game
 	// level entered before the queue drains) the leftovers decode where they always did
 	// — synchronously in Background.SetSpace() on the level's loading tick — and the
 	// queued entries become free cache hits afterwards; either order is safe.
+	// Known minor edge: a ?level= boot into a NON-space level (e.g. Level2/Mars) never
+	// calls SetSpace, so the leftovers trickle-decode one-per-tick during early gameplay
+	// (each sub-watchdog, ~40ms .dds / ~20ms star PNG) and ?loadlog logs them as COLD
+	// against that level — don't let eaPreloadExport bake space tiles into a non-space
+	// level's manifest set from such a run. Debug-only boots; accepted.
 	private readonly Queue<Action> idleWarmQueue = new Queue<Action>();
 
 	public Game1()
@@ -557,7 +562,7 @@ public class Game1 : Game
 		}
 		catch (Exception ex)
 		{
-			System.Console.WriteLine("[menu-warm] " + assetName + " warm failed: " + ex.Message);
+			System.Console.WriteLine("[warm] " + assetName + " warm failed: " + ex.Message);
 		}
 	}
 
@@ -779,8 +784,8 @@ public class Game1 : Game
 			base.Update(gameTime);
 			collectionHelper.Update();
 			collisionHandler.DetectCollisions();
-			// Warm one queued menu asset per tick, hiding the heavy decodes behind the
-			// splash / Press-Start idle time (see QueueMenuWarm). No-op once drained.
+			// Warm one queued asset per tick (menu queue first, then the low-priority
+			// idle set — see PumpWarmQueue). No-op once both queues are drained.
 			PumpWarmQueue();
 		}
 		else

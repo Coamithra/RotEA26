@@ -223,3 +223,133 @@ html, body {
     color: #fff;
     outline: none;
 }
+
+/* ---- Webcam challenge ("I Made This!"): person overlay + camera-setup dialog
+   (built OUTSIDE #app by eaWebcam in webcam.js). The overlay canvas is placed
+   over the game's 4:3 letterbox (same math as RenderScale.WindowDestRect) and
+   never captures input; the setup dialog reuses the dark/green UI theme. */
+#ea-webcam-layer {
+    position: fixed;
+    z-index: 500;                     /* above the game canvas, below #ea-ui (1000+) */
+    pointer-events: none;
+    opacity: 0.95;                    /* a whisper of the scene shows through the player */
+}
+
+#ea-webcam-setup {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;                    /* above everything, incl. the trailer overlay */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 1, 6, 0.88);
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+#ea-webcam-setup .ea-wc-card {
+    width: min(92vw, 460px);
+    padding: 20px 22px 18px;
+    background: #0a0714;
+    border: 1px solid rgba(124, 252, 0, 0.45);
+    border-radius: 12px;
+    box-shadow: 0 0 32px rgba(124, 252, 0, 0.18);
+    color: #d8ffd0;
+}
+#ea-webcam-setup .ea-wc-title {
+    font-weight: 800;
+    font-size: 20px;
+    letter-spacing: 0.14em;
+    text-align: center;
+    color: #7CFC00;
+}
+#ea-webcam-setup .ea-wc-sub {
+    margin: 6px 0 12px;
+    text-align: center;
+    font-size: 13px;
+    color: #b9c4b4;
+}
+#ea-webcam-setup .ea-wc-previewwrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border: 1px solid rgba(124, 252, 0, 0.35);
+    border-radius: 8px;
+    overflow: hidden;
+    /* a tiny CSS starfield so the keyed preview reads as "you, in space" */
+    background:
+        radial-gradient(1.6px 1.6px at 12% 22%, #fff 60%, transparent),
+        radial-gradient(1.2px 1.2px at 32% 74%, #cfe0ff 60%, transparent),
+        radial-gradient(1.8px 1.8px at 51% 38%, #fff 60%, transparent),
+        radial-gradient(1.1px 1.1px at 66% 82%, #b9c8ff 60%, transparent),
+        radial-gradient(1.5px 1.5px at 78% 15%, #fff 60%, transparent),
+        radial-gradient(1.2px 1.2px at 88% 55%, #d9e4ff 60%, transparent),
+        radial-gradient(1px 1px at 22% 52%, #aab8e8 60%, transparent),
+        radial-gradient(1.3px 1.3px at 43% 90%, #fff 60%, transparent),
+        radial-gradient(1px 1px at 92% 88%, #fff 60%, transparent),
+        radial-gradient(1.4px 1.4px at 6% 87%, #cfe0ff 60%, transparent),
+        #05030a;
+}
+#ea-webcam-setup .ea-wc-preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+#ea-webcam-setup .ea-wc-devrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0 8px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+#ea-webcam-setup .ea-wc-device {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    background: #141022;
+    color: #d8ffd0;
+    border: 1px solid rgba(124, 252, 0, 0.35);
+    border-radius: 6px;
+    font: inherit;
+}
+#ea-webcam-setup .ea-wc-status {
+    min-height: 2.4em;
+    font-size: 12.5px;
+    color: #b9c4b4;
+}
+#ea-webcam-setup .ea-wc-status.ea-wc-ok   { color: #9dff6e; }
+#ea-webcam-setup .ea-wc-status.ea-wc-warn { color: #ffd166; }
+#ea-webcam-setup .ea-wc-status.ea-wc-err  { color: #ff6e6e; }
+#ea-webcam-setup .ea-wc-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+#ea-webcam-setup .ea-wc-buttons button {
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+#ea-webcam-setup .ea-wc-join {
+    flex: 1;
+    color: #05030a;
+    background: #7CFC00;
+    border: 2px solid #7CFC00;
+}
+#ea-webcam-setup .ea-wc-join:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+#ea-webcam-setup .ea-wc-join:not(:disabled):hover { background: #9dff6e; }
+#ea-webcam-setup .ea-wc-cancel {
+    color: #d8ffd0;
+    background: rgba(5, 3, 10, 0.65);
+    border: 2px solid rgba(124, 252, 0, 0.5);
+}
+#ea-webcam-setup .ea-wc-cancel:hover { background: rgba(124, 252, 0, 0.3); color: #fff; }

@@ -294,6 +294,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (`eaMusic.pause()`/`resume()` = AudioContext suspend/resume, seamless) and on close (Back/Esc/backdrop,
   all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
   (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
+- **Webcam challenge "I Made This!" (`Levels.WebcamAliens`)** — the remake of the 2004 webcam game the
+  splash meme is from; last entry in the Challenges carousel (ungated). The player's SEGMENTED camera
+  image is the ship: **JS owns everything camera** (`wwwroot/webcam.js` = the Teams-style setup dialog
+  with device picker + preview, getUserMedia, and the mirrored person OVERLAY canvas positioned over the
+  4:3 letterbox, outside `#app` like the touch/trailer overlays), **C# owns everything gameplay**
+  (`Compat/WebcamInterop.cs` + `Game/EvilAliens/WebcamLevel.cs`/`WebcamUfo.cs`/`WebcamPlasma.cs`). The
+  collision surface is a 40x30 person-mask occupancy grid in design space, pushed ~30Hz from JS
+  (`webcamMask`, ~200 B base64); the scene hit-tests saucers/plasma against it (`HitCircle`) and aims at
+  its `Centroid`. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
+  fire ONE big slow plasma orb at you; 3 hearts, 20 kills to win. **GOTCHA — MediaPipe MUST stay in the
+  worker (`webcam-worker.js`):** its Emscripten loader assigns the global `Module`, which Blazor's Mono
+  runtime also uses — importing tasks-vision on the main thread kills the whole .NET runtime ("_malloc is
+  not a function", reproduced). The ~10 MB runtime+model under `wwwroot/lib/mediapipe/` (see its README)
+  is lazy-loaded only when the level starts, so the boot payload is unchanged; if it can't load the level
+  falls back to a fixed-oval "simple mode". A `Levels` member must only ever be APPENDED (XmlSerializer
+  keys on enum names) — `Achievements.checkData` now BACKFILLS missing level keys instead of wiping
+  progress on the first post-update load. Derived art (`heart.png`, `Screenshots/webcamss` — cropped from
+  the meme splash) is built by `tools/webcam/build_webcam_assets.py`; don't hand-edit. Headless QA: fake
+  a player from the console via `DotNet.invokeMethod('EvilAliensWeb','webcamMask', b64Grid, coverage)`.
 - **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no

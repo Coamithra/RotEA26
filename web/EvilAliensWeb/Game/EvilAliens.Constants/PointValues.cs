@@ -37,4 +37,6 @@ public static class PointValues
 	public const float BrainBoss = 5000f;
 
 	public const float FakeBoss = 3000f;
+
+	public const float WebcamUfo = 10f;
 }

@@ -16,5 +16,10 @@ public enum Levels
 	Demo2,
 	Demo3,
 	CrazyGame,
-	Paratrooper
+	Paratrooper,
+	// Web-port addition: the webcam challenge ("I Made This!" — the remake of the
+	// 2004 webcam game the splash meme is from). Appended LAST on purpose: the
+	// XmlSerializer saves key on enum NAMES, so existing saves stay valid, and
+	// Achievements.checkData backfills the new key instead of wiping progress.
+	WebcamAliens
 }

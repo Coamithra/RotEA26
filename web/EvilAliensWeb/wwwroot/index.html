@@ -81,6 +81,13 @@
     <script src="_content/nkast.Wasm.Canvas/js/CanvasGLContext.8.0.5.js"></script>
     <script src="_content/nkast.Wasm.Audio/js/Audio.8.0.5.js"></script>
 
+    <!-- eaWebcam: the "I Made This!" webcam challenge level's browser half — the
+         Teams-style camera-setup dialog, the segmented-person overlay canvas, and
+         the collision-mask feed into C# (Compat/WebcamInterop.cs). The heavy
+         MediaPipe segmentation payload under lib/mediapipe/ is lazy-loaded from
+         inside webcam.js only when the level starts; this script itself is tiny. -->
+    <script src="webcam.js"></script>
+
     <script>
         // Web-port debug shortcuts: hand the URL query string to .NET at boot so
         // DebugFlags can parse ?menu / ?noattract / ?level=... (see Compat/DebugFlags.cs).

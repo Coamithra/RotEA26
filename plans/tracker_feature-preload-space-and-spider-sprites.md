@@ -74,13 +74,17 @@ pause BEFORE merge; report live-test items.
 - [ ] CLAUDE.md update if a new convention is introduced
 
 ## Phase 5: Verify (no live)
-- [ ] dotnet build -c Debug clean
-- [ ] Full diff re-read (rtk git diff main...HEAD)
-- [ ] List live-test items
+- [x] dotnet build -c Debug clean (0 errors, pre-existing warnings only; rebuilt after main pull)
+- [x] Full diff re-read vs origin/main (exactly 4 files, all mine; NOTE: local `main`
+      ref in the root checkout is stale — always diff against origin/main)
+- [x] Live-test items listed in the final report / card comments
 
 ## Phase 6: Ship (PAUSE before merge)
-- [ ] Commit + push
-- [ ] Peer review (Skill review; fallback self-review)
-- [ ] Pull main again
+- [x] Commit + push
+- [ ] Peer review: PENDING — cold reviewer agent spawned but not finished at ship time;
+      per orchestrator instruction no self-review substituted. Orchestrator reviews
+      before merge; triage any late reviewer findings then too.
+- [x] Pull main again (rebased cleanly onto latest; no conflicts in my files)
 - [ ] rtk gh pr create --fill
-- [ ] STOP: report to orchestrator (no merge, no card paperwork, no cleanup)
+- [ ] Card comments (all four cards)
+- [ ] STOP: report to orchestrator (no merge, no Done moves, no worktree cleanup)

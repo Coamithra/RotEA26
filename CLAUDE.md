@@ -191,6 +191,21 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `build_audio.py` calls it as its last step; re-run `python tools/audio/refine_loops.py` standalone
   after a bank rebuild (needs `pymusiclooper`; absent → whole-wave points are left in place). Per-track
   hand-tunes go in its `OVERRIDES`; don't hand-edit the loop points. `--dry-run` previews.
+- **The `classic` music cue is a BESPOKE EXTERNAL track, not from the banks — `tools/audio/install_classic.py`.**
+  The retro-minigame song (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`, played by
+  `AsteroidChase`/`BraineroidsLevel`/`CrazyGame`) was replaced with a user-authored "Evil Aliens
+  Revenged" track (`new_assets_raw/EvilAliensRevengedLoopable.ogg`, gitignored raw source; the committed
+  `classic.ogg` is the shipped artifact). Because it isn't in the recovered XACT banks, **`classic` was
+  removed from `build_audio.py`'s bank-cracked `MUSIC_CUES`** and is installed by `install_classic.py`
+  instead (same pattern as `build_channelswap.py` owning the one port-era SFX cue). The tool copies the
+  source OGG straight to `classic.ogg` (already OGG/Vorbis 44100 stereo — a copy avoids a re-encode) and
+  writes `music.json`'s `classic` loop from **pymusiclooper's own top-ranked pair** (the track has a ~75s
+  intro then a seamless ~339s body loop; `loopStart 75.06 → loopEnd 414.18`, `introEnd = loopStart`).
+  `build_music` now **merges** into the existing `music.json` (instead of overwriting) so a full
+  `build_audio.py` rebuild preserves the external `classic` entry, and `main()` calls
+  `install_classic.install()` (a missing source just leaves the committed track untouched — safe in CI /
+  fresh clones). Re-run `python tools/audio/install_classic.py` after swapping the source track; don't
+  hand-edit `classic.ogg`/`music.json`. `--dry-run` previews; `--source <path>` overrides the source.
 - **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
   WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
   (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;

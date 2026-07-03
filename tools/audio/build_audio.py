@@ -48,7 +48,10 @@ SFX_CUES = [
 
 # Music cues -> the SongInstance.songFiles ids. Cues with two waves are an
 # authored intro + loop body (the intro plays once, then the body loops).
-MUSIC_CUES = ["stage1", "stage2", "stage3", "bach", "classic",
+# "classic" is NOT here: it was replaced with a bespoke external track and is
+# installed by install_classic.py (called from main); build_music preserves its
+# music.json entry so a rebuild never drops or clobbers it.
+MUSIC_CUES = ["stage1", "stage2", "stage3", "bach",
               "sjaak", "kylikova", "sjaakslow"]
 
 
@@ -118,7 +121,10 @@ def build_narration():
 
 def build_music(entries, cues):
     os.makedirs(MUSIC_DIR, exist_ok=True)
-    manifest = {}
+    # Merge into the existing manifest so externally-installed cues (classic,
+    # via install_classic.py) survive a rebuild instead of being dropped.
+    manifest_path = os.path.join(MUSIC_DIR, "music.json")
+    manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
     for cue in MUSIC_CUES:
         waves = cues[cue]
         parts = [xact.decode(entries[w]) for w in waves]
@@ -152,7 +158,7 @@ def build_music(entries, cues):
         size = os.path.getsize(out) / 1024
         print(f"  mus  {cue:10} wave{waves} {total:6.1f}s {kind:10} "
               f"loop[{loop_start:6.1f}..{loop_end:6.1f}] {size:6.0f}KB")
-    with open(os.path.join(MUSIC_DIR, "music.json"), "w") as f:
+    with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"  -> {os.path.join('Content', 'music', 'music.json')} ({len(manifest)} tracks)")
 
@@ -169,6 +175,14 @@ def main():
     build_narration()
     print("Music:")
     build_music(entries, cues)
+    # "classic" is a bespoke external track, not a bank cue — install it (copy +
+    # pymusiclooper loop). A missing source leaves the committed classic in place.
+    print("External music (classic):")
+    try:
+        import install_classic
+        install_classic.install()
+    except ImportError:
+        print("  (pymusiclooper not installed — skipped; run install_classic.py later)")
     # The loop points written above are the raw XACT whole-wave points, which
     # seam under WebAudio's hard-splice loop. Refine them to waveform-matched
     # points (pymusiclooper). Optional — a missing pymusiclooper just leaves the

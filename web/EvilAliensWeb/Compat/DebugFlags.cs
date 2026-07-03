@@ -55,6 +55,11 @@ namespace EvilAliensWeb.Compat
 	//     ?blastactive=<0..1> fade-alpha floor below which the blast stops dealing damage (def 0.5)
 	//     ?blasthit=<f>       fraction of the visible radius that deals damage (default 0.8)
 	//     ?blastloop=<sec>    seconds for one spawn->fade sweep in the viz (default 3)
+	//   With ?harness=battleskull (the level-3 alienboss "lightbulb" boss) the harness can
+	//   override the hue-remap colorize so the recolour band + target can be tuned by eye:
+	//     ?huestart=<deg>  hue-band Minimum (in-game -10)   ?hueend=<deg> hue-band Maximum (10)
+	//     ?huetarget=<deg> / ?hue=<deg>  pin the target hue (0..360; default = HP-based)
+	//     ?huecycle        auto-sweep the target 0..360 (?hueloop=<sec> sets the period, def 6)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
 	//            ?harness=Spider&frame=2   ?harness=DeathStar&play   ?harness=UFO&pos=300,260
@@ -166,6 +171,30 @@ namespace EvilAliensWeb.Compat
 
 		public static float BlastLoopSeconds { get; private set; } = 3f;
 
+		// Colorize (hue-remap) tuning knobs for the alienboss "lightbulb" boss in the sprite
+		// harness (?harness=battleskull). The BattleSkull recolours a band of the alienboss
+		// sprite's hues [Minimum,Maximum] toward a Target hue (all in degrees); in-game that
+		// band is (-10,10) and the Target sweeps with HP (100=green full HP -> 0=red dead).
+		// These override those numbers so the band + target can be tuned by eye. ALL null/off
+		// => BattleSkull uses its baked-in values, so a shipped build is byte-identical, and
+		// they only ever apply while the harness is up (BattleSkull gates on Harness != null).
+		//   ?huestart=<deg>  overrides the hue-band Minimum  (in-game -10)
+		//   ?hueend=<deg>    overrides the hue-band Maximum  (in-game  10)
+		//   ?huetarget=<deg> pins the Target hue (0..360). Without it the Target sweeps with the
+		//                    ?hue scrub / ?huecycle, or rests at the full-HP value (100).
+		//   ?hue=<deg>       one-shot scrub: pin the Target to this exact hue (alias of huetarget)
+		//   ?huecycle        auto-sweep the Target 0..360 so a screenshot shows any point of the
+		//                    range (alias ?huesweep); ?hueloop=<sec> sets the sweep period (def 6)
+		public static float? HueStart { get; private set; }
+
+		public static float? HueEnd { get; private set; }
+
+		public static float? HueTarget { get; private set; }
+
+		public static bool HueCycle { get; private set; }
+
+		public static float HueLoopSeconds { get; private set; } = 6f;
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -273,6 +302,35 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bl) && bl > 0f)
 					{
 						BlastLoopSeconds = bl;
+					}
+					break;
+				case "huestart":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
+					{
+						HueStart = hs;
+					}
+					break;
+				case "hueend":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var he))
+					{
+						HueEnd = he;
+					}
+					break;
+				case "huetarget":
+				case "hue":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ht))
+					{
+						HueTarget = ht;
+					}
+					break;
+				case "huecycle":
+				case "huesweep":
+					HueCycle = IsOn(val);
+					break;
+				case "hueloop":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hl) && hl > 0f)
+					{
+						HueLoopSeconds = hl;
 					}
 					break;
 				case "harness":

@@ -44,27 +44,38 @@ internal class TutorialLevel : GameScene
 		contentManager.Load<Texture2D>("GFX/Sprites/smallship");
 	}
 
+	// True when the tutorial player is on an actual gamepad. Player 0 is the "starter" that
+	// launched this level (Game1.MenuFinished -> oracle.AddPlayer(starter)): a real gamepad
+	// => PadOne..PadFour, while keyboard/mouse select AND mouse-click AND the on-screen touch
+	// overlay all resolve to ControlDevice.Keyboard. So joystick prompts show only for an
+	// actual gamepad; everything else (keyboard, mouse, touch) gets mouse & keyboard phrasing.
+	// DeviceIsPlaying is the same non-throwing query GameScene uses everywhere for keyboard
+	// detection. NOTE: this MUST be evaluated at display time (via messageByDevice's resolver),
+	// not while PopulateEventList builds the event list — the list is built in the GameScene
+	// constructor at boot, long before any player is added, so a build-time read is always false.
+	private bool UsingGamepad => oracle.DeviceIsPlaying(ControlDevice.PadOne) || oracle.DeviceIsPlaying(ControlDevice.PadTwo) || oracle.DeviceIsPlaying(ControlDevice.PadThree) || oracle.DeviceIsPlaying(ControlDevice.PadFour);
+
 	protected override void PopulateEventList()
 	{
 		wait(4f);
 		message("Welcome to the Trial Simulation Chamber");
 		message("Activating Tutorial Mode...");
 		wait(1f);
-		message("Use Left Stick to Move", isCheckpoint: true);
+		messageByDevice("Use Left Stick to Move", "Use WASD or Arrow Keys to Move", isCheckpoint: true);
 		MessageEvent messageEvent = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 2.5f);
 		messageEvent.SetupAsWarning(-(float)Math.PI / 2f);
 		messageEvent.OnFinished += messageEvent_OnFinished;
 		eventList.AddEvent(messageEvent, halting: true);
 		eventList.AddHalt();
 		wait(6f);
-		message("Use Right Stick to Fire", isCheckpoint: true);
+		messageByDevice("Use Right Stick to Fire", "Aim with the Mouse, hold Left Click to Fire", isCheckpoint: true);
 		SingleEnemySpawner gameEvent = new SingleEnemySpawner(base.Game);
 		eventList.AddEvent(gameEvent);
 		eventList.AddHalt();
 		wait(1f);
 		message("Enhancements:", isCheckpoint: true);
 		message("Pick up B's for a bomb");
-		message("Press Left or Right Trigger to activate a\nbomb");
+		messageByDevice("Press Left or Right Trigger to activate a\nbomb", "Right Click to activate a bomb");
 		message("You can carry up to 3 bombs");
 		bonusWave(Powerup.PowerupType.Blast);
 		wait(9.5f);
@@ -180,6 +191,20 @@ internal class TutorialLevel : GameScene
 	private void message(string message, float time, bool isCheckpoint)
 	{
 		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, time, message);
+		eventList.AddEvent(gameEvent);
+		eventList.AddHalt();
+		if (isCheckpoint)
+		{
+			eventList.SetLastEventAsCheckPoint();
+		}
+		wait(0.6f);
+	}
+
+	// Device-dependent prompt: picks gamepadText vs mkText when the message is actually
+	// shown (see UsingGamepad — must be resolved at display time, not list-build time).
+	private void messageByDevice(string gamepadText, string mkText, bool isCheckpoint = false)
+	{
+		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, 6.5f, () => UsingGamepad ? gamepadText : mkText);
 		eventList.AddEvent(gameEvent);
 		eventList.AddHalt();
 		if (isCheckpoint)

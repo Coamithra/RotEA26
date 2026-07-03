@@ -157,3 +157,30 @@ InsaneBossI|gfx/menu/powerbar
 InsaneBossI|gfx/hud/barlit
 InsaneBossI|gfx/hud/barunlit2
 InsaneBossI|gfx/hud/barlitedge
+
+# Credits CAST ROLL gaps (cards f75e6f25 / 2956da8a / c5d91d6e: flying-spider / boss-spider /
+# spider-debris hitches). The cast-of-characters roll (CastDisplayer) only plays in the credits
+# after beating Level3 on Hard+ (CreditsScene.SetupLevel3 -> castWillBeDisplayed, added mid-crawl
+# at the "Well done." line). It loads every enemy's sheet through the SHARED content manager --
+# most are already warm from Level3's own preload (brainbosshd, alienboss, deathstarsheet2,
+# eye_idle, faceofdeathspritesheet, ufosheet, ...), but Level3 has no spiders and no motherships,
+# so those decode COLD mid-crawl: wing1 + spiderdebris1-3 + gfx/spider/spiderfly on the tick the
+# cast is added (its LoadContent), spider_sheet2 (the 8 MB .dds fetch+upload) the frame the
+# "Spider Wasp" entry appears, and mothershipA/B (1.4 MB PNG each) at the "Alien Battleship"
+# entry -- each a visible stutter in the scrolling crawl. Level3 ALWAYS immediately precedes that
+# credits scene, so warming them on Level3's loading screen kills every one of those stutters.
+# (In-level spider art is NOT the problem: Level2/InsaneBossI/Demo2 code-preload everything their
+# spiders use -- verified per load site.)
+# DELIBERATE TRADEOFF: every Level3 run at every difficulty pays this warm on its loading screen,
+# though only Hard+ winners see the cast. Accepted: the alternative (warming from CreditsScene,
+# pumped during the crawl) still blocks a tick per decode -- a 1.4 MB PNG is a visible stutter in
+# continuously-scrolling text, the exact bug class being fixed -- and the manifest has no
+# difficulty gate. Loading-screen cost for maybe-unseen content matches the rest of this file.
+Level3|gfx/sprites/spider_sheet2
+Level3|gfx/spider/spiderfly
+Level3|gfx/sprites/wing1
+Level3|gfx/sprites/spiderdebris1
+Level3|gfx/sprites/spiderdebris2
+Level3|gfx/sprites/spiderdebris3
+Level3|gfx/sprites/mothershipa
+Level3|gfx/sprites/mothershipb

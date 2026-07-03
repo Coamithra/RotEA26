@@ -380,6 +380,22 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
   (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
   `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
+- **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
+  The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
+  the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the
+  `KillableAlien` red death-tint): its `Draw` sets `colorizeEffect.RangeTarget = (-10, 10, num)` where
+  `num = HitPointsNormalized*100` (100 = green full HP -> 0 = red dead), which the `sprite.fx` COLORIZE
+  path recolours toward (see the feathered hue-range remap; grays are untouched). To tune "it doesn't
+  colorize well" by eye, `BattleSkull.Draw` routes its RangeTarget through **`HarnessColorize.Apply`**,
+  which overrides the band + target from URL flags **only while the sprite harness is up**
+  (`DebugFlags.Harness != null` **and** a hue flag present) — so normal play + the other alienboss
+  bosses are byte-identical. Flags (`Compat/DebugFlags.cs`): `?huestart=<deg>` / `?hueend=<deg>` (the
+  hue band, in-game -10/10), `?huetarget=<deg>` (alias `?hue`, pin the target; default = HP-based),
+  `?huecycle` (auto-sweep the target 0..360 so a screenshot shows any point; `?hueloop=<sec>` period).
+  `HarnessScene` shows a live `colorize band [..]  target ..` readout (`HarnessColorize.Describe`).
+  Picker: `wwwroot/harness.html` (battleskull option + hue fields). When the user settles on values,
+  the chosen band/target get written back into `BattleSkull.Draw`'s hard-coded `new Vector3(...)` (and
+  the target curve if they change how it tracks HP). e.g. `?harness=battleskull&huestart=-20&hueend=40&huecycle`.
 - **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
   was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research

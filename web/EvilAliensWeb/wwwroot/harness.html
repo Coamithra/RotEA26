@@ -77,7 +77,7 @@
         <option value="braineroidmedium">braineroidmedium</option>
         <option value="braineroidsmall">braineroidsmall</option>
         <option value="evilskull">evilskull</option>
-        <option value="battleskull">battleskull</option>
+        <option value="battleskull">battleskull (lvl-3 "lightbulb" boss — colorize viz: ?huestart= ?hueend= ?huetarget= ?huecycle)</option>
         <option value="starmine">starmine</option>
         <option value="powerup">powerup</option>
         <option value="plasmaball">plasmaball</option>
@@ -144,6 +144,28 @@
       <label for="play">Play the animation in place (instead of freezing on the frame)</label>
     </div>
 
+    <!-- Colorize (hue-remap) tuning — only meaningful for the alienboss "lightbulb" boss
+         (battleskull). Blank fields fall back to the boss's coded values. -->
+    <label>Colorize (hue-remap) — battleskull only</label>
+    <div class="row">
+      <div>
+        <label for="huestart">Hue start°</label>
+        <input id="huestart" type="number" step="5" placeholder="-10" />
+      </div>
+      <div>
+        <label for="hueend">Hue end°</label>
+        <input id="hueend" type="number" step="5" placeholder="10" />
+      </div>
+      <div>
+        <label for="huetarget">Target°</label>
+        <input id="huetarget" type="number" step="5" placeholder="HP-based" />
+      </div>
+    </div>
+    <div class="check">
+      <input id="huecycle" type="checkbox" />
+      <label for="huecycle">Auto-cycle the target hue 0–360 (screenshot shows any point of the range)</label>
+    </div>
+
     <div class="actions">
       <button id="launch">Launch ▶</button>
       <button id="newtab" class="secondary">Open in new tab ↗</button>
@@ -184,6 +206,16 @@
 
     var rot = document.getElementById("rot").value.trim();
     if (rot !== "0" && rot !== "") p.set("rot", rot);
+
+    // Colorize (hue-remap) overrides — only sent when filled; the boss falls back to its
+    // coded values otherwise, so an untouched launch is byte-identical to plain ?harness.
+    var huestart = document.getElementById("huestart").value.trim();
+    if (huestart !== "") p.set("huestart", huestart);
+    var hueend = document.getElementById("hueend").value.trim();
+    if (hueend !== "") p.set("hueend", hueend);
+    var huetarget = document.getElementById("huetarget").value.trim();
+    if (huetarget !== "") p.set("huetarget", huetarget);
+    if (document.getElementById("huecycle").checked) p.set("huecycle", "1");
 
     return new URL("?" + p.toString(), GAME_BASE).href;
   }

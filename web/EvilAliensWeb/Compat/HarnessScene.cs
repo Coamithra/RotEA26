@@ -291,6 +291,7 @@ namespace EvilAliensWeb.Compat
             {
                 DrawCircleCollisionOverlay();
             }
+            DrawColorizeReadout();
             base.SpriteBatch.DrawString(label, new Vector2(16f, 12f), new Color(Color.White, 0.85f), 0f, centered: false, 0.55f, (SpriteEffects)0, 0f);
             base.SpriteBatch.DrawString("Esc: menu", new Vector2(16f, 574f), new Color(Color.White, 0.5f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
         }
@@ -359,6 +360,24 @@ namespace EvilAliensWeb.Compat
             string line = "hitbox r " + radius.ToString("0", CultureInfo.InvariantCulture) + "px"
                 + "   scale " + obj.scale.ToString("0.000", CultureInfo.InvariantCulture);
             base.SpriteBatch.DrawString(line, new Vector2(16f, 40f), new Color(Color.White, 0.85f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
+        }
+
+        // Colorize (hue-remap) readout for the alienboss "lightbulb" boss (?harness=battleskull
+        // with ?huestart/?hueend/?huetarget/?huecycle). Shows the live band + target the shader
+        // is using so the recolour can be tuned by eye — the whole point of the card. The numbers
+        // come from HarnessColorize, which the BattleSkull's Draw feeds every frame; drawn only
+        // when a colorize override is actually active (else the harness view is unchanged).
+        private void DrawColorizeReadout()
+        {
+            if (!HarnessColorize.IsActive)
+            {
+                return;
+            }
+            string desc = HarnessColorize.Describe();
+            base.SpriteBatch.DrawString("colorize viz (?huestart= ?hueend= ?huetarget= ?huecycle)",
+                new Vector2(16f, 40f), new Color(Color.White, 0.7f), 0f, centered: false, 0.4f, (SpriteEffects)0, 0f);
+            base.SpriteBatch.DrawString(desc,
+                new Vector2(16f, 60f), new Color(0.5f, 1f, 0.8f, 0.95f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
         }
 
         private static List<string> BuildUnknownMessage(string requested)

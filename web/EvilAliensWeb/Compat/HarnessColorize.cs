@@ -31,8 +31,19 @@ namespace EvilAliensWeb.Compat
             && (DebugFlags.HueStart.HasValue || DebugFlags.HueEnd.HasValue
                 || DebugFlags.HueTarget.HasValue || DebugFlags.HueCycle);
 
-        // The last resolved (Minimum, Maximum, Target) in DEGREES, for the readout.
+        // The last resolved (Minimum, Maximum, Target) in DEGREES, for the readout. Set by
+        // Apply(), which the BattleSkull's Draw calls each frame; the readout (HarnessScene,
+        // DrawOrder 2000) draws after the boss (DrawOrder 17), so this is fresh by then.
         public static Vector3 LastRange { get; private set; }
+
+        // Wrap a hue into [0,360) so a swept/biased target never feeds the shader (or the
+        // readout) a negative or >360 degree value — hue is periodic, so this is a no-op on
+        // the colour but keeps the numbers unambiguous.
+        private static float WrapHue(float deg)
+        {
+            deg %= 360f;
+            return (deg < 0f) ? deg + 360f : deg;
+        }
 
         // Override a coded ColorizeEffect.RangeTarget (degrees: X=min, Y=max, Z=target hue)
         // with whatever hue flags are present. Absent components keep the coded value, so
@@ -52,7 +63,7 @@ namespace EvilAliensWeb.Compat
             {
                 // Sweep the target 0..360 so a screenshot at any moment shows a different
                 // point of the recolour range. Wall-clock, independent of the frozen object.
-                float loop = (DebugFlags.HueLoopSeconds > 0f) ? DebugFlags.HueLoopSeconds : 6f;
+                float loop = DebugFlags.HueLoopSeconds;   // parse-guarded > 0
                 float t = (float)(gameTime.TotalGameTime.TotalSeconds % loop) / loop;
                 target = t * 360f;
                 // ?huetarget with ?huecycle biases the sweep so it orbits the pinned hue
@@ -61,6 +72,7 @@ namespace EvilAliensWeb.Compat
                 {
                     target = DebugFlags.HueTarget.Value + (t - 0.5f) * 360f;
                 }
+                target = WrapHue(target);   // keep the fed/reported degree in [0,360)
             }
             else
             {

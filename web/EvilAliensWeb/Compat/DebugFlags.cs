@@ -304,35 +304,35 @@ namespace EvilAliensWeb.Compat
 						BlastLoopSeconds = bl;
 					}
 					break;
-					case "huestart":
-						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
-						{
-							HueStart = hs;
-						}
-						break;
-					case "hueend":
-						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var he))
-						{
-							HueEnd = he;
-						}
-						break;
-					case "huetarget":
-					case "hue":
-						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ht))
-						{
-							HueTarget = ht;
-						}
-						break;
-					case "huecycle":
-					case "huesweep":
-						HueCycle = IsOn(val);
-						break;
-					case "hueloop":
-						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hl) && hl > 0f)
-						{
-							HueLoopSeconds = hl;
-						}
-						break;
+				case "huestart":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
+					{
+						HueStart = hs;
+					}
+					break;
+				case "hueend":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var he))
+					{
+						HueEnd = he;
+					}
+					break;
+				case "huetarget":
+				case "hue":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ht))
+					{
+						HueTarget = ht;
+					}
+					break;
+				case "huecycle":
+				case "huesweep":
+					HueCycle = IsOn(val);
+					break;
+				case "hueloop":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hl) && hl > 0f)
+					{
+						HueLoopSeconds = hl;
+					}
+					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
 						// with no value is meaningless (no object), so ignore it.

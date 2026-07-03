@@ -25,9 +25,10 @@
   },
   "classic": {
     "file": "Content/music/classic.ogg",
-    "loopStart": 22.335,
-    "loopEnd": 107.9975,
-    "duration": 109.7375
+    "loopStart": 75.0607,
+    "loopEnd": 414.1836,
+    "duration": 414.9834,
+    "introEnd": 75.0607
   },
   "sjaak": {
     "file": "Content/music/sjaak.ogg",

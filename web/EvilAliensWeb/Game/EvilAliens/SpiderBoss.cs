@@ -25,6 +25,19 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private const float yposstatic = 400f;
 
+	// Off-screen holds between fly segments, so the "Danger!" warning leads the boss's arrival
+	// instead of coinciding with it. All three turns share the single `waittimer`; its Duration is
+	// set explicitly at each site because Duration persists across Reset(), so the land value below
+	// would otherwise leak into the next fly turn. The two mid-air turns (flyleft->flyright,
+	// flyup->flyleft) already paused for the waittimer's old default 1000ms (flyPauseMs preserves
+	// that exactly -- don't drop those two assignments or the land value leaks in). The
+	// flyright->land turn (fly off the right edge, then drop from the top to land) had NO pause, so
+	// the warning fired the instant the descent began; it now holds for the longer landWarningLeadMs
+	// -- deliberately > flyPauseMs -- to give the player time to fly clear before the boss drops in.
+	private const float flyPauseMs = 1000f;
+
+	private const float landWarningLeadMs = 1500f;
+
 	private AnimatedSprite spiderStand;
 
 	private AnimatedSprite spiderJump;
@@ -481,6 +494,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				animatedMessage3.SetWarningDirection(warningDirection3);
 				animatedMessage3.MakeShort();
 				collection.Add((GameComponent)(object)animatedMessage3);
+				waittimer.Duration = flyPauseMs;
 				waittimer.Reset();
 				waittimer.Start();
 			}
@@ -502,6 +516,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				collection.Add((GameComponent)(object)animatedMessage2);
 				state = SpiderBossState.land;
 				base.Position = new Vector2(600f, -345f);
+				waittimer.Duration = landWarningLeadMs;
+				waittimer.Reset();
+				waittimer.Start();
 			}
 			break;
 		case SpiderBossState.flyup:
@@ -526,6 +543,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				animatedMessage.SetWarningDirection(warningDirection);
 				animatedMessage.MakeShort();
 				collection.Add((GameComponent)(object)animatedMessage);
+				waittimer.Duration = flyPauseMs;
 				waittimer.Reset();
 				waittimer.Start();
 			}

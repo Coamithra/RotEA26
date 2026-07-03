@@ -60,7 +60,11 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 		foreach (Shadow shadow in shadows)
 		{
 			(color) = new Color(new Vector4(1f, 1f, 1f, shadow.height));
-			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height)), 0f, shadow.size * (2f - shadow.height) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/shadow", shadowimage.Width), center: true, color);
+			// shadow.size (in CollidesWith) already self-normalises against shadowimage.Width, so
+			// the draw scale needs NO supersample divide -- a resized shadow.png is auto-corrected
+			// there. The former "/ SuperSampleFactor" double-compensated and shrank the shadow to
+			// 1/4 (the "Mars shadow too small" bug); this matches the original decompiled draw.
+			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height)), 0f, shadow.size * (2f - shadow.height), center: true, color);
 		}
 		base.Draw(gameTime);
 	}

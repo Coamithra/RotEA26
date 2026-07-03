@@ -119,12 +119,12 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{ "GFX/Sprites/arrow", 49 },
 		// glow sprites (also upscaled). connector + blast draw through the component
 		// (base.Draw) so the registry auto-corrects; singleconnectorglow (PlayerShip)
-		// + shadow (Floor) draw DIRECTLY and divide by SuperSampleFactor there. (Quad's
-		// flare self-normalises via diameterPx/glow.Width, so it needs no factor.)
+		// draws DIRECTLY and divides by SuperSampleFactor there. (Quad's flare
+		// self-normalises via diameterPx/glow.Width, so it needs no factor; Floor's
+		// shadow likewise self-normalises via shadowimage.Width -- no entry, no divide.)
 		{ "GFX/Sprites/connector", 180 },
 		{ "GFX/Sprites/blast", 384 },
 		{ "GFX/Sprites/singleconnectorglow", 89 },
-		{ "GFX/Sprites/shadow", 82 },
 		// parachute + plasmaball2: AI redraws DOWNSCALED below the original res for ~1:1
 		// texels (366->293, 697->523); registering the ORIGINAL width keeps on-screen size
 		// unchanged (both component-drawn -> the draw auto-corrects; PlasmaBall's hand-rolled

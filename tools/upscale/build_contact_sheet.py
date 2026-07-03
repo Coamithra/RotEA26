@@ -49,7 +49,9 @@ SETS: dict[str, tuple[list[str], dict[str, int]]] = {
     "smalls": (
         [
             "bulletevil", "bulletgood", "blooddrop", "blooddrop_green",
-            "option", "braingoo", "arrow", "photocamera", "shadow",
+            "option", "braingoo", "arrow", "photocamera",
+            # "shadow" dropped: its AI redraw keyed to a speckle and was reverted to the
+            # pristine 82x40 gradient (see repack_misc.py) -- don't re-send it for redraw.
             "block", "singleconnectorglow", "connector",
             "spiderdebris1", "spiderdebris2", "spiderdebris3",
         ],

@@ -54,6 +54,18 @@ public class UfoSpawner : GenericSpawner
 		}
 		Vector2 val = new Vector2(RandomHelper.RandomNextFloat(0f, 800f), RandomHelper.RandomNextFloat(0f, 600f)) + MyMath.AngleToVector(angle) * 1000f;
 		val = Vector2.Clamp(val, new Vector2(0f - num), new Vector2(800f + num, num2 + num));
+		if (mars)
+		{
+			// Mars levels have GROUND along the screen bottom (Floor.bottom = 560; the terrain
+			// reads from ~y 540). `num2 = 500f - num` above was meant to keep a spawning
+			// saucer's underside above that, but the shared clamp re-adds num (max Y =
+			// num2 + num = 500 for every size), so a big saucer (num 85) could enter with its
+			// underside at ~585 -- half-buried in the ground -- and clamping the 0..600 roll
+			// piled ~1 in 6 entries at exactly that lowest point. Mars entries are side-only
+			// (SetupMars/SetupMarsWest), so Y is the free axis: re-roll it uniformly over the
+			// sky band, capping the underside at y <= 500. Spawn count/pacing unchanged.
+			val.Y = RandomHelper.RandomNextFloat(0f, num2);
+		}
 		UFO uFO;
 		if (big)
 		{

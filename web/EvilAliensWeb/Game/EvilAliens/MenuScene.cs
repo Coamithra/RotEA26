@@ -88,6 +88,17 @@ internal class MenuScene : Scene
 
 	private float ringDriftVel;
 
+	// Ambient-coast guard rails. ringDrift is a free-running integrator (ringDrift +=
+	// ringDriftVel * dt) and ringDriftVel is (re)seeded from each dart's ~5% momentum;
+	// left unbounded/undamped the coast could run past the intended slow "hunt" feel and
+	// the accumulator grow without limit over a long menu idle. RingDriftVelMax hard-caps
+	// the coast rate no matter the dart params; RingDriftVelDecay bleeds inherited momentum
+	// toward 0 each frame so the coast is a brief drift, not a permanent spin; and ringDrift
+	// is wrapped to (-pi, pi] (rotation is mod-2pi identical) so it can't creep unbounded.
+	private const float RingDriftVelMax = 0.12f;   // rad/s — a touch above the fastest authored seed
+
+	private const float RingDriftVelDecay = 0.6f;  // per-second exponential bleed of coast momentum
+
 	// HUD ring centre "recalibration": the ring re-centres on whichever menu is active
 	// (main vs. a submenu). OnComponentAdded sets ringTargetMenu when a menu is shown;
 	// the centre then eases (with overshoot) from where it was to the new menu's centre.
@@ -1152,10 +1163,15 @@ internal class MenuScene : Scene
 	private void UpdateRing(GameTime gameTime)
 	{
 		double now = timer.TotalSeconds;
+		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 		// Ambient background coast: a slow drift that inherits the LAST dart's direction
 		// and a sliver of its speed (set in the dart branch below), so the ring keeps
-		// gently rotating the way it last moved instead of a fixed constant spin.
-		ringDrift += ringDriftVel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+		// gently rotating the way it last moved instead of a fixed constant spin. The coast
+		// momentum bleeds off (so it stays a brief drift, not a permanent spin) and the
+		// accumulator is wrapped so it can't grow unbounded over a long menu idle.
+		ringDriftVel *= (float)Math.Exp(-RingDriftVelDecay * dt);
+		ringDrift += ringDriftVel * dt;
+		ringDrift = MathHelper.WrapAngle(ringDrift);
 		Random rng = RandomHelper.Random;
 		if (ringHolding)
 		{
@@ -1184,7 +1200,10 @@ internal class MenuScene : Scene
 			ringMoveDur = 0.30 + 0.006 * magDeg; // unhurried: ~0.35s small .. ~1.1s big
 			// Ambient coast inherits this dart's direction + ~5% of its angular speed, so
 			// the ring keeps drifting the way it last moved (a bit of angular momentum).
+			// Hard-clamped to RingDriftVelMax so the coast can never exceed the intended
+			// slow max, regardless of the dart magnitude/duration.
 			ringDriftVel = sign * (float)(MathHelper.ToRadians(magDeg) / ringMoveDur) * 0.05f;
+			ringDriftVel = MathHelper.Clamp(ringDriftVel, -RingDriftVelMax, RingDriftVelMax);
 			ringMoveStart = now;
 			ringHolding = false;
 		}

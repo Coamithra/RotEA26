@@ -258,7 +258,7 @@ internal class CreditsScene : Scene
 		lines.Add("Harald (CoamIthra) Maassen");
 		lines.Add("");
 		lines.Add("ADDITIONAL PROGRAMMING:");
-		lines.Add("Claude Opus 4.6");
+		lines.Add("Dario Amodei");
 		lines.Add("");
 		lines.Add("MUSIC:");
 		lines.Add("Peter Brannan");
@@ -282,8 +282,8 @@ internal class CreditsScene : Scene
 		lines.Add("Tom Rutjens");
 		lines.Add("");
 		lines.Add("ADDITIONAL GRAPHICS:");
-		lines.Add("ChatGPT (GPT Image)");
-		lines.Add("Gemini (Nano Banana)");
+		lines.Add("Sam Altman");
+		lines.Add("Demis Hassabis");
 		lines.Add("");
 		lines.Add("PLAYTESTING: ");
 		lines.Add("Rucky Brunsman");

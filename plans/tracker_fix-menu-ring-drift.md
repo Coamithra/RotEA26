@@ -32,11 +32,12 @@ clamp only bites values that were already out of spec, and the decay is gentle.
 - [x] Pull main, create wt4 + branch, push
 - [x] Research: identify spinner + root cause
 - [x] Write tracker
-- [ ] Implement fix in MenuScene.UpdateRing
-- [ ] dotnet build -c Debug clean
-- [ ] Re-read full diff
-- [ ] /review (or self-review)
-- [ ] Commit, push, PR (--fill). PAUSE before merge (orchestrator override).
+- [x] Implement fix in MenuScene.UpdateRing
+- [x] dotnet build -c Debug clean (also after merging main)
+- [x] Re-read full diff
+- [x] Commit 6b2c2a7, push, pull main into branch (clean merge)
+- [ ] /review (reviewer agent running; first attempt lost to outage)
+- [ ] PR (--fill). PAUSE before merge (orchestrator override).
 
 ## Needs live/manual testing (no browser verification this session)
 - Boot `?menu`, idle on the main menu, confirm the reticle rotates at a gentle, steady max

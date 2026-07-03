@@ -16,6 +16,16 @@ internal class CreditsScene : Scene
 
 	private Timer fadeouttimer = new Timer(8000f, repeating: false);
 
+	// Card 6d7a4b64: the narrator voice line no longer fires the instant the crawl is set up.
+	// SetupLevelN() stashes the VO cue in pendingNarration; Initialize() starts this delay timer
+	// (the scene's per-showing reset point); Update() plays the line once the timer finishes,
+	// giving the player ~2.5s to settle into the new screen before the narrator speaks.
+	private Timer narrationDelayTimer = new Timer(2500f, repeating: false);
+
+	private string pendingNarration;
+
+	private bool narrationStarted;
+
 	private SpriteFont font;
 
 	private ContentManager content;
@@ -107,6 +117,12 @@ internal class CreditsScene : Scene
 		// set, the second showing's Terminate() early-returns and the credits never hand
 		// off to the menu.
 		terminated = false;
+		// Delay the narrator line (card 6d7a4b64). SetupLevelN() ran before this Add/Initialize
+		// and already stashed pendingNarration; arm the countdown from the moment the crawl
+		// becomes active so the voice starts ~2.5s in, not instantly.
+		narrationStarted = false;
+		narrationDelayTimer.Reset();
+		narrationDelayTimer.Start();
 	}
 
 	public void SetupLevel1()
@@ -135,7 +151,7 @@ internal class CreditsScene : Scene
 		bg = content.Load<Texture2D>(texturetoload);
 		color = Color.White;
 		nextlevel = Levels.Level2;
-		base.SoundManager.PlayNarration("victor_level1");
+		pendingNarration = "victor_level1";
 	}
 
 	public void SetupLevel2()
@@ -164,7 +180,7 @@ internal class CreditsScene : Scene
 		bg = content.Load<Texture2D>(texturetoload);
 		color = Color.White;
 		nextlevel = Levels.Level3;
-		base.SoundManager.PlayNarration("victor_level2");
+		pendingNarration = "victor_level2";
 	}
 
 	public void SetupLevel3()
@@ -195,7 +211,7 @@ internal class CreditsScene : Scene
 			lines.Add("The game is over. ");
 			lines.Add("The Earth is safe. ");
 			lines.Add("Well done.");
-			base.SoundManager.PlayNarration("victor_level3_hard");
+			pendingNarration = "victor_level3_hard";
 		}
 		else
 		{
@@ -226,7 +242,7 @@ internal class CreditsScene : Scene
 			lines.Add("");
 			lines.Add("");
 			SetupCredits();
-			base.SoundManager.PlayNarration("victor_level3_normal");
+			pendingNarration = "victor_level3_normal";
 		}
 		texturetoload = "GFX/Menu/planet";
 		bg = content.Load<Texture2D>(texturetoload);
@@ -333,6 +349,15 @@ internal class CreditsScene : Scene
 	{
 		fadetimer.Update(gameTime);
 		fadeouttimer.Update(gameTime);
+		narrationDelayTimer.Update(gameTime);
+		// Fire the stashed narrator line once the delay elapses (card 6d7a4b64). Guarded by
+		// !terminated so a skip during the delay window (Terminate() -> StopNarration) cancels
+		// the line rather than letting it start afterwards; narrationStarted keeps it one-shot.
+		if (!narrationStarted && !terminated && narrationDelayTimer.Finished && pendingNarration != null)
+		{
+			narrationStarted = true;
+			base.SoundManager.PlayNarration(pendingNarration);
+		}
 		if (displayingcast && castDisplayer.done)
 		{
 			lines.Clear();

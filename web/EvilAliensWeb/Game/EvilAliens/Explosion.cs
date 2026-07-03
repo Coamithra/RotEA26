@@ -129,6 +129,11 @@ internal class Explosion : AlienDrawableGameComponent
 		collection.Add((GameComponent)(object)smokeDrawer);
 		backgroundimpulsetimer.Start();
 		Vibrate();
+		// Game juice: an explosion rattles the CAMERA as well as the pad — trauma scaled by
+		// size, so a routine blast nudges (~0.1) while a player death / boss finale (several
+		// size 2-3.5 explosions stacking) builds a real shake. The fixed camera shows the
+		// whole arena, so no distance attenuation (unlike the per-player Vibrate above).
+		EvilAliensWeb.Compat.Juice.AddTrauma(0.05f + size * 0.06f);
 		curframe = 0f;
 		rotation = RandomHelper.RandomNextAngle();
 	}

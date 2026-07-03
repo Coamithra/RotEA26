@@ -511,9 +511,14 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `AsteroidSpawner.OnFinished` calls `DisengageBeltSlowdown()`. `Demo1` (the attract-mode twin of the
   Level 1 belt) is wired identically so the mismatch is fixed in the menu attract loop too. The
   standalone `AsteroidChase`/`SpaceDodge` minigame is deliberately OUT of scope (its `SetSpeed(0.3,
-  0.72)` is a raw, ~20x-faster "warp" scroll — a different feel, not the Level 1 field). The belt and the earth fly-by can
-  never overlap (the belt gates on the earth leaving via `WaitForDoodadEvent`), so the two factors
-  never double-slow in practice; `Background.Reset()` clears the belt state on every fresh level entry.
+  0.72)` is a raw, ~20x-faster "warp" scroll — a different feel, not the Level 1 field). The doodad
+  and belt slowdowns are combined by `MathHelper.Min` (whichever is deeper wins), NOT multiplied: in
+  Level1 they're disjoint (the belt gates on the earth leaving via `WaitForDoodadEvent`) so min ==
+  product, but Demo1's attract belt has no such gate and its earth fly-by can still be crossing when
+  the belt engages — min applies the deeper slowdown without stacking them into a crawl.
+  `Background.Reset()` clears the belt state on every fresh level entry; a death mid-belt can skip the
+  disengage but is self-correcting (the belt replays from the pre-belt checkpoint — see the
+  `EngageBeltSlowdown` comment; don't add a checkpoint *inside* the belt).
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet

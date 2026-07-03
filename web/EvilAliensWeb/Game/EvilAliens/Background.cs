@@ -352,7 +352,14 @@ public class Background : Scene
 		// slam the stars to a halt in a few frames (then snap back once End starts rewriting
 		// the field). A per-frame local keeps the doodad factor applied exactly once.
 		UpdateBeltSlowdown(gameTime);
-		float effectiveModifier = scrollspeedmodifier * DoodadStarSlowdownFactor() * BeltStarSlowdownFactor();
+		// Combine the doodad and belt star-slowdowns by taking the STRONGER (smaller) factor, not the
+		// product. In Level 1 they're temporally disjoint (the belt gates on the earth leaving via
+		// WaitForDoodadEvent), so one is always 1 and min == product. But the Level 1 ATTRACT demo
+		// (Demo1) has no such gate -- its earth fly-by can still be crossing when the belt engages --
+		// and multiplying would double-slow the stars to a crawl. min() applies whichever slowdown is
+		// currently deeper and never stacks them, so the composition is correct on both paths.
+		float starSlowdown = MathHelper.Min(DoodadStarSlowdownFactor(), BeltStarSlowdownFactor());
+		float effectiveModifier = scrollspeedmodifier * starSlowdown;
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
 			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
@@ -487,13 +494,22 @@ public class Background : Scene
 	// Engage the asteroid-belt star-slowdown (Level 1 sideways belt phase). Called from
 	// Level1.spawner_OnFinished when the belt scroll speed is set; the near stars ramp DOWN over
 	// BeltRampInMs so the fastest star drops below the slowest asteroid. Idempotent.
+	//
+	// Death-mid-belt is self-correcting: GameEventList.RevertToCheckpoint clears active events
+	// WITHOUT terminating them, so a death during the belt drops the AsteroidSpawner's OnFinished
+	// (i.e. Disengage never fires for that run). It's harmless because the ONLY checkpoint reachable
+	// from mid-belt is the pre-belt one (Level1/Demo1 place their checkpoint before the belt gate),
+	// so the belt replays: Engage is called again (fine -- the belt IS active again) and the fresh
+	// spawner's OnFinished eventually disengages. INVARIANT: don't place a checkpoint INSIDE the
+	// belt, or a death there would strand beltSlowActive = true with no re-engage to correct it.
 	public void EngageBeltSlowdown()
 	{
 		beltSlowActive = true;
 	}
 
 	// Disengage the belt slowdown (Level 1 belt wave finished). Called from the AsteroidSpawner's
-	// OnFinished; the stars ramp BACK UP to full speed over BeltRampOutMs. Idempotent.
+	// OnFinished; the stars ramp BACK UP to full speed over BeltRampOutMs. Idempotent. (A death
+	// mid-belt can skip this call -- see EngageBeltSlowdown; it's self-correcting.)
 	public void DisengageBeltSlowdown()
 	{
 		beltSlowActive = false;
@@ -516,10 +532,9 @@ public class Background : Scene
 		beltSlowAmount = MathHelper.Clamp(beltSlowAmount, 0f, 1f);
 	}
 
-	// The belt star-slowdown factor (<= 1) multiplied into effectiveModifier alongside the doodad
-	// factor. Smoothstep-eased like the doodad envelope so engage/disengage aren't linear jerks.
-	// The belt and a fly-by doodad are temporally disjoint in Level 1 (the belt gates on the earth
-	// leaving via WaitForDoodadEvent), so multiplying the two factors never double-slows in practice.
+	// The belt star-slowdown factor (<= 1), combined with the doodad factor via MathHelper.Min in
+	// Update (see there). Smoothstep-eased like the doodad envelope so engage/disengage aren't linear
+	// jerks.
 	private float BeltStarSlowdownFactor()
 	{
 		if (beltSlowAmount <= 0f)

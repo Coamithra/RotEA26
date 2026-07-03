@@ -52,20 +52,31 @@ reported bug (faithful to the original Xbox build). BonusSpawner's mars path alr
 small-only at underside <=524, above terrain — left as-is.
 
 ## Phase 4: Implement
-- [ ] Edit UfoSpawner.DoEvent (mars Y re-roll + why-comment)
-- [ ] CLAUDE.md: no documented contract changes — skip
+- [x] Edit UfoSpawner.DoEvent (mars Y re-roll + why-comment)
+- [x] CLAUDE.md: no documented contract changes — skip
 
 ## Phase 5: Verify (no live browser per override)
-- [ ] dotnet build -c Debug clean
-- [ ] Rigorous full-diff re-read + reasoning
-- [ ] List what needs live/manual testing post-hoc
+- [x] dotnet build -c Debug clean (0 errors; 36 pre-existing warnings)
+- [x] Rigorous full-diff re-read + simulation (fixed: underside <= 500, 0 ground overlap,
+      uniform; non-mars byte-identical)
+- [x] Live-test items listed (see LIVE TESTING below)
 
 ## Phase 6: Review & Ship (PAUSED at merge per override)
-- [ ] Commit + push branch
-- [ ] Peer review (Skill `review`; else meticulous self-review)
+- [x] Commit + push branch (single commit on UfoSpawner.cs + this tracker)
+- [ ] Peer review (Skill `review` — agent running)
 - [ ] Pull main into branch
 - [ ] rtk gh pr create --fill
+- [ ] Card comment (progress note; card stays In Progress)
 - [ ] STOP — report to orchestrator (no merge, no card move, no cleanup)
+
+## LIVE TESTING NEEDED (post-hoc — no browser allowed this session)
+- Boot `?level=Level2&invuln&noattract`, watch the first UfoWave (side entries from the
+  east): no saucer should ever appear overlapping the terrain band (~y 540-560); entries
+  should be visibly spread over the sky instead of clustering at one low line.
+- Watch a `SetupMarsWest` phase (after the "speedup" westward-scroll section) incl. BIG
+  saucers: undersides stay clear of the ground on entry.
+- Sanity-check a space level (`?level=Level1`) UFO waves unchanged (top/three-directional).
+- Optional: Demo2 attract mode exercises the same UfoWave path.
 
 ## Findings so far (Phase 2 notes)
 - `UfoSpawner.DoEvent`: spawn = rand(0..800, 0..600) + AngleToVector(dir)*1000,

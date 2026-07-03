@@ -61,7 +61,7 @@ public class UfoSpawner : GenericSpawner
 			// saucer's underside above that, but the shared clamp re-adds num (max Y =
 			// num2 + num = 500 for every size), so a big saucer (num 85) could enter with its
 			// underside at ~585 -- half-buried in the ground -- and clamping the 0..600 roll
-			// piled ~1 in 5 entries at exactly that lowest point. Mars entries are side-only
+			// piled ~1 in 6 entries at exactly that lowest point. Mars entries are side-only
 			// (SetupMars/SetupMarsWest), so Y is the free axis: re-roll it uniformly over the
 			// sky band, capping the underside at y <= 500. Spawn count/pacing unchanged.
 			val.Y = RandomHelper.RandomNextFloat(0f, num2);

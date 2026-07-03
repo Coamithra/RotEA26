@@ -163,6 +163,10 @@ public abstract class KillableAlien : AlienDrawableGameComponent
 		hittimer.Start();
 		if ((hitpoints <= 0) & !dead)
 		{
+			// Game juice: every confirmed kill lands a punch — a micro freeze-frame + a tap
+			// of screen shake (boss kills a longer stop + real shake). Rate-limited inside
+			// Juice so a bomb-cleared wave reads as one impact, not a stutter.
+			EvilAliensWeb.Compat.Juice.KillPunch(isboss);
 			KilledBy(other, isComboGenerator);
 			dead = true;
 		}

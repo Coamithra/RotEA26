@@ -1505,6 +1505,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
 		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
+		// Game juice: the player's own death is the biggest impact in the game — a real
+		// freeze-frame + extra trauma on top of what the two explosions below add.
+		EvilAliensWeb.Compat.Juice.AddHitStop(0.18f);
+		EvilAliensWeb.Compat.Juice.AddTrauma(0.35f);
 		Die();
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
@@ -1524,6 +1528,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
 		if (!base.IsDead)
 		{
+			// Game juice: same death punch as AsplodeWall — freeze-frame + extra trauma on
+			// top of the two explosions' own shake.
+			EvilAliensWeb.Compat.Juice.AddHitStop(0.18f);
+			EvilAliensWeb.Compat.Juice.AddTrauma(0.35f);
 			Die();
 			Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 			explosion.Setup(base.Position, 2f, 2f, 0f, 0f);

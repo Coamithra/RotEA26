@@ -102,6 +102,22 @@
             catch (e) { console.warn('[debug] eaSlowmo failed (game not booted yet?): ' + e.message); }
         };
 
+        // QA/demo: fire a screen-shake burst on demand (works anywhere, even the menu — it
+        // shakes the present blit). Console: eaShake() for a solid 0.6-trauma burst, or
+        // eaShake(1) for the full rattle. Tune the shipped feel with the ?shake= URL flag.
+        window.eaShake = (trauma) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugShake', Number(trauma) || 0); }
+            catch (e) { console.warn('[debug] eaShake failed (game not booted yet?): ' + e.message); }
+        };
+
+        // QA/demo: freeze game time for N milliseconds of real time (the hit-stop juice
+        // effect). Most visible in a level: eaHitstop() for 120ms, eaHitstop(500) for a
+        // long dramatic freeze. Disable the shipped effect with ?hitstop=0.
+        window.eaHitstop = (ms) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugHitstop', Number(ms) || 0); }
+            catch (e) { console.warn('[debug] eaHitstop failed (game not booted yet?): ' + e.message); }
+        };
+
         // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
         // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
         // and permanently freezes the tab. We swallow a bad frame and keep looping so one

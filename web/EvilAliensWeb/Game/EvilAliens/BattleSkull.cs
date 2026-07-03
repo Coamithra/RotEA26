@@ -113,7 +113,15 @@ internal class BattleSkull : KillableAlien
 		if (state != BattleSkullState.dying)
 		{
 			int num = (int)(base.HitPointsNormalized * 100f);
-			spriteBatch.colorizeEffect.RangeTarget = new Vector3(-10f, 10f, (float)num);
+			// In-game: recolour the sprite's hue band (-10,10) toward a target hue that
+			// sweeps with HP (100 = green full HP -> 0 = red dead). The sprite harness
+			// (Compat/HarnessScene.cs, ?harness=battleskull) can override the band + target
+			// live to tune "the little lightbulbs don't colorize well" — see the ?huestart/
+			// ?hueend/?huetarget/?huecycle flags in Compat/DebugFlags.cs. Overrides only take
+			// effect while the harness is up, so normal play is byte-identical.
+			Vector3 range = new Vector3(-10f, 10f, (float)num);
+			range = EvilAliensWeb.Compat.HarnessColorize.Apply(range, gameTime);
+			spriteBatch.colorizeEffect.RangeTarget = range;
 			spriteBatch.colorizeEffect.Enable();
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;

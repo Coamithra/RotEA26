@@ -228,6 +228,31 @@ namespace EvilAliensWeb.Compat
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
 
+		// Webcam "I Made This!" difficulty tuning knobs (WebcamLevel). The webcam challenge
+		// now has a per-difficulty tuning table (hearts / kills-to-win / saucer cap / saucer
+		// speed / plasma speed, Easy..Inzane); these knobs A/B those numbers live so the feel
+		// can be dialled in by eye, then baked back into WebcamLevel.Tunings. ALL null/off =>
+		// the shipped table is used, so a normal build is unchanged.
+		//   ?wcdiff=<Easy|Medium|Hard|Very_Hard|Inzane>  force the webcam's difficulty (so any
+		//                 tier can be tuned without unlocking it in the menu; case-insensitive,
+		//                 spaces or underscores). Pair with ?level=WebcamAliens.
+		//   ?wchearts=<int>      override starting hearts for the active run
+		//   ?wckills=<int>       override kills-to-win
+		//   ?wcsaucers=<int>     override the max simultaneous-saucer cap
+		//   ?wcsaucerspeed=<f>   multiply the active tier's saucer-speed multiplier
+		//   ?wcplasmaspeed=<f>   multiply the active tier's plasma-speed multiplier
+		public static EvilAliens.Settings.DifficultyLevel? WebcamDifficulty { get; private set; }
+
+		public static int? WebcamHearts { get; private set; }
+
+		public static int? WebcamKills { get; private set; }
+
+		public static int? WebcamSaucers { get; private set; }
+
+		public static float? WebcamSaucerSpeed { get; private set; }
+
+		public static float? WebcamPlasmaSpeed { get; private set; }
+
 		// Spider jump-cycle tuning knobs for the sprite-harness visualiser (?harness=spiderjump).
 		// The grounded Mars Spider's whole rear-up -> launch -> arc -> land cycle is otherwise only
 		// reachable by driving a live level; the harness LOOPS a self-contained sim of it (see
@@ -368,6 +393,48 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
 					{
 						FlySpiderScale = fss;
+					}
+					break;
+				case "wcdiff":
+				case "webcamdiff":
+					// Like ?level=, reject numeric input: Enum.TryParse would take "2"
+					// -> (DifficultyLevel)2 (Hard) by ordinal, which IsDefined then passes.
+					if (!string.IsNullOrEmpty(val) && !char.IsDigit(val.Trim()[0])
+						&& val.Trim()[0] != '+' && val.Trim()[0] != '-'
+						&& Enum.TryParse<EvilAliens.Settings.DifficultyLevel>(val.Trim().Replace(' ', '_'), ignoreCase: true, out var wcd)
+						&& Enum.IsDefined(typeof(EvilAliens.Settings.DifficultyLevel), wcd))
+					{
+						WebcamDifficulty = wcd;
+					}
+					break;
+				case "wchearts":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wch) && wch > 0)
+					{
+						WebcamHearts = wch;
+					}
+					break;
+				case "wckills":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wck) && wck > 0)
+					{
+						WebcamKills = wck;
+					}
+					break;
+				case "wcsaucers":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wcs) && wcs > 0)
+					{
+						WebcamSaucers = wcs;
+					}
+					break;
+				case "wcsaucerspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcss) && wcss > 0f)
+					{
+						WebcamSaucerSpeed = wcss;
+					}
+					break;
+				case "wcplasmaspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcps) && wcps > 0f)
+					{
+						WebcamPlasmaSpeed = wcps;
 					}
 					break;
 				case "huestart":

@@ -207,11 +207,10 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Content/music/classicclean.ogg`) is a lyric-free loopable instrumental. **Which one plays is chosen by
   difficulty** via `SoundManager.ClassicForDifficulty()` — lyrics (`Classic`) only when
   `Settings.CurrentDifficulty >= Hard`, else clean (`ClassicClean`) — so the vocal cut is an *earned*
-  reward (higher challenge difficulties are gated behind finishing the challenge). The four
-  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`) call the
-  helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
-  key on difficulty); the **Webcam** level uses `ClassicClean` (ungated, no real difficulty pick — until
-  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** now routes through the helper too (card
+  reward (higher challenge difficulties are gated behind finishing the challenge). The
+  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`/**Webcam**)
+  call the helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
+  key on difficulty); **`TeamChallenge`** now routes through the helper too (card
   `7329fcd4` gave it real difficulty — its `Initialize` calls `LockDifficulty()` on the menu-chosen level
   instead of the old hard-coded `LockDifficulty(Medium)`, so the lyric cut is earned on Hard+ like the
   other challenges, not always on). Both cues are bespoke external tracks (NOT in
@@ -317,7 +316,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
   (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
 - **Webcam challenge "I Made This!" (`Levels.WebcamAliens`)** — the remake of the 2004 webcam game the
-  splash meme is from; last entry in the Challenges carousel (ungated). The player's SEGMENTED camera
+  splash meme is from; last entry in the Challenges carousel (no Unlockables gate — it just needs a
+  webcam). It DOES go through the challenge difficulty menu like the others. The player's SEGMENTED camera
   image is the ship: **JS owns everything camera** (`wwwroot/webcam.js` = the Teams-style setup dialog
   with device picker + preview, getUserMedia, and the mirrored person OVERLAY canvas positioned over the
   4:3 letterbox, outside `#app` like the touch/trailer overlays), **C# owns everything gameplay**
@@ -325,7 +325,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   collision surface is a 40x30 person-mask occupancy grid in design space, pushed ~30Hz from JS
   (`webcamMask`, ~200 B base64); the scene hit-tests saucers/plasma against it (`HitCircle`) and aims at
   its `Centroid`. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
-  fire ONE big slow plasma orb at you; 3 hearts, 20 kills to win. **GOTCHA — MediaPipe MUST stay in the
+  fire ONE big slow plasma orb at you; hearts + kills-to-win are per-difficulty (see below). **Per-difficulty
+  tuning (card `8fcc7a8e`):** `WebcamLevel.Tunings[]` is an Easy..Inzane table of the DISCRETE knobs —
+  hearts, kills-to-win, max simultaneous saucers, saucer-speed × and plasma-speed × (the generic
+  arm/blink/spawn cadence already scales off `Settings.DifficultyModifier`). `Initialize` reads
+  `Settings.CurrentDifficulty` (the menu pick), resolves the row, and picks the music via
+  `SoundManager.ClassicForDifficulty()` (Hard+ = lyrics). `WebcamUfo.Setup`/`WebcamPlasma.Setup` take a
+  speed-× arg. **Live-tune the feel with the `?wc*` debug flags** (`Compat/DebugFlags.cs`): boot
+  `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`,
+  then bake the chosen numbers back into `Tunings[]`. **GOTCHA — MediaPipe MUST stay in the
   worker (`webcam-worker.js`):** its Emscripten loader assigns the global `Module`, which Blazor's Mono
   runtime also uses — importing tasks-vision on the main thread kills the whole .NET runtime ("_malloc is
   not a function", reproduced). The ~10 MB runtime+model under `wwwroot/lib/mediapipe/` (see its README)

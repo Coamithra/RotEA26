@@ -570,6 +570,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.Reset()` clears the belt state on every fresh level entry; a death mid-belt can skip the
   disengage but is self-correcting (the belt replays from the pre-belt checkpoint — see the
   `EngageBeltSlowdown` comment; don't add a checkpoint *inside* the belt).
+- **Mars far-hills layer is PROCEDURAL, not hand-drawn -- `tools/mars/build_marshills.py`.** The 2nd
+  Mars background layer (`GFX/MarsBG/marshills`, added by `Background.SetMars()` behind the HD `marsloop`
+  ground / in front of `clouds-background`, scrollspeed 0.7) used to be a low-res hand-drawn hazy tan
+  silhouette with a visible repeating seam. It's now SYNTHESIZED: numpy builds N back-to-front ridges as
+  circular-FFT (natively SEAMLESS -- `mirrorX=false`, so the layer just REPEATS every `realsize.X`; the
+  wrap MUST be seamless) fractal heightfields, composited with aerial perspective (farther ridges
+  lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers + lerps toward the haze
+  tone so it dissolves into the sky). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
+  TOP from design y~448 down, so ONLY ~design y 405..450 (just above the rocky horizon) ever shows -- the
+  `RIDGES` crests are placed to land there and each body just fills down to be occluded. All aesthetic
+  knobs (palette, per-ridge base/amp/roughness/haze/feather, seed) are constants in the tool's CONFIG
+  block. Re-run `python tools/mars/build_marshills.py` after tweaking; `--seed N`, `--preview` (2x-tiled
+  seam check -> `tools/mars/_preview_marshills.png`, gitignored), `--show` (composite over the real sky
+  -> `_context_marshills.png`). Deterministic/offline (numpy+Pillow), like tools/earth & tools/favicon;
+  CI ships the committed `marshills.png`. It's a plain PNG decoded at level preload (tiny, not in
+  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHA when editing the tool: the alpha
+  accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255 makes
+  the whole layer ~1/255 transparent -> invisible hills).
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet

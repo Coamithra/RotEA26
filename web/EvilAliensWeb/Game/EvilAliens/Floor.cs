@@ -13,6 +13,10 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 		public float height;
 
 		public float size;
+
+		// Extra y nudge along the floor line, from the caster's ShadowOffset.Y (0 for
+		// everything except a tuned landed Mars UFO).
+		public float yoff;
 	}
 
 	public const float bottom = 560f;
@@ -64,7 +68,7 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 			// the draw scale needs NO supersample divide -- a resized shadow.png is auto-corrected
 			// there. The former "/ SuperSampleFactor" double-compensated and shrank the shadow to
 			// 1/4 (the "Mars shadow too small" bug); this matches the original decompiled draw.
-			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height)), 0f, shadow.size * (2f - shadow.height), center: true, color);
+			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height) + shadow.yoff), 0f, shadow.size * (2f - shadow.height), center: true, color);
 		}
 		base.Draw(gameTime);
 	}
@@ -126,6 +130,13 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 			item.height = (560f - collisionBox.Bottom) / 310f;
 			item.height = MathHelper.Clamp(1f - item.height, 0f, 1f);
 			item.size = (collisionBox.Right - collisionBox.Left) / ((float)shadowimage.Width * 0.7f);
+			// Per-caster shadow tuning (identity for all but a tuned landed Mars UFO).
+			if (other is AlienDrawableGameComponent adgc)
+			{
+				item.x += adgc.ShadowOffset.X;
+				item.yoff = adgc.ShadowOffset.Y;
+				item.size *= adgc.ShadowSize;
+			}
 			shadows.Add(item);
 		}
 	}

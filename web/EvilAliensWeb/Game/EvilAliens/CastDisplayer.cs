@@ -203,11 +203,16 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		state = CastState.intro;
 		// Debug (?castbrain): park straight on the Brain Spawn entry so it can be viewed/tuned.
 		// The braineroid state never advances on stateTimer (only intro/waiting do), so stop it —
-		// nothing should transition this showcase off the brain.
+		// nothing should transition this showcase off the brain. alienname/alientext are set here
+		// too (not only in the braineroid Update case): the displayer is added mid-frame, so its
+		// FIRST Draw can run before its first Update, and Draw does font.MeasureString(alientext).
+		// The real credits path is immune because it starts in `intro`, whose Draw early-returns;
+		// forcing braineroid skips that guard, so a null alientext would NRE on frame one.
 		if (BrainShowcase)
 		{
 			state = CastState.braineroid;
 			alienname = "Brain Spawn";
+			alientext = "Their eons-long goal is to destroy all other intelligent life,\nsince the thoughts of other beings screech at them like the\nforced laughs of a billion art-house movie patrons.";
 			stateTimer.Stop();
 		}
 		spiderdeadtimer.Stop();

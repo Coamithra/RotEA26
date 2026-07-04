@@ -184,6 +184,33 @@ namespace EvilAliensWeb.Compat
 
 		public static float BlastLoopSeconds { get; private set; } = 3f;
 
+		// Laser FX tuning knobs (Trello: "improve laser animation"). The beam + chargeup are
+		// drawn by Quad.cs / LazerGenerator.cs; these override the eye-tuned magic numbers so
+		// the look can be A/B'd live (see the ?lazershot showcase). ALL null => the baked
+		// defaults ship unchanged.
+		//   ?lazerchargescale=<f>  multiply the chargeup swarm's per-particle scale (the GFX/Menu/star
+		//                          sparkle is soft + full-frame, so at the stock scale the rays vanish
+		//                          sub-pixel -> "too subtle"; bump it to make the charge visible).
+		//   ?lazercapscale=<f>     size of the beam's rounded END-CAPS vs the core width (default 1;
+		//                          the caps round off the otherwise flat/"chopped" beam ends + hide
+		//                          the core/flare seam).
+		//   ?lazerarcs=<n>         cap on the number of electric tendrils crackling off the beam.
+		//   ?lazerarclife=<sec>    lifespan of one tendril before it fades + respawns elsewhere
+		//                          (shortlived = "pop up all over"; long = the old "sits forever").
+		public static float? LazerChargeScale { get; private set; }
+
+		public static float? LazerCapScale { get; private set; }
+
+		public static int? LazerArcCount { get; private set; }
+
+		public static float? LazerArcLife { get; private set; }
+
+		// Laser showcase scene (Compat/LazerShowcaseScene.cs): the chargeup swarm + a full-grown
+		// beam side by side on the starfield, ANIMATING (unlike the frozen ?harness/?bulletshot),
+		// so the tendrils / chargeup / caps can be watched while tuning. Opt in with ?lazershot;
+		// non-null => SkipSplash + AutoStart and the boot routes into the showcase.
+		public static bool Lazershot { get; private set; }
+
 		// Colorize (hue-remap) tuning knobs for the alienboss "lightbulb" boss in the sprite
 		// harness (?harness=battleskull). The BattleSkull recolours a band of the alienboss
 		// sprite's hues [Minimum,Maximum] toward a Target hue (all in degrees); in-game that
@@ -317,6 +344,38 @@ namespace EvilAliensWeb.Compat
 						BlastLoopSeconds = bl;
 					}
 					break;
+				case "lazerchargescale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lcs) && lcs > 0f)
+					{
+						LazerChargeScale = lcs;
+					}
+					break;
+				case "lazercapscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lcap) && lcap >= 0f)
+					{
+						LazerCapScale = lcap;
+					}
+					break;
+				case "lazerarcs":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var larc) && larc >= 0)
+					{
+						LazerArcCount = larc;
+					}
+					break;
+				case "lazerarclife":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lal) && lal > 0f)
+					{
+						LazerArcLife = lal;
+					}
+					break;
+				case "lazershot":
+					Lazershot = IsOn(val);
+					if (Lazershot)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
 				case "flyspiderscale":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
 					{
@@ -424,7 +483,7 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

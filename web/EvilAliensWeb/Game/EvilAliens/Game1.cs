@@ -66,6 +66,11 @@ public class Game1 : Game
 	// launched from startScreen_OnFinished instead of the menu when DebugFlags.Bulletshot is set.
 	private EvilAliensWeb.Compat.BulletShowcaseScene bulletShowcaseScene;
 
+	// Web-port laser showcase (?lazershot): a LIVE (animating) stage — chargeup swarm + a
+	// full-grown beam on the starfield — for tuning the laser FX. Created in Initialize,
+	// launched from startScreen_OnFinished instead of the menu when DebugFlags.Lazershot is set.
+	private EvilAliensWeb.Compat.LazerShowcaseScene lazerShowcaseScene;
+
 	private AsteroidChase spaceDodge;
 
 	private BraineroidsLevel braineroids;
@@ -314,6 +319,8 @@ public class Game1 : Game
 		harnessScene.OnExitToMenu = harnessScene_OnExitToMenu;
 		bulletShowcaseScene = new EvilAliensWeb.Compat.BulletShowcaseScene((Game)(object)this);
 		bulletShowcaseScene.OnExitToMenu = bulletShowcaseScene_OnExitToMenu;
+		lazerShowcaseScene = new EvilAliensWeb.Compat.LazerShowcaseScene((Game)(object)this);
+		lazerShowcaseScene.OnExitToMenu = lazerShowcaseScene_OnExitToMenu;
 		creditsScene = new CreditsScene((Game)(object)this);
 		creditsScene.OnFinished += creditsScene_OnFinished;
 		bragScene = new BragScene((Game)(object)this);
@@ -359,6 +366,12 @@ public class Game1 : Game
 		else if (DebugFlags.Bulletshot)
 		{
 			collectionHelper.Add((GameComponent)(object)bulletShowcaseScene);
+		}
+		// Debug (?lazershot): bypass the menu and boot straight into the live laser showcase.
+		// menuScene is still wired above, so Esc drops back via lazerShowcaseScene_OnExitToMenu.
+		else if (DebugFlags.Lazershot)
+		{
+			collectionHelper.Add((GameComponent)(object)lazerShowcaseScene);
 		}
 		// Debug (?level=...): bypass the menu and boot straight into the requested level.
 		// menuScene is still created + wired above, so returning from the level (or losing)
@@ -711,6 +724,13 @@ public class Game1 : Game
 	{
 		bulletShowcaseScene.Teardown();
 		collectionHelper.Remove((GameComponent)(object)bulletShowcaseScene);
+		collectionHelper.Add((GameComponent)(object)menuScene);
+	}
+
+	private void lazerShowcaseScene_OnExitToMenu()
+	{
+		lazerShowcaseScene.Teardown();
+		collectionHelper.Remove((GameComponent)(object)lazerShowcaseScene);
 		collectionHelper.Add((GameComponent)(object)menuScene);
 	}
 

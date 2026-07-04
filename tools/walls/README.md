@@ -16,42 +16,69 @@ blown up hugely on screen. This folder is the pipeline to ship a **higher-res** 
 
 1. **Upscale the art (you).** Give ChatGPT / an image upscaler the current
    `wwwroot/Content/gfx/base/756-v1.png` and ask for a **higher-resolution** version at a
-   **square, power-of-two size** (1024×1024 or 2048×2048 recommended; any multiple of 8
-   works). Keep it a solid, opaque, roughly uniform "wall material" — no borders, no logos,
-   edge-to-edge texture. See the desc idea on the card about infill for tileability — you do
-   **not** need to make it tileable yourself; step 3 does that.
-2. **Drop it** at `tools/walls/source/756-v1.png` (gitignored — it's raw art, like the earth
-   / classic-music raw sources).
-3. **Run the tool:**
-   ```sh
-   python tools/walls/build_wall_tileable.py
-   ```
-   It re-makes the (edge-broken) upscale **seamlessly tileable** and writes the shipped
-   artifact `wwwroot/Content/gfx/base/756-v1.png`, printing a before/after seam report and a
-   2×2 tiling `preview_756-v1.png` so you can eyeball it.
+   **square, power-of-two size** (1024×1024 or 2048×2048 recommended; any multiple of 8 works —
+   a multiple of **16** if you'll use the Flux infill path). Keep it a solid, opaque, roughly
+   uniform "wall material" — no borders, no logos, edge-to-edge texture. You do **not** need to
+   make it tileable yourself.
+2. **Drop it** at `tools/walls/source/756-v1.png` (gitignored — it's raw art, like the earth /
+   classic-music raw sources).
+3. **Make it tileable** with one of the two methods below, then eyeball the 2×2 preview it writes.
 
-## How the tileable step works
+## Two ways to make it seamless (A/B them)
 
-Classic **offset-and-heal**, healed with the **same Laplacian multiband blend the mars-ground
-stitcher uses** (`tools/mars/stitch_lib.py:pyr_blend` — the "similar toolchain as mars" the
-card asked for). It rolls the image by half so the wrap seam moves to the centre where content
-exists on both sides, keeps a seamless pure-`B` frame around all four edges, and cross-fades
-the frame→centre transition per-frequency so each side keeps its own detail. Result: the output
-border wraps exactly → tiles seamlessly. It reports the wrap seam as a **ratio to the texture's
-own interior adjacency** (1.0 = as continuous as any interior pixel step; a broken seam is ≫1).
+Both offset the upscale so the wrap seam becomes a centre cross, then fix that cross while keeping
+the outer border seamless. Each writes its own 2×2 tiling preview so you can compare side by side.
 
-## Options
+### A. BLEND — offline, no model (`build_wall_tileable.py`, default)
 
-```
+```sh
+python tools/walls/build_wall_tileable.py            # source/756-v1.png -> content path
 python tools/walls/build_wall_tileable.py --size 1024   # Lanczos-resize to 1024² first
 python tools/walls/build_wall_tileable.py --check-only  # report + preview, don't write the asset
-python tools/walls/build_wall_tileable.py --band-frac 0.2   # widen the heal band if a seam survives
-python tools/walls/build_wall_tileable.py --in X.png --out Y.png
+python tools/walls/build_wall_tileable.py --band-frac 0.2   # widen the heal frame if a seam survives
 ```
 
-Offline (numpy + Pillow; cv2 optional → sharper pyramid). Don't hand-edit the shipped
-`756-v1.png`; re-run this after a new upscale. **Verify on the LIVE Pages URL too** — content
-paths are case-sensitive there (capital `Content/`, lowercase under it).
+Offset-and-heal, healed with the **same Laplacian multiband blend the mars-ground stitcher uses**
+(`tools/mars/stitch_lib.py:pyr_blend` — the "similar toolchain as mars" the card asked for): keep a
+seamless pure-`B` frame around all four edges, cross-fade the frame→centre transition per-frequency
+so each side keeps its detail. Deterministic and dependency-free — but it **relocates** edge content
+(from the opposite half) and can faintly ghost near the seam; it blends existing pixels, it doesn't
+invent. Writes `preview_blend_756-v1.png`.
+
+### B. INFILL — a LOCAL inpainting model regenerates the seam (higher quality)
+
+The modern "make seamless" method: mask the seam cross and let an inpainter **generate coherent new
+detail** across it — no ghosting, no relocation. **ChatGPT can't do this** (it regenerates the whole
+frame and breaks the unmasked borders); you need a real inpainter that preserves unmasked pixels
+(**Flux Fill** / SD-inpaint, run locally). The reimport composites the fill **inside the mask only**
+over the original offset, so the wrap borders stay pixel-exact → tiling is guaranteed.
+
+One-shot with Flux (see `flux_infill.py` header for setup — needs a GPU + gated `FLUX.1-Fill-dev`):
+
+```sh
+python tools/walls/flux_infill.py --size 1024        # emit -> Flux Fill -> composite -> install
+python tools/walls/flux_infill.py --check-only       # don't write the content file
+```
+
+Or model-agnostic, three steps (works with ANY local inpainter):
+
+```sh
+python tools/walls/build_wall_tileable.py --emit-seam            # -> seam/756-v1_offset.png + _mask.png
+#   run your inpainter on those two (offset = image, mask = white band to fill)
+python tools/walls/build_wall_tileable.py --reimport out.png     # composite in-mask + install
+```
+
+Writes `preview_infill_756-v1.png`. `--reimport` needs the `seam/` files from `--emit-seam` (it
+composites the fill over that offset so the borders stay seamless).
+
+> **NOTE:** the Flux path (`flux_infill.py`'s pipeline call) is **not run/verified in this repo** —
+> it needs a GPU + the gated weights, which aren't available here. The seam/composite/install
+> plumbing it shares with `build_wall_tileable.py` *is* verified; treat the Flux params as a
+> starting point and tune for your box.
+
+Offline core (numpy + Pillow; cv2 optional → sharper pyramid). Don't hand-edit the shipped
+`756-v1.png`; re-run after a new upscale. **Verify on the LIVE Pages URL too** — content paths are
+case-sensitive there (capital `Content/`, lowercase under it).
 
 ## Notes / follow-ups
 

@@ -268,7 +268,12 @@ public class Background : Scene
 			doodadname = "GFX/Sprites/andromeda";
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			doodadscale = 1f;
+			// On-screen footprint is pinned to AndromedaDesignWidth (800x600 design px)
+			// regardless of the texture's pixel resolution, so an HD drop-in (tools/nebula/
+			// build_nebula.py output) stays the same size on screen -- more texels = crisper
+			// at high-res windows, not bigger. 840 preserves the original 840px@scale-1 look.
+			const float AndromedaDesignWidth = 840f;
+			doodadscale = AndromedaDesignWidth / (float)doodad.Width;
 			doodadscrollspeed = new Vector2(1f, 1f);
 			// A distant galaxy, not a planet — no star slowdown (also clears a prior earth's value).
 			doodadStarSlowdown = 1f;

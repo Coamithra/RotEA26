@@ -95,7 +95,8 @@
         <option value="brainboss">brainboss</option>
         <option value="classicboss">classicboss</option>
         <option value="marsboss">marsboss</option>
-        <option value="junkboss">junkboss</option>
+        <option value="junkboss">junkboss (eye boss — idle sheet)</option>
+        <option value="eyeattract">eyeattract (eye boss — attract sheet; interpolation test: Play + low fps)</option>
         <option value="fakeboss">fakeboss</option>
         <option value="spiderboss">spiderboss</option>
         <option value="stationaryboss">stationaryboss</option>
@@ -142,6 +143,16 @@
     <div class="check">
       <input id="play" type="checkbox" />
       <label for="play">Play the animation in place (instead of freezing on the frame)</label>
+    </div>
+
+    <!-- fps override (?fps=) — only with Play. Turn it real low to make the frame-interpolation
+         shader carry the motion between frames (e.g. eyeattract + Play + fps 2). Blank = authored fps. -->
+    <label>Animation fps override — with Play (blank = authored)</label>
+    <div class="row">
+      <div>
+        <label for="fps">fps</label>
+        <input id="fps" type="number" step="0.5" min="0.1" placeholder="authored" />
+      </div>
     </div>
 
     <!-- Colorize (hue-remap) tuning — only meaningful for the alienboss "lightbulb" boss
@@ -230,6 +241,10 @@
     // Flying-spider size override — only sent when filled; blank uses the baked default.
     var flyspiderscale = document.getElementById("flyspiderscale").value.trim();
     if (flyspiderscale !== "") p.set("flyspiderscale", flyspiderscale);
+
+    // fps override — only meaningful with Play, only sent when filled (blank = authored fps).
+    var fps = document.getElementById("fps").value.trim();
+    if (play && fps !== "") p.set("fps", fps);
 
     return new URL("?" + p.toString(), GAME_BASE).href;
   }

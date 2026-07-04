@@ -71,6 +71,12 @@ internal class JunkBoss : KillableAlien
 
 	private float eyePrevFrame;
 
+	// Sprite-harness only: when set (by the `eyeattract` HarnessRegistry factory), Initialize
+	// loads the spin+lightning attract sheet instead of idle, so the frozen harness can show the
+	// rotating/attracting animation. In real play the state machine (UpdateEyeAnim) swaps to it,
+	// but the harness freezes Update so that never runs. Defaults false, so gameplay is untouched.
+	public bool HarnessForceAttract;
+
 	public Vector2 GetPosition => base.Position;
 
 	public override ICollisionType CollisionType
@@ -189,6 +195,13 @@ internal class JunkBoss : KillableAlien
 		threshold = 5;
 		retaliate = false;
 		suckeffect = null;
+		// Harness: swap to the attract sheet AFTER `r` (the hitbox) is sized off the idle cell,
+		// so the drawn/animated sprite is the attract state but the collision radius still matches
+		// real play (idle-based, halo excluded). LoadAnimation resets curframe; the harness re-seeds it.
+		if (HarnessForceAttract)
+		{
+			LoadAnimation(EyeAttract);
+		}
 	}
 
 	public override void Draw(GameTime gameTime)

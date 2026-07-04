@@ -71,6 +71,16 @@ internal abstract class GameScene : Scene
 
 	private Timer snapshotdelaytimer = new Timer(800f, repeating: false);
 
+	// checkScreenShot's weighted Game.Components scan only decides WHEN to arm the
+	// 800ms snapshotdelaytimer, so sampling it every Nth frame (instead of every
+	// frame once snapshottimer expires) preserves the >30 threshold semantics while
+	// cutting the full-component scan to 1/N during calm stretches. The shift in
+	// capture timing is at most N-1 frames — immaterial next to the 5s cadence, the
+	// 800ms delay, and the capture randomness.
+	private const int SnapshotScanInterval = 6;
+
+	private int snapshotScanCounter;
+
 	protected Levels level;
 
 	private Timer AIJoinTimer = new Timer(6000f, repeating: true);
@@ -823,6 +833,11 @@ internal abstract class GameScene : Scene
 		{
 			return;
 		}
+		if (++snapshotScanCounter < SnapshotScanInterval)
+		{
+			return;
+		}
+		snapshotScanCounter = 0;
 		float num2 = 0f;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{

@@ -123,6 +123,15 @@ internal class CreditsScene : Scene
 		narrationStarted = false;
 		narrationDelayTimer.Reset();
 		narrationDelayTimer.Start();
+		// KNI runs LoadContent() once per component instance EVER (guarded), but this
+		// scene is a boot-time singleton that Unload()s its per-scene content when removed
+		// (OnComponentRemoved) and is re-added after every level completion. Re-load the
+		// content textures every showing: a no-op cache hit while nothing was unloaded, a
+		// fresh decode after Unload() -- otherwise the second credits roll draws disposed
+		// textures. (SetupLevelN() ran before this Add/Initialize and set texturetoload.)
+		font = content.Load<SpriteFont>("GFX/Menu/menufont");
+		bg = content.Load<Texture2D>(texturetoload);
+		blankTexture = content.Load<Texture2D>("GFX/Menu/blank");
 	}
 
 	public void SetupLevel1()
@@ -453,6 +462,26 @@ internal class CreditsScene : Scene
 			this.OnFinished(this, nextlevel);
 		}
 		Collection.Remove((GameComponent)(object)this);
+	}
+
+	// Free this scene's per-scene WebContentManager when it leaves the component
+	// collection. CreditsScene is a boot-time singleton re-added after every level
+	// completion; without this its credit backgrounds + font + blank stayed resident for
+	// the whole session (WebContentManager.Unload now actually frees them). Fires once per
+	// removal, AFTER the scene's final Draw -- ComponentBin defers the remove to its next
+	// flush, which runs before Draw -- so no disposed texture is ever drawn; Initialize()
+	// re-loads them on the next showing. Mirrors HelpText/InstructionsMenu.
+	public void Unload()
+	{
+		content.Unload();
+	}
+
+	public override void OnComponentRemoved(GameComponentCollectionEventArgs e)
+	{
+		if (e.GameComponent == this)
+		{
+			Unload();
+		}
 	}
 
 	public override void Draw(GameTime gameTime)

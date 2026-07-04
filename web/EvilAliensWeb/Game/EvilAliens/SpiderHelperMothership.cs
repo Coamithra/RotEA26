@@ -132,9 +132,14 @@ internal class SpiderHelperMothership : KillableAlien
 	public override void OnComponentRemoved(GameComponentCollectionEventArgs e)
 	{
 		base.OnComponentRemoved(e);
-		if (e.GameComponent == this && lazer != null)
+		if (e.GameComponent == this)
 		{
-			lazer.Free();
+			// Only retract a Lazer that is still ours + alive; if it already Died on a boss fly-by it
+			// may have been recycled into another emitter, so don't Free it out from under them.
+			if (lazer != null && !lazer.IsDead && lazer.owner == this)
+			{
+				lazer.Free();
+			}
 			lazer = null;
 		}
 	}
@@ -185,16 +190,24 @@ internal class SpiderHelperMothership : KillableAlien
 			}
 			break;
 		case HelperState.fire:
-			if (fireTimer.Finished)
+		{
+			// The beam Dies (via Lazer.CollidesWith -> Die) the instant it catches the boss on a
+			// fly-by, which ALSO drops that Lazer into the recycle pool -- a UFO in this same fight
+			// can then grab and re-Setup it while we still hold the ref. So treat "no longer our live
+			// Lazer" as job-done and leave, and only Free() a Lazer that is STILL ours + alive (the
+			// fire window timed out without a hit). Never Free a recycled-away one.
+			bool lazerLost = lazer == null || lazer.IsDead || lazer.owner != this;
+			if (lazerLost || fireTimer.Finished)
 			{
-				if (lazer != null)
+				if (!lazerLost)
 				{
 					lazer.Free();
-					lazer = null;
 				}
+				lazer = null;
 				state = HelperState.leave;
 			}
 			break;
+		}
 		case HelperState.leave:
 			base.Position = new Vector2(base.Position.X + flySpeed * dt, hoverY);
 			if (base.Position.X > 1100f)

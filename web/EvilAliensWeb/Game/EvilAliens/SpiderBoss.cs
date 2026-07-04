@@ -822,6 +822,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private void helper_OnDeath(object sender)
 	{
+		// Invariant: if the boss dies with a helper still airborne, GameScene.Purge removes the helper
+		// (severing this handler) before either object is recycled, so this never nulls a recycled
+		// boss's fresh helper ref.
 		helper = null;
 	}
 }

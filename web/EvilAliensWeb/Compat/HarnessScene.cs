@@ -40,6 +40,13 @@ namespace EvilAliensWeb.Compat
         private Background background;
         private AlienDrawableGameComponent obj;
 
+        // Cast "Brain Spawn" viewer (?castbrain). The end-credits Cast screen is only reachable
+        // after beating Level 3 on Hard, so this parks a CastDisplayer on its braineroid entry —
+        // the one that now shows the animated brainanimated sheet + glow — for viewing/tuning
+        // (?castbrainscale=/?castbrainfps=). It's a full CastDisplayer (not a single sprite), so
+        // it's kept separate from the registry `obj` path below.
+        private CastDisplayer castBrain;
+
         private Vector2 objPos = new Vector2(400f, 300f);
         private float frozenFrame;
         private string label = "";
@@ -89,6 +96,19 @@ namespace EvilAliensWeb.Compat
             ApplyBackground(DebugFlags.HarnessBg);
             ((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)background);
 
+            // ?castbrain: show the end-credits Cast screen parked on the animated Brain Spawn
+            // entry (see the field comment). Its own DrawOrder (1000) paints over the background;
+            // Esc still exits via the normal handler below. Nothing else in this scene applies.
+            if (DebugFlags.CastBrain)
+            {
+                castBrain = new CastDisplayer(base.Game);
+                castBrain.owner = (GameComponent)(object)this;
+                castBrain.BrainShowcase = true;
+                ((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)castBrain);
+                label = "cast: Brain Spawn   (?castbrainscale= ?castbrainfps=)";
+                return;
+            }
+
             objPos = new Vector2(DebugFlags.HarnessX ?? 400f, DebugFlags.HarnessY ?? 300f);
 
             if (!HarnessRegistry.TryGet(DebugFlags.Harness, out var factory))
@@ -131,6 +151,14 @@ namespace EvilAliensWeb.Compat
                                                     // HarnessApplyPhase (which re-applies HarnessScale itself)
             obj.rotation = MathHelper.ToRadians(DebugFlags.HarnessRot);
             obj.curframe = frozenFrame;
+            // Optional fps override (?fps=<n>). Slowing the animation down makes the frame-interpolation
+            // shader do all the visible work between frames, so ?harness=eyeattract&play&fps=2 proves the
+            // eye's rotating/attract sheet is smoothly tweened rather than stepping. null => the sheet's
+            // authored fps, so an un-flagged harness is unchanged.
+            if (DebugFlags.HarnessFps.HasValue)
+            {
+                obj.fps = DebugFlags.HarnessFps.Value;
+            }
             obj.Enabled = false;   // freeze: no gameplay Update
             obj.Visible = true;    // but keep drawing itself
 
@@ -309,6 +337,11 @@ namespace EvilAliensWeb.Compat
             {
                 Collection.Remove((GameComponent)(object)obj);
                 obj = null;
+            }
+            if (castBrain != null)
+            {
+                Collection.Remove((GameComponent)(object)castBrain);
+                castBrain = null;
             }
             harnessBlast = null;
             harnessSpider = null;

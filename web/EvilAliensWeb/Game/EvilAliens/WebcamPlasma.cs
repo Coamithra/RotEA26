@@ -23,6 +23,10 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 
 	private const float FlySpeed = 0.085f;   // design px/ms — slow enough to dodge
 
+	// Per-difficulty cruise-speed scale (WebcamLevel picks it from its tuning
+	// table). Resolved speed = FlySpeed * speedMul; 1 = the baseline.
+	private float flySpeed = FlySpeed;
+
 	// Drawn additively at two independent spinning rotations (PlasmaBall's
 	// flickering-lightning trick).
 	private float[] rotations = new float[2];
@@ -67,12 +71,13 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 		return webcamPlasma;
 	}
 
-	public void Setup(Vector2 position, Vector2 target)
+	public void Setup(Vector2 position, Vector2 target, float speedMultiplier = 1f)
 	{
 		base.Position = position;
 		base.Direction = MyMath.VectorToAngle(target - position);
+		flySpeed = FlySpeed * speedMultiplier;
 		base.Speed = 0f;
-		base.MaxSpeed = FlySpeed;
+		base.MaxSpeed = flySpeed;
 	}
 
 	public override void Initialize()
@@ -116,7 +121,7 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 			{
 				state = PlasmaState.fly;
 				scale = FullScale;
-				base.Speed = FlySpeed;
+				base.Speed = flySpeed;
 			}
 			break;
 		case PlasmaState.fly:

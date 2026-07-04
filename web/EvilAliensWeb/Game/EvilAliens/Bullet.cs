@@ -208,11 +208,13 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 		//IL_0378: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0382: Unknown result type (might be due to invalid IL or missing references)
 		bool flag = true;
-		if (other is Asteroid || (other is Ball && !((Ball)other).IsConnected()))
+		// The helper mothership is un-killable (fake damage only) — bullets should be consumed by it
+		// (below) but must NOT sustain combos off it, or a player could farm combo on an immortal ship.
+		if (other is Asteroid || (other is Ball && !((Ball)other).IsConnected()) || other is SpiderHelperMothership)
 		{
 			flag = false;
 		}
-		if ((other is UFO || other is Boss || other is Braineroid || other is Asteroid || other is Ball || other is JunkBoss || other is EvilSkull || other is DeathStar || other is ClassicBoss || other is BattleSkull || other is Spider || other is StationaryBoss || other is MarsBoss || other is StarMine || other is BrainBoss || other is FlyingSpider || other is FakeBoss || other is SweepUFO || other is ParatrooperAlien || other is Parachute || other is ParatrooperBrain || other is PunchingBag) && !bouncedTimer.Active)
+		if ((other is UFO || other is Boss || other is Braineroid || other is Asteroid || other is Ball || other is JunkBoss || other is EvilSkull || other is DeathStar || other is ClassicBoss || other is BattleSkull || other is Spider || other is StationaryBoss || other is MarsBoss || other is StarMine || other is BrainBoss || other is FlyingSpider || other is FakeBoss || other is SweepUFO || other is ParatrooperAlien || other is Parachute || other is ParatrooperBrain || other is PunchingBag || other is SpiderHelperMothership) && !bouncedTimer.Active)
 		{
 			if (firsthit && flag)
 			{

@@ -81,8 +81,15 @@ namespace EvilAliensWeb.Compat
                 ["classicboss"] = (bin, g, p) => { var c = ClassicBoss.NewClassicBoss(bin, g); c.Setup(); return c; },
                 ["marsboss"] = (bin, g, p) => { var m = MarsBoss.NewMarsBoss(bin, g); m.Setup(MarsBoss.BossPosition.left); return m; },
                 ["junkboss"] = (bin, g, p) => { var j = JunkBoss.NewJunkBoss(bin, g); j.Setup(false); return j; },
+                // Same eye boss, but forced onto its spin+lightning ATTRACT sheet (the frozen harness
+                // never runs the state machine that swaps to it). Pair with ?play&fps=<low> to watch
+                // frame interpolation carry the motion between the sparse frames.
+                ["eyeattract"] = (bin, g, p) => { var j = JunkBoss.NewJunkBoss(bin, g); j.HarnessForceAttract = true; j.Setup(false); return j; },
                 ["fakeboss"] = (bin, g, p) => { var f = FakeBoss.NewFakeBoss(bin, g); f.Setup(); return f; },
                 ["spiderboss"] = (bin, g, p) => { var s = SpiderBoss.NewSpiderBoss(bin, g); s.Setup(false); return s; },
+                // The spider-boss "helper" mothership (shown as a full sprite here; in-game only its
+                // underside peeks in at the top). ?pos=400,10 to preview the in-game half-visible framing.
+                ["spiderhelper"] = (bin, g, p) => { var h = SpiderHelperMothership.NewHelper(bin, g); h.Setup(10f, 0.3f, 4500f, 150f); return h; },
                 ["stationaryboss"] = (bin, g, p) => { var s = StationaryBoss.NewAlien(bin, g); s.Setup(); return s; },
             };
 

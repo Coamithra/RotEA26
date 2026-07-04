@@ -43,6 +43,18 @@ public class Quad
 	private const float MuzzleFlareScale = 2.0f; // muzzle bloom diameter vs core width
 	private const float ArcThickness = 2.0f;     // electric tendril core thickness (design px)
 	private const int ArcLevels = 3;             // midpoint-displacement subdivisions per tendril
+	// Rounded end-caps (Trello "improve laser animation"): the lazermiddle strip has no soft
+	// falloff ALONG its length, so the beam ends read as flat/"chopped" and the big tip/muzzle
+	// blooms leave a seam where the rectangle meets them. A width-sized round cap (the glow
+	// circle) at each end domes the flat edge off. Scale is tunable via ?lazercapscale=.
+	private const float DefaultCapScale = 1.0f;
+	// Electric tendrils are now SHORTLIVED and respawn all over (was: a fixed handful anchored to
+	// one spot forever). Defaults tuned by eye; overridable via ?lazerarcs= / ?lazerarclife=.
+	private const int DefaultArcCount = 5;       // max concurrent tendrils on a long beam
+	private const float DefaultArcLife = 0.16f;  // seconds one tendril lives before fading + respawning
+	private static float CapScale => EvilAliensWeb.Compat.DebugFlags.LazerCapScale ?? DefaultCapScale;
+	private static int ArcCountMax => EvilAliensWeb.Compat.DebugFlags.LazerArcCount ?? DefaultArcCount;
+	private static float ArcLife => EvilAliensWeb.Compat.DebugFlags.LazerArcLife ?? DefaultArcLife;
 	private static readonly Color CoreColor = new Color(210, 235, 255);   // white-hot beam core
 	private static readonly Color GlowColor = new Color(35, 110, 235);    // electric-blue beam glow
 	private static readonly Color FlareColor = new Color(150, 215, 255);  // cyan-white bloom
@@ -142,7 +154,18 @@ public class Quad
 		// the old core/cap rasterisation crack can't form.
 		DrawBeam(sb, middle, bodyCenter, rotation, width * GlowWidthScale, bodyLen + width, GlowColor);
 		DrawBeam(sb, middle, bodyCenter, rotation, width, bodyLen, CoreColor);
-		// electric tendrils crackling off the beam (smooth, time-driven -- see DrawArcs)
+		// Rounded end-caps: dome off the beam's otherwise flat/"chopped" ends (and hide the
+		// core/flare seam) with a width-sized round glow at each end -- a wide glow-colour cap
+		// under a hot core-colour cap, matching the beam's two layers.
+		float cap = CapScale;
+		if (cap > 0f)
+		{
+			DrawFlare(sb, tip, width * GlowWidthScale * cap, GlowColor);
+			DrawFlare(sb, tail, width * GlowWidthScale * cap, GlowColor);
+			DrawFlare(sb, tip, width * cap, CoreColor);
+			DrawFlare(sb, tail, width * cap, CoreColor);
+		}
+		// electric tendrils crackling off the beam (shortlived, respawn all over -- see DrawArcs)
 		DrawArcs(sb, tail, axis, perp, bodyLen, time);
 		// round flares blooming at the leading tip (gently pulsing) and the muzzle
 		float pulse = 1f + 0.12f * (float)Math.Sin(time * 9f + fxPhase);
@@ -188,30 +211,49 @@ public class Quad
 		DrawBeam(sb, middle, (p0 + p1) * 0.5f, rot, thickness, len, color);
 	}
 
-	// Electric tendrils crackling off the beam. Each is a midpoint-displacement bolt (fractal
-	// jaggedness, the offset halving every subdivision) whose displacements are driven by smooth
-	// time functions rather than fresh RNG -- so the tendrils WRITHE instead of strobing (the fix
-	// for the "spastic" look; see the /research notes). Drawn as a wide dim glow pass + a thin hot
-	// core, both fading toward the free end.
+	// Electric tendrils crackling off the beam. Each tendril is SHORTLIVED: it pops up at a
+	// pseudo-random spot along the beam, crackles for ~ArcLife seconds while fading in then out,
+	// and on the next cycle respawns somewhere else -- so instead of a fixed handful growing out
+	// of one spot forever, the tendrils flicker "all over all the time" like real arcing energy
+	// (Trello "improve laser animation"). Within a single appearance the bolt still WRITHES via
+	// smooth time-driven midpoint displacement (no per-frame RNG strobing); it's only the
+	// per-appearance anchor/reach/side/seed that re-roll each cycle, keyed off floor(t) so they
+	// hold steady for that tendril's whole life. Drawn as a wide dim glow pass + a thin hot core,
+	// both fading toward the free end and scaled by the birth/death envelope.
 	private void DrawArcs(SpriteBatchWrapper sb, Vector2 tailPt, Vector2 axis, Vector2 perp, float bodyLen, float time)
 	{
 		if (bodyLen < width)
 		{
 			return;
 		}
-		int count = (int)(bodyLen / 90f);
-		if (count < 1) count = 1;
-		if (count > 3) count = 3;
+		int count = (int)(bodyLen / 70f);
+		if (count < 2) count = 2;
+		int max = ArcCountMax;
+		if (count > max) count = max;
+		if (count <= 0) return;
+		float life = ArcLife;
 		for (int i = 0; i < count; i++)
 		{
-			float key = fxPhase + (float)i * 101.7f;
-			// anchor sits at a stable spot along the beam; the tendril sweeps out to the side,
-			// its reach and lean animated by smooth wiggles so the whole arc slithers.
-			float ap = 0.12f + 0.76f * Frac(key * 0.013f);
+			float slot = fxPhase + (float)i * 101.7f;
+			// Stagger each tendril's cycle so they don't all blink together, then split the clock
+			// into an integer appearance index (re-rolls the anchor/shape) + a 0..1 life fraction.
+			float t = time / life + Frac(slot * 0.017f) * 7.13f;
+			float cyc = (float)Math.Floor(t);
+			float frac = t - cyc;
+			// Birth->death envelope (0 at spawn, 1 mid-life, 0 at death) so the tendril pops in
+			// and fades out rather than snapping on/off.
+			float env = (float)Math.Sin(frac * Math.PI);
+			if (env <= 0.02f)
+			{
+				continue;
+			}
+			// Per-appearance seed: stable for this tendril's whole life, new next cycle.
+			float seed = slot + cyc * 57.13f;
+			float ap = 0.06f + 0.88f * Hash(seed);                 // anchor along the beam
+			float side = (Hash(seed * 1.7f) < 0.5f) ? 1f : -1f;    // which side it whips out to
+			float reach = width * (1.1f + 1.5f * Hash(seed * 2.3f));
+			float lean = width * 1.8f * (Hash(seed * 3.1f) - 0.5f);
 			Vector2 anchor = tailPt + axis * (bodyLen * ap);
-			float side = ((i & 1) == 0) ? 1f : -1f;
-			float reach = width * (1.4f + 1.0f * Wiggle(time, key));
-			float lean = width * 1.6f * Wiggle(time, key * 1.7f + 3.1f);
 			Vector2 endPt = anchor + perp * (side * reach) + axis * lean;
 
 			Vector2 d = endPt - anchor;
@@ -222,19 +264,28 @@ public class Quad
 			}
 			Vector2 bperp = new Vector2(0f - d.Y, d.X) / len;
 			float amp = Math.Min(len, reach) * 0.55f;
-			int n = BuildBolt(anchor, endPt, bperp, amp, time, key);
+			int n = BuildBolt(anchor, endPt, bperp, amp, time, seed);
 			// glow pass (wide, dim) then core pass (thin, hot), each fading toward the free end
+			// and dimmed by the life envelope.
 			for (int pass = 0; pass < 2; pass++)
 			{
 				float thick = (pass == 0) ? ArcThickness * 2.6f : ArcThickness;
 				Color col = (pass == 0) ? ArcGlowColor : ArcColor;
 				for (int k = 0; k < n - 1; k++)
 				{
-					float fade = 1f - 0.6f * ((float)k / (float)(n - 1));
+					float fade = (1f - 0.6f * ((float)k / (float)(n - 1))) * env;
 					DrawLine(sb, boltA[k], boltA[k + 1], thick, col * fade);
 				}
 			}
 		}
+	}
+
+	// Deterministic hash -> [0,1). Used to re-roll a tendril's anchor/shape each appearance
+	// (keyed off floor(time/life)), so the re-roll is stable for that appearance's whole life.
+	private static float Hash(float x)
+	{
+		double s = Math.Sin(x) * 43758.5453;
+		return (float)(s - Math.Floor(s));
 	}
 
 	// Midpoint-displacement subdivision into boltA[0..return). Each level inserts a displaced

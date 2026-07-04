@@ -70,6 +70,9 @@ desktop.ini
 # reproduce the engine textures from these, so the raw gens are kept local-only.
 new_assets_raw/
 tools/tts/_alex_oneshot_full.mp3
+# tools/nebula/build_nebula.py reads a raw HD galaxy from here; the SHIPPED
+# andromeda.png (wwwroot/Content/gfx/sprites) is committed, the raw gen is local-only.
+tools/nebula/source/
 
 # ---- Mars-BG stitch pipeline (tools/mars/) -----------------------------------
 # The doc + wip/00..08 scripts + the low-res originals + hand-made horizon{1,2}.png
@@ -86,6 +89,8 @@ tools/mars/wip/horizon_out/
 tools/mars/wip/strip_*.png
 tools/mars/wip/_*.png
 tools/mars/**/__pycache__/
+# build_marshills.py --preview/--show diagnostics (the shipped asset is committed).
+tools/mars/_*.png
 
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.

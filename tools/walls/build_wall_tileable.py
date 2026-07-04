@@ -38,6 +38,7 @@ Usage
   python tools/walls/build_wall_tileable.py                 # source/756-v1.png -> content path
   python tools/walls/build_wall_tileable.py --size 1024     # Lanczos-resize to 1024x1024 first
   python tools/walls/build_wall_tileable.py --check-only     # report seam + preview, no write
+  python tools/walls/build_wall_tileable.py --in foo.png --out bar.png   # explicit paths
 
   # INFILL (local model):
   python tools/walls/build_wall_tileable.py --emit-seam      # -> seam/756-v1_offset.png + _mask.png
@@ -181,25 +182,40 @@ def seam_offset_and_mask(rgb, seam_frac=0.16):
     fill mask over that cross. Returns (offset_rgb float32 HxWx3, mask_u8 HxW: 255 = fill).
 
     The offset's OUTER edges are interior-adjacent rows/cols of the upscale, so they wrap
-    seamlessly and must NOT be repainted -- the mask is a centre-only cross, kept clear of the
-    borders. Widen the band a bit past the raw seam so the model has context on both sides.
+    seamlessly and must NOT be repainted. The seam is a full centre ROW + COLUMN (a plus), whose
+    arms would otherwise run right up to the borders at the four edge-midpoints -- so we CLIP the
+    mask to an inner rectangle, leaving a `bm`-wide clear frame on all sides. That keeps the
+    composited borders 100% offset (-> guaranteed tiling); only tiny seam stubs near the
+    edge-midpoints go unhealed (they sit at the tile boundary and are barely visible). Widen the
+    band a bit past the raw seam so the model has context on both sides.
     """
     H, W = rgb.shape[:2]
     cy, cx = H // 2, W // 2
     off = np.roll(np.roll(rgb, cy, axis=0), cx, axis=1)
     half = min(W, H) / 2.0
-    bw = float(np.clip(seam_frac * min(W, H) / 2.0, 24.0, 0.4 * half))  # band half-width, kept off borders
+    hi = 0.4 * half  # keep the band clear of the borders (which must stay the seamless offset)
+    bw = float(np.clip(seam_frac * min(W, H) / 2.0, min(24.0, hi), hi))  # band half-width
+    bm = int(min(max(24.0, 0.03 * min(W, H)), 0.25 * half))  # border frame the mask never enters
     x = np.arange(W)
     y = np.arange(H)
     cross = (np.abs(x - cx)[None, :] < bw) | (np.abs(y - cy)[:, None] < bw)
+    inner = ((x >= bm) & (x < W - bm))[None, :] & ((y >= bm) & (y < H - bm))[:, None]
+    cross = cross & inner  # never touch the border frame -> borders stay the seamless offset
     return off, (cross.astype(np.uint8) * 255)
 
 
 def composite_infill(offset_rgb, result_rgb, mask_u8, feather_px=6.0):
     """INFILL method, step 3: paste the model's fill INSIDE THE MASK ONLY over the original
     offset, so the seamless wrap borders (mask=0) stay pixel-exact -> tiling is guaranteed even
-    if the model altered unmasked pixels. A small feather smooths the fill<->original handoff.
+    if the model altered unmasked pixels. A small feather smooths the fill<->original handoff;
+    it's clamped to the mask's own distance from the border, so even a huge `--feather` can't lift
+    the border weight above 0 and reintroduce a wrap seam.
     """
+    H, W = mask_u8.shape[:2]
+    ys, xs = np.where(mask_u8 > 0)
+    if len(xs):  # nearest the mask gets to any border -> keep the blur well inside that
+        margin = min(int(xs.min()), int(W - 1 - xs.max()), int(ys.min()), int(H - 1 - ys.max()))
+        feather_px = float(min(feather_px, max(1.0, margin / 3.0)))
     m = Image.fromarray(mask_u8, "L").filter(ImageFilter.GaussianBlur(feather_px))
     w = (np.asarray(m).astype(np.float32) / 255.0)[..., None]
     return np.clip(offset_rgb * (1.0 - w) + result_rgb * w, 0, 255)
@@ -231,14 +247,15 @@ def do_blend(args):
     print(f"proc: {W}x{H}  (mult-of-8 ok; 8x8 cell = {W // 8}x{H // 8})")
     report_seam(rgb, out_rgb, "blend")
 
-    out_im = install(out_rgb, rgba[..., 3], args.out, args.keep_alpha) if not (
-        args.check_only or args.dry_run) else Image.fromarray(
-        np.dstack([out_rgb, np.full((H, W), 255.0, np.float32)]).astype(np.uint8), "RGBA")
+    out_a = rgba[..., 3] if args.keep_alpha else np.full((H, W), 255.0, np.float32)
+    out_im = Image.fromarray(np.dstack([out_rgb, out_a]).astype(np.uint8), "RGBA")
     write_preview(out_im, PREVIEW_BLEND)
     print(f"preview: {PREVIEW_BLEND}  (2x2 tiling)")
     if args.check_only or args.dry_run:
         print("(no content file written)")
     else:
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        out_im.save(args.out)
         print(f"wrote: {args.out}")
 
 

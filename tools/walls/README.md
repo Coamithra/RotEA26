@@ -36,6 +36,7 @@ python tools/walls/build_wall_tileable.py            # source/756-v1.png -> cont
 python tools/walls/build_wall_tileable.py --size 1024   # Lanczos-resize to 1024² first
 python tools/walls/build_wall_tileable.py --check-only  # report + preview, don't write the asset
 python tools/walls/build_wall_tileable.py --band-frac 0.2   # widen the heal frame if a seam survives
+python tools/walls/build_wall_tileable.py --in X.png --out Y.png   # explicit source / destination
 ```
 
 Offset-and-heal, healed with the **same Laplacian multiband blend the mars-ground stitcher uses**

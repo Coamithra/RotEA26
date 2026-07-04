@@ -71,12 +71,14 @@ internal abstract class GameScene : Scene
 
 	private Timer snapshotdelaytimer = new Timer(800f, repeating: false);
 
-	// checkScreenShot's weighted Game.Components scan only decides WHEN to arm the
-	// 800ms snapshotdelaytimer, so sampling it every Nth frame (instead of every
-	// frame once snapshottimer expires) preserves the >30 threshold semantics while
-	// cutting the full-component scan to 1/N during calm stretches. The shift in
-	// capture timing is at most N-1 frames — immaterial next to the 5s cadence, the
-	// 800ms delay, and the capture randomness.
+	// checkScreenShot's weighted Game.Components scan is a per-frame snapshot of
+	// on-screen busy-ness that arms the 800ms snapshotdelaytimer once it crosses 30.
+	// Sampling it every Nth frame (instead of every frame once snapshottimer expires)
+	// cuts the full-component scan to 1/N during calm stretches. The >30 threshold is
+	// unchanged; the trade is that a busy spike lasting fewer than N frames can fall
+	// between samples and be missed — acceptable because the thumbnail only needs one
+	// representative busy frame over the 5s snapshot cadence, and any sustained action
+	// is sampled many times within that window.
 	private const int SnapshotScanInterval = 6;
 
 	private int snapshotScanCounter;
@@ -320,6 +322,7 @@ internal abstract class GameScene : Scene
 		snapshottimer.Start();
 		snapshotdelaytimer.Reset();
 		snapshotdelaytimer.Stop();
+		snapshotScanCounter = 0;
 		AIJoinTimer.Reset();
 		AIJoinTimer.Start();
 		xfading = false;

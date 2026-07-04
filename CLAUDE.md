@@ -790,6 +790,32 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   as Meridian => every link stays relative; cross-origin => set the two absolute knobs (`MERIDIAN_BASE`
   game side, `CONFIG.GAME_ORIGIN` meridian side). `?from=<id>` is what Meridian's "Shut Down" uses to
   return the player to the right game. Add as many games as you like without touching the existing ones.
+- **SpiderBoss "helper mothership" assist (`Game/EvilAliens/SpiderHelperMothership.cs`).** The Level2
+  spider boss can ONLY be hurt by a `Lazer`, and in normal play the only lazers around are the big
+  UFOs' player-aimed shots -- a very obscure "lure a lazer across the boss" mechanic. To make it
+  legible, when the boss goes un-damaged for `SpiderHelperIdleSeconds` (default 30) a mothership
+  (mothershipA/B, same sprite as `Boss`/`MarsBoss`) slides in from the left showing only its underside
+  at the top (`hoverY ~10`), halts dead-centre, fires a `Lazer` straight DOWN for a few seconds (it
+  hits the boss on a fly-by via the normal Lazer->SpiderBoss path), then leaves east. It is **"fake
+  killable"**: enormous hitpoints so it never dies in time, flashes (blink) + reddens (a separate
+  `fakeHits` ramp, since real HP barely moves) like it's taking damage. The trigger lives in
+  `SpiderBoss.Update` (idle `helpTimer`, reset on every landed hit + on spawn; one helper at a time via
+  the `helper` ref + `OnDeath`). `Bullet.cs` lists it so bullets stop on it but do NOT sustain combo
+  (it's immortal -- would be a combo farm). **GOTCHA -- never fire a PERFECTLY vertical (or perfectly
+  horizontal) `Lazer`.** `CollisionHandler` rasterises a `CollisionLine` cell-by-cell with a DDA whose
+  near-vertical branch advances `val.X` by `80*cos(angle)` per step while its loop exits on `val.X`.
+  For straight-down (`MathHelper.PiOver2`, `cos ~= -4.4e-8`) at x~400 that per-step delta is *below the
+  float32 ULP* (~3e-5), so `val.X` never changes and the loop spins forever -- a hard 100%-CPU hang
+  (reproduced in float32, confirmed live). The fix: the beam is tilted ~1.1 deg off vertical
+  (`FireTilt = 0.02f`) -- visually still straight down, but the X step is ~1.6px/cell, far above the
+  ULP. This is a **latent bug in the shared CollisionHandler DDA** that any near-axis-aligned lazer at a
+  high coordinate could hit (see the Backlog follow-up); don't feed it a degenerate line. **Debug/tuning
+  (`DebugFlags`):** `?spiderhelperidle=<sec>` `?spiderhelperhovery=<y>` `?spiderhelperspeed=<f>`
+  `?spiderhelperfire=<sec>` `?spiderhelperlead=<px>` tune the feel live (all have shipping defaults, so a
+  plain boot is unchanged). **Sprite harness:** `?harness=spiderhelper` (use `?pos=400,10` to preview the
+  in-game half-visible framing). **Fast test boot:** `?level=Level2&spiderboss` jumps straight into the
+  spider-boss fight (skips the whole level, like `?win`); pair with `?invuln&spiderhelperidle=3` to watch
+  the assist in seconds. See `Level2.PopulateSpiderBossOnly`.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

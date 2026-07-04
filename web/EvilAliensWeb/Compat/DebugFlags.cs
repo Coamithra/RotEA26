@@ -263,6 +263,35 @@ namespace EvilAliensWeb.Compat
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
 
+		// SpiderBoss "helper mothership" feel knobs (Game/EvilAliens/SpiderHelperMothership.cs +
+		// the trigger in SpiderBoss.cs). When the Level2 spider boss goes un-damaged for
+		// SpiderHelperIdleSeconds, a mothership slides in showing just its underside at the top,
+		// halts dead-centre, fires a Lazer straight DOWN for SpiderHelperFireSeconds (which hits the
+		// boss on a fly-by), then leaves east. It is "fake killable": flashes/reddens but never dies
+		// in time. All have shipping defaults, so a plain boot is unchanged; these only let the feel
+		// be tuned live. See the flags:
+		//   ?spiderhelperidle=<sec>    seconds of no boss damage before help arrives (default 30)
+		//   ?spiderhelperhovery=<y>    sprite-centre Y; more negative pushes the ship up so less of
+		//                              it shows (default 10 => the belly + lower spikes hang in, dome cut)
+		//   ?spiderhelperspeed=<f>     horizontal design-px/ms fly speed (default 0.3)
+		//   ?spiderhelperfire=<sec>    how long the downward laser holds (default 4.5)
+		//   ?spiderhelperlead=<px>     gap from sprite centre down to the beam's start = its belly
+		//                              (default 150)
+		public static float SpiderHelperIdleSeconds { get; private set; } = 30f;
+
+		public static float SpiderHelperHoverY { get; private set; } = 10f;
+
+		public static float SpiderHelperSpeed { get; private set; } = 0.3f;
+
+		public static float SpiderHelperFireSeconds { get; private set; } = 4.5f;
+
+		public static float SpiderHelperFireLead { get; private set; } = 150f;
+
+		// Fast-boot Level2 straight to the spider-boss fight (skips the whole level) so the helper
+		// mothership + boss interaction can be watched in seconds. Pair with ?level=Level2 (+ ?invuln,
+		// ?spiderhelperidle=<small>). A pure test shortcut, like ?win. See Level2.PopulateEventList.
+		public static bool SpiderBoss { get; private set; }
+
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
 		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
@@ -544,6 +573,39 @@ namespace EvilAliensWeb.Compat
 					{
 						HueLoopSeconds = hl;
 					}
+					break;
+				case "spiderhelperidle":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shi) && shi >= 0f)
+					{
+						SpiderHelperIdleSeconds = shi;
+					}
+					break;
+				case "spiderhelperhovery":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shy))
+					{
+						SpiderHelperHoverY = shy;
+					}
+					break;
+				case "spiderhelperspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shs) && shs > 0f)
+					{
+						SpiderHelperSpeed = shs;
+					}
+					break;
+				case "spiderhelperfire":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shf) && shf > 0f)
+					{
+						SpiderHelperFireSeconds = shf;
+					}
+					break;
+				case "spiderhelperlead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shl) && shl >= 0f)
+					{
+						SpiderHelperFireLead = shl;
+					}
+					break;
+				case "spiderboss":
+					SpiderBoss = IsOn(val);
 					break;
 				case "castbrain":
 					CastBrain = IsOn(val);

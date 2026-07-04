@@ -11,10 +11,17 @@ public class AnimatedSprite
 
 	private List<AnimationFrame> frames = new List<AnimationFrame>();
 
+	// Divides the effective draw scale so a supersampled (higher-resolution) sheet keeps its
+	// original on-screen size -- the AnimatedSprite analogue of AlienDrawableGameComponent's
+	// DesignFrameWidth factor. A sheet re-rendered at Nx by tools/models/build_models.py is
+	// constructed with supersample: N; every existing caller uses the default 1 (no-op).
+	private readonly float supersample;
+
 	public int Frames => frames.Count;
 
-	public AnimatedSprite(string filename)
+	public AnimatedSprite(string filename, float supersample = 1f)
 	{
+		this.supersample = (supersample > 0f) ? supersample : 1f;
 		loadTexture(filename);
 		loadData(filename + ".dat");
 	}
@@ -78,6 +85,10 @@ public class AnimatedSprite
 		//IL_011b: Unknown result type (might be due to invalid IL or missing references)
 		AnimationFrame animationFrame = frames[frame];
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
+		// The frame coords (minX/maxX, originalWidth, xPos/yPos) are in supersampled atlas
+		// pixels; drawing at scale/supersample maps them back to design space, so an Nx sheet
+		// keeps its original on-screen size. supersample == 1 leaves every existing sprite exact.
+		float s = scale / supersample;
 		switch ((int)e)
 		{
 		default:
@@ -86,21 +97,21 @@ public class AnimatedSprite
 			}
 			break;
 		case 1:
-			position.X += (float)(animationFrame.originalWidth - animationFrame.maxX) * scale;
-			position.Y += (float)animationFrame.minY * scale;
+			position.X += (float)(animationFrame.originalWidth - animationFrame.maxX) * s;
+			position.Y += (float)animationFrame.minY * s;
 			break;
 		case 0:
-			position.X += (float)animationFrame.minX * scale;
-			position.Y += (float)animationFrame.minY * scale;
+			position.X += (float)animationFrame.minX * s;
+			position.Y += (float)animationFrame.minY * s;
 			break;
 		}
 		Vector2 zero = Vector2.Zero;
 		if (center)
 		{
-			zero.X = (float)(animationFrame.originalWidth / 2) * scale;
-			zero.Y = (float)(animationFrame.originalHeight / 2) * scale;
+			zero.X = (float)(animationFrame.originalWidth / 2) * s;
+			zero.Y = (float)(animationFrame.originalHeight / 2) * s;
 		}
-		spriteBatchWrapper.Draw(texture, new Rectangle((int)animationFrame.xPos, (int)animationFrame.yPos, animationFrame.maxX - animationFrame.minX, animationFrame.maxY - animationFrame.minY), position - zero, 0f, scale, center: false, color, e);
+		spriteBatchWrapper.Draw(texture, new Rectangle((int)animationFrame.xPos, (int)animationFrame.yPos, animationFrame.maxX - animationFrame.minX, animationFrame.maxY - animationFrame.minY), position - zero, 0f, s, center: false, color, e);
 	}
 
 	public void Draw(int frame, Vector2 position, Color color, float scale, bool center)

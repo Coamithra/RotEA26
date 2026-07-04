@@ -610,16 +610,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   and the cell split is `texture.Width/8` (integer), so a higher-res drop-in only needs **dims a
   multiple of 8** -- **no game code change**. To ship a higher-res wall: (1) upscale
   `756-v1.png` with ChatGPT/an upscaler to a square power-of-two (art step); (2) drop it at
-  `tools/walls/source/756-v1.png` (gitignored raw source); (3) `python
-  tools/walls/build_wall_tileable.py`. The tool re-makes the (edge-broken) upscale seamlessly
-  tileable via **offset-and-heal healed with the mars stitcher's Laplacian `pyr_blend`**
-  (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the card asked for): roll by half
-  so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
-  cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
-  reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
-  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
-  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
-  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  `tools/walls/source/756-v1.png` (gitignored raw source); (3) run ONE of the two make-tileable
+  methods. Both offset the upscale so the wrap seam becomes a centre cross, then fix that cross while
+  keeping the outer border seamless, and each writes its own 2x2 preview + a wrap-seam **ratio to the
+  texture's own interior adjacency** (1.0 = seamless, >>1 = broken) so you can A/B them:
+  **(A) BLEND** (`build_wall_tileable.py`, default; offline, no model) heals the seam with the mars
+  stitcher's Laplacian `pyr_blend` (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the
+  card asked for): keep a pure-`B` seamless frame at all four edges, multiband cross-fade the
+  transition. Deterministic, but it RELOCATES edge content (blends existing pixels, can faintly
+  ghost). `preview_blend_756-v1.png`.
+  **(B) INFILL** (higher quality) masks the seam cross and lets a LOCAL inpainting model REGENERATE
+  new detail across it -- no ghosting. ChatGPT can't (it regenerates the whole frame + breaks the
+  borders); needs a real inpainter that preserves unmasked pixels (**Flux Fill**/SD-inpaint). Flow:
+  `--emit-seam` (writes `seam/756-v1_offset.png` + `_mask.png`) -> run the model -> `--reimport out.png`,
+  which composites the fill **inside the mask only** over the offset so the wrap borders stay
+  pixel-exact (tiling guaranteed). `tools/walls/flux_infill.py` is a one-shot Flux Fill runner
+  (`FluxFillPipeline`); its pipeline call is **NOT run/verified here** (needs a GPU + gated weights) --
+  the seam/composite/install plumbing it shares with `build_wall_tileable.py` IS verified.
+  `preview_infill_756-v1.png`. Only `756-v1` is the collidable wall (8x8
   grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
   `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
   preload stutters on a big new PNG, add

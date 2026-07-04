@@ -50,6 +50,9 @@ namespace EvilAliensWeb.Compat
 	//     ?pos=<x,y>   object position in 800x600 design space (default 400,300 = centre)
 	//     ?objscale=<f> multiply the object's natural draw scale (default 1; alias ?size)
 	//     ?rot=<deg>   object rotation in degrees (default 0; alias ?rotation)
+	//     ?fps=<n>     override the played animation's fps (alias ?animfps; only with ?play). Turning
+	//                  it real low lets the frame-interpolation shader carry the motion between frames,
+	//                  e.g. ?harness=eyeattract&play&fps=2 shows the eye boss's attract sheet tween.
 	//   With ?harness=blast the harness LOOPS the blast through its lifetime and overlays the
 	//   real collision ring + a live readout, for tuning the bomb's fade/active window:
 	//     ?blastactive=<0..1> fade-alpha floor below which the blast stops dealing damage (def 0.5)
@@ -127,6 +130,12 @@ namespace EvilAliensWeb.Compat
 
 		// Object rotation in degrees (default 0).
 		public static float HarnessRot { get; private set; }
+
+		// Override the played animation's frames-per-second in the harness (?fps=<n>, alias ?animfps).
+		// null => the sheet's authored fps. Turning it real low makes the frame-interpolation shader
+		// carry all the visible motion between frames — e.g. ?harness=eyeattract&play&fps=2 shows the
+		// eye boss's rotating/attract sheet tween smoothly rather than step. Only meaningful with ?play.
+		public static float? HarnessFps { get; private set; }
 
 		// Bullet showcase scene (Compat/BulletShowcaseScene.cs): a frozen reference tableau
 		// (player ship + a UFO cluster + both bullet types on the starfield) drawn through the
@@ -480,6 +489,13 @@ namespace EvilAliensWeb.Compat
 						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var rt))
 						{
 							HarnessRot = rt;
+						}
+						break;
+					case "fps":
+					case "animfps":
+						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var afps) && afps > 0f)
+						{
+							HarnessFps = afps;
 						}
 						break;
 						case "bulletshot":

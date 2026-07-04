@@ -131,6 +131,14 @@ namespace EvilAliensWeb.Compat
                                                     // HarnessApplyPhase (which re-applies HarnessScale itself)
             obj.rotation = MathHelper.ToRadians(DebugFlags.HarnessRot);
             obj.curframe = frozenFrame;
+            // Optional fps override (?fps=<n>). Slowing the animation down makes the frame-interpolation
+            // shader do all the visible work between frames, so ?harness=eyeattract&play&fps=2 proves the
+            // eye's rotating/attract sheet is smoothly tweened rather than stepping. null => the sheet's
+            // authored fps, so an un-flagged harness is unchanged.
+            if (DebugFlags.HarnessFps.HasValue)
+            {
+                obj.fps = DebugFlags.HarnessFps.Value;
+            }
             obj.Enabled = false;   // freeze: no gameplay Update
             obj.Visible = true;    // but keep drawing itself
 

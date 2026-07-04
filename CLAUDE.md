@@ -81,8 +81,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   time (object `Enabled=false` so gameplay `Update` never runs; the harness sets
   `Position`/`curframe`/`scale`/`rotation`). Companion flags: `?frame=<n>` (freeze frame, default 0)
   · `?play` (animate in place instead) · `?bg=space|spaceclassic|holodeck|mars|base|basedark`
-  · `?pos=<x,y>` (design space, default 400,300) · `?objscale=<f>` (alias `?size`) · `?rot=<deg>`.
-  e.g. `…:5280/?harness=Spider&frame=2` · `…/?harness=DeathStar&play` · `…/?harness=ufo&bg=mars`.
+  · `?pos=<x,y>` (design space, default 400,300) · `?objscale=<f>` (alias `?size`) · `?rot=<deg>`
+  · `?fps=<n>` (alias `?animfps`; override the played animation's fps, only with `?play` — turn it
+  real low so the frame-interpolation shader carries the motion between frames). e.g.
+  `…:5280/?harness=Spider&frame=2` · `…/?harness=DeathStar&play` · `…/?harness=ufo&bg=mars`.
+  **Eye boss (`JunkBoss`) interpolation:** the frozen harness can't reach the boss's `attracting`
+  state (its `UpdateEyeAnim` state machine never runs), so `?harness=junkboss` shows only the IDLE
+  eye sheet. `?harness=eyeattract` forces the spin+lightning ATTRACT sheet (via `JunkBoss.HarnessForceAttract`,
+  set only by that registry factory; hitbox `r` stays idle-based so the lightning halo doesn't inflate it).
+  The eye interpolates by default (`interpolationOptions = as_specified` + `Settings.Interpolate = true` →
+  `interpolate.fx`), so `?harness=eyeattract&play&fps=2` proves it: at 2 fps the sparse 72-frame sheet is
+  smoothly tweened by the shader rather than stepping.
   Code: **`Compat/HarnessScene.cs`** (the scene) + **`Compat/HarnessRegistry.cs`** (name→factory;
   add an object in ONE line — call its `New*`+`Setup`). Wired in `Game1` next to the `?level=`
   path. Human picker: **`wwwroot/harness.html`** (dropdown + fields → builds the URL; keep its

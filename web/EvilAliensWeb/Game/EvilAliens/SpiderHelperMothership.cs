@@ -177,9 +177,9 @@ internal class SpiderHelperMothership : KillableAlien
 				fireTimer.Start();
 				lazer = Lazer.NewLazer(collection, base.Game);
 				// Fire exactly straight down. The engine's line rasteriser (CollisionHandler) is now
-			// hardened against the degenerate perfectly-vertical case (card 7a3e70ad), so the old
-			// ~1.1deg FireTilt workaround is gone -- a true PiOver2 beam no longer hangs the game.
-			lazer.Setup(base.Position, MathHelper.PiOver2, this, fireLead);
+				// hardened against the degenerate perfectly-vertical case (card 7a3e70ad), so the old
+				// ~1.1deg FireTilt workaround is gone -- a true PiOver2 beam no longer hangs the game.
+				lazer.Setup(base.Position, MathHelper.PiOver2, this, fireLead);
 				collection.Add((GameComponent)(object)lazer);
 			}
 			break;

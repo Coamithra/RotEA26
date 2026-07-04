@@ -9,7 +9,8 @@
 ## Phase 2/3: Research + Design
 - [x] Confirm root cause: near-vertical Lazer (num tiny-nonzero) enters the val.X-exit diagonal
       branch; sub-ULP val.X step never advances -> infinite loop (100% CPU hang).
-- [x] Only Lazer feeds FillCollisionMatrixLine. Pure-axis (num==0 / num2==0) branches are safe.
+- [x] Lazer AND Bullet feed FillCollisionMatrixLine; only near-axis Lazers hit the degenerate case
+      (bullets are short lines nowhere near the cap). Pure-axis (num==0 / num2==0) branches are safe.
 - [x] Fix = guaranteed-termination iteration cap (card option b) on the DDA while-loops. Zero
       correctness regression (cap >> max real cells; degenerate line still marks correct cells first).
 - [x] Remove the per-lazer FireTilt workaround in SpiderHelperMothership (card asks to).

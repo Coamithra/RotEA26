@@ -48,7 +48,7 @@ internal class ClassicAliens : GameScene
 		setPresence((GamerPresenceMode)14);
 		score.DisableCombos();
 		Background.SetSimpleSpaceClassic();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty();
 		spawnType = PlayerSpawnType.North;

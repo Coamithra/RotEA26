@@ -1,33 +1,37 @@
 # ---------------------------------------------------------------------------
-# install_classic.py — install the "classic" music cue from an EXTERNAL track
-# instead of the XACT banks.
+# install_classic.py — install the two "classic" music cues from EXTERNAL
+# tracks instead of the XACT banks.
 #
-# WHY: the "classic" song (Songs.Classic -> songFiles[5] -> Content/music/
-# classic.ogg; played by the retro minigames AsteroidChase / BraineroidsLevel /
-# CrazyGame) was replaced with a bespoke "Evil Aliens Revenged" track the user
-# authored to be loopable. It is NOT in the recovered banks, so build_audio.py
-# no longer cracks "classic" — this tool installs it, the same way
-# build_channelswap.py owns the one port-era SFX cue that isn't in the banks.
+# WHY: the retro tune has two bespoke external variants (neither in the recovered
+# banks), so build_audio.py doesn't crack them — this tool installs both, the way
+# build_channelswap.py owns the one port-era SFX cue:
+#   * "classic"      (Songs.Classic)      — the full Japanese-vocal "Evil Aliens
+#     Revenged" cut, served only as a reward on Hard+ challenges.
+#   * "classicclean" (Songs.ClassicClean) — a lyric-free loopable instrumental,
+#     the default for the tutorial + Easy/Medium challenges.
+# SoundManager.ClassicForDifficulty() picks between them; both are played by the
+# retro minigames (AsteroidChase / BraineroidsLevel / ClassicAliens / CrazyGame).
 #
-# What it does (offline, committed output — mirrors the tools/audio philosophy):
-#   1. copy the source OGG straight to wwwroot/Content/music/classic.ogg
-#      (the source is already OGG Vorbis 44100 stereo, so a copy avoids a
+# What it does per cue (offline, committed output — mirrors the tools/audio
+# philosophy):
+#   1. copy the source OGG straight to wwwroot/Content/music/<cue>.ogg
+#      (the sources are already OGG Vorbis 44100 stereo, so a copy avoids a
 #      decode->re-encode generation loss; no need to round-trip through PCM).
-#   2. run pymusiclooper on it and take the tool's top-ranked loop pair — the
-#      track has a ~75s intro then a seamless body, which is exactly what
-#      pymusiclooper is for (the card said "use the python music looping tool").
-#   3. write those loop points into music.json's "classic" entry, preserving
+#   2. run pymusiclooper on it and take the tool's top-ranked loop pair — each
+#      track has an intro then a seamless body, which is exactly what
+#      pymusiclooper is for.
+#   3. write those loop points into music.json's "<cue>" entry, preserving
 #      every other cue's entry.
 #
-# Re-run after replacing the source track; don't hand-edit classic.ogg /
-# music.json. The source lives in new_assets_raw/ (gitignored raw assets); the
-# committed classic.ogg is the shipped artifact. build_audio.py calls this at
-# the end of a full rebuild when the source is present (else the committed
-# classic is left untouched).
+# Re-run after replacing a source track; don't hand-edit the .ogg / music.json.
+# The sources live in new_assets_raw/ (gitignored raw assets); the committed
+# .ogg files are the shipped artifacts. build_audio.py calls install() at the end
+# of a full rebuild — a missing source leaves that cue's committed artifact as-is.
 #
-#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py            # both cues
 #   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --dry-run
-#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --source <path>
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --cue classicclean
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --cue classic --source <path>
 # ---------------------------------------------------------------------------
 import argparse
 import json
@@ -43,8 +47,19 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MUSIC_DIR = os.path.join(ROOT, "web", "EvilAliensWeb", "wwwroot", "Content", "music")
 MANIFEST = os.path.join(MUSIC_DIR, "music.json")
 
-CUE = "classic"
-DEFAULT_SOURCE = os.path.join(ROOT, "new_assets_raw", "EvilAliensRevengedLoopable.ogg")
+# Two variants of the retro tune, each a bespoke external track (not from the
+# banks). "classic" = the full Japanese-vocal cut (the Hard+ challenge reward);
+# "classicclean" = a lyric-free loopable instrumental (tutorial + Easy/Medium).
+# Songs.Classic / Songs.ClassicClean pick between them via
+# SoundManager.ClassicForDifficulty(). Each gets its own committed .ogg +
+# music.json loop entry. A missing source leaves that cue's committed artifact
+# untouched (safe in CI / fresh clones).
+TRACKS = {
+    "classic": os.path.join(ROOT, "new_assets_raw", "EvilAliensRevengedLoopable.ogg"),
+    "classicclean": os.path.join(ROOT, "new_assets_raw", "classicaliensremixloopable_nolyrics.ogg"),
+}
+CUE = "classic"  # back-compat default for --source with no --cue
+DEFAULT_SOURCE = TRACKS[CUE]
 
 
 def find_loop(path):
@@ -74,11 +89,11 @@ def find_loop(path):
     return round(s, 4), round(e, 4), best.score, splice_click(audio, rate, s, e)
 
 
-def install(source=DEFAULT_SOURCE, dry_run=False):
+def install_one(cue, source, dry_run=False):
     if not os.path.exists(source):
-        print(f"  source missing: {source} (skip — committed classic.ogg left as-is)")
+        print(f"  {cue}: source missing: {source} (skip — committed {cue}.ogg left as-is)")
         return False
-    out = os.path.join(MUSIC_DIR, CUE + ".ogg")
+    out = os.path.join(MUSIC_DIR, cue + ".ogg")
 
     info = sf.info(source)
     if info.format != "OGG" or info.subtype != "VORBIS":
@@ -87,7 +102,7 @@ def install(source=DEFAULT_SOURCE, dry_run=False):
 
     loop_start, loop_end, score, click = find_loop(source)
     entry = {
-        "file": f"Content/music/{CUE}.ogg",
+        "file": f"Content/music/{cue}.ogg",
         "loopStart": loop_start,
         "loopEnd": loop_end,
         "duration": duration,
@@ -95,32 +110,47 @@ def install(source=DEFAULT_SOURCE, dry_run=False):
         # later pull loopStart in front of the intro.
         "introEnd": loop_start,
     }
-    print(f"  {CUE:10} {info.samplerate}Hz ch={info.channels} {duration:.3f}s"
+    print(f"  {cue:12} {info.samplerate}Hz ch={info.channels} {duration:.3f}s"
           f"  loop[{loop_start:.3f}..{loop_end:.3f}] len={loop_end - loop_start:.2f}s"
           f"  score={score:.3f} click={click:.2f}")
 
     if dry_run:
-        print("  dry-run: classic.ogg not copied, music.json not written.")
+        print(f"  dry-run: {cue}.ogg not copied, music.json not written.")
         return True
 
     shutil.copyfile(source, out)
     manifest = json.load(open(MANIFEST)) if os.path.exists(MANIFEST) else {}
-    manifest[CUE] = entry
+    manifest[cue] = entry
     with open(MANIFEST, "w") as f:
         json.dump(manifest, f, indent=2)
     size = os.path.getsize(out) / 1024
-    print(f"  -> {os.path.relpath(out, ROOT)} ({size:.0f}KB) + music.json[{CUE}] updated")
+    print(f"  -> {os.path.relpath(out, ROOT)} ({size:.0f}KB) + music.json[{cue}] updated")
     return True
+
+
+def install(dry_run=False):
+    """Install every external classic-tune variant (classic + classicclean)."""
+    ok = False
+    for cue, source in TRACKS.items():
+        ok = install_one(cue, source, dry_run=dry_run) or ok
+    return ok
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--source", default=DEFAULT_SOURCE,
-                    help="source OGG (default: new_assets_raw/EvilAliensRevengedLoopable.ogg)")
+    ap.add_argument("--cue", choices=sorted(TRACKS),
+                    help="install only this cue (default: all — classic + classicclean)")
+    ap.add_argument("--source",
+                    help="override the source OGG for --cue (default: the cue's TRACKS path)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="print the chosen loop without writing classic.ogg / music.json")
+                    help="print the chosen loop without writing the .ogg / music.json")
     args = ap.parse_args()
-    install(source=args.source, dry_run=args.dry_run)
+    if args.cue or args.source:
+        cue = args.cue or CUE
+        source = args.source or TRACKS[cue]
+        install_one(cue, source, dry_run=args.dry_run)
+    else:
+        install(dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

@@ -50,11 +50,17 @@ namespace EvilAliensWeb.Compat
 	//     ?pos=<x,y>   object position in 800x600 design space (default 400,300 = centre)
 	//     ?objscale=<f> multiply the object's natural draw scale (default 1; alias ?size)
 	//     ?rot=<deg>   object rotation in degrees (default 0; alias ?rotation)
+	//     ?fps=<n>     override the played animation's fps (alias ?animfps; only with ?play). Turning
+	//                  it real low lets the frame-interpolation shader carry the motion between frames,
+	//                  e.g. ?harness=eyeattract&play&fps=2 shows the eye boss's attract sheet tween.
 	//   With ?harness=blast the harness LOOPS the blast through its lifetime and overlays the
 	//   real collision ring + a live readout, for tuning the bomb's fade/active window:
 	//     ?blastactive=<0..1> fade-alpha floor below which the blast stops dealing damage (def 0.5)
 	//     ?blasthit=<f>       fraction of the visible radius that deals damage (default 0.8)
 	//     ?blastloop=<sec>    seconds for one spawn->fade sweep in the viz (default 3)
+	//   ?flyspiderscale=<f>  multiply the flying-spider size (both fg 1.0 + bg 0.67 base scales;
+	//                  null => FlyingSpider.DefaultSizeFactor). Applies in play AND the harness,
+	//                  so ?harness=flyingspider&play&flyspiderscale=0.8 previews it frozen/looping.
 	//   With ?harness=battleskull (the level-3 alienboss "lightbulb" boss) the harness can
 	//   override the hue-remap colorize so the recolour band + target can be tuned by eye:
 	//     ?huestart=<deg>  hue-band Minimum (in-game -10)   ?hueend=<deg> hue-band Maximum (10)
@@ -68,6 +74,17 @@ namespace EvilAliensWeb.Compat
 	//     ?castbrainscale=<f>  on-screen size of the cast brain (default baked in CastDisplayer)
 	//     ?castbrainfps=<f>    animation speed (the cast draws frames by hand, no interpolation,
 	//                          so it plays faster than the in-game 0.4 fps; default baked in)
+	//   With ?harness=spiderjump the harness LOOPS the Mars jumping-spider's whole crawl -> launch
+	//   -> arc -> land cycle (shadow + jump-X/ground markers + a readout) so its alignment values
+	//   can be tuned by eye. The spider crosses the screen over one loop, jumping at jumpX with the
+	//   entry frame back-calculated so the jump beat lines up:
+	//     ?spiderjumpframe=<f> the ground-anim frame the spider launches on (the jump beat)
+	//     ?spiderlandframe=<f> the frame it snaps to on touchdown (live default 44)
+	//     ?spiderjumpx=<x>     design-space X it launches at (marker line; default 400)
+	//     ?spidershadowx/y=<d> shadow offset from the spider centre / ground baseline
+	//     ?spidershadowscale=<f> multiply the shadow's on-ground size (default 1)
+	//     ?spiderloop=<sec>    seconds for one crawl->jump->land sweep (default 6)
+	//     ?spiderphase=<0..1>  FREEZE the cycle at that fraction (deterministic apex screenshot)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
 	//            ?harness=Spider&frame=2   ?harness=DeathStar&play   ?harness=UFO&pos=300,260
@@ -121,6 +138,12 @@ namespace EvilAliensWeb.Compat
 
 		// Object rotation in degrees (default 0).
 		public static float HarnessRot { get; private set; }
+
+		// Override the played animation's frames-per-second in the harness (?fps=<n>, alias ?animfps).
+		// null => the sheet's authored fps. Turning it real low makes the frame-interpolation shader
+		// carry all the visible motion between frames — e.g. ?harness=eyeattract&play&fps=2 shows the
+		// eye boss's rotating/attract sheet tween smoothly rather than step. Only meaningful with ?play.
+		public static float? HarnessFps { get; private set; }
 
 		// Bullet showcase scene (Compat/BulletShowcaseScene.cs): a frozen reference tableau
 		// (player ship + a UFO cluster + both bullet types on the starfield) drawn through the
@@ -177,6 +200,16 @@ namespace EvilAliensWeb.Compat
 
 		public static float? BlastHitFactor { get; private set; }
 
+		// Flying-spider size multiplier (Trello: "make the flying spiders slightly smaller").
+		// The reared-up HD stance (FlyingSpider loops spider_sheet2 frames 22..30) draws taller
+		// and a touch wider than the OG 1x4 crawl sheet the original used, so it reads bigger than
+		// the XBLIG. This multiplies BOTH the foreground (1.0) and background (0.67) base scales.
+		// null => FlyingSpider.cs uses its baked DefaultSizeFactor, so a shipped build is unchanged.
+		// Tune by eye with ?flyspiderscale=<f> (e.g. ?harness=flyingspider&play&flyspiderscale=0.8,
+		// or ?level=Level2&flyspiderscale=0.8). The sprite and its box hitbox (sized off the frame
+		// via DrawScale) shrink together, so collision keeps tracking the visible size.
+		public static float? FlySpiderScale { get; private set; }
+
 		public static float BlastLoopSeconds { get; private set; } = 3f;
 
 		// Colorize (hue-remap) tuning knobs for the alienboss "lightbulb" boss in the sprite
@@ -214,6 +247,33 @@ namespace EvilAliensWeb.Compat
 		public static float? CastBrainScale { get; private set; }
 
 		public static float? CastBrainFps { get; private set; }
+
+		// Spider jump-cycle tuning knobs for the sprite-harness visualiser (?harness=spiderjump).
+		// The grounded Mars Spider's whole rear-up -> launch -> arc -> land cycle is otherwise only
+		// reachable by driving a live level; the harness LOOPS a self-contained sim of it (see
+		// Spider.HarnessApplyPhase) so the shadow, the jump-start X and the land-anim resume frame can
+		// be aligned by eye. ALL null/default => the sim uses its baked-in reference values and,
+		// crucially, LIVE gameplay is byte-identical (these knobs are only ever read while the harness
+		// is up). ?spiderloop= ?spiderjumpframe= ?spiderlandframe= ?spiderjumpx= ?spidershadowx=
+		// ?spidershadowy= ?spidershadowscale=  (see the Parse cases below for units).
+		public static float SpiderLoopSeconds { get; private set; } = 6f;
+
+		public static float? SpiderJumpFrame { get; private set; }
+
+		public static float? SpiderLandFrame { get; private set; }
+
+		public static float? SpiderJumpX { get; private set; }
+
+		public static float SpiderShadowX { get; private set; }
+
+		public static float SpiderShadowY { get; private set; }
+
+		public static float SpiderShadowScale { get; private set; } = 1f;
+
+		// ?spiderphase=<0..1> FREEZES the jump sim at that fraction of one cycle (instead of looping)
+		// so a screenshot of a specific beat -- e.g. the airborne apex -- is deterministic, the same
+		// "reliable still" the harness gives for a frozen frame. null => the cycle loops.
+		public static float? SpiderPhase { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -324,6 +384,12 @@ namespace EvilAliensWeb.Compat
 						BlastLoopSeconds = bl;
 					}
 					break;
+				case "flyspiderscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
+					{
+						FlySpiderScale = fss;
+					}
+					break;
 				case "huestart":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
 					{
@@ -373,6 +439,53 @@ namespace EvilAliensWeb.Compat
 						CastBrainFps = cbf;
 					}
 					break;
+				case "spiderloop":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spl) && spl > 0f)
+					{
+						SpiderLoopSeconds = spl;
+					}
+					break;
+				case "spiderjumpframe":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjf))
+					{
+						SpiderJumpFrame = spjf;
+					}
+					break;
+				case "spiderlandframe":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var splf))
+					{
+						SpiderLandFrame = splf;
+					}
+					break;
+				case "spiderjumpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjx))
+					{
+						SpiderJumpX = spjx;
+					}
+					break;
+				case "spidershadowx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsx))
+					{
+						SpiderShadowX = spsx;
+					}
+					break;
+				case "spidershadowy":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsy))
+					{
+						SpiderShadowY = spsy;
+					}
+					break;
+				case "spidershadowscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spss) && spss > 0f)
+					{
+						SpiderShadowScale = spss;
+					}
+					break;
+				case "spiderphase":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spph))
+					{
+						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
+					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
 						// with no value is meaningless (no object), so ignore it.
@@ -415,6 +528,13 @@ namespace EvilAliensWeb.Compat
 						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var rt))
 						{
 							HarnessRot = rt;
+						}
+						break;
+					case "fps":
+					case "animfps":
+						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var afps) && afps > 0f)
+						{
+							HarnessFps = afps;
 						}
 						break;
 						case "bulletshot":

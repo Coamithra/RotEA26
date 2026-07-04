@@ -9,5 +9,6 @@ public enum Songs
 	Level3,
 	Classic,
 	Kylikova,
-	SjaakSlow
+	SjaakSlow,
+	ClassicClean
 }

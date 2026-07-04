@@ -17,7 +17,7 @@ public class SongInstance
 
 	private const float MAXVOL = 0.3f;
 
-	public static string[] songFiles = new string[8] { "sjaak", "stage1", "bach", "stage2", "stage3", "classic", "kylikova", "sjaakslow" };
+	public static string[] songFiles = new string[9] { "sjaak", "stage1", "bach", "stage2", "stage3", "classic", "kylikova", "sjaakslow", "classicclean" };
 
 	private State state;
 

@@ -44,6 +44,11 @@ namespace EvilAliensWeb.Compat
             {
                 // --- common enemies ---
                 ["spider"] = (bin, g, p) => { var s = Spider.NewSpider(bin, g); s.Setup(); return s; },
+                // Same Spider, but HarnessScene detects the "spiderjump" key and LOOPS the full
+                // crawl -> launch -> arc -> land cycle (shadow + jump-X + land markers + readout) so
+                // the Mars jumping-spider alignment values can be tuned by eye. See DebugFlags
+                // ?spider* and Spider.HarnessApplyPhase.
+                ["spiderjump"] = (bin, g, p) => { var s = Spider.NewSpider(bin, g); s.Setup(); return s; },
                 ["flyingspider"] = (bin, g, p) => { var f = FlyingSpider.NewFlyingSpider(bin, g); f.Setup(false); return f; },
                 ["ufo"] = (bin, g, p) => { var u = UFO.NewUFO(bin, g); u.Setup(p, true, EnemyBehaviour.normal); return u; },
                 ["ufobig"] = (bin, g, p) => { var u = UFO.NewUFO(bin, g); u.Setup(p, true, EnemyBehaviour.normal); return u; },

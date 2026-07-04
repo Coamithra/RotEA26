@@ -11,6 +11,14 @@ internal class Spider : KillableAlien
 	// there on the following frames.
 	private const float LandFrame = 44f;
 
+	// Ground baseline Y (design space): the spider rests here and lands back to it.
+	public const float GroundY = 505f;
+
+	// Reference "jump" beat used by the harness viz when ?spiderjumpframe= is not given. This is a
+	// PLACEHOLDER for tuning only (see the ?harness=spiderjump tool + the For-me card) -- live play
+	// still jumps on X position, so nothing ships keyed to this number.
+	private const float DefaultJumpFrame = 40f;
+
 	private float yspeed;
 
 	private bool hasJumped;
@@ -92,7 +100,7 @@ internal class Spider : KillableAlien
 		//IL_0092: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
 		//IL_009e: Unknown result type (might be due to invalid IL or missing references)
-		base.Position = new Vector2(1000f, 505f);
+		base.Position = new Vector2(1000f, GroundY);
 		base.Initialize();
 		yspeed = 0f;
 		hasJumped = false;
@@ -100,6 +108,10 @@ internal class Spider : KillableAlien
 		rotation = 0f;
 		rotationspeed = 0f;
 		jumpXposition = RandomHelper.RandomNextFloat(300f, 900f);
+		// Start each spider at a RANDOM point in the rear-up animation so a cluster crawls out of
+		// lock-step (they used to all animate from frame 0 in unison). Cosmetic: the jump is still
+		// X-triggered, so the desync doesn't change when/where any spider jumps.
+		curframe = RandomHelper.RandomNextFloat(0f, (float)(rows * columns));
 		switch (RandomHelper.Random.Next(3))
 		{
 		case 0:
@@ -193,14 +205,14 @@ internal class Spider : KillableAlien
 			rotationspeed = 0.0018f;
 			yspeed = RandomHelper.RandomNextFloat(-8f, -19f) / 16.666666f;
 		}
-		if (hasJumped & (base.Position.Y > 505f))
+		if (hasJumped & (base.Position.Y > GroundY))
 		{
 			hasJumped = false;
 			hasLanded = true;
 			rotation = 0f;
 			rotationspeed = 0f;
 			yspeed = 0f;
-			base.Position = new Vector2(base.Position.X, 505f);
+			base.Position = new Vector2(base.Position.X, GroundY);
 			// Snap to the settled "landed" frame ONCE on touchdown, then let it keep animating
 			// from there (base.Update advances curframe normally on the following frames).
 			curframe = LandFrame;
@@ -258,5 +270,104 @@ internal class Spider : KillableAlien
 			sound.PlayCue("bugdies");
 		}
 		sound.PlayCue("small head asplode");
+	}
+
+	// ---- Sprite-harness jump-cycle visualiser (?harness=spiderjump) -------------------------
+	// The whole crawl -> launch -> arc -> land cycle is otherwise only reachable by driving a live
+	// level. HarnessScene LOOPS this deterministic sim instead so the Mars jumping-spider alignment
+	// values (shadow position, jump-start X, land-anim resume frame) can be tuned by eye. It sets
+	// Position/curframe/rotation/hasJumped so the object's OWN Draw shows the right sprite (ground
+	// sheet vs the airborne spiderjump sheet); the harness overlays the shadow + markers + readout.
+	// LIVE gameplay never calls this -- it stays X-triggered until the tuned values are wired in
+	// (see the For-me card). All ?spider* knobs are read here only, so a shipped build is unchanged.
+	public struct JumpVizState
+	{
+		public float ScrollPxPerSec;
+		public float EntryFrame;
+		public float JumpFrame;
+		public float LandFrameOut;
+		public float JumpX;
+		public float CurFrame;
+		public bool Airborne;
+		public float GroundYOut;
+	}
+
+	// phase in [0,1) loops one crawl->jump->land cycle. Returns the derived numbers for the readout.
+	public JumpVizState HarnessApplyPhase(float phase)
+	{
+		float total = MathHelper.Max(1f, rows * columns);
+		float jumpFrame = WrapFrame(EvilAliensWeb.Compat.DebugFlags.SpiderJumpFrame ?? DefaultJumpFrame, total);
+		float landFrame = EvilAliensWeb.Compat.DebugFlags.SpiderLandFrame ?? LandFrame;
+		float jumpX = EvilAliensWeb.Compat.DebugFlags.SpiderJumpX ?? 400f;
+		float loopSec = MathHelper.Max(0.5f, EvilAliensWeb.Compat.DebugFlags.SpiderLoopSeconds);
+
+		// The spider crosses the whole screen over one loop (enter just off the right edge, exit
+		// off the left). The viz scroll speed is DERIVED from the loop so the spider stays on
+		// screen and slow enough to watch at any loop length; the real Mars ground scroll (~0.6
+		// px/ms) is much faster, so driving the viz at it would flick the spider past in a frame.
+		// The entry-frame "count back" below uses THIS same speed, so the jump still lines up on
+		// jumpX exactly -- the number the live wiring re-derives from the real scroll (For-me card).
+		const float xEnter = 880f;
+		const float xExit = -120f;
+		float sPxPerSec = (xEnter - xExit) / loopSec;
+
+		// Clamp the launch X into the visible crossing so the "count back" time stays positive.
+		float jumpXeff = MathHelper.Clamp(jumpX, xExit + 60f, xEnter - 60f);
+		float tJump = (xEnter - jumpXeff) / sPxPerSec;   // time from spawn to reaching jumpX
+		float t = phase * loopSec;
+
+		// The "count back": preset the entry frame so curframe hits the jump beat EXACTLY when the
+		// spider reaches jumpX. entryFrame = J - fps * (time from spawn to jumpX).
+		float entryFrame = jumpFrame - fps * tJump;
+		float x = xEnter - sPxPerSec * t;
+
+		// Deterministic arc, ILLUSTRATIVE only -- it is NOT live play's physics (live: yspeed
+		// rand(-8..-19)/16.67 px/ms + 0.02 px/ms^2 gravity). This viz just needs a readable ~0.67s
+		// hop to show WHEN/WHERE the jump fires; the beat/land-frame alignment is what's being tuned.
+		const float v0 = -300f;
+		const float g = 900f;
+		float airDur = -2f * v0 / g;
+		bool airborne = t >= tJump && t < tJump + airDur;
+
+		float y = GroundY;
+		if (t < tJump)
+		{
+			hasJumped = false;
+			curframe = WrapFrame(entryFrame + fps * t, total);
+			rotation = 0f;
+		}
+		else if (airborne)
+		{
+			float tau = t - tJump;
+			y = GroundY + v0 * tau + 0.5f * g * tau * tau;
+			hasJumped = true;
+			rotation = 1.2f * (tau / airDur);
+		}
+		else
+		{
+			hasJumped = false;
+			float tGround = t - (tJump + airDur);
+			curframe = WrapFrame(landFrame + fps * tGround, total);
+			rotation = 0f;
+		}
+
+		base.Position = new Vector2(x, y);
+
+		return new JumpVizState
+		{
+			ScrollPxPerSec = sPxPerSec,
+			EntryFrame = WrapFrame(entryFrame, total),
+			JumpFrame = jumpFrame,
+			LandFrameOut = landFrame,
+			JumpX = jumpX,
+			CurFrame = curframe,
+			Airborne = airborne,
+			GroundYOut = GroundY
+		};
+	}
+
+	private static float WrapFrame(float f, float total)
+	{
+		return ((f % total) + total) % total;
 	}
 }

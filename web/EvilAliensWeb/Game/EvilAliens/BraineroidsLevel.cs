@@ -52,7 +52,7 @@ internal class BraineroidsLevel : GameScene
 		ufotimer.Start();
 		fired = false;
 		Background.SetSpace();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty();
 	}

@@ -341,6 +341,19 @@ public class SoundManager : ISoundManagerService
 		Spawn(name);
 	}
 
+	// The retro "classic" tune ships in two variants: a clean, lyric-free loopable
+	// instrumental (Songs.ClassicClean, the default for the tutorial + Easy/Medium
+	// challenges) and the full Japanese-vocal "insane" cut (Songs.Classic), served
+	// only as a reward when the player takes a challenge on Hard or above (higher
+	// challenge difficulties are gated behind finishing the challenge first, so the
+	// lyrics are genuinely earned). Difficulty-selected challenges pick with this.
+	public static Songs ClassicForDifficulty()
+	{
+		return (Settings.GetInstance().CurrentDifficulty >= Settings.DifficultyLevel.Hard)
+			? Songs.Classic
+			: Songs.ClassicClean;
+	}
+
 	public void PlayMusic(Songs song)
 	{
 		if (!Settings.GetInstance().PlayMusic)

@@ -191,21 +191,32 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `build_audio.py` calls it as its last step; re-run `python tools/audio/refine_loops.py` standalone
   after a bank rebuild (needs `pymusiclooper`; absent → whole-wave points are left in place). Per-track
   hand-tunes go in its `OVERRIDES`; don't hand-edit the loop points. `--dry-run` previews.
-- **The `classic` music cue is a BESPOKE EXTERNAL track, not from the banks — `tools/audio/install_classic.py`.**
-  The retro-minigame song (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`, played by
-  `AsteroidChase`/`BraineroidsLevel`/`CrazyGame`) was replaced with a user-authored "Evil Aliens
-  Revenged" track (`new_assets_raw/EvilAliensRevengedLoopable.ogg`, gitignored raw source; the committed
-  `classic.ogg` is the shipped artifact). Because it isn't in the recovered XACT banks, **`classic` was
-  removed from `build_audio.py`'s bank-cracked `MUSIC_CUES`** and is installed by `install_classic.py`
-  instead (same pattern as `build_channelswap.py` owning the one port-era SFX cue). The tool copies the
-  source OGG straight to `classic.ogg` (already OGG/Vorbis 44100 stereo — a copy avoids a re-encode) and
-  writes `music.json`'s `classic` loop from **pymusiclooper's own top-ranked pair** (the track has a ~75s
-  intro then a seamless ~339s body loop; `loopStart 75.06 → loopEnd 414.18`, `introEnd = loopStart`).
-  `build_music` now **merges** into the existing `music.json` (instead of overwriting) so a full
-  `build_audio.py` rebuild preserves the external `classic` entry, and `main()` calls
-  `install_classic.install()` (a missing source just leaves the committed track untouched — safe in CI /
-  fresh clones). Re-run `python tools/audio/install_classic.py` after swapping the source track; don't
-  hand-edit `classic.ogg`/`music.json`. `--dry-run` previews; `--source <path>` overrides the source.
+- **The `classic` tune is a BESPOKE EXTERNAL track in TWO variants, difficulty-gated — `tools/audio/install_classic.py`.**
+  The retro-minigame song was replaced with a user-authored "Evil Aliens Revenged" track, and now ships
+  in two cuts: **`classic`** (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`) is the full
+  Japanese-vocal cut, and **`classicclean`** (`Songs.ClassicClean` → `songFiles[8]` →
+  `Content/music/classicclean.ogg`) is a lyric-free loopable instrumental. **Which one plays is chosen by
+  difficulty** via `SoundManager.ClassicForDifficulty()` — lyrics (`Classic`) only when
+  `Settings.CurrentDifficulty >= Hard`, else clean (`ClassicClean`) — so the vocal cut is an *earned*
+  reward (higher challenge difficulties are gated behind finishing the challenge). The four
+  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`) call the
+  helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
+  key on difficulty); the **Webcam** level uses `ClassicClean` (ungated, no real difficulty pick — until
+  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** keeps `Songs.Classic` (lyrics) directly
+  (follow-up card `7329fcd4` will give it real difficulty). Both cues are bespoke external tracks (NOT in
+  the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by
+  `install_classic.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
+  `new_assets_raw/EvilAliensRevengedLoopable.ogg` (lyrics) and
+  `new_assets_raw/classicaliensremixloopable_nolyrics.ogg` (clean) — gitignored raw; the committed `.ogg`s
+  are the shipped artifacts. The tool copies each source straight (already OGG/Vorbis 44100 stereo — a copy
+  avoids a re-encode) and writes each `music.json` loop from **pymusiclooper's own top-ranked pair**
+  (lyrics: intro ~75s, body loop `75.06→414.18`; clean: intro ~55s, body loop `54.78→208.76`;
+  `introEnd = loopStart`). `build_music` **merges** into the existing `music.json` so a full `build_audio.py`
+  rebuild preserves both external entries, and `main()` calls `install_classic.install()` which installs
+  **both** cues (a missing source leaves that cue's committed track untouched — safe in CI / fresh clones).
+  Re-run `python tools/audio/install_classic.py` after swapping a source; don't hand-edit the `.ogg`s /
+  `music.json`. `--dry-run` previews; `--cue <classic|classicclean>` installs just one; `--source <path>`
+  overrides that cue's source.
 - **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
   WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
   (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;

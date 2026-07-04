@@ -268,8 +268,8 @@ public class Background : Scene
 			doodadname = "GFX/Sprites/andromeda";
 			doodad = Content.Load<Texture2D>(doodadname);
 			showdoodad = true;
-			// On-screen footprint is pinned to AndromedaDesignWidth (800x600 design px)
-			// regardless of the texture's pixel resolution, so an HD drop-in (tools/nebula/
+			// On-screen footprint is pinned to AndromedaDesignWidth (in 800x600 design
+			// space) regardless of the texture's pixel resolution, so an HD drop-in (tools/nebula/
 			// build_nebula.py output) stays the same size on screen -- more texels = crisper
 			// at high-res windows, not bigger. 840 preserves the original 840px@scale-1 look.
 			const float AndromedaDesignWidth = 840f;

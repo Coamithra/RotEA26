@@ -98,8 +98,10 @@ def edge_feather(h, w, start):
     over the starfield even if the source content reaches an edge. Mild `start`
     (~0.85) leaves a well-margined centred galaxy untouched."""
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    nx = np.abs(xx - (w - 1) / 2.0) / ((w - 1) / 2.0)   # 0 centre -> 1 left/right edge
-    ny = np.abs(yy - (h - 1) / 2.0) / ((h - 1) / 2.0)   # 0 centre -> 1 top/bottom edge
+    hx = max((w - 1) / 2.0, 1e-6)                       # guard a 1px axis (no div-by-zero)
+    hy = max((h - 1) / 2.0, 1e-6)
+    nx = np.abs(xx - (w - 1) / 2.0) / hx                # 0 centre -> 1 left/right edge
+    ny = np.abs(yy - (h - 1) / 2.0) / hy                # 0 centre -> 1 top/bottom edge
     wx = 1.0 - smoothstep(start, 1.0, nx)
     wy = 1.0 - smoothstep(start, 1.0, ny)
     return (wx * wy).astype(np.float32)
@@ -137,6 +139,7 @@ def build(src, out, alpha_mode, opacity, gamma, feather, max_dim, dry_run):
     # auto: if the source already carries a real cutout (a meaningful fraction of
     # near-transparent pixels), trust its alpha; else it's opaque-on-black -> derive.
     mode = alpha_mode
+    transparent_frac = None
     if mode == "auto":
         transparent_frac = float((src_a < 0.06).mean())
         mode = "source" if transparent_frac > 0.02 else "luma"
@@ -154,7 +157,8 @@ def build(src, out, alpha_mode, opacity, gamma, feather, max_dim, dry_run):
 
     ow, oh = img.size
     scale = DESIGN_WIDTH / float(ow)
-    print(f"source {w}x{h}  alpha-mode={mode}  mean-alpha={alpha.mean()*255:.1f}")
+    detect = "" if transparent_frac is None else f" (auto: {transparent_frac*100:.1f}% transparent px)"
+    print(f"source {w}x{h}  alpha-mode={mode}{detect}  mean-alpha={alpha.mean()*255:.1f}")
     print(f"output {ow}x{oh}  -> on-screen doodadscale = {scale:.4f} (footprint {DESIGN_WIDTH:.0f} design px)")
     if dry_run:
         print(f"[dry-run] would write {out}")

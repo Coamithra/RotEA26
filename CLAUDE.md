@@ -434,6 +434,26 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   default, so a shipped build is unchanged). Applies in play AND the sprite harness, so
   `?harness=flyingspider&play&flyspiderscale=0.8` previews it (also a field in `wwwroot/harness.html`).
   To retune: pick a value by eye, then update the `DefaultSizeFactor` constant.
+- **Laser FX (`Quad.cs` beam + `LazerGeneratorData.cs` chargeup) — LIVE tuning via `?lazershot`
+  (Trello "improve laser animation").** The Protoss-style beam is `Quad.Draw` (a wide blue glow +
+  white-hot core, each ONE continuous sprite, + tip/muzzle blooms + electric tendrils); the pre-fire
+  chargeup swarm is `LazerGenerator` (10 converging `GFX/Menu/star` sparkles, additive). Three fixes
+  landed with URL knobs so the feel can be A/B'd by eye (all null => baked defaults ship unchanged):
+  (1) **chargeup was too subtle** — `star.png` is a soft full-frame 4-point sparkle whose rays vanish
+  sub-pixel at the original `0.015` particle scale; `LazerGeneratorData` now multiplies scale by
+  `DefaultChargeScale` (**5** — a clear converging swarm; ~10x additive-whites the frame out,
+  `?lazerchargescale=`). (2) **beam ends looked "chopped" / a core-vs-flare seam** — the `lazermiddle`
+  strip has no soft falloff ALONG its length, so `Quad.Draw` now domes each end with a width-sized
+  round GLOW-then-CORE cap (`DefaultCapScale` **1.0**, `?lazercapscale=`). (3) **tendrils sat on one
+  spot forever** — `DrawArcs` is now a SHORTLIVED lifecycle: each tendril pops up at a hashed spot,
+  crackles for `~ArcLife` s while a `sin(pi*frac)` envelope fades it in/out, then respawns elsewhere
+  next cycle (`DefaultArcCount` **5** / `DefaultArcLife` **0.16s**; `?lazerarcs=` / `?lazerarclife=`;
+  the per-appearance anchor/shape re-roll off `floor(time/life)` via a `sin*43758` `Hash`, while the
+  bolt still writhes smoothly within one life). **Tune with `?lazershot`** — `Compat/LazerShowcaseScene.cs`
+  shows the chargeup swarm (left) + a full-grown beam (right) ANIMATING (unlike the frozen
+  `?harness`/`?bulletshot`); it drives a raw `Quad` for a stable beam + a real (Update-ticked, via
+  `Collection.Add`) `LazerGenerator` for the swarm. When the user settles on values, bake them into the
+  `Default*` constants. Straight-alpha additive tints throughout (do NOT premultiply).
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the

@@ -22,6 +22,15 @@ internal class LazerGeneratorData
 
 	public float normalizedLifetime => lifetime / lifetimeinitial;
 
+	// Chargeup particle-scale multiplier (Trello "improve laser animation"). The chargeup swarm
+	// uses GFX/Menu/star, a soft full-frame 4-point sparkle whose rays vanish sub-pixel at the
+	// original 0.015 factor, so the charge read as "too subtle". Bump the visible scale; tune by
+	// eye via ?lazerchargescale= (null => this baked default). ~5x reads as a clear converging
+	// sparkle swarm without the additive rays washing the frame out (10x whited the screen out).
+	private const float DefaultChargeScale = 5f;
+
+	private static float ChargeScale => EvilAliensWeb.Compat.DebugFlags.LazerChargeScale ?? DefaultChargeScale;
+
 	public void Initialize(float size, float lifetime, Vector2 impulse)
 	{
 		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
@@ -38,8 +47,9 @@ internal class LazerGeneratorData
 		float angle = RandomHelper.RandomNextAngle();
 		this.lifetime = lifetime * RandomHelper.RandomNextFloat(350f, 800f);
 		lifetimeinitial = this.lifetime;
-		scale = size * (1f + RandomHelper.RandomNextFloat(-0.2f, 0.2f)) * 0.015f;
-		scalespeed = size * 0.00025f;
+		float chargeScale = ChargeScale;
+		scale = size * (1f + RandomHelper.RandomNextFloat(-0.2f, 0.2f)) * 0.015f * chargeScale;
+		scalespeed = size * 0.00025f * chargeScale;
 		startposition = MyMath.AngleToVector(angle) * num;
 		position = startposition;
 		endposition = Vector2.Zero;

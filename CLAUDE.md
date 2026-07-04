@@ -211,8 +211,10 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`) call the
   helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
   key on difficulty); the **Webcam** level uses `ClassicClean` (ungated, no real difficulty pick — until
-  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** keeps `Songs.Classic` (lyrics) directly
-  (follow-up card `7329fcd4` will give it real difficulty). Both cues are bespoke external tracks (NOT in
+  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** now routes through the helper too (card
+  `7329fcd4` gave it real difficulty — its `Initialize` calls `LockDifficulty()` on the menu-chosen level
+  instead of the old hard-coded `LockDifficulty(Medium)`, so the lyric cut is earned on Hard+ like the
+  other challenges, not always on). Both cues are bespoke external tracks (NOT in
   the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by
   `install_classic.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
   `new_assets_raw/EvilAliensRevengedLoopable.ogg` (lyrics) and
@@ -440,6 +442,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Picker: `wwwroot/harness.html` (battleskull option + hue fields). When the user settles on values,
   the chosen band/target get written back into `BattleSkull.Draw`'s hard-coded `new Vector3(...)` (and
   the target curve if they change how it tracks HP). e.g. `?harness=battleskull&huestart=-20&hueend=40&huecycle`.
+- **Mars jumping-spider alignment tool (`?harness=spiderjump` + `Spider.HarnessApplyPhase` + `Compat/HarnessScene.cs`).**
+  The Trello card "the jumping spiders on mars, we need a tool for me to align" asks for a tool to dial in
+  the spider's **shadow position**, **jump-start X**, and **land-anim resume frame** (plus a future
+  animation-driven jump: rear-up -> fling -> jump-prep -> launch, with a scrollspeed-compensated entry
+  frame so a random jump-X lines up with the jump beat). This card built the **plumbing**: a sprite-harness
+  mode that LOOPS the whole crawl -> launch -> arc -> land cycle (mirroring the blast/battleskull tuners).
+  `Spider.HarnessApplyPhase(phase)` is a self-contained deterministic sim of that cycle (drives
+  Position/curframe/rotation/hasJumped so the real `Draw` shows the ground sheet vs the airborne
+  `spiderjump` sheet); it presets the entry frame via the "count back" `entryFrame = J - fps*tJump` so the
+  jump beat coincides with `jumpX`. The spider crosses the screen over one loop (viz scroll is DERIVED from
+  the loop for visibility, NOT the fast real Mars scroll). `HarnessScene` overlays the **shadow** (drawn by
+  a low-DrawOrder `SpiderShadowDrawer` so it sits UNDER the sprite, like `Floor`; it tracks X, detaches +
+  shrinks on the jump), **jump-X / ground / feet markers**, and a **readout** (scroll, entryFrame, curframe,
+  jump/land frames, shadow offset). Tunable via `?spiderjumpframe= ?spiderlandframe= ?spiderjumpx=
+  ?spidershadowx= ?spidershadowy= ?spidershadowscale= ?spiderloop= ?spiderphase=` (all read ONLY while the
+  harness is up + kept OUT of `DebugFlags.Active` -> **live play is byte-identical**). `?spiderphase=<0..1>`
+  freezes the cycle for a deterministic apex screenshot. Picker: `wwwroot/harness.html` (spiderjump option +
+  fields). The **only live change** in this card is a cosmetic **random animation start** in
+  `Spider.Initialize` (a cluster crawls out of lock-step; jump is still X-triggered). Dialing the actual
+  values + wiring the animation-driven jump live is deferred to the "For me" card + a follow-up.
+  e.g. `?harness=spiderjump&bg=mars&spiderphase=0.535` (airborne apex) · `...&spidershadowy=-90` (align shadow).
 - **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
   was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research
@@ -598,16 +621,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   and the cell split is `texture.Width/8` (integer), so a higher-res drop-in only needs **dims a
   multiple of 8** -- **no game code change**. To ship a higher-res wall: (1) upscale
   `756-v1.png` with ChatGPT/an upscaler to a square power-of-two (art step); (2) drop it at
-  `tools/walls/source/756-v1.png` (gitignored raw source); (3) `python
-  tools/walls/build_wall_tileable.py`. The tool re-makes the (edge-broken) upscale seamlessly
-  tileable via **offset-and-heal healed with the mars stitcher's Laplacian `pyr_blend`**
-  (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the card asked for): roll by half
-  so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
-  cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
-  reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
-  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
-  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
-  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  `tools/walls/source/756-v1.png` (gitignored raw source); (3) run ONE of the two make-tileable
+  methods. Both offset the upscale so the wrap seam becomes a centre cross, then fix that cross while
+  keeping the outer border seamless, and each writes its own 2x2 preview + a wrap-seam **ratio to the
+  texture's own interior adjacency** (1.0 = seamless, >>1 = broken) so you can A/B them:
+  **(A) BLEND** (`build_wall_tileable.py`, default; offline, no model) heals the seam with the mars
+  stitcher's Laplacian `pyr_blend` (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the
+  card asked for): keep a pure-`B` seamless frame at all four edges, multiband cross-fade the
+  transition. Deterministic, but it RELOCATES edge content (blends existing pixels, can faintly
+  ghost). `preview_blend_756-v1.png`.
+  **(B) INFILL** (higher quality) masks the seam cross and lets a LOCAL inpainting model REGENERATE
+  new detail across it -- no ghosting. ChatGPT can't (it regenerates the whole frame + breaks the
+  borders); needs a real inpainter that preserves unmasked pixels (**Flux Fill**/SD-inpaint). Flow:
+  `--emit-seam` (writes `seam/756-v1_offset.png` + `_mask.png`) -> run the model -> `--reimport out.png`,
+  which composites the fill **inside the mask only** over the offset so the wrap borders stay
+  pixel-exact (tiling guaranteed). `tools/walls/flux_infill.py` is a one-shot Flux Fill runner
+  (`FluxFillPipeline`); its pipeline call is **NOT run/verified here** (needs a GPU + gated weights) --
+  the seam/composite/install plumbing it shares with `build_wall_tileable.py` IS verified.
+  `preview_infill_756-v1.png`. Only `756-v1` is the collidable wall (8x8
   grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
   `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
   preload stutters on a big new PNG, add

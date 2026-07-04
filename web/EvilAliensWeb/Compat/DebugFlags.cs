@@ -66,6 +66,14 @@ namespace EvilAliensWeb.Compat
 	//     ?huestart=<deg>  hue-band Minimum (in-game -10)   ?hueend=<deg> hue-band Maximum (10)
 	//     ?huetarget=<deg> / ?hue=<deg>  pin the target hue (0..360; default = HP-based)
 	//     ?huecycle        auto-sweep the target 0..360 (?hueloop=<sec> sets the period, def 6)
+	//   ?castbrain     CAST "BRAIN SPAWN" VIEWER: boot straight onto the end-credits Cast screen,
+	//                  parked on the "Brain Spawn" entry (the one that now shows the animated
+	//                  brainanimated sheet + glow, not the old brainlargetransglow). The real cast
+	//                  is only reachable after beating Level 3 on Hard, so this is how to see/tune
+	//                  it. Reuses the sprite-harness scene (Esc -> menu). Tuning knobs:
+	//     ?castbrainscale=<f>  on-screen size of the cast brain (default baked in CastDisplayer)
+	//     ?castbrainfps=<f>    animation speed (the cast draws frames by hand, no interpolation,
+	//                          so it plays faster than the in-game 0.4 fps; default baked in)
 	//   With ?harness=spiderjump the harness LOOPS the Mars jumping-spider's whole crawl -> launch
 	//   -> arc -> land cycle (shadow + jump-X/ground markers + a readout) so its alignment values
 	//   can be tuned by eye. The spider crosses the screen over one loop, jumping at jumpX with the
@@ -227,6 +235,18 @@ namespace EvilAliensWeb.Compat
 		public static bool HueCycle { get; private set; }
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
+
+		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
+		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
+		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
+		public static bool CastBrain { get; private set; }
+
+		// On-screen scale + animation fps of the cast "Brain Spawn" specimen. null => the baked
+		// defaults in CastDisplayer, so a shipped build is unchanged; these override for by-eye
+		// tuning via ?castbrain (the blast/colorize-tuner pattern). ?castbrainscale= / ?castbrainfps=
+		public static float? CastBrainScale { get; private set; }
+
+		public static float? CastBrainFps { get; private set; }
 
 		// Webcam "I Made This!" difficulty tuning knobs (WebcamLevel). The webcam challenge
 		// now has a per-difficulty tuning table (hearts / kills-to-win / saucer cap / saucer
@@ -466,6 +486,26 @@ namespace EvilAliensWeb.Compat
 						HueLoopSeconds = hl;
 					}
 					break;
+				case "castbrain":
+					CastBrain = IsOn(val);
+					if (CastBrain)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
+				case "castbrainscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbs) && cbs > 0f)
+					{
+						CastBrainScale = cbs;
+					}
+					break;
+				case "castbrainfps":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbf) && cbf > 0f)
+					{
+						CastBrainFps = cbf;
+					}
+					break;
 				case "spiderloop":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spl) && spl > 0f)
 					{
@@ -511,8 +551,7 @@ namespace EvilAliensWeb.Compat
 				case "spiderphase":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spph))
 					{
-						SpiderPhase = ((spph % 1f) + 1f) % 1f;
-					}
+						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
@@ -593,7 +632,7 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || CastBrain;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

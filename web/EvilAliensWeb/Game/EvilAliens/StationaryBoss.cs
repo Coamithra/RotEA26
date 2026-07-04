@@ -9,6 +9,10 @@ internal class StationaryBoss : AlienDrawableGameComponent
 
 	private Texture2D blank;
 
+	// Authored placement for the Mothership_landed still (Content/data/landed_offsets.json).
+	// The mothership never lifts off, so only Landed (draw nudge) + shadow tuning apply.
+	private EvilAliensWeb.Compat.LandedOffsets.Entry landedTuning = EvilAliensWeb.Compat.LandedOffsets.Entry.Identity;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -59,6 +63,9 @@ internal class StationaryBoss : AlienDrawableGameComponent
 		base.Position = new Vector2(1100f, 440f);
 		base.Initialize();
 		fakehittimer.Stop();
+		landedTuning = EvilAliensWeb.Compat.LandedOffsets.Get("GFX/Sprites/Mothership_landed");
+		base.ShadowOffset = landedTuning.Shadow;
+		base.ShadowSize = landedTuning.ShadowSize;
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -67,7 +74,12 @@ internal class StationaryBoss : AlienDrawableGameComponent
 		{
 			spriteBatch.lightenEffect.Enable();
 		}
+		// Nudge only the draw by the authored feet offset; Position (collisions + shadow source)
+		// stays put, matching how the landed UFOs offset their still.
+		Vector2 drawPos = base.Position;
+		base.Position = drawPos + landedTuning.Landed;
 		base.Draw(gameTime);
+		base.Position = drawPos;
 		if (fakehittimer.Active)
 		{
 			spriteBatch.lightenEffect.Disable();

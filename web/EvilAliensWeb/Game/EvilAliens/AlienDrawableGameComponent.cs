@@ -40,6 +40,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// Sheets opt in via the registry below (name -> original/design frame width); others stay 1.
 	public float textureScale = 1f;
 
+	// Per-instance ground-shadow tuning, read by Floor.cs when it builds this entity's shadow.
+	// Identity (offset 0, size 1) is the default for every entity and reproduces the original
+	// shadow exactly; the landed Mars UFOs set these from LandedOffsets while parked so the
+	// author can nudge the parked ship's shadow (x + y along the floor line, and width).
+	public Vector2 ShadowOffset = Vector2.Zero;
+
+	public float ShadowSize = 1f;
+
 	private static readonly Dictionary<string, int> DesignFrameWidth = new Dictionary<string, int>
 	{
 		{ "GFX/Sprites/ufosheet", 48 },

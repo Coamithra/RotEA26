@@ -452,6 +452,33 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Spider.Initialize` (a cluster crawls out of lock-step; jump is still X-triggered). Dialing the actual
   values + wiring the animation-driven jump live is deferred to the "For me" card + a follow-up.
   e.g. `?harness=spiderjump&bg=mars&spiderphase=0.535` (airborne apex) · `...&spidershadowy=-90` (align shadow).
+- **Landed Mars-UFO placement offsets (`Compat/LandedOffsets.cs` + `wwwroot/landed-editor.html` +
+  `Content/data/landed_offsets.json`).** The Mars saucers that start parked on the ground
+  (`ufometpootjes`/`Smallship_landed`/`Mediumship_landed`, spawned by `StationarySpawner`) and the
+  drifting `Mothership_landed` (`StationaryBoss`) each use a **different still sprite** than their flying
+  animation, so their ground shadow can read off-centre and the landed->flying handoff can JUMP (the
+  parked still's "landing feet" offset its visual centre from the flying frame's). This card built the
+  **plumbing + an HTML author tool**; the actual values are the user's to dial (the "For me" card). Per
+  sprite, `landed_offsets.json` holds (all DESIGN-space px, +y down): `landed` (nudges the parked still's
+  draw), `takeoff` (shifts `Position` ONCE at lift-off so the flying sprite continues seamlessly),
+  `shadow` (nudges the ground shadow x + y-along-the-floor), `shadowSize` (× the shadow width). Identity
+  (0s / size 1, or a missing entry/file) reproduces the ORIGINAL untuned behaviour — so the shipped
+  all-zero file changes nothing until tuned. `LandedOffsets.Get(name)` loads it once, lazily
+  (`TitleContainer.OpenStream` + `JsonDocument`, both proven trim-safe; missing/bad file -> identity).
+  Consumers: `UFO` (`SetStationary` applies the shadow tuning + caches the entry; `Draw` offsets the
+  still by `landed`; lift-off adds `takeoff` to `Position` and clears the shadow tuning; `Setup` resets
+  to identity for recycled instances) and `StationaryBoss` (`Initialize` applies shadow tuning; `Draw`
+  nudges only the draw by `landed`). The shadow tuning rides the generic `Floor` shadow via two new
+  identity-default fields on `AlienDrawableGameComponent` (`ShadowOffset`/`ShadowSize`) that
+  `Floor.CollidesWith` reads — so there's ONE shadow, no double-draw, and every OTHER entity is
+  byte-identical. **The tool is `wwwroot/landed-editor.html`** (served alongside the game, e.g.
+  `…:5280/landed-editor.html`): it fetches the real sprites + shadow, lets you drag the parked still, the
+  shadow, and a flying-sprite ghost (takeoff preview) on a Mars-ground canvas, loads the committed JSON
+  to continue, and exports a new one. **GOTCHA when iterating in-game:** the JSON is read late (at the
+  first stationary spawn) via `TitleContainer`, so a plain reload serves the STALE browser-cached copy
+  (the same Content-cache trap as textures) — bust it (DevTools "Disable cache", or
+  `fetch('Content/data/landed_offsets.json',{cache:'reload'})` then reload). Production self-heals via
+  ETag. Re-export from the tool; don't hand-edit values you can author visually.
 - **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
   was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research

@@ -64,6 +64,10 @@ public class UFO : KillableAlien
 
 	private float stationaryLiftOffX;
 
+	// Per-sprite landed-placement tuning (Content/data/landed_offsets.json, authored with
+	// wwwroot/landed-editor.html). Identity until SetStationary loads the parked still's entry.
+	private EvilAliensWeb.Compat.LandedOffsets.Entry landedTuning = EvilAliensWeb.Compat.LandedOffsets.Entry.Identity;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -244,6 +248,11 @@ public class UFO : KillableAlien
 		}
 		hasbonus = false;
 		stationary = false;
+		// Recycled instance: clear any landed tuning from a previous parked life so a ship
+		// spawned flying uses the untouched generic shadow (SetStationary re-applies it).
+		landedTuning = EvilAliensWeb.Compat.LandedOffsets.Entry.Identity;
+		base.ShadowOffset = Microsoft.Xna.Framework.Vector2.Zero;
+		base.ShadowSize = 1f;
 		flyintimer.Stop();
 	}
 
@@ -304,7 +313,8 @@ public class UFO : KillableAlien
 			// landed stills are drawn directly (not via DrawScale), so undo any supersample
 			// factor here; 1 for not-yet-upscaled stills (Smallship_landed / Mediumship_landed)
 			float landedScale = scale / SuperSampleFactor(stationarySpriteName, stationarySprite.Width);
-			spriteBatch.Draw(stationarySprite, base.Position, 0f, landedScale, center: true);
+			// landedTuning.Landed plants the still (its "feet") relative to the flying anchor.
+			spriteBatch.Draw(stationarySprite, base.Position + landedTuning.Landed, 0f, landedScale, center: true);
 		}
 		if (lazerGenerator != null)
 		{
@@ -428,6 +438,12 @@ public class UFO : KillableAlien
 					base.Direction = accelDir;
 					base.Speed = base.MaxSpeed;
 					stationary = false;
+					// Feet compensation: shift to the flying frame's centre so the sprite doesn't
+					// jump the instant it swaps the parked still for the flying animation. Also
+					// drop the parked shadow tuning back to the generic in-flight shadow.
+					base.Position += landedTuning.Takeoff;
+					base.ShadowOffset = Microsoft.Xna.Framework.Vector2.Zero;
+					base.ShadowSize = 1f;
 					liftofftimer.Reset();
 					liftofftimer.Start();
 					flyawaytimer.Duration = 16000f;
@@ -624,6 +640,11 @@ public class UFO : KillableAlien
 	{
 		stationary = true;
 		stationaryLiftOffX = RandomHelper.RandomNextFloat(400f, 550f);
+		// Pull this parked still's authored placement and apply its shadow tuning; the flying
+		// ship's generic shadow is restored at lift-off (Update) / on the next Setup.
+		landedTuning = EvilAliensWeb.Compat.LandedOffsets.Get(stationarySpriteName);
+		base.ShadowOffset = landedTuning.Shadow;
+		base.ShadowSize = landedTuning.ShadowSize;
 	}
 
 	private void MakeSmall()

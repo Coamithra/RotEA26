@@ -43,7 +43,7 @@ import numpy as np
 from PIL import Image
 
 # --------------------------------------------------------------------------- #
-#  CONFIG -- the knobs a human tweaks (see module docstring / the "For me" card)
+#  CONFIG -- the knobs a human tweaks (see the module docstring's "TUNE IT")
 # --------------------------------------------------------------------------- #
 
 WIDTH, HEIGHT = 1000, 600        # must match the layer's on-disk size (drawn at size 1)
@@ -78,9 +78,11 @@ RIDGES = [
 ]
 
 # Large-scale left-to-right brightness drift (dust density) so no ridge is a flat
-# fill. Amplitude is a fraction of the ridge value; period is in screen-widths.
+# fill -- a broad seamless curve shared by all ridges. DUST_STRENGTH is the drift
+# as a fraction of the ridge value; DUST_HIGHCUT is the top FFT bin kept (higher =
+# finer drift). 1-2 gives one or two gentle bright/dark swells across the width.
 DUST_STRENGTH = 0.10
-DUST_CYCLES = 1.5                # integer+.5 keeps it non-repetitive but still wraps via the ridge FFT
+DUST_HIGHCUT = 2
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "..",
                    "web", "EvilAliensWeb", "wwwroot", "Content", "gfx", "marsbg", "marshills.png")
@@ -128,7 +130,7 @@ def build(seed):
 
     # A single seamless dust-drift curve shared across ridges (broad, low-freq).
     dust = periodic_heightfield(W, np.random.default_rng(seed * 131 + 7),
-                                beta=3.0, lowcut=1, highcut=max(1, int(DUST_CYCLES) + 1))
+                                beta=3.0, lowcut=1, highcut=max(1, DUST_HIGHCUT))
 
     haze = np.array(HAZE_RGB, dtype=np.float64)
 

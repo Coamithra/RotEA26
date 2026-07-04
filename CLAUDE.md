@@ -610,6 +610,21 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.Reset()` clears the belt state on every fresh level entry; a death mid-belt can skip the
   disengage but is self-correcting (the belt replays from the pre-belt checkpoint — see the
   `EngageBeltSlowdown` comment; don't add a checkpoint *inside* the belt).
+- **Andromeda nebula fly-by (Level-1 brains section) is RESOLUTION-INDEPENDENT -- `tools/nebula/build_nebula.py`.**
+  `GFX/Sprites/andromeda` is the galaxy that crosses during Level 1's brain waves (`Background.QueueAndromeda`,
+  fired from `Level1.message_OnFinished` after the first `BrainSpawner`). It's a STRAIGHT-alpha sprite
+  (`(SpriteBlendMode)1` == AlphaBlend -> `NonPremultiplied`, NOT additive -- the enum is None=0/AlphaBlend=1/
+  Additive=2), drawn centred at x=400 scrolling vertically. `QueueAndromeda` now sets `doodadscale =
+  AndromedaDesignWidth(840) / doodad.Width` instead of a hard-coded `1f`, so the on-screen footprint is pinned
+  at 840 design px for ANY texture resolution -- a higher-res drop-in stays the same size, just crisper (the
+  old fixed 840px asset was a ~2.4x blur once RenderScale upscaled it to a 1080p+ window). So swapping in HD
+  art needs NO code change. Build it with `tools/nebula/build_nebula.py`: it takes a raw HD galaxy at
+  `tools/nebula/source/andromeda.png` (gitignored) and normalises it to straight-alpha RGBA -- auto-deriving
+  alpha from luminance if the source is opaque-on-black (else respecting its alpha), applying a per-axis edge
+  feather so no hard rectangle shows over the starfield, and capping the long side at 2048. Safe no-op if the
+  source is missing (CI ships the committed png). Re-run after swapping the source; don't hand-edit
+  `andromeda.png`. Knobs + how-to: `tools/nebula/README.md`. It's a background fly-by (no `?harness=` entry),
+  so verify by booting Level 1 to the brains section.
 - **Mars far-hills layer is PROCEDURAL, not hand-drawn -- `tools/mars/build_marshills.py`.** The 2nd
   Mars background layer (`GFX/MarsBG/marshills`, added by `Background.SetMars()` behind the HD `marsloop`
   ground / in front of `clouds-background`, scrollspeed 0.7) used to be a low-res hand-drawn hazy tan

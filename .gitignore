@@ -86,6 +86,8 @@ tools/mars/wip/horizon_out/
 tools/mars/wip/strip_*.png
 tools/mars/wip/_*.png
 tools/mars/**/__pycache__/
+# build_marshills.py --preview/--show diagnostics (the shipped asset is committed).
+tools/mars/_*.png
 
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.

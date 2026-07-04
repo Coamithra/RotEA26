@@ -380,6 +380,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
   (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
   `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
+- **Flying-spider size (`FlyingSpider.DefaultSizeFactor` + `?flyspiderscale=`).** The port reuses the
+  reared-up HD sheet (`spider_sheet2` frames 22..30) for the Level 2 flying spider instead of the OG
+  1x4 crawl sheet, so it draws taller + a touch wider than the XBLIG (measured on-screen silhouette
+  ~147x174 design px vs the OG's ~122x93). `FlyingSpider.SizeFactor` multiplies BOTH the foreground
+  (1.0) and background (0.67) base scales in `Initialize`; the sprite AND its box hitbox (sized off the
+  frame via `DrawScale`) shrink together, so collision tracks the visible size. Baked default is
+  **0.85** (`DefaultSizeFactor`); override live with **`?flyspiderscale=<f>`** (null => the baked
+  default, so a shipped build is unchanged). Applies in play AND the sprite harness, so
+  `?harness=flyingspider&play&flyspiderscale=0.8` previews it (also a field in `wwwroot/harness.html`).
+  To retune: pick a value by eye, then update the `DefaultSizeFactor` constant.
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the

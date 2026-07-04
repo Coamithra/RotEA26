@@ -207,11 +207,10 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Content/music/classicclean.ogg`) is a lyric-free loopable instrumental. **Which one plays is chosen by
   difficulty** via `SoundManager.ClassicForDifficulty()` — lyrics (`Classic`) only when
   `Settings.CurrentDifficulty >= Hard`, else clean (`ClassicClean`) — so the vocal cut is an *earned*
-  reward (higher challenge difficulties are gated behind finishing the challenge). The four
-  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`) call the
-  helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
-  key on difficulty); the **Webcam** level uses `ClassicClean` (ungated, no real difficulty pick — until
-  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** now routes through the helper too (card
+  reward (higher challenge difficulties are gated behind finishing the challenge). The
+  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`/**Webcam**)
+  call the helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
+  key on difficulty); **`TeamChallenge`** now routes through the helper too (card
   `7329fcd4` gave it real difficulty — its `Initialize` calls `LockDifficulty()` on the menu-chosen level
   instead of the old hard-coded `LockDifficulty(Medium)`, so the lyric cut is earned on Hard+ like the
   other challenges, not always on). Both cues are bespoke external tracks (NOT in
@@ -317,7 +316,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
   (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
 - **Webcam challenge "I Made This!" (`Levels.WebcamAliens`)** — the remake of the 2004 webcam game the
-  splash meme is from; last entry in the Challenges carousel (ungated). The player's SEGMENTED camera
+  splash meme is from; last entry in the Challenges carousel (no Unlockables gate — it just needs a
+  webcam). It DOES go through the challenge difficulty menu like the others. The player's SEGMENTED camera
   image is the ship: **JS owns everything camera** (`wwwroot/webcam.js` = the Teams-style setup dialog
   with device picker + preview, getUserMedia, and the mirrored person OVERLAY canvas positioned over the
   4:3 letterbox, outside `#app` like the touch/trailer overlays), **C# owns everything gameplay**
@@ -325,7 +325,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   collision surface is a 40x30 person-mask occupancy grid in design space, pushed ~30Hz from JS
   (`webcamMask`, ~200 B base64); the scene hit-tests saucers/plasma against it (`HitCircle`) and aims at
   its `Centroid`. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
-  fire ONE big slow plasma orb at you; 3 hearts, 20 kills to win. **GOTCHA — MediaPipe MUST stay in the
+  fire ONE big slow plasma orb at you; hearts + kills-to-win are per-difficulty (see below). **Per-difficulty
+  tuning (card `8fcc7a8e`):** `WebcamLevel.Tunings[]` is an Easy..Inzane table of the DISCRETE knobs —
+  hearts, kills-to-win, max simultaneous saucers, saucer-speed × and plasma-speed × (the generic
+  arm/blink/spawn cadence already scales off `Settings.DifficultyModifier`). `Initialize` reads
+  `Settings.CurrentDifficulty` (the menu pick), resolves the row, and picks the music via
+  `SoundManager.ClassicForDifficulty()` (Hard+ = lyrics). `WebcamUfo.Setup`/`WebcamPlasma.Setup` take a
+  speed-× arg. **Live-tune the feel with the `?wc*` debug flags** (`Compat/DebugFlags.cs`): boot
+  `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`,
+  then bake the chosen numbers back into `Tunings[]`. **GOTCHA — MediaPipe MUST stay in the
   worker (`webcam-worker.js`):** its Emscripten loader assigns the global `Module`, which Blazor's Mono
   runtime also uses — importing tasks-vision on the main thread kills the whole .NET runtime ("_malloc is
   not a function", reproduced). The ~10 MB runtime+model under `wwwroot/lib/mediapipe/` (see its README)
@@ -613,6 +621,39 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.Reset()` clears the belt state on every fresh level entry; a death mid-belt can skip the
   disengage but is self-correcting (the belt replays from the pre-belt checkpoint — see the
   `EngageBeltSlowdown` comment; don't add a checkpoint *inside* the belt).
+- **Andromeda nebula fly-by (Level-1 brains section) is RESOLUTION-INDEPENDENT -- `tools/nebula/build_nebula.py`.**
+  `GFX/Sprites/andromeda` is the galaxy that crosses during Level 1's brain waves (`Background.QueueAndromeda`,
+  fired from `Level1.message_OnFinished` after the first `BrainSpawner`). It's a STRAIGHT-alpha sprite
+  (`(SpriteBlendMode)1` == AlphaBlend -> `NonPremultiplied`, NOT additive -- the enum is None=0/AlphaBlend=1/
+  Additive=2), drawn centred at x=400 scrolling vertically. `QueueAndromeda` now sets `doodadscale =
+  AndromedaDesignWidth(840) / doodad.Width` instead of a hard-coded `1f`, so the on-screen footprint is pinned
+  at 840 design px for ANY texture resolution -- a higher-res drop-in stays the same size, just crisper (the
+  old fixed 840px asset was a ~2.4x blur once RenderScale upscaled it to a 1080p+ window). So swapping in HD
+  art needs NO code change. Build it with `tools/nebula/build_nebula.py`: it takes a raw HD galaxy at
+  `tools/nebula/source/andromeda.png` (gitignored) and normalises it to straight-alpha RGBA -- auto-deriving
+  alpha from luminance if the source is opaque-on-black (else respecting its alpha), applying a per-axis edge
+  feather so no hard rectangle shows over the starfield, and capping the long side at 2048. Safe no-op if the
+  source is missing (CI ships the committed png). Re-run after swapping the source; don't hand-edit
+  `andromeda.png`. Knobs + how-to: `tools/nebula/README.md`. It's a background fly-by (no `?harness=` entry),
+  so verify by booting Level 1 to the brains section.
+- **Mars far-hills layer is PROCEDURAL, not hand-drawn -- `tools/mars/build_marshills.py`.** The 2nd
+  Mars background layer (`GFX/MarsBG/marshills`, added by `Background.SetMars()` behind the HD `marsloop`
+  ground / in front of `clouds-background`, scrollspeed 0.7) used to be a low-res hand-drawn hazy tan
+  silhouette with a visible repeating seam. It's now SYNTHESIZED: numpy builds N back-to-front ridges as
+  circular-FFT (natively SEAMLESS -- `mirrorX=false`, so the layer just REPEATS every `realsize.X`; the
+  wrap MUST be seamless) fractal heightfields, composited with aerial perspective (farther ridges
+  lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers + lerps toward the haze
+  tone so it dissolves into the sky). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
+  TOP from design y~448 down, so ONLY ~design y 405..450 (just above the rocky horizon) ever shows -- the
+  `RIDGES` crests are placed to land there and each body just fills down to be occluded. All aesthetic
+  knobs (palette, per-ridge base/amp/roughness/haze/feather, seed) are constants in the tool's CONFIG
+  block. Re-run `python tools/mars/build_marshills.py` after tweaking; `--seed N`, `--preview` (2x-tiled
+  seam check -> `tools/mars/_preview_marshills.png`, gitignored), `--show` (composite over the real sky
+  -> `_context_marshills.png`). Deterministic/offline (numpy+Pillow), like tools/earth & tools/favicon;
+  CI ships the committed `marshills.png`. It's a plain PNG decoded at level preload (tiny, not in
+  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHA when editing the tool: the alpha
+  accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255 makes
+  the whole layer ~1/255 transparent -> invisible hills).
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet

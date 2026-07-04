@@ -431,6 +431,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Picker: `wwwroot/harness.html` (battleskull option + hue fields). When the user settles on values,
   the chosen band/target get written back into `BattleSkull.Draw`'s hard-coded `new Vector3(...)` (and
   the target curve if they change how it tracks HP). e.g. `?harness=battleskull&huestart=-20&hueend=40&huecycle`.
+- **Mars jumping-spider alignment tool (`?harness=spiderjump` + `Spider.HarnessApplyPhase` + `Compat/HarnessScene.cs`).**
+  The Trello card "the jumping spiders on mars, we need a tool for me to align" asks for a tool to dial in
+  the spider's **shadow position**, **jump-start X**, and **land-anim resume frame** (plus a future
+  animation-driven jump: rear-up -> fling -> jump-prep -> launch, with a scrollspeed-compensated entry
+  frame so a random jump-X lines up with the jump beat). This card built the **plumbing**: a sprite-harness
+  mode that LOOPS the whole crawl -> launch -> arc -> land cycle (mirroring the blast/battleskull tuners).
+  `Spider.HarnessApplyPhase(phase)` is a self-contained deterministic sim of that cycle (drives
+  Position/curframe/rotation/hasJumped so the real `Draw` shows the ground sheet vs the airborne
+  `spiderjump` sheet); it presets the entry frame via the "count back" `entryFrame = J - fps*tJump` so the
+  jump beat coincides with `jumpX`. The spider crosses the screen over one loop (viz scroll is DERIVED from
+  the loop for visibility, NOT the fast real Mars scroll). `HarnessScene` overlays the **shadow** (drawn by
+  a low-DrawOrder `SpiderShadowDrawer` so it sits UNDER the sprite, like `Floor`; it tracks X, detaches +
+  shrinks on the jump), **jump-X / ground / feet markers**, and a **readout** (scroll, entryFrame, curframe,
+  jump/land frames, shadow offset). Tunable via `?spiderjumpframe= ?spiderlandframe= ?spiderjumpx=
+  ?spidershadowx= ?spidershadowy= ?spidershadowscale= ?spiderloop= ?spiderphase=` (all read ONLY while the
+  harness is up + kept OUT of `DebugFlags.Active` -> **live play is byte-identical**). `?spiderphase=<0..1>`
+  freezes the cycle for a deterministic apex screenshot. Picker: `wwwroot/harness.html` (spiderjump option +
+  fields). The **only live change** in this card is a cosmetic **random animation start** in
+  `Spider.Initialize` (a cluster crawls out of lock-step; jump is still X-triggered). Dialing the actual
+  values + wiring the animation-driven jump live is deferred to the "For me" card + a follow-up.
+  e.g. `?harness=spiderjump&bg=mars&spiderphase=0.535` (airborne apex) · `...&spidershadowy=-90` (align shadow).
 - **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
   was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research

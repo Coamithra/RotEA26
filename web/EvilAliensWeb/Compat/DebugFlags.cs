@@ -350,7 +350,10 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "wcdiff":
 				case "webcamdiff":
-					if (!string.IsNullOrEmpty(val)
+					// Like ?level=, reject numeric input: Enum.TryParse would take "2"
+					// -> (DifficultyLevel)2 (Hard) by ordinal, which IsDefined then passes.
+					if (!string.IsNullOrEmpty(val) && !char.IsDigit(val.Trim()[0])
+						&& val.Trim()[0] != '+' && val.Trim()[0] != '-'
 						&& Enum.TryParse<EvilAliens.Settings.DifficultyLevel>(val.Trim().Replace(' ', '_'), ignoreCase: true, out var wcd)
 						&& Enum.IsDefined(typeof(EvilAliens.Settings.DifficultyLevel), wcd))
 					{
@@ -358,7 +361,7 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "wchearts":
-					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wch) && wch >= 0)
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wch) && wch > 0)
 					{
 						WebcamHearts = wch;
 					}

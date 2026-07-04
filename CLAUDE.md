@@ -200,8 +200,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Settings.CurrentDifficulty >= Hard`, else clean (`ClassicClean`) — so the vocal cut is an *earned*
   reward (higher challenge difficulties are gated behind finishing the challenge). The four
   difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`/**Webcam**)
-  call the
-  helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
+  call the helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
   key on difficulty); **`TeamChallenge`** keeps `Songs.Classic` (lyrics) directly
   (follow-up card `7329fcd4` will give it real difficulty). Both cues are bespoke external tracks (NOT in
   the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by

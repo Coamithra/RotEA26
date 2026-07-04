@@ -130,7 +130,10 @@ internal class WebcamLevel : GameScene
 		// The player picked a difficulty in the challenge difficulty menu — this level
 		// routes through MenuScene.challengeSelector_levelSelected like every other
 		// challenge, so Settings.CurrentDifficulty is already their choice. ?wcdiff
-		// forces a tier for live tuning without unlocking it in the menu.
+		// forces a tier for live tuning without unlocking it in the menu; it writes the
+		// shared CurrentDifficulty (not persisted — the difficulty menu is the only
+		// saver), so a tester who then exits to the menu carries that tier until they
+		// re-pick. Debug-flag only, so a shipped build never hits this.
 		if (DebugFlags.WebcamDifficulty.HasValue)
 		{
 			settings.CurrentDifficulty = DebugFlags.WebcamDifficulty.Value;

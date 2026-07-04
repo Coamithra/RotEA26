@@ -55,6 +55,9 @@ namespace EvilAliensWeb.Compat
 	//     ?blastactive=<0..1> fade-alpha floor below which the blast stops dealing damage (def 0.5)
 	//     ?blasthit=<f>       fraction of the visible radius that deals damage (default 0.8)
 	//     ?blastloop=<sec>    seconds for one spawn->fade sweep in the viz (default 3)
+	//   ?flyspiderscale=<f>  multiply the flying-spider size (both fg 1.0 + bg 0.67 base scales;
+	//                  null => FlyingSpider.DefaultSizeFactor). Applies in play AND the harness,
+	//                  so ?harness=flyingspider&play&flyspiderscale=0.8 previews it frozen/looping.
 	//   With ?harness=battleskull (the level-3 alienboss "lightbulb" boss) the harness can
 	//   override the hue-remap colorize so the recolour band + target can be tuned by eye:
 	//     ?huestart=<deg>  hue-band Minimum (in-game -10)   ?hueend=<deg> hue-band Maximum (10)
@@ -168,6 +171,16 @@ namespace EvilAliensWeb.Compat
 		public static float? BlastActiveAlpha { get; private set; }
 
 		public static float? BlastHitFactor { get; private set; }
+
+		// Flying-spider size multiplier (Trello: "make the flying spiders slightly smaller").
+		// The reared-up HD stance (FlyingSpider loops spider_sheet2 frames 22..30) draws taller
+		// and a touch wider than the OG 1x4 crawl sheet the original used, so it reads bigger than
+		// the XBLIG. This multiplies BOTH the foreground (1.0) and background (0.67) base scales.
+		// null => FlyingSpider.cs uses its baked DefaultSizeFactor, so a shipped build is unchanged.
+		// Tune by eye with ?flyspiderscale=<f> (e.g. ?harness=flyingspider&play&flyspiderscale=0.8,
+		// or ?level=Level2&flyspiderscale=0.8). The sprite and its box hitbox (sized off the frame
+		// via DrawScale) shrink together, so collision keeps tracking the visible size.
+		public static float? FlySpiderScale { get; private set; }
 
 		public static float BlastLoopSeconds { get; private set; } = 3f;
 
@@ -304,6 +317,12 @@ namespace EvilAliensWeb.Compat
 						BlastLoopSeconds = bl;
 					}
 					break;
+					case "flyspiderscale":
+						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
+						{
+							FlySpiderScale = fss;
+						}
+						break;
 				case "huestart":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
 					{

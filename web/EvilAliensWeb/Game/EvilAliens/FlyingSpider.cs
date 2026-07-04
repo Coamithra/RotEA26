@@ -23,6 +23,21 @@ internal class FlyingSpider : KillableAlien
 		new Vector2(21.96f, 2.95f),  // loop 8 (sheet frame 30)
 	};
 
+	// Flying-spider size (Trello: "make the flying spiders slightly smaller since their graphic is
+	// now larger with the stance"). The port reuses the reared-up HD sheet (frames 22..30) instead
+	// of the OG 1x4 crawl sheet, which draws taller and a touch wider — measured on-screen silhouette
+	// ~147x174 design px vs the OG's ~122x93 — so the enemy reads bigger than in the XBLIG. This
+	// factor multiplies BOTH the foreground (1.0) and background (0.67) base scales to bring it back
+	// toward the original; 0.85 pulls the width in line (the stance is inherently taller, so height
+	// stays a bit above OG without re-cutting the art). Both the sprite AND its box hitbox (sized off
+	// the frame via DrawScale in retrieveBoundsFromTexture) shrink together, so collision keeps
+	// tracking the visible size. Live-tune by eye with ?flyspiderscale=<f> (null => this default);
+	// once the value feels right, update this constant. See Compat/DebugFlags.cs.
+	public const float DefaultSizeFactor = 0.85f;
+
+	private static float SizeFactor =>
+		EvilAliensWeb.Compat.DebugFlags.FlySpiderScale ?? DefaultSizeFactor;
+
 	private bool isbackground;
 
 	private Texture2D wing;
@@ -134,7 +149,7 @@ internal class FlyingSpider : KillableAlien
 		{
 			base.Collides = false;
 			color = new Color(new Vector4(1f, 1f, 1f, 0.2f));
-			scale = 0.67f;
+			scale = 0.67f * SizeFactor;
 			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 			base.Speed = (backgroundSpeed).Length() * 1.11f;
 			base.DrawOrder = 1;
@@ -143,7 +158,7 @@ internal class FlyingSpider : KillableAlien
 		}
 		else
 		{
-			scale = 1f;
+			scale = 1f * SizeFactor;
 			base.Collides = true;
 			Vector2 backgroundSpeed2 = oracle.BackgroundSpeed;
 			base.Speed = (backgroundSpeed2).Length() * 1.35f;

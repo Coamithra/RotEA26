@@ -60,6 +60,17 @@ namespace EvilAliensWeb.Compat
 	//     ?huestart=<deg>  hue-band Minimum (in-game -10)   ?hueend=<deg> hue-band Maximum (10)
 	//     ?huetarget=<deg> / ?hue=<deg>  pin the target hue (0..360; default = HP-based)
 	//     ?huecycle        auto-sweep the target 0..360 (?hueloop=<sec> sets the period, def 6)
+	//   With ?harness=spiderjump the harness LOOPS the Mars jumping-spider's whole crawl -> launch
+	//   -> arc -> land cycle (shadow + jump-X/ground markers + a readout) so its alignment values
+	//   can be tuned by eye. The spider crosses the screen over one loop, jumping at jumpX with the
+	//   entry frame back-calculated so the jump beat lines up:
+	//     ?spiderjumpframe=<f> the ground-anim frame the spider launches on (the jump beat)
+	//     ?spiderlandframe=<f> the frame it snaps to on touchdown (live default 44)
+	//     ?spiderjumpx=<x>     design-space X it launches at (marker line; default 400)
+	//     ?spidershadowx/y=<d> shadow offset from the spider centre / ground baseline
+	//     ?spidershadowscale=<f> multiply the shadow's on-ground size (default 1)
+	//     ?spiderloop=<sec>    seconds for one crawl->jump->land sweep (default 6)
+	//     ?spiderphase=<0..1>  FREEZE the cycle at that fraction (deterministic apex screenshot)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
 	//            ?harness=Spider&frame=2   ?harness=DeathStar&play   ?harness=UFO&pos=300,260
@@ -194,6 +205,33 @@ namespace EvilAliensWeb.Compat
 		public static bool HueCycle { get; private set; }
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
+
+		// Spider jump-cycle tuning knobs for the sprite-harness visualiser (?harness=spiderjump).
+		// The grounded Mars Spider's whole rear-up -> launch -> arc -> land cycle is otherwise only
+		// reachable by driving a live level; the harness LOOPS a self-contained sim of it (see
+		// Spider.HarnessApplyPhase) so the shadow, the jump-start X and the land-anim resume frame can
+		// be aligned by eye. ALL null/default => the sim uses its baked-in reference values and,
+		// crucially, LIVE gameplay is byte-identical (these knobs are only ever read while the harness
+		// is up). ?spiderloop= ?spiderjumpframe= ?spiderlandframe= ?spiderjumpx= ?spidershadowx=
+		// ?spidershadowy= ?spidershadowscale=  (see the Parse cases below for units).
+		public static float SpiderLoopSeconds { get; private set; } = 6f;
+
+		public static float? SpiderJumpFrame { get; private set; }
+
+		public static float? SpiderLandFrame { get; private set; }
+
+		public static float? SpiderJumpX { get; private set; }
+
+		public static float SpiderShadowX { get; private set; }
+
+		public static float SpiderShadowY { get; private set; }
+
+		public static float SpiderShadowScale { get; private set; } = 1f;
+
+		// ?spiderphase=<0..1> FREEZES the jump sim at that fraction of one cycle (instead of looping)
+		// so a screenshot of a specific beat -- e.g. the airborne apex -- is deterministic, the same
+		// "reliable still" the harness gives for a frozen frame. null => the cycle loops.
+		public static float? SpiderPhase { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -331,6 +369,54 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hl) && hl > 0f)
 					{
 						HueLoopSeconds = hl;
+					}
+					break;
+				case "spiderloop":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spl) && spl > 0f)
+					{
+						SpiderLoopSeconds = spl;
+					}
+					break;
+				case "spiderjumpframe":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjf))
+					{
+						SpiderJumpFrame = spjf;
+					}
+					break;
+				case "spiderlandframe":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var splf))
+					{
+						SpiderLandFrame = splf;
+					}
+					break;
+				case "spiderjumpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjx))
+					{
+						SpiderJumpX = spjx;
+					}
+					break;
+				case "spidershadowx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsx))
+					{
+						SpiderShadowX = spsx;
+					}
+					break;
+				case "spidershadowy":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsy))
+					{
+						SpiderShadowY = spsy;
+					}
+					break;
+				case "spidershadowscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spss) && spss > 0f)
+					{
+						SpiderShadowScale = spss;
+					}
+					break;
+				case "spiderphase":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spph))
+					{
+						SpiderPhase = ((spph % 1f) + 1f) % 1f;
 					}
 					break;
 				case "harness":

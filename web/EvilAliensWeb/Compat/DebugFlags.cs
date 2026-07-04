@@ -50,6 +50,9 @@ namespace EvilAliensWeb.Compat
 	//     ?pos=<x,y>   object position in 800x600 design space (default 400,300 = centre)
 	//     ?objscale=<f> multiply the object's natural draw scale (default 1; alias ?size)
 	//     ?rot=<deg>   object rotation in degrees (default 0; alias ?rotation)
+	//     ?fps=<n>     override the played animation's fps (alias ?animfps; only with ?play). Turning
+	//                  it real low lets the frame-interpolation shader carry the motion between frames,
+	//                  e.g. ?harness=eyeattract&play&fps=2 shows the eye boss's attract sheet tween.
 	//   With ?harness=blast the harness LOOPS the blast through its lifetime and overlays the
 	//   real collision ring + a live readout, for tuning the bomb's fade/active window:
 	//     ?blastactive=<0..1> fade-alpha floor below which the blast stops dealing damage (def 0.5)
@@ -63,6 +66,25 @@ namespace EvilAliensWeb.Compat
 	//     ?huestart=<deg>  hue-band Minimum (in-game -10)   ?hueend=<deg> hue-band Maximum (10)
 	//     ?huetarget=<deg> / ?hue=<deg>  pin the target hue (0..360; default = HP-based)
 	//     ?huecycle        auto-sweep the target 0..360 (?hueloop=<sec> sets the period, def 6)
+	//   ?castbrain     CAST "BRAIN SPAWN" VIEWER: boot straight onto the end-credits Cast screen,
+	//                  parked on the "Brain Spawn" entry (the one that now shows the animated
+	//                  brainanimated sheet + glow, not the old brainlargetransglow). The real cast
+	//                  is only reachable after beating Level 3 on Hard, so this is how to see/tune
+	//                  it. Reuses the sprite-harness scene (Esc -> menu). Tuning knobs:
+	//     ?castbrainscale=<f>  on-screen size of the cast brain (default baked in CastDisplayer)
+	//     ?castbrainfps=<f>    animation speed (the cast draws frames by hand, no interpolation,
+	//                          so it plays faster than the in-game 0.4 fps; default baked in)
+	//   With ?harness=spiderjump the harness LOOPS the Mars jumping-spider's whole crawl -> launch
+	//   -> arc -> land cycle (shadow + jump-X/ground markers + a readout) so its alignment values
+	//   can be tuned by eye. The spider crosses the screen over one loop, jumping at jumpX with the
+	//   entry frame back-calculated so the jump beat lines up:
+	//     ?spiderjumpframe=<f> the ground-anim frame the spider launches on (the jump beat)
+	//     ?spiderlandframe=<f> the frame it snaps to on touchdown (live default 44)
+	//     ?spiderjumpx=<x>     design-space X it launches at (marker line; default 400)
+	//     ?spidershadowx/y=<d> shadow offset from the spider centre / ground baseline
+	//     ?spidershadowscale=<f> multiply the shadow's on-ground size (default 1)
+	//     ?spiderloop=<sec>    seconds for one crawl->jump->land sweep (default 6)
+	//     ?spiderphase=<0..1>  FREEZE the cycle at that fraction (deterministic apex screenshot)
 	// Bare flags are ON; ?menu=0 / ?menu=false turns one back off (handy in saved URLs).
 	// Examples:  ?menu   ?menu&noattract   ?level=ClassicAliens   ?level=Level2&noattract
 	//            ?harness=Spider&frame=2   ?harness=DeathStar&play   ?harness=UFO&pos=300,260
@@ -116,6 +138,12 @@ namespace EvilAliensWeb.Compat
 
 		// Object rotation in degrees (default 0).
 		public static float HarnessRot { get; private set; }
+
+		// Override the played animation's frames-per-second in the harness (?fps=<n>, alias ?animfps).
+		// null => the sheet's authored fps. Turning it real low makes the frame-interpolation shader
+		// carry all the visible motion between frames — e.g. ?harness=eyeattract&play&fps=2 shows the
+		// eye boss's rotating/attract sheet tween smoothly rather than step. Only meaningful with ?play.
+		public static float? HarnessFps { get; private set; }
 
 		// Bullet showcase scene (Compat/BulletShowcaseScene.cs): a frozen reference tableau
 		// (player ship + a UFO cluster + both bullet types on the starfield) drawn through the
@@ -234,6 +262,70 @@ namespace EvilAliensWeb.Compat
 		public static bool HueCycle { get; private set; }
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
+
+		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
+		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
+		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
+		public static bool CastBrain { get; private set; }
+
+		// On-screen scale + animation fps of the cast "Brain Spawn" specimen. null => the baked
+		// defaults in CastDisplayer, so a shipped build is unchanged; these override for by-eye
+		// tuning via ?castbrain (the blast/colorize-tuner pattern). ?castbrainscale= / ?castbrainfps=
+		public static float? CastBrainScale { get; private set; }
+
+		public static float? CastBrainFps { get; private set; }
+
+		// Webcam "I Made This!" difficulty tuning knobs (WebcamLevel). The webcam challenge
+		// now has a per-difficulty tuning table (hearts / kills-to-win / saucer cap / saucer
+		// speed / plasma speed, Easy..Inzane); these knobs A/B those numbers live so the feel
+		// can be dialled in by eye, then baked back into WebcamLevel.Tunings. ALL null/off =>
+		// the shipped table is used, so a normal build is unchanged.
+		//   ?wcdiff=<Easy|Medium|Hard|Very_Hard|Inzane>  force the webcam's difficulty (so any
+		//                 tier can be tuned without unlocking it in the menu; case-insensitive,
+		//                 spaces or underscores). Pair with ?level=WebcamAliens.
+		//   ?wchearts=<int>      override starting hearts for the active run
+		//   ?wckills=<int>       override kills-to-win
+		//   ?wcsaucers=<int>     override the max simultaneous-saucer cap
+		//   ?wcsaucerspeed=<f>   multiply the active tier's saucer-speed multiplier
+		//   ?wcplasmaspeed=<f>   multiply the active tier's plasma-speed multiplier
+		public static EvilAliens.Settings.DifficultyLevel? WebcamDifficulty { get; private set; }
+
+		public static int? WebcamHearts { get; private set; }
+
+		public static int? WebcamKills { get; private set; }
+
+		public static int? WebcamSaucers { get; private set; }
+
+		public static float? WebcamSaucerSpeed { get; private set; }
+
+		public static float? WebcamPlasmaSpeed { get; private set; }
+
+		// Spider jump-cycle tuning knobs for the sprite-harness visualiser (?harness=spiderjump).
+		// The grounded Mars Spider's whole rear-up -> launch -> arc -> land cycle is otherwise only
+		// reachable by driving a live level; the harness LOOPS a self-contained sim of it (see
+		// Spider.HarnessApplyPhase) so the shadow, the jump-start X and the land-anim resume frame can
+		// be aligned by eye. ALL null/default => the sim uses its baked-in reference values and,
+		// crucially, LIVE gameplay is byte-identical (these knobs are only ever read while the harness
+		// is up). ?spiderloop= ?spiderjumpframe= ?spiderlandframe= ?spiderjumpx= ?spidershadowx=
+		// ?spidershadowy= ?spidershadowscale=  (see the Parse cases below for units).
+		public static float SpiderLoopSeconds { get; private set; } = 6f;
+
+		public static float? SpiderJumpFrame { get; private set; }
+
+		public static float? SpiderLandFrame { get; private set; }
+
+		public static float? SpiderJumpX { get; private set; }
+
+		public static float SpiderShadowX { get; private set; }
+
+		public static float SpiderShadowY { get; private set; }
+
+		public static float SpiderShadowScale { get; private set; } = 1f;
+
+		// ?spiderphase=<0..1> FREEZES the jump sim at that fraction of one cycle (instead of looping)
+		// so a screenshot of a specific beat -- e.g. the airborne apex -- is deterministic, the same
+		// "reliable still" the harness gives for a frozen frame. null => the cycle loops.
+		public static float? SpiderPhase { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -382,6 +474,48 @@ namespace EvilAliensWeb.Compat
 						FlySpiderScale = fss;
 					}
 					break;
+				case "wcdiff":
+				case "webcamdiff":
+					// Like ?level=, reject numeric input: Enum.TryParse would take "2"
+					// -> (DifficultyLevel)2 (Hard) by ordinal, which IsDefined then passes.
+					if (!string.IsNullOrEmpty(val) && !char.IsDigit(val.Trim()[0])
+						&& val.Trim()[0] != '+' && val.Trim()[0] != '-'
+						&& Enum.TryParse<EvilAliens.Settings.DifficultyLevel>(val.Trim().Replace(' ', '_'), ignoreCase: true, out var wcd)
+						&& Enum.IsDefined(typeof(EvilAliens.Settings.DifficultyLevel), wcd))
+					{
+						WebcamDifficulty = wcd;
+					}
+					break;
+				case "wchearts":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wch) && wch > 0)
+					{
+						WebcamHearts = wch;
+					}
+					break;
+				case "wckills":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wck) && wck > 0)
+					{
+						WebcamKills = wck;
+					}
+					break;
+				case "wcsaucers":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wcs) && wcs > 0)
+					{
+						WebcamSaucers = wcs;
+					}
+					break;
+				case "wcsaucerspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcss) && wcss > 0f)
+					{
+						WebcamSaucerSpeed = wcss;
+					}
+					break;
+				case "wcplasmaspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcps) && wcps > 0f)
+					{
+						WebcamPlasmaSpeed = wcps;
+					}
+					break;
 				case "huestart":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
 					{
@@ -410,6 +544,73 @@ namespace EvilAliensWeb.Compat
 					{
 						HueLoopSeconds = hl;
 					}
+					break;
+				case "castbrain":
+					CastBrain = IsOn(val);
+					if (CastBrain)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
+				case "castbrainscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbs) && cbs > 0f)
+					{
+						CastBrainScale = cbs;
+					}
+					break;
+				case "castbrainfps":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbf) && cbf > 0f)
+					{
+						CastBrainFps = cbf;
+					}
+					break;
+				case "spiderloop":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spl) && spl > 0f)
+					{
+						SpiderLoopSeconds = spl;
+					}
+					break;
+				case "spiderjumpframe":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjf))
+					{
+						SpiderJumpFrame = spjf;
+					}
+					break;
+				case "spiderlandframe":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var splf))
+					{
+						SpiderLandFrame = splf;
+					}
+					break;
+				case "spiderjumpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjx))
+					{
+						SpiderJumpX = spjx;
+					}
+					break;
+				case "spidershadowx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsx))
+					{
+						SpiderShadowX = spsx;
+					}
+					break;
+				case "spidershadowy":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsy))
+					{
+						SpiderShadowY = spsy;
+					}
+					break;
+				case "spidershadowscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spss) && spss > 0f)
+					{
+						SpiderShadowScale = spss;
+					}
+					break;
+				case "spiderphase":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spph))
+					{
+						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
@@ -455,6 +656,13 @@ namespace EvilAliensWeb.Compat
 							HarnessRot = rt;
 						}
 						break;
+					case "fps":
+					case "animfps":
+						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var afps) && afps > 0f)
+						{
+							HarnessFps = afps;
+						}
+						break;
 						case "bulletshot":
 						Bulletshot = IsOn(val);
 						if (Bulletshot)
@@ -483,7 +691,7 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || CastBrain;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

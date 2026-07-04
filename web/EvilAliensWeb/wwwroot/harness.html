@@ -67,6 +67,7 @@
     <select id="obj">
       <optgroup label="Enemies">
         <option value="spider" selected>spider</option>
+        <option value="spiderjump">spiderjump (Mars jump-cycle viz: loops crawl→jump→land; shadow + jump-X markers; ?spider* flags)</option>
         <option value="flyingspider">flyingspider (size tuner: ?flyspiderscale=)</option>
         <option value="ufo">ufo (big)</option>
         <option value="ufosmall">ufosmall</option>
@@ -95,7 +96,8 @@
         <option value="brainboss">brainboss</option>
         <option value="classicboss">classicboss</option>
         <option value="marsboss">marsboss</option>
-        <option value="junkboss">junkboss</option>
+        <option value="junkboss">junkboss (eye boss — idle sheet)</option>
+        <option value="eyeattract">eyeattract (eye boss — attract sheet; interpolation test: Play + low fps)</option>
         <option value="fakeboss">fakeboss</option>
         <option value="spiderboss">spiderboss</option>
         <option value="stationaryboss">stationaryboss</option>
@@ -144,6 +146,16 @@
       <label for="play">Play the animation in place (instead of freezing on the frame)</label>
     </div>
 
+    <!-- fps override (?fps=) — only with Play. Turn it real low to make the frame-interpolation
+         shader carry the motion between frames (e.g. eyeattract + Play + fps 2). Blank = authored fps. -->
+    <label>Animation fps override — with Play (blank = authored)</label>
+    <div class="row">
+      <div>
+        <label for="fps">fps</label>
+        <input id="fps" type="number" step="0.5" min="0.1" placeholder="authored" />
+      </div>
+    </div>
+
     <!-- Colorize (hue-remap) tuning — only meaningful for the alienboss "lightbulb" boss
          (battleskull). Blank fields fall back to the boss's coded values. -->
     <label>Colorize (hue-remap) — battleskull only</label>
@@ -166,6 +178,46 @@
       <label for="huecycle">Auto-cycle the target hue 0–360 (screenshot shows any point of the range)</label>
     </div>
 
+    <!-- Mars jumping-spider alignment — only meaningful for the "spiderjump" object. Blank fields
+         fall back to the sim's reference values. Tip: set Background to "mars" for context. -->
+    <label>Mars jumping-spider — spiderjump only</label>
+    <div class="row">
+      <div>
+        <label for="spiderjumpframe">Jump frame</label>
+        <input id="spiderjumpframe" type="number" step="1" placeholder="40" />
+      </div>
+      <div>
+        <label for="spiderlandframe">Land frame</label>
+        <input id="spiderlandframe" type="number" step="1" placeholder="44" />
+      </div>
+      <div>
+        <label for="spiderjumpx">Jump X</label>
+        <input id="spiderjumpx" type="number" step="10" placeholder="400" />
+      </div>
+      <div>
+        <label for="spiderloop">Loop s</label>
+        <input id="spiderloop" type="number" step="0.5" placeholder="6" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="spidershadowx">Shadow dX</label>
+        <input id="spidershadowx" type="number" step="2" placeholder="0" />
+      </div>
+      <div>
+        <label for="spidershadowy">Shadow dY</label>
+        <input id="spidershadowy" type="number" step="2" placeholder="0" />
+      </div>
+      <div>
+        <label for="spidershadowscale">Shadow ×</label>
+        <input id="spidershadowscale" type="number" step="0.1" min="0.1" placeholder="1" />
+      </div>
+      <div>
+        <label for="spiderphase">Freeze @</label>
+        <input id="spiderphase" type="number" step="0.05" min="0" max="1" placeholder="loop" />
+      </div>
+    </div>
+
     <!-- Flying-spider size tuner — only meaningful for flyingspider. Blank falls back to the
          baked FlyingSpider.DefaultSizeFactor; applies in play AND the harness. -->
     <label>Flying-spider size — flyingspider only</label>
@@ -185,6 +237,10 @@
 
     <p class="hint">Agents: skip this page — just navigate to <code>./?harness=&lt;name&gt;&amp;frame=&lt;n&gt;</code>.
       Object names are the C# <code>HarnessRegistry</code> keys.</p>
+
+    <p class="hint">Not a sprite: the end-credits <b>Cast "Brain Spawn"</b> screen (the one that shows the
+      animated brain) is viewable at <a href="./?castbrain" style="color:#93e6db">./?castbrain</a> —
+      tune its size/speed with <code>?castbrain&amp;castbrainscale=1.7&amp;castbrainfps=10</code>.</p>
   </div>
 
 <script>
@@ -227,9 +283,22 @@
     if (huetarget !== "") p.set("huetarget", huetarget);
     if (document.getElementById("huecycle").checked) p.set("huecycle", "1");
 
+    // Mars jumping-spider alignment overrides — only sent when filled; the sim falls back to its
+    // reference values otherwise, and these knobs are read only while the harness is up.
+    [ ["spiderjumpframe","spiderjumpframe"], ["spiderlandframe","spiderlandframe"],
+      ["spiderjumpx","spiderjumpx"], ["spiderloop","spiderloop"],
+      ["spidershadowx","spidershadowx"], ["spidershadowy","spidershadowy"],
+      ["spidershadowscale","spidershadowscale"], ["spiderphase","spiderphase"] ].forEach(function (pair) {
+        var v = document.getElementById(pair[0]).value.trim();
+        if (v !== "") p.set(pair[1], v);
+      });
     // Flying-spider size override — only sent when filled; blank uses the baked default.
     var flyspiderscale = document.getElementById("flyspiderscale").value.trim();
     if (flyspiderscale !== "") p.set("flyspiderscale", flyspiderscale);
+
+    // fps override — only meaningful with Play, only sent when filled (blank = authored fps).
+    var fps = document.getElementById("fps").value.trim();
+    if (play && fps !== "") p.set("fps", fps);
 
     return new URL("?" + p.toString(), GAME_BASE).href;
   }

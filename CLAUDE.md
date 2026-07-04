@@ -81,8 +81,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   time (object `Enabled=false` so gameplay `Update` never runs; the harness sets
   `Position`/`curframe`/`scale`/`rotation`). Companion flags: `?frame=<n>` (freeze frame, default 0)
   · `?play` (animate in place instead) · `?bg=space|spaceclassic|holodeck|mars|base|basedark`
-  · `?pos=<x,y>` (design space, default 400,300) · `?objscale=<f>` (alias `?size`) · `?rot=<deg>`.
-  e.g. `…:5280/?harness=Spider&frame=2` · `…/?harness=DeathStar&play` · `…/?harness=ufo&bg=mars`.
+  · `?pos=<x,y>` (design space, default 400,300) · `?objscale=<f>` (alias `?size`) · `?rot=<deg>`
+  · `?fps=<n>` (alias `?animfps`; override the played animation's fps, only with `?play` — turn it
+  real low so the frame-interpolation shader carries the motion between frames). e.g.
+  `…:5280/?harness=Spider&frame=2` · `…/?harness=DeathStar&play` · `…/?harness=ufo&bg=mars`.
+  **Eye boss (`JunkBoss`) interpolation:** the frozen harness can't reach the boss's `attracting`
+  state (its `UpdateEyeAnim` state machine never runs), so `?harness=junkboss` shows only the IDLE
+  eye sheet. `?harness=eyeattract` forces the spin+lightning ATTRACT sheet (via `JunkBoss.HarnessForceAttract`,
+  set only by that registry factory; hitbox `r` stays idle-based so the lightning halo doesn't inflate it).
+  The eye interpolates by default (`interpolationOptions = as_specified` + `Settings.Interpolate = true` →
+  `interpolate.fx`), so `?harness=eyeattract&play&fps=2` proves it: at 2 fps the sparse 72-frame sheet is
+  smoothly tweened by the shader rather than stepping.
   Code: **`Compat/HarnessScene.cs`** (the scene) + **`Compat/HarnessRegistry.cs`** (name→factory;
   add an object in ONE line — call its `New*`+`Setup`). Wired in `Game1` next to the `?level=`
   path. Human picker: **`wwwroot/harness.html`** (dropdown + fields → builds the URL; keep its
@@ -198,12 +207,13 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Content/music/classicclean.ogg`) is a lyric-free loopable instrumental. **Which one plays is chosen by
   difficulty** via `SoundManager.ClassicForDifficulty()` — lyrics (`Classic`) only when
   `Settings.CurrentDifficulty >= Hard`, else clean (`ClassicClean`) — so the vocal cut is an *earned*
-  reward (higher challenge difficulties are gated behind finishing the challenge). The four
-  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`) call the
-  helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
-  key on difficulty); the **Webcam** level uses `ClassicClean` (ungated, no real difficulty pick — until
-  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** keeps `Songs.Classic` (lyrics) directly
-  (follow-up card `7329fcd4` will give it real difficulty). Both cues are bespoke external tracks (NOT in
+  reward (higher challenge difficulties are gated behind finishing the challenge). The
+  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`/**Webcam**)
+  call the helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
+  key on difficulty); **`TeamChallenge`** now routes through the helper too (card
+  `7329fcd4` gave it real difficulty — its `Initialize` calls `LockDifficulty()` on the menu-chosen level
+  instead of the old hard-coded `LockDifficulty(Medium)`, so the lyric cut is earned on Hard+ like the
+  other challenges, not always on). Both cues are bespoke external tracks (NOT in
   the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by
   `install_classic.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
   `new_assets_raw/EvilAliensRevengedLoopable.ogg` (lyrics) and
@@ -306,7 +316,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   all JS-owned) resumes music + refocuses the canvas. Ids map `TrailerScene.TrailerMode` 1:1
   (EvilAliens=`v732YJ4wHjc`, RocketRiot=`4zN0h1xmwF8`); change them in `MenuScene.trailerMenu_*Selected`.
 - **Webcam challenge "I Made This!" (`Levels.WebcamAliens`)** — the remake of the 2004 webcam game the
-  splash meme is from; last entry in the Challenges carousel (ungated). The player's SEGMENTED camera
+  splash meme is from; last entry in the Challenges carousel (no Unlockables gate — it just needs a
+  webcam). It DOES go through the challenge difficulty menu like the others. The player's SEGMENTED camera
   image is the ship: **JS owns everything camera** (`wwwroot/webcam.js` = the Teams-style setup dialog
   with device picker + preview, getUserMedia, and the mirrored person OVERLAY canvas positioned over the
   4:3 letterbox, outside `#app` like the touch/trailer overlays), **C# owns everything gameplay**
@@ -314,7 +325,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   collision surface is a 40x30 person-mask occupancy grid in design space, pushed ~30Hz from JS
   (`webcamMask`, ~200 B base64); the scene hit-tests saucers/plasma against it (`HitCircle`) and aims at
   its `Centroid`. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
-  fire ONE big slow plasma orb at you; 3 hearts, 20 kills to win. **GOTCHA — MediaPipe MUST stay in the
+  fire ONE big slow plasma orb at you; hearts + kills-to-win are per-difficulty (see below). **Per-difficulty
+  tuning (card `8fcc7a8e`):** `WebcamLevel.Tunings[]` is an Easy..Inzane table of the DISCRETE knobs —
+  hearts, kills-to-win, max simultaneous saucers, saucer-speed × and plasma-speed × (the generic
+  arm/blink/spawn cadence already scales off `Settings.DifficultyModifier`). `Initialize` reads
+  `Settings.CurrentDifficulty` (the menu pick), resolves the row, and picks the music via
+  `SoundManager.ClassicForDifficulty()` (Hard+ = lyrics). `WebcamUfo.Setup`/`WebcamPlasma.Setup` take a
+  speed-× arg. **Live-tune the feel with the `?wc*` debug flags** (`Compat/DebugFlags.cs`): boot
+  `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`,
+  then bake the chosen numbers back into `Tunings[]`. **GOTCHA — MediaPipe MUST stay in the
   worker (`webcam-worker.js`):** its Emscripten loader assigns the global `Module`, which Blazor's Mono
   runtime also uses — importing tasks-vision on the main thread kills the whole .NET runtime ("_malloc is
   not a function", reproduced). The ~10 MB runtime+model under `wwwroot/lib/mediapipe/` (see its README)
@@ -451,6 +470,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Picker: `wwwroot/harness.html` (battleskull option + hue fields). When the user settles on values,
   the chosen band/target get written back into `BattleSkull.Draw`'s hard-coded `new Vector3(...)` (and
   the target curve if they change how it tracks HP). e.g. `?harness=battleskull&huestart=-20&hueend=40&huecycle`.
+- **Mars jumping-spider alignment tool (`?harness=spiderjump` + `Spider.HarnessApplyPhase` + `Compat/HarnessScene.cs`).**
+  The Trello card "the jumping spiders on mars, we need a tool for me to align" asks for a tool to dial in
+  the spider's **shadow position**, **jump-start X**, and **land-anim resume frame** (plus a future
+  animation-driven jump: rear-up -> fling -> jump-prep -> launch, with a scrollspeed-compensated entry
+  frame so a random jump-X lines up with the jump beat). This card built the **plumbing**: a sprite-harness
+  mode that LOOPS the whole crawl -> launch -> arc -> land cycle (mirroring the blast/battleskull tuners).
+  `Spider.HarnessApplyPhase(phase)` is a self-contained deterministic sim of that cycle (drives
+  Position/curframe/rotation/hasJumped so the real `Draw` shows the ground sheet vs the airborne
+  `spiderjump` sheet); it presets the entry frame via the "count back" `entryFrame = J - fps*tJump` so the
+  jump beat coincides with `jumpX`. The spider crosses the screen over one loop (viz scroll is DERIVED from
+  the loop for visibility, NOT the fast real Mars scroll). `HarnessScene` overlays the **shadow** (drawn by
+  a low-DrawOrder `SpiderShadowDrawer` so it sits UNDER the sprite, like `Floor`; it tracks X, detaches +
+  shrinks on the jump), **jump-X / ground / feet markers**, and a **readout** (scroll, entryFrame, curframe,
+  jump/land frames, shadow offset). Tunable via `?spiderjumpframe= ?spiderlandframe= ?spiderjumpx=
+  ?spidershadowx= ?spidershadowy= ?spidershadowscale= ?spiderloop= ?spiderphase=` (all read ONLY while the
+  harness is up + kept OUT of `DebugFlags.Active` -> **live play is byte-identical**). `?spiderphase=<0..1>`
+  freezes the cycle for a deterministic apex screenshot. Picker: `wwwroot/harness.html` (spiderjump option +
+  fields). The **only live change** in this card is a cosmetic **random animation start** in
+  `Spider.Initialize` (a cluster crawls out of lock-step; jump is still X-triggered). Dialing the actual
+  values + wiring the animation-driven jump live is deferred to the "For me" card + a follow-up.
+  e.g. `?harness=spiderjump&bg=mars&spiderphase=0.535` (airborne apex) · `...&spidershadowy=-90` (align shadow).
 - **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
   was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research
@@ -541,6 +581,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `preload/manifest.txt`. NOTE:
   `Braineroid.Initialize` sets `pulsate = 1f` (not 0) — Update overwrites it in-game, but the sprite harness
   freezes Update, so a 0 baseline would draw the whole sprite at scale 0 (invisible).
+  **The end-credits Cast "Brain Spawn" entry (`CastDisplayer.braineroid`) now draws this animated sheet too**
+  (card 208da2fe — it was still the old static `brainlargetransglow`). `CastDisplayer` draws every cast member
+  by hand (its own `Draw`, NO interpolation shader), so it plays the 20-frame sheet at a higher raw fps
+  (`DefaultBrainFps` 10) than the in-game 0.4, and draws the additive blue glow (`brainanimatedglow`) behind it
+  via `DrawBrainGlow` (mirrors `Braineroid.DrawGlow`; `scale/textureScale` = DrawScale so glow tracks the brain).
+  Size/speed are baked defaults (`DefaultBrainScale` 1.7 / `DefaultBrainFps` 10) overridable by eye — the real
+  Cast screen is only reachable after beating L3 on Hard, so **`?castbrain` boots straight to it** (reuses
+  `HarnessScene` in a cast-brain mode; Esc → menu) with tuners `?castbrainscale=<f>` / `?castbrainfps=<f>`
+  (null override => the baked defaults ship, blast/colorize-tuner pattern; `DebugFlags.CastBrain/CastBrainScale/CastBrainFps`).
+  Picker link in `wwwroot/harness.html`. When the user settles on values, bake them into the `DefaultBrain*`
+  consts in `CastDisplayer`.
 - **Earth fly-by sprite (Level 1 hero earth) -- `tools/earth/build_earth.py`.** `GFX/Sprites/earth` is
   the masked NASA Blue Marble globe (`sources/globe_west_2048.jpg`, ~1822px disk). It's emitted at the
   FULL source resolution (NO downscale) so the fly-by renders crisp (1 texel ~= 1 pixel on a typical
@@ -590,6 +641,39 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Background.Reset()` clears the belt state on every fresh level entry; a death mid-belt can skip the
   disengage but is self-correcting (the belt replays from the pre-belt checkpoint — see the
   `EngageBeltSlowdown` comment; don't add a checkpoint *inside* the belt).
+- **Andromeda nebula fly-by (Level-1 brains section) is RESOLUTION-INDEPENDENT -- `tools/nebula/build_nebula.py`.**
+  `GFX/Sprites/andromeda` is the galaxy that crosses during Level 1's brain waves (`Background.QueueAndromeda`,
+  fired from `Level1.message_OnFinished` after the first `BrainSpawner`). It's a STRAIGHT-alpha sprite
+  (`(SpriteBlendMode)1` == AlphaBlend -> `NonPremultiplied`, NOT additive -- the enum is None=0/AlphaBlend=1/
+  Additive=2), drawn centred at x=400 scrolling vertically. `QueueAndromeda` now sets `doodadscale =
+  AndromedaDesignWidth(840) / doodad.Width` instead of a hard-coded `1f`, so the on-screen footprint is pinned
+  at 840 design px for ANY texture resolution -- a higher-res drop-in stays the same size, just crisper (the
+  old fixed 840px asset was a ~2.4x blur once RenderScale upscaled it to a 1080p+ window). So swapping in HD
+  art needs NO code change. Build it with `tools/nebula/build_nebula.py`: it takes a raw HD galaxy at
+  `tools/nebula/source/andromeda.png` (gitignored) and normalises it to straight-alpha RGBA -- auto-deriving
+  alpha from luminance if the source is opaque-on-black (else respecting its alpha), applying a per-axis edge
+  feather so no hard rectangle shows over the starfield, and capping the long side at 2048. Safe no-op if the
+  source is missing (CI ships the committed png). Re-run after swapping the source; don't hand-edit
+  `andromeda.png`. Knobs + how-to: `tools/nebula/README.md`. It's a background fly-by (no `?harness=` entry),
+  so verify by booting Level 1 to the brains section.
+- **Mars far-hills layer is PROCEDURAL, not hand-drawn -- `tools/mars/build_marshills.py`.** The 2nd
+  Mars background layer (`GFX/MarsBG/marshills`, added by `Background.SetMars()` behind the HD `marsloop`
+  ground / in front of `clouds-background`, scrollspeed 0.7) used to be a low-res hand-drawn hazy tan
+  silhouette with a visible repeating seam. It's now SYNTHESIZED: numpy builds N back-to-front ridges as
+  circular-FFT (natively SEAMLESS -- `mirrorX=false`, so the layer just REPEATS every `realsize.X`; the
+  wrap MUST be seamless) fractal heightfields, composited with aerial perspective (farther ridges
+  lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers + lerps toward the haze
+  tone so it dissolves into the sky). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
+  TOP from design y~448 down, so ONLY ~design y 405..450 (just above the rocky horizon) ever shows -- the
+  `RIDGES` crests are placed to land there and each body just fills down to be occluded. All aesthetic
+  knobs (palette, per-ridge base/amp/roughness/haze/feather, seed) are constants in the tool's CONFIG
+  block. Re-run `python tools/mars/build_marshills.py` after tweaking; `--seed N`, `--preview` (2x-tiled
+  seam check -> `tools/mars/_preview_marshills.png`, gitignored), `--show` (composite over the real sky
+  -> `_context_marshills.png`). Deterministic/offline (numpy+Pillow), like tools/earth & tools/favicon;
+  CI ships the committed `marshills.png`. It's a plain PNG decoded at level preload (tiny, not in
+  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHA when editing the tool: the alpha
+  accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255 makes
+  the whole layer ~1/255 transparent -> invisible hills).
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet
@@ -609,16 +693,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   and the cell split is `texture.Width/8` (integer), so a higher-res drop-in only needs **dims a
   multiple of 8** -- **no game code change**. To ship a higher-res wall: (1) upscale
   `756-v1.png` with ChatGPT/an upscaler to a square power-of-two (art step); (2) drop it at
-  `tools/walls/source/756-v1.png` (gitignored raw source); (3) `python
-  tools/walls/build_wall_tileable.py`. The tool re-makes the (edge-broken) upscale seamlessly
-  tileable via **offset-and-heal healed with the mars stitcher's Laplacian `pyr_blend`**
-  (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the card asked for): roll by half
-  so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
-  cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
-  reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
-  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
-  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
-  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  `tools/walls/source/756-v1.png` (gitignored raw source); (3) run ONE of the two make-tileable
+  methods. Both offset the upscale so the wrap seam becomes a centre cross, then fix that cross while
+  keeping the outer border seamless, and each writes its own 2x2 preview + a wrap-seam **ratio to the
+  texture's own interior adjacency** (1.0 = seamless, >>1 = broken) so you can A/B them:
+  **(A) BLEND** (`build_wall_tileable.py`, default; offline, no model) heals the seam with the mars
+  stitcher's Laplacian `pyr_blend` (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the
+  card asked for): keep a pure-`B` seamless frame at all four edges, multiband cross-fade the
+  transition. Deterministic, but it RELOCATES edge content (blends existing pixels, can faintly
+  ghost). `preview_blend_756-v1.png`.
+  **(B) INFILL** (higher quality) masks the seam cross and lets a LOCAL inpainting model REGENERATE
+  new detail across it -- no ghosting. ChatGPT can't (it regenerates the whole frame + breaks the
+  borders); needs a real inpainter that preserves unmasked pixels (**Flux Fill**/SD-inpaint). Flow:
+  `--emit-seam` (writes `seam/756-v1_offset.png` + `_mask.png`) -> run the model -> `--reimport out.png`,
+  which composites the fill **inside the mask only** over the offset so the wrap borders stay
+  pixel-exact (tiling guaranteed). `tools/walls/flux_infill.py` is a one-shot Flux Fill runner
+  (`FluxFillPipeline`); its pipeline call is **NOT run/verified here** (needs a GPU + gated weights) --
+  the seam/composite/install plumbing it shares with `build_wall_tileable.py` IS verified.
+  `preview_infill_756-v1.png`. Only `756-v1` is the collidable wall (8x8
   grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
   `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
   preload stutters on a big new PNG, add

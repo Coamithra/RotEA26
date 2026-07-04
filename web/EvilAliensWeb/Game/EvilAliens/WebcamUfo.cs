@@ -33,6 +33,10 @@ internal class WebcamUfo : AlienDrawableGameComponent
 
 	private float wanderDir;
 
+	// Per-difficulty saucer-speed multiplier (WebcamLevel picks it from its tuning
+	// table). Applied to the base/max drift speed in Initialize; 1 = the baseline.
+	private float speedMul = 1f;
+
 	// milliseconds of wandering before the blink phase starts (set by Setup).
 	private Timer armTimer = new Timer(8000f, repeating: false);
 
@@ -90,9 +94,11 @@ internal class WebcamUfo : AlienDrawableGameComponent
 
 	// position: just off one screen edge. armDelayMs: wander time before the
 	// blink phase; blinkMs: length of the blink phase (both scale difficulty).
-	public void Setup(Vector2 position, float armDelayMs, float blinkMs)
+	// speedMultiplier: per-difficulty drift-speed scale (applied in Initialize).
+	public void Setup(Vector2 position, float armDelayMs, float blinkMs, float speedMultiplier = 1f)
 	{
 		base.Position = position;
+		speedMul = speedMultiplier;
 		armTimer.Duration = armDelayMs;
 		blinkClock.Duration = blinkMs;
 		// point roughly at the field centre so the fly-in always enters the screen
@@ -110,8 +116,8 @@ internal class WebcamUfo : AlienDrawableGameComponent
 		armTimer.Stop();
 		blinkClock.Stop();
 		base.Direction = wanderDir;
-		base.Speed = RandomHelper.RandomNextFloat(0.1f, 0.15f);
-		base.MaxSpeed = 0.18f;
+		base.Speed = RandomHelper.RandomNextFloat(0.1f, 0.15f) * speedMul;
+		base.MaxSpeed = 0.18f * speedMul;
 		base.Acceleration = 6E-05f;
 		base.Deceleration = 1.8E-05f;
 	}

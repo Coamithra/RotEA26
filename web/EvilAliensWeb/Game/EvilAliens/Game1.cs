@@ -361,6 +361,13 @@ public class Game1 : Game
 		{
 			collectionHelper.Add((GameComponent)(object)harnessScene);
 		}
+		// Debug (?castbrain): reuse the harness scene to show the end-credits Cast screen parked
+		// on the animated "Brain Spawn" entry (HarnessScene handles the cast-brain mode). Esc
+		// drops back to the menu via harnessScene_OnExitToMenu, same as the sprite harness.
+		else if (DebugFlags.CastBrain)
+		{
+			collectionHelper.Add((GameComponent)(object)harnessScene);
+		}
 		// Debug (?bulletshot): bypass the menu and boot straight into the bullet showcase.
 		// menuScene is still wired above, so Esc drops back via bulletShowcaseScene_OnExitToMenu.
 		else if (DebugFlags.Bulletshot)

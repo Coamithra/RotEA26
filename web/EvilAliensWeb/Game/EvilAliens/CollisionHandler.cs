@@ -24,6 +24,12 @@ public class CollisionHandler
 
 	private const int squaresY = 8;
 
+	// Upper bound on DDA line-rasteriser iterations (see FillCollisionMatrixLine). A straight line
+	// touches at most squaresX + squaresY cells; the generous headroom covers off-screen beam
+	// origins while still turning a degenerate near-axis-aligned line's infinite spin into a bounded
+	// no-op.
+	private const int maxLineSteps = 128;
+
 	private List<ICollidable>[,] fieldMatrix = new List<ICollidable>[10, 8];
 
 	private List<ICollidable> collidables = new List<ICollidable>();
@@ -181,11 +187,22 @@ public class CollisionHandler
 		int num5 = (int)(origin.X / 80f);
 		int num6 = (int)(origin.Y / 80f);
 		addToMatrix(collidable, num5, num6, boxes, i);
+		// Guaranteed-termination backstop for the DDA below (card 7a3e70ad). A straight line crosses
+		// at most squaresX + squaresY (=18) grid cells, so every well-behaved lazer steps far fewer
+		// times than this. The cap only ever trips for a DEGENERATE near-axis-aligned line: a
+		// (near-)perfectly vertical/horizontal lazer at a high coordinate advances val.X (or val.Y) by
+		// a sub-float32-ULP amount each step, so the val.X-exit (or val.Y-exit) loop can never reach
+		// End and spins forever -- a hard 100%-CPU game hang. E.g. a straight-down beam at x~400:
+		// End.X = 400 + len*cos(PiOver2) = 399.99997, but val.X stays pinned at 400.0 because each
+		// step adds < 1 ULP (~6e-5 at that magnitude). The degenerate line still marks its correct
+		// column/row of cells before the cap stops the spin, so broad-phase coverage is unaffected for
+		// every legitimate line.
+		int steps = 0;
 		if (num > 0f)
 		{
 			if (num2 > 0f)
 			{
-				while (val.X < collisionLine.End.X)
+				while (val.X < collisionLine.End.X && ++steps < maxLineSteps)
 				{
 					float num7 = (float)((num5 + 1) * 80) - val.X;
 					float num8 = (float)((num6 + 1) * 80) - val.Y;
@@ -207,7 +224,7 @@ public class CollisionHandler
 			}
 			else if (num2 < 0f)
 			{
-				while (val.X < collisionLine.End.X)
+				while (val.X < collisionLine.End.X && ++steps < maxLineSteps)
 				{
 					float num10 = (float)((num5 + 1) * 80) - val.X;
 					float num11 = (float)(num6 * 80) - val.Y;
@@ -229,7 +246,7 @@ public class CollisionHandler
 			}
 			else
 			{
-				while (val.X < collisionLine.End.X)
+				while (val.X < collisionLine.End.X && ++steps < maxLineSteps)
 				{
 					num5++;
 					val.X += 80f;
@@ -241,7 +258,7 @@ public class CollisionHandler
 		{
 			if (num2 > 0f)
 			{
-				while (val.X > collisionLine.End.X)
+				while (val.X > collisionLine.End.X && ++steps < maxLineSteps)
 				{
 					float num13 = (float)(num5 * 80) - val.X;
 					float num14 = (float)((num6 + 1) * 80) - val.Y;
@@ -263,7 +280,7 @@ public class CollisionHandler
 			}
 			else if (num2 < 0f)
 			{
-				while (val.X > collisionLine.End.X)
+				while (val.X > collisionLine.End.X && ++steps < maxLineSteps)
 				{
 					float num16 = (float)(num5 * 80) - val.X;
 					float num17 = (float)(num6 * 80) - val.Y;
@@ -285,7 +302,7 @@ public class CollisionHandler
 			}
 			else
 			{
-				while (val.X > collisionLine.End.X)
+				while (val.X > collisionLine.End.X && ++steps < maxLineSteps)
 				{
 					num5--;
 					val.X -= 80f;
@@ -295,7 +312,7 @@ public class CollisionHandler
 		}
 		else if (num2 > 0f)
 		{
-			while (val.Y < collisionLine.End.Y)
+			while (val.Y < collisionLine.End.Y && ++steps < maxLineSteps)
 			{
 				num6++;
 				val.Y += 80f;
@@ -304,7 +321,7 @@ public class CollisionHandler
 		}
 		else if (num2 < 0f)
 		{
-			while (val.Y > collisionLine.End.Y)
+			while (val.Y > collisionLine.End.Y && ++steps < maxLineSteps)
 			{
 				num6--;
 				val.Y -= 80f;

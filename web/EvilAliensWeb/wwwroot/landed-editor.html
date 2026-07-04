@@ -115,6 +115,12 @@ const FLOOR = 560;                     // Floor.bottom — where ground shadows 
 const SHADOW_IMG_W = 82;               // shadow.png width, for the base-scale math
 
 // cols/rows are the AnimationData grid; frame 0's cell is drawn as the ghost.
+// shadowBase = the game's default shadow draw-scale at rest, i.e.
+//   (flyingCellWidth * DrawScale * 0.6) / (82 * 0.7)   with (2 - height) ~= 1 on the floor,
+// where DrawScale = 1/supersample (ufosheet/smallship 3x -> 0.333; mediumship 1x; mothership
+// box is 0.91*1368/3). So shadowSize=1 previews the untuned game; the exact look is verified
+// in-game (a ship's live height/resting-Y can shift it slightly). anchor.y ~= the spawner's
+// resting Y per class (small 545-560, big 515-540, mothership airborne 440).
 const SPRITES = {
   "GFX/Sprites/ufometpootjes": {
     label:"Small UFO (feet)", sub:"ufometpootjes → ufosheet",
@@ -285,7 +291,7 @@ canvas.addEventListener("pointermove", ev=>{
 canvas.addEventListener("pointerup", ()=>{ drag=null; });
 canvas.addEventListener("wheel", ev=>{
   const p = toDesign(ev);
-  if (pick(p)==="shadow" || sel==="shadow"){
+  if (pick(p)==="shadow"){   // resize only while hovering the shadow, so page scroll works elsewhere
     ev.preventDefault();
     const st = state[current];
     st.shadowSize = Math.max(0.2, Math.min(3, st.shadowSize + (ev.deltaY<0?0.03:-0.03)));
@@ -314,16 +320,16 @@ document.addEventListener("keydown", ev=>{
 });
 
 // --- panel sync ------------------------------------------------------------
-function bindNum(id, get, set){
+function bindNum(id, set){
   const el = document.getElementById(id);
   el.addEventListener("input", ()=>{ const v=parseFloat(el.value); if(!isNaN(v)){ set(v); refresh(); } });
 }
-bindNum("landedX", ()=>state[current].landed[0],  v=>state[current].landed[0]=v);
-bindNum("landedY", ()=>state[current].landed[1],  v=>state[current].landed[1]=v);
-bindNum("takeoffX",()=>state[current].takeoff[0], v=>state[current].takeoff[0]=v);
-bindNum("takeoffY",()=>state[current].takeoff[1], v=>state[current].takeoff[1]=v);
-bindNum("shadowX", ()=>state[current].shadow[0],  v=>state[current].shadow[0]=v);
-bindNum("shadowY", ()=>state[current].shadow[1],  v=>state[current].shadow[1]=v);
+bindNum("landedX", v=>state[current].landed[0]=v);
+bindNum("landedY", v=>state[current].landed[1]=v);
+bindNum("takeoffX",v=>state[current].takeoff[0]=v);
+bindNum("takeoffY",v=>state[current].takeoff[1]=v);
+bindNum("shadowX", v=>state[current].shadow[0]=v);
+bindNum("shadowY", v=>state[current].shadow[1]=v);
 document.getElementById("shadowSize").addEventListener("input", e=>{ state[current].shadowSize=parseFloat(e.target.value); refresh(); });
 for (const id of ["tGhost","tShadow","tGrid"]) document.getElementById(id).addEventListener("change", refresh);
 

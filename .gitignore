@@ -74,6 +74,13 @@ tools/tts/_alex_oneshot_full.mp3
 # andromeda.png (wwwroot/Content/gfx/sprites) is committed, the raw gen is local-only.
 tools/nebula/source/
 
+# ---- 3D model -> spritesheet pipeline (tools/models/build_models.py) ----------
+# The tool + config + README ARE tracked. The raw .glb/.gltf/.obj models you make
+# (Meshy/Tripo/Blender) stay LOCAL; the SHIPPED sheets under wwwroot/Content are
+# committed. build_models.py is inert until a model is dropped in source/.
+tools/models/source/
+tools/models/**/__pycache__/
+
 # ---- Mars-BG stitch pipeline (tools/mars/) -----------------------------------
 # The doc + wip/00..08 scripts + the low-res originals + hand-made horizon{1,2}.png
 # ARE tracked. The 27 MB AI-upscaled source quarters (hr/) and every regenerated

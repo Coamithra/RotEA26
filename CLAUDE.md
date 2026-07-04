@@ -844,6 +844,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   spider-boss fight (skips the whole level, like `?win`); pair with `?invuln&spiderhelperidle=3` to watch
   the assist in seconds. See `Level2.PopulateSpiderBossOnly`.
 
+- **3D model -> sprite-sheet pipeline for the big bosses (`tools/models/build_models.py`).** The big
+  UFO / mothership / spider boss draw from 2D sheets at their original render resolution (the ceiling);
+  this OFFLINE tool re-renders a boss from a supplied **3D model** at any supersample factor and emits a
+  crisper drop-in sheet. Scope is **static hero pose OR N-angle turntable** (an online image-to-3D mesh
+  has no rig, so it can't reproduce the multi-pose gameplay animations -- those stay hand-made). Renderer
+  = **Blender headless** (`blender -b -P blender_render.py`; `bpy` has no 3.12 wheel, so it shells out to
+  a `blender` exe via `$BLENDER`/config/`PATH`) -- a heavy dev-box-only dep like `tools/textures`'
+  `texconv`; CI just ships the committed PNGs. Config-driven (`models.config`, per object: source `.glb`,
+  camera/light, `layout`, `design_*`, `supersample`); **inert until a model is dropped at
+  `tools/models/source/<name>.glb`** (gitignored), safe in CI/fresh clones. Two output layouts, each with
+  a supersample seam so the hi-res sheet keeps its on-screen size: **`grid`** (uniform cols x rows for
+  `AlienDrawableGameComponent` -- mothership/UFO; wire via a `DesignFrameWidth` entry, the existing
+  mechanism) and **`atlas`** (packed sheet + `.dat` for `AnimatedSprite` -- spider boss; `AnimatedSprite`
+  now takes an optional **`supersample`** ctor arg, default 1 = no-op, that divides the draw scale --
+  mirrors the `DesignFrameWidth` factor). `datfmt.py` writes the `.dat` byte-for-byte to `loadData`'s read
+  order; `build_models.py --selftest` proves the pack + `.dat` round-trip without Blender. The ACTUAL model
+  creation + per-object wiring is the user's manual work (its own "For me" card); `tools/models/README.md`
+  is the how-to. Don't hand-edit the built `.png`/`.dat` -- re-run the tool.
+
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).
 - Don't re-run `tools/*.py` against `Game/` (regenerates it from scratch).

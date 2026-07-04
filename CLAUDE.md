@@ -356,6 +356,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   two consts are public so the score and the shader params stay in lockstep. Menus keep the old
   periodic marquee sweep (the no-`glintTime` `DrawShadowString`/`DrawMetalString` overloads still
   use `MetalTime`) — only the score is event-driven.
+  **Menu chrome rows are CACHED (perf card febc71de) — don't revert them to per-frame `DrawMetalString`.**
+  The menu list rows (`MenuSub1.DrawMenu` + `MenuSubWithSkull.DrawRows`) are drawn every frame on an idle
+  screen, and each row used to do a full metal-string RT ping-pong (target capture/restore + Clear +
+  rasterise batch) per frame. They now call **`SpriteBatchWrapper.DrawMetalStringCached`** instead: the
+  plain-text raster (Pass 1) is time-INDEPENDENT (the sheen, incl. the moving glint, is a Pass-2 composite
+  input), so it's cached — content-addressed on `(text, tint)` in `metalSpriteCache`, built once per
+  label+colour and reused every frame, while only the metal.fx composite runs per frame (glint still
+  sweeps). Same idea as `DrawShadowStringCached` but keyed by content (menu text is fixed) rather than an
+  int slot (the score's text changes). `DrawMetalString` still exists (uncached, shared `metalRT`) for
+  dynamic call sites; it and the cached variant share the extracted `RasteriseMetalText`/`CompositeMetalText`
+  helpers so their output can't diverge. `MenuSubWithSkull`'s octagon **frame FILL** is likewise cached: the
+  ~one-strip-per-row loop is replaced by a white octagon alpha **mask texture** (`EnsureFillMask`, rebuilt
+  only on a frame-size change) drawn as ONE tinted quad per row (`white*fill` = the fill colour, straight
+  alpha, so both selection states reuse the one mask; chamfer-edge softening hides under the crisp outline).
   The floating **"Power Up!" / combo pops** (`FloatingText.ShowType.pop`, shown for powerup
   level-ups and every 10th combo) had the SAME bleed-through (two translucent `DrawString`s, a
   dark drop + bright text at one alpha) and now route through the same `DrawShadowString`

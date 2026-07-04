@@ -62,6 +62,18 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	private readonly System.Collections.Generic.Dictionary<int, CachedTextSprite> textSpriteCache = new System.Collections.Generic.Dictionary<int, CachedTextSprite>();
 
+	// Content-addressed cache for DrawMetalStringCached (the static menu chrome rows). Keyed on
+	// (text, packed tint) because menu labels never change, so each distinct label+colour is
+	// rasterised into its own persistent RT exactly ONCE and reused every frame — unlike the score's
+	// int-keyed textSpriteCache (whose text changes, so it keeps a fixed per-slot grow-only RT). The
+	// (string, uint) tuple key value-compares the label, so equal labels across frames/menus share one
+	// raster with no per-frame string allocation and no cache-key threading through menu renderers. Grows
+	// for the session (disposed only in UnloadContent) — bounded ONLY because menu labels + tints are a
+	// finite constant set; a caller passing a time-varying tint would spawn a fresh RT every frame, so keep
+	// this path to static-text/static-tint call sites (dynamic text belongs on DrawMetalString / the score's
+	// int-keyed DrawShadowStringCached).
+	private readonly System.Collections.Generic.Dictionary<(string, uint), CachedTextSprite> metalSpriteCache = new System.Collections.Generic.Dictionary<(string, uint), CachedTextSprite>();
+
 	// Transparent border (design px) baked around the text in the metal RT so the glint
 	// sweep and bloom have overshoot room and don't clip at the glyph edges.
 	private const int MetalPad = 6;
@@ -249,37 +261,105 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// for every metal string this frame (each renders into the top-left corner). The
 		// composite passes its used sub-rect as UvExtent so the shader's local UV is 0..1.
 		EnsureTextRT(usedW, usedH);
+		RasteriseMetalText(metalRT, text, tint, rs);               // Pass 1 (time-independent)
+		CompositeMetalText(metalRT, usedW, usedH, boxH, position, rotation, origin, scale, time, rs); // Pass 2
+	}
 
-		// --- Pass 1: rasterise the text into the RT's top-left corner at render res ---
-		// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the
-		// straight-alpha glyphs verbatim (dst is 0, so the InvSrcAlpha*dst term vanishes).
-		// NonPremultiplied here would instead square the alpha (srcA*srcA) and premultiply
-		// the colour, thinning the edges — invisible over black but haloed over the menu.
-		// Capture whatever target is currently bound so we can restore IT after the RT
-		// ping-pong. DrawMetalString runs mid-draw: from a plain scene draw the bound
-		// target is the Stage-10 scene target, but from inside a menu (MenuSub1.Draw)
-		// it's the menu's OWN render target, which the menu later composites with the
-		// zoom-transition scale via DrawPresent. Hardcoding SetRenderTarget(0, null) here
-		// resolves (via the compat shim) to the scene target, so after the first metal
-		// string the menu RT is abandoned: its composite + every later entry leak
-		// straight to the scene unzoomed, breaking the transition and the selection
-		// highlight. Restore the captured binding instead.
+	// Cached variant of DrawMetalString for the STATIC menu chrome rows (MenuSub1/MenuSubWithSkull draw
+	// them every frame on an idle screen). Menu labels never change, so the plain-text raster (Pass 1) is
+	// content-addressed on (text, tint) and built into its own persistent RT exactly ONCE, then reused
+	// every frame; only the metal.fx composite (Pass 2) runs per frame. That's what keeps the moving glint
+	// alive while skipping the per-row RT ping-pong (target capture/restore + Clear + a Begin/End rasterise
+	// batch): the sheen — including the sweep clock `time` — is a Pass-2 input, NEVER baked into the raster,
+	// so reusing the raster across frames can't freeze the sheen (the concern the card raised). Same idea as
+	// DrawShadowStringCached, but keyed by content rather than an int slot (the score's text changes, so it
+	// keeps a fixed per-slot grow-only RT; menu text is fixed, so content addressing avoids RT churn AND
+	// threading a cache key through every bespoke menu renderer). Output is pixel-identical to DrawMetalString.
+	public void DrawMetalStringCached(string text, Vector2 position, Color tint, float rotation, Vector2 origin, float scale, float time)
+	{
+		if (string.IsNullOrEmpty(text) || font == null)
+		{
+			return;
+		}
+		if (scale <= 0f)
+		{
+			return;
+		}
+		if (metalEffect == null)
+		{
+			DrawString(font, text, position, tint, rotation, origin, scale, (SpriteEffects)0, 0f);
+			return;
+		}
+
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		(string, uint) key = (text, tint.PackedValue);
+		if (!metalSpriteCache.TryGetValue(key, out CachedTextSprite sprite))
+		{
+			sprite = new CachedTextSprite();
+			metalSpriteCache[key] = sprite;
+		}
+
+		// text + tint are in the key; only a render-scale change (window resize) invalidates the raster.
+		bool dirty = sprite.Rt == null || ((GraphicsResource)sprite.Rt).IsDisposed || sprite.BuiltRs != rs;
+		if (dirty)
+		{
+			Vector2 textSz = font.MeasureString(text);
+			float boxW = textSz.X + 2 * MetalPad;
+			float boxH = textSz.Y + 2 * MetalPad;
+			int usedW = Math.Max(1, (int)Math.Ceiling(boxW * rs));
+			int usedH = Math.Max(1, (int)Math.Ceiling(boxH * rs));
+			// Per-entry grow-only RT, independent of the shared metalRT so a cached raster survives other
+			// text draws between frames (same reason DrawShadowStringCached keeps its own per-slot RTs).
+			int haveW = (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed) ? ((Texture2D)sprite.Rt).Width : 0;
+			int haveH = (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed) ? ((Texture2D)sprite.Rt).Height : 0;
+			if (haveW < usedW || haveH < usedH)
+			{
+				if (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed)
+				{
+					((GraphicsResource)sprite.Rt).Dispose();
+				}
+				sprite.Rt = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, usedW), Math.Max(haveH, usedH), false, SurfaceFormat.Color, DepthFormat.None);
+			}
+			RasteriseMetalText(sprite.Rt, text, tint, rs);
+			sprite.Text = text;
+			sprite.TextColor = tint;
+			sprite.BuiltRs = rs;
+			sprite.UsedW = usedW;
+			sprite.UsedH = usedH;
+			sprite.BoxH = boxH;
+		}
+		CompositeMetalText(sprite.Rt, sprite.UsedW, sprite.UsedH, sprite.BoxH, position, rotation, origin, scale, time, rs);
+	}
+
+	// Pass 1 of the metal path: rasterise just the TINTED text (no shadow) into `rt`'s top-left corner at
+	// render res. Time-INDEPENDENT — the sheen (incl. the moving glint) is applied in the Pass-2 composite,
+	// never here, which is exactly why DrawMetalStringCached can reuse this raster across frames while the
+	// glint keeps sweeping. BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the
+	// straight-alpha glyphs verbatim (dst is 0, so the InvSrcAlpha*dst term vanishes). NonPremultiplied here
+	// would instead square the alpha (srcA*srcA) and premultiply the colour, thinning the edges — invisible
+	// over black but haloed over the menu. Capture whatever target is currently bound so we can restore IT
+	// after the RT ping-pong: DrawMetalString runs mid-draw, and from inside a menu (MenuSub1.Draw) the bound
+	// target is the menu's OWN render target (later composited with the zoom-transition scale via
+	// DrawPresent). Hardcoding SetRenderTarget(0, null) here resolves (via the compat shim) to the scene
+	// target, so after the first metal string the menu RT would be abandoned: its composite + every later
+	// entry would leak straight to the scene unzoomed, breaking the transition and the selection highlight.
+	private void RasteriseMetalText(RenderTarget2D rt, string text, Color tint, float rs)
+	{
 		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
 		Flush();                                                   // end any active scene batch
-		base.GraphicsDevice.SetRenderTarget(0, metalRT);
+		base.GraphicsDevice.SetRenderTarget(0, rt);
 		base.GraphicsDevice.Clear(Color.Transparent);
 		// design -> RT: translate the padded box to the RT origin, then scale to render res.
 		Matrix m = Matrix.CreateTranslation(MetalPad, MetalPad, 0f) * Matrix.CreateScale(rs);
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, m);
 		DrawStringScaled(font, text, Vector2.Zero, tint, 0f, Vector2.Zero, new Vector2(1f, 1f), (SpriteEffects)0, 0f);
 		spriteBatch.End();
-		// Restore the target that was bound on entry (menu RT or scene target), NOT a
-		// hardcoded null, so Pass 2's composite + any following draws land where the
-		// caller expects. In practice prevTargets is always length 1 here: every
-		// DrawMetalString runs inside Game1.DrawInner, which keeps a target bound for the
-		// whole frame, so the empty-array case (real back buffer bound) is unreachable in
-		// that flow. The fallback routes through the compat null (-> BaseRenderTarget)
-		// rather than handing an empty array to SetRenderTargets, purely defensively.
+		// Restore the target that was bound on entry (menu RT or scene target), NOT a hardcoded null, so
+		// Pass 2's composite + any following draws land where the caller expects. In practice prevTargets is
+		// always length 1 here: every metal string runs inside Game1.DrawInner, which keeps a target bound
+		// for the whole frame, so the empty-array case (real back buffer bound) is unreachable in that flow.
+		// The fallback routes through the compat null (-> BaseRenderTarget) purely defensively.
 		if (prevTargets != null && prevTargets.Length > 0)
 		{
 			base.GraphicsDevice.SetRenderTargets(prevTargets);
@@ -288,24 +368,29 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 		}
+	}
 
-		// --- Pass 2: composite the RT's used sub-rect through metal.fx ---
-		// FLOAT-precise (sub-pixel) draw mirroring DrawString's transform EXACTLY: the RT
-		// holds the text offset by MetalPad at render scale, so origin (in RT texels) =
-		// (origin + pad) * rs and drawScale = scale / rs reproduce DrawString's placement
-		// for any design `origin` (incl. centred) while applying the sheen. Integer dest
-		// rects are avoided on purpose — rounding a pulsating rect each frame wobbles.
+	// Pass 2 of the metal path: composite `rt`'s used sub-rect through metal.fx at position/origin/scale,
+	// with `time` driving the glint sweep. FLOAT-precise (sub-pixel) draw mirroring DrawString's transform
+	// EXACTLY: the RT holds the text offset by MetalPad at render scale, so origin (in RT texels) =
+	// (origin + pad) * rs and drawScale = scale / rs reproduce DrawString's placement for any design
+	// `origin` (incl. centred) while applying the sheen. Integer dest rects are avoided on purpose —
+	// rounding a pulsating rect each frame wobbles. Symmetric box (no drop shadow): equal top/bottom
+	// glyph-band inset. Flush first because the cached fast path skips Pass 1, so an earlier _beginDrawing
+	// batch may still be open (spriteBatch.Begin would otherwise throw); idempotent right after a rasterise.
+	private void CompositeMetalText(RenderTarget2D rt, int usedW, int usedH, float boxH, Vector2 position, float rotation, Vector2 origin, float scale, float time, float rs)
+	{
+		Flush();
 		Rectangle used = new Rectangle(0, 0, usedW, usedH);
-		int texW = ((Texture2D)metalRT).Width;
-		int texH = ((Texture2D)metalRT).Height;
-		// Symmetric box (no drop shadow): equal top/bottom glyph-band inset.
+		int texW = ((Texture2D)rt).Width;
+		int texH = ((Texture2D)rt).Height;
 		float padFracY = (float)MetalPad / boxH;
 		Vector2 uvExtent = new Vector2((float)usedW / texW, (float)usedH / texH);
 		SetMetalParams(time, padFracY, padFracY, uvExtent);
 		float drawScale = scale / rs;
 		Vector2 rtOrigin = (origin + new Vector2(MetalPad, MetalPad)) * rs;
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, metalEffect, RenderScale.Matrix);
-		spriteBatch.Draw(metalRT, position, (Rectangle?)used, Color.White, rotation, rtOrigin, drawScale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(rt, position, (Rectangle?)used, Color.White, rotation, rtOrigin, drawScale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
 	}
 
@@ -939,6 +1024,14 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			}
 		}
 		textSpriteCache.Clear();
+		foreach (CachedTextSprite sprite in metalSpriteCache.Values)
+		{
+			if (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed)
+			{
+				((GraphicsResource)sprite.Rt).Dispose();
+			}
+		}
+		metalSpriteCache.Clear();
 		spriteBatch.Dispose();
 		base.UnloadContent();
 	}

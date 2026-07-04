@@ -828,15 +828,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `fakeHits` ramp, since real HP barely moves) like it's taking damage. The trigger lives in
   `SpiderBoss.Update` (idle `helpTimer`, reset on every landed hit + on spawn; one helper at a time via
   the `helper` ref + `OnDeath`). `Bullet.cs` lists it so bullets stop on it but do NOT sustain combo
-  (it's immortal -- would be a combo farm). **GOTCHA -- never fire a PERFECTLY vertical (or perfectly
-  horizontal) `Lazer`.** `CollisionHandler` rasterises a `CollisionLine` cell-by-cell with a DDA whose
-  near-vertical branch advances `val.X` by `80*cos(angle)` per step while its loop exits on `val.X`.
-  For straight-down (`MathHelper.PiOver2`, `cos ~= -4.4e-8`) at x~400 that per-step delta is *below the
-  float32 ULP* (~3e-5), so `val.X` never changes and the loop spins forever -- a hard 100%-CPU hang
-  (reproduced in float32, confirmed live). The fix: the beam is tilted ~1.1 deg off vertical
-  (`FireTilt = 0.02f`) -- visually still straight down, but the X step is ~1.6px/cell, far above the
-  ULP. This is a **latent bug in the shared CollisionHandler DDA** that any near-axis-aligned lazer at a
-  high coordinate could hit (see the Backlog follow-up); don't feed it a degenerate line. **Debug/tuning
+  (it's immortal -- would be a combo farm). **Perfectly-vertical Lazers are now SAFE (card 7a3e70ad).**
+  `CollisionHandler.FillCollisionMatrixLine` rasterises a `CollisionLine` cell-by-cell with a DDA whose
+  near-vertical branch advances `val.X` by `80*cos(angle)` per step while its loop exits on `val.X`. For
+  straight-down (`MathHelper.PiOver2`, `cos ~= -4.4e-8`) at x~400 that per-step delta is *below the
+  float32 ULP* (~6e-5), so `val.X` never changed and the loop spun forever -- a hard 100%-CPU hang
+  (reproduced in float32, confirmed live). It was worked around by tilting the helper's beam ~1.1 deg off
+  vertical (`FireTilt`); that per-lazer band-aid is now REMOVED because the DDA itself is hardened: every
+  DDA `while` loop is bounded by a `maxLineSteps` cap (a straight line touches at most `squaresX+squaresY`
+  cells, so the cap only ever trips on a degenerate near-axis-aligned line, which still marks its correct
+  column/row of cells first). So the helper fires exactly `PiOver2` again and no near-axis-aligned lazer
+  (Boss/MarsBoss/UFO aimed nearly straight at a target) can hang the game. Don't reintroduce a per-lazer
+  tilt. **Debug/tuning
   (`DebugFlags`):** `?spiderhelperidle=<sec>` `?spiderhelperhovery=<y>` `?spiderhelperspeed=<f>`
   `?spiderhelperfire=<sec>` `?spiderhelperlead=<px>` tune the feel live (all have shipping defaults, so a
   plain boot is unchanged). **Sprite harness:** `?harness=spiderhelper` (use `?pos=400,10` to preview the

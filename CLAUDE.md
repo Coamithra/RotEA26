@@ -487,10 +487,29 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   ?spidershadowx= ?spidershadowy= ?spidershadowscale= ?spiderloop= ?spiderphase=` (all read ONLY while the
   harness is up + kept OUT of `DebugFlags.Active` -> **live play is byte-identical**). `?spiderphase=<0..1>`
   freezes the cycle for a deterministic apex screenshot. Picker: `wwwroot/harness.html` (spiderjump option +
-  fields). The **only live change** in this card is a cosmetic **random animation start** in
-  `Spider.Initialize` (a cluster crawls out of lock-step; jump is still X-triggered). Dialing the actual
-  values + wiring the animation-driven jump live is deferred to the "For me" card + a follow-up.
+  fields). This card built the tool; the **live animation-driven jump** it previews is now wired (see the
+  next bullet), and the `Spider.Initialize` **random animation start** it added (a cluster crawls out of
+  lock-step) is preserved but overridden by the jump's count-back preset. Dialing the final values stays
+  the "For me" card 5645a489.
   e.g. `?harness=spiderjump&bg=mars&spiderphase=0.535` (airborne apex) · `...&spidershadowy=-90` (align shadow).
+- **Mars jumping-spider jump is now ANIMATION-DRIVEN in LIVE play (`Spider.cs`).** The grounded
+  `Spider` no longer launches on `Position.X < jumpXposition`; it fires when the rear-up animation
+  reaches a launch beat. On the first `Update` a one-time "count back" presets an UNWRAPPED frame
+  accumulator (`animAcc`) from the REAL Mars scroll (`oracle.BackgroundSpeed.X`) so the beat coincides
+  with the spider passing a (still random) launch X: `entryFrame = jumpBeatFrame - fps * (dist/scroll)`;
+  it then fires when `animAcc >= jumpBeatFrame` (unwrapped, since `base.Update` wraps `curframe` mod the
+  49-frame sheet, which can't be crossing-tested). `spider_sheet2` is one rear-up->fling->settle cycle
+  with a believable "about to spring" peak (~frame 40 = `DefaultJumpFrame`), enough for a legible
+  single-beat launch; the fancier rear->fling->down->rear->jump double-pump would need re-authored art
+  (optional follow-up). The `?spider*` knobs now apply to LIVE play too (not just the `?harness=spiderjump`
+  viz): `?spiderjumpframe=` (launch beat), `?spiderjumpx=` (pin the launch X, else random per spider),
+  `?spiderlandframe=` (touchdown resume frame), `?spidershadowx=/y/scale=` (the dialed shadow, applied via
+  the generic `Floor` shadow's `ShadowOffset`/`ShadowSize`). **All default to identity, so a shipped build
+  with no query is byte-identical.** Bake dialed values into the `Default*` consts / `LandFrame` in
+  `Spider.cs`. **Watch/dial it live with `?level=Level2&spiders`** -- a debug boot (mirrors `?spiderboss`)
+  that skips the level and runs a continuous pure-spider GROUND wave, so the jump is seen in REAL play (the
+  harness sim's arc is only illustrative). Pair `?invuln`. Final dialing is the "For me" card 5645a489.
+  e.g. `?level=Level2&spiders&invuln&spiderjumpframe=42&spidershadowy=-40`.
 - **Landed Mars-UFO placement offsets (`Compat/LandedOffsets.cs` + `wwwroot/landed-editor.html` +
   `Content/data/landed_offsets.json`).** The Mars saucers that start parked on the ground
   (`ufometpootjes`/`Smallship_landed`/`Mediumship_landed`, spawned by `StationarySpawner`) and the

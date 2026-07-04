@@ -205,14 +205,14 @@ internal class Spider : KillableAlien
 			rotationspeed = 0.0018f;
 			yspeed = RandomHelper.RandomNextFloat(-8f, -19f) / 16.666666f;
 		}
-		if (hasJumped & (base.Position.Y > 505f))
+		if (hasJumped & (base.Position.Y > GroundY))
 		{
 			hasJumped = false;
 			hasLanded = true;
 			rotation = 0f;
 			rotationspeed = 0f;
 			yspeed = 0f;
-			base.Position = new Vector2(base.Position.X, 505f);
+			base.Position = new Vector2(base.Position.X, GroundY);
 			// Snap to the settled "landed" frame ONCE on touchdown, then let it keep animating
 			// from there (base.Update advances curframe normally on the following frames).
 			curframe = LandFrame;
@@ -321,7 +321,9 @@ internal class Spider : KillableAlien
 		float entryFrame = jumpFrame - fps * tJump;
 		float x = xEnter - sPxPerSec * t;
 
-		// Deterministic arc (live play randomises yspeed): v0 up, gravity down, ~0.67s of air.
+		// Deterministic arc, ILLUSTRATIVE only -- it is NOT live play's physics (live: yspeed
+		// rand(-8..-19)/16.67 px/ms + 0.02 px/ms^2 gravity). This viz just needs a readable ~0.67s
+		// hop to show WHEN/WHERE the jump fires; the beat/land-frame alignment is what's being tuned.
 		const float v0 = -300f;
 		const float g = 900f;
 		float airDur = -2f * v0 / g;

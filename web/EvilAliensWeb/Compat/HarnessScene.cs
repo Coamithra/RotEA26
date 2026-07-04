@@ -441,9 +441,11 @@ namespace EvilAliensWeb.Compat
             }
             base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 
-            int jumpX = (int)spiderState.JumpX;
-            int groundY = (int)spiderState.GroundYOut;
-            int feet = (int)(spiderState.GroundYOut + 40f + DebugFlags.SpiderShadowY);
+            // Markers come from stable values, NOT spiderState, so they're correct even on the very
+            // first Draw before Update has populated the struct (same reasoning as DrawSpiderShadow).
+            int jumpX = (int)(DebugFlags.SpiderJumpX ?? 400f);
+            int groundY = (int)Spider.GroundY;
+            int feet = (int)(Spider.GroundY + 40f + DebugFlags.SpiderShadowY);
 
             // vertical jump-start marker, ground baseline, shadow (feet) baseline
             base.SpriteBatch.Draw(pixelTex, new Rectangle(jumpX - 1, 30, 2, 540), new Color(1f, 0.85f, 0.2f, 0.5f));

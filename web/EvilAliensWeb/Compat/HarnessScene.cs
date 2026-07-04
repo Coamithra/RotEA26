@@ -311,8 +311,19 @@ namespace EvilAliensWeb.Compat
                     obj.Position = objPos;
                     if (DebugFlags.HarnessPlay)
                     {
-                        int total = Math.Max(1, obj.rows * obj.columns);
-                        obj.curframe = (obj.curframe + obj.fps * (float)gameTime.ElapsedGameTime.TotalSeconds) % total;
+                        // Wrap over the animation's [FirstFrame, ActiveLastFrame) sub-range the
+                        // same way the engine's own Update does (AlienDrawableGameComponent) so a
+                        // registered object that loops a sub-range (e.g. flyingspider = spider_sheet2
+                        // frames 22..30) plays only those frames, not the whole sheet. LastFrame<=
+                        // FirstFrame means "whole sheet" (mirrors the private ActiveLastFrame).
+                        int activeLast = (obj.LastFrame > obj.FirstFrame) ? obj.LastFrame : obj.rows * obj.columns;
+                        float span = activeLast - obj.FirstFrame;
+                        if (span <= 0f)
+                        {
+                            span = 1f;
+                        }
+                        obj.curframe += obj.fps * (float)gameTime.ElapsedGameTime.TotalSeconds;
+                        obj.curframe = obj.FirstFrame + ((obj.curframe - obj.FirstFrame) % span + span) % span;
                     }
                     else
                     {

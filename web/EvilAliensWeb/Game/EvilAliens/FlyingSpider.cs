@@ -31,8 +31,10 @@ internal class FlyingSpider : KillableAlien
 	// toward the original; 0.85 pulls the width in line (the stance is inherently taller, so height
 	// stays a bit above OG without re-cutting the art). Both the sprite AND its box hitbox (sized off
 	// the frame via DrawScale in retrieveBoundsFromTexture) shrink together, so collision keeps
-	// tracking the visible size. Live-tune by eye with ?flyspiderscale=<f> (null => this default);
-	// once the value feels right, update this constant. See Compat/DebugFlags.cs.
+	// tracking the visible size. (Update already scales the vertical swivel amplitude by `scale`,
+	// so a smaller spider also bobs proportionally less — intended, and true of the OG coupling too.)
+	// Live-tune by eye with ?flyspiderscale=<f> (null => this default); once the value feels right,
+	// update this constant. See Compat/DebugFlags.cs.
 	public const float DefaultSizeFactor = 0.85f;
 
 	private static float SizeFactor =>

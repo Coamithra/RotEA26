@@ -317,12 +317,12 @@ namespace EvilAliensWeb.Compat
 						BlastLoopSeconds = bl;
 					}
 					break;
-					case "flyspiderscale":
-						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
-						{
-							FlySpiderScale = fss;
-						}
-						break;
+				case "flyspiderscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
+					{
+						FlySpiderScale = fss;
+					}
+					break;
 				case "huestart":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
 					{

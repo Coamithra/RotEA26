@@ -554,6 +554,31 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   so leaving it would keep showing the old alien). Re-run `python tools/favicon/build_favicon.py` after
   changing the source sheet or the `FRAME`/margin knobs; don't hand-edit the `.ico`/`.png`. Offline
   (Pillow only), like the other `tools/` asset steps; CI just ships the committed outputs.
+- **Level-3 collidable-wall texture is an 8x8-tiled SEAMLESS wrap sheet -- upscale via
+  `tools/walls/build_wall_tileable.py`.** The front, collidable Level-3 walls (`Wall`,
+  `Game/EvilAliens/Wall.cs`) all use ONE texture, `GFX/Base/756-v1`
+  (`wwwroot/Content/gfx/base/756-v1.png`, currently a low-res 512x512). `Wall.Draw` samples it as
+  an **8x8 grid** -- block (i,j) draws source cell `(j%8, i%8)` at an adjacent on-screen slot,
+  wrapping every 8 cells -- so the WHOLE image must **tile seamlessly (all four edges wrap)** or a
+  hard seam shows every 8 blocks. On-screen size is dynamic (`scale = 800/(texture.Width*width)`)
+  and the cell split is `texture.Width/8` (integer), so a higher-res drop-in only needs **dims a
+  multiple of 8** -- **no game code change**. To ship a higher-res wall: (1) upscale
+  `756-v1.png` with ChatGPT/an upscaler to a square power-of-two (art step); (2) drop it at
+  `tools/walls/source/756-v1.png` (gitignored raw source); (3) `python
+  tools/walls/build_wall_tileable.py`. The tool re-makes the (edge-broken) upscale seamlessly
+  tileable via **offset-and-heal healed with the mars stitcher's Laplacian `pyr_blend`**
+  (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the card asked for): roll by half
+  so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
+  cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
+  reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
+  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
+  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
+  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
+  `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
+  preload stutters on a big new PNG, add
+  `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
+  `tools/walls/README.md`.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

@@ -64,6 +64,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private Timer waittimer = new Timer(1000f, repeating: false);
 
+	// "Helper" mothership: if the boss goes un-damaged for this long, a mothership flies over and
+	// lasers it (see SpiderHelperMothership) so a stuck player gets a clear, understandable nudge.
+	// The timer resets on every landed hit AND on each spawn, so help arrives at most every ~30s of
+	// no progress. Threshold + the helper's own feel knobs are tunable via DebugFlags (?spiderhelper*).
+	private Timer helpTimer = new Timer(30000f, repeating: false);
+
+	private SpiderHelperMothership helper;
+
 	private List<Lazer> alreadyHitBy = new List<Lazer>();
 
 	private List<Vector2> debrisposition = new List<Vector2>();
@@ -211,6 +219,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		timers.Add(stateTimer);
 		timers.Add(hittimer);
 		timers.Add(waittimer);
+		timers.Add(helpTimer);
 		PointValue = 2000f;
 	}
 
@@ -317,6 +326,10 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		waittimer.Stop();
 		currentAnimation = spiderFly;
 		animationProgress = 0f;
+		helper = null;
+		helpTimer.Duration = EvilAliensWeb.Compat.DebugFlags.SpiderHelperIdleSeconds * 1000f;
+		helpTimer.Reset();
+		helpTimer.Start();
 	}
 
 	private void ResetTimer(float seconds)
@@ -460,6 +473,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			flag = true;
 		}
 		base.Update(gameTime);
+		// Summon the helper mothership when the boss has gone un-damaged too long (checked even while
+		// paused between fly turns). One at a time; resetting the timer on spawn spaces them out.
+		if (state != SpiderBossState.dead && !base.IsDead && helper == null && helpTimer.Finished)
+		{
+			SpawnHelper();
+			helpTimer.Reset();
+			helpTimer.Start();
+		}
 		if (waittimer.Active)
 		{
 			return;
@@ -691,6 +712,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		sound.PlayCue("bugdies");
 		sound.PlayCue("bugdies");
 		hp--;
+		// The boss took damage (incl. from the helper's own laser), so restart the idle countdown.
+		helpTimer.Reset();
+		helpTimer.Start();
 		if (hp <= 0 && !base.IsDead)
 		{
 			switch (state)
@@ -782,5 +806,22 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	internal void SetupPreload()
 	{
 		isPreload = true;
+	}
+
+	private void SpawnHelper()
+	{
+		helper = SpiderHelperMothership.NewHelper(collection, base.Game);
+		helper.Setup(
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperHoverY,
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperSpeed,
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireSeconds * 1000f,
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireLead);
+		helper.OnDeath += helper_OnDeath;
+		collection.Add((GameComponent)(object)helper);
+	}
+
+	private void helper_OnDeath(object sender)
+	{
+		helper = null;
 	}
 }

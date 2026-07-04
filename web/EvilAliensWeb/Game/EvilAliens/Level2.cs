@@ -136,6 +136,14 @@ internal class Level2 : GameScene
 			ue.OnFinished += Victory;
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.SpiderBoss)
+		{
+			// DEBUG (?spiderboss): skip the whole level and drop straight into the spider-boss
+			// fight, so the helper-mothership assist can be watched in seconds. Mirrors the real
+			// boss block below (spawn + linked UFO/bonus spawners + halt), then Victory.
+			PopulateSpiderBossOnly();
+			return;
+		}
 		WaitEvent waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += resetlives;
 		StationaryWave(8f, 3f, 100f, 0f, 0f, 0f);
@@ -333,6 +341,36 @@ internal class Level2 : GameScene
 		eventList.AddEvent(gameEvent2, halting: true);
 		eventList.AddHalt();
 		gameEvent2.OnFinished += Victory;
+	}
+
+	private void PopulateSpiderBossOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += resetlives;
+		waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += halt;
+		SpiderBossEvent spiderBossEvent = new SpiderBossEvent(base.Game);
+		eventList.AddEvent(spiderBossEvent, halting: false);
+		Wait(2f);
+		UfoSpawner ufoSpawner = new UfoSpawner(base.Game, 0f, 2f, big: false);
+		eventList.AddEvent(ufoSpawner, halting: false);
+		spiderBossEvent.LinkWith(ufoSpawner);
+		ufoSpawner = new UfoSpawner(base.Game, 0f, 0.2f, big: true);
+		eventList.AddEvent(ufoSpawner, halting: false);
+		spiderBossEvent.LinkWith(ufoSpawner);
+		BonusSpawner bonusSpawner = new BonusSpawner(base.Game, 0f, 0.08f, randomly: false);
+		eventList.AddEvent(bonusSpawner, halting: false);
+		spiderBossEvent.LinkWith(bonusSpawner);
+		ufoSpawner = new UfoSpawner(base.Game, 0f, 0.15f, big: true);
+		eventList.AddEvent(ufoSpawner, halting: true);
+		ufoSpawner.DoNotScale();
+		spiderBossEvent.LinkWith(ufoSpawner);
+		eventList.AddHalt();
+		Wait(2f);
+		UnlockEvent victoryEvent = new UnlockEvent(base.Game, "Next Mission!", Unlockables.Items.Level3, AnimatedMessage.UnlockType.level, level);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
 	}
 
 	private void invuln(GameEvent sender)

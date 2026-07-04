@@ -21,9 +21,14 @@ namespace EvilAliens;
 //   * Saucers fly in from the screen edges and wander. TOUCH one with your
 //     body to asplode it.
 //   * Left alone, a saucer starts blinking faster and faster, then fires one
-//     big slow plasma orb at you. If it hits your image you lose one of
-//     3 hearts; 0 hearts = game over.
-//   * Asplode KillTarget saucers to win.
+//     big slow plasma orb at you. If it hits your image you lose a heart;
+//     0 hearts = game over.
+//   * Asplode enough saucers to win.
+//
+// It runs through the challenge difficulty menu like the other challenges, and
+// the per-difficulty feel (hearts / kills-to-win / saucer cap + speed / plasma
+// speed) comes from the Tunings table below; harder tiers earn the lyrics music
+// (SoundManager.ClassicForDifficulty()). Live-tune with the ?wc* debug flags.
 //
 // There is NO PlayerShip in this level (spawnPlayerNormally = false) — the
 // pause menu, score HUD, victory/defeat flows are all inherited from GameScene,
@@ -31,9 +36,35 @@ namespace EvilAliens;
 // so LoseLife() lands directly in the GameOver flow when the hearts run out).
 internal class WebcamLevel : GameScene
 {
-	private const int KillTarget = 20;
+	// The discrete, per-difficulty knobs for the challenge. The generic cadence
+	// (saucer arm/blink/spawn timing) already scales off Settings.DifficultyModifier
+	// in SpawnSaucers; this table adds the things that don't come from that single
+	// float: how many hits you can take, how many kills win, how many saucers can be
+	// on screen at once, and how fast the saucers drift + the plasma cruises.
+	private struct DifficultyTuning
+	{
+		public int Hearts;         // lives (hearts) you start with
+		public int KillTarget;     // saucers to splat to win
+		public int MaxSaucers;     // simultaneous-saucer ceiling
+		public float SaucerSpeedMul; // WebcamUfo drift-speed scale
+		public float PlasmaSpeedMul; // WebcamPlasma cruise-speed scale
+	}
 
-	private const int StartHearts = 3;
+	// Shipped baseline, indexed by (int)Settings.DifficultyLevel (Easy..Inzane).
+	// These are a starting point — A/B them live with the ?wc* debug flags (see
+	// Compat/DebugFlags.cs) then bake the chosen numbers back here.
+	private static readonly DifficultyTuning[] Tunings = new DifficultyTuning[]
+	{
+		new DifficultyTuning { Hearts = 5, KillTarget = 12, MaxSaucers = 3, SaucerSpeedMul = 0.85f, PlasmaSpeedMul = 0.75f }, // Easy
+		new DifficultyTuning { Hearts = 4, KillTarget = 16, MaxSaucers = 4, SaucerSpeedMul = 1.0f,  PlasmaSpeedMul = 0.9f  }, // Medium
+		new DifficultyTuning { Hearts = 3, KillTarget = 20, MaxSaucers = 5, SaucerSpeedMul = 1.15f, PlasmaSpeedMul = 1.05f }, // Hard
+		new DifficultyTuning { Hearts = 2, KillTarget = 26, MaxSaucers = 6, SaucerSpeedMul = 1.3f,  PlasmaSpeedMul = 1.2f  }, // Very_Hard
+		new DifficultyTuning { Hearts = 2, KillTarget = 32, MaxSaucers = 7, SaucerSpeedMul = 1.5f,  PlasmaSpeedMul = 1.4f  }, // Inzane
+	};
+
+	// The active run's resolved tuning (difficulty row + any ?wc* debug overrides),
+	// set in Initialize before play begins.
+	private DifficultyTuning tuning;
 
 	private int kills;
 
@@ -95,22 +126,32 @@ internal class WebcamLevel : GameScene
 		score.DisableCombos();
 		// the meme screenshot's plain starfield, not the holodeck sim chamber
 		Background.SetSpace();
-		// Ungated fun challenge with no real difficulty pick -> clean instrumental.
-		// (Follow-up card 8fcc7a8e gives it difficulty; then route through
-		// SoundManager.ClassicForDifficulty() so Hard+ webcam runs earn the lyrics.)
-		base.SoundManager.PlayMusic(Songs.ClassicClean);
+		Settings settings = Settings.GetInstance();
+		// The player picked a difficulty in the challenge difficulty menu — this level
+		// routes through MenuScene.challengeSelector_levelSelected like every other
+		// challenge, so Settings.CurrentDifficulty is already their choice. ?wcdiff
+		// forces a tier for live tuning without unlocking it in the menu.
+		if (DebugFlags.WebcamDifficulty.HasValue)
+		{
+			settings.CurrentDifficulty = DebugFlags.WebcamDifficulty.Value;
+		}
+		ResolveTuning(settings.CurrentDifficulty);
+		// Hard+ earns the full Japanese-vocal "classic" cut; Easy/Medium get the clean
+		// lyric-free instrumental (SoundManager.ClassicForDifficulty()).
+		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
 		// GameScene showed the keyboard player's crosshair cursor, but there is no
 		// ship to aim here — the player's body is the pointer. Keep it hidden.
 		((DrawableGameComponent)ServiceHelper.Get<IMousePointerService>().MousePointer).Visible = false;
-		Settings.GetInstance().LockDifficulty();
+		// Lock the modifier at the picked tier so the mid-level ramp-up doesn't drift it.
+		settings.LockDifficulty();
 		// No PlayerShip: the player is the webcam image. Keep score.Lives at 0 so
 		// the stock lives strip stays empty and LoseLife() (called when the last
 		// heart goes) drops straight into the GameOver flow.
 		spawnPlayerNormally = false;
 		score.Lives = 0;
 		kills = 0;
-		hearts = StartHearts;
+		hearts = tuning.Hearts;
 		won = false;
 		introShown = false;
 		ufos.Clear();
@@ -123,6 +164,42 @@ internal class WebcamLevel : GameScene
 		// removal. The level idles underneath until the player joins (or exits
 		// via the dialog's Back, which lands in the Cancelled poll below).
 		WebcamInterop.BeginSetup();
+	}
+
+	// Pick the difficulty row, then layer any ?wc* debug overrides on top (absolute
+	// for the counts, a multiplier for the speeds). See Compat/DebugFlags.cs.
+	private void ResolveTuning(Settings.DifficultyLevel difficulty)
+	{
+		int idx = (int)difficulty;
+		if (idx < 0)
+		{
+			idx = 0;
+		}
+		if (idx >= Tunings.Length)
+		{
+			idx = Tunings.Length - 1;
+		}
+		tuning = Tunings[idx];
+		if (DebugFlags.WebcamHearts.HasValue)
+		{
+			tuning.Hearts = DebugFlags.WebcamHearts.Value;
+		}
+		if (DebugFlags.WebcamKills.HasValue)
+		{
+			tuning.KillTarget = DebugFlags.WebcamKills.Value;
+		}
+		if (DebugFlags.WebcamSaucers.HasValue)
+		{
+			tuning.MaxSaucers = DebugFlags.WebcamSaucers.Value;
+		}
+		if (DebugFlags.WebcamSaucerSpeed.HasValue)
+		{
+			tuning.SaucerSpeedMul *= DebugFlags.WebcamSaucerSpeed.Value;
+		}
+		if (DebugFlags.WebcamPlasmaSpeed.HasValue)
+		{
+			tuning.PlasmaSpeedMul *= DebugFlags.WebcamPlasmaSpeed.Value;
+		}
 	}
 
 	private void WebcamLevel_OnFinished(object sender, FinishedArgs args)
@@ -162,7 +239,7 @@ internal class WebcamLevel : GameScene
 		{
 			introShown = true;
 			AnimatedMessage animatedMessage = AnimatedMessage.NewAnimatedMessage(Collection, base.Game);
-			animatedMessage.Setup("Splat " + KillTarget + " saucers\nwith your body!", SoundManager.Texts.GetReady, AnimatedMessage.MessageType.starwarsblue);
+			animatedMessage.Setup("Splat " + tuning.KillTarget + " saucers\nwith your body!", SoundManager.Texts.GetReady, AnimatedMessage.MessageType.starwarsblue);
 			Collection.Add((GameComponent)(object)animatedMessage);
 		}
 		if (WebcamInterop.PlayerVisible)
@@ -171,7 +248,7 @@ internal class WebcamLevel : GameScene
 			TestPlayerTouchesSaucers();
 			TestPlasmaHitsPlayer();
 		}
-		if (kills >= KillTarget && !won)
+		if (kills >= tuning.KillTarget && !won)
 		{
 			won = true;
 			Victory();
@@ -198,8 +275,8 @@ internal class WebcamLevel : GameScene
 		{
 			return;
 		}
-		// population ramps up as the player racks up kills
-		int cap = Math.Min(1 + kills / 4, 5);
+		// population ramps up as the player racks up kills, capped per difficulty
+		int cap = Math.Min(1 + kills / 4, tuning.MaxSaucers);
 		if (ufos.Count >= cap)
 		{
 			// full house: check again shortly
@@ -211,9 +288,9 @@ internal class WebcamLevel : GameScene
 		float difficulty = Settings.GetInstance().DifficultyModifier;
 		WebcamUfo webcamUfo = WebcamUfo.NewWebcamUfo(Collection, base.Game);
 		// harder difficulty + later waves arm faster and blink shorter
-		float armDelay = RandomHelper.RandomNextFloat(5000f, 9000f) / difficulty * MathHelper.Lerp(1f, 0.6f, Math.Min(1f, kills / (float)KillTarget));
+		float armDelay = RandomHelper.RandomNextFloat(5000f, 9000f) / difficulty * MathHelper.Lerp(1f, 0.6f, Math.Min(1f, kills / (float)tuning.KillTarget));
 		float blinkTime = RandomHelper.RandomNextFloat(2400f, 3200f) / difficulty;
-		webcamUfo.Setup(RandomEdgePosition(), armDelay, blinkTime);
+		webcamUfo.Setup(RandomEdgePosition(), armDelay, blinkTime, tuning.SaucerSpeedMul);
 		webcamUfo.OnFired += ufo_OnFired;
 		Collection.Add((GameComponent)(object)webcamUfo);
 		ufos.Add(webcamUfo);
@@ -240,7 +317,7 @@ internal class WebcamLevel : GameScene
 	private void ufo_OnFired(WebcamUfo sender, Vector2 target)
 	{
 		WebcamPlasma webcamPlasma = WebcamPlasma.NewWebcamPlasma(Collection, base.Game);
-		webcamPlasma.Setup(sender.Position, target);
+		webcamPlasma.Setup(sender.Position, target, tuning.PlasmaSpeedMul);
 		Collection.Add((GameComponent)(object)webcamPlasma);
 		plasmas.Add(webcamPlasma);
 		base.SoundManager.PlayCue("lazershotnoloop");
@@ -307,7 +384,7 @@ internal class WebcamLevel : GameScene
 		// kill counter, top-right — the original's "Killed: N"
 		if (font != null)
 		{
-			string text = "Killed: " + kills + " / " + KillTarget;
+			string text = "Killed: " + kills + " / " + tuning.KillTarget;
 			Vector2 size = font.MeasureString(text) * 0.7f;
 			spriteBatch.DrawShadowString(text, new Vector2((float)(General.SafeZone).Right - size.X, (float)(General.SafeZone).Top + 6f), 0.7f, Color.Black, Color.White, new Vector2(2f, 2f), 1f, metal: false);
 			// prompts: mask gone stale / player out of frame

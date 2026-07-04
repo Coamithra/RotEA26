@@ -486,6 +486,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `preload/manifest.txt`. NOTE:
   `Braineroid.Initialize` sets `pulsate = 1f` (not 0) — Update overwrites it in-game, but the sprite harness
   freezes Update, so a 0 baseline would draw the whole sprite at scale 0 (invisible).
+  **The end-credits Cast "Brain Spawn" entry (`CastDisplayer.braineroid`) now draws this animated sheet too**
+  (card 208da2fe — it was still the old static `brainlargetransglow`). `CastDisplayer` draws every cast member
+  by hand (its own `Draw`, NO interpolation shader), so it plays the 20-frame sheet at a higher raw fps
+  (`DefaultBrainFps` 10) than the in-game 0.4, and draws the additive blue glow (`brainanimatedglow`) behind it
+  via `DrawBrainGlow` (mirrors `Braineroid.DrawGlow`; `scale/textureScale` = DrawScale so glow tracks the brain).
+  Size/speed are baked defaults (`DefaultBrainScale` 1.7 / `DefaultBrainFps` 10) overridable by eye — the real
+  Cast screen is only reachable after beating L3 on Hard, so **`?castbrain` boots straight to it** (reuses
+  `HarnessScene` in a cast-brain mode; Esc → menu) with tuners `?castbrainscale=<f>` / `?castbrainfps=<f>`
+  (null override => the baked defaults ship, blast/colorize-tuner pattern; `DebugFlags.CastBrain/CastBrainScale/CastBrainFps`).
+  Picker link in `wwwroot/harness.html`. When the user settles on values, bake them into the `DefaultBrain*`
+  consts in `CastDisplayer`.
 - **Earth fly-by sprite (Level 1 hero earth) -- `tools/earth/build_earth.py`.** `GFX/Sprites/earth` is
   the masked NASA Blue Marble globe (`sources/globe_west_2048.jpg`, ~1822px disk). It's emitted at the
   FULL source resolution (NO downscale) so the fly-by renders crisp (1 texel ~= 1 pixel on a typical

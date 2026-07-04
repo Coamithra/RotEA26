@@ -37,6 +37,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -63,10 +64,12 @@ def find_blender(cfg: dict) -> str | None:
     on_path = shutil.which("blender")
     if on_path:
         return on_path
+    def ver_key(name):  # "Blender 4.10" -> (4, 10) so it sorts above "Blender 4.9"
+        return tuple(int(n) for n in re.findall(r"\d+", name)) or (0,)
     for root in (r"C:\Program Files\Blender Foundation",
                  r"C:\Program Files (x86)\Blender Foundation"):
         if os.path.isdir(root):
-            for name in sorted(os.listdir(root), reverse=True):  # newest version first
+            for name in sorted(os.listdir(root), key=ver_key, reverse=True):  # newest first
                 exe = os.path.join(root, name, "blender.exe")
                 if os.path.isfile(exe):
                     return exe
@@ -146,6 +149,14 @@ def pack(frame_images: list[Image.Image], render_w: int, render_h: int):
         shelf_h = max(shelf_h, c.height + PAD)
     atlas_h = y + shelf_h
 
+    limit = 32767  # .dat stores frame coords as int16; WebGL/ANGLE caps texture size anyway
+    if max(atlas_w, atlas_h, render_w, render_h) > limit:
+        raise ValueError(
+            f"packed atlas is {atlas_w}x{atlas_h} (render frame {render_w}x{render_h}); the "
+            f".dat stores coordinates as int16 (max {limit}), and the GPU won't accept a "
+            f"texture that large. Lower this object's 'supersample' or frame count in "
+            f"models.config.")
+
     atlas = Image.new("RGBA", (atlas_w, atlas_h), (0, 0, 0, 0))
     frames: list[Frame] = []
     for i, (c, l, t, r, b) in enumerate(trimmed):
@@ -170,13 +181,18 @@ def emit_grid(imgs: list[Image.Image], cols: int, rows: int):
     for i, im in enumerate(imgs):
         if im.mode != "RGBA":
             im = im.convert("RGBA")
-        if (im.width, im.height) != (cw, ch):
-            im = im.resize((cw, ch))
+        assert (im.width, im.height) == (cw, ch), (
+            f"grid frame {i} is {im.width}x{im.height}, expected {cw}x{ch} -- every rendered "
+            "frame must be the same size for a uniform grid (Blender renders them uniform)")
         sheet.paste(im, ((i % cols) * cw, (i // cols) * ch))
     return sheet
 
 
 def build_object(name: str, obj: dict, cfg: dict, dry_run: bool) -> bool:
+    if obj.get("_template"):
+        print(f"  [skip] {name}: template entry -- retarget it and set \"_template\": false "
+              "(or drop the flag) before building.")
+        return False
     src = obj.get("source")
     abs_src = os.path.normpath(os.path.join(HERE, src)) if src else None
     if not abs_src or not os.path.isfile(abs_src):

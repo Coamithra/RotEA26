@@ -78,5 +78,14 @@ mothership's 16-frame hover → 16 rotation frames).
 | `light` | `key_energy` (sun), `environment` (world ambient). |
 | `samples` | EEVEE render samples. |
 
+## Resolution ceiling
+
+`supersample` × the design size × the frame count all land in one atlas, whose coordinates
+are stored as `int16` in the `.dat` (max 32767) — and the browser's WebGL/ANGLE→D3D11
+backend caps texture size (~8–16k) anyway. If you crank `supersample` too high the tool
+stops with a clear error naming the knob; lower `supersample` or the turntable frame count.
+For a turntable, prefer more supersample over more frames — the interpolation shader can
+tween a sparse animation, but every extra frame multiplies the atlas area.
+
 Offline + deterministic (given a fixed model), like the other `tools/` asset steps. Don't
 hand-edit the built `.png`/`.dat` — re-run the tool.

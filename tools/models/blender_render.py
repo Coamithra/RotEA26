@@ -88,11 +88,13 @@ def setup_render(scene, job):
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
     # EEVEE across versions: Next (4.2+), classic, then Workbench as a last resort.
+    # An unknown enum item raises TypeError on some builds, RuntimeError/ValueError on
+    # others -- catch broadly so the fallback chain actually falls back.
     for eng in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH"):
         try:
             scene.render.engine = eng
             break
-        except TypeError:
+        except Exception:
             continue
     ee = getattr(scene, "eevee", None)
     if ee is not None:

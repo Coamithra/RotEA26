@@ -30,15 +30,6 @@ internal class SpiderHelperMothership : KillableAlien
 	// a separate hit counter that ramps to fully-red over this many landed shots.
 	private const int FakeHitsToFullRed = 40;
 
-	// The laser fires "straight down" but is nudged a hair off true vertical. A PERFECTLY vertical
-	// Lazer is a degenerate input to CollisionHandler's line rasteriser: it walks the collision line
-	// cell-by-cell and, for a near-vertical line, its loop exits on val.X while each step adds only
-	// 80*cos(angle) to val.X. cos(PiOver2) is ~-4.4e-8, and at x~400 that per-step delta is below the
-	// float ULP (~3e-5), so val.X never actually changes and the `while (val.X > End.X)` loop spins
-	// forever (a hard game hang). ~1.1 degrees off vertical is visually indistinguishable but makes
-	// the X step ~1.6 px/cell, far above the ULP, so the rasteriser terminates normally.
-	private const float FireTilt = 0.02f;
-
 	private HelperState state;
 
 	private float hoverY;
@@ -185,7 +176,10 @@ internal class SpiderHelperMothership : KillableAlien
 				fireTimer.Reset();
 				fireTimer.Start();
 				lazer = Lazer.NewLazer(collection, base.Game);
-				lazer.Setup(base.Position, MathHelper.PiOver2 + FireTilt, this, fireLead);
+				// Fire exactly straight down. The engine's line rasteriser (CollisionHandler) is now
+				// hardened against the degenerate perfectly-vertical case (card 7a3e70ad), so the old
+				// ~1.1deg FireTilt workaround is gone -- a true PiOver2 beam no longer hangs the game.
+				lazer.Setup(base.Position, MathHelper.PiOver2, this, fireLead);
 				collection.Add((GameComponent)(object)lazer);
 			}
 			break;

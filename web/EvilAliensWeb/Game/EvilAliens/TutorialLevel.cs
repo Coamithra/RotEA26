@@ -26,7 +26,9 @@ internal class TutorialLevel : GameScene
 	{
 		setPresence((GamerPresenceMode)21);
 		Background.SetSimpleSpace();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		// Tutorial is always the clean instrumental -- it LockDifficulty(Very_Hard)s
+		// for gameplay tuning, so it can't key on difficulty; force clean.
+		base.SoundManager.PlayMusic(Songs.ClassicClean);
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty(Settings.DifficultyLevel.Very_Hard);
 		base.spawnPlayerNormally = true;

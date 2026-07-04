@@ -67,7 +67,7 @@
     <select id="obj">
       <optgroup label="Enemies">
         <option value="spider" selected>spider</option>
-        <option value="flyingspider">flyingspider</option>
+        <option value="flyingspider">flyingspider (size tuner: ?flyspiderscale=)</option>
         <option value="ufo">ufo (big)</option>
         <option value="ufosmall">ufosmall</option>
         <option value="sweepufo">sweepufo</option>
@@ -166,6 +166,16 @@
       <label for="huecycle">Auto-cycle the target hue 0–360 (screenshot shows any point of the range)</label>
     </div>
 
+    <!-- Flying-spider size tuner — only meaningful for flyingspider. Blank falls back to the
+         baked FlyingSpider.DefaultSizeFactor; applies in play AND the harness. -->
+    <label>Flying-spider size — flyingspider only</label>
+    <div class="row">
+      <div>
+        <label for="flyspiderscale">Size ×</label>
+        <input id="flyspiderscale" type="number" step="0.05" placeholder="0.85" />
+      </div>
+    </div>
+
     <div class="actions">
       <button id="launch">Launch ▶</button>
       <button id="newtab" class="secondary">Open in new tab ↗</button>
@@ -216,6 +226,10 @@
     var huetarget = document.getElementById("huetarget").value.trim();
     if (huetarget !== "") p.set("huetarget", huetarget);
     if (document.getElementById("huecycle").checked) p.set("huecycle", "1");
+
+    // Flying-spider size override — only sent when filled; blank uses the baked default.
+    var flyspiderscale = document.getElementById("flyspiderscale").value.trim();
+    if (flyspiderscale !== "") p.set("flyspiderscale", flyspiderscale);
 
     return new URL("?" + p.toString(), GAME_BASE).href;
   }

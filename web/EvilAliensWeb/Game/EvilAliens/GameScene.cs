@@ -71,6 +71,18 @@ internal abstract class GameScene : Scene
 
 	private Timer snapshotdelaytimer = new Timer(800f, repeating: false);
 
+	// checkScreenShot's weighted Game.Components scan is a per-frame snapshot of
+	// on-screen busy-ness that arms the 800ms snapshotdelaytimer once it crosses 30.
+	// Sampling it every Nth frame (instead of every frame once snapshottimer expires)
+	// cuts the full-component scan to 1/N during calm stretches. The >30 threshold is
+	// unchanged; the trade is that a busy spike lasting fewer than N frames can fall
+	// between samples and be missed — acceptable because the thumbnail only needs one
+	// representative busy frame over the 5s snapshot cadence, and any sustained action
+	// is sampled many times within that window.
+	private const int SnapshotScanInterval = 6;
+
+	private int snapshotScanCounter;
+
 	protected Levels level;
 
 	private Timer AIJoinTimer = new Timer(6000f, repeating: true);
@@ -310,6 +322,7 @@ internal abstract class GameScene : Scene
 		snapshottimer.Start();
 		snapshotdelaytimer.Reset();
 		snapshotdelaytimer.Stop();
+		snapshotScanCounter = 0;
 		AIJoinTimer.Reset();
 		AIJoinTimer.Start();
 		xfading = false;
@@ -823,6 +836,11 @@ internal abstract class GameScene : Scene
 		{
 			return;
 		}
+		if (++snapshotScanCounter < SnapshotScanInterval)
+		{
+			return;
+		}
+		snapshotScanCounter = 0;
 		float num2 = 0f;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{

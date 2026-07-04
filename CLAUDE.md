@@ -394,6 +394,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
   (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
   `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
+- **Flying-spider size (`FlyingSpider.DefaultSizeFactor` + `?flyspiderscale=`).** The port reuses the
+  reared-up HD sheet (`spider_sheet2` frames 22..30) for the Level 2 flying spider instead of the OG
+  1x4 crawl sheet, so it draws taller + a touch wider than the XBLIG (measured on-screen silhouette
+  ~147x174 design px vs the OG's ~122x93). `FlyingSpider.SizeFactor` multiplies BOTH the foreground
+  (1.0) and background (0.67) base scales in `Initialize`; the sprite AND its box hitbox (sized off the
+  frame via `DrawScale`) shrink together, so collision tracks the visible size. Baked default is
+  **0.85** (`DefaultSizeFactor`); override live with **`?flyspiderscale=<f>`** (null => the baked
+  default, so a shipped build is unchanged). Applies in play AND the sprite harness, so
+  `?harness=flyingspider&play&flyspiderscale=0.8` previews it (also a field in `wwwroot/harness.html`).
+  To retune: pick a value by eye, then update the `DefaultSizeFactor` constant.
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the
@@ -558,6 +568,31 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   so leaving it would keep showing the old alien). Re-run `python tools/favicon/build_favicon.py` after
   changing the source sheet or the `FRAME`/margin knobs; don't hand-edit the `.ico`/`.png`. Offline
   (Pillow only), like the other `tools/` asset steps; CI just ships the committed outputs.
+- **Level-3 collidable-wall texture is an 8x8-tiled SEAMLESS wrap sheet -- upscale via
+  `tools/walls/build_wall_tileable.py`.** The front, collidable Level-3 walls (`Wall`,
+  `Game/EvilAliens/Wall.cs`) all use ONE texture, `GFX/Base/756-v1`
+  (`wwwroot/Content/gfx/base/756-v1.png`, currently a low-res 512x512). `Wall.Draw` samples it as
+  an **8x8 grid** -- block (i,j) draws source cell `(j%8, i%8)` at an adjacent on-screen slot,
+  wrapping every 8 cells -- so the WHOLE image must **tile seamlessly (all four edges wrap)** or a
+  hard seam shows every 8 blocks. On-screen size is dynamic (`scale = 800/(texture.Width*width)`)
+  and the cell split is `texture.Width/8` (integer), so a higher-res drop-in only needs **dims a
+  multiple of 8** -- **no game code change**. To ship a higher-res wall: (1) upscale
+  `756-v1.png` with ChatGPT/an upscaler to a square power-of-two (art step); (2) drop it at
+  `tools/walls/source/756-v1.png` (gitignored raw source); (3) `python
+  tools/walls/build_wall_tileable.py`. The tool re-makes the (edge-broken) upscale seamlessly
+  tileable via **offset-and-heal healed with the mars stitcher's Laplacian `pyr_blend`**
+  (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the card asked for): roll by half
+  so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
+  cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
+  reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
+  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
+  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
+  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
+  `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
+  preload stutters on a big new PNG, add
+  `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
+  `tools/walls/README.md`.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

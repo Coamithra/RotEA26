@@ -587,7 +587,7 @@ internal class MenuSub1 : Scene
 					// selection glow rings (above) stay as the frame. Per-entry RT composite => each
 					// row's sheen is local to itself, so stacked rows read identically regardless of
 					// height. The MenuTheme colour is preserved (the sheen modulates it).
-					base.SpriteBatch.DrawMetalString(menuEntries[i], position, color, 0f, val, num4, time);
+					base.SpriteBatch.DrawMetalStringCached(menuEntries[i], position, color, 0f, val, num4, time);
 				position.Y += (float)font.LineSpacing;
 			}
 		}

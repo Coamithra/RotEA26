@@ -54,5 +54,12 @@
     "loopEnd": 68.5453,
     "duration": 68.5453,
     "introEnd": 0.0
+  },
+  "classicclean": {
+    "file": "Content/music/classicclean.ogg",
+    "loopStart": 54.7764,
+    "loopEnd": 208.7608,
+    "duration": 209.2154,
+    "introEnd": 54.7764
   }
 }

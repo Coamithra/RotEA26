@@ -95,7 +95,10 @@ internal class WebcamLevel : GameScene
 		score.DisableCombos();
 		// the meme screenshot's plain starfield, not the holodeck sim chamber
 		Background.SetSpace();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		// Ungated fun challenge with no real difficulty pick -> clean instrumental.
+		// (Follow-up card 8fcc7a8e gives it difficulty; then route through
+		// SoundManager.ClassicForDifficulty() so Hard+ webcam runs earn the lyrics.)
+		base.SoundManager.PlayMusic(Songs.ClassicClean);
 		base.Initialize();
 		// GameScene showed the keyboard player's crosshair cursor, but there is no
 		// ship to aim here — the player's body is the pointer. Keep it hidden.

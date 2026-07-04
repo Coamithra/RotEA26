@@ -68,7 +68,7 @@
       <optgroup label="Enemies">
         <option value="spider" selected>spider</option>
         <option value="spiderjump">spiderjump (Mars jump-cycle viz: loops crawl→jump→land; shadow + jump-X markers; ?spider* flags)</option>
-        <option value="flyingspider">flyingspider</option>
+        <option value="flyingspider">flyingspider (size tuner: ?flyspiderscale=)</option>
         <option value="ufo">ufo (big)</option>
         <option value="ufosmall">ufosmall</option>
         <option value="sweepufo">sweepufo</option>
@@ -207,6 +207,16 @@
       </div>
     </div>
 
+    <!-- Flying-spider size tuner — only meaningful for flyingspider. Blank falls back to the
+         baked FlyingSpider.DefaultSizeFactor; applies in play AND the harness. -->
+    <label>Flying-spider size — flyingspider only</label>
+    <div class="row">
+      <div>
+        <label for="flyspiderscale">Size ×</label>
+        <input id="flyspiderscale" type="number" step="0.05" placeholder="0.85" />
+      </div>
+    </div>
+
     <div class="actions">
       <button id="launch">Launch ▶</button>
       <button id="newtab" class="secondary">Open in new tab ↗</button>
@@ -267,6 +277,9 @@
         var v = document.getElementById(pair[0]).value.trim();
         if (v !== "") p.set(pair[1], v);
       });
+    // Flying-spider size override — only sent when filled; blank uses the baked default.
+    var flyspiderscale = document.getElementById("flyspiderscale").value.trim();
+    if (flyspiderscale !== "") p.set("flyspiderscale", flyspiderscale);
 
     return new URL("?" + p.toString(), GAME_BASE).href;
   }

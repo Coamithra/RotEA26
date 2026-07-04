@@ -191,21 +191,32 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `build_audio.py` calls it as its last step; re-run `python tools/audio/refine_loops.py` standalone
   after a bank rebuild (needs `pymusiclooper`; absent → whole-wave points are left in place). Per-track
   hand-tunes go in its `OVERRIDES`; don't hand-edit the loop points. `--dry-run` previews.
-- **The `classic` music cue is a BESPOKE EXTERNAL track, not from the banks — `tools/audio/install_classic.py`.**
-  The retro-minigame song (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`, played by
-  `AsteroidChase`/`BraineroidsLevel`/`CrazyGame`) was replaced with a user-authored "Evil Aliens
-  Revenged" track (`new_assets_raw/EvilAliensRevengedLoopable.ogg`, gitignored raw source; the committed
-  `classic.ogg` is the shipped artifact). Because it isn't in the recovered XACT banks, **`classic` was
-  removed from `build_audio.py`'s bank-cracked `MUSIC_CUES`** and is installed by `install_classic.py`
-  instead (same pattern as `build_channelswap.py` owning the one port-era SFX cue). The tool copies the
-  source OGG straight to `classic.ogg` (already OGG/Vorbis 44100 stereo — a copy avoids a re-encode) and
-  writes `music.json`'s `classic` loop from **pymusiclooper's own top-ranked pair** (the track has a ~75s
-  intro then a seamless ~339s body loop; `loopStart 75.06 → loopEnd 414.18`, `introEnd = loopStart`).
-  `build_music` now **merges** into the existing `music.json` (instead of overwriting) so a full
-  `build_audio.py` rebuild preserves the external `classic` entry, and `main()` calls
-  `install_classic.install()` (a missing source just leaves the committed track untouched — safe in CI /
-  fresh clones). Re-run `python tools/audio/install_classic.py` after swapping the source track; don't
-  hand-edit `classic.ogg`/`music.json`. `--dry-run` previews; `--source <path>` overrides the source.
+- **The `classic` tune is a BESPOKE EXTERNAL track in TWO variants, difficulty-gated — `tools/audio/install_classic.py`.**
+  The retro-minigame song was replaced with a user-authored "Evil Aliens Revenged" track, and now ships
+  in two cuts: **`classic`** (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`) is the full
+  Japanese-vocal cut, and **`classicclean`** (`Songs.ClassicClean` → `songFiles[8]` →
+  `Content/music/classicclean.ogg`) is a lyric-free loopable instrumental. **Which one plays is chosen by
+  difficulty** via `SoundManager.ClassicForDifficulty()` — lyrics (`Classic`) only when
+  `Settings.CurrentDifficulty >= Hard`, else clean (`ClassicClean`) — so the vocal cut is an *earned*
+  reward (higher challenge difficulties are gated behind finishing the challenge). The four
+  difficulty-selected challenges (`AsteroidChase`/`ClassicAliens`/`BraineroidsLevel`/`CrazyGame`) call the
+  helper; the **Tutorial** forces `ClassicClean` (it `LockDifficulty(Very_Hard)`s for gameplay, so it can't
+  key on difficulty); the **Webcam** level uses `ClassicClean` (ungated, no real difficulty pick — until
+  follow-up card `8fcc7a8e` gives it one); **`TeamChallenge`** keeps `Songs.Classic` (lyrics) directly
+  (follow-up card `7329fcd4` will give it real difficulty). Both cues are bespoke external tracks (NOT in
+  the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by
+  `install_classic.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
+  `new_assets_raw/EvilAliensRevengedLoopable.ogg` (lyrics) and
+  `new_assets_raw/classicaliensremixloopable_nolyrics.ogg` (clean) — gitignored raw; the committed `.ogg`s
+  are the shipped artifacts. The tool copies each source straight (already OGG/Vorbis 44100 stereo — a copy
+  avoids a re-encode) and writes each `music.json` loop from **pymusiclooper's own top-ranked pair**
+  (lyrics: intro ~75s, body loop `75.06→414.18`; clean: intro ~55s, body loop `54.78→208.76`;
+  `introEnd = loopStart`). `build_music` **merges** into the existing `music.json` so a full `build_audio.py`
+  rebuild preserves both external entries, and `main()` calls `install_classic.install()` which installs
+  **both** cues (a missing source leaves that cue's committed track untouched — safe in CI / fresh clones).
+  Re-run `python tools/audio/install_classic.py` after swapping a source; don't hand-edit the `.ogg`s /
+  `music.json`. `--dry-run` previews; `--cue <classic|classicclean>` installs just one; `--source <path>`
+  overrides that cue's source.
 - **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
   WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
   (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;
@@ -356,6 +367,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   two consts are public so the score and the shader params stay in lockstep. Menus keep the old
   periodic marquee sweep (the no-`glintTime` `DrawShadowString`/`DrawMetalString` overloads still
   use `MetalTime`) — only the score is event-driven.
+  **Menu chrome rows are CACHED (perf card febc71de) — don't revert them to per-frame `DrawMetalString`.**
+  The menu list rows (`MenuSub1.DrawMenu` + `MenuSubWithSkull.DrawRows`) are drawn every frame on an idle
+  screen, and each row used to do a full metal-string RT ping-pong (target capture/restore + Clear +
+  rasterise batch) per frame. They now call **`SpriteBatchWrapper.DrawMetalStringCached`** instead: the
+  plain-text raster (Pass 1) is time-INDEPENDENT (the sheen, incl. the moving glint, is a Pass-2 composite
+  input), so it's cached — content-addressed on `(text, tint)` in `metalSpriteCache`, built once per
+  label+colour and reused every frame, while only the metal.fx composite runs per frame (glint still
+  sweeps). Same idea as `DrawShadowStringCached` but keyed by content (menu text is fixed) rather than an
+  int slot (the score's text changes). `DrawMetalString` still exists (uncached, shared `metalRT`) for
+  dynamic call sites; it and the cached variant share the extracted `RasteriseMetalText`/`CompositeMetalText`
+  helpers so their output can't diverge. `MenuSubWithSkull`'s octagon **frame FILL** is likewise cached: the
+  ~one-strip-per-row loop is replaced by a white octagon alpha **mask texture** (`EnsureFillMask`, rebuilt
+  only on a frame-size change) drawn as ONE tinted quad per row (`white*fill` = the fill colour, straight
+  alpha, so both selection states reuse the one mask; chamfer-edge softening hides under the crisp outline).
   The floating **"Power Up!" / combo pops** (`FloatingText.ShowType.pop`, shown for powerup
   level-ups and every 10th combo) had the SAME bleed-through (two translucent `DrawString`s, a
   dark drop + bright text at one alpha) and now route through the same `DrawShadowString`
@@ -380,6 +405,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   overlays the REAL collision ring (green = dealing damage, red = inert) + a live readout
   (phase/alpha/scale/hit-radius + the param values). `?blastloop=<sec>` sets the sweep speed,
   `?objscale=` shrinks a big bomb to fit. Registry default is power 1 (the curve is power-independent).
+- **Flying-spider size (`FlyingSpider.DefaultSizeFactor` + `?flyspiderscale=`).** The port reuses the
+  reared-up HD sheet (`spider_sheet2` frames 22..30) for the Level 2 flying spider instead of the OG
+  1x4 crawl sheet, so it draws taller + a touch wider than the XBLIG (measured on-screen silhouette
+  ~147x174 design px vs the OG's ~122x93). `FlyingSpider.SizeFactor` multiplies BOTH the foreground
+  (1.0) and background (0.67) base scales in `Initialize`; the sprite AND its box hitbox (sized off the
+  frame via `DrawScale`) shrink together, so collision tracks the visible size. Baked default is
+  **0.85** (`DefaultSizeFactor`); override live with **`?flyspiderscale=<f>`** (null => the baked
+  default, so a shipped build is unchanged). Applies in play AND the sprite harness, so
+  `?harness=flyingspider&play&flyspiderscale=0.8` previews it (also a field in `wwwroot/harness.html`).
+  To retune: pick a value by eye, then update the `DefaultSizeFactor` constant.
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the
@@ -565,6 +600,31 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   so leaving it would keep showing the old alien). Re-run `python tools/favicon/build_favicon.py` after
   changing the source sheet or the `FRAME`/margin knobs; don't hand-edit the `.ico`/`.png`. Offline
   (Pillow only), like the other `tools/` asset steps; CI just ships the committed outputs.
+- **Level-3 collidable-wall texture is an 8x8-tiled SEAMLESS wrap sheet -- upscale via
+  `tools/walls/build_wall_tileable.py`.** The front, collidable Level-3 walls (`Wall`,
+  `Game/EvilAliens/Wall.cs`) all use ONE texture, `GFX/Base/756-v1`
+  (`wwwroot/Content/gfx/base/756-v1.png`, currently a low-res 512x512). `Wall.Draw` samples it as
+  an **8x8 grid** -- block (i,j) draws source cell `(j%8, i%8)` at an adjacent on-screen slot,
+  wrapping every 8 cells -- so the WHOLE image must **tile seamlessly (all four edges wrap)** or a
+  hard seam shows every 8 blocks. On-screen size is dynamic (`scale = 800/(texture.Width*width)`)
+  and the cell split is `texture.Width/8` (integer), so a higher-res drop-in only needs **dims a
+  multiple of 8** -- **no game code change**. To ship a higher-res wall: (1) upscale
+  `756-v1.png` with ChatGPT/an upscaler to a square power-of-two (art step); (2) drop it at
+  `tools/walls/source/756-v1.png` (gitignored raw source); (3) `python
+  tools/walls/build_wall_tileable.py`. The tool re-makes the (edge-broken) upscale seamlessly
+  tileable via **offset-and-heal healed with the mars stitcher's Laplacian `pyr_blend`**
+  (`tools/mars/stitch_lib.py` -- the "similar toolchain as mars" the card asked for): roll by half
+  so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
+  cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
+  reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
+  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
+  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
+  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
+  `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
+  preload stutters on a big new PNG, add
+  `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
+  `tools/walls/README.md`.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

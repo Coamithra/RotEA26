@@ -36,6 +36,19 @@ internal class MenuSubWithSkull : MenuSub1
 
 	private readonly Vector2[] frameOutlinePts = new Vector2[8];
 
+	// Perf follow-up (card febc71de): the chamfered-octagon FILL used to submit ~one 1px-tall strip per
+	// design row (~frameH strips) PER ROW EVERY FRAME on an idle screen. The shape is identical for every
+	// row and only changes when the frame size does (a menu unlock changes the widest visible label), so it
+	// is rasterised ONCE into a white alpha mask and each row draws it as a SINGLE tinted quad — the
+	// per-selection fill colour is applied as the draw tint (white*tint = the fill colour, straight alpha),
+	// so idle and selected rows reuse the one mask. Any chamfer-edge softening from the single scaled quad
+	// is hidden under DrawFrameOutline, drawn crisp on top. Rebuilt (disposing the old) only on a size
+	// change, so it's effectively built once; the last mask leaks on scene teardown, consistent with the
+	// menu's other GPU resources (tracked by the separate "unload per-scene managers" backlog card).
+	private Texture2D fillMask;
+	private int fillMaskW = -1;
+	private int fillMaskH = -1;
+
 	private static Vector2[] BuildGlowRing(float r)
 	{
 		float d = r * 0.7071f;
@@ -152,7 +165,7 @@ internal class MenuSubWithSkull : MenuSub1
 			// Stage 13: the entry text gets the chrome sheen; the frame fill, the selection
 			// glow ring (above) and the frame outline (below) stay as its setting. Per-entry
 			// RT composite => each row's sheen is local to itself regardless of height.
-			base.SpriteBatch.DrawMetalString(label, rowCentre, textColor, 0f, origin, scale, t);
+			base.SpriteBatch.DrawMetalStringCached(label, rowCentre, textColor, 0f, origin, scale, t);
 
 			// Frame outline LAST, on top of the text + glow, so the edges stay crisp.
 			DrawFrameOutline(rowCentre, frameW, frameH, selected, pulse01);
@@ -203,23 +216,51 @@ internal class MenuSubWithSkull : MenuSub1
 
 	// Pass 1 (before text): fill the FULL octagon, INCLUDING the chamfered corners, so the
 	// bright background can't show through the cut corners (the old 3-rect fill was the
-	// octagon MINUS its corners). Drawn as contiguous 1px-tall horizontal strips whose
-	// width follows the octagon profile (full in the middle, shrinking 45° over the c-tall
-	// chamfer bands at top/bottom). Integer, contiguous rows => strips never overlap, so the
-	// translucent fill doesn't double-darken into seams.
+	// octagon MINUS its corners). Cached as a white alpha mask (see EnsureFillMask + the field
+	// comment) and drawn as ONE tinted quad per row: white*fill = the fill colour under straight
+	// alpha — the same fill the old per-strip loop produced, to within the sub-pixel centering + linear
+	// sampling of one scaled quad (hidden under the outline). Both selection states reuse the mask.
 	private void DrawFrameFill(Vector2 centre, float w, float h, bool selected)
 	{
-		float hh = h / 2f, c = 12f;
+		int mw = Math.Max(1, (int)Math.Round(w));
+		int mh = Math.Max(1, (int)Math.Round(h));
+		EnsureFillMask(mw, mh);
 		Color fill = selected ? new Color(46, 18, 80, 150) : MenuTheme.FrameFill;
-		int yTop = (int)Math.Round(centre.Y - hh);
-		int yBot = (int)Math.Round(centre.Y + hh);
-		for (int y = yTop; y < yBot; y++)
+		base.SpriteBatch.Draw(fillMask, centre, 0f, 1f, center: true, fill);
+	}
+
+	// Build (once, or when the frame size changes) a white octagon alpha mask matching the old fill's
+	// chamfer profile: opaque white inside, transparent outside, 1 design-px per texel and the SAME rowW
+	// math as the retired strip loop, so the filled shape is identical. Centre-independent (chamfer keyed
+	// off the mask's own centre), so one mask serves every row regardless of its screen Y.
+	private void EnsureFillMask(int w, int h)
+	{
+		if (fillMask != null && !((GraphicsResource)fillMask).IsDisposed && fillMaskW == w && fillMaskH == h)
+			return;
+		if (fillMask != null && !((GraphicsResource)fillMask).IsDisposed)
+			((GraphicsResource)fillMask).Dispose();
+
+		const float c = 12f;
+		float hh = h / 2f;
+		Color[] data = new Color[w * h];                                  // default(Color) = transparent
+		for (int y = 0; y < h; y++)
 		{
-			float ad = Math.Abs((y + 0.5f) - centre.Y);                   // distance from row centre
-			float rowW = (ad > hh - c) ? w - 2f * (ad - (hh - c)) : w;     // chamfer the two ends
-			if (rowW >= 1f)
-				FillRect(centre.X, y + 0.5f, rowW, 1f, fill);
+			float ad = Math.Abs((y + 0.5f) - hh);                        // distance from mask centre
+			float rowW = (ad > hh - c) ? w - 2f * (ad - (hh - c)) : w;    // chamfer the two ends
+			if (rowW < 1f)                                                // old strip loop's exact tip test
+				continue;
+			int fillW = (int)Math.Round(rowW);                           // width = FillRect's Round(rowW)
+			if (fillW > w)
+				fillW = w;
+			int x0 = (w - fillW) / 2;                                     // centred, matching FillRect
+			int rowBase = y * w;
+			for (int x = x0; x < x0 + fillW; x++)
+				data[rowBase + x] = Color.White;
 		}
+		fillMask = new Texture2D(base.GraphicsDevice, w, h, false, SurfaceFormat.Color);
+		fillMask.SetData(data);
+		fillMaskW = w;
+		fillMaskH = h;
 	}
 
 	// Pass 2 (after text): the octagon outline = 8 line segments; the selected frame gets
@@ -255,14 +296,6 @@ internal class MenuSubWithSkull : MenuSub1
 			for (int k = 0; k < 8; k++)
 				DrawLine(o[k], o[(k + 1) % 8], 1.5f, MenuTheme.FrameIdle);
 		}
-	}
-
-	// Solid axis-aligned rect centred at (cx,cy), in design space.
-	private void FillRect(float cx, float cy, float w, float h, Color color)
-	{
-		base.SpriteBatch.Draw(blank, new Rectangle(
-			(int)Math.Round(cx - w / 2f), (int)Math.Round(cy - h / 2f),
-			(int)Math.Round(w), (int)Math.Round(h)), color);
 	}
 
 	// Exact mitre extension for THIS octagon's corners. Every vertex of the chamfered

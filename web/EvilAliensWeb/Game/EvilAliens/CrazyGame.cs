@@ -106,7 +106,7 @@ internal class CrazyGame : GameScene
 	{
 		setPresence((GamerPresenceMode)14);
 		Background.SetAlienBaseDark();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty();
 	}

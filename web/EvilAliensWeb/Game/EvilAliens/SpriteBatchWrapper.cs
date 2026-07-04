@@ -67,7 +67,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// rasterised into its own persistent RT exactly ONCE and reused every frame — unlike the score's
 	// int-keyed textSpriteCache (whose text changes, so it keeps a fixed per-slot grow-only RT). The
 	// (string, uint) tuple key value-compares the label, so equal labels across frames/menus share one
-	// raster with no per-frame string allocation and no cache-key threading through menu renderers.
+	// raster with no per-frame string allocation and no cache-key threading through menu renderers. Grows
+	// for the session (disposed only in UnloadContent) — bounded ONLY because menu labels + tints are a
+	// finite constant set; a caller passing a time-varying tint would spawn a fresh RT every frame, so keep
+	// this path to static-text/static-tint call sites (dynamic text belongs on DrawMetalString / the score's
+	// int-keyed DrawShadowStringCached).
 	private readonly System.Collections.Generic.Dictionary<(string, uint), CachedTextSprite> metalSpriteCache = new System.Collections.Generic.Dictionary<(string, uint), CachedTextSprite>();
 
 	// Transparent border (design px) baked around the text in the metal RT so the glint
@@ -1020,6 +1024,14 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			}
 		}
 		textSpriteCache.Clear();
+		foreach (CachedTextSprite sprite in metalSpriteCache.Values)
+		{
+			if (sprite.Rt != null && !((GraphicsResource)sprite.Rt).IsDisposed)
+			{
+				((GraphicsResource)sprite.Rt).Dispose();
+			}
+		}
+		metalSpriteCache.Clear();
 		spriteBatch.Dispose();
 		base.UnloadContent();
 	}

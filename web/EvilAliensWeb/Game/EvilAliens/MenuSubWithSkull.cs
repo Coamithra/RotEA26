@@ -218,7 +218,8 @@ internal class MenuSubWithSkull : MenuSub1
 	// bright background can't show through the cut corners (the old 3-rect fill was the
 	// octagon MINUS its corners). Cached as a white alpha mask (see EnsureFillMask + the field
 	// comment) and drawn as ONE tinted quad per row: white*fill = the fill colour under straight
-	// alpha, exactly what the old per-strip loop produced, so both selection states reuse the mask.
+	// alpha — the same fill the old per-strip loop produced, to within the sub-pixel centering + linear
+	// sampling of one scaled quad (hidden under the outline). Both selection states reuse the mask.
 	private void DrawFrameFill(Vector2 centre, float w, float h, bool selected)
 	{
 		int mw = Math.Max(1, (int)Math.Round(w));
@@ -246,9 +247,9 @@ internal class MenuSubWithSkull : MenuSub1
 		{
 			float ad = Math.Abs((y + 0.5f) - hh);                        // distance from mask centre
 			float rowW = (ad > hh - c) ? w - 2f * (ad - (hh - c)) : w;    // chamfer the two ends
-			int fillW = (int)Math.Round(rowW);
-			if (fillW < 1)
+			if (rowW < 1f)                                                // old strip loop's exact tip test
 				continue;
+			int fillW = (int)Math.Round(rowW);                           // width = FillRect's Round(rowW)
 			if (fillW > w)
 				fillW = w;
 			int x0 = (w - fillW) / 2;                                     // centred, matching FillRect

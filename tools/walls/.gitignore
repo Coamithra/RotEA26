@@ -1,5 +1,8 @@
 # raw upscaled art (drop here; the shipped artifact is wwwroot/Content/gfx/base/756-v1.png)
 source/*.png
-# eyeball preview written on every run
+# eyeball previews written on every run
 preview_*.png
+# infill working files (offset image + seam mask + any scratch model output)
+seam/
+seam_*.png
 __pycache__/

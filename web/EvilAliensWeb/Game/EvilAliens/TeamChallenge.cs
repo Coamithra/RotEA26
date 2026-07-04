@@ -33,9 +33,13 @@ internal class TeamChallenge : GameScene
 	{
 		setPresence((GamerPresenceMode)3);
 		Background.SetSpace();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		// Difficulty is now the menu-selected one (routed through DifficultyMenu as a
+		// LevelType.Challenge, like the other challenges), instead of a hard-coded Medium — so
+		// lock at whatever the player picked and let the music variant follow it (lyric cut
+		// earned on Hard+, clean instrumental below), same as AsteroidChase/ClassicAliens.
+		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
-		Settings.GetInstance().LockDifficulty(Settings.DifficultyLevel.Medium);
+		Settings.GetInstance().LockDifficulty();
 		oracle.ResetPlayers();
 		oracle.AddPlayer(ControlDevice.Keyboard);
 		oracle.AddPlayer(ControlDevice.PadOne);

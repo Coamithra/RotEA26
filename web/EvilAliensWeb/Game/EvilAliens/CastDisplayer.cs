@@ -104,6 +104,40 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private Texture2D AButton;
 
+	// Card 208da2fe: the "Brain Spawn" cast entry shows the animated cyborg-brain sheet
+	// (brainanimated) with the additive blue glow (brainanimatedglow) behind it — the same
+	// art the in-game Braineroid uses — instead of the old static brainlargetransglow. The
+	// cast draws frames by hand (no interpolation shader), so it plays the 20-frame sheet at
+	// a higher fps than the in-game 0.4 (which relies on interpolation to fill the gaps).
+	private Texture2D brainGlow;
+
+	// Baked defaults for the cast brain's on-screen size + animation speed. Overridable by eye
+	// via ?castbrain (DebugFlags.CastBrainScale/CastBrainFps); null override => these ship.
+	// Design width 100 (see AlienDrawableGameComponent) => on-screen brain width ~= 100 * scale.
+	private const float DefaultBrainScale = 1.7f;
+
+	private const float DefaultBrainFps = 10f;
+
+	// Additive blue-glow shimmer, mirrored from Braineroid.DrawGlow so the cast look matches.
+	private const float BrainGlowOmega = 2.6f;
+
+	private const float BrainGlowScaleBase = 1.05f;
+
+	private const float BrainGlowScaleShimmer = 0.04f;
+
+	private const float BrainGlowAlphaBase = 0.5f;
+
+	private const float BrainGlowAlphaShimmer = 0.12f;
+
+	// Debug (?castbrain): boot straight onto the braineroid entry and ignore the advance/asplode
+	// input, so the cast brain can be viewed + tuned in place via HarnessScene. Set before the
+	// component is added (so Initialize sees it); false in normal play.
+	public bool BrainShowcase;
+
+	private static float BrainScale => EvilAliensWeb.Compat.DebugFlags.CastBrainScale ?? DefaultBrainScale;
+
+	private static float BrainFps => EvilAliensWeb.Compat.DebugFlags.CastBrainFps ?? DefaultBrainFps;
+
 	private CastState state;
 
 	private CastState nextstate;
@@ -167,6 +201,20 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		stateTimer.Reset();
 		stateTimer.Start();
 		state = CastState.intro;
+		// Debug (?castbrain): park straight on the Brain Spawn entry so it can be viewed/tuned.
+		// The braineroid state never advances on stateTimer (only intro/waiting do), so stop it —
+		// nothing should transition this showcase off the brain. alienname/alientext are set here
+		// too (not only in the braineroid Update case): the displayer is added mid-frame, so its
+		// FIRST Draw can run before its first Update, and Draw does font.MeasureString(alientext).
+		// The real credits path is immune because it starts in `intro`, whose Draw early-returns;
+		// forcing braineroid skips that guard, so a null alientext would NRE on frame one.
+		if (BrainShowcase)
+		{
+			state = CastState.braineroid;
+			alienname = "Brain Spawn";
+			alientext = "Their eons-long goal is to destroy all other intelligent life,\nsince the thoughts of other beings screech at them like the\nforced laughs of a billion art-house movie patrons.";
+			stateTimer.Stop();
+		}
 		spiderdeadtimer.Stop();
 	}
 
@@ -185,6 +233,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		spiderdebris3 = content.Load<Texture2D>("GFX/Sprites/spiderdebris3");
 		spiderFly = new AnimatedSprite("GFX/Spider/spiderfly");
 		alienBoss = new AnimatedSprite("GFX/Alienboss/alienboss");
+		brainGlow = content.Load<Texture2D>("GFX/Sprites/brainanimatedglow");
 		AButton = content.Load<Texture2D>("GFX/Preview/small_face_a");
 	}
 
@@ -260,11 +309,14 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		{
 			alienname = "Brain Spawn";
 			alientext = "Their eons-long goal is to destroy all other intelligent life,\nsince the thoughts of other beings screech at them like the\nforced laughs of a billion art-house movie patrons.";
-			EnsureAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
+			// Animated cyborg-brain sheet (5 cols x 4 rows, 20 frames) — same art as the
+			// in-game Braineroid. The cast steps frames raw (no interpolation shader), so it
+			// runs at BrainFps rather than the in-game 0.4 fps. The glow is drawn in Draw().
+			EnsureAnimation(new AnimationData("GFX/Sprites/brainanimated", 4, 5, 0, BrainFps, 0, 20));
 			_time += (float)gameTime.ElapsedGameTime.TotalSeconds;
 			float num2 = 1f + (1f + (float)Math.Sin(_time * 3.32f)) * 0.07f;
-			scale = 0.4f * num2;
-			if (flag2)
+			scale = BrainScale * num2;
+			if (flag2 && !BrainShowcase)
 			{
 				AsplodeBraineroid();
 				Next();
@@ -663,6 +715,26 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		this.state = state;
 	}
 
+	// Soft additive blue glow behind the animated Brain Spawn, tracking its (pulsated) size.
+	// Mirrors Braineroid.DrawGlow: the glow texture is pre-tinted blue, drawn white-with-alpha,
+	// scaled by the same DrawScale (scale / textureScale) the brain frame uses so the two stay
+	// aligned at any sheet resolution. Restores the normal blend mode for the brain draw.
+	private void DrawBrainGlow(GameTime gameTime, Vector2 center)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		if (brainGlow == null)
+		{
+			return;
+		}
+		float t = (float)gameTime.TotalGameTime.TotalSeconds;
+		float s = (float)Math.Sin(t * BrainGlowOmega);
+		float glowScale = scale / textureScale * BrainGlowScaleBase * (1f + BrainGlowScaleShimmer * s);
+		float alpha = BrainGlowAlphaBase + BrainGlowAlphaShimmer * s;
+		spriteBatch.BlendMode = (SpriteBlendMode)2;
+		spriteBatch.Draw(brainGlow, center, rotation, glowScale, center: true, new Color(new Vector4(1f, 1f, 1f, alpha)));
+		spriteBatch.BlendMode = (SpriteBlendMode)1;
+	}
+
 	public override void Draw(GameTime gameTime)
 	{
 		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
@@ -763,6 +835,12 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			{
 				pulsetimer.Update(gameTime);
 				scale = 1f + 0.07f * pulsateCurve.Evaluate(1f - pulsetimer.Normalized);
+			}
+			// Additive blue glow behind the animated Brain Spawn (mirrors Braineroid.DrawGlow);
+			// drawn before the brain frame so it sits behind. Resets BlendMode to normal after.
+			if (state == CastState.braineroid)
+			{
+				DrawBrainGlow(gameTime, val3 + new Vector2(0f, num));
 			}
 			if ((columns > 1) | (rows > 1))
 			{

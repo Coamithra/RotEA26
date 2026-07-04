@@ -52,7 +52,7 @@ internal class AsteroidChase : GameScene
 	{
 		setPresence((GamerPresenceMode)14);
 		Background.SetSpace();
-		base.SoundManager.PlayMusic(Songs.Classic);
+		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty(Settings.GetInstance().CurrentDifficulty);
 	}

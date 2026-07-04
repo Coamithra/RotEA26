@@ -1,0 +1,5 @@
+# raw upscaled art (drop here; the shipped artifact is wwwroot/Content/gfx/base/756-v1.png)
+source/*.png
+# eyeball preview written on every run
+preview_*.png
+__pycache__/

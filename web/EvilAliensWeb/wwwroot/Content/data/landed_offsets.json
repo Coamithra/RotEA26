@@ -1,7 +1,63 @@
 {
-  "_comment": "Per-landed-sprite placement tuning for the Mars ground UFOs. Authored with wwwroot/landed-editor.html; loaded by Compat/LandedOffsets.cs. All values are DESIGN-space pixels (800x600), +x right, +y down. 'landed' shifts the parked still's draw position; 'takeoff' shifts the ship's position once when it lifts off (so the flying sprite continues seamlessly, offsetting the landing feet); 'shadow' nudges the ground shadow (x, and y along the floor line); 'shadowSize' multiplies the shadow width. Identity (all 0, shadowSize 1) reproduces the original untuned behaviour.",
-  "GFX/Sprites/ufometpootjes":     { "landed": [0, 0], "takeoff": [0, 0], "shadow": [0, 0], "shadowSize": 1.0 },
-  "GFX/Sprites/Smallship_landed":  { "landed": [0, 0], "takeoff": [0, 0], "shadow": [0, 0], "shadowSize": 1.0 },
-  "GFX/Sprites/Mediumship_landed": { "landed": [0, 0], "takeoff": [0, 0], "shadow": [0, 0], "shadowSize": 1.0 },
-  "GFX/Sprites/Mothership_landed": { "landed": [0, 0], "takeoff": [0, 0], "shadow": [0, 0], "shadowSize": 1.0 }
+  "_comment": "Per-landed-sprite placement tuning for the Mars ground UFOs. Authored with wwwroot/landed-editor.html; loaded by Compat/LandedOffsets.cs. Design-space px (800x600), +x right, +y down. 'landed' shifts the parked still; 'takeoff' shifts the ship once on lift-off (feet compensation); 'shadow' nudges the ground shadow (x, y along the floor line); 'shadowSize' multiplies the shadow width. Identity (0s, shadowSize 1) = original untuned behaviour.",
+  "GFX/Sprites/ufometpootjes": {
+    "landed": [
+      0,
+      0
+    ],
+    "takeoff": [
+      0,
+      -5
+    ],
+    "shadow": [
+      0,
+      6
+    ],
+    "shadowSize": 1
+  },
+  "GFX/Sprites/Smallship_landed": {
+    "landed": [
+      0,
+      0
+    ],
+    "takeoff": [
+      0,
+      0
+    ],
+    "shadow": [
+      0,
+      8
+    ],
+    "shadowSize": 1
+  },
+  "GFX/Sprites/Mediumship_landed": {
+    "landed": [
+      0,
+      -23
+    ],
+    "takeoff": [
+      0,
+      -13
+    ],
+    "shadow": [
+      0,
+      8
+    ],
+    "shadowSize": 1
+  },
+  "GFX/Sprites/Mothership_landed": {
+    "landed": [
+      0,
+      -6
+    ],
+    "takeoff": [
+      0,
+      0
+    ],
+    "shadow": [
+      -16,
+      4
+    ],
+    "shadowSize": 0.98
+  }
 }

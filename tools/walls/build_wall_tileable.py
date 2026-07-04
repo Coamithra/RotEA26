@@ -121,6 +121,11 @@ def make_tileable(rgb, band_frac=0.14, levels=None):
     # or the multiband reconstruction there isn't pure B and a faint seam survives; hence `flat`.
     ramp = max(8.0, band_frac * min(W, H))
     flat = max(2.0 ** (levels + 1), 0.5 * ramp)
+    # keep a real central plateau (mask reaches 0 -> A's detail survives): flat+ramp must clear
+    # the half-extent, else an over-wide band silently leaves the output as all rolled-B.
+    if flat + ramp > 0.45 * min(W, H):
+        scale_down = (0.45 * min(W, H)) / (flat + ramp)
+        flat, ramp = flat * scale_down, ramp * scale_down
     x = np.arange(W, dtype=np.float32)
     y = np.arange(H, dtype=np.float32)
     dx = np.minimum(x, W - 1 - x)  # distance to nearest vertical edge
@@ -156,6 +161,7 @@ def main():
         )
 
     im = Image.open(args.inp).convert("RGBA")
+    orig_w, orig_h = im.size
     if args.size:
         im = im.resize((args.size, args.size), RESAMPLE_LANCZOS)
     im = crop_mult8(im)
@@ -164,13 +170,13 @@ def main():
         sys.exit(f"dims {W}x{H} not a multiple of 8 after crop -- unexpected")
 
     rgba = np.asarray(im).astype(np.float32)
-    rgb, alpha = rgba[..., :3], rgba[..., 3]
+    rgb = rgba[..., :3]
 
     hr0, vr0, ha0, va0 = wrap_seam(rgb)
     out_rgb = make_tileable(rgb, band_frac=args.band_frac)
     hr1, vr1, ha1, va1 = wrap_seam(out_rgb)
 
-    out_a = alpha if args.keep_alpha else np.full((H, W), 255.0, np.float32)
+    out_a = rgba[..., 3] if args.keep_alpha else np.full((H, W), 255.0, np.float32)
     out = np.dstack([out_rgb, out_a]).astype(np.uint8)
     out_im = Image.fromarray(out, "RGBA")
 
@@ -181,7 +187,7 @@ def main():
             prev.paste(out_im, (px, py))
     prev.save(PREVIEW)
 
-    print(f"in  : {args.inp}  ({Image.open(args.inp).size[0]}x{Image.open(args.inp).size[1]})")
+    print(f"in  : {args.inp}  ({orig_w}x{orig_h})")
     print(f"proc: {W}x{H}  (mult-of-8 ok; 8x8 cell = {W // 8}x{H // 8})")
     print("wrap seam vs interior adjacency (1.0 = seamless; abs meandiff 0..255 in parens):")
     print(f"    H  {hr0:5.2f}x ({ha0:4.1f}) -> {hr1:5.2f}x ({ha1:4.1f})"

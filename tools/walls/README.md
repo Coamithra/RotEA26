@@ -55,9 +55,11 @@ paths are case-sensitive there (capital `Content/`, lowercase under it).
 
 ## Notes / follow-ups
 
-- Only `756-v1` is the **collidable** wall. The other `756-v*` (`v3/v4/v5/v6/v8`) are Base-level
-  **background** layers in `Background.cs` — out of scope here, but they're the same 8×8-tiled
-  format, so this tool would upscale them too (pass `--in`/`--out`).
+- Only `756-v1` is the **collidable** wall (the 8×8 grid-sampled one). The other `756-v*`
+  (`v3/v4/v5/v6/v8`) are loaded as single whole tiles into scrolling Base-level **background**
+  layers in `Background.cs` — a different use whose four-edge wrap needs weren't verified, so
+  they're out of scope here. This tool *could* be pointed at one (`--in`/`--out`), but confirm it
+  actually needs seamless wrapping first.
 - If Level-3 preload stutters on a big new PNG, precompile it to DXT: add `756-v1` to
   `tools/textures/textures.config` and run `tools/textures/build_textures.py`
   (`WebContentManager` prefers `.dds` → `.rtex` → `.png`). Dims are a multiple of 8, so the

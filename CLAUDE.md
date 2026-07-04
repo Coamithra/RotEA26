@@ -561,9 +561,12 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   so the wrap seam moves to the centre, keep a pure-`B` seamless frame at all four edges, multiband
   cross-fade the transition. It writes the shipped `756-v1.png` + a 2x2 `preview_756-v1.png` and
   reports the wrap seam as a **ratio to the texture's own interior adjacency** (1.0 = seamless, >>1
-  = broken). Idempotent (an already-tileable input is left ~unchanged), offline (numpy+Pillow,
-  cv2 optional). Only `756-v1` is the collidable wall; the other `756-v*` are Base backgrounds in
-  `Background.cs` (same format, out of scope). If Level-3 preload stutters on a big new PNG, add
+  = broken). It ALWAYS re-derives a seamless border (edge content is relocated from the opposite
+  half, so pixels near the edges change even on an already-tiling input -- but the *result* tiles
+  regardless), offline (numpy+Pillow, cv2 optional). Only `756-v1` is the collidable wall (8x8
+  grid-sampled); the other `756-v*` are single whole-tile Base *background* layers in
+  `Background.cs` (a different use whose tiling needs weren't verified -- out of scope). If Level-3
+  preload stutters on a big new PNG, add
   `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
   `tools/walls/README.md`.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end

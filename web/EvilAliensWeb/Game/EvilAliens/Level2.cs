@@ -144,6 +144,14 @@ internal class Level2 : GameScene
 			PopulateSpiderBossOnly();
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.Spiders)
+		{
+			// DEBUG (?spiders): skip the level and run a continuous pure-spider GROUND wave so the
+			// animation-driven jump can be watched + dialed in REAL play. Pair the ?spiderjumpframe=/
+			// ?spiderjumpx=/?spiderlandframe=/?spidershadow* knobs to tune, then bake the values.
+			PopulateSpidersOnly();
+			return;
+		}
 		WaitEvent waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += resetlives;
 		StationaryWave(8f, 3f, 100f, 0f, 0f, 0f);
@@ -371,6 +379,20 @@ internal class Level2 : GameScene
 		eventList.AddEvent(victoryEvent, halting: true);
 		eventList.AddHalt();
 		victoryEvent.OnFinished += Victory;
+	}
+
+	private void PopulateSpidersOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += resetlives;
+		waitEvent = Wait(0.1f);
+		// Set the mars ground scroll to the level's spider-wave pace (~-0.18 px/ms) so spiders cross
+		// at a watchable speed and the count-back entry-frame preset uses a realistic scroll.
+		waitEvent.OnFinished += slowdown;
+		// A long, frequent, non-halting pure-spider wave -- effectively endless for testing.
+		StationarySpawner stationarySpawner = new StationarySpawner(base.Game, 560f, 600f, 1.5f);
+		stationarySpawner.SetChances(0f, 0f, 0f, 1f);
+		eventList.AddEvent(stationarySpawner, halting: false);
 	}
 
 	private void invuln(GameEvent sender)

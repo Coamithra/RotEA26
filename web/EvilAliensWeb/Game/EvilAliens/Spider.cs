@@ -8,15 +8,17 @@ internal class Spider : KillableAlien
 {
 	// Packed-sheet frame the spider snaps to ONCE on landing (source ~88 at half fps -> packed
 	// 44): the crouched settled stance near the end of the rear-up. It resumes animating from
-	// there on the following frames.
+	// there on the following frames. Overridable live via ?spiderlandframe= for dialing.
 	private const float LandFrame = 44f;
 
 	// Ground baseline Y (design space): the spider rests here and lands back to it.
 	public const float GroundY = 505f;
 
-	// Reference "jump" beat used by the harness viz when ?spiderjumpframe= is not given. This is a
-	// PLACEHOLDER for tuning only (see the ?harness=spiderjump tool + the For-me card) -- live play
-	// still jumps on X position, so nothing ships keyed to this number.
+	// Sheet frame the rear-up "launch" beat fires on (spider_sheet2 is a 7x7 rear-up->fling->settle
+	// cycle; ~frame 40 is the peak reared-up "about to spring" pose). LIVE play now fires the jump
+	// when the animation reaches this beat (count-back preset makes it coincide with a random launch
+	// X). Overridable live via ?spiderjumpframe= (null => this baked default, so a plain boot is
+	// unchanged). The ?harness=spiderjump tool reuses the same default. Bake the dialed value here.
 	private const float DefaultJumpFrame = 40f;
 
 	private float yspeed;
@@ -28,6 +30,16 @@ internal class Spider : KillableAlien
 	private float rotationspeed;
 
 	private float jumpXposition;
+
+	// Animation-driven jump state. animAcc is an UNWRAPPED frame accumulator (base.Update wraps
+	// curframe mod the sheet, which can't be crossing-tested); the count-back presets it below the
+	// launch beat so it reaches jumpBeatFrame exactly as the spider passes jumpXposition. jumpArmed
+	// gates the one-time preset to the first Update (oracle.BackgroundSpeed is valid by then).
+	private float animAcc;
+
+	private float jumpBeatFrame;
+
+	private bool jumpArmed;
 
 	private Texture2D spiderJump;
 
@@ -107,10 +119,18 @@ internal class Spider : KillableAlien
 		hasLanded = false;
 		rotation = 0f;
 		rotationspeed = 0f;
-		jumpXposition = RandomHelper.RandomNextFloat(300f, 900f);
+		// Random launch X per spider (so a cluster jumps at different spots). ?spiderjumpx= pins it
+		// to a fixed X for testing a specific launch point; null => the random default.
+		jumpXposition = EvilAliensWeb.Compat.DebugFlags.SpiderJumpX ?? RandomHelper.RandomNextFloat(300f, 900f);
+		jumpBeatFrame = EvilAliensWeb.Compat.DebugFlags.SpiderJumpFrame ?? DefaultJumpFrame;
+		jumpArmed = false;
+		// Dialed shadow tuning rides the generic Floor shadow via ShadowOffset/ShadowSize (identity
+		// by default -> a plain boot casts the same shadow). Reset on every (incl. recycled) spawn.
+		ShadowOffset = new Vector2(EvilAliensWeb.Compat.DebugFlags.SpiderShadowX, EvilAliensWeb.Compat.DebugFlags.SpiderShadowY);
+		ShadowSize = EvilAliensWeb.Compat.DebugFlags.SpiderShadowScale;
 		// Start each spider at a RANDOM point in the rear-up animation so a cluster crawls out of
-		// lock-step (they used to all animate from frame 0 in unison). Cosmetic: the jump is still
-		// X-triggered, so the desync doesn't change when/where any spider jumps.
+		// lock-step. The count-back preset in Update OVERRIDES this on the first tick to line the
+		// launch beat up with jumpXposition; this is only the pre-preset value.
 		curframe = RandomHelper.RandomNextFloat(0f, (float)(rows * columns));
 		switch (RandomHelper.Random.Next(3))
 		{
@@ -180,6 +200,25 @@ internal class Spider : KillableAlien
 		//IL_01db: Unknown result type (might be due to invalid IL or missing references)
 		//IL_01ea: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
+		if (!jumpArmed)
+		{
+			// One-time "count back": preset the unwrapped launch-beat accumulator (and the visible
+			// frame) from the REAL Mars scroll so the animation reaches jumpBeatFrame exactly as the
+			// spider passes jumpXposition. entryFrame = J - fps * (time from spawn X to jumpX).
+			// Done here (first Update) because oracle.BackgroundSpeed is valid by now.
+			float total = MathHelper.Max(1f, rows * columns);
+			float scrollPxPerMs = Math.Abs(oracle.BackgroundSpeed.X);
+			float dist = base.Position.X - jumpXposition;
+			float entryFrame = jumpBeatFrame;
+			if (scrollPxPerMs > 0.0001f && dist > 0f)
+			{
+				float tJumpSec = dist / scrollPxPerMs / 1000f;
+				entryFrame = jumpBeatFrame - fps * tJumpSec;
+			}
+			animAcc = entryFrame;
+			curframe = WrapFrame(entryFrame, total);
+			jumpArmed = true;
+		}
 		if (base.Position.X < -500f)
 		{
 			Die();
@@ -198,12 +237,19 @@ internal class Spider : KillableAlien
 				rotationspeed -= 6E-05f * (float)gameTime.ElapsedGameTime.TotalMilliseconds / 16.666666f;
 			}
 		}
-		if (!hasJumped & !hasLanded & (base.Position.X < jumpXposition))
+		if (!hasJumped & !hasLanded)
 		{
-			hasJumped = true;
-			rotation = -0.1f;
-			rotationspeed = 0.0018f;
-			yspeed = RandomHelper.RandomNextFloat(-8f, -19f) / 16.666666f;
+			// ANIMATION-DRIVEN launch: advance the unwrapped launch-beat accumulator at the sprite's
+			// fps and fire when it reaches the tuned rear-up beat. The count-back preset makes that
+			// coincide with the spider passing jumpXposition, so it still launches at a (random) X.
+			animAcc += fps * (float)gameTime.ElapsedGameTime.TotalSeconds;
+			if (animAcc >= jumpBeatFrame)
+			{
+				hasJumped = true;
+				rotation = -0.1f;
+				rotationspeed = 0.0018f;
+				yspeed = RandomHelper.RandomNextFloat(-8f, -19f) / 16.666666f;
+			}
 		}
 		if (hasJumped & (base.Position.Y > GroundY))
 		{
@@ -215,7 +261,8 @@ internal class Spider : KillableAlien
 			base.Position = new Vector2(base.Position.X, GroundY);
 			// Snap to the settled "landed" frame ONCE on touchdown, then let it keep animating
 			// from there (base.Update advances curframe normally on the following frames).
-			curframe = LandFrame;
+			// ?spiderlandframe= overrides the beat for dialing; null => the baked LandFrame.
+			curframe = EvilAliensWeb.Compat.DebugFlags.SpiderLandFrame ?? LandFrame;
 		}
 	}
 
@@ -278,8 +325,10 @@ internal class Spider : KillableAlien
 	// values (shadow position, jump-start X, land-anim resume frame) can be tuned by eye. It sets
 	// Position/curframe/rotation/hasJumped so the object's OWN Draw shows the right sprite (ground
 	// sheet vs the airborne spiderjump sheet); the harness overlays the shadow + markers + readout.
-	// LIVE gameplay never calls this -- it stays X-triggered until the tuned values are wired in
-	// (see the For-me card). All ?spider* knobs are read here only, so a shipped build is unchanged.
+	// LIVE gameplay is now animation-driven too (Update fires on jumpBeatFrame via the same count-back
+	// preset), and the ?spider* knobs (jumpframe/landframe/jumpx/shadow*) apply to LIVE play as well as
+	// this viz -- but all default to identity, so a shipped build (no query) is byte-identical. This
+	// viz still LOOPS the whole cycle deterministically for eyeball-dialing (its arc is illustrative).
 	public struct JumpVizState
 	{
 		public float ScrollPxPerSec;

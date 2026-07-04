@@ -292,6 +292,13 @@ namespace EvilAliensWeb.Compat
 		// ?spiderhelperidle=<small>). A pure test shortcut, like ?win. See Level2.PopulateEventList.
 		public static bool SpiderBoss { get; private set; }
 
+		// Fast-boot Level2 straight to a continuous pure-spider GROUND wave (skips the whole level)
+		// so the animation-driven jump can be watched + dialed in REAL play -- the ?harness=spiderjump
+		// sim's arc is illustrative, this is the live Spider.Update path. Pair with ?level=Level2
+		// (+ ?invuln, + the ?spiderjumpframe=/?spiderjumpx=/?spiderlandframe=/?spidershadow* knobs).
+		// A pure test shortcut, like ?spiderboss. See Level2.PopulateEventList / PopulateSpidersOnly.
+		public static bool Spiders { get; private set; }
+
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
 		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
@@ -606,6 +613,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "spiderboss":
 					SpiderBoss = IsOn(val);
+					break;
+				case "spiders":
+					Spiders = IsOn(val);
 					break;
 				case "castbrain":
 					CastBrain = IsOn(val);

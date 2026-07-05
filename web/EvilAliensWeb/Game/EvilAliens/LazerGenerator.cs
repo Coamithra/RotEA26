@@ -24,9 +24,9 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	// --- Chargeup ramp + "energy well" (Trello "improve laser animation") -----------------
 	// The chargeup no longer draws at a flat scale. Its per-particle scale RAMPS 1 -> peak over the
-	// windup (ease-out, near-linear), and a pulsing "energy well" glow forms at the convergence
-	// centre -- a circle like the laser TIP that grows to ~1.3x the tip while fluctuating erratically
-	// in size, reading as energy gathering before it bursts out as the beam. `progress` (0..1) drives
+	// windup (ease-out, near-linear), and a pulsing "energy well" forms at the convergence centre --
+	// a white-hot orb (layered like the laser TIP) that grows to ~1.6x the tip while fluctuating
+	// erratically in size, reading as energy gathering before it bursts out as the beam. `progress` drives
 	// both; it's `elapsed / windupSeconds` so the animation stretches to WHATEVER windup the caller
 	// passes (varies per UFO/laser + difficulty -- see SetWindup).
 	private float elapsed;
@@ -36,9 +36,14 @@ internal class LazerGenerator : AlienDrawableGameComponent
 	private const float DefaultPeakChargeScale = 4f; // ramp target (was a flat 5x); ?lazerchargescale overrides
 	private const float ChargeEase = 1.4f;           // ease-out exponent (near-linear) for the 1->peak ramp
 	private const float LaserTipDiameter = 48f;      // Quad beam width(16) x TipFlareScale(3) = the real tip bloom
-	private const float WellTipFactor = 1.3f;        // energy-well final size vs the laser tip
+	private const float WellTipFactor = 1.6f;        // energy-well final size vs the laser tip (a touch bigger = stored energy)
 	private const float WellSeedFrac = 0.15f;        // well grows from 15% -> 100% of its final size
-	private static readonly Color WellColor = new Color(150, 215, 255); // == Quad.FlareColor (the tip bloom hue)
+	// The well is drawn as a STACK of additive glows so its centre saturates white-hot with a blue
+	// halo -- exactly how Quad's tip reads (blue glow cap + near-white core cap + cyan-white flare
+	// stacked). A single flat-blue draw read too dim vs the tip. Colours == Quad's beam layers.
+	private static readonly Color WellHaloColor = new Color(35, 110, 235);  // == Quad.GlowColor (blue outer halo)
+	private static readonly Color WellMidColor = new Color(150, 215, 255);  // == Quad.FlareColor (cyan-white body)
+	private static readonly Color WellCoreColor = new Color(210, 235, 255); // == Quad.CoreColor (white-hot centre)
 	private static float PeakChargeScale => EvilAliensWeb.Compat.DebugFlags.LazerChargeScale ?? DefaultPeakChargeScale;
 	// Render-only RNG for the well's fluctuation phase (kept off the gameplay RandomHelper so it can't
 	// desync a future lockstep co-op session, like Quad's fxr).
@@ -160,11 +165,12 @@ internal class LazerGenerator : AlienDrawableGameComponent
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 	}
 
-	// The "energy well": a tip-like glow at the convergence centre that grows from a small seed to
-	// ~1.3x the laser tip over the windup, fluctuating erratically (~90-110%) as energy gathers.
-	// Uses the SAME glow texture (lazerglow -- clean radial falloff, what Quad's tip/flares now use)
-	// + hue as the beam's tip bloom, additive. Fades in over the first quarter so the showcase's
-	// loop restart isn't a hard pop.
+	// The "energy well": a glowing orb at the convergence centre that grows from a small seed to
+	// ~1.6x the laser tip over the windup, fluctuating erratically (~90-110%) as energy gathers, then
+	// bursts out as the beam. Drawn as a STACK of additive glows (same lazerglow texture Quad's tip
+	// uses) so the centre saturates WHITE-HOT with a blue halo, matching the beam tip -- a single
+	// mid-blue draw read too dim/flat. The hot core also brightens as the charge nears eruption.
+	// Fades in over the first quarter so the showcase's loop restart isn't a hard pop.
 	private void DrawWell(float progress)
 	{
 		if (wellTex == null)
@@ -178,11 +184,23 @@ internal class LazerGenerator : AlienDrawableGameComponent
 		float fluct = 1f + 0.1f * (0.5f * (float)System.Math.Sin(t * 47f + fxPhase)
 			+ 0.3f * (float)System.Math.Sin(t * 83f + fxPhase * 1.7f)
 			+ 0.2f * (float)System.Math.Sin(t * 131f + fxPhase * 2.3f));
-		float diameter = LaserTipDiameter * WellTipFactor * wellProg * fluct;
-		float alpha = progress * 4f;
-		if (alpha > 1f) alpha = 1f;
+		float d = LaserTipDiameter * WellTipFactor * wellProg * fluct;
+		float a = progress * 4f;
+		if (a > 1f) a = 1f;
+		// Blue halo (wide) -> cyan-white body -> white-hot core: additively these saturate the centre
+		// to white while leaving a blue rim, like the tip. The innermost core hots up with progress so
+		// the well glares brightest just before it erupts.
+		DrawGlow(d * 1.30f, WellHaloColor * a);
+		DrawGlow(d * 0.90f, WellMidColor * a);
+		DrawGlow(d * 0.55f, WellCoreColor * a);
+		DrawGlow(d * 0.30f, WellCoreColor * (a * (0.4f + 0.6f * progress)));
+	}
+
+	// One additive radial glow of the well texture, centred at the convergence point.
+	private void DrawGlow(float diameter, Color color)
+	{
 		float s = diameter / (float)wellTex.Width;
-		spriteBatch.Draw(wellTex, base.Position, 0f, s, center: true, WellColor * alpha);
+		spriteBatch.Draw(wellTex, base.Position, 0f, s, center: true, color);
 	}
 
 	public override void Update(GameTime gameTime)

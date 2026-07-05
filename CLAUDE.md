@@ -463,9 +463,11 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (1) **chargeup is a WINDUP ANIMATION, not a flat swarm** — the per-particle scale RAMPS `1 -> peak`
   (`DefaultPeakChargeScale` **4**, ease-out near-linear via `ChargeEase`) over the windup, applied at
   DRAW time in `LazerGenerator.Draw` (so the whole swarm ramps crisply; `LazerGeneratorData` only bakes
-  the base `0.015` scale). PLUS an **"energy well"**: a tip-like glow (`lazerglow` -- the same clean
-  radial glow Quad's tip/flares use post-merge, `WellColor` == the beam's `FlareColor`) at the
-  convergence centre that grows `15% -> 100%` of `1.3x the laser tip`
+  the base `0.015` scale). PLUS an **"energy well"**: a white-hot orb at the convergence centre,
+  drawn as a STACK of additive `lazerglow` glows (blue halo -> cyan-white body -> white-hot core,
+  colours == Quad's beam layers) so its centre saturates white like the laser tip (a single flat-blue
+  draw read too dim); the core brightens with progress (glares before eruption). It grows `15% -> 100%`
+  of `1.6x the laser tip`
   (`LaserTipDiameter` 48 = beam width 16 × `TipFlareScale` 3 × `WellTipFactor` 1.3) while fluctuating
   ~90-110% erratically (3 incommensurate fast sines) — energy gathering before it bursts. Both driven by
   `progress = elapsed/windupSeconds`. **The windup is FLEXIBLE**: callers pass the REAL (per-laser,

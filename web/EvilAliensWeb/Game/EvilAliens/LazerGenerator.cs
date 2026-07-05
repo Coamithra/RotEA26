@@ -177,23 +177,56 @@ internal class LazerGenerator : AlienDrawableGameComponent
 		{
 			wellTex = ServiceHelper.Get<IContentManagerService>().ContentManager.Load<Texture2D>("GFX/Sprites/lazerglow");
 		}
-		float wellProg = WellSeedFrac + (1f - WellSeedFrac) * progress;
-		float t = elapsed;
-		// Three incommensurate fast sines -> a rapid, erratic-looking +/-10% wobble (temporally smooth,
-		// so it's frame-rate independent -- no single-frame strobing).
-		float fluct = 1f + 0.1f * (0.5f * (float)System.Math.Sin(t * 47f + fxPhase)
-			+ 0.3f * (float)System.Math.Sin(t * 83f + fxPhase * 1.7f)
-			+ 0.2f * (float)System.Math.Sin(t * 131f + fxPhase * 2.3f));
-		float d = LaserTipDiameter * WellTipFactor * wellProg * fluct;
-		float a = progress * 4f;
+		float g = progress;
+		float baseD = LaserTipDiameter * WellTipFactor;
+		float a = g * 4f;
 		if (a > 1f) a = 1f;
+		// NON-UNIFORM growth: each layer of the composite grows on its own STAGGERED schedule (the
+		// diffuse outer glow swells first; the hot core condenses in later), so it reads as energy
+		// gathering + focusing rather than one blob scaling. Grow() = delayed smoothstep 0..1.
+		float pOuter = Grow(g, 0.00f);
+		float pMid = Grow(g, 0.10f);
+		float pCore = Grow(g, 0.24f);
+		float pInner = Grow(g, 0.36f);
+		// Per-layer erraticness gradient: the inner core wobbles SMOOTHEST (small, slow), the body a
+		// bit more, the outer halo MOST (larger, faster) -- decorrelated phases so they don't pulse in
+		// lockstep. Frequencies are low so it shimmers/breathes rather than jitters.
+		float wOuter = Wobble(0.10f, 2.3f, fxPhase);
+		float wMid = Wobble(0.065f, 1.7f, fxPhase * 1.7f);
+		float wCore = Wobble(0.035f, 1.2f, fxPhase * 2.3f);
+		float wInner = Wobble(0.022f, 1.0f, fxPhase * 3.1f);
 		// Blue halo (wide) -> cyan-white body -> white-hot core: additively these saturate the centre
-		// to white while leaving a blue rim, like the tip. The innermost core hots up with progress so
-		// the well glares brightest just before it erupts.
-		DrawGlow(d * 1.30f, WellHaloColor * a);
-		DrawGlow(d * 0.90f, WellMidColor * a);
-		DrawGlow(d * 0.55f, WellCoreColor * a);
-		DrawGlow(d * 0.30f, WellCoreColor * (a * (0.4f + 0.6f * progress)));
+		// to white while leaving a blue rim, like the tip. The core layers fade in with their own
+		// (delayed) growth, and the innermost hots up with progress so the well glares before eruption.
+		DrawGlow(baseD * 1.30f * Size(pOuter) * wOuter, WellHaloColor * a);
+		DrawGlow(baseD * 0.90f * Size(pMid) * wMid, WellMidColor * a);
+		DrawGlow(baseD * 0.55f * Size(pCore) * wCore, WellCoreColor * (a * pCore));
+		DrawGlow(baseD * 0.30f * Size(pInner) * wInner, WellCoreColor * (a * pInner * (0.4f + 0.6f * g)));
+	}
+
+	// Delayed smoothstep: 0 until `delay`, then eases 0..1 over the rest of the windup. Staggers the
+	// well layers so they don't all grow in lockstep.
+	private static float Grow(float g, float delay)
+	{
+		if (g <= delay) return 0f;
+		float u = (g - delay) / (1f - delay);
+		if (u > 1f) u = 1f;
+		return u * u * (3f - 2f * u);
+	}
+
+	// A layer's growth 0..1 -> its diameter fraction: never below the small seed, up to full size.
+	private static float Size(float p)
+	{
+		return WellSeedFrac + (1f - WellSeedFrac) * p;
+	}
+
+	// A gentle +/-amp size shimmer (two low, incommensurate sines -> a smooth wander, not a jitter).
+	// Bigger amp + fscale => more erratic; each layer passes a different phase so they decorrelate.
+	private float Wobble(float amp, float fscale, float phase)
+	{
+		float t = elapsed;
+		return 1f + amp * (0.6f * (float)System.Math.Sin(t * 7f * fscale + phase)
+			+ 0.4f * (float)System.Math.Sin(t * 11f * fscale + phase * 1.9f));
 	}
 
 	// One additive radial glow of the well texture, centred at the convergence point.

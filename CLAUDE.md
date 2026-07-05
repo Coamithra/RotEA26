@@ -460,21 +460,43 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   white-hot core, each ONE continuous sprite, + tip/muzzle blooms + electric tendrils); the pre-fire
   chargeup swarm is `LazerGenerator` (10 converging `GFX/Menu/star` sparkles, additive). Three fixes
   landed with URL knobs so the feel can be A/B'd by eye (all null => baked defaults ship unchanged):
-  (1) **chargeup was too subtle** — `star.png` is a soft full-frame 4-point sparkle whose rays vanish
-  sub-pixel at the original `0.015` particle scale; `LazerGeneratorData` now multiplies scale by
-  `DefaultChargeScale` (**5** — a clear converging swarm; ~10x additive-whites the frame out,
-  `?lazerchargescale=`). (2) **beam ends looked "chopped" / a core-vs-flare seam** — the `lazermiddle`
-  strip has no soft falloff ALONG its length, so `Quad.Draw` now domes each end with a width-sized
-  round GLOW-then-CORE cap (`DefaultCapScale` **1.0**, `?lazercapscale=`). (3) **tendrils sat on one
-  spot forever** — `DrawArcs` is now a SHORTLIVED lifecycle: each tendril pops up at a hashed spot,
-  crackles for `~ArcLife` s while a `sin(pi*frac)` envelope fades it in/out, then respawns elsewhere
-  next cycle (`DefaultArcCount` **5** / `DefaultArcLife` **0.16s**; `?lazerarcs=` / `?lazerarclife=`;
-  the per-appearance anchor/shape re-roll off `floor(time/life)` via a `sin*43758` `Hash`, while the
-  bolt still writhes smoothly within one life). **Tune with `?lazershot`** — `Compat/LazerShowcaseScene.cs`
-  shows the chargeup swarm (left) + a full-grown beam (right) ANIMATING (unlike the frozen
-  `?harness`/`?bulletshot`); it drives a raw `Quad` for a stable beam + a real (Update-ticked, via
-  `Collection.Add`) `LazerGenerator` for the swarm. When the user settles on values, bake them into the
-  `Default*` constants. Straight-alpha additive tints throughout (do NOT premultiply).
+  (1) **chargeup is a WINDUP ANIMATION, not a flat swarm** — the per-particle scale RAMPS `1 -> peak`
+  (`DefaultPeakChargeScale` **4**, ease-out near-linear via `ChargeEase`) over the windup, applied at
+  DRAW time in `LazerGenerator.Draw` (so the whole swarm ramps crisply; `LazerGeneratorData` only bakes
+  the base `0.015` scale). PLUS an **"energy well"**: a tip-like glow (`singleconnectorglow`, `WellColor`
+  == the beam's `FlareColor`) at the convergence centre that grows `15% -> 100%` of `1.3x the laser tip`
+  (`LaserTipDiameter` 48 = beam width 16 × `TipFlareScale` 3 × `WellTipFactor` 1.3) while fluctuating
+  ~90-110% erratically (3 incommensurate fast sines) — energy gathering before it bursts. Both driven by
+  `progress = elapsed/windupSeconds`. **The windup is FLEXIBLE**: callers pass the REAL (per-laser,
+  difficulty-scaled) duration via `LazerGenerator.SetWindup(seconds, loop)` — UFO 2.5s, SpiderHelper
+  `windupMs/1000`, showcase `loop:true` (repeats the ramp to watch it; in-game plays once + holds at full).
+  `?lazerchargescale=` overrides the peak. (2) **beam ends looked "chopped" / a core-vs-flare seam** — the
+  `lazermiddle` strip has no soft falloff ALONG its length, so `Quad.Draw` now domes each end with a
+  width-sized round GLOW-then-CORE cap (`DefaultCapScale` **1.0**, `?lazercapscale=`). (3) **tendrils SPAWN
+  STOCHASTICALLY + DRIFT** — `DrawArcs` is now STATEFUL (a `Tendril[]` pool): each frame one Bernoulli
+  trial spawns a tendril at `DefaultArcRate` **2**/sec (the `RandomHelper.RandomFromAverage` `rate*dt`
+  model, but on `Quad`'s FX RNG so it can't desync co-op), each lives a RANDOM `0.25..0.5s`
+  (`DefaultArcLifeMin/Max`; `?lazerarclife=` overrides the MEAN, ±33%), fades via a `sin(pi*frac)` envelope,
+  and DRIFTS along the beam at a random SIGNED speed up to `DefaultTendrilSpeed` **150** px/s
+  (`?lazertendrilspeed=`) — so they pop up out of sync "all over" and slide, vs the old fixed handful on a
+  shared cadence. `SetProperties` clears the pool (recycled beams). The bolt still writhes smoothly within
+  one life (time-driven midpoint displacement). `?lazerarcs=` is now the RATE (was a count).
+  **Tune with `?lazershot`** — `Compat/LazerShowcaseScene.cs` shows the chargeup swarm+well (left) + a
+  full-grown beam (right) ANIMATING (unlike the frozen `?harness`/`?bulletshot`); it drives a raw `Quad`
+  for a stable beam + a real (Update-ticked, via `Collection.Add`) `LazerGenerator` (with `loop:true`
+  windup) for the chargeup. **LIVE SLIDER PANEL (no reload needed):** `?lazershot` shows a top-right HTML
+  slider panel (built in `index.html` outside `#app`, ONLY on that page so a normal boot is byte-identical)
+  dragging the four knobs — **Chargeup peak scale / End-cap size / Tendril rate (/s) / Tendril speed (px/s)**
+  — in REAL TIME via `window.eaLazer` -> `Compat/DebugInput.SetLazer` ([JSInvokable `debugSetLazer`]) ->
+  `DebugFlags.SetLazerOverride` (`Quad` reads `CapScale` every Draw + `ArcRate`/`TendrilSpeed` at each
+  spawn; `LazerGenerator` reads the peak every Draw). The readout prints the
+  `lazerchargescale=/lazercapscale=/lazerarcs=/lazertendrilspeed=` string to paste back for baking in; the
+  `?lazer*` URL flags seed the sliders. `eaLazer(charge,cap,rate,speed)` also works from the console. (The
+  range inputs carry `autocomplete='off'` — without it Chrome's form-restoration re-seeds them post-load
+  and desyncs the game from the defaults.) When the user settles on values, bake them into the `Default*`
+  constants (`DefaultPeakChargeScale` in `LazerGenerator`; `DefaultCapScale`/`DefaultArcRate`/
+  `DefaultTendrilSpeed`/`DefaultArcLifeMin`/`Max` in `Quad`). Straight-alpha additive tints throughout (do
+  NOT premultiply).
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the

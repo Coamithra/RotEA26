@@ -350,6 +350,7 @@ internal class SpiderHelperMothership : KillableAlien
 		// (LazerGenerator.Setup(pos, size, lifetime, impulse, direction)), parked where the beam will emerge.
 		windup = LazerGenerator.NewLazerGenerator(collection, base.Game);
 		windup.Setup(BeamOrigin(CurrentAimDirection()), 2f, 1f, 0f, 0f);
+		windup.SetWindup(windupMs / 1000f, loop: false); // ramp fills the (difficulty-scaled) charge exactly
 		collection.Add((GameComponent)(object)windup);
 	}
 

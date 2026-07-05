@@ -500,6 +500,7 @@ public class UFO : KillableAlien
 				state = UFOState.lazor;
 				lazerGenerator = LazerGenerator.NewLazerGenerator(collection, base.Game);
 				lazerGenerator.Setup(base.Position, 1f, 1f, 0f, 0f);
+				lazerGenerator.SetWindup(2.5f, loop: false); // this state charges for 2500ms (see UFOState.lazor) before firing
 				collection.Add((GameComponent)(object)lazerGenerator);
 				base.Deceleration = 0.0001f;
 				lazertime = 0f;

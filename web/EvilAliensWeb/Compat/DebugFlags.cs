@@ -237,16 +237,36 @@ namespace EvilAliensWeb.Compat
 		//   ?lazercapscale=<f>     size of the beam's rounded END-CAPS vs the core width (default 1;
 		//                          the caps round off the otherwise flat/"chopped" beam ends + hide
 		//                          the core/flare seam).
-		//   ?lazerarcs=<n>         cap on the number of electric tendrils crackling off the beam.
-		//   ?lazerarclife=<sec>    lifespan of one tendril before it fades + respawns elsewhere
-		//                          (shortlived = "pop up all over"; long = the old "sits forever").
+		//   ?lazerarcs=<f>         average number of electric tendrils SPAWNED PER SECOND off the beam
+		//                          (stochastic, so they pop up out of sync -- was a fixed count).
+		//   ?lazertendrilspeed=<f> max |drift| a spawned tendril travels along the beam (design px/sec;
+		//                          each tendril gets a random signed speed up to this).
+		//   ?lazerarclife=<sec>    overrides the MEAN tendril lifespan (range = mean +/-33%); default
+		//                          range is a random 0.25..0.5s per tendril.
 		public static float? LazerChargeScale { get; private set; }
 
 		public static float? LazerCapScale { get; private set; }
 
-		public static int? LazerArcCount { get; private set; }
+		public static float? LazerArcRate { get; private set; }
+
+		public static float? LazerTendrilSpeed { get; private set; }
 
 		public static float? LazerArcLife { get; private set; }
+
+		// Runtime setter for the live laser-tuner slider panel (Compat/DebugInput.SetLazer ->
+		// eaLazer() in index.html, shown on the ?lazershot showcase). Lets the four knobs be
+		// dragged in real time instead of reloading with new ?lazer* flags each nudge. Quad.cs
+		// reads CapScale every Draw + ArcRate/TendrilSpeed at each tendril spawn, and LazerGenerator
+		// reads the peak charge scale every Draw — so a set here is picked up almost immediately
+		// (the showcase swarm/tendrils re-roll continuously). Same effect as the
+		// ?lazerchargescale/?lazercapscale/?lazerarcs/?lazertendrilspeed URL flags, live.
+		internal static void SetLazerOverride(float? chargeScale, float? capScale, float? arcRate, float? tendrilSpeed)
+		{
+			LazerChargeScale = chargeScale;
+			LazerCapScale = capScale;
+			LazerArcRate = arcRate;
+			LazerTendrilSpeed = tendrilSpeed;
+		}
 
 		// Laser showcase scene (Compat/LazerShowcaseScene.cs): the chargeup swarm + a full-grown
 		// beam side by side on the starfield, ANIMATING (unlike the frozen ?harness/?bulletshot),
@@ -617,9 +637,15 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "lazerarcs":
-					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var larc) && larc >= 0)
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var larc) && larc >= 0f)
 					{
-						LazerArcCount = larc;
+						LazerArcRate = larc;
+					}
+					break;
+				case "lazertendrilspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lts) && lts >= 0f)
+					{
+						LazerTendrilSpeed = lts;
 					}
 					break;
 				case "lazerarclife":

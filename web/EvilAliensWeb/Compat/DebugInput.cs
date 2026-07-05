@@ -158,6 +158,21 @@ namespace EvilAliensWeb.Compat
 				(float)loop);
 		}
 
+		// JS bridge for the live laser-tuner slider panel (eaLazer in wwwroot/index.html, shown on
+		// the ?lazershot showcase): DotNet.invokeMethod('EvilAliensWeb', 'debugSetLazer',
+		// chargeScale, capScale, arcRate, tendrilSpeed). Overrides the four Quad/LazerGenerator FX
+		// knobs in real time so the sliders retune without a page reload — same effect as the
+		// ?lazerchargescale/?lazercapscale/?lazerarcs/?lazertendrilspeed URL flags, just live.
+		[JSInvokable("debugSetLazer")]
+		public static void SetLazer(double chargeScale, double capScale, double arcRate, double tendrilSpeed)
+		{
+			DebugFlags.SetLazerOverride(
+				(float)chargeScale,
+				(float)capScale,
+				(float)arcRate,
+				(float)tendrilSpeed);
+		}
+
 		// JS bridge for the live webcam-tuner stepper panel (eaWcTune in wwwroot/index.html,
 		// shown on the webcam level when ?wctune is set): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetWcTune', hearts, kills, saucers, saucerSpeed, plasmaSpeed). Overrides the

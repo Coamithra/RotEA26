@@ -285,8 +285,9 @@ namespace EvilAliensWeb.Compat
 		//   ?spiderhelperfire=<sec>    how long the laser holds if it hasn't caught the boss (default 4.5)
 		//   ?spiderhelperlead=<px>     gap from sprite centre down to the beam's start = its belly
 		//                              (default 60; lower = beam emerges higher up the body)
-		//   ?spiderhelperenterpower=<p> ease-out-to-rest exponent for the fly-in (default 2; >=1;
-		//                              higher = punchier start but still glides to a smooth stop)
+		//   ?spiderhelperenterpower=<p> ease-out-to-rest exponent for the fly-in (default: unset =>
+		//                              the baked DefaultEnterPower 2; >=1; higher = punchier start
+		//                              but still glides to a smooth stop)
 		public static float? SpiderHelperIdleSeconds { get; private set; }
 
 		public static float SpiderHelperHoverY { get; private set; } = 10f;
@@ -299,7 +300,7 @@ namespace EvilAliensWeb.Compat
 
 		public static float SpiderHelperFireLead { get; private set; } = 60f;
 
-		public static float SpiderHelperEnterPower { get; private set; } = 2f;
+		public static float? SpiderHelperEnterPower { get; private set; }
 
 		// Fast-boot Level2 straight to the spider-boss fight (skips the whole level) so the helper
 		// mothership + boss interaction can be watched in seconds. Pair with ?level=Level2 (+ ?invuln,

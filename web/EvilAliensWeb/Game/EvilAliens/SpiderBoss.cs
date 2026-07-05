@@ -852,7 +852,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireSeconds * 1000f,
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireLead,
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperWindupSeconds * 1000f,
-			EvilAliensWeb.Compat.DebugFlags.SpiderHelperEnterPower,
 			this);
 		helper.OnDeath += helper_OnDeath;
 		collection.Add((GameComponent)(object)helper);

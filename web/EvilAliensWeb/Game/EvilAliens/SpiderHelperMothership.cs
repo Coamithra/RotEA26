@@ -50,9 +50,14 @@ internal class SpiderHelperMothership : KillableAlien
 	// Lerp(from,to,1-(1-t)^p) == PowerCurve(to,from,p,1-t) -- endpoints swapped, t mirrored -- so the
 	// ship flies in already moving and DECELERATES to a true stop (zero arrival velocity) at centre.
 	// (MarsBoss's raw power-0.5 entry arrives still moving at ~half average speed and hard-stops --
-	// too abrupt for a park-at-centre.) enterPower must be >=1: default 2 = a gentle glide-to-rest;
-	// higher = punchier start, still stops smoothly (?spiderhelperenterpower). Leave is a plain quad
+	// too abrupt for a park-at-centre.) EnterPower must be >=1: default 2 = a gentle glide-to-rest;
+	// higher = punchier start, still stops smoothly (?spiderhelperenterpower overrides live, the
+	// Blast tuner pattern -- null => the baked const ships unchanged). Leave is a plain quad
 	// ease-IN: PowerCurve(centre,exit,LeavePower,t) starts at rest and accelerates away east.
+	private const float DefaultEnterPower = 2f;
+
+	private static float EnterPower => EvilAliensWeb.Compat.DebugFlags.SpiderHelperEnterPower ?? DefaultEnterPower;
+
 	private const float LeavePower = 2f;
 
 	// Reference: the twin MarsBoss ("2 motherships") traverse -500 -> ~400 (mid of its left/right
@@ -79,9 +84,6 @@ internal class SpiderHelperMothership : KillableAlien
 	private float moveProgress;
 
 	private float moveDurationMs;
-
-	// Enter ease-out exponent (the ?spiderhelperenterpower value), captured in Setup.
-	private float enterPower;
 
 	private Timer fireTimer = new Timer(4500f, repeating: false);
 
@@ -152,15 +154,15 @@ internal class SpiderHelperMothership : KillableAlien
 	// fireDurationMs: how long the downward Lazer holds if it hasn't caught the boss.
 	// fireLead: gap from the sprite centre down to where the beam starts (its belly).
 	// windupMs: charge-swarm duration before the beam (mirrors the medium UFO's ~2.5s laser windup).
-	// enterPower: ease-out-to-rest exponent for the entrance (>=1; higher = punchier start, ~2 gentle).
 	// boss: the summoning SpiderBoss (for Easy/Medium aim-at-a-standing-boss); may be null.
-	public void Setup(float hoverY, float? speedOverride, float fireDurationMs, float fireLead, float windupMs, float enterPower, SpiderBoss boss)
+	// (The entrance ease exponent is NOT a param: EnterPower reads ?spiderhelperenterpower in-class,
+	// like LeavePower it's a curve shape, not a per-spawn value.)
+	public void Setup(float hoverY, float? speedOverride, float fireDurationMs, float fireLead, float windupMs, SpiderBoss boss)
 	{
 		this.hoverY = hoverY;
 		this.speedOverride = speedOverride;
 		this.fireLead = fireLead;
 		this.windupMs = windupMs;
-		this.enterPower = enterPower;
 		this.boss = boss;
 		fireTimer.Duration = fireDurationMs;
 		state = HelperState.enter;
@@ -322,7 +324,7 @@ internal class SpiderHelperMothership : KillableAlien
 			moveProgress = MathHelper.Clamp(moveProgress + dt / moveDurationMs, 0f, 1f);
 			// Quad ease-out to rest: PowerCurve with the endpoints swapped and t mirrored (see the
 			// ease-shapes comment up top).
-			base.Position = new Vector2(MyMath.PowerCurve(CenterX, EnterStartX, enterPower, 1f - moveProgress), hoverY);
+			base.Position = new Vector2(MyMath.PowerCurve(CenterX, EnterStartX, EnterPower, 1f - moveProgress), hoverY);
 			if (moveProgress >= 1f)
 			{
 				base.Position = new Vector2(CenterX, hoverY);

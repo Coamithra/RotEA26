@@ -21,17 +21,8 @@ internal class Level1 : GameScene
 		base.SoundManager.PlayMusic(Songs.Level1);
 		base.Initialize();
 		Settings.GetInstance().UnlockDifficulty();
-		if (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Easy)
-		{
-			Settings.GetInstance().DirectRespawn = true;
-			Settings.GetInstance().AdaptiveDifficulty = true;
-			Settings.GetInstance().DifficultyModifier = Settings.GetInstance().GetDifficultyValue(Settings.DifficultyLevel.Medium);
-		}
+		ApplyDifficultyPolicy();
 		base.spawnPlayerNormally = false;
-		if ((Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Hard) | (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Inzane) | (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Very_Hard))
-		{
-			score.Lives = 7;
-		}
 	}
 
 	private void resetlives(GameEvent sender)

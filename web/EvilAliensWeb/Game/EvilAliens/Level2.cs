@@ -38,16 +38,7 @@ internal class Level2 : GameScene
 		Collection.Add((GameComponent)(object)floor);
 		Background.SetMars();
 		base.Initialize();
-		if (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Easy)
-		{
-			Settings.GetInstance().DirectRespawn = true;
-			Settings.GetInstance().AdaptiveDifficulty = true;
-			Settings.GetInstance().DifficultyModifier = Settings.GetInstance().GetDifficultyValue(Settings.DifficultyLevel.Medium);
-		}
-		if ((Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Hard) | (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Inzane) | (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Very_Hard))
-		{
-			score.Lives = 7;
-		}
+		ApplyDifficultyPolicy();
 		Settings.GetInstance().UnlockDifficulty();
 		if (EvilAliensWeb.Compat.DebugFlags.Win)
 		{
@@ -142,6 +133,13 @@ internal class Level2 : GameScene
 			// fight, so the helper-mothership assist can be watched in seconds. Mirrors the real
 			// boss block below (spawn + linked UFO/bonus spawners + halt), then Victory.
 			PopulateSpiderBossOnly();
+			return;
+		}
+		if (EvilAliensWeb.Compat.DebugFlags.MarsBoss)
+		{
+			// DEBUG (?marsboss): skip the whole level and drop straight into the twin-mothership
+			// (MarsBoss) fight -- mirrors the real MarsBoss block below, then Victory.
+			PopulateMarsBossOnly();
 			return;
 		}
 		if (EvilAliensWeb.Compat.DebugFlags.Spiders)
@@ -349,6 +347,31 @@ internal class Level2 : GameScene
 		eventList.AddEvent(gameEvent2, halting: true);
 		eventList.AddHalt();
 		gameEvent2.OnFinished += Victory;
+	}
+
+	private void PopulateMarsBossOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += resetlives;
+		waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += halt;
+		// The twin motherships + their linked support spawners (mirrors the real MarsBoss block).
+		MarsBossSpawner marsBossSpawner = new MarsBossSpawner(base.Game);
+		StationarySpawner stationarySpawner = new StationarySpawner(base.Game, 560f, 0f, 0.8f);
+		stationarySpawner.SetChances(0f, 0f, 0f, 1f);
+		marsBossSpawner.LinkWith(stationarySpawner);
+		eventList.AddEvent(stationarySpawner, halting: false);
+		BonusSpawner bonusSpawner = new BonusSpawner(base.Game, 0f, 0.2f, randomly: true);
+		bonusSpawner.SetMars();
+		marsBossSpawner.LinkWith(bonusSpawner);
+		eventList.AddEvent(bonusSpawner, halting: false);
+		eventList.AddEvent(marsBossSpawner, halting: true);
+		eventList.AddHalt();
+		Wait(2f);
+		UnlockEvent victoryEvent = new UnlockEvent(base.Game, "Next Mission!", Unlockables.Items.Level3, AnimatedMessage.UnlockType.level, level);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
 	}
 
 	private void PopulateSpiderBossOnly()

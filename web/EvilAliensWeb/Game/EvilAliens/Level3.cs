@@ -23,16 +23,7 @@ internal class Level3 : GameScene
 		base.SoundManager.PlayMusic(Songs.Level3);
 		Background.SetAlienBase();
 		base.Initialize();
-		if (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Easy)
-		{
-			Settings.GetInstance().DirectRespawn = true;
-			Settings.GetInstance().AdaptiveDifficulty = true;
-			Settings.GetInstance().DifficultyModifier = Settings.GetInstance().GetDifficultyValue(Settings.DifficultyLevel.Medium);
-		}
-		if ((Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Hard) | (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Inzane) | (Settings.GetInstance().CurrentDifficulty == Settings.DifficultyLevel.Very_Hard))
-		{
-			score.Lives = 7;
-		}
+		ApplyDifficultyPolicy();
 		Settings.GetInstance().UnlockDifficulty();
 		base.spawnPlayerNormally = true;
 	}

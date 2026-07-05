@@ -264,31 +264,39 @@ namespace EvilAliensWeb.Compat
 		public static float HueLoopSeconds { get; private set; } = 6f;
 
 		// SpiderBoss "helper mothership" feel knobs (Game/EvilAliens/SpiderHelperMothership.cs +
-		// the trigger in SpiderBoss.cs). When the Level2 spider boss goes un-damaged for
-		// SpiderHelperIdleSeconds, a mothership EASES in from the left showing just its underside at
-		// the top, halts dead-centre, WINDS UP a converging spark swarm (like a medium UFO charging
-		// its laser) for SpiderHelperWindupSeconds, fires a Lazer for SpiderHelperFireSeconds (which
-		// hits the boss on a fly-by -- or, on Easy/Medium against a standing boss, is aimed AT it),
-		// then EASES back out to the left. Enter/exit speed is a difficulty-scaled fraction of the
-		// twin-MarsBoss traverse speed (Easy ~1/5 .. Inzane ~4/5); ?spiderhelperspeed overrides it
-		// with a raw px/ms value. It is "fake killable": flashes/reddens but never dies
-		// in time. All have shipping defaults, so a plain boot is unchanged; these only let the feel
-		// be tuned live. See the flags:
-		//   ?spiderhelperidle=<sec>    RAW seconds of no boss damage (counted from the boss's first
-		//                              landing) before help arrives, overriding the difficulty scaling
-		//                              (default: unset => Easy ~6s .. Very_Hard 30s .. Inzane ~37s)
+		// the trigger in SpiderBoss.cs). Every N completed jump->fly->land CYCLES (N is set ONCE at the
+		// fight's start from the difficulty modifier -- baselines Easy/Medium 1, Hard 2, Very_Hard 3,
+		// Inzane 4; a ramped-in or higher-tier fight locks a bigger interval), a mothership EASES in from
+		// the left showing just its underside at the top, halts dead-centre, WINDS UP a converging
+		// spark swarm (like a medium UFO charging its laser) for SpiderHelperWindupSeconds, fires a
+		// Lazer for SpiderHelperFireSeconds, then EASES out east and exits right. WHERE the beam aims is
+		// keyed on the difficulty TIER: Easy/Medium at the standing spider, Hard straight down,
+		// Very_Hard/Inzane AT THE PLAYER (the "helper" turns hazard up top). A little top-left warning
+		// arrow announces it. Enter/exit speed is a difficulty-scaled fraction of the twin-MarsBoss
+		// traverse speed (Easy ~1/5 .. Inzane ~4/5); ?spiderhelperspeed overrides it with a raw px/ms
+		// value. It is now KILLABLE (SpiderHelperHitPoints): destroy it and it still fires its laser,
+		// then crash-lands off the bottom-right in a burst of explosions instead of flying off. All have
+		// shipping defaults, so a plain boot is unchanged; these only let the feel be tuned live. Flags:
+		//   ?spiderhelpercycles=<n>    FIXED boss cycles between helper visits (no ramp), overriding the
+		//                              difficulty scaling (which baselines Easy/Medium 1, Hard 2,
+		//                              Very_Hard 3, Inzane 4). Pair with ?difficulty= to test a tier.
+		//   ?spiderhelperhp=<n>        base hitpoints before it's destroyed (default 50, then
+		//                              difficulty-scaled by DifficultyFactorized(0.7))
 		//   ?spiderhelperhovery=<y>    sprite-centre Y; more negative pushes the ship up so less of
 		//                              it shows (default 10 => the belly + lower spikes hang in, dome cut)
 		//   ?spiderhelperspeed=<f>     RAW avg enter/exit design-px/ms, overriding the difficulty
 		//                              scaling (default: unset => Easy ~0.15 .. Medium ~0.28 .. Inzane ~0.6)
 		//   ?spiderhelperwindup=<sec>  charge-swarm duration before the beam fires (default 2.5)
 		//   ?spiderhelperfire=<sec>    how long the laser holds if it hasn't caught the boss (default 4.5)
-		//   ?spiderhelperlead=<px>     gap from sprite centre down to the beam's start = its belly
-		//                              (default 60; lower = beam emerges higher up the body)
+		//   ?spiderhelperlead=<px>     muzzle offset: sprite centre -> beam origin, along the aim
+		//                              (default 100 = MarsBoss's lazer offset, same sprite; lower =
+		//                              beam emerges higher up the body)
 		//   ?spiderhelperenterpower=<p> ease-out-to-rest exponent for the fly-in (default: unset =>
 		//                              the baked DefaultEnterPower 2; >=1; higher = punchier start
 		//                              but still glides to a smooth stop)
-		public static float? SpiderHelperIdleSeconds { get; private set; }
+		public static int? SpiderHelperCycles { get; private set; }
+
+		public static int? SpiderHelperHitPoints { get; private set; }
 
 		public static float SpiderHelperHoverY { get; private set; } = 10f;
 
@@ -298,7 +306,7 @@ namespace EvilAliensWeb.Compat
 
 		public static float SpiderHelperFireSeconds { get; private set; } = 4.5f;
 
-		public static float SpiderHelperFireLead { get; private set; } = 60f;
+		public static float SpiderHelperFireLead { get; private set; } = 100f;
 
 		public static float? SpiderHelperEnterPower { get; private set; }
 
@@ -306,6 +314,10 @@ namespace EvilAliensWeb.Compat
 		// mothership + boss interaction can be watched in seconds. Pair with ?level=Level2 (+ ?invuln,
 		// ?spiderhelperidle=<small>). A pure test shortcut, like ?win. See Level2.PopulateEventList.
 		public static bool SpiderBoss { get; private set; }
+
+		// Fast-boot Level2 straight to the TWIN-mothership (MarsBoss) fight -- like ?spiderboss but for
+		// the twins. See Level2.PopulateMarsBossOnly.
+		public static bool MarsBoss { get; private set; }
 
 		// ?difficulty=<Easy|Medium|Hard|Very_Hard|Inzane>: pin the difficulty at boot (applied before
 		// any level Initialize runs). The helper's glide speed + aim are difficulty-scaled, so this
@@ -605,10 +617,16 @@ namespace EvilAliensWeb.Compat
 						HueLoopSeconds = hl;
 					}
 					break;
-				case "spiderhelperidle":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shi) && shi >= 0f)
+				case "spiderhelpercycles":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var shc) && shc >= 1)
 					{
-						SpiderHelperIdleSeconds = shi;
+						SpiderHelperCycles = shc;
+					}
+					break;
+				case "spiderhelperhp":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var shhp) && shhp >= 1)
+					{
+						SpiderHelperHitPoints = shhp;
 					}
 					break;
 				case "spiderhelperhovery":
@@ -666,6 +684,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "spiderboss":
 					SpiderBoss = IsOn(val);
+					break;
+				case "marsboss":
+					MarsBoss = IsOn(val);
 					break;
 				case "spiders":
 					Spiders = IsOn(val);

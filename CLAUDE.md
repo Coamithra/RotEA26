@@ -324,7 +324,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (`Compat/WebcamInterop.cs` + `Game/EvilAliens/WebcamLevel.cs`/`WebcamUfo.cs`/`WebcamPlasma.cs`). The
   collision surface is a 40x30 person-mask occupancy grid in design space, pushed ~30Hz from JS
   (`webcamMask`, ~200 B base64); the scene hit-tests saucers/plasma against it (`HitCircle`) and aims at
-  its `Centroid`. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
+  its `Centroid`. **The mask is REFINED in the worker (Meet-style post-processing — don't strip it):**
+  raw per-frame segmentation shimmers and has blobby edges, so `webcam-worker.js` runs (1) an adaptive
+  temporal EMA over the confidence (delta-weighted: stable pixels smooth hard, moving pixels snap — no
+  ghosting) and (2) a band-limited JOINT BILATERAL FILTER on the uncertain edge pixels guided by the
+  camera frame's RGB (the refinement MediaPipe's own docs + Google Meet's published pipeline use), then
+  builds BOTH the visual alpha and the occupancy grid from the refined confidence (hitbox stops
+  flickering too). The overlay canvas backing store is sized to the letterbox's DEVICE pixels (capped
+  `OVERLAY_MAX_W` 1280 ~= a 720p camera's 4:3 crop) instead of a fixed 800x600 CSS-stretch, with
+  `imageSmoothingQuality:"high"` on the composite — the player image is drawn at native res. Knobs are
+  consts at the top of `webcam-worker.js` (`EMA_MIN/MAX`, `JBF_*`). Vendored tasks-vision is 0.10.14;
+  0.10.35 exists (GL memory-barrier fix for GPU masks; WebGPU inference still unshipped) — a mechanical
+  vendor-bump follow-up. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
   fire ONE big slow plasma orb at you; hearts + kills-to-win are per-difficulty (see below). **Per-difficulty
   tuning (card `8fcc7a8e`):** `WebcamLevel.Tunings[]` is an Easy..Inzane table of the DISCRETE knobs —
   hearts, kills-to-win, max simultaneous saucers, saucer-speed × and plasma-speed × (the generic

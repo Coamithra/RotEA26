@@ -80,6 +80,24 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 		base.MaxSpeed = flySpeed;
 	}
 
+	// Live-retune hook (the ?wctune stepper panel): retarget the cruise speed of an
+	// orb already in flight. Speed > 0 means the entry-grow phase already handed the
+	// orb its cruise speed, so snap it to the new value; during entry Speed is 0 and
+	// the fly transition below picks up the new flySpeed by itself.
+	public void SetSpeedMultiplier(float multiplier)
+	{
+		if (multiplier <= 0f)
+		{
+			return;
+		}
+		flySpeed = FlySpeed * multiplier;
+		base.MaxSpeed = flySpeed;
+		if (base.Speed > 0f)
+		{
+			base.Speed = flySpeed;
+		}
+	}
+
 	public override void Initialize()
 	{
 		base.Initialize();

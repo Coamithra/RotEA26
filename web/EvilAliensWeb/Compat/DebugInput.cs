@@ -158,6 +158,26 @@ namespace EvilAliensWeb.Compat
 				(float)loop);
 		}
 
+		// JS bridge for the live webcam-tuner stepper panel (eaWcTune in wwwroot/index.html,
+		// shown on the webcam level when ?wctune is set): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetWcTune', hearts, kills, saucers, saucerSpeed, plasmaSpeed). Overrides the
+		// five WebcamLevel.Tunings[] knobs in real time — ABSOLUTE final values (what you'd
+		// bake into the table), unlike the ?wcsaucerspeed/?wcplasmaspeed URL multipliers.
+		// WebcamLevel picks the change up on its next Update via WebcamTuneVersion.
+		[JSInvokable("debugSetWcTune")]
+		public static void SetWcTune(int hearts, int kills, int saucers, double saucerSpeed, double plasmaSpeed)
+		{
+			DebugFlags.SetWebcamTuneOverride(hearts, kills, saucers, (float)saucerSpeed, (float)plasmaSpeed);
+		}
+
+		// Companion: drop all runtime webcam-tuner overrides (the panel's "Reset to tier"
+		// button) so the level falls back to its shipped Tunings[] row + any ?wc* URL flags.
+		[JSInvokable("debugClearWcTune")]
+		public static void ClearWcTune()
+		{
+			DebugFlags.ClearWebcamTuneOverride();
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first

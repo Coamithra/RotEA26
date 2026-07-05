@@ -94,6 +94,20 @@ namespace EvilAliensWeb.Compat
             _js?.InvokeVoid("eaWebcam.stop");
         }
 
+        // Show/seed the live tuning stepper panel (eaWcTune in index.html; ?wctune only —
+        // WebcamLevel gates the call on DebugFlags.WebcamTune, so a normal boot never
+        // reaches JS). Also called after every applied change so the panel re-renders the
+        // level's actual resolved values (e.g. after its "Reset to tier" button).
+        public static void TuneShow(string tier, int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed)
+        {
+            _js?.InvokeVoid("eaWcTune.show", tier, hearts, kills, saucers, saucerSpeed, plasmaSpeed);
+        }
+
+        public static void TuneHide()
+        {
+            _js?.InvokeVoid("eaWcTune.hide");
+        }
+
         private static void ClearMask()
         {
             Array.Clear(grid, 0, grid.Length);

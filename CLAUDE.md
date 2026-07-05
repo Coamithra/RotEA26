@@ -333,7 +333,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `SoundManager.ClassicForDifficulty()` (Hard+ = lyrics). `WebcamUfo.Setup`/`WebcamPlasma.Setup` take a
   speed-× arg. **Live-tune the feel with the `?wc*` debug flags** (`Compat/DebugFlags.cs`): boot
   `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`,
-  then bake the chosen numbers back into `Tunings[]`. **GOTCHA — MediaPipe MUST stay in the
+  then bake the chosen numbers back into `Tunings[]`. **Better: `?wctune` shows a LIVE stepper panel**
+  (`eaWcTune` in `index.html`, outside `#app`, only built when the webcam level calls `show()` -- a boot
+  without the flag has no extra DOM): +/- all five knobs in real time, mid-play or paused, no reload.
+  Edits drive `DebugInput.SetWcTune` -> `DebugFlags.SetWebcamTuneOverride` (ABSOLUTE final values,
+  unlike the URL speed flags which are tier-baseline multipliers) and `WebcamLevel` re-resolves on its
+  next tick (`WebcamTuneVersion`): hearts snap to the new count, KillTarget/MaxSaucers are read live
+  anyway, and speed changes rescale the saucers/orbs already on screen (`SetSpeedMultiplier` on
+  `WebcamUfo`/`WebcamPlasma`). "Reset to tier defaults" clears the overrides via `debugClearWcTune`
+  and the level re-seeds the panel with its actual resolved row; the panel's orange readout prints the
+  bake-ready `Tunings[]` row (click to copy). e.g. `?menu&unlockall&wctune` then pick the challenge +
+  any tier from the menu. **GOTCHA — MediaPipe MUST stay in the
   worker (`webcam-worker.js`):** its Emscripten loader assigns the global `Module`, which Blazor's Mono
   runtime also uses — importing tasks-vision on the main thread kills the whole .NET runtime ("_malloc is
   not a function", reproduced). The ~10 MB runtime+model under `wwwroot/lib/mediapipe/` (see its README)

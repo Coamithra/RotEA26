@@ -66,6 +66,10 @@ internal class WebcamLevel : GameScene
 	// set in Initialize before play begins.
 	private DifficultyTuning tuning;
 
+	// Last DebugFlags.WebcamTuneVersion this run resolved against — the live tuner
+	// panel (?wctune) bumps the version on every edit and UpdateNormal re-resolves.
+	private int appliedTuneVersion;
+
 	private int kills;
 
 	private int hearts;
@@ -139,6 +143,8 @@ internal class WebcamLevel : GameScene
 			settings.CurrentDifficulty = DebugFlags.WebcamDifficulty.Value;
 		}
 		ResolveTuning(settings.CurrentDifficulty);
+		appliedTuneVersion = DebugFlags.WebcamTuneVersion;
+		SeedTunePanel();
 		// Hard+ earns the full Japanese-vocal "classic" cut; Easy/Medium get the clean
 		// lyric-free instrumental (SoundManager.ClassicForDifficulty()).
 		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
@@ -170,7 +176,9 @@ internal class WebcamLevel : GameScene
 	}
 
 	// Pick the difficulty row, then layer any ?wc* debug overrides on top (absolute
-	// for the counts, a multiplier for the speeds). See Compat/DebugFlags.cs.
+	// for the counts, a multiplier for the speeds), then the live tuner panel's
+	// runtime overrides (?wctune — ABSOLUTE final values) on top of everything.
+	// See Compat/DebugFlags.cs.
 	private void ResolveTuning(Settings.DifficultyLevel difficulty)
 	{
 		int idx = (int)difficulty;
@@ -203,11 +211,83 @@ internal class WebcamLevel : GameScene
 		{
 			tuning.PlasmaSpeedMul *= DebugFlags.WebcamPlasmaSpeed.Value;
 		}
+		if (DebugFlags.WebcamTuneHearts.HasValue)
+		{
+			tuning.Hearts = DebugFlags.WebcamTuneHearts.Value;
+		}
+		if (DebugFlags.WebcamTuneKills.HasValue)
+		{
+			tuning.KillTarget = DebugFlags.WebcamTuneKills.Value;
+		}
+		if (DebugFlags.WebcamTuneSaucers.HasValue)
+		{
+			tuning.MaxSaucers = DebugFlags.WebcamTuneSaucers.Value;
+		}
+		if (DebugFlags.WebcamTuneSaucerSpeed.HasValue)
+		{
+			tuning.SaucerSpeedMul = DebugFlags.WebcamTuneSaucerSpeed.Value;
+		}
+		if (DebugFlags.WebcamTunePlasmaSpeed.HasValue)
+		{
+			tuning.PlasmaSpeedMul = DebugFlags.WebcamTunePlasmaSpeed.Value;
+		}
+	}
+
+	// A live tuner-panel edit landed (?wctune): re-resolve the knobs and apply what
+	// must change in place — hearts snap to the new count, speed changes rescale the
+	// saucers/orbs already on screen (KillTarget/MaxSaucers are read live anyway).
+	// Every apply re-seeds the panel so it always shows the level's actual resolved
+	// values (this is what makes its "Reset to tier" button round-trip).
+	private void ApplyLiveTuning()
+	{
+		int oldHearts = tuning.Hearts;
+		float oldSaucerSpeed = tuning.SaucerSpeedMul;
+		float oldPlasmaSpeed = tuning.PlasmaSpeedMul;
+		ResolveTuning(Settings.GetInstance().CurrentDifficulty);
+		appliedTuneVersion = DebugFlags.WebcamTuneVersion;
+		if (tuning.Hearts != oldHearts)
+		{
+			hearts = tuning.Hearts;
+		}
+		if (tuning.SaucerSpeedMul != oldSaucerSpeed)
+		{
+			foreach (WebcamUfo ufo in ufos)
+			{
+				ufo.SetSpeedMultiplier(tuning.SaucerSpeedMul);
+			}
+		}
+		if (tuning.PlasmaSpeedMul != oldPlasmaSpeed)
+		{
+			foreach (WebcamPlasma plasma in plasmas)
+			{
+				plasma.SetSpeedMultiplier(tuning.PlasmaSpeedMul);
+			}
+		}
+		Console.WriteLine("[wctune] applied: hearts=" + tuning.Hearts + " kills=" + tuning.KillTarget
+			+ " saucers=" + tuning.MaxSaucers + " saucerspeed=" + tuning.SaucerSpeedMul
+			+ " plasmaspeed=" + tuning.PlasmaSpeedMul);
+		SeedTunePanel();
+	}
+
+	// Push the resolved tuning into the eaWcTune panel (?wctune only). Idempotent —
+	// show() re-renders in place when the panel already exists.
+	private void SeedTunePanel()
+	{
+		if (DebugFlags.WebcamTune)
+		{
+			WebcamInterop.TuneShow(Settings.GetInstance().CurrentDifficulty.ToString(),
+				tuning.Hearts, tuning.KillTarget, tuning.MaxSaucers,
+				tuning.SaucerSpeedMul, tuning.PlasmaSpeedMul);
+		}
 	}
 
 	private void WebcamLevel_OnFinished(object sender, FinishedArgs args)
 	{
 		// every exit path (victory, defeat, pause-exit, cancel) releases the camera
+		if (DebugFlags.WebcamTune)
+		{
+			WebcamInterop.TuneHide();
+		}
 		WebcamInterop.Stop();
 		score.EnableCombos();
 		ufos.Clear();
@@ -234,6 +314,12 @@ internal class WebcamLevel : GameScene
 		base.UpdateNormal(gameTime);
 		Prune(ufos);
 		Prune(plasmas);
+		// Live tuner panel (?wctune): pick up an edit before the Playing gate so a
+		// change made during camera setup (or applied on unpause) still lands.
+		if (DebugFlags.WebcamTuneVersion != appliedTuneVersion)
+		{
+			ApplyLiveTuning();
+		}
 		if (WebcamInterop.State != WebcamInterop.SessionState.Playing)
 		{
 			return;

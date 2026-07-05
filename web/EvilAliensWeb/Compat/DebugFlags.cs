@@ -399,6 +399,9 @@ namespace EvilAliensWeb.Compat
 		//   ?wcsaucers=<int>     override the max simultaneous-saucer cap
 		//   ?wcsaucerspeed=<f>   multiply the active tier's saucer-speed multiplier
 		//   ?wcplasmaspeed=<f>   multiply the active tier's plasma-speed multiplier
+		//   ?wctune              show the LIVE stepper panel (index.html) while the webcam
+		//                        level is up: +/- every knob in real time, no reload —
+		//                        the panel's readout prints the bake-ready Tunings[] row
 		public static EvilAliens.Settings.DifficultyLevel? WebcamDifficulty { get; private set; }
 
 		public static int? WebcamHearts { get; private set; }
@@ -410,6 +413,56 @@ namespace EvilAliensWeb.Compat
 		public static float? WebcamSaucerSpeed { get; private set; }
 
 		public static float? WebcamPlasmaSpeed { get; private set; }
+
+		// ?wctune: show the LIVE webcam-tuning stepper panel (index.html, outside #app)
+		// while the webcam level is up. The panel drives SetWebcamTuneOverride below via
+		// Compat/DebugInput.SetWcTune, so the five Tunings[] knobs can be nudged in real
+		// time (mid-play or paused) instead of reloading with new ?wc* flags each change.
+		// OFF by default and — like the other tuner panels — kept OUT of `Active`, so a
+		// shipped build never shows it and boots byte-identical.
+		public static bool WebcamTune { get; private set; }
+
+		// Runtime (live-panel) overrides for the five webcam tuning knobs. Unlike the
+		// ?wcsaucerspeed/?wcplasmaspeed URL flags (MULTIPLIERS on the tier baseline),
+		// these are ABSOLUTE final values — the panel shows/edits exactly what would be
+		// baked into WebcamLevel.Tunings[]. All null => no runtime override.
+		public static int? WebcamTuneHearts { get; private set; }
+
+		public static int? WebcamTuneKills { get; private set; }
+
+		public static int? WebcamTuneSaucers { get; private set; }
+
+		public static float? WebcamTuneSaucerSpeed { get; private set; }
+
+		public static float? WebcamTunePlasmaSpeed { get; private set; }
+
+		// Bumped on every SetWebcamTuneOverride/ClearWebcamTuneOverride so WebcamLevel can
+		// re-resolve its tuning the tick after a panel edit (a cheap int compare per Update).
+		public static int WebcamTuneVersion { get; private set; }
+
+		// Runtime setter for the live webcam tuner panel (Compat/DebugInput.SetWcTune ->
+		// eaWcTune in index.html). The panel always sends the full five-knob state.
+		internal static void SetWebcamTuneOverride(int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed)
+		{
+			WebcamTuneHearts = hearts > 0 ? hearts : (int?)null;
+			WebcamTuneKills = kills > 0 ? kills : (int?)null;
+			WebcamTuneSaucers = saucers > 0 ? saucers : (int?)null;
+			WebcamTuneSaucerSpeed = saucerSpeed > 0f ? saucerSpeed : (float?)null;
+			WebcamTunePlasmaSpeed = plasmaSpeed > 0f ? plasmaSpeed : (float?)null;
+			WebcamTuneVersion++;
+		}
+
+		// Drop all runtime overrides (the panel's "Reset to tier" button): the level falls
+		// back to its shipped Tunings[] row + any ?wc* URL flags, and re-seeds the panel.
+		internal static void ClearWebcamTuneOverride()
+		{
+			WebcamTuneHearts = null;
+			WebcamTuneKills = null;
+			WebcamTuneSaucers = null;
+			WebcamTuneSaucerSpeed = null;
+			WebcamTunePlasmaSpeed = null;
+			WebcamTuneVersion++;
+		}
 
 		// Spider jump-cycle tuning knobs for the sprite-harness visualiser (?harness=spiderjump).
 		// The grounded Mars Spider's whole rear-up -> launch -> arc -> land cycle is otherwise only
@@ -630,6 +683,9 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamPlasmaSpeed = wcps;
 					}
+					break;
+				case "wctune":
+					WebcamTune = IsOn(val);
 					break;
 				case "huestart":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))

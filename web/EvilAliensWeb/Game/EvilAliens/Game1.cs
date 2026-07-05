@@ -1084,6 +1084,16 @@ public class Game1 : Game
 		{
 			onPostDraw();
 		}
+		// ?hitboxes / eaHitboxes(): draw every live collidable's collision shape over the
+		// composited (and bloomed) frame, colour-coded by kind, so a sprite whose Draw is
+		// offset from its Position/hitbox shows the drift in real gameplay. In design space
+		// via the wrapper (like the HideSafeArea draw below), on top of everything. OFF by
+		// default and out of DebugFlags.Active, so a shipped build is unaffected.
+		if (DebugFlags.ShowHitboxes)
+		{
+			HitboxOverlay.Draw(base.GraphicsDevice, spriteBatchWrapper, collisionHandler.Collidables);
+			spriteBatchWrapper.Flush();
+		}
 		// Stage 5 (shaders): the gamma post-process used to composite the resolved
 		// back buffer here via ResolveBackBuffer + a full-screen gamma draw. The
 		// Stage-4 presenter already renders the whole frame into sceneTarget, so

@@ -129,6 +129,17 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitstop " + ms + "ms");
 		}
 
+		// JS bridge for the hitbox debug overlay (eaHitboxes in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitboxes', on). Toggles the ?hitboxes
+		// overlay at runtime (draws every collidable's collision shape colour-coded by kind);
+		// same as booting with ?hitboxes but flippable live from the console.
+		[JSInvokable("debugHitboxes")]
+		public static void Hitboxes(bool on)
+		{
+			DebugFlags.SetShowHitboxes(on);
+			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first

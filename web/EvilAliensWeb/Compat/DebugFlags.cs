@@ -27,6 +27,8 @@ namespace EvilAliensWeb.Compat
 	//                  boss kill — Compat/Juice.cs). ON by default.
 	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (it is ON by default) to A/B the plain flattened drop shadow
+	//   ?hitboxes      draw every collidable's collision shape over the game, colour-coded by
+	//                  kind (box/circle/line). OFF by default; also toggleable via eaHitboxes()
 	//   ?slowmotrail=0 disable the cinematic slow-motion ghost-trail post-process (ON by default;
 	//                  reverts the 1up slowmo to the plain time-scale + bloom look). Tune the look
 	//                  with ?slowmotraildecay=<0..0.99> (ghost persistence) and
@@ -188,6 +190,19 @@ namespace EvilAliensWeb.Compat
 		// the plain flatten. Does NOT alter the boot path — purely a render look, so it is
 		// deliberately left OUT of `Active` (a clean boot stays "no debug flags").
 		public static bool MetalScore { get; private set; } = true;
+
+		// Draw every live collidable's collision shape over the frame, colour-coded by kind
+		// (box -> rectangle, circle -> ring, line -> segment) so a sprite whose DRAW is offset
+		// from its Position/hitbox shows the drift. OFF by default; enable with ?hitboxes (URL)
+		// or eaHitboxes(true) (console). A pure overlay — deliberately left OUT of `Active`, so a
+		// clean boot stays "no debug flags". Drawn by HitboxOverlay from Game1.DrawInner.
+		public static bool ShowHitboxes { get; private set; }
+
+		// Runtime toggle for the console bridge (Compat/DebugInput.Hitboxes -> eaHitboxes()).
+		internal static void SetShowHitboxes(bool on)
+		{
+			ShowHitboxes = on;
+		}
 
 		// Blast (bomb) tuning knobs for the sprite-harness lifetime visualiser (?harness=blast).
 		// All null/default => Blast.cs uses its baked-in constants, so a shipped build is unchanged.
@@ -423,6 +438,10 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "metalscore":
 					MetalScore = IsOn(val);
+					break;
+				case "hitboxes":
+				case "hitbox":
+					ShowHitboxes = IsOn(val);
 					break;
 				case "shake":
 				case "screenshake":

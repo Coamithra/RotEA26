@@ -537,6 +537,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (the same Content-cache trap as textures) — bust it (DevTools "Disable cache", or
   `fetch('Content/data/landed_offsets.json',{cache:'reload'})` then reload). Production self-heals via
   ETag. Re-export from the tool; don't hand-edit values you can author visually.
+- **Hitbox debug overlay (`Compat/HitboxOverlay.cs` + `?hitboxes` / `eaHitboxes()`).** Draws EVERY
+  live collidable's collision shape over the running game, colour-coded by kind — `CollisionBox`/
+  `CollisionMultibox` -> **cyan** rectangle outline, `CollisionSimpleCircle` -> **green** ring,
+  `CollisionLine` (bullets, lazers) -> **orange** segment; active hitboxes bright, inactive
+  (`Collides == false`) dim. Built to SEE the many objects whose DRAW is offset from their
+  Position/hitbox (the landed Mars UFOs + drifting `StationaryBoss` nudge only their Draw — see the
+  LandedOffsets bullet), which the sprite harness can't show (it only rings *parked circular*
+  hitboxes). `HitboxOverlay.Draw` iterates `CollisionHandler.Collidables` (a read-only accessor added
+  for this) and draws each shape via the `spriteBatchWrapper` in 800x600 design space, hooked in
+  `Game1.DrawInner` right after the game + bloom composite (same seam as the HideSafeArea overlay) so
+  it sits on top of everything, un-bloomed. It owns a 1px white pixel (lines/box edges) + a ring
+  texture (`BuildRing`, same annulus as `HarnessScene`). Enable with the **`?hitboxes`** URL flag or
+  toggle live from the console with **`eaHitboxes()`/`eaHitboxes(false)`** (`DebugInput.Hitboxes` ->
+  `DebugFlags.SetShowHitboxes`). OFF by default and deliberately kept OUT of `DebugFlags.Active`, so a
+  shipped build is byte-identical unless it's asked for. Verify by eye in any level (e.g.
+  `?level=Level1&hitboxes&invuln` — bullets show as orange segments, asteroids as green rings, UFOs as
+  cyan boxes). Follow-up "big pass" (a "For me" card): now that hitboxes are visible, fold each
+  draw-offset object's nudge into its `CollisionType` so sprite + hitbox align.
 - **Game juice: screen shake + hit-stop (`Compat/Juice.cs`) — the two classic feel effects the port
   was missing** (per Vlambeer's "Art of Screenshake" / "Juice it or lose it"; hit flash, rumble,
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research

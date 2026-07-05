@@ -500,6 +500,8 @@ internal abstract class GameScene : Scene
 		contentManager.Load<Texture2D>("GFX/Sprites/option");
 		contentManager.Load<Texture2D>("GFX/Sprites/photocamera");
 		contentManager.Load<Texture2D>("GFX/Sprites/singleconnectorglow");
+		contentManager.Load<Texture2D>("GFX/Sprites/lazerglow");
+		contentManager.Load<Texture2D>("GFX/Sprites/lazerbeam");
 		contentManager.Load<Texture2D>("GFX/Sprites/powerupbw");
 		contentManager.Load<SpriteFont>("GFX/menu/menufont");
 		Explosion explosion = Explosion.NewExplosion(Collection, base.Game);

@@ -919,6 +919,15 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		spriteBatch.Draw(texture, dest, (Rectangle?)source, color);
 	}
 
+	// Full-control overload: source rect + rotation + non-uniform scale + explicit origin
+	// (origin in source-rect pixels). Needed by Quad's capsule beam-glow pieces, whose
+	// dome ends pivot on the middle of one source edge, not the sprite centre.
+	public void Draw(Texture2D texture, Rectangle source, Vector2 position, float rotation, Vector2 scale, Vector2 origin, Color color)
+	{
+		_beginDrawing();
+		spriteBatch.Draw(texture, position, (Rectangle?)source, color, rotation, origin, scale, (SpriteEffects)0, 0f);
+	}
+
 	public void Draw(Texture2D texture, Rectangle source, Vector2 position, float rotation, float scale, bool center, Color color, SpriteEffects spriteEffects)
 	{
 		//IL_0021: Unknown result type (might be due to invalid IL or missing references)

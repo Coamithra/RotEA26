@@ -140,6 +140,24 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
+		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
+		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull
+		// hue band/target in real time so the sliders retune without a page reload — same
+		// effect as the ?huestart/?hueend/?huetarget/?huecycle/?hueloop URL flags, just live.
+		// trackHp == true pins nothing (Target follows HP, the shipped default); false pins the
+		// Target to `target`. Only bites while the harness is up (HarnessColorize gates on it).
+		[JSInvokable("debugSetHue")]
+		public static void SetHue(double start, double end, double target, bool trackHp, bool cycle, double loop)
+		{
+			DebugFlags.SetHueOverride(
+				(float)start,
+				(float)end,
+				trackHp ? (float?)null : (float)target,
+				cycle,
+				(float)loop);
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first

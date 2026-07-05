@@ -133,6 +133,20 @@
             catch (e) { console.warn('[debug] eaHitboxes failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
+        // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
+        // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>
+        // Target auto-sweeps. Console: eaHue(-10, 10, 120, false, false) to pin a band+target.
+        window.eaHue = (start, end, target, trackHp, cycle, loop) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetHue',
+                    Number(start) || 0, Number(end) || 0, Number(target) || 0,
+                    trackHp !== false && (trackHp === true || target == null),
+                    cycle === true, Number(loop) || 6);
+            }
+            catch (e) { console.warn('[debug] eaHue failed (game not booted yet?): ' + e.message); }
+        };
+
         // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
         // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
         // and permanently freezes the tab. We swallow a bad frame and keep looping so one
@@ -816,6 +830,135 @@
             try { return DotNet.invokeMethod("EvilAliensWeb", "ExportPreloadManifest"); }
             catch (e) { console.warn("eaPreloadExport failed (game not ready?)", e); return ""; }
         };
+    </script>
+
+    <!-- Live colorize-tuner slider panel for the ?harness=battleskull page (card 632d4cf7).
+         The BattleSkull "lightbulb" boss hue tuner was URL-flag only, so every nudge meant a
+         full page reload. This overlay drives Compat/DebugInput.SetHue (via eaHue) so the band
+         [start,end] + Target hue can be DRAGGED in real time. Built outside #app so it survives
+         Blazor's mount, and only created on the battleskull harness — a normal boot gets no
+         extra DOM and stays byte-identical. Positioned top-right (the game draws its own readout
+         top-left). -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]harness=battleskull\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?hue* flags already on the URL, else the in-game coded
+            // defaults: band (-10,10) and the full-HP green Target (100).
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var urlCycle = /[?&](huecycle|huesweep)\b/i.test(q);
+            var urlTarget = /[?&](huetarget|hue)=/i.test(q);
+            var st = {
+                start: num("huestart", -10),
+                end: num("hueend", 10),
+                target: num("huetarget", num("hue", 100)),
+                trackHp: !urlTarget && !urlCycle,   // pin the Target only if the URL did
+                cycle: urlCycle,
+                loop: num("hueloop", 6)
+            };
+
+            // Push the current state into the game. Returns false (and is retried) until the
+            // .NET runtime is up — eaHue swallows the pre-boot throw, so we call DotNet directly.
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetHue',
+                        st.start, st.end, st.target, st.trackHp, st.cycle, st.loop);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-hue{position:fixed;top:10px;right:10px;z-index:99999;width:260px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(150,140,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-hue h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#c9b8ff}" +
+                "#ea-hue .row{margin:7px 0}" +
+                "#ea-hue label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-hue .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-hue input[type=range]{width:100%;margin:3px 0 0;accent-color:#8f7bff}" +
+                "#ea-hue .chk{display:flex;align-items:center;gap:6px;margin:6px 0;cursor:pointer}" +
+                "#ea-hue .chk input{accent-color:#8f7bff}" +
+                "#ea-hue .dim{opacity:.4}" +
+                "#ea-hue .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(150,140,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-hue .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-hue";
+            el.innerHTML =
+                "<h4>Colorize tuner &mdash; BattleSkull</h4>" +
+                "<div class='row'><label>Band start<span class='v' id='eh-vs'></span></label>" +
+                "<input type='range' id='eh-start' min='-180' max='180' step='1'></div>" +
+                "<div class='row'><label>Band end<span class='v' id='eh-ve'></span></label>" +
+                "<input type='range' id='eh-end' min='-180' max='180' step='1'></div>" +
+                "<div class='row' id='eh-trow'><label>Target hue<span class='v' id='eh-vt'></span></label>" +
+                "<input type='range' id='eh-target' min='0' max='360' step='1'></div>" +
+                "<label class='chk'><input type='checkbox' id='eh-hp'> Target tracks HP</label>" +
+                "<label class='chk'><input type='checkbox' id='eh-cyc'> Auto-cycle target</label>" +
+                "<div class='out' id='eh-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
+                "then paste them to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var elStart = el.querySelector("#eh-start"), elEnd = el.querySelector("#eh-end"),
+                elTarget = el.querySelector("#eh-target"), elHp = el.querySelector("#eh-hp"),
+                elCyc = el.querySelector("#eh-cyc"), elTrow = el.querySelector("#eh-trow"),
+                elOut = el.querySelector("#eh-out"),
+                vs = el.querySelector("#eh-vs"), ve = el.querySelector("#eh-ve"), vt = el.querySelector("#eh-vt");
+
+            function render()
+            {
+                elStart.value = st.start; elEnd.value = st.end; elTarget.value = st.target;
+                elHp.checked = st.trackHp; elCyc.checked = st.cycle;
+                vs.textContent = st.start; ve.textContent = st.end;
+                vt.textContent = st.trackHp ? "HP" : (st.cycle ? st.target + " (cycling)" : st.target);
+                // The Target slider is inert while the Target follows HP.
+                elTrow.classList.toggle("dim", st.trackHp);
+                elTarget.disabled = st.trackHp;
+                var flags = "huestart=" + st.start + " hueend=" + st.end;
+                if (st.cycle) { flags += st.trackHp ? " huecycle" : (" huetarget=" + st.target + " huecycle"); }
+                else if (!st.trackHp) { flags += " huetarget=" + st.target; }
+                else { flags += "  (target: HP-based, i.e. the shipped default)"; }
+                elOut.textContent = flags;
+            }
+
+            function changed() { render(); push(); }
+
+            elStart.addEventListener("input", function () { st.start = +elStart.value; changed(); });
+            elEnd.addEventListener("input", function () { st.end = +elEnd.value; changed(); });
+            elTarget.addEventListener("input", function () { st.target = +elTarget.value; changed(); });
+            elHp.addEventListener("change", function () { st.trackHp = elHp.checked; changed(); });
+            elCyc.addEventListener("change", function () { st.cycle = elCyc.checked; changed(); });
+            elOut.addEventListener("click", function ()
+            {
+                var t = elOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+
+            render();
+            // Keep pushing until the .NET runtime is booted, then stop (input events push after).
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
     </script>
 </body>
 

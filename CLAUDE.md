@@ -467,6 +467,14 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   hue band, in-game -10/10), `?huetarget=<deg>` (alias `?hue`, pin the target; default = HP-based),
   `?huecycle` (auto-sweep the target 0..360 so a screenshot shows any point; `?hueloop=<sec>` period).
   `HarnessScene` shows a live `colorize band [..]  target ..` readout (`HarnessColorize.Describe`).
+  **LIVE SLIDER PANEL (no reload needed):** `?harness=battleskull` now shows a top-right HTML slider
+  panel (built in `index.html` outside `#app`, ONLY on that harness so a normal boot is byte-identical)
+  that drags the band start/end + target hue + track-HP/auto-cycle toggles in REAL TIME — it drives
+  `window.eaHue` -> `Compat/DebugInput.SetHue` ([JSInvokable `debugSetHue`]) -> `DebugFlags.SetHueOverride`,
+  which `HarnessColorize.Apply` reads every frame, so a drag recolours the boss on the next Draw. The
+  panel's readout line prints the `huestart=/hueend=/huetarget=` string to paste back for baking in. The
+  `?hue*` URL flags still work and seed the sliders' initial values. `eaHue(start,end,target,trackHp,cycle,loop)`
+  is also callable from the console.
   Picker: `wwwroot/harness.html` (battleskull option + hue fields). When the user settles on values,
   the chosen band/target get written back into `BattleSkull.Draw`'s hard-coded `new Vector3(...)` (and
   the target curve if they change how it tracks HP). e.g. `?harness=battleskull&huestart=-20&hueend=40&huecycle`.

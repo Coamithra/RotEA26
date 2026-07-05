@@ -278,6 +278,23 @@ namespace EvilAliensWeb.Compat
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
 
+		// Runtime setter for the live slider panel (Compat/DebugInput.SetHue -> eaHue() in
+		// index.html, shown on the ?harness=battleskull page). Lets the band/target be dragged
+		// in real time instead of reloading with new ?hue* flags each nudge. HarnessColorize.Apply
+		// reads these properties every frame, so a set here is picked up on the very next Draw.
+		// `target == null` => the Target tracks HP (the shipped default); a non-null value pins it.
+		internal static void SetHueOverride(float? start, float? end, float? target, bool cycle, float loop)
+		{
+			HueStart = start;
+			HueEnd = end;
+			HueTarget = target;
+			HueCycle = cycle;
+			if (loop > 0f)
+			{
+				HueLoopSeconds = loop;
+			}
+		}
+
 		// SpiderBoss "helper mothership" feel knobs (Game/EvilAliens/SpiderHelperMothership.cs +
 		// the trigger in SpiderBoss.cs). Every N completed jump->fly->land CYCLES (N is set ONCE at the
 		// fight's start from the difficulty modifier -- baselines Easy/Medium 1, Hard 2, Very_Hard 3,

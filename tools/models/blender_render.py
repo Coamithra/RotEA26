@@ -85,6 +85,13 @@ def setup_render(scene, job):
     scene.render.resolution_y = job["height"]
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = True
+    # Blender 4.x defaults to the AgX view transform, which desaturates and lifts —
+    # bright cyan emission renders near-white and dark albedo washes out. Game sprites
+    # want the punchy clipped look, so default to Standard (job can override).
+    try:
+        scene.view_settings.view_transform = job.get("view_transform", "Standard")
+    except Exception:
+        pass  # older Blender without that transform name — keep its default
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
     # EEVEE across versions: Next (4.2+), classic, then Workbench as a last resort.

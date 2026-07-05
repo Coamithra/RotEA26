@@ -89,6 +89,7 @@ def render_frames(blender: str, obj: dict, out_dir: str) -> list[str]:
         "camera": obj.get("camera", {}),
         "light": obj.get("light", {}),
         "samples": obj.get("samples", 64),
+        "view_transform": obj.get("view_transform", "Standard"),
     }
     job_path = os.path.join(out_dir, "_job.json")
     with open(job_path, "w", encoding="utf-8") as fh:

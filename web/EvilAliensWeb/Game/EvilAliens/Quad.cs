@@ -15,6 +15,8 @@ public class Quad
 
 	private Texture2D glow;
 
+	private Texture2D beamCone;
+
 	private Vector3 origin;
 
 	private Vector3 upperLeft;
@@ -43,10 +45,10 @@ public class Quad
 	private const float MuzzleFlareScale = 2.0f; // muzzle bloom diameter vs core width
 	private const float ArcThickness = 2.0f;     // electric tendril core thickness (design px)
 	private const int ArcLevels = 3;             // midpoint-displacement subdivisions per tendril
-	// Rounded end-caps (Trello "improve laser animation"): the lazermiddle strip has no soft
-	// falloff ALONG its length, so the beam ends read as flat/"chopped" and the big tip/muzzle
-	// blooms leave a seam where the rectangle meets them. A width-sized round cap (the glow
-	// circle) at each end domes the flat edge off. Scale is tunable via ?lazercapscale=.
+	// Rounded ends (Trello "improve laser animation"): a stretched strip has no falloff
+	// ALONG its length, so the beam ends read as flat/"chopped". Both beam layers draw as
+	// seamless capsules (DrawCapsuleBeam) whose dome length this scales. Tunable via
+	// ?lazercapscale=; 0 = flat ends.
 	private const float DefaultCapScale = 1.0f;
 	// Electric tendrils SPAWN STOCHASTICALLY (a per-frame Bernoulli trial at DefaultArcRate/sec, the
 	// RandomHelper.RandomFromAverage model) instead of a fixed handful on a shared cadence -- so they
@@ -132,7 +134,18 @@ public class Quad
 			alreadyloaded = true;
 			ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 			middle = contentManager.Load<Texture2D>("GFX/Sprites/lazermiddle");
-			glow = contentManager.Load<Texture2D>("GFX/Sprites/singleconnectorglow");
+			// lazerglow is a clean radial glow with a smooth falloff to exact zero, built by
+			// tools/textures/build_lazer_glow.py. Do NOT swap back to singleconnectorglow:
+			// that's the PlayerShip's ringed connector ORB, whose halo stops dead at ~65% of
+			// the frame - scaled up for the flares/caps, the hard ring edge makes the beam's
+			// emitted light visibly "cut off" in a circle around the muzzle/tip.
+			glow = contentManager.Load<Texture2D>("GFX/Sprites/lazerglow");
+			// lazerbeam is the cone-profile capsule texture for BOTH beam layers: its centre
+			// row reproduces lazermiddle's triangle across profile, so the glow keeps its
+			// original apparent width and the core its body, while the ends fade radially
+			// instead of stopping at a flat strip edge. (Don't draw the beam layers with the
+			// gaussian lazerglow -- its energy hugs the centre and visibly narrows the halo.)
+			beamCone = contentManager.Load<Texture2D>("GFX/Sprites/lazerbeam");
 		}
 	}
 
@@ -181,21 +194,16 @@ public class Quad
 
 		SpriteBlendMode oldMode = sb.BlendMode;
 		sb.BlendMode = SpriteBlendMode.Additive;
-		// wide soft blue glow, then the bright hot core -- each a single continuous sprite, so
-		// the old core/cap rasterisation crack can't form.
-		DrawBeam(sb, middle, bodyCenter, rotation, width * GlowWidthScale, bodyLen + width, GlowColor);
-		DrawBeam(sb, middle, bodyCenter, rotation, width, bodyLen, CoreColor);
-		// Rounded end-caps: dome off the beam's otherwise flat/"chopped" ends (and hide the
-		// core/flare seam) with a width-sized round glow at each end -- a wide glow-colour cap
-		// under a hot core-colour cap, matching the beam's two layers.
 		float cap = CapScale;
-		if (cap > 0f)
-		{
-			DrawFlare(sb, tip, width * GlowWidthScale * cap, GlowColor);
-			DrawFlare(sb, tail, width * GlowWidthScale * cap, GlowColor);
-			DrawFlare(sb, tip, width * cap, CoreColor);
-			DrawFlare(sb, tail, width * cap, CoreColor);
-		}
+		// Both beam layers draw as seamless CAPSULES (see DrawCapsuleBeam) of the cone
+		// texture, whose centre row matches lazermiddle's triangle across profile -- so the
+		// wide blue glow and the hot core look exactly like the old stretched-strip layers.
+		// The strip itself is gone because it's constant along its length: its flat ends
+		// were a visible brightness STEP that no additively-drawn round cap could erase --
+		// the emitted light "cut off" in a hard line at the tip/muzzle row wherever the
+		// flares didn't saturate. The capsule ends fade radially to zero instead.
+		DrawCapsuleBeam(sb, beamCone, bodyCenter, tip, tail, rotation, width * GlowWidthScale, bodyLen, cap, GlowColor);
+		DrawCapsuleBeam(sb, beamCone, bodyCenter, tip, tail, rotation, width, bodyLen, cap, CoreColor);
 		// electric tendrils crackling off the beam (shortlived, respawn all over -- see DrawArcs)
 		DrawArcs(sb, tail, axis, perp, bodyLen, time);
 		// round flares blooming at the leading tip (gently pulsing) and the muzzle
@@ -218,6 +226,33 @@ public class Quad
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 scale = new Vector2(acrossPx / (float)tex.Width, alongPx / (float)tex.Height);
 		sb.Draw(tex, center, rotation, scale, center: true, color);
+	}
+
+	// Draws one beam layer as a CAPSULE built from a radial texture: its centre row
+	// stretched along the body (so the across profile is the texture's radial profile,
+	// fading to exact zero at the sides) plus its top/bottom halves as dome ends. The dome's
+	// innermost row IS the centre row at the same across scale, so the seam is continuous by
+	// construction -- the emitted light dissolves smoothly past both ends instead of stopping
+	// at the strip's flat edge. capLen (?lazercapscale=) stretches the domes along the axis;
+	// 0 = flat "chopped" ends, the A/B baseline.
+	private void DrawCapsuleBeam(SpriteBatchWrapper sb, Texture2D tex, Vector2 bodyCenter, Vector2 tip, Vector2 tail, float rotation, float acrossPx, float alongPx, float capLen, Color color)
+	{
+		int texW = tex.Width;
+		int texH = tex.Height;
+		float sx = acrossPx / (float)texW;
+		// middle: a 2px band through the texture centre, stretched to the body length
+		sb.Draw(tex, new Rectangle(0, texH / 2 - 1, texW, 2), bodyCenter, rotation, new Vector2(sx, alongPx / 2f), new Vector2(texW / 2f, 1f), color);
+		if (capLen > 0f)
+		{
+			// dome ends: the texture's top half, pivoted on its bottom-centre so it bulges
+			// outward from the end point (local -Y maps to the beam's outward axis; the
+			// tail dome is the same piece spun half a turn).
+			Rectangle half = new Rectangle(0, 0, texW, texH / 2);
+			Vector2 pivot = new Vector2(texW / 2f, texH / 2f);
+			Vector2 domeScale = new Vector2(sx, sx * capLen);
+			sb.Draw(tex, half, tip, rotation, domeScale, pivot, color);
+			sb.Draw(tex, half, tail, rotation + (float)Math.PI, domeScale, pivot, color);
+		}
 	}
 
 	// Blooms the round glow texture to ~diameterPx, centred (it's radial, so rotation is moot).

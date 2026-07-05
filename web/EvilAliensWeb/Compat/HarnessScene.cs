@@ -109,6 +109,20 @@ namespace EvilAliensWeb.Compat
                 return;
             }
 
+            // ?cast: the FULL end-credits Cast screen (every member), run through the real
+            // CastDisplayer state machine. Enter advances to the next member (each asplodes as
+            // in the real cast); Esc exits to the menu via the normal handler below. Reuses the
+            // castBrain field purely as the holder so the cleanup at the bottom removes it.
+            if (DebugFlags.CastShow)
+            {
+                castBrain = new CastDisplayer(base.Game);
+                castBrain.owner = (GameComponent)(object)this;
+                castBrain.CastShowcase = true;
+                ((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)castBrain);
+                label = "cast (full)   Enter: next member   Esc: menu";
+                return;
+            }
+
             objPos = new Vector2(DebugFlags.HarnessX ?? 400f, DebugFlags.HarnessY ?? 300f);
 
             if (!HarnessRegistry.TryGet(DebugFlags.Harness, out var factory))

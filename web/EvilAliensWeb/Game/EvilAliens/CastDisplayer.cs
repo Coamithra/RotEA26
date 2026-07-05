@@ -107,8 +107,11 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	// Card 208da2fe: the "Brain Spawn" cast entry shows the animated cyborg-brain sheet
 	// (brainanimated) with the additive blue glow (brainanimatedglow) behind it — the same
 	// art the in-game Braineroid uses — instead of the old static brainlargetransglow. The
-	// cast draws frames by hand (no interpolation shader), so it plays the 20-frame sheet at
-	// a higher fps than the in-game 0.4 (which relies on interpolation to fill the gaps).
+	// brain frame is drawn through the same interpolate.fx cross-fade the in-game Braineroid
+	// uses (DrawInterpolatedFrame, gated by ShouldInterpolate), so the sparse 20-frame sheet
+	// plays smooth; because the
+	// shader fills the gaps, BrainFps can stay low like the in-game 0.4. The other cast
+	// members hand-step single frames, which reads fine at their denser fps.
 	private Texture2D brainGlow;
 
 	// Baked defaults for the cast brain's on-screen size + animation speed. Overridable by eye
@@ -133,6 +136,11 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	// input, so the cast brain can be viewed + tuned in place via HarnessScene. Set before the
 	// component is added (so Initialize sees it); false in normal play.
 	public bool BrainShowcase;
+
+	// Debug (?cast): run the FULL cast state machine via HarnessScene (DebugFlags.CastShow).
+	// Unlike BrainShowcase it does not lock to one entry — Enter advances through every
+	// member. Set before the component is added (so Initialize sees it); false in normal play.
+	public bool CastShowcase;
 
 	private static float BrainScale => EvilAliensWeb.Compat.DebugFlags.CastBrainScale ?? DefaultBrainScale;
 
@@ -214,6 +222,13 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			alienname = "Brain Spawn";
 			alientext = "Their eons-long goal is to destroy all other intelligent life,\nsince the thoughts of other beings screech at them like the\nforced laughs of a billion art-house movie patrons.";
 			stateTimer.Stop();
+		}
+		// ?cast (full cast): start on intro but cut its 17s hold to a blink so it flips to the
+		// first real member (ufo) immediately. The intro state draws nothing, and ufo's Update
+		// sets its name/text before the first non-early-return Draw, so no first-frame NRE.
+		if (CastShowcase)
+		{
+			stateTimer.Duration = 100f;
 		}
 		spiderdeadtimer.Stop();
 	}
@@ -310,8 +325,9 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			alienname = "Brain Spawn";
 			alientext = "Their eons-long goal is to destroy all other intelligent life,\nsince the thoughts of other beings screech at them like the\nforced laughs of a billion art-house movie patrons.";
 			// Animated cyborg-brain sheet (5 cols x 4 rows, 20 frames) — same art as the
-			// in-game Braineroid. The cast steps frames raw (no interpolation shader), so it
-			// runs at BrainFps rather than the in-game 0.4 fps. The glow is drawn in Draw().
+			// in-game Braineroid. Draw() cross-fades frames through interpolate.fx
+			// (DrawInterpolatedFrame), so BrainFps can be low and still play smooth. The
+			// glow is drawn in Draw() too.
 			EnsureAnimation(new AnimationData("GFX/Sprites/brainanimated", 4, 5, 0, BrainFps, 0, 20));
 			_time += (float)gameTime.ElapsedGameTime.TotalSeconds;
 			float num2 = 1f + (1f + (float)Math.Sin(_time * 3.32f)) * 0.07f;
@@ -735,6 +751,73 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 	}
 
+	// Which cast members animate through the interpolation shader — the ones whose in-game
+	// object also interpolates. In-game, animated sprites go through
+	// AlienDrawableGameComponent.Draw, which interpolates unless interpolationOptions == never;
+	// the ones that DON'T interpolate in-game must not here either, or the cast would look
+	// smoother than gameplay. Excluded (stepped, matching gameplay): the Alien Battleship
+	// (boss = Boss/MarsBoss, both interpolationOptions=never), the Spider Wasp (spider =
+	// Spider/FlyingSpider, never), the Spider Stag (spiderboss = SpiderBoss, never), and the
+	// Alien Ruler (battleskull) — the in-game BattleSkull draws its AnimatedSprite by raw
+	// integer frame, no interpolation. (spiderboss/battleskull are drawn via AnimatedSprite,
+	// not this slice path, and brainboss is a single frame, so they never reach the branch
+	// that consults this — they're named for the record.) The included ones (UFO, Brain Spawn,
+	// Fleet Commander Drone/junkboss, Evil Grinning Face of Death/evilskull, Death Star, The
+	// Unnamed Hero/playership) all call base.Draw in-game with interpolationOptions != never.
+	private static bool ShouldInterpolate(CastState state)
+	{
+		switch (state)
+		{
+		case CastState.ufo:
+		case CastState.braineroid:
+		case CastState.junkboss:
+		case CastState.evilskull:
+		case CastState.deathstar:
+		case CastState.playership:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	// Source rect of one frame of the currently loaded sheet (same grid math as Draw's slice
+	// path and AlienDrawableGameComponent.getFrameRectangle).
+	private Rectangle FrameRect(int frame)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		int row = frame / columns;
+		int col = frame % columns;
+		int frameWidth = (texture.Width - (columns - 1) * separatingspace) / columns;
+		int frameHeight = (texture.Height - (rows - 1) * separatingspace) / rows;
+		return new Rectangle(col * (frameWidth + separatingspace), row * (frameHeight + separatingspace), frameWidth, frameHeight);
+	}
+
+	// Draw the current animation frame with frame-to-frame interpolation, mirroring
+	// AlienDrawableGameComponent.drawWithInterpolation for the non-additive (blend mode 1)
+	// case: the interpolate.fx variant samples the current frame AND the next (at UV +
+	// Offset) and lerps by Delta = the fractional frame, and fade.fx carries the (white)
+	// tint. CastDisplayer plays the full sheet (curframe wraps at rows*columns), so the next
+	// frame wraps back to 0. This is the one cast draw path that interpolates — the others
+	// hand-step single frames; ShouldInterpolate gates which states route here.
+	private void DrawInterpolatedFrame(Vector2 center)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		int frame = (int)curframe;
+		float delta = curframe % 1f;
+		int total = rows * columns;
+		int nextFrame = (frame + 1) % total;
+		Rectangle rect = FrameRect(frame);
+		Rectangle nextRect = FrameRect(nextFrame);
+		spriteBatch.interpolateEffect.Enable();
+		spriteBatch.interpolateEffect.Offset = new Vector2((nextRect).Left - (rect).Left, (nextRect).Top - (rect).Top) / new Vector2((float)texture.Width, (float)texture.Height);
+		spriteBatch.interpolateEffect.Delta = delta;
+		spriteBatch.fadeEffect.Enable();
+		spriteBatch.fadeEffect.Value = (color).ToVector4();
+		spriteBatch.Draw(texture, rect, center, rotation, scale / textureScale, center: true, color, spriteEffects);
+		spriteBatch.interpolateEffect.Disable();
+		spriteBatch.fadeEffect.Disable();
+	}
+
 	public override void Draw(GameTime gameTime)
 	{
 		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
@@ -838,22 +921,34 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 			}
 			// Additive blue glow behind the animated Brain Spawn (mirrors Braineroid.DrawGlow);
 			// drawn before the brain frame so it sits behind. Resets BlendMode to normal after.
+			// Additive blue glow behind the animated Brain Spawn only (mirrors Braineroid.DrawGlow).
 			if (state == CastState.braineroid)
 			{
 				DrawBrainGlow(gameTime, val3 + new Vector2(0f, num));
 			}
 			if ((columns > 1) | (rows > 1))
 			{
-				int num2 = (int)curframe;
-				int num3 = num2 / columns;
-				int num4 = num2 % columns;
-				int num5 = texture.Width - (columns - 1) * separatingspace;
-				num5 /= columns;
-				int num6 = texture.Height - (rows - 1) * separatingspace;
-				num6 /= rows;
-				Rectangle source = default(Rectangle);
-				(source) = new Rectangle(num4 * (num5 + separatingspace), num3 * (num6 + separatingspace), num5, num6);
-				spriteBatch.Draw(texture, source, val3 + new Vector2(0f, num), rotation, scale / textureScale, center: true, color, spriteEffects);
+				// Cast members whose in-game object interpolates get the same interpolate.fx
+				// cross-fade here, so sparse sheets play smooth instead of stepping; the rest
+				// (mothership, spiders — interpolationOptions=never in-game) hand-step, matching
+				// gameplay. See ShouldInterpolate.
+				if (ShouldInterpolate(state))
+				{
+					DrawInterpolatedFrame(val3 + new Vector2(0f, num));
+				}
+				else
+				{
+					int num2 = (int)curframe;
+					int num3 = num2 / columns;
+					int num4 = num2 % columns;
+					int num5 = texture.Width - (columns - 1) * separatingspace;
+					num5 /= columns;
+					int num6 = texture.Height - (rows - 1) * separatingspace;
+					num6 /= rows;
+					Rectangle source = default(Rectangle);
+					(source) = new Rectangle(num4 * (num5 + separatingspace), num3 * (num6 + separatingspace), num5, num6);
+					spriteBatch.Draw(texture, source, val3 + new Vector2(0f, num), rotation, scale / textureScale, center: true, color, spriteEffects);
+				}
 			}
 			else
 			{

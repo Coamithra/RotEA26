@@ -355,6 +355,13 @@ namespace EvilAliensWeb.Compat
 		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
 		public static bool CastBrain { get; private set; }
 
+		// Full end-credits Cast viewer (?cast): boot the WHOLE CastDisplayer state machine
+		// (not the brain-locked showcase) through HarnessScene, so every cast member can be
+		// stepped through with Enter. The real Cast screen is only reachable after beating
+		// Level 3 on Hard; this is the way to eyeball it (e.g. the per-member frame
+		// interpolation). True => SkipSplash + AutoStart, routes into the harness.
+		public static bool CastShow { get; private set; }
+
 		// On-screen scale + animation fps of the cast "Brain Spawn" specimen. null => the baked
 		// defaults in CastDisplayer, so a shipped build is unchanged; these override for by-eye
 		// tuning via ?castbrain (the blast/colorize-tuner pattern). ?castbrainscale= / ?castbrainfps=
@@ -718,6 +725,14 @@ namespace EvilAliensWeb.Compat
 						AutoStart = true;
 					}
 					break;
+				case "cast":
+					CastShow = IsOn(val);
+					if (CastShow)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
 				case "castbrainscale":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbs) && cbs > 0f)
 					{
@@ -856,7 +871,7 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || CastBrain;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || CastBrain || CastShow;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

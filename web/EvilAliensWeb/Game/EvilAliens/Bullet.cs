@@ -208,9 +208,10 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 		//IL_0378: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0382: Unknown result type (might be due to invalid IL or missing references)
 		bool flag = true;
-		// The helper mothership is un-killable (fake damage only) — bullets should be consumed by it
-		// (below) but must NOT sustain combos off it, or a player could farm combo on an immortal ship.
-		if (other is Asteroid || (other is Ball && !((Ball)other).IsConnected()) || other is SpiderHelperMothership)
+		// Asteroids + loose (unconnected) Balls don't sustain a combo. (The helper mothership used to be
+		// excluded here too, as an immortal fake-damage target -- it's now killable, so it keeps the combo
+		// alive like any other alien.)
+		if (other is Asteroid || (other is Ball && !((Ball)other).IsConnected()))
 		{
 			flag = false;
 		}

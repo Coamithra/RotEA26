@@ -313,6 +313,34 @@ internal abstract class GameScene : Scene
 		}
 	}
 
+	// Shared per-difficulty policy, applied by each story level (Level1/2/3) right after base.Initialize
+	// -- which clears the two flags below to false, so a non-Easy tier ends up non-adaptive. This block
+	// was copy-pasted verbatim in all three levels.
+	// "Easy" is NOT a flat-low setting -- it is the ADAPTIVE / forgiving mode: it SEEDS the modifier at
+	// Medium's value (so the opening isn't trivially slow), turns on DirectRespawn (die -> respawn in
+	// place, keep level progress), and flags AdaptiveDifficulty. That flag is a slight misnomer: the
+	// time-ramp (Settings.Update) runs on EVERY non-locked difficulty regardless; the flag only changes
+	// the edges -- on death Settings.ResetDifficulty eases 20% (x0.8) instead of hard-resetting to the
+	// tier floor, and the ramp ceiling rises to Inzane*2 instead of tier*2. So Easy vs Medium start
+	// identical (both 0.6) and only diverge once you die or survive a long time. Hard and up instead
+	// get extra starting lives.
+	protected void ApplyDifficultyPolicy()
+	{
+		Settings settings = Settings.GetInstance();
+		if (settings.CurrentDifficulty == Settings.DifficultyLevel.Easy)
+		{
+			settings.DirectRespawn = true;
+			settings.AdaptiveDifficulty = true;
+			settings.DifficultyModifier = settings.GetDifficultyValue(Settings.DifficultyLevel.Medium);
+		}
+		if (settings.CurrentDifficulty == Settings.DifficultyLevel.Hard
+			|| settings.CurrentDifficulty == Settings.DifficultyLevel.Very_Hard
+			|| settings.CurrentDifficulty == Settings.DifficultyLevel.Inzane)
+		{
+			score.Lives = 7;
+		}
+	}
+
 	public override void Initialize()
 	{
 		Settings.GetInstance().AdaptiveDifficulty = false;

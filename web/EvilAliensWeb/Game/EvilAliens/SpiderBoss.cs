@@ -32,11 +32,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// flyup->flyleft) already paused for the waittimer's old default 1000ms (flyPauseMs preserves
 	// that exactly -- don't drop those two assignments or the land value leaks in). The
 	// flyright->land turn (fly off the right edge, then drop from the top to land) had NO pause, so
-	// the warning fired the instant the descent began; it now holds for the longer landWarningLeadMs
-	// -- deliberately > flyPauseMs -- to give the player time to fly clear before the boss drops in.
+	// the warning fired the instant the descent began; it now holds for landWarningLeadMs, kept EQUAL to
+	// flyPauseMs so every spider warning leads by a consistent ~1s.
 	private const float flyPauseMs = 1000f;
 
-	private const float landWarningLeadMs = 1500f;
+	private const float landWarningLeadMs = 1000f;
 
 	private AnimatedSprite spiderStand;
 
@@ -64,13 +64,34 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private Timer waittimer = new Timer(1000f, repeating: false);
 
-	// "Helper" mothership: if the boss goes un-damaged for this long, a mothership flies over and
-	// lasers it (see SpiderHelperMothership) so a stuck player gets a clear, understandable nudge.
-	// The timer resets on every landed hit AND on each spawn, so help arrives at most every ~30s of
-	// no progress. Threshold + the helper's own feel knobs are tunable via DebugFlags (?spiderhelper*).
-	private Timer helpTimer = new Timer(30000f, repeating: false);
-
+	// "Helper" mothership: a friendly mothership periodically flies over and lasers the boss (see
+	// SpiderHelperMothership), keeping the Lazer-only-damageable fight legible. It arrives every N
+	// completed jump->fly->land CYCLES, where N scales with difficulty (HelperCyclePeriod); the intro
+	// landing doesn't count. Feel knobs + ?spiderhelpercycles live in DebugFlags (?spiderhelper*).
 	private SpiderHelperMothership helper;
+
+	// Set true the first time the boss lands (end of the intro fly-in); cycle counting starts after it.
+	private bool hasLanded;
+
+	// Completed jump->fly->land cycles since the last helper (or since the intro landing). When it
+	// reaches helperCycleTarget the helper is summoned and this resets to 0.
+	private int landingsSinceHelper;
+
+	// The summon interval for THIS whole boss fight, sampled ONCE at the first landing (see the landing
+	// logic) and held -- so the modifier's ramp can't drift it mid-fight (Very Hard stays 3 for all its
+	// summons, not 3 then 4 then 5). It still scales by difficulty, just at fight granularity: the sample
+	// is the fight-start modifier, so a higher tier -- or a long no-death run that's ramped in -- locks a
+	// bigger interval.
+	private int helperCycleTarget;
+
+	// A warning arrow LEADS the helper's arrival by HelperWarningLeadMs (like the boss's own Danger
+	// warns lead its fly-bys, flyPauseMs 1000): at the trigger landing we fire the arrow + arm this
+	// timer, and only fly the mothership in when it finishes. helperPending gates the interval between.
+	private const float HelperWarningLeadMs = 1000f;
+
+	private Timer helpWarningTimer = new Timer(HelperWarningLeadMs, repeating: false);
+
+	private bool helperPending;
 
 	private List<Lazer> alreadyHitBy = new List<Lazer>();
 
@@ -219,7 +240,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		timers.Add(stateTimer);
 		timers.Add(hittimer);
 		timers.Add(waittimer);
-		timers.Add(helpTimer);
+		timers.Add(helpWarningTimer);
 		PointValue = 2000f;
 	}
 
@@ -315,7 +336,8 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		dunceTimer.Reset();
 		dunceTimer.Start();
 		hittimer.Stop();
-		hp = (int)(5f * Settings.GetInstance().DifficultyFactorized(0.75f));
+		// ?spiderbosshp=<n> overrides the pool so the boss survives many helper cycles while tuning.
+		hp = EvilAliensWeb.Compat.DebugFlags.SpiderBossHp ?? (int)(5f * Settings.GetInstance().DifficultyFactorized(0.75f));
 		base.Initialize();
 		debrisposition.Clear();
 		debrisspeed.Clear();
@@ -327,9 +349,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		currentAnimation = spiderFly;
 		animationProgress = 0f;
 		helper = null;
-		helpTimer.Duration = EvilAliensWeb.Compat.DebugFlags.SpiderHelperIdleSeconds * 1000f;
-		helpTimer.Reset();
-		helpTimer.Start();
+		// Cycle counting starts at the boss's FIRST landing (so the intro fly-bys don't count).
+		hasLanded = false;
+		landingsSinceHelper = 0;
+		helperCycleTarget = 0;
+		helperPending = false;
+		helpWarningTimer.Stop();
 	}
 
 	private void ResetTimer(float seconds)
@@ -473,13 +498,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			flag = true;
 		}
 		base.Update(gameTime);
-		// Summon the helper mothership when the boss has gone un-damaged too long (checked even while
-		// paused between fly turns). One at a time; resetting the timer on spawn spaces them out.
-		if (state != SpiderBossState.dead && !base.IsDead && helper == null && helpTimer.Finished)
+		// The warning arrow led by HelperWarningLeadMs; now fly the mothership in. Checked even while
+		// the boss is paused between fly turns, so the lead time is honoured regardless of boss state.
+		if (helperPending && helpWarningTimer.Finished && helper == null && !base.IsDead)
 		{
 			SpawnHelper();
-			helpTimer.Reset();
-			helpTimer.Start();
+			helperPending = false;
 		}
 		if (waittimer.Active)
 		{
@@ -579,6 +603,30 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				base.Position = new Vector2(600f, 400f);
 				ResetTimer(7f);
 				rumble(base.Position);
+				// The intro fly-in ends at the FIRST landing (which does NOT count as a cycle). After
+				// that, every completed jump->fly->land cycle ticks the counter, and every
+				// HelperCyclePeriod() cycles the helper mothership flies in right as the boss hits the
+				// ground. One helper at a time (helper == null).
+				if (!hasLanded)
+				{
+					// Intro fly-in done -- LOCK the summon interval for the whole fight from the difficulty
+					// NOW, sampled ONCE (not per-interval), so the modifier's ~+0.066/cycle ramp can't
+					// drift it mid-fight. A fresh / post-death Very Hard fight is at ~baseline here, so
+					// this is 3, held for all ~9 cycles; a ramped-in or higher-tier fight locks a bigger
+					// value. (Re-sampling each interval instead would climb 3 -> 4 -> 5 over a VH fight.)
+					hasLanded = true;
+					helperCycleTarget = HelperCyclePeriod();
+				}
+				else if (helper == null && !helperPending && !base.IsDead && ++landingsSinceHelper >= helperCycleTarget)
+				{
+					// Fire the warning arrow NOW and fly the mothership in HelperWarningLeadMs later, so
+					// the player gets a ~1s heads-up (the boss is landing anyway -- we know it's coming).
+					WarnHelperIncoming();
+					helpWarningTimer.Reset();
+					helpWarningTimer.Start();
+					helperPending = true;
+					landingsSinceHelper = 0;
+				}
 			}
 			break;
 		case SpiderBossState.standing:
@@ -712,9 +760,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		sound.PlayCue("bugdies");
 		sound.PlayCue("bugdies");
 		hp--;
-		// The boss took damage (incl. from the helper's own laser), so restart the idle countdown.
-		helpTimer.Reset();
-		helpTimer.Start();
 		if (hp <= 0 && !base.IsDead)
 		{
 			switch (state)
@@ -808,6 +853,22 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		isPreload = true;
 	}
 
+	// How many completed jump->fly->land cycles between helper visits, from the difficulty modifier via
+	// DifficultyFactorized. Sampled ONCE per fight (see helperCycleTarget) so within a fight it's fixed;
+	// the scaling is ACROSS fights -- a higher tier, or a run that's ramped in without dying, gets a
+	// bigger interval. 3 * DifficultyFactorized(5/3) is anchored so the tier baselines hit the spec:
+	// Very_Hard(mod 1.0)->3 and Medium(0.6)->1, passing through Hard(0.8)->2 and Inzane(1.2)->4, with
+	// Easy(0.35) clamped up to 1. ?spiderhelpercycles overrides with a fixed raw count.
+	private static int HelperCyclePeriod()
+	{
+		int? overrideCycles = EvilAliensWeb.Compat.DebugFlags.SpiderHelperCycles;
+		if (overrideCycles.HasValue)
+		{
+			return Math.Max(1, overrideCycles.Value);
+		}
+		return Math.Max(1, (int)Math.Round(3f * Settings.GetInstance().DifficultyFactorized(5f / 3f)));
+	}
+
 	private void SpawnHelper()
 	{
 		helper = SpiderHelperMothership.NewHelper(collection, base.Game);
@@ -815,9 +876,37 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperHoverY,
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperSpeed,
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireSeconds * 1000f,
-			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireLead);
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireLead,
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperWindupSeconds * 1000f,
+			this);
 		helper.OnDeath += helper_OnDeath;
 		collection.Add((GameComponent)(object)helper);
+	}
+
+	// A little warning arrow, top-left, announcing the incoming mothership -- visual only (Nothing
+	// speech, no "Danger!" voice). Reuses the boss's own redwarning arrow; points up-left toward where
+	// the helper eases in from. Fired HelperWarningLeadMs BEFORE SpawnHelper so it leads the arrival.
+	private void WarnHelperIncoming()
+	{
+		AnimatedMessage warning = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
+		warning.Setup("Warning!", SoundManager.Texts.Nothing, AnimatedMessage.MessageType.redwarning);
+		warning.SetWarningDirection((float)Math.PI * 5f / 4f);
+		warning.MakeShort();
+		collection.Add((GameComponent)(object)warning);
+	}
+
+	// The centre of the boss's standing hitbox -- where the helper aims its beam on Easy/Medium when
+	// the boss is a stationary (standing) target. Matches the SpiderBossState.standing collision box.
+	public Vector2 GetAimPoint()
+	{
+		return base.Position + new Vector2(20f * scale, 40f * scale);
+	}
+
+	// True while the boss is moving across the screen (fly/jump/land/drop) -- an unreliable aim
+	// target, so the helper shoots straight down then. False only while standing on the ground.
+	public bool IsFlyingAround()
+	{
+		return state != SpiderBossState.standing;
 	}
 
 	private void helper_OnDeath(object sender)

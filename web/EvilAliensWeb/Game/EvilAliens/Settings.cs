@@ -264,6 +264,12 @@ public class Settings : Savable
 		return 1f + (DifficultyModifier - 1f) * factor;
 	}
 
+	// Called on player death. This is the CORE of what "adaptive" means (see also the ceiling in
+	// Update): NON-adaptive tiers hard-reset the ramped modifier back to the tier floor, so a death
+	// undoes all the tension the time-ramp built up; ADAPTIVE (Easy) only eases it 20% -- a gentle
+	// rubber-band DOWN for a struggling player, not a full reset. The time-ramp itself (Update) runs
+	// on every non-locked tier either way, so "adaptive" is a slight misnomer -- it governs the death
+	// rule + ceiling, not whether difficulty changes at all.
 	public void ResetDifficulty()
 	{
 		if (!AdaptiveDifficulty)
@@ -301,6 +307,12 @@ public class Settings : Savable
 	{
 		RandomHelper.RandomNextFloat(0f, 999f);
 		_ = 1f;
+		// The difficulty time-ramp: while NOT locked (challenges/tutorial LockDifficulty, freezing this),
+		// the modifier creeps up every frame (+ elapsedMinutes * 0.17 * tierValue) so a level gets harder
+		// the longer you survive -- on EVERY tier, adaptive or not. The ONLY difference the adaptive flag
+		// makes here is the ceiling: non-adaptive caps at tier*2 (Hard 1.6 / Very_Hard 2.0 / Inzane 2.4),
+		// adaptive caps at Inzane*2 = 2.4 so a strong Easy run can climb as high as Inzane. (Pairs with
+		// ResetDifficulty's death rule above.)
 		if (!_difficultyLocked)
 		{
 			if (!AdaptiveDifficulty)

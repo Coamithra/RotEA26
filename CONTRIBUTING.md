@@ -29,10 +29,12 @@ disabling "Approve" on your own PR is irrelevant — a required review only appl
 branch-protection rule, and this repo has none. Don't stop to ask the user to approve. (If the user
 says "just merge / direct", skip the PR and push straight to `main`.)
 
-**Every push to `main` auto-deploys.** `.github/workflows/deploy.yml` runs `dotnet publish -c Release`
-in CI and publishes to GitHub Pages (https://coamithra.github.io/RotEA26/). So merging to `main` =
-shipping to production. There are no unit tests gating this — **your visual + console verification
-(Phase 5) IS the gate.** If the change touches publish/trim config, do the local Release check in
+**Deploying is MANUAL.** `.github/workflows/deploy.yml` runs `dotnet publish -c Release` in CI and
+publishes to GitHub Pages (https://coamithra.github.io/RotEA26/), but it only fires on
+`workflow_dispatch` — pushing/merging to `main` no longer auto-deploys. When you want to ship, run it
+from the Actions tab or `rtk gh workflow run "Deploy to GitHub Pages"`. There are no unit tests gating
+this — **your visual + console verification (Phase 5) IS the gate.** If the change touches
+publish/trim config, do the local Release check in
 Phase 5 *before* you push, because trimming breakage only surfaces at runtime in the browser.
 
 ---
@@ -282,8 +284,9 @@ trust the markers.
 25. **Open a PR and self-merge** — `rtk gh pr create --fill` then `rtk gh pr merge --merge` (real
     merge commit, not `--squash`, so the branch's commits stay reachable and step 26's
     `git branch -d` works), then `rtk git pull origin main` to fast-forward the root checkout.
-    **No approval needed** (unprotected solo repo). **The merge auto-deploys to GitHub Pages** —
-    confirm the Pages run goes green (`rtk gh run list`) and, for anything content/path-sensitive,
+    **No approval needed** (unprotected solo repo). **Merging does NOT deploy** — when you're ready to
+    ship, trigger the deploy by hand (`rtk gh workflow run "Deploy to GitHub Pages"` or the Actions
+    tab), confirm the Pages run goes green (`rtk gh run list`) and, for anything content/path-sensitive,
     **spot-check the LIVE URL** (https://coamithra.github.io/RotEA26/), not just localhost.
 26. **Clean up the worktree and branch** — kill your dev server FIRST (it holds the directory lock and
     squats the slot's port):

@@ -1,10 +1,10 @@
 name: Deploy to GitHub Pages
 
 # Builds the Blazor WebAssembly site (GitHub Pages can't build .NET itself) and
-# publishes wwwroot to Pages. Fires on every push to main; can also be run by hand.
+# publishes wwwroot to Pages. MANUAL only — run it from the Actions tab (or
+# `gh workflow run "Deploy to GitHub Pages"`) when you want to ship. Pushing to main
+# no longer auto-deploys, so you can push often without triggering a build every time.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

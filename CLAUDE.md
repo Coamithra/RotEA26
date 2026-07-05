@@ -25,7 +25,7 @@ it lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programmin
   runbook for this repo — claim the card (Backlog → In Progress), tracker doc, a per-card worktree
   (mandatory; slot `wt1`..`wt8`, dev server on port `528<k>`),
   research → design → implement, the visual+console verification gate (no unit tests here), PR
-  self-merge (every push to `main` auto-deploys to Pages), and the card-close paperwork (move to
+  self-merge (deploy to Pages is MANUAL — `workflow_dispatch`, not on push), and the card-close paperwork (move to
   Done, comment, follow-ups). Read it at the start of any card and work the phases in order.
 
 ## Build / run / verify
@@ -140,7 +140,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   saves** (settings/unlockables/awardments/screenshots → localStorage), **polish** (keyboard controls-help,
   browser fullscreen, favicon/meta, on-screen touch controls), a **unified hi-res render path** (legacy + hi-res art share one window-resolution scene, one bloom/gamma) and a **trimmed download** (9.6 MB
   uncompressed boot payload, ~2.9 MB brotli — down from 25.8 MB) and 0 console exceptions —
-  **deployed publicly at https://coamithra.github.io/RotEA26/**, auto-rebuilt on every push to `main`.
+  **deployed publicly at https://coamithra.github.io/RotEA26/**, rebuilt by a MANUAL `workflow_dispatch` deploy (no longer on every push to `main`).
   Remaining: online co-op (11) + trailers (14); menu reskin (13) in progress. See the archived `plans/plan.md`
   "Stage 4/5/6/7/8/9/10 — DONE" for what changed and the stubs each later stage must un-stub.
 - **Hosting (Stage 8):** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI (Pages

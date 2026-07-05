@@ -375,6 +375,12 @@ public class Game1 : Game
 		{
 			collectionHelper.Add((GameComponent)(object)harnessScene);
 		}
+		// Debug (?cast): reuse the harness scene to run the FULL end-credits Cast screen
+		// (HarnessScene handles the full-cast mode). Esc drops back to the menu, same as above.
+		else if (DebugFlags.CastShow)
+		{
+			collectionHelper.Add((GameComponent)(object)harnessScene);
+		}
 		// Debug (?bulletshot): bypass the menu and boot straight into the bullet showcase.
 		// menuScene is still wired above, so Esc drops back via bulletShowcaseScene_OnExitToMenu.
 		else if (DebugFlags.Bulletshot)

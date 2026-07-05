@@ -7,13 +7,17 @@ that had visible vertical seams and read as "just a repeating hazy hills
 texture") with a synthesized, natively-SEAMLESS, multi-ridge silhouette that has
 real atmospheric depth.
 
-WHERE IT'S USED: `Background.SetMars()` adds `marshills` as the 2nd background
-layer (behind the HD `marsloop` ground, in front of `clouds-background`), drawn
-at size 1, `scrollspeedmodifier = 0.7`, `mirrorX = false`. Because mirrorX is
-off the layer simply REPEATS every `realsize.X` (= texture width) pixels as it
-scrolls -- so the texture MUST wrap seamlessly left<->right or a hard seam scrolls
-through view (that was the old art's flaw). Every heightfield here is built with
-a circular FFT so column 0 continues perfectly from column W-1.
+WHERE IT'S USED: `Background.SetMars()` adds the hills as THREE background
+layers -- `marshills1` (far) / `marshills2` (mid) / `marshills3` (near), one
+texture per RIDGES entry, emitted by this tool -- between `clouds-background`
+and the HD `marsloop` ground, each drawn at size 1, `mirrorX = false`, with its
+OWN `scrollspeedmodifier` (far 0.33 / mid 0.53 / near 0.85, between the sky's
+0.3 and the ground's 1.0) so the ridges PARALLAX against each other. Because
+mirrorX is off each layer simply REPEATS every `realsize.X` (= texture width)
+pixels as it scrolls -- so every texture MUST wrap seamlessly left<->right or a
+hard seam scrolls through view (that was the old art's flaw). Every heightfield
+here is built with a circular FFT so column 0 continues perfectly from column
+W-1.
 
 HOW IT LOOKS RIGHT: distant Martian hills are sold by AERIAL PERSPECTIVE, not by
 a crisp outline -- farther ridges are lighter, softer and higher; nearer ridges
@@ -27,7 +31,15 @@ OFFLINE asset step (numpy + Pillow), same family as tools/earth, tools/walls,
 tools/favicon: CI ships the committed `marshills.png`; this only re-runs when a
 human wants to retune. It is DETERMINISTIC (seeded) -- same knobs -> same PNG.
 
-TUNE IT: every aesthetic knob is a constant in the CONFIG block below. Re-run
+TUNE IT (the fun way): run the LIVE EDITOR --
+    python tools/mars/editor/serve.py
+then open http://localhost:5299/ -- sliders for every knob below, re-rendered
+by THIS generator per drag (pixel-exact) and composited over the real sky +
+rocky ground, with a "Write into game" button and a paste-ready CONFIG block
+to bake your values back into this file when done.
+
+TUNE IT (by hand): every aesthetic knob is a constant in the CONFIG block below.
+Re-run
     python tools/mars/build_marshills.py
 after changing them. `--seed N` overrides the RNG seed for a different hill
 shape without editing the file; `--preview` also writes a 2x-wide tiled preview
@@ -47,14 +59,18 @@ from PIL import Image
 # --------------------------------------------------------------------------- #
 
 WIDTH, HEIGHT = 1000, 600        # must match the layer's on-disk size (drawn at size 1)
-SEED = 7                         # RNG seed; --seed overrides. Change for a new hill shape.
+SEED = 30466                     # RNG seed; --seed overrides. Change for a new hill shape.
 
-# Palette (straight/non-premultiplied RGBA, 0..255). Sampled from the old art +
-# clouds-background so the new hills sit in the same Mars tone family.
-#   HILL_RGB : the base dusty-brown rock tone of the NEAREST ridge.
-#   HAZE_RGB : the atmospheric tone crests fade toward (== the dusty sky).
-HILL_RGB = (136, 102, 76)
-HAZE_RGB = (192, 162, 132)
+# Palette (straight/non-premultiplied RGBA, 0..255). MEASURED, not vibed:
+#   - clouds-background at the horizon band (design y 400..450) is ~(188,154,116);
+#   - the ORIGINAL hand-drawn marshills was ONE flat tone (177,144,107) -- a mere
+#     ~11 levels below the sky. That near-invisibility is the whole OG look, so
+#     the ridge bodies must stay within ~a dozen levels of the sky tone.
+#   HILL_RGB : the base dusty-brown rock tone of the NEAREST ridge (>= OG tone,
+#              since even the nearest ridge lerps `haze` of the way to HAZE_RGB).
+#   HAZE_RGB : the atmospheric tone crests fade toward (== the measured sky).
+HILL_RGB = (172, 138, 102)
+HAZE_RGB = (188, 154, 116)
 
 # Ridges are listed FAR -> NEAR (painted back to front). Per ridge:
 #   base    : crest centre-line y (design px, 0=top). Farther ridges sit HIGHER.
@@ -71,21 +87,41 @@ HAZE_RGB = (192, 162, 132)
 # from design y~448 down, so ONLY the ~40px strip above the rocky horizon
 # (design y ~405..450) is ever visible -- crests must land there, and each
 # ridge's body just fills down to be occluded by the ground.
+# Haze values are HIGH on purpose: with the near-sky palette above, the ridge
+# bodies land only a handful of levels below the sky (far ridge fully hazed, near
+# ridge at the full HILL_RGB) -- OG-adjacent subtlety (the OG sat ~11 below) with
+# a whisper of layered depth, but still clearly THERE. Feathers melt the crests
+# like the OG's soft alpha ramp. Values dialed by eye in the live editor
+# (2026-07-06): a tall far ridge that all-but-fades into sky, a mid ridge, and a
+# low near ridge at full rock tone that catches the eye above the horizon.
+# NOTE: each ridge is emitted as its OWN texture (marshills1..3) and scrolls at
+# its own depth -- the per-layer scroll modifiers live in Background.SetMars()
+# (far 0.33 / mid 0.53 / near 0.85, between the sky 0.3 and the ground 1.0).
 RIDGES = [
-    dict(base=428, amp=20, beta=2.5, lowcut=2, highcut=28, haze=0.52, feather=16),
-    dict(base=440, amp=26, beta=2.2, lowcut=2, highcut=46, haze=0.36, feather=13),
-    dict(base=452, amp=30, beta=2.0, lowcut=2, highcut=70, haze=0.20, feather=10),
+    dict(base=380, amp=47, beta=3.2, lowcut=2, highcut=28, haze=0.66, feather=14),
+    dict(base=420, amp=28, beta=1.8, lowcut=2, highcut=31, haze=0.44, feather=12),
+    dict(base=455, amp=11, beta=2.5, lowcut=2, highcut=25, haze=0.0, feather=10),
 ]
 
-# Large-scale left-to-right brightness drift (dust density) so no ridge is a flat
-# fill -- a broad seamless curve shared by all ridges. DUST_STRENGTH is the drift
-# as a fraction of the ridge value; DUST_HIGHCUT is the top FFT bin kept (higher =
-# finer drift). 1-2 gives one or two gentle bright/dark swells across the width.
-DUST_STRENGTH = 0.10
+# Large-scale left-to-right brightness drift (dust density) -- a broad seamless
+# curve shared by all ridges. DUST_STRENGTH is the drift as a fraction of the
+# ridge value; DUST_HIGHCUT is the top FFT bin kept (higher = finer drift).
+# Keep this SMALL: with the near-sky palette the hills' own contrast is only a
+# handful of levels, so even a 5% swing (~9 levels) reads as a weird horizontal
+# GRADIENT sliding across the layer, not as dust. 0.02 is a barely-there breakup
+# dialed in the editor; 0 turns it off entirely.
+DUST_STRENGTH = 0.02
 DUST_HIGHCUT = 2
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "..",
-                   "web", "EvilAliensWeb", "wwwroot", "Content", "gfx", "marsbg", "marshills.png")
+# One output PNG per ridge (far -> near), each its own parallax layer in
+# Background.SetMars(). The old single `marshills.png` is superseded (main()
+# removes a stale copy so the game can't half-load the old look).
+OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..",
+                       "web", "EvilAliensWeb", "wwwroot", "Content", "gfx", "marsbg")
+OUT_TEMPLATE = os.path.join(OUT_DIR, "marshills{}.png")
+LEGACY_OUT = os.path.join(OUT_DIR, "marshills.png")
+# Kept for the editor server (it derives the marsbg dir from here).
+OUT = OUT_TEMPLATE.format(1)
 
 # --------------------------------------------------------------------------- #
 
@@ -119,29 +155,41 @@ def lerp_rgb(a, b, t):
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
 
-def build(seed):
+def build_layers(seed, cfg=None):
+    """Build the hills as one straight-alpha RGBA uint8 array PER RIDGE (far ->
+    near) -- each becomes its own parallax texture (marshills1..3). `cfg`
+    (optional dict) overrides the CONFIG constants per call -- used by the live
+    editor (tools/mars/editor/serve.py); None = the baked CONFIG, so the CLI
+    path is unchanged. The shared rng is consumed one heightfield per ridge in
+    order, so a given seed produces the same silhouettes it did when the ridges
+    were composited into a single texture."""
+    cfg = cfg or {}
+    hill_rgb = tuple(cfg.get("hill_rgb", HILL_RGB))
+    haze_rgb = tuple(cfg.get("haze_rgb", HAZE_RGB))
+    ridges = cfg.get("ridges", RIDGES)
+    dust_strength = cfg.get("dust_strength", DUST_STRENGTH)
+    dust_highcut = int(cfg.get("dust_highcut", DUST_HIGHCUT))
+
     rng = np.random.default_rng(seed)
     W, H = WIDTH, HEIGHT
-
-    # RGBA float accumulator, straight alpha, transparent to start.
-    canvas = np.zeros((H, W, 4), dtype=np.float64)
 
     ys = np.arange(H)[:, None]                      # (H,1) column of row indices
 
     # A single seamless dust-drift curve shared across ridges (broad, low-freq).
     dust = periodic_heightfield(W, np.random.default_rng(seed * 131 + 7),
-                                beta=3.0, lowcut=1, highcut=max(1, DUST_HIGHCUT))
+                                beta=3.0, lowcut=1, highcut=max(1, dust_highcut))
 
-    haze = np.array(HAZE_RGB, dtype=np.float64)
+    haze = np.array(haze_rgb, dtype=np.float64)
 
-    for ridge in RIDGES:                             # far -> near
+    layers = []
+    for ridge in ridges:                             # far -> near
         h = periodic_heightfield(W, rng, ridge["beta"], ridge["lowcut"], ridge["highcut"])
         ridgeline = ridge["base"] - ridge["amp"] * h          # (W,) y of the crest per column
 
-        body = np.array(lerp_rgb(HILL_RGB, HAZE_RGB, ridge["haze"]), dtype=np.float64)
+        body = np.array(lerp_rgb(hill_rgb, haze_rgb, ridge["haze"]), dtype=np.float64)
 
         # Per-column brightness drift (dust) -- keep it subtle, multiply the body.
-        col_scale = 1.0 + DUST_STRENGTH * dust                # (W,)
+        col_scale = 1.0 + dust_strength * dust                # (W,)
 
         # Coverage below the (sub-pixel) ridgeline, ~1px anti-aliased edge.
         cover = np.clip(ys - ridgeline[None, :] + 0.5, 0.0, 1.0)   # (H,W)
@@ -159,14 +207,43 @@ def build(seed):
         rgb = rgb * (1.0 - near_haze) + haze[None, None, :] * near_haze
         rgb = np.clip(rgb, 0, 255)
 
-        a = alpha[..., None]                                  # (H,W,1)
-        # Straight-alpha OVER composite: near ridge over the far accumulation.
+        # Each ridge is its own STRAIGHT-alpha texture (the game's layer stack
+        # does the OVER compositing at draw time, one parallax layer per ridge).
+        # Fully-transparent texels are filled with the haze tone so bilinear
+        # filtering at the crest can't bleed black in.
+        out = np.empty((H, W, 4), dtype=np.uint8)
+        out[..., :3] = np.clip(rgb + 0.5, 0, 255).astype(np.uint8)
+        out[..., 3] = np.clip(alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        layers.append(out)
+    return layers
+
+
+def build(seed, cfg=None):
+    """Composite the per-ridge layers (far -> near, straight-alpha OVER) into
+    ONE flat RGBA array -- the previews (--preview/--show) want the combined
+    look. The game itself loads the separate layers.
+
+    GOTCHA kept from the single-texture era: an OVER accumulator holds
+    PREMULTIPLIED colour (rgb*a), and the game/preview consumers expect STRAIGHT
+    alpha -- exporting it verbatim turns every feathered crest into a DARK
+    fringe. So un-premultiply on the way out (transparent texels -> haze tone)."""
+    cfg = cfg or {}
+    haze = np.array(tuple(cfg.get("haze_rgb", HAZE_RGB)), dtype=np.float64)
+    W, H = WIDTH, HEIGHT
+
+    canvas = np.zeros((H, W, 4), dtype=np.float64)
+    for layer in build_layers(seed, cfg):
+        rgb = layer[..., :3].astype(np.float64)
+        a = (layer[..., 3:4].astype(np.float64)) / 255.0
         canvas[..., :3] = rgb * a + canvas[..., :3] * (1.0 - a)
         canvas[..., 3:4] = a + canvas[..., 3:4] * (1.0 - a)
 
-    # canvas RGB is 0..255, alpha is 0..1 -> scale alpha to 0..255 for the PNG.
+    a = canvas[..., 3:4]
+    straight = np.where(a > 1e-6, canvas[..., :3] / np.maximum(a, 1e-6),
+                        haze[None, None, :])
+
     out = np.empty((H, W, 4), dtype=np.uint8)
-    out[..., :3] = np.clip(canvas[..., :3] + 0.5, 0, 255).astype(np.uint8)
+    out[..., :3] = np.clip(straight + 0.5, 0, 255).astype(np.uint8)
     out[..., 3] = np.clip(canvas[..., 3] * 255.0 + 0.5, 0, 255).astype(np.uint8)
     return out
 
@@ -181,15 +258,21 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="Build but don't write marshills.png.")
     args = ap.parse_args()
 
-    rgba = build(args.seed)
-    img = Image.fromarray(rgba, "RGBA")
-    out = os.path.normpath(OUT)
+    layers = build_layers(args.seed)
+    img = Image.fromarray(build(args.seed), "RGBA")   # combined, for the previews
 
     if not args.dry_run:
-        img.save(out)
-        print(f"wrote {out}  ({img.width}x{img.height}, seed {args.seed})")
+        for i, layer in enumerate(layers, start=1):
+            out = os.path.normpath(OUT_TEMPLATE.format(i))
+            Image.fromarray(layer, "RGBA").save(out)
+            print(f"wrote {out}  ({img.width}x{img.height}, seed {args.seed})")
+        legacy = os.path.normpath(LEGACY_OUT)
+        if os.path.exists(legacy):   # superseded single-texture output
+            os.remove(legacy)
+            print(f"removed stale {legacy} (now split into per-ridge layers)")
     else:
-        print(f"[dry-run] built {img.width}x{img.height}, seed {args.seed} (not saved)")
+        print(f"[dry-run] built {len(layers)} layers {img.width}x{img.height}, "
+              f"seed {args.seed} (not saved)")
 
     # Diagnostic previews live next to THIS script (gitignored), never in wwwroot.
     here = os.path.dirname(__file__)
@@ -202,7 +285,7 @@ def main():
         print(f"wrote {p}  (2x tiled -- inspect the join at x={img.width})")
 
     if args.show:
-        sky_path = os.path.join(os.path.dirname(out), "clouds-background.png")
+        sky_path = os.path.join(os.path.normpath(OUT_DIR), "clouds-background.png")
         if os.path.exists(sky_path):
             sky = Image.open(sky_path).convert("RGBA").resize((img.width, img.height))
             comp = Image.alpha_composite(sky, img)

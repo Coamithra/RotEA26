@@ -775,14 +775,19 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   source is missing (CI ships the committed png). Re-run after swapping the source; don't hand-edit
   `andromeda.png`. Knobs + how-to: `tools/nebula/README.md`. It's a background fly-by (no `?harness=` entry),
   so verify by booting Level 1 to the brains section.
-- **Mars far-hills layer is PROCEDURAL, not hand-drawn -- `tools/mars/build_marshills.py`.** The 2nd
-  Mars background layer (`GFX/MarsBG/marshills`, added by `Background.SetMars()` behind the HD `marsloop`
-  ground / in front of `clouds-background`, scrollspeed 0.7) used to be a low-res hand-drawn hazy tan
-  silhouette with a visible repeating seam. It's now SYNTHESIZED: numpy builds N back-to-front ridges as
-  circular-FFT (natively SEAMLESS -- `mirrorX=false`, so the layer just REPEATS every `realsize.X`; the
-  wrap MUST be seamless) fractal heightfields, composited with aerial perspective (farther ridges
-  lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers + lerps toward the haze
-  tone so it dissolves into the sky). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
+- **Mars far-hills are PROCEDURAL and PARALLAX -- three per-ridge textures from `tools/mars/build_marshills.py`.**
+  The Mars hills (added by `Background.SetMars()` behind the HD `marsloop` ground / in front of
+  `clouds-background`) used to be ONE low-res hand-drawn hazy tan silhouette with a visible repeating
+  seam, then one synthesized texture; they are now **three separate layers** -- `marshills1` (far) /
+  `marshills2` (mid) / `marshills3` (near), one texture per `RIDGES` entry -- each with its OWN
+  `scrollspeedmodifier` (**far 0.33 / mid 0.53 / near 0.85**, `hillScrolls` in `SetMars`, between the
+  sky's 0.3 and the ground's 1.0) so the ridges parallax against each other. Each layer is SYNTHESIZED:
+  numpy builds its ridge as a circular-FFT (natively SEAMLESS -- `mirrorX=false`, so a layer just
+  REPEATS every `realsize.X`; the wrap MUST be seamless) fractal heightfield with aerial perspective
+  (farther ridges lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers +
+  lerps toward the haze tone so it dissolves into the sky). The per-layer PNGs are STRAIGHT alpha
+  (no OVER-compositing at build time -- the game's layer stack composites at draw); the old single
+  `marshills.png` is gone (the tool deletes a stale copy). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
   TOP from design y~448 down, so ONLY ~design y 405..450 (just above the rocky horizon) ever shows -- the
   `RIDGES` crests are placed to land there and each body just fills down to be occluded. All aesthetic
   knobs (palette, per-ridge base/amp/roughness/haze/feather, seed) are constants in the tool's CONFIG
@@ -790,9 +795,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   seam check -> `tools/mars/_preview_marshills.png`, gitignored), `--show` (composite over the real sky
   -> `_context_marshills.png`). Deterministic/offline (numpy+Pillow), like tools/earth & tools/favicon;
   CI ships the committed `marshills.png`. It's a plain PNG decoded at level preload (tiny, not in
-  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHA when editing the tool: the alpha
-  accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255 makes
-  the whole layer ~1/255 transparent -> invisible hills).
+  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHAS when editing the tool: (1) the
+  alpha accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255
+  makes the whole layer ~1/255 transparent -> invisible hills); (2) the OVER loop accumulates
+  PREMULTIPLIED colour but the game renders the PNG with STRAIGHT alpha, so the export MUST un-premultiply
+  (divide RGB by alpha; transparent texels filled with the haze tone for bilinear) -- exporting the
+  accumulator verbatim turns every feathered crest into a DARK fringe (the original "hills stand out like
+  a sore thumb" bug). The palette is MEASURED, not vibed: the sky at the horizon is ~(188,154,116) and the
+  OG hand-drawn hills were ONE flat tone (177,144,107), a mere ~11 levels darker -- ridge bodies must stay
+  within ~a dozen levels of the sky or they read way too stark. **Tune it with the LIVE EDITOR:**
+  `python tools/mars/editor/serve.py` -> `http://localhost:5299/` -- sliders for every CONFIG knob
+  (per-ridge crest/height/haze/feather/smoothness/detail + SCROLL speed, palette colour pickers, dust,
+  seed+reroll), re-rendered per drag by the REAL generator (`build_layers(seed, cfg)` overrides) and
+  composited over the real sky + marsloop ground with the full scene PARALLAX-ANIMATED at the layers'
+  relative speeds (animate toggle + preview-speed slider; plus 2x horizon band + static wrap-seam check
+  views), a "Write into game" button that saves the three layer PNGs straight into wwwroot (then
+  cache-bust the game tab), and a paste-ready CONFIG block to bake the settled values back into
+  `build_marshills.py` -- scroll-speed changes are baked by hand into `SetMars`'s `hillScrolls` (the
+  block prints the line). Bake + re-run once before committing, so the committed tool reproduces the
+  committed PNGs.
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet

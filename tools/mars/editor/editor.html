@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mars far-hills tuner</title>
+<style>
+  body { margin:0; font:13px/1.4 system-ui, sans-serif; background:#1b1613; color:#e8ddd0;
+         display:flex; gap:14px; padding:14px; }
+  #panel { width:330px; flex:none; }
+  #panel h1 { font-size:15px; margin:0 0 8px; }
+  fieldset { border:1px solid #4a3c30; border-radius:6px; margin:0 0 10px; padding:6px 10px 8px; }
+  legend { color:#d8a25f; font-weight:600; padding:0 4px; }
+  .row { display:flex; align-items:center; gap:6px; margin:2px 0; }
+  .row label { width:60px; flex:none; color:#b9a893; }
+  .row input[type=range] { flex:1; }
+  .row output { width:44px; flex:none; text-align:right; font-variant-numeric:tabular-nums; }
+  .row input[type=color] { width:44px; height:22px; border:none; background:none; padding:0; }
+  .row input[type=number] { width:70px; background:#2a221c; color:#e8ddd0;
+                            border:1px solid #4a3c30; border-radius:4px; padding:2px 4px; }
+  button { background:#7a4a1e; color:#fff; border:none; border-radius:5px;
+           padding:6px 12px; cursor:pointer; font-weight:600; }
+  button:hover { background:#96602c; }
+  button.small { padding:3px 8px; font-weight:400; }
+  #apply { background:#2e6b34; width:100%; margin-top:4px; }
+  #apply:hover { background:#3a8442; }
+  #status { min-height:1.2em; color:#9fd89f; margin-top:6px; word-break:break-all; }
+  #bake { width:100%; height:170px; background:#12100d; color:#c9e0a8; border:1px solid #4a3c30;
+          border-radius:5px; font:11px/1.35 Consolas, monospace; white-space:pre; margin-top:6px; }
+  #views { flex:1; min-width:0; }
+  canvas { display:block; max-width:100%; border:1px solid #4a3c30; border-radius:4px;
+           background:#000; margin-bottom:10px; image-rendering:auto; }
+  .cap { color:#b9a893; margin:0 0 4px; }
+  #err { color:#ff9a7a; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Mars far-hills tuner</h1>
+
+  <fieldset id="global">
+    <legend>Global</legend>
+    <div class="row"><label>seed</label><input type="number" id="seed" value="7">
+      <button class="small" id="reroll">reroll</button></div>
+    <div class="row"><label>hill</label><input type="color" id="hill">
+      <label style="width:auto">haze/sky</label><input type="color" id="haze"></div>
+    <div class="row"><label>dust</label><input type="range" id="dust" min="0" max="0.3" step="0.01"><output></output></div>
+    <div class="row"><label>animate</label><input type="checkbox" id="animate" checked>
+      <label style="width:auto">preview speed</label>
+      <input type="range" id="animspeed" min="0.05" max="1" step="0.05" value="0.35"><output>0.35</output></div>
+  </fieldset>
+
+  <div id="ridges"></div>
+
+  <button id="apply">Write into game (wwwroot marshills1..3.png)</button>
+  <div id="status"></div>
+  <p class="cap">Then in the GAME tab console:<br>
+  <code>location.reload()</code> after<br>
+  <code>['1','2','3'].forEach(n=>fetch('Content/gfx/marsbg/marshills'+n+'.png',{cache:'reload'}))</code></p>
+
+  <p class="cap">Paste-ready CONFIG block (bake into build_marshills.py; scroll speeds go in Background.SetMars):</p>
+  <textarea id="bake" readonly onclick="this.select()"></textarea>
+  <div id="err"></div>
+</div>
+
+<div id="views">
+  <p class="cap">Full scene, PARALLAX-ANIMATED (design 1000&times;600 &mdash; sky 0.3&times; + the three hill layers at
+  their own speeds + real rocky ground 1.0&times;; "preview speed" slows the whole scroll for inspection):</p>
+  <canvas id="full" width="1000" height="600"></canvas>
+  <p class="cap">Horizon band 2&times; (design y 385..470 &mdash; the only strip that ever shows in-game):</p>
+  <canvas id="band" width="2000" height="170"></canvas>
+  <p class="cap">Wrap seam check (static; each texture repeats every 1000px &mdash; the join is at the centre line):</p>
+  <canvas id="seam" width="2000" height="120"></canvas>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const RIDGE_SLIDERS = [
+  ["base",    380, 470, 1,    "crest y"],
+  ["amp",     0,   60,  1,    "height"],
+  ["haze",    0,   1,   0.02, "haze"],
+  ["feather", 1,   40,  1,    "feather"],
+  ["beta",    1.2, 4,   0.1,  "smooth"],
+  ["highcut", 8,   120, 1,    "detail"],
+];
+// Per-layer scroll modifiers -- MUST mirror Background.SetMars()'s hillScrolls
+// (sky is 0.3, ground is 1.0). Tunable per ridge below; baking a change means
+// editing the C# array (the bake block prints them).
+const DEFAULT_SCROLLS = [0.55, 0.7, 0.85];
+const SKY_SCROLL = 0.3, GROUND_SCROLL = 1.0;
+const BASE_PXMS = 0.6;   // |scrollspeedreset| = 10/16.666 design px per ms
+let cfg = null;            // live config, mirrors build_marshills CONFIG
+let scrolls = [...DEFAULT_SCROLLS];
+let assets = {};           // loaded images
+let hillLayers = null;     // [far, mid, near] ImageBitmaps from the last render
+let renderTimer = null, inflight = false, dirty = false;
+const staticFull = document.createElement("canvas");
+staticFull.width = 1000; staticFull.height = 600;
+
+const hex = rgb => "#" + rgb.map(v => Math.round(v).toString(16).padStart(2, "0")).join("");
+const unhex = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16));
+
+function slider(parent, label, min, max, step, get, set) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><output></output>`;
+  const inp = row.querySelector("input"), out = row.querySelector("output");
+  inp.autocomplete = "off";
+  inp.value = get(); out.value = get();
+  inp.oninput = () => { out.value = inp.value; set(parseFloat(inp.value)); queueRender(); };
+  parent.appendChild(row);
+}
+
+function buildUI() {
+  $("seed").value = cfg.seed;
+  $("seed").autocomplete = "off";
+  $("seed").onchange = () => { cfg.seed = parseInt($("seed").value) || 0; queueRender(); };
+  $("reroll").onclick = () => { cfg.seed = Math.floor(Math.random() * 100000);
+                                $("seed").value = cfg.seed; queueRender(); };
+  $("hill").value = hex(cfg.hill_rgb);
+  $("hill").oninput = () => { cfg.hill_rgb = unhex($("hill").value); queueRender(); };
+  $("haze").value = hex(cfg.haze_rgb);
+  $("haze").oninput = () => { cfg.haze_rgb = unhex($("haze").value); queueRender(); };
+  const dustRow = $("dust"); dustRow.value = cfg.dust_strength;
+  dustRow.nextElementSibling.value = cfg.dust_strength;
+  dustRow.oninput = () => { dustRow.nextElementSibling.value = dustRow.value;
+                            cfg.dust_strength = parseFloat(dustRow.value); queueRender(); };
+  $("animspeed").oninput = () => { $("animspeed").nextElementSibling.value = $("animspeed").value; };
+
+  const holder = $("ridges"); holder.innerHTML = "";
+  cfg.ridges.forEach((r, i) => {
+    const fs = document.createElement("fieldset");
+    fs.innerHTML = `<legend>Ridge ${i + 1} ${["(far)", "(mid)", "(near)"][i] || ""}</legend>`;
+    for (const [key, min, max, step, label] of RIDGE_SLIDERS)
+      slider(fs, label, min, max, step, () => r[key], v => { r[key] = v; });
+    slider(fs, "scroll", 0.3, 1, 0.01, () => scrolls[i], v => { scrolls[i] = v; });
+    holder.appendChild(fs);
+  });
+}
+
+function bakeBlock() {
+  const t = (v, n = 2) => Number(v.toFixed(n));
+  const lines = cfg.ridges.map(r =>
+    `    dict(base=${Math.round(r.base)}, amp=${Math.round(r.amp)}, beta=${t(r.beta,1)}, ` +
+    `lowcut=${r.lowcut}, highcut=${Math.round(r.highcut)}, haze=${t(r.haze)}, feather=${Math.round(r.feather)}),`);
+  return `SEED = ${cfg.seed}\n` +
+         `HILL_RGB = (${cfg.hill_rgb.join(", ")})\n` +
+         `HAZE_RGB = (${cfg.haze_rgb.join(", ")})\n` +
+         `RIDGES = [\n${lines.join("\n")}\n]\n` +
+         `DUST_STRENGTH = ${t(cfg.dust_strength)}\n` +
+         `# Background.SetMars() hillScrolls = { ${scrolls.map(s => t(s) + "f").join(", ")} }`;
+}
+
+function queueRender() {
+  $("bake").value = bakeBlock();
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 180);
+}
+
+async function render() {
+  if (inflight) { dirty = true; return; }
+  inflight = true;
+  try {
+    const resp = await fetch("/render", { method: "POST", body: JSON.stringify(cfg) });
+    if (!resp.ok) throw new Error(await resp.text());
+    const blob = await resp.blob();     // layers stacked vertically, far -> near
+    const n = cfg.ridges.length;
+    hillLayers = await Promise.all(Array.from({ length: n }, (_, i) =>
+      createImageBitmap(blob, 0, i * 600, 1000, 600)));
+    drawStatic();
+    $("err").textContent = "";
+  } catch (e) { $("err").textContent = "render failed: " + e.message; }
+  inflight = false;
+  if (dirty) { dirty = false; render(); }
+}
+
+// One wrapped draw of a horizontally repeating image at scroll offset `off`.
+function drawWrapped(c, img, off, y, w, h) {
+  const o = ((off % w) + w) % w;
+  c.drawImage(img, -o, y, w, h);
+  c.drawImage(img, w - o, y, w, h);
+}
+
+function drawScene(c, tMs) {
+  if (!hillLayers) return;
+  const px = tMs * BASE_PXMS;
+  // sky (1024 wide, drawn at natural size, wraps at 1024)
+  drawWrapped(c, assets.sky, px * SKY_SCROLL, 0, 1024, 600);
+  hillLayers.forEach((l, i) => drawWrapped(c, l, px * scrolls[i], 0, 1000, 600));
+  // ground tiles at 1/3.238 from y=300; wraps at the loaded strip width (a
+  // preview approximation -- the real strip is 12 tiles long).
+  const s = 1 / 3.238, G = assets.groundW;
+  let o = ((px * GROUND_SCROLL) % G + G) % G;
+  for (let pass = 0; pass < 2; pass++) {
+    let x = -o + pass * G;
+    for (const t of assets.ground) {
+      c.drawImage(t, x, 300, t.width * s, t.height * s);
+      x += t.width * s;
+    }
+  }
+}
+
+function drawStatic() {   // zero-offset composite: feeds the seam view
+  const c = staticFull.getContext("2d");
+  drawScene(c, 0);
+  const sc = $("seam").getContext("2d");
+  sc.drawImage(staticFull, 500, 390, 500, 60, 0, 0, 1000, 120);
+  sc.drawImage(staticFull, 0, 390, 500, 60, 1000, 0, 1000, 120);
+}
+
+let t0 = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!hillLayers) return;
+  const t = $("animate").checked ? (now - t0) * parseFloat($("animspeed").value) : 0;
+  const c = $("full").getContext("2d");
+  drawScene(c, t);
+  $("band").getContext("2d").drawImage($("full"), 0, 385, 1000, 85, 0, 0, 2000, 170);
+}
+requestAnimationFrame(frame);
+
+$("apply").onclick = async () => {
+  $("status").textContent = "writing...";
+  try {
+    const resp = await fetch("/apply", { method: "POST", body: JSON.stringify(cfg) });
+    if (!resp.ok) throw new Error(await resp.text());
+    const j = await resp.json();
+    $("status").textContent = "written " + j.written.length +
+      " layers into wwwroot -- now cache-bust the game tab.";
+  } catch (e) { $("status").textContent = ""; $("err").textContent = "apply failed: " + e.message; }
+};
+
+async function loadImg(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + " -> " + r.status);
+  return createImageBitmap(await r.blob());
+}
+
+(async () => {
+  cfg = await (await fetch("/defaults")).json();
+  assets.sky = await loadImg("/assets/clouds-background.png");
+  // ground: at 1/3.238 one ~3238px tile covers the canvas; load a bit past
+  // 2000px so the animated wrap has margin.
+  assets.ground = [];
+  let covered = 0, i = 1;
+  while (covered < 2000 && i <= 12) {
+    const t = await loadImg(`/assets/marsloop${i++}.png`);
+    assets.ground.push(t);
+    covered += t.width / 3.238;
+  }
+  assets.groundW = covered;
+  buildUI();
+  queueRender();
+})().catch(e => { $("err").textContent = "boot failed: " + e.message; });
+</script>
+</body>
+</html>

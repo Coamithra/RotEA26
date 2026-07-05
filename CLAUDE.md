@@ -839,10 +839,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
 - **SpiderBoss "helper mothership" assist (`Game/EvilAliens/SpiderHelperMothership.cs`).** The Level2
   spider boss can ONLY be hurt by a `Lazer`, and in normal play the only lazers around are the big
   UFOs' player-aimed shots -- a very obscure "lure a lazer across the boss" mechanic. To make it
-  legible, when the boss goes un-damaged for `SpiderHelperIdleSeconds` (default 30) a mothership
-  (mothershipA/B, same sprite as `Boss`/`MarsBoss`) slides in from the left showing only its underside
-  at the top (`hoverY ~10`), halts dead-centre, fires a `Lazer` straight DOWN for a few seconds (it
-  hits the boss on a fly-by via the normal Lazer->SpiderBoss path), then leaves east. It is **"fake
+  legible, when the boss goes un-damaged for the helper-idle threshold -- counted from the boss's
+  FIRST landing (not spawn, so the intro fly-bys don't count), and DIFFICULTY-SCALED by
+  `SpiderBoss.EffectiveHelperIdleMs` (Easy ~6s, Medium ~15s, Hard ~23s, Very_Hard 30s, Inzane ~37s;
+  `?spiderhelperidle` overrides raw) -- a mothership
+  (mothershipA/B, same sprite as `Boss`/`MarsBoss`) EASES in from the left showing only its underside
+  at the top (`hoverY ~10`), halts dead-centre, WINDS UP a converging spark swarm (a `LazerGenerator`,
+  same effect + params a medium UFO uses to charge its laser in `UFOState.lazor`) for
+  `SpiderHelperWindupSeconds` (default 2.5), fires a `Lazer` (it hits the boss on a fly-by via the
+  normal Lazer->SpiderBoss path), then EASES out east (accelerating from rest, exits right). **Movement
+  speed mirrors the twin "2 motherships" (`MarsBoss`), but the curves are gentler:** enter is a quad
+  ease-OUT-to-rest (`1-(1-t)^2`, zero arrival velocity -- NOT MarsBoss's sqrt `PowerCurve` whoosh, which
+  arrives still moving), leave is a quad ease-IN (`t^2` from rest); at a DIFFICULTY-SCALED fraction of their ~0.75 px/ms
+  traverse speed -- `SpeedFrac = -0.0477 + 0.7077*DifficultyModifier` => Easy ~0.20 (1/5), Medium ~0.38
+  (~1/3), Very_Hard 0.66, Inzane ~0.80; `?spiderhelperspeed` overrides with a raw px/ms value (default
+  now unset = difficulty-scaled). **The laser's own descent speed is already difficulty-scaled** inside
+  `Lazer.Update` (`growthspeed * DifficultyModifier`) -- nothing helper-specific. **AIM (Easy/Medium
+  only):** at fire, if the boss is STANDING (`SpiderBoss.IsFlyingAround()` false) the beam is aimed AT
+  it (`SpiderBoss.GetAimPoint()` = the standing hitbox centre) so it lands a direct hit; while the boss
+  flies around, or on Hard+, the beam just goes straight down and a fly-by crosses it. It is **"fake
   killable"**: enormous hitpoints so it never dies in time, flashes (blink) + reddens (a separate
   `fakeHits` ramp, since real HP barely moves) like it's taking damage. The trigger lives in
   `SpiderBoss.Update` (idle `helpTimer`, reset on every landed hit + on spawn; one helper at a time via
@@ -859,7 +874,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   column/row of cells first). So the helper fires exactly `PiOver2` again and no near-axis-aligned lazer
   (Boss/MarsBoss/UFO aimed nearly straight at a target) can hang the game. Don't reintroduce a per-lazer
   tilt. **Debug/tuning
-  (`DebugFlags`):** `?spiderhelperidle=<sec>` `?spiderhelperhovery=<y>` `?spiderhelperspeed=<f>`
+  (`DebugFlags`):** `?spiderhelperidle=<sec>` `?spiderhelperhovery=<y>` `?spiderhelperspeed=<f>` (raw
+  px/ms override; unset = difficulty-scaled) `?spiderhelperwindup=<sec>` `?spiderhelperenterpower=<p>`
   `?spiderhelperfire=<sec>` `?spiderhelperlead=<px>` tune the feel live (all have shipping defaults, so a
   plain boot is unchanged). **Sprite harness:** `?harness=spiderhelper` (use `?pos=400,10` to preview the
   in-game half-visible framing). **Fast test boot:** `?level=Level2&spiderboss` jumps straight into the

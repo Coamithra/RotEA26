@@ -89,7 +89,7 @@ namespace EvilAliensWeb.Compat
                 ["spiderboss"] = (bin, g, p) => { var s = SpiderBoss.NewSpiderBoss(bin, g); s.Setup(false); return s; },
                 // The spider-boss "helper" mothership (shown as a full sprite here; in-game only its
                 // underside peeks in at the top). ?pos=400,10 to preview the in-game half-visible framing.
-                ["spiderhelper"] = (bin, g, p) => { var h = SpiderHelperMothership.NewHelper(bin, g); h.Setup(10f, 0.3f, 4500f, 150f); return h; },
+                ["spiderhelper"] = (bin, g, p) => { var h = SpiderHelperMothership.NewHelper(bin, g); h.Setup(10f, 0.3f, 4500f, 150f, 2500f, 2f, null); return h; },
                 ["stationaryboss"] = (bin, g, p) => { var s = StationaryBoss.NewAlien(bin, g); s.Setup(); return s; },
             };
 

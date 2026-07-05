@@ -72,6 +72,10 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private SpiderHelperMothership helper;
 
+	// Set true the first time the boss lands; the helper idle countdown only runs after this, so the
+	// intro fly-bys don't count toward it.
+	private bool hasLanded;
+
 	private List<Lazer> alreadyHitBy = new List<Lazer>();
 
 	private List<Vector2> debrisposition = new List<Vector2>();
@@ -315,7 +319,8 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		dunceTimer.Reset();
 		dunceTimer.Start();
 		hittimer.Stop();
-		hp = (int)(5f * Settings.GetInstance().DifficultyFactorized(0.75f));
+		// ?spiderbosshp=<n> overrides the pool so the boss survives many helper cycles while tuning.
+		hp = EvilAliensWeb.Compat.DebugFlags.SpiderBossHp ?? (int)(5f * Settings.GetInstance().DifficultyFactorized(0.75f));
 		base.Initialize();
 		debrisposition.Clear();
 		debrisspeed.Clear();
@@ -327,9 +332,10 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		currentAnimation = spiderFly;
 		animationProgress = 0f;
 		helper = null;
-		helpTimer.Duration = EvilAliensWeb.Compat.DebugFlags.SpiderHelperIdleSeconds * 1000f;
-		helpTimer.Reset();
-		helpTimer.Start();
+		// The idle countdown does NOT run yet: it starts at the boss's FIRST landing (so the intro
+		// fly-bys don't count) and its length is difficulty-scaled -- see EffectiveHelperIdleMs.
+		hasLanded = false;
+		helpTimer.Stop();
 	}
 
 	private void ResetTimer(float seconds)
@@ -475,7 +481,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		base.Update(gameTime);
 		// Summon the helper mothership when the boss has gone un-damaged too long (checked even while
 		// paused between fly turns). One at a time; resetting the timer on spawn spaces them out.
-		if (state != SpiderBossState.dead && !base.IsDead && helper == null && helpTimer.Finished)
+		if (state != SpiderBossState.dead && !base.IsDead && helper == null && hasLanded && helpTimer.Finished)
 		{
 			SpawnHelper();
 			helpTimer.Reset();
@@ -579,6 +585,15 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				base.Position = new Vector2(600f, 400f);
 				ResetTimer(7f);
 				rumble(base.Position);
+				// First time the boss reaches the ground: start the helper idle countdown from HERE
+				// (so it never fires during the intro fly-bys). Difficulty sets how long it waits.
+				if (!hasLanded)
+				{
+					hasLanded = true;
+					helpTimer.Duration = EffectiveHelperIdleMs();
+					helpTimer.Reset();
+					helpTimer.Start();
+				}
 			}
 			break;
 		case SpiderBossState.standing:
@@ -712,9 +727,13 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		sound.PlayCue("bugdies");
 		sound.PlayCue("bugdies");
 		hp--;
-		// The boss took damage (incl. from the helper's own laser), so restart the idle countdown.
-		helpTimer.Reset();
-		helpTimer.Start();
+		// The boss took damage (incl. from the helper's own laser), so restart the idle countdown --
+		// but only once it's actually running (after the first landing).
+		if (hasLanded)
+		{
+			helpTimer.Reset();
+			helpTimer.Start();
+		}
 		if (hp <= 0 && !base.IsDead)
 		{
 			switch (state)
@@ -808,6 +827,22 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		isPreload = true;
 	}
 
+	// How long the boss may go un-damaged (measured from its first landing) before the helper is
+	// summoned. ?spiderhelperidle overrides with a raw seconds value; otherwise it's difficulty-scaled,
+	// linear in Settings.DifficultyModifier (0.35 Easy .. 1.2 Inzane): Easy ~6s, Medium ~15s, Hard ~23s,
+	// Very_Hard 30s, Inzane ~37s. So a stuck beginner gets help fast; a Very_Hard player is left to it.
+	private static float EffectiveHelperIdleMs()
+	{
+		float? overrideSeconds = EvilAliensWeb.Compat.DebugFlags.SpiderHelperIdleSeconds;
+		if (overrideSeconds.HasValue)
+		{
+			return overrideSeconds.Value * 1000f;
+		}
+		float modifier = Settings.GetInstance().DifficultyModifier;
+		float seconds = MathHelper.Clamp(-6.923f + 36.923f * modifier, 3f, 45f);
+		return seconds * 1000f;
+	}
+
 	private void SpawnHelper()
 	{
 		helper = SpiderHelperMothership.NewHelper(collection, base.Game);
@@ -815,9 +850,26 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperHoverY,
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperSpeed,
 			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireSeconds * 1000f,
-			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireLead);
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperFireLead,
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperWindupSeconds * 1000f,
+			EvilAliensWeb.Compat.DebugFlags.SpiderHelperEnterPower,
+			this);
 		helper.OnDeath += helper_OnDeath;
 		collection.Add((GameComponent)(object)helper);
+	}
+
+	// The centre of the boss's standing hitbox -- where the helper aims its beam on Easy/Medium when
+	// the boss is a stationary (standing) target. Matches the SpiderBossState.standing collision box.
+	public Vector2 GetAimPoint()
+	{
+		return base.Position + new Vector2(20f * scale, 40f * scale);
+	}
+
+	// True while the boss is moving across the screen (fly/jump/land/drop) -- an unreliable aim
+	// target, so the helper shoots straight down then. False only while standing on the ground.
+	public bool IsFlyingAround()
+	{
+		return state != SpiderBossState.standing;
 	}
 
 	private void helper_OnDeath(object sender)

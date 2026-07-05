@@ -343,6 +343,13 @@ public class Game1 : Game
 		{
 			Settings.GetInstance().Invulnerability = true;
 		}
+		// Debug (?difficulty=Easy..Inzane): pin the difficulty before any level boots. The
+		// spider-boss helper's speed + aim are difficulty-scaled, so this makes the test
+		// deterministic. No flag => the saved/menu-chosen difficulty is left untouched.
+		if (DebugFlags.Difficulty.HasValue)
+		{
+			Settings.GetInstance().CurrentDifficulty = DebugFlags.Difficulty.Value;
+		}
 		if (menuScene != null)
 		{
 			menuScene.CleanUp();

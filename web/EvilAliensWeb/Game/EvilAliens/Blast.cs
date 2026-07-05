@@ -90,10 +90,14 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		base.Collides = true;
 		lifetime.Start();
 		lifetime.Reset();
-		// Game juice: detonating a bomb kicks the camera — harder at higher powerup levels
-		// (power is 1..5 by Setup time). Minis (asploding bullets) get a light tap. The
-		// kills the blast then causes add their own trauma via KillableAlien/Explosion.
-		EvilAliensWeb.Compat.Juice.AddTrauma(mini ? 0.08f : 0.2f + 0.05f * power);
+		// Game juice: the player's own bomb detonation (right-click, non-mini) deliberately
+		// does NOT shake the camera — the kills it causes add their own trauma via
+		// KillableAlien/Explosion, so the bomb still reads without a self-inflicted jolt.
+		// Minis (asploding bullets) keep a light tap.
+		if (mini)
+		{
+			EvilAliensWeb.Compat.Juice.AddTrauma(0.08f);
+		}
 		scale = 0f;
 		// Update() overwrites scale + color from the lifetime curve before the first Draw,
 		// so in-game this 0 baseline is never seen. The sprite harness freezes Update, though,

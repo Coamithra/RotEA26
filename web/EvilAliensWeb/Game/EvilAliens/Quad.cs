@@ -58,7 +58,7 @@ public class Quad
 	private const float DefaultArcRate = 2f;         // average tendrils spawned per second
 	private const float DefaultArcLifeMin = 0.25f;   // a tendril's lifespan is random in [min,max] seconds
 	private const float DefaultArcLifeMax = 0.5f;
-	private const float DefaultTendrilSpeed = 150f;  // max |drift| along the beam, design px/sec (dir randomised)
+	private const float DefaultTendrilSpeed = 30f;   // max |drift| along the beam, design px/sec (dir randomised)
 	private static float CapScale => EvilAliensWeb.Compat.DebugFlags.LazerCapScale ?? DefaultCapScale;
 	private static float ArcRate => EvilAliensWeb.Compat.DebugFlags.LazerArcRate ?? DefaultArcRate;
 	private static float TendrilSpeed => EvilAliensWeb.Compat.DebugFlags.LazerTendrilSpeed ?? DefaultTendrilSpeed;
@@ -343,7 +343,12 @@ public class Quad
 		float along = bodyLen * tn.ap + tn.drift * age;
 		if (along < 0f) along = 0f; else if (along > bodyLen) along = bodyLen;
 		Vector2 anchor = tailPt + axis * along;
-		Vector2 endPt = anchor + perp * (tn.side * tn.reach) + axis * tn.lean;
+		// Keep the whole tendril between the two tips: the anchor is already clamped along the beam,
+		// but the along-axis `lean` on the free end could poke it past a tip once drift has pushed the
+		// anchor right up against one -- so clamp the end's axial position to [0, bodyLen] too.
+		float endAlong = along + tn.lean;
+		if (endAlong < 0f) endAlong = 0f; else if (endAlong > bodyLen) endAlong = bodyLen;
+		Vector2 endPt = anchor + perp * (tn.side * tn.reach) + axis * (endAlong - along);
 		Vector2 d = endPt - anchor;
 		float len = d.Length();
 		if (len < 1f) return;

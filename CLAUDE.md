@@ -480,7 +480,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   trial spawns a tendril at `DefaultArcRate` **2**/sec (the `RandomHelper.RandomFromAverage` `rate*dt`
   model, but on `Quad`'s FX RNG so it can't desync co-op), each lives a RANDOM `0.25..0.5s`
   (`DefaultArcLifeMin/Max`; `?lazerarclife=` overrides the MEAN, ±33%), fades via a `sin(pi*frac)` envelope,
-  and DRIFTS along the beam at a random SIGNED speed up to `DefaultTendrilSpeed` **150** px/s
+  and DRIFTS along the beam at a random SIGNED speed up to `DefaultTendrilSpeed` **30** px/s (the whole
+  tendril -- anchor AND lean'd free end -- is clamped to the beam span so drift can't push it past a tip)
   (`?lazertendrilspeed=`) — so they pop up out of sync "all over" and slide, vs the old fixed handful on a
   shared cadence. `SetProperties` clears the pool (recycled beams). The bolt still writhes smoothly within
   one life (time-driven midpoint displacement). `?lazerarcs=` is now the RATE (was a count).

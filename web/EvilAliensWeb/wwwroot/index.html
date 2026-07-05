@@ -149,7 +149,7 @@
 
         // Debug: live-set the laser FX knobs (the ?lazershot showcase tuner). Drives
         // Compat/DebugInput.SetLazer so the slider panel below (and the console) can retune the
-        // beam/chargeup without a page reload. Console: eaLazer(4, 1, 2, 150) — chargeScale (peak),
+        // beam/chargeup without a page reload. Console: eaLazer(4, 1, 2, 30) — chargeScale (peak),
         // capScale, tendril rate/sec, tendril drift speed. Same effect as the ?lazer* URL flags, live.
         window.eaLazer = (chargeScale, capScale, arcRate, tendrilSpeed) => {
             try {
@@ -987,7 +987,7 @@
             if (!/[?&]lazershot\b/i.test(q)) { return; }
 
             // Seed the sliders from any ?lazer* flags already on the URL, else the in-game baked
-            // defaults (peak charge 4 / cap 1 / tendril rate 2 per sec / tendril speed 150 px/s).
+            // defaults (peak charge 4 / cap 1 / tendril rate 2 per sec / tendril speed 30 px/s).
             function num(name, def)
             {
                 var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
@@ -997,7 +997,7 @@
                 charge: num("lazerchargescale", 4),
                 cap: num("lazercapscale", 1),
                 rate: num("lazerarcs", 2),
-                speed: num("lazertendrilspeed", 150)
+                speed: num("lazertendrilspeed", 30)
             };
 
             // Push the current state into the game. Returns false (and is retried) until the .NET

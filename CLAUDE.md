@@ -548,7 +548,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   for this) and draws each shape via the `spriteBatchWrapper` in 800x600 design space, hooked in
   `Game1.DrawInner` right after the game + bloom composite (same seam as the HideSafeArea overlay) so
   it sits on top of everything, un-bloomed. It owns a 1px white pixel (lines/box edges) + a ring
-  texture (`BuildRing`, same annulus as `HarnessScene`). Enable with the **`?hitboxes`** URL flag or
+  texture (`BuildRing`, same approach as `HarnessScene`'s ring — a slightly tighter band). Enable with the **`?hitboxes`** URL flag or
   toggle live from the console with **`eaHitboxes()`/`eaHitboxes(false)`** (`DebugInput.Hitboxes` ->
   `DebugFlags.SetShowHitboxes`). OFF by default and deliberately kept OUT of `DebugFlags.Active`, so a
   shipped build is byte-identical unless it's asked for. Verify by eye in any level (e.g.

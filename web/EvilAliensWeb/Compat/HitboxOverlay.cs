@@ -61,6 +61,8 @@ namespace EvilAliensWeb.Compat
                 {
                     continue;
                 }
+                // Dim when a collidable's collision is off; the rare non-AlienDrawable collidable
+                // has no Collides concept, so treat it as active (bright) by default.
                 bool active = !(c is AlienDrawableGameComponent adc) || adc.Collides;
                 DrawShape(sb, shape, active);
             }

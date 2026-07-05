@@ -32,7 +32,7 @@ internal class LazerGenerator : AlienDrawableGameComponent
 	private float elapsed;
 	private float windupSeconds = 2.5f; // fallback; callers pass the real (difficulty-scaled) duration
 	private bool loopWindup;            // showcase loops the ramp to watch it; in-game plays once + holds
-	private Texture2D wellTex;          // GFX/Sprites/singleconnectorglow (same glow as the beam tip), lazy
+	private Texture2D wellTex;          // GFX/Sprites/lazerglow -- the SAME clean radial glow as the beam tip, lazy
 	private const float DefaultPeakChargeScale = 4f; // ramp target (was a flat 5x); ?lazerchargescale overrides
 	private const float ChargeEase = 1.4f;           // ease-out exponent (near-linear) for the 1->peak ramp
 	private const float LaserTipDiameter = 48f;      // Quad beam width(16) x TipFlareScale(3) = the real tip bloom
@@ -162,13 +162,14 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	// The "energy well": a tip-like glow at the convergence centre that grows from a small seed to
 	// ~1.3x the laser tip over the windup, fluctuating erratically (~90-110%) as energy gathers.
-	// Same glow texture + hue as the beam's tip bloom, additive. Fades in over the first quarter so
-	// the showcase's loop restart isn't a hard pop.
+	// Uses the SAME glow texture (lazerglow -- clean radial falloff, what Quad's tip/flares now use)
+	// + hue as the beam's tip bloom, additive. Fades in over the first quarter so the showcase's
+	// loop restart isn't a hard pop.
 	private void DrawWell(float progress)
 	{
 		if (wellTex == null)
 		{
-			wellTex = ServiceHelper.Get<IContentManagerService>().ContentManager.Load<Texture2D>("GFX/Sprites/singleconnectorglow");
+			wellTex = ServiceHelper.Get<IContentManagerService>().ContentManager.Load<Texture2D>("GFX/Sprites/lazerglow");
 		}
 		float wellProg = WellSeedFrac + (1f - WellSeedFrac) * progress;
 		float t = elapsed;

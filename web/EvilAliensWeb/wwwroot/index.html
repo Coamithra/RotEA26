@@ -125,6 +125,14 @@
             catch (e) { console.warn('[debug] eaHitstop failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: toggle the collision-hitbox overlay (draws every collidable's shape over the
+        // game, colour-coded by kind). eaHitboxes() / eaHitboxes(true) to show, eaHitboxes(false)
+        // to hide. Same as booting with the ?hitboxes URL flag. OFF by default.
+        window.eaHitboxes = (on) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugHitboxes', on !== false); }
+            catch (e) { console.warn('[debug] eaHitboxes failed (game not booted yet?): ' + e.message); }
+        };
+
         // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
         // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
         // and permanently freezes the tab. We swallow a bad frame and keep looping so one

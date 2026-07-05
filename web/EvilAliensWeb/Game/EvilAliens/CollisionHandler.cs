@@ -40,6 +40,11 @@ public class CollisionHandler
 
 	private List<ICollidable> colliders = new List<ICollidable>();
 
+	// Live set of registered collidables (kept in sync by the ComponentAdded/Removed
+	// events below). Exposed read-only so the ?hitboxes debug overlay (HitboxOverlay,
+	// drawn from Game1.DrawInner) can iterate every hitbox at present time.
+	public IReadOnlyList<ICollidable> Collidables => collidables;
+
 	public CollisionHandler(Game game)
 	{
 		for (int i = 0; i < 10; i++)

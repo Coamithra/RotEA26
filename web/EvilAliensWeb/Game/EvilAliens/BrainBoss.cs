@@ -61,6 +61,10 @@ internal class BrainBoss : KillableAlien
 
 	private BrainAura aura;
 
+	// Live animated overlay patches (mechanical bits flickering, fleshy folds pulsating)
+	// composited over the static brain sprite; data-driven from Content/data/brainoverlays.json.
+	private BrainBossOverlays overlays;
+
 	private static List<StuffToSpawn> stuffToSpawnValues = Game1.GetEnumValues<StuffToSpawn>();
 
 	public override ICollisionType CollisionType
@@ -124,6 +128,8 @@ internal class BrainBoss : KillableAlien
 	{
 		base.LoadContent();
 		pulsateCurve = content.Load<Curve>("GFX/Effects/BrainCurve");
+		overlays = new BrainBossOverlays();
+		overlays.Load(content);
 	}
 
 	public void Setup(bool challenge)
@@ -172,6 +178,10 @@ internal class BrainBoss : KillableAlien
 	public override void Draw(GameTime gameTime)
 	{
 		base.Draw(gameTime);
+		// Live animated patches on top of the static brain. `color` is the base sprite's
+		// live tint (reddens on low HP) so the overlays redden in lockstep; DrawScale +
+		// Position glue them to the boss so they pulse and move with it.
+		overlays?.Draw(spriteBatch, base.Position, DrawScale, texture.Width, texture.Height, color, gameTime);
 	}
 
 	public override void Update(GameTime gameTime)

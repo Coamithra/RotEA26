@@ -41,6 +41,17 @@ Demo1|gfx/sprites/brainanimatedglow
 Demo2|gfx/sprites/brainanimated
 Demo2|gfx/sprites/brainanimatedglow
 
+# Brain FINAL BOSS animated overlay patches (BrainBossOverlays, from tools/brainanim).
+# The BrainBoss (Level3 + InsaneBossI) composites these feathered i2v sheets over its
+# static sprite; each is a ~1-1.7 MB PNG that would otherwise decode cold the instant
+# the boss spawns. Warm them on the two levels that spawn the boss so the fight opens clean.
+Level3|gfx/sprites/brainov_eye_reveal
+Level3|gfx/sprites/brainov_pods_flicker
+Level3|gfx/sprites/brainov_lens_right
+InsaneBossI|gfx/sprites/brainov_eye_reveal
+InsaneBossI|gfx/sprites/brainov_pods_flicker
+InsaneBossI|gfx/sprites/brainov_lens_right
+
 # Asteroids. The AsteroidSpawner picks AsteroidSmall1..4 at RANDOM per spawn
 # (Asteroid.Setup), and the big level-opener uses large_asteroid. None of the four
 # small variants are in any PreloadGraphicalContent() code list, so each first-seen

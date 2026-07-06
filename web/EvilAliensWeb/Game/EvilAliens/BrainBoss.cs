@@ -173,6 +173,9 @@ internal class BrainBoss : KillableAlien
 		aura = BrainAura.NewAura(collection, base.Game);
 		aura.Setup(this);
 		collection.Add((GameComponent)(object)aura);
+		// Restart overlay playback at phase 0 on a recycled boss (overlays are created in
+		// LoadContent, which base.Initialize() above has already run on first spawn).
+		overlays?.Reset();
 	}
 
 	public override void Draw(GameTime gameTime)

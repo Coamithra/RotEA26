@@ -54,6 +54,17 @@ internal sealed class BrainBossOverlays
     private readonly List<Overlay> _overlays = new List<Overlay>();
     private bool _loaded;
 
+    // Zero every patch's playback clock. Called from BrainBoss.Initialize so a RECYCLED
+    // boss (re-fight) restarts its overlays at phase 0 instead of mid-loop.
+    public void Reset()
+    {
+        foreach (Overlay ov in _overlays)
+            ov.Clock = 0f;
+    }
+
+    // Sheets are loaded through the shared ContentManager (which caches by asset name and
+    // owns their lifetime), so re-spawns hit the cache and nothing is disposed here — do
+    // NOT add a Dispose, it would corrupt the shared cache.
     public void Load(ContentManager content)
     {
         if (_loaded)
@@ -115,8 +126,8 @@ internal sealed class BrainBossOverlays
             TexCenterY = GetFloat(e, "texCenterY", RefH / 2f),
             TexW = GetFloat(e, "texW", 1f),
             TexH = GetFloat(e, "texH", 1f),
-            CellW = GetInt(e, "cellW", 1),
-            CellH = GetInt(e, "cellH", 1),
+            CellW = Math.Max(1, GetInt(e, "cellW", 1)),
+            CellH = Math.Max(1, GetInt(e, "cellH", 1)),
             PingPong = !e.TryGetProperty("pingpong", out JsonElement pp) || pp.ValueKind != JsonValueKind.False,
             Blend = ParseBlend(e),
         };
@@ -135,7 +146,9 @@ internal sealed class BrainBossOverlays
             return;
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
         // Map manifest (1448x1086 reference) coords onto the actual boss texture, so a
-        // future higher-res brainbosshd (with a matching DesignFrameWidth) still lines up.
+        // future higher-res brainbosshd (with a matching DesignFrameWidth) still lines up —
+        // provided it keeps the 1448:1086 aspect (else sx != sy and a patch's crop aspect
+        // no longer matches its cell, distorting it).
         float sx = bossTexW / RefW;
         float sy = bossTexH / RefH;
         SpriteBlendMode savedBlend = sb.BlendMode;

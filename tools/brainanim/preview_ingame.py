@@ -62,14 +62,17 @@ def cell_rect(ov, frame):
 
 
 def pingpong_frame(ov, phase):
-    """phase 0..1 -> integer frame with ping-pong (matches the C# triangle)."""
+    """phase 0..1 -> integer frame with ping-pong. FLOORS (int) to match the engine's
+    frame SELECTION (BrainBossOverlays.FramePair f0 = (int)pos); the engine additionally
+    cross-fades f0->f1 via the interpolation shader, which this static preview omits, so
+    the preview is a slightly steppier lower bound on smoothness."""
     n = ov["frames"]
     if n <= 1:
         return 0
     span = 2 * (n - 1)
     t = (phase * span) % span
     pos = span - t if t > (n - 1) else t
-    return int(round(pos))
+    return min(n - 1, int(pos))
 
 
 def render(scale, phase, overlays, brain, sheets, with_overlays=True):
@@ -96,7 +99,7 @@ def render(scale, phase, overlays, brain, sheets, with_overlays=True):
 def main():
     if not MANIFEST.exists():
         raise SystemExit(f"no manifest at {MANIFEST}; run build_brain_overlays.py first")
-    overlays = json.loads(MANIFEST.read_text())["overlays"]
+    overlays = json.loads(MANIFEST.read_text(encoding="utf-8"))["overlays"]
     brain = Image.open(BRAIN).convert("RGBA")
     sheets = {ov["name"]: Image.open(WWW / "gfx/sprites" / (Path(ov["sheet"]).name + ".png")).convert("RGBA")
               for ov in overlays}

@@ -106,6 +106,8 @@ def main():
     for r in regions:
         name = r["name"]
         x0, y0, x1, y1 = r["box"]
+        # 373 = the HARD cutoff (rows above it are off the top of the screen at fight scale
+        # 1.0); regions.json keeps ty0 >= ~400 for a safety margin against pulsation.
         assert y0 >= 373, f"{name}: box top {y0} is above the on-screen cutoff (373)!"
         outdir = WORK / name
         outdir.mkdir(parents=True, exist_ok=True)

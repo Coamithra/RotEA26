@@ -89,15 +89,21 @@ def feather_mask(w, h):
     return m * m * (3 - 2 * m)              # smoothstep
 
 
-def colour_match(frames, crop_rgb):
+def colour_match(frames, crop_rgb, crop_alpha):
     """Shift every frame by (crop_border_mean - frame0_border_mean) so the VAE's global
-    colour drift doesn't make even the rest frame mismatch the static art it overlays."""
+    colour drift doesn't make even the rest frame mismatch the static art it overlays.
+    Only OPAQUE border pixels are sampled (crop_alpha), so a crop that overhangs the ball
+    doesn't average in the sprite's transparent green backdrop and cast the patch green."""
     h, w, _ = frames[0].shape
     b = max(2, int(min(h, w) * 0.12))
-    mask = np.ones((h, w), bool)
-    mask[b:-b, b:-b] = False
+    border = np.zeros((h, w), bool)
+    border[:b, :] = border[-b:, :] = border[:, :b] = border[:, -b:] = True
+    alpha = np.asarray(Image.fromarray(crop_alpha).resize((w, h), Image.LANCZOS))
+    band = border & (alpha > 128)
+    if not band.any():
+        return [np.clip(f, 0, 255) for f in frames]
     crop = np.asarray(Image.fromarray(crop_rgb).resize((w, h), Image.LANCZOS)).astype(np.float32)
-    off = crop[mask].mean(0) - frames[0][mask].mean(0)
+    off = crop[band].mean(0) - frames[0][band].mean(0)
     return [np.clip(f + off, 0, 255) for f in frames]
 
 
@@ -125,7 +131,7 @@ def build(name, region):
     crop_alpha = brain[..., 3]           # brain silhouette in this crop
 
     frames = decimate(frames, KEEP_FRAMES)
-    frames = colour_match(frames, crop_rgb)
+    frames = colour_match(frames, crop_rgb, crop_alpha)
     n = len(frames)
     tw, th = x1 - x0, y1 - y0
     cw = CELL_W
@@ -187,7 +193,7 @@ def main():
     DATA.mkdir(parents=True, exist_ok=True)
     manifest = {}
     if MANIFEST.exists():
-        manifest = {e["name"]: e for e in json.loads(MANIFEST.read_text())["overlays"]}
+        manifest = {e["name"]: e for e in json.loads(MANIFEST.read_text(encoding="utf-8"))["overlays"]}
     for name in args:
         if name not in regions:
             print(f"  {name}: not in regions.json - skipped")

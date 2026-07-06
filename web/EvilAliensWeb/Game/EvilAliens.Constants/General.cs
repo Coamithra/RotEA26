@@ -37,12 +37,31 @@ public static class General
 
 	public static string Path => path;
 
+	// Which levels capture a live level-select thumbnail (vs showing bundled static art).
+	// The XBLIG enabled only the three story levels; the web port extends it to every
+	// challenge in the carousel too. WebcamAliens is opt-in (privacy: the shot contains
+	// the player's camera image) via the Settings.WebcamScreenshot toggle. Demo1/2/3
+	// (attract-mode) and the Tutorial have no carousel slot, so they never capture.
 	public static bool ScreenshotEnabled(Levels level)
 	{
-		if (level != Levels.Level1 && level != Levels.Level2)
+		switch (level)
 		{
-			return level == Levels.Level3;
+		case Levels.Level1:
+		case Levels.Level2:
+		case Levels.Level3:
+		case Levels.SpaceDodge:
+		case Levels.Braineroids:
+		case Levels.ClassicAliens:
+		case Levels.Paratrooper:
+		case Levels.OwnLevel:
+		case Levels.CrazyGame:
+		case Levels.InsaneBossI:
+		case Levels.TeamChallenge:
+			return true;
+		case Levels.WebcamAliens:
+			return Settings.GetInstance().WebcamScreenshot;
+		default:
+			return false;
 		}
-		return true;
 	}
 }

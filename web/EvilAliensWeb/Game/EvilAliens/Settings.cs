@@ -69,6 +69,12 @@ public class Settings : Savable
 
 	public bool HideSafeArea;
 
+	// Web port: opt-in capture of a level-select thumbnail for the webcam challenge
+	// (Levels.WebcamAliens). Default OFF — when on, the shot composites the player's
+	// segmented camera overlay in (WebcamLevel + ScreenshotSaver). Appended field, so
+	// an existing Settings.xml without it deserializes to false.
+	public bool WebcamScreenshot;
+
 	public float Scale = 1f;
 
 	public float Gamma = 1f;

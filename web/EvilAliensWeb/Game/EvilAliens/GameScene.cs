@@ -954,7 +954,34 @@ internal abstract class GameScene : Scene
 			_ = ScreenShotSpamEnabled;
 			score.Snapshot();
 			snapshotMadeThisSession = true;
+			// Hook for levels that need to grab something extra at the exact snapshot
+			// instant (the webcam level composites its player overlay in — the overlay
+			// is torn down before SaveScreenShot runs, so it must be captured now).
+			OnScreenshotResolved();
 		}
+	}
+
+	// Called the instant the scene frame is resolved into MyScreenShot (during Draw).
+	// Base does nothing; WebcamLevel overrides it to stash the player overlay.
+	protected virtual void OnScreenshotResolved()
+	{
+	}
+
+	// Arm a one-off screenshot regardless of the on-screen busy-ness heuristic. The
+	// generic checkScreenShot only fires once a scene crosses ~30 on-screen entities,
+	// which a sparse level (the webcam challenge) never does — this lets such a level
+	// request a shot at a good moment. Guarded so it never double-captures.
+	protected void ForceSnapshot()
+	{
+		if (!General.ScreenshotEnabled(level) || snapshotMadeThisSession || snapshottimer.Active)
+		{
+			return;
+		}
+		if (game1PostDrawEvent == null)
+		{
+			game1PostDrawEvent = takeScreenShot;
+		}
+		Game1.onPostDraw = (Game1.PostDrawEvent)Delegate.Combine(Game1.onPostDraw, game1PostDrawEvent);
 	}
 
 	private void UpdateStartup(GameTime gameTime)

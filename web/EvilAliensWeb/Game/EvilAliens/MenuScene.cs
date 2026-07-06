@@ -285,6 +285,10 @@ internal class MenuScene : Scene
 		optionsMenu = new MenuSub1(base.Game);
 		optionsMenu.AddEntry("Music: " + boolToGameString(Settings.GetInstance().PlayMusic));
 		optionsMenu.AddEntryEvent(optionsMenu_MusicSelected);
+		// Opt-in: capture a level-select thumbnail of the webcam challenge (it contains
+		// the player's camera image, so it's off by default). See General.ScreenshotEnabled.
+		optionsMenu.AddEntry("Webcam Screenshots: " + boolToGameString(Settings.GetInstance().WebcamScreenshot));
+		optionsMenu.AddEntryEvent(optionsMenu_WebcamScreenshotSelected);
 		if (GraphicsAdapter.DefaultAdapter.IsWideScreen)
 		{
 			optionsMenu.AddEntry("Stretch Screen: " + boolToGameString(Settings.GetInstance().Stretch));
@@ -654,6 +658,12 @@ internal class MenuScene : Scene
 		Settings.GetInstance().Interpolate = Settings.GetInstance().Bloom;
 		sender.SetEntry("Fancy GFX: " + boolToGameString(Settings.GetInstance().Bloom));
 		((DrawableGameComponent)ServiceHelper.Get<IBloomService>().BloomComponent).Visible = Settings.GetInstance().Bloom;
+	}
+
+	private void optionsMenu_WebcamScreenshotSelected(MenuSub1 sender)
+	{
+		Settings.GetInstance().WebcamScreenshot = !Settings.GetInstance().WebcamScreenshot;
+		sender.SetEntry("Webcam Screenshots: " + boolToGameString(Settings.GetInstance().WebcamScreenshot));
 	}
 
 	private void optionsMenu_MusicSelected(MenuSub1 sender)

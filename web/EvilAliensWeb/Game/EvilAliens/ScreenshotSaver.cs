@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Storage;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -17,6 +18,11 @@ public class ScreenshotSaver
 	private static List<Levels> levels = Game1.GetEnumValues<Levels>();
 
 	private static Texture2D[] screenshots = (Texture2D[])(object)new Texture2D[levels.Count];
+
+	// A player-overlay texture grabbed at the last snapshot instant, composited over
+	// the game frame in SaveScreenShot (the webcam challenge — see CaptureWebcamOverlay).
+	// Disposed + cleared once composited so it never leaks into a later level's shot.
+	private static Texture2D pendingOverlay;
 
 	public static void Init()
 	{
@@ -57,6 +63,45 @@ public class ScreenshotSaver
 		return screenshots[(int)level];
 	}
 
+	// Grab the webcam challenge's player-overlay pixels from JS (WebcamInterop ->
+	// eaWebcam.overlayPixels) at the current frame and stash them as a texture for the
+	// next SaveScreenShot to composite. Called from WebcamLevel.OnScreenshotResolved at
+	// the snapshot instant (the JS overlay is torn down before SaveScreenShot runs). Any
+	// failure (no player, interop unavailable) just leaves pendingOverlay null -> the
+	// shot is the plain game frame.
+	public static void CaptureWebcamOverlay(GraphicsDevice gd)
+	{
+		if (pendingOverlay != null)
+		{
+			((GraphicsResource)pendingOverlay).Dispose();
+			pendingOverlay = null;
+		}
+		if (WebcamInterop.GetOverlayPixels((int)SIZE.X, (int)SIZE.Y, out byte[] rgba, out int w, out int h)
+			&& rgba != null && w > 0 && h > 0 && rgba.Length >= w * h * 4)
+		{
+			try
+			{
+				// SetData wants EXACTLY w*h*4 bytes; the interop returns exactly that, but
+				// the guard above only checks >=, so trim any trailing slack defensively
+				// (a mismatch would otherwise throw). Any failure -> plain frame.
+				int need = w * h * 4;
+				if (rgba.Length != need)
+				{
+					byte[] exact = new byte[need];
+					Array.Copy(rgba, exact, need);
+					rgba = exact;
+				}
+				Texture2D overlay = new Texture2D(gd, w, h, false, SurfaceFormat.Color);
+				overlay.SetData<byte>(rgba);
+				pendingOverlay = overlay;
+			}
+			catch
+			{
+				pendingOverlay = null;
+			}
+		}
+	}
+
 	public static void SaveScreenShot(Texture2D Screenshot, Levels level)
 	{
 		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
@@ -78,8 +123,24 @@ public class ScreenshotSaver
 			spriteBatchWrapper.BlendMode = (SpriteBlendMode)0;
 			spriteBatchWrapper.Draw(Screenshot, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
 			spriteBatchWrapper.Flush();
+			// Composite the player overlay on top of the game frame (webcam challenge).
+			// Straight (non-premultiplied) alpha; the overlay is transparent except the
+			// segmented person, which draws over the starfield/saucers just like on screen.
+			// Gated on WebcamAliens: a stray overlay must never leak the camera image into
+			// another level's thumbnail (it's still disposed below either way).
+			if (pendingOverlay != null && level == Levels.WebcamAliens)
+			{
+				spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
+				spriteBatchWrapper.Draw(pendingOverlay, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
+				spriteBatchWrapper.Flush();
+			}
 			spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 			graphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
+			if (pendingOverlay != null)
+			{
+				((GraphicsResource)pendingOverlay).Dispose();
+				pendingOverlay = null;
+			}
 			Texture2D texture = val.GetTexture();
 			uint[] array = new uint[texture.Width * texture.Height];
 			texture.GetData<uint>(array);

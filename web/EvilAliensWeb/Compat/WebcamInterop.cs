@@ -21,6 +21,7 @@
 // can pause fairly instead of letting an invisible player die.
 // ---------------------------------------------------------------------------
 using System;
+using System.Text.Json;
 using Microsoft.JSInterop;
 using Microsoft.Xna.Framework;
 
@@ -106,6 +107,56 @@ namespace EvilAliensWeb.Compat
         public static void TuneHide()
         {
             _js?.InvokeVoid("eaWcTune.hide");
+        }
+
+        // Grab the in-game person overlay's pixels for the level-select thumbnail (the
+        // opt-in Settings.WebcamScreenshot capture). JS renders the overlay canvas into a
+        // reqW x reqH offscreen and returns {w,h,px} where px is straight-alpha RGBA,
+        // base64. Only valid while Playing; returns false (and leaves outputs empty) on
+        // any failure so the caller falls back to the plain game frame.
+        public static bool GetOverlayPixels(int reqW, int reqH, out byte[] rgba, out int w, out int h)
+        {
+            rgba = null;
+            w = 0;
+            h = 0;
+            if (_js == null || State != SessionState.Playing)
+            {
+                return false;
+            }
+            string json;
+            try
+            {
+                json = _js.Invoke<string>("eaWebcam.overlayPixels", reqW, reqH);
+            }
+            catch
+            {
+                return false;
+            }
+            if (string.IsNullOrEmpty(json))
+            {
+                return false;
+            }
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(json);
+                JsonElement root = doc.RootElement;
+                w = root.GetProperty("w").GetInt32();
+                h = root.GetProperty("h").GetInt32();
+                string b64 = root.GetProperty("px").GetString();
+                if (string.IsNullOrEmpty(b64) || w <= 0 || h <= 0)
+                {
+                    return false;
+                }
+                rgba = Convert.FromBase64String(b64);
+                return rgba.Length >= w * h * 4;
+            }
+            catch
+            {
+                w = 0;
+                h = 0;
+                rgba = null;
+                return false;
+            }
         }
 
         private static void ClearMask()

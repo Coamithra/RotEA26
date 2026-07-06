@@ -421,7 +421,26 @@ internal class WebcamLevel : GameScene
 				ufo.Asplode();
 				kills++;
 				score.AddScore(PointValues.WebcamUfo, isCombo: false, ufo.Position, 0);
+				// Grab the level-select thumbnail on the first splat: the player is
+				// clearly in frame and there's a saucer + explosion on screen. The
+				// generic busy-scene trigger never fires here (too few entities). No-op
+				// unless the opt-in Settings.WebcamScreenshot is on (ForceSnapshot gates
+				// on ScreenshotEnabled).
+				if (kills == 1)
+				{
+					ForceSnapshot();
+				}
 			}
+		}
+	}
+
+	// Composite the player's camera overlay into the thumbnail at the snapshot instant
+	// (the JS overlay is torn down before ScreenshotSaver.SaveScreenShot runs).
+	protected override void OnScreenshotResolved()
+	{
+		if (Settings.GetInstance().WebcamScreenshot)
+		{
+			ScreenshotSaver.CaptureWebcamOverlay(base.GraphicsDevice);
 		}
 	}
 

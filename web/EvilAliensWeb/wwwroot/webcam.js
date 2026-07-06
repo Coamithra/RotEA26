@@ -506,5 +506,35 @@ window.eaWebcam = (function () {
         segmenterState = "off";
     }
 
-    return { begin: begin, stop: stop };
+    // Grab the in-game person overlay as straight-alpha RGBA for the level-select
+    // thumbnail (the opt-in Settings.WebcamScreenshot capture; C# side is
+    // WebcamInterop.GetOverlayPixels). Renders the overlay canvas — which exactly
+    // covers the game's 4:3 letterbox — into a reqW x reqH offscreen (the thumbnail is
+    // also 4:3, so it fills), reads it back, and returns {w,h,px:base64}. null unless
+    // actively playing. Called rarely (once per capture), so the readback cost is fine.
+    function overlayPixels(reqW, reqH) {
+        try {
+            if (mode !== "play" || !overlayCanvas || !overlayCanvas.width || !overlayCanvas.height) return null;
+            var w = Math.max(1, reqW | 0), h = Math.max(1, reqH | 0);
+            var off = document.createElement("canvas");
+            off.width = w; off.height = h;
+            var ctx = off.getContext("2d");
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(overlayCanvas, 0, 0, overlayCanvas.width, overlayCanvas.height, 0, 0, w, h);
+            var data = ctx.getImageData(0, 0, w, h).data; // straight (unpremultiplied) RGBA
+            // Chunked base64 — btoa/String.fromCharCode.apply choke on a whole big buffer.
+            var CH = 0x8000, parts = [];
+            for (var i = 0; i < data.length; i += CH) {
+                parts.push(String.fromCharCode.apply(null, data.subarray(i, Math.min(i + CH, data.length))));
+            }
+            return JSON.stringify({ w: w, h: h, px: btoa(parts.join("")) });
+        } catch (e) {
+            console.warn("[webcam] overlayPixels failed:", e);
+            return null;
+        }
+    }
+
+    return { begin: begin, stop: stop, overlayPixels: overlayPixels };
 })();

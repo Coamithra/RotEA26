@@ -364,6 +364,28 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   progress on the first post-update load. Derived art (`heart.png`, `Screenshots/webcamss` — cropped from
   the meme splash) is built by `tools/webcam/build_webcam_assets.py`; don't hand-edit. Headless QA: fake
   a player from the console via `DotNet.invokeMethod('EvilAliensWeb','webcamMask', b64Grid, coverage)`.
+- **Level-select screenshots now cover ALL challenges, not just the 3 story levels — plus an opt-in
+  webcam capture (`General.ScreenshotEnabled` + `Settings.WebcamScreenshot`).** The XBLIG only
+  captured live thumbnails for `Level1/2/3` (`General.ScreenshotEnabled`); the web port extends it to
+  every carousel challenge (`SpaceDodge`/`Braineroids`/`ClassicAliens`/`Paratrooper`/`OwnLevel`/
+  `CrazyGame`/`InsaneBossI`/`TeamChallenge`). The capture→save→display path is unchanged
+  (`GameScene.checkScreenShot` → `takeScreenShot` `ResolveBackBuffer` → `ScreenshotSaver.SaveScreenShot`
+  writes `<Level>.dat` → localStorage; `SubMenuLevelChoice` shows it, else the bundled static art). The
+  `.dat` is written on level EXIT (`Terminate`), not mid-play, and each is ~270 KB raw / ~360 KB base64
+  in **localStorage (~5 MB cap)** — the `StorageStub.Sync` persists screenshots LAST so critical saves
+  survive a quota blowout; IndexedDB migration is the follow-up if it bites. **WebcamAliens is opt-in**
+  (privacy — the shot contains the player's camera image): `ScreenshotEnabled(WebcamAliens)` returns
+  the new **`Settings.WebcamScreenshot`** bool (default false; a new Options-menu toggle "Webcam
+  Screenshots", saved on options-exit like the others). The webcam shot **composites the player overlay
+  back in**: the person is a JS canvas layered ABOVE the WebGL canvas, so `ResolveBackBuffer` can't see
+  it — instead `WebcamLevel.OnScreenshotResolved` (a new `GameScene` hook fired at the snapshot instant,
+  before the JS overlay is torn down) calls `ScreenshotSaver.CaptureWebcamOverlay`, which pulls the
+  overlay's straight-alpha RGBA from JS (`WebcamInterop.GetOverlayPixels` → `eaWebcam.overlayPixels(w,h)`
+  in `webcam.js`) into a `pendingOverlay` texture that `SaveScreenShot` draws over the game frame
+  (NonPremultiplied; aliens already render behind the player). The sparse webcam level never hits the
+  generic >30-entity capture trigger, so `WebcamLevel` calls the new `GameScene.ForceSnapshot()` on the
+  first kill (guarded single-shot). All 9 challenges verified capturing; the webcam *composite* itself
+  needs a real camera to verify end-to-end.
 - **Webcam saucer FEEL pass (`WebcamUfo`/`WebcamLevel`/`WebcamInterop`).** A round of gameplay tuning on
   the "I Made This!" mode (behavioural, separate from the `Tunings[]` value dialing). (1) **Firing is
   plant-and-shoot**: a saucer decelerates to a COMPLETE on-screen stop (`HaltMs`), blink-charges in

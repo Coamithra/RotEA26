@@ -444,7 +444,10 @@ internal class WebcamLevel : GameScene
 		{
 			return;
 		}
-		base.SoundManager.PlayCue("head_asplode");
+		// The Doom-derived "boss takes a hit" cue — the same sound the final BrainBoss
+		// plays when it's hit (BrainBoss.HitBy). A cheeky reference; replaces the old
+		// head_asplode placeholder.
+		base.SoundManager.PlayCue("hit_boss");
 		graceTimer.Reset();
 		graceTimer.Start();
 		if (Settings.GetInstance().InfiniteLives)
@@ -465,10 +468,15 @@ internal class WebcamLevel : GameScene
 		base.Draw(gameTime);
 		SpriteBatchWrapper spriteBatch = base.SpriteBatch;
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
-		// hearts, top-left — the original game's lives row
+		// hearts, top-centre + smaller — the old top-left row overlapped the score (which
+		// draws at SafeZone.(Left,Top)); centring clears both the score and the top-right
+		// kill counter.
+		float heartScale = 0.6f;
+		float heartSpacing = 30f;
+		float heartsLeft = 400f - (float)(hearts - 1) * heartSpacing / 2f;
 		for (int i = 0; i < hearts; i++)
 		{
-			spriteBatch.Draw(heart, new Vector2((float)((General.SafeZone).Left + 24 + i * 44), (float)((General.SafeZone).Top + 22)), 0f, 0.9f, center: true, Color.White);
+			spriteBatch.Draw(heart, new Vector2(heartsLeft + (float)i * heartSpacing, (float)((General.SafeZone).Top + 18)), 0f, heartScale, center: true, Color.White);
 		}
 		// kill counter, top-right — the original's "Killed: N"
 		if (font != null)

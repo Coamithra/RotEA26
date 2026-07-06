@@ -1015,6 +1015,46 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   order; `build_models.py --selftest` proves the pack + `.dat` round-trip without Blender. The ACTUAL model
   creation + per-object wiring is the user's manual work (its own "For me" card); `tools/models/README.md`
   is the how-to. Don't hand-edit the built `.png`/`.dat` -- re-run the tool.
+- **Brain final-boss LIVE ANIMATED OVERLAY PATCHES (`Game/EvilAliens/BrainBossOverlays.cs` +
+  `tools/brainanim/` + `Content/data/brainoverlays.json`).** The big-brain final boss (`BrainBoss`,
+  `brainbosshd` -- Level3 + InsaneBossI) is ONE static 1448x1086 sprite, too big to animate whole. So a
+  few SELECTED on-screen regions are animated offline with the LOCAL Wan 2.2 14B Lightning i2v model
+  (via the `../animgen` ComfyUI plumbing) and composited back as small feathered sprite-sheet patches
+  that track the boss. Shipped overlays: **`eye_reveal`** (fleshy folds part to reveal an orange eye
+  that looks around, centre), **`pods_flicker`** (the bottom blue mechanical pod cluster flickering,
+  mechanical), **`lens_right`** (a blue mechanical iris blooming open on the right). **INVARIANT --
+  never animate the top of the sprite:** the boss draws at design `(400,100)` with `textureScale
+  ~1.703`, so texture rows `< ~373` (incl. the central mechanical eye) are ABOVE the top of the screen;
+  every `regions.json` box has `ty0 >= ~400`. **Pipeline (`tools/brainanim/`, run with the AnimGen venv
+  `C:/Programming/animgen/.venv/Scripts/python.exe`):** (1) `regions.json` = the crop boxes (texture px)
+  + i2v prompts + seeds + per-region `fps`; (2) `gen_brain_anims.py` crops each region and runs it
+  through `comfy_client.generate` as an OPEN-ENDED i2v (start = crop, no end frame -> the FLF template
+  degrades to I2V; auto-launches ComfyUI with the safe TDR flags), extracting mp4 frames into
+  `new_assets_raw/brainanim/<name>/` (gitignored); (3) `build_brain_overlays.py <name>...` TRIAGES motion
+  (`--list` prints mean inter-frame diff + a border-drift metric so static duds / camera-drift takes are
+  spotted), colour-matches each frame's border to the original crop (undo VAE colour drift), multiplies
+  the edge feather by the **brain's own alpha** (so the patch dissolves into the art AND never leaks the
+  sprite's green backdrop where a crop overhangs the ball), packs a squarest grid ->
+  `wwwroot/Content/gfx/sprites/brainov_<name>.png`, and writes the manifest. **The game reads ONLY
+  `Content/data/brainoverlays.json`** (LandedOffsets-style trim-safe `TitleContainer`+`JsonDocument`
+  load; a region not packed there is simply not drawn; a missing/bad manifest -> static boss).
+  `BrainBossOverlays.Draw` (called from `BrainBoss.Draw` AFTER `base.Draw`) pins each patch's on-screen
+  footprint to its brain-texel crop (`texCenter`/`texW`/`texH`, reference 1448x1086), so it sits exactly
+  over the region it was cut from and **pulses + moves with the boss** (uses the boss's `DrawScale` +
+  `Position`), tints by the boss's live `color` (so patches redden in lockstep on low HP), **ping-pongs**
+  for a seamless loop, and rides the frame-interpolation shader (`interpolateEffect`, same path as the
+  animated Braineroid) so the low frame count still plays smooth. It advances on DRAW time (cosmetic --
+  unaffected by hit-stop, like the metal sheen). Straight (non-premultiplied) alpha throughout.
+  **Verify WITHOUT a browser:** `tools/brainanim/preview_ingame.py` composites the boss + overlays in the
+  exact 800x600 player framing (mirrors the Draw math) -> `_ingame_contact.png` (static vs 4 phases) +
+  `_ingame.gif`. Live: **`?harness=brainboss`** shows the full boss with the overlays ANIMATING (they
+  advance on Draw, so the frozen harness still plays them). Both boss levels warm the three sheets in
+  `preload/manifest.txt` so they don't decode mid-fight. **To retune:** edit `regions.json` (box/prompt/
+  seed/fps), re-run `gen_brain_anims.py <name>` then `build_brain_overlays.py <name>...` with ONLY the
+  winners (that rebuilds their sheets + rewrites the manifest); to DROP an overlay, remove its entry from
+  the manifest (or rebuild without it) + delete the `brainov_<name>.png`. Don't hand-edit the sheets /
+  manifest -- re-run the tools. If a big new sheet stutters at preload, add it to `textures.config` for
+  DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

@@ -102,3 +102,9 @@ tools/mars/_*.png
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.
 .env
+
+# ---- Brain-boss animated overlays (tools/brainanim) --------------------------
+# The scripts + regions.json + the committed sheets/manifest ship. Diagnostic
+# previews (_*.png / _*.gif) and raw i2v work (mp4s + extracted frames, kept in
+# new_assets_raw/brainanim) stay local; re-run the tools to reproduce.
+tools/brainanim/_*

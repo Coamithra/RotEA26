@@ -26,6 +26,15 @@ on-screen size (more texels = more crispness, not a bigger galaxy).
    and prints the resulting on-screen `doodadscale` (a sanity check; the game derives
    it live, so you don't edit any code).
 
+## Current source / license
+The shipped `andromeda.png` is built from **Adam Evans' natural-colour M31 mosaic**
+("Andromeda Galaxy (with h-alpha)", Wikimedia Commons), licensed **CC BY 2.0** —
+free to use *with attribution*. The credit is in the in-game end-credits crawl
+(`CreditsScene.SetupCredits`, "ADDITIONAL GRAPHICS"). If you swap in a different
+source, keep it public-domain (NASA/JPL) or CC-BY-with-credit and update that line.
+The raw source (centre-cropped on the galaxy to trim the star-heavy borders) lives at
+`source/andromeda.png` (gitignored).
+
 ## What the tool does
 - **Alpha** (`--alpha auto`, default): auto-detects the source shape. Opaque-on-black
   → derives alpha from luminance (black becomes transparent). Already-transparent →

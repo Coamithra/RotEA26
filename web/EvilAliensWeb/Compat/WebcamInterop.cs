@@ -226,5 +226,50 @@ namespace EvilAliensWeb.Compat
             }
             return false;
         }
+
+        // Body-shaped avoidance: a vector pointing AWAY from the player's mask, summed
+        // over every occupied cell within `radius` of `pos` (each contributes a unit
+        // push away, linearly stronger the closer it is). Zero when the player isn't
+        // meaningfully in frame or nothing is within range. WebcamUfo steers its wander
+        // by this so the saucers flow around the player's silhouette instead of drifting
+        // into a still body — driven by the actual camera image, not just the centroid.
+        public static Vector2 AvoidanceVector(Vector2 pos, float radius)
+        {
+            if (!PlayerVisible || radius <= 0f)
+            {
+                return Vector2.Zero;
+            }
+            int gx0 = (int)((pos.X - radius) / CellW);
+            int gx1 = (int)((pos.X + radius) / CellW);
+            int gy0 = (int)((pos.Y - radius) / CellH);
+            int gy1 = (int)((pos.Y + radius) / CellH);
+            if (gx0 < 0) gx0 = 0;
+            if (gy0 < 0) gy0 = 0;
+            if (gx1 >= GridW) gx1 = GridW - 1;
+            if (gy1 >= GridH) gy1 = GridH - 1;
+            Vector2 push = Vector2.Zero;
+            for (int gy = gy0; gy <= gy1; gy++)
+            {
+                for (int gx = gx0; gx <= gx1; gx++)
+                {
+                    if (!grid[gy * GridW + gx])
+                    {
+                        continue;
+                    }
+                    float dx = pos.X - (gx + 0.5f) * CellW;
+                    float dy = pos.Y - (gy + 0.5f) * CellH;
+                    float d2 = dx * dx + dy * dy;
+                    if (d2 >= radius * radius || d2 < 1f)
+                    {
+                        continue;
+                    }
+                    float d = (float)Math.Sqrt(d2);
+                    float w = 1f - d / radius;
+                    push.X += dx / d * w;
+                    push.Y += dy / d * w;
+                }
+            }
+            return push;
+        }
     }
 }

@@ -79,9 +79,26 @@ public class ScreenshotSaver
 		if (WebcamInterop.GetOverlayPixels((int)SIZE.X, (int)SIZE.Y, out byte[] rgba, out int w, out int h)
 			&& rgba != null && w > 0 && h > 0 && rgba.Length >= w * h * 4)
 		{
-			Texture2D overlay = new Texture2D(gd, w, h, false, SurfaceFormat.Color);
-			overlay.SetData<byte>(rgba);
-			pendingOverlay = overlay;
+			try
+			{
+				// SetData wants EXACTLY w*h*4 bytes; the interop returns exactly that, but
+				// the guard above only checks >=, so trim any trailing slack defensively
+				// (a mismatch would otherwise throw). Any failure -> plain frame.
+				int need = w * h * 4;
+				if (rgba.Length != need)
+				{
+					byte[] exact = new byte[need];
+					Array.Copy(rgba, exact, need);
+					rgba = exact;
+				}
+				Texture2D overlay = new Texture2D(gd, w, h, false, SurfaceFormat.Color);
+				overlay.SetData<byte>(rgba);
+				pendingOverlay = overlay;
+			}
+			catch
+			{
+				pendingOverlay = null;
+			}
 		}
 	}
 
@@ -109,7 +126,9 @@ public class ScreenshotSaver
 			// Composite the player overlay on top of the game frame (webcam challenge).
 			// Straight (non-premultiplied) alpha; the overlay is transparent except the
 			// segmented person, which draws over the starfield/saucers just like on screen.
-			if (pendingOverlay != null)
+			// Gated on WebcamAliens: a stray overlay must never leak the camera image into
+			// another level's thumbnail (it's still disposed below either way).
+			if (pendingOverlay != null && level == Levels.WebcamAliens)
 			{
 				spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 				spriteBatchWrapper.Draw(pendingOverlay, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);

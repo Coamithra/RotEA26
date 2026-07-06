@@ -386,6 +386,22 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   generic >30-entity capture trigger, so `WebcamLevel` calls the new `GameScene.ForceSnapshot()` on the
   first kill (guarded single-shot). All 9 challenges verified capturing; the webcam *composite* itself
   needs a real camera to verify end-to-end.
+- **Webcam saucer FEEL pass (`WebcamUfo`/`WebcamLevel`/`WebcamInterop`).** A round of gameplay tuning on
+  the "I Made This!" mode (behavioural, separate from the `Tunings[]` value dialing). (1) **Firing is
+  plant-and-shoot**: a saucer decelerates to a COMPLETE on-screen stop (`HaltMs`), blink-charges in
+  place, fires, then ACCELERATES away from rest (was: drift-while-blinking then snap to full speed). (2)
+  **Saucers are PERSISTENT**: a fired saucer retreats only ~`RetreatMargin`(50px) past an edge, then
+  `ReturnToField()` snap-turns it back in (the turn is off-screen so the cheat is invisible) to
+  re-arm/fire again; the ONLY despawn is a player swat (`Asplode`) -- no more off-screen GC. Because they
+  persist, the swarm fills to the tier's `MaxSaucers` and stays there (a new one spawns only after a
+  swat). (3) **Fly-around AI**: while wandering they steer away from + orbit the player's mask via
+  `WebcamInterop.AvoidanceVector` (image-driven, not just the `Centroid`), so a still player isn't
+  drifted into but a lunge still swats them; strength is live-tunable with **`?wcavoid=<f>`**
+  (`DebugFlags.WebcamAvoid`; 0 disables, null => baked `DefaultAvoidStrength`). (4) Plasma already aims
+  at the mask **centre of mass** (`Centroid`), locked at fire. (5) Player-hit plays **`hit_boss`** (the
+  Doom BrainBoss-hit cue) not `head_asplode`. (6) Hearts moved TOP-CENTRE + smaller (were overlapping the
+  top-left score). "Explosions on top of the feed" was scoped out: the JS-overlay feed can't cheaply
+  enter the C# scene (a ~5MB/frame canvas->WASM texture copy, or hacking KNI's private GL context).
 - **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no

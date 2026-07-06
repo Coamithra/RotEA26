@@ -434,6 +434,13 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WebcamPlasmaSpeed { get; private set; }
 
+		// ?wcavoid=<f>: strength of the webcam saucers' player-avoidance/orbit steering
+		// ("fly around the player"). 0 disables it (pure random wander), 1 = the baked
+		// default feel, >1 more evasive. null => WebcamUfo's baked DefaultAvoidStrength,
+		// so a normal build is unchanged. Lets the "won't hit me if I sit still" feel be
+		// A/B'd by eye without a rebuild.
+		public static float? WebcamAvoid { get; private set; }
+
 		// ?wctune: show the LIVE webcam-tuning stepper panel (index.html, outside #app)
 		// while the webcam level is up. The panel drives SetWebcamTuneOverride below via
 		// Compat/DebugInput.SetWcTune, so the five Tunings[] knobs can be nudged in real
@@ -743,6 +750,12 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcps) && wcps > 0f)
 					{
 						WebcamPlasmaSpeed = wcps;
+					}
+					break;
+				case "wcavoid":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcav) && wcav >= 0f)
+					{
+						WebcamAvoid = wcav;
 					}
 					break;
 				case "wctune":

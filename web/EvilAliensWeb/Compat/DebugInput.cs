@@ -173,6 +173,29 @@ namespace EvilAliensWeb.Compat
 				(float)tendrilSpeed);
 		}
 
+		// JS bridge for the live spider-tuner slider panel (eaSpider in wwwroot/index.html, shown on
+		// ?harness=spiderjump / ?level=Level2&spiders / ?spidertune): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetSpider', jumpFrame, landFrame, jumpX, pinJumpX, shadowX, shadowY, shadowScale, airX, airY).
+		// Overrides the Mars jumping-spider alignment knobs in real time so the sliders retune without a
+		// page reload — same effect as the ?spiderjumpframe/?spiderlandframe/?spiderjumpx/?spidershadow*/
+		// ?spiderair* URL flags, just live. airX/airY nudge the airborne flying sprite so the launch +
+		// landing transitions line up. pinJumpX == false => leave the launch X RANDOM per spider (the
+		// shipped behaviour, jumpX ignored); true => pin it to `jumpX` so dialing is repeatable.
+		[JSInvokable("debugSetSpider")]
+		public static void SetSpider(double jumpFrame, double landFrame, double jumpX, bool pinJumpX, double shadowX, double shadowY, double shadowScale, double airX, double airY, double phase, bool freezePhase)
+		{
+			DebugFlags.SetSpiderOverride(
+				(float)jumpFrame,
+				(float)landFrame,
+				pinJumpX ? (float?)(float)jumpX : null,
+				(float)shadowX,
+				(float)shadowY,
+				(float)shadowScale,
+				(float)airX,
+				(float)airY,
+				freezePhase ? (float?)(float)phase : null);
+		}
+
 		// JS bridge for the live webcam-tuner stepper panel (eaWcTune in wwwroot/index.html,
 		// shown on the webcam level when ?wctune is set): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetWcTune', hearts, kills, saucers, saucerSpeed, plasmaSpeed). Overrides the

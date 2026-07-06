@@ -6,20 +6,22 @@ namespace EvilAliens;
 
 internal class Spider : KillableAlien
 {
-	// Packed-sheet frame the spider snaps to ONCE on landing (source ~88 at half fps -> packed
-	// 44): the crouched settled stance near the end of the rear-up. It resumes animating from
-	// there on the following frames. Overridable live via ?spiderlandframe= for dialing.
-	private const float LandFrame = 44f;
+	// Packed-sheet frame the spider snaps to ONCE on landing: the crouched settled stance that best
+	// matches the descending airborne pose (dialed to 42 by eye). It resumes animating from there on
+	// the following frames. Overridable live via ?spiderlandframe= for dialing; bake the value here.
+	private const float LandFrame = 42f;
 
-	// Ground baseline Y (design space): the spider rests here and lands back to it.
-	public const float GroundY = 505f;
+	// Ground baseline Y (design space): the spider rests here and lands back to it. Dialed up from
+	// 505 to 485 (~20px) by eye so the whole spider assembly (sprite + shadow + hitbox + jump arc)
+	// sits a touch higher on the Mars ground. Spider-only (nothing else keys off this).
+	public const float GroundY = 485f;
 
 	// Sheet frame the rear-up "launch" beat fires on (spider_sheet2 is a 7x7 rear-up->fling->settle
-	// cycle; ~frame 40 is the peak reared-up "about to spring" pose). LIVE play now fires the jump
-	// when the animation reaches this beat (count-back preset makes it coincide with a random launch
-	// X). Overridable live via ?spiderjumpframe= (null => this baked default, so a plain boot is
-	// unchanged). The ?harness=spiderjump tool reuses the same default. Bake the dialed value here.
-	private const float DefaultJumpFrame = 40f;
+	// cycle). LIVE play fires the jump when the animation reaches this beat (a count-back preset makes
+	// it coincide with a random launch X). Dialed to frame 5 by eye (the early "coil" reads best as
+	// the launch moment). Overridable live via ?spiderjumpframe= (null => this baked default, so a
+	// plain boot is unchanged); the ?harness=spiderjump tool + tuner panel reuse it. Bake it here.
+	private const float DefaultJumpFrame = 5f;
 
 	private float yspeed;
 
@@ -179,7 +181,14 @@ internal class Spider : KillableAlien
 		float fJump = SuperSampleFactor("GFX/Sprites/spiderjump", cellW);
 		int frame = (int)(gameTime.TotalGameTime.TotalMilliseconds / 55f) % (cols * rows);
 		Rectangle src = new Rectangle(frame % cols * (cellW + sep), frame / cols * (cellH + sep), cellW, cellH);
-		spriteBatch.Draw(spiderJump, src, base.Position, rotation, 1f / fJump, center: true, color);
+		// The airborne "flying" sheet has a different visual anchor than the ground rear-up sheet, so
+		// the first in-air pose can pop away from the last ground frame at launch (and the last in-air
+		// pose from the land frame on touchdown). Nudge the flying sprite by a dialed offset so both
+		// transitions line up. Design px, +y down -> a NEGATIVE y lifts the flying sprite ("start y of
+		// flying mode higher"). Identity default (0,0) => a plain boot is unchanged; ?spiderairx=/
+		// ?spiderairy= + the tuner panel dial it. Applies in live play AND the ?harness=spiderjump viz.
+		Vector2 airOffset = new Vector2(EvilAliensWeb.Compat.DebugFlags.SpiderAirX, EvilAliensWeb.Compat.DebugFlags.SpiderAirY);
+		spriteBatch.Draw(spiderJump, src, base.Position + airOffset, rotation, 1f / fJump, center: true, color);
 		if (base.hittimeractive)
 		{
 			spriteBatch.lightenEffect.Disable();
@@ -371,9 +380,12 @@ internal class Spider : KillableAlien
 		float x = xEnter - sPxPerSec * t;
 
 		// Deterministic arc, ILLUSTRATIVE only -- it is NOT live play's physics (live: yspeed
-		// rand(-8..-19)/16.67 px/ms + 0.02 px/ms^2 gravity). This viz just needs a readable ~0.67s
-		// hop to show WHEN/WHERE the jump fires; the beat/land-frame alignment is what's being tuned.
-		const float v0 = -300f;
+		// rand(-8..-19)/16.67 px/ms + 0.02 px/ms^2 gravity, which arcs higher and varies per jump).
+		// This viz just needs a readable hop at a representative HEIGHT so the flying sprite is clearly
+		// airborne (to line up the launch/land transitions + the air offset); the beat/land-frame/air
+		// alignment is what's being tuned. Kept deterministic so a phase freeze is repeatable; the
+		// natural per-jump variance is only in live play (?level=Level2&spiders). ~200px apex, ~1.3s.
+		const float v0 = -600f;
 		const float g = 900f;
 		float airDur = -2f * v0 / g;
 		bool airborne = t >= tJump && t < tJump + airDur;

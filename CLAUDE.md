@@ -565,6 +565,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   that skips the level and runs a continuous pure-spider GROUND wave, so the jump is seen in REAL play (the
   harness sim's arc is only illustrative). Pair `?invuln`. Final dialing is the "For me" card 5645a489.
   e.g. `?level=Level2&spiders&invuln&spiderjumpframe=42&spidershadowy=-40`.
+- **Mars jumping-spider LIVE TUNER PANEL + the dialing is DONE and baked (card 5645a489).** The `?spider*`
+  knobs now have a live slider PANEL (`index.html`, outside `#app`; auto-shown on `?harness=spiderjump` /
+  `?level=Level2&spiders` / a bare `?spidertune`) -- drag jump-beat / land / launch-X / shadow x/y/scale +
+  a **flying-sprite Air offset X/Y**, plus a **Freeze & scrub Phase** control that parks the harness on any
+  point of the crawl->launch->land cycle (~0.47 = the last ground frame before launch) so the launch +
+  landing pose transitions can be lined up by eye. It drives `Compat/DebugInput.SetSpider` ([JSInvokable
+  `debugSetSpider`]) -> `DebugFlags.SetSpiderOverride` (all live, no reload; `eaSpider(...)` from the
+  console too); the orange readout prints the bake-ready `?spider*` string. **Baked-in dialed values:**
+  `DefaultJumpFrame` **5**, `LandFrame` **42**, `GroundY` 505 -> **485** (whole spider assembly lifted
+  ~20px) in `Spider.cs`; shadow **(37,4) x0.95** + **air offset (14,1)** carried as `DebugFlags` defaults
+  (read live by `Spider`). The **Air offset** nudges the airborne `spiderjump` sprite (whose visual anchor
+  differs from the ground rear-up sheet) so the first/last in-air pose connects with the ground launch/land
+  frames; the harness illustrative arc was raised (`v0` -600, ~200px apex, kept deterministic for
+  phase-scrub) so the flying sprite is clearly airborne while dialing. Live play jump HEIGHT/variance was
+  always fine (rand -8..-19 launch vel) -- only the old harness demo arc was low, which misled; not a
+  regression. Panel gate is a URL regex only (no C# flag, no `harness.html` picker entry). **The harness
+  SHADOW now goes through the real `Floor` math** (`Floor.ShadowScalars` / `Floor.DrawShadowScalars`,
+  extracted static + behavior-preserving for live) instead of a hand-rolled drawer that was fainter /
+  smaller / higher -- so the shadow the harness previews is byte-identical to what `Floor` casts in game
+  (the tuning finally translates). `HarnessScene.DrawSpiderShadow` reads the shadow knobs LIVE from
+  `DebugFlags` (what a freshly-spawned live spider would use) so a panel drag updates the preview at once.
 - **Landed Mars-UFO placement offsets (`Compat/LandedOffsets.cs` + `wwwroot/landed-editor.html` +
   `Content/data/landed_offsets.json`).** The Mars saucers that start parked on the ground
   (`ufometpootjes`/`Smallship_landed`/`Mediumship_landed`, spawned by `StationarySpawner`) and the

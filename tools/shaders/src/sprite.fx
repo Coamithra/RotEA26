@@ -72,8 +72,18 @@ float4 PixelShaderFunction(float4 color : COLOR0, float2 texCoord : TEXCOORD0) :
     // when saturation ~= 0.)
     #define HUE_FEATHER 0.06
     float3 hsv = rgb2hsv(c.rgb);
-    float m = smoothstep(ColorizeRange.x - HUE_FEATHER, ColorizeRange.x + HUE_FEATHER, hsv.x)
-            * (1.0 - smoothstep(ColorizeRange.y - HUE_FEATHER, ColorizeRange.y + HUE_FEATHER, hsv.x));
+    // Hue is CIRCULAR (red sits at both 0 and 1), so membership is measured as the
+    // wrapped distance from the band's centre, not two linear edge tests. A linear
+    // window broke every band that touches red: the game's (-10,10) band matched
+    // hues 0..10 deg but never the equally-red 350..360 deg pixels (the "red splots
+    // that never recolour" bug), and even a full-wheel (-180,180) band excluded
+    // everything above ~200 deg. frac() folds the difference onto the circle; the
+    // abs/0.5 fold gives the true circular distance (0..0.5 turns).
+    float center = (ColorizeRange.x + ColorizeRange.y) * 0.5;
+    float halfw  = (ColorizeRange.y - ColorizeRange.x) * 0.5;
+    float dist = abs(frac(hsv.x - center + 0.5) - 0.5);
+    float m = (halfw >= 0.5) ? 1.0   // full-wheel band: everything is in range
+            : 1.0 - smoothstep(halfw - HUE_FEATHER, halfw + HUE_FEATHER, dist);
     // Blend between the original and the fully-recoloured pixel in RGB (not by
     // lerping the hue), so the feathered transition can't pass through intermediate
     // hues and produce a rainbow fringe. m==1 -> full recolour (target hue, same

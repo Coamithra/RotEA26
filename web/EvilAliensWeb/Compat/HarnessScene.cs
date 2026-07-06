@@ -503,7 +503,9 @@ namespace EvilAliensWeb.Compat
             // first Draw before Update has populated the struct (same reasoning as DrawSpiderShadow).
             int jumpX = (int)(DebugFlags.SpiderJumpX ?? 400f);
             int groundY = (int)Spider.GroundY;
-            int feet = (int)(Spider.GroundY + 40f + DebugFlags.SpiderShadowY);
+            // Grounded shadow baseline = the Floor's rest line (Floor.bottom) + the dialed shadow y,
+            // matching Floor.DrawShadowScalars' lerp(520,560,1)+yoff so the marker sits on the shadow.
+            int feet = (int)(Floor.bottom + DebugFlags.SpiderShadowY);
 
             // vertical jump-start marker, ground baseline, shadow (feet) baseline
             base.SpriteBatch.Draw(pixelTex, new Rectangle(jumpX - 1, 30, 2, 540), new Color(1f, 0.85f, 0.2f, 0.5f));
@@ -537,24 +539,22 @@ namespace EvilAliensWeb.Compat
             {
                 return;
             }
-            // Use the GroundY constant + live Position, NOT spiderState: this drawer is a separate
-            // Game.Components component whose Draw can run before HarnessScene.Update refreshes the
-            // struct on a frame (which parked the shadow at y~40 = the stale zeroed struct).
-            float sx = harnessSpider.Position.X + DebugFlags.SpiderShadowX;
-            float baseline = Spider.GroundY + 40f + DebugFlags.SpiderShadowY;
-            float height = MathHelper.Max(0f, Spider.GroundY - harnessSpider.Position.Y);
-            float hf = MathHelper.Clamp(height / 50f, 0f, 1f);
-
-            float widthPx = 60f;
-            if (harnessSpider.CollisionType is CollisionBox box)
+            // Draw the EXACT shadow the in-game Floor casts (Floor.ShadowScalars / DrawShadowScalars),
+            // so the harness preview MATCHES live play -- this scene has no Floor of its own, and the old
+            // hand-rolled math here was fainter / smaller / higher than Floor, which made shadow tuning
+            // in the harness not translate to the game. Reads the shadow knobs LIVE from DebugFlags (what
+            // a freshly-spawned live spider would use) rather than the spider's spawn-time ShadowOffset,
+            // so a panel drag updates the preview immediately. Uses the spider's real collision box, so
+            // the shadow shrinks / fades / detaches through the jump exactly as Floor does in-game.
+            if (!(harnessSpider.CollisionType is CollisionBox box))
             {
-                widthPx = box.Right - box.Left;
+                return;
             }
-            float scale = widthPx / (float)shadowTex.Width * DebugFlags.SpiderShadowScale * MathHelper.Lerp(1f, 0.55f, hf);
-            float alpha = MathHelper.Lerp(0.55f, 0.18f, hf);
-
+            Vector2 shadowOffset = new Vector2(DebugFlags.SpiderShadowX, DebugFlags.SpiderShadowY);
+            Floor.ShadowScalars(box, shadowOffset, DebugFlags.SpiderShadowScale, shadowTex.Width,
+                out float sx, out float sh, out float ssize, out float syoff);
             base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-            base.SpriteBatch.Draw(shadowTex, new Vector2(sx, baseline), 0f, scale, center: true, new Color(new Vector4(1f, 1f, 1f, alpha)));
+            Floor.DrawShadowScalars(base.SpriteBatch, shadowTex, sx, sh, ssize, syoff);
         }
 
         // Low-DrawOrder drawable so the spider's shadow composites UNDER the sprite (DrawOrder 20)

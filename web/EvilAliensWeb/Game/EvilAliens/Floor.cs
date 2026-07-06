@@ -60,17 +60,37 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0081: Unknown result type (might be due to invalid IL or missing references)
-		Color color = default(Color);
 		foreach (Shadow shadow in shadows)
 		{
-			(color) = new Color(new Vector4(1f, 1f, 1f, shadow.height));
 			// shadow.size (in CollidesWith) already self-normalises against shadowimage.Width, so
 			// the draw scale needs NO supersample divide -- a resized shadow.png is auto-corrected
 			// there. The former "/ SuperSampleFactor" double-compensated and shrank the shadow to
 			// 1/4 (the "Mars shadow too small" bug); this matches the original decompiled draw.
-			spriteBatch.Draw(shadowimage, new Vector2(shadow.x, MathHelper.Lerp(520f, 560f, shadow.height) + shadow.yoff), 0f, shadow.size * (2f - shadow.height), center: true, color);
+			// Extracted to DrawShadowScalars so the sprite harness renders an IDENTICAL shadow.
+			DrawShadowScalars(spriteBatch, shadowimage, shadow.x, shadow.height, shadow.size, shadow.yoff);
 		}
 		base.Draw(gameTime);
+	}
+
+	// The Floor's shadow math, extracted static so the sprite harness (Compat/HarnessScene) can render
+	// a shadow IDENTICAL to what ships -- its scene has no Floor, so it used to hand-roll a different
+	// (fainter / mis-sized / mis-placed) shadow, which made by-eye shadow tuning in the harness not
+	// match live play. ShadowScalars = the CollidesWith build (a caster's box + its ShadowOffset/
+	// ShadowSize -> the draw scalars); DrawShadowScalars = the Draw step. KEEP ShadowScalars in lockstep
+	// with the inline math in CollidesWith below (same formula), and DrawShadowScalars with Draw above.
+	public static void ShadowScalars(CollisionBox box, Vector2 shadowOffset, float shadowSize, int shadowWidth,
+		out float x, out float height, out float size, out float yoff)
+	{
+		x = box.Left + (box.Right - box.Left) / 2f + shadowOffset.X;
+		height = MathHelper.Clamp(1f - (560f - box.Bottom) / 310f, 0f, 1f);
+		size = (box.Right - box.Left) / ((float)shadowWidth * 0.7f) * shadowSize;
+		yoff = shadowOffset.Y;
+	}
+
+	public static void DrawShadowScalars(SpriteBatchWrapper spriteBatch, Texture2D shadowimage, float x, float height, float size, float yoff)
+	{
+		Color color = new Color(new Vector4(1f, 1f, 1f, height));
+		spriteBatch.Draw(shadowimage, new Vector2(x, MathHelper.Lerp(520f, 560f, height) + yoff), 0f, size * (2f - height), center: true, color);
 	}
 
 	public override void Initialize()

@@ -57,6 +57,10 @@ internal class MenuScene : Scene
 
 	private float originalBackdropSize;
 
+	// Ceiling for the menu backdrop's slow zoom-in: it eases toward this multiple of the
+	// fitted size and tapers to a stop, rather than growing forever (see Update).
+	private const float BackdropZoomCap = 2f;
+
 	private Texture2D backdrop;
 
 	private Texture2D blankTexture;
@@ -1367,7 +1371,13 @@ internal class MenuScene : Scene
 		UpdateRingCentre(gameTime);
 		HandleStars(gameTime);
 		float num = 16.666666f;
-		float num2 = Convert.ToSingle(Math.Pow(1.000100016593933, timer.TotalMilliseconds / (double)num));
+		// Backdrop Ken-Burns zoom. This used to be an unbounded exponential
+		// (1.0001^frames) keyed off the ever-accumulating menu timer, so the planet
+		// crept bigger with no ceiling the whole time the menu sat idle. Now it's an
+		// exponential *approach* to a 2x cap: it eases toward 2x and tapers to a stop.
+		// The approach rate is the old curve's initial per-ms growth (ln(base)/frameMs),
+		// so the zoom starts identically and only slows as it nears the cap.
+		float num2 = (float)(BackdropZoomCap - (BackdropZoomCap - 1.0) * Math.Exp(-Math.Log(1.000100016593933) / num * timer.TotalMilliseconds));
 		currentBackdropSize = originalBackdropSize * num2;
 		if (state != MenuState.FadeToGame)
 		{

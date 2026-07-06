@@ -237,16 +237,36 @@ namespace EvilAliensWeb.Compat
 		//   ?lazercapscale=<f>     size of the beam's rounded END-CAPS vs the core width (default 1;
 		//                          the caps round off the otherwise flat/"chopped" beam ends + hide
 		//                          the core/flare seam).
-		//   ?lazerarcs=<n>         cap on the number of electric tendrils crackling off the beam.
-		//   ?lazerarclife=<sec>    lifespan of one tendril before it fades + respawns elsewhere
-		//                          (shortlived = "pop up all over"; long = the old "sits forever").
+		//   ?lazerarcs=<f>         average number of electric tendrils SPAWNED PER SECOND off the beam
+		//                          (stochastic, so they pop up out of sync -- was a fixed count).
+		//   ?lazertendrilspeed=<f> max |drift| a spawned tendril travels along the beam (design px/sec;
+		//                          each tendril gets a random signed speed up to this).
+		//   ?lazerarclife=<sec>    overrides the MEAN tendril lifespan (range = mean +/-33%); default
+		//                          range is a random 0.25..0.5s per tendril.
 		public static float? LazerChargeScale { get; private set; }
 
 		public static float? LazerCapScale { get; private set; }
 
-		public static int? LazerArcCount { get; private set; }
+		public static float? LazerArcRate { get; private set; }
+
+		public static float? LazerTendrilSpeed { get; private set; }
 
 		public static float? LazerArcLife { get; private set; }
+
+		// Runtime setter for the live laser-tuner slider panel (Compat/DebugInput.SetLazer ->
+		// eaLazer() in index.html, shown on the ?lazershot showcase). Lets the four knobs be
+		// dragged in real time instead of reloading with new ?lazer* flags each nudge. Quad.cs
+		// reads CapScale every Draw + ArcRate/TendrilSpeed at each tendril spawn, and LazerGenerator
+		// reads the peak charge scale every Draw — so a set here is picked up almost immediately
+		// (the showcase swarm/tendrils re-roll continuously). Same effect as the
+		// ?lazerchargescale/?lazercapscale/?lazerarcs/?lazertendrilspeed URL flags, live.
+		internal static void SetLazerOverride(float? chargeScale, float? capScale, float? arcRate, float? tendrilSpeed)
+		{
+			LazerChargeScale = chargeScale;
+			LazerCapScale = capScale;
+			LazerArcRate = arcRate;
+			LazerTendrilSpeed = tendrilSpeed;
+		}
 
 		// Laser showcase scene (Compat/LazerShowcaseScene.cs): the chargeup swarm + a full-grown
 		// beam side by side on the starfield, ANIMATING (unlike the frozen ?harness/?bulletshot),
@@ -277,6 +297,23 @@ namespace EvilAliensWeb.Compat
 		public static bool HueCycle { get; private set; }
 
 		public static float HueLoopSeconds { get; private set; } = 6f;
+
+		// Runtime setter for the live slider panel (Compat/DebugInput.SetHue -> eaHue() in
+		// index.html, shown on the ?harness=battleskull page). Lets the band/target be dragged
+		// in real time instead of reloading with new ?hue* flags each nudge. HarnessColorize.Apply
+		// reads these properties every frame, so a set here is picked up on the very next Draw.
+		// `target == null` => the Target tracks HP (the shipped default); a non-null value pins it.
+		internal static void SetHueOverride(float? start, float? end, float? target, bool cycle, float loop)
+		{
+			HueStart = start;
+			HueEnd = end;
+			HueTarget = target;
+			HueCycle = cycle;
+			if (loop > 0f)
+			{
+				HueLoopSeconds = loop;
+			}
+		}
 
 		// SpiderBoss "helper mothership" feel knobs (Game/EvilAliens/SpiderHelperMothership.cs +
 		// the trigger in SpiderBoss.cs). Every N completed jump->fly->land CYCLES (N is set ONCE at the
@@ -382,6 +419,9 @@ namespace EvilAliensWeb.Compat
 		//   ?wcsaucers=<int>     override the max simultaneous-saucer cap
 		//   ?wcsaucerspeed=<f>   multiply the active tier's saucer-speed multiplier
 		//   ?wcplasmaspeed=<f>   multiply the active tier's plasma-speed multiplier
+		//   ?wctune              show the LIVE stepper panel (index.html) while the webcam
+		//                        level is up: +/- every knob in real time, no reload —
+		//                        the panel's readout prints the bake-ready Tunings[] row
 		public static EvilAliens.Settings.DifficultyLevel? WebcamDifficulty { get; private set; }
 
 		public static int? WebcamHearts { get; private set; }
@@ -394,14 +434,64 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WebcamPlasmaSpeed { get; private set; }
 
-		// Spider jump-cycle tuning knobs for the sprite-harness visualiser (?harness=spiderjump).
-		// The grounded Mars Spider's whole rear-up -> launch -> arc -> land cycle is otherwise only
-		// reachable by driving a live level; the harness LOOPS a self-contained sim of it (see
-		// Spider.HarnessApplyPhase) so the shadow, the jump-start X and the land-anim resume frame can
-		// be aligned by eye. ALL null/default => the sim uses its baked-in reference values and,
-		// crucially, LIVE gameplay is byte-identical (these knobs are only ever read while the harness
-		// is up). ?spiderloop= ?spiderjumpframe= ?spiderlandframe= ?spiderjumpx= ?spidershadowx=
-		// ?spidershadowy= ?spidershadowscale=  (see the Parse cases below for units).
+		// ?wctune: show the LIVE webcam-tuning stepper panel (index.html, outside #app)
+		// while the webcam level is up. The panel drives SetWebcamTuneOverride below via
+		// Compat/DebugInput.SetWcTune, so the five Tunings[] knobs can be nudged in real
+		// time (mid-play or paused) instead of reloading with new ?wc* flags each change.
+		// OFF by default and — like the other tuner panels — kept OUT of `Active`, so a
+		// shipped build never shows it and boots byte-identical.
+		public static bool WebcamTune { get; private set; }
+
+		// Runtime (live-panel) overrides for the five webcam tuning knobs. Unlike the
+		// ?wcsaucerspeed/?wcplasmaspeed URL flags (MULTIPLIERS on the tier baseline),
+		// these are ABSOLUTE final values — the panel shows/edits exactly what would be
+		// baked into WebcamLevel.Tunings[]. All null => no runtime override.
+		public static int? WebcamTuneHearts { get; private set; }
+
+		public static int? WebcamTuneKills { get; private set; }
+
+		public static int? WebcamTuneSaucers { get; private set; }
+
+		public static float? WebcamTuneSaucerSpeed { get; private set; }
+
+		public static float? WebcamTunePlasmaSpeed { get; private set; }
+
+		// Bumped on every SetWebcamTuneOverride/ClearWebcamTuneOverride so WebcamLevel can
+		// re-resolve its tuning the tick after a panel edit (a cheap int compare per Update).
+		public static int WebcamTuneVersion { get; private set; }
+
+		// Runtime setter for the live webcam tuner panel (Compat/DebugInput.SetWcTune ->
+		// eaWcTune in index.html). The panel always sends the full five-knob state.
+		internal static void SetWebcamTuneOverride(int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed)
+		{
+			WebcamTuneHearts = hearts > 0 ? hearts : (int?)null;
+			WebcamTuneKills = kills > 0 ? kills : (int?)null;
+			WebcamTuneSaucers = saucers > 0 ? saucers : (int?)null;
+			WebcamTuneSaucerSpeed = saucerSpeed > 0f ? saucerSpeed : (float?)null;
+			WebcamTunePlasmaSpeed = plasmaSpeed > 0f ? plasmaSpeed : (float?)null;
+			WebcamTuneVersion++;
+		}
+
+		// Drop all runtime overrides (the panel's "Reset to tier" button): the level falls
+		// back to its shipped Tunings[] row + any ?wc* URL flags, and re-seeds the panel.
+		internal static void ClearWebcamTuneOverride()
+		{
+			WebcamTuneHearts = null;
+			WebcamTuneKills = null;
+			WebcamTuneSaucers = null;
+			WebcamTuneSaucerSpeed = null;
+			WebcamTunePlasmaSpeed = null;
+			WebcamTuneVersion++;
+		}
+
+		// Mars jumping-spider alignment knobs, shared by LIVE play (Spider.cs), the sprite-harness
+		// visualiser (?harness=spiderjump -> Spider.HarnessApplyPhase) AND the live tuner slider panel
+		// (SetSpiderOverride below / eaSpider in index.html). They dial the shadow, the launch X, the
+		// land-anim resume frame, the launch-beat frame, and the flying-sprite air offset. The frame
+		// knobs are nullable (null => the baked Spider.cs consts DefaultJumpFrame/LandFrame); the
+		// shadow + air knobs carry the DIALED shipped defaults directly (shadow (37,4) x0.95, air
+		// (14,1)), so a plain boot casts the tuned shadow. ?spiderloop= (viz only) ?spiderjumpframe=
+		// ?spiderlandframe= ?spiderjumpx= ?spidershadowx=/y=/scale= ?spiderairx=/y= (units: Parse below).
 		public static float SpiderLoopSeconds { get; private set; } = 6f;
 
 		public static float? SpiderJumpFrame { get; private set; }
@@ -410,16 +500,51 @@ namespace EvilAliensWeb.Compat
 
 		public static float? SpiderJumpX { get; private set; }
 
-		public static float SpiderShadowX { get; private set; }
+		// Shadow nudge (design px, +y down) + size x, applied to the generic Floor shadow via the
+		// spider's ShadowOffset/ShadowSize. These are the DIALED shipped defaults (not identity), so a
+		// plain boot casts the tuned shadow; the panel/URL flags override them.
+		public static float SpiderShadowX { get; private set; } = 37f;
 
-		public static float SpiderShadowY { get; private set; }
+		public static float SpiderShadowY { get; private set; } = 4f;
 
-		public static float SpiderShadowScale { get; private set; } = 1f;
+		public static float SpiderShadowScale { get; private set; } = 0.95f;
+
+		// Flying-sprite (spiderjump) draw offset (design px, +y down; negative y lifts it) so the
+		// airborne pose lines up with the ground rear-up/land poses at the launch + landing transitions
+		// ("start y of flying mode"). DIALED shipped defaults (14, 1) by eye; ?spiderairx=/y= + the
+		// tuner panel override them.
+		public static float SpiderAirX { get; private set; } = 14f;
+
+		public static float SpiderAirY { get; private set; } = 1f;
 
 		// ?spiderphase=<0..1> FREEZES the jump sim at that fraction of one cycle (instead of looping)
 		// so a screenshot of a specific beat -- e.g. the airborne apex -- is deterministic, the same
 		// "reliable still" the harness gives for a frozen frame. null => the cycle loops.
 		public static float? SpiderPhase { get; private set; }
+
+		// Runtime setter for the live spider-tuner slider panel (Compat/DebugInput.SetSpider ->
+		// eaSpider() in index.html, shown on ?harness=spiderjump / ?level=Level2&spiders / ?spidertune).
+		// Lets the six alignment knobs be dragged in real time instead of reloading with new ?spider*
+		// flags each nudge -- same effect as the ?spiderjumpframe/?spiderlandframe/?spiderjumpx/
+		// ?spidershadowx/y/scale URL flags, live. The ?harness=spiderjump sim (Spider.HarnessApplyPhase)
+		// + shadow overlay read these every frame, so a drag re-aligns on the very next Draw; in the
+		// ?spiders LIVE wave they're read at each Spider.Initialize, so a change takes effect on the
+		// NEXT spider spawned (jumpframe/jumpx/shadow) -- landframe is read live on touchdown. `jumpX`
+		// null => launch X stays RANDOM per spider (the shipped behaviour); a value pins it.
+		internal static void SetSpiderOverride(float jumpFrame, float landFrame, float? jumpX, float shadowX, float shadowY, float shadowScale, float airX, float airY, float? phase)
+		{
+			SpiderJumpFrame = jumpFrame;
+			SpiderLandFrame = landFrame;
+			SpiderJumpX = jumpX;
+			SpiderShadowX = shadowX;
+			SpiderShadowY = shadowY;
+			SpiderShadowScale = shadowScale > 0f ? shadowScale : 1f;
+			SpiderAirX = airX;
+			SpiderAirY = airY;
+			// null => the harness LOOPS the cycle; a value FREEZES it there (the panel's scrub, so the
+			// user can park on the last ground frame before launch and nudge the air offset to match).
+			SpiderPhase = phase;
+		}
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -547,9 +672,15 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "lazerarcs":
-					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var larc) && larc >= 0)
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var larc) && larc >= 0f)
 					{
-						LazerArcCount = larc;
+						LazerArcRate = larc;
+					}
+					break;
+				case "lazertendrilspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lts) && lts >= 0f)
+					{
+						LazerTendrilSpeed = lts;
 					}
 					break;
 				case "lazerarclife":
@@ -613,6 +744,9 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamPlasmaSpeed = wcps;
 					}
+					break;
+				case "wctune":
+					WebcamTune = IsOn(val);
 					break;
 				case "huestart":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
@@ -785,6 +919,18 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spss) && spss > 0f)
 					{
 						SpiderShadowScale = spss;
+					}
+					break;
+				case "spiderairx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spax))
+					{
+						SpiderAirX = spax;
+					}
+					break;
+				case "spiderairy":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spay))
+					{
+						SpiderAirY = spay;
 					}
 					break;
 				case "spiderphase":

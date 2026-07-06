@@ -3,9 +3,9 @@
 
 The site's tab icon used to be a hand-drawn green "grey alien" head
 (`wwwroot/favicon.svg`). This regenerates it from THE actual game art: one
-frame of the player's flying-saucer sheet (`GFX/Sprites/ufosheet`), composited
-onto the menu's near-black rounded-rect tile so the grey saucer stays visible
-on light browser tab bars.
+frame of the player's flying-saucer sheet (`GFX/Sprites/ufosheet`), on a
+TRANSPARENT background so the saucer sits directly on the tab bar and adapts
+to any browser theme (no black tile).
 
 Outputs (committed; the loader/host page reference them):
   wwwroot/favicon.ico        multi-res 16/32/48/64 (classic tab icon)
@@ -17,7 +17,7 @@ outputs. Offline asset step (Pillow only), like the other tools/ pipelines.
     python tools/favicon/build_favicon.py
 """
 import os
-from PIL import Image, ImageDraw
+from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SHEET = os.path.join(ROOT, "web", "EvilAliensWeb", "wwwroot",
@@ -33,9 +33,7 @@ OUT_DIR = os.path.join(ROOT, "web", "EvilAliensWeb", "wwwroot")
 COLS, ROWS, SEP = 8, 4, 1
 FRAME = 28
 
-BG = (5, 3, 10, 255)     # menu near-black (#05030a), matches the old favicon tile
-MARGIN_FRAC = 0.10       # padding between the saucer and the tile edge
-RADIUS_FRAC = 0.18       # rounded-rect corner radius
+MARGIN_FRAC = 0.10       # padding between the saucer and the icon edge
 ICO_SIZES = [16, 32, 48, 64]
 TOUCH_SIZE = 180
 
@@ -52,9 +50,9 @@ def extract_frame(sheet, idx):
 
 
 def render(sprite, size):
+    # Transparent canvas -- the saucer sits directly on the tab bar (no tile),
+    # so the icon adapts to any browser theme instead of a black square.
     icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(icon).rounded_rectangle(
-        [0, 0, size - 1, size - 1], radius=int(size * RADIUS_FRAC), fill=BG)
     avail = size - 2 * int(size * MARGIN_FRAC)
     spr = sprite.copy()
     spr.thumbnail((avail, avail), Image.LANCZOS)

@@ -140,6 +140,82 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
+		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
+		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull
+		// hue band/target in real time so the sliders retune without a page reload — same
+		// effect as the ?huestart/?hueend/?huetarget/?huecycle/?hueloop URL flags, just live.
+		// trackHp == true pins nothing (Target follows HP, the shipped default); false pins the
+		// Target to `target`. Only bites while the harness is up (HarnessColorize gates on it).
+		[JSInvokable("debugSetHue")]
+		public static void SetHue(double start, double end, double target, bool trackHp, bool cycle, double loop)
+		{
+			DebugFlags.SetHueOverride(
+				(float)start,
+				(float)end,
+				trackHp ? (float?)null : (float)target,
+				cycle,
+				(float)loop);
+		}
+
+		// JS bridge for the live laser-tuner slider panel (eaLazer in wwwroot/index.html, shown on
+		// the ?lazershot showcase): DotNet.invokeMethod('EvilAliensWeb', 'debugSetLazer',
+		// chargeScale, capScale, arcRate, tendrilSpeed). Overrides the four Quad/LazerGenerator FX
+		// knobs in real time so the sliders retune without a page reload — same effect as the
+		// ?lazerchargescale/?lazercapscale/?lazerarcs/?lazertendrilspeed URL flags, just live.
+		[JSInvokable("debugSetLazer")]
+		public static void SetLazer(double chargeScale, double capScale, double arcRate, double tendrilSpeed)
+		{
+			DebugFlags.SetLazerOverride(
+				(float)chargeScale,
+				(float)capScale,
+				(float)arcRate,
+				(float)tendrilSpeed);
+		}
+
+		// JS bridge for the live spider-tuner slider panel (eaSpider in wwwroot/index.html, shown on
+		// ?harness=spiderjump / ?level=Level2&spiders / ?spidertune): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetSpider', jumpFrame, landFrame, jumpX, pinJumpX, shadowX, shadowY, shadowScale, airX, airY).
+		// Overrides the Mars jumping-spider alignment knobs in real time so the sliders retune without a
+		// page reload — same effect as the ?spiderjumpframe/?spiderlandframe/?spiderjumpx/?spidershadow*/
+		// ?spiderair* URL flags, just live. airX/airY nudge the airborne flying sprite so the launch +
+		// landing transitions line up. pinJumpX == false => leave the launch X RANDOM per spider (the
+		// shipped behaviour, jumpX ignored); true => pin it to `jumpX` so dialing is repeatable.
+		[JSInvokable("debugSetSpider")]
+		public static void SetSpider(double jumpFrame, double landFrame, double jumpX, bool pinJumpX, double shadowX, double shadowY, double shadowScale, double airX, double airY, double phase, bool freezePhase)
+		{
+			DebugFlags.SetSpiderOverride(
+				(float)jumpFrame,
+				(float)landFrame,
+				pinJumpX ? (float?)(float)jumpX : null,
+				(float)shadowX,
+				(float)shadowY,
+				(float)shadowScale,
+				(float)airX,
+				(float)airY,
+				freezePhase ? (float?)(float)phase : null);
+		}
+
+		// JS bridge for the live webcam-tuner stepper panel (eaWcTune in wwwroot/index.html,
+		// shown on the webcam level when ?wctune is set): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetWcTune', hearts, kills, saucers, saucerSpeed, plasmaSpeed). Overrides the
+		// five WebcamLevel.Tunings[] knobs in real time — ABSOLUTE final values (what you'd
+		// bake into the table), unlike the ?wcsaucerspeed/?wcplasmaspeed URL multipliers.
+		// WebcamLevel picks the change up on its next Update via WebcamTuneVersion.
+		[JSInvokable("debugSetWcTune")]
+		public static void SetWcTune(int hearts, int kills, int saucers, double saucerSpeed, double plasmaSpeed)
+		{
+			DebugFlags.SetWebcamTuneOverride(hearts, kills, saucers, (float)saucerSpeed, (float)plasmaSpeed);
+		}
+
+		// Companion: drop all runtime webcam-tuner overrides (the panel's "Reset to tier"
+		// button) so the level falls back to its shipped Tunings[] row + any ?wc* URL flags.
+		[JSInvokable("debugClearWcTune")]
+		public static void ClearWcTune()
+		{
+			DebugFlags.ClearWebcamTuneOverride();
+		}
+
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)
 		// while injected ticks remain. Folded into the keyboard `flag`, so the existing
 		// press/hold edge detection treats it exactly like a held physical key — first

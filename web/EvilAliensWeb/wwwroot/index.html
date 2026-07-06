@@ -133,6 +133,52 @@
             catch (e) { console.warn('[debug] eaHitboxes failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
+        // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
+        // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>
+        // Target auto-sweeps. Console: eaHue(-10, 10, 120, false, false) to pin a band+target.
+        window.eaHue = (start, end, target, trackHp, cycle, loop) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetHue',
+                    Number(start) || 0, Number(end) || 0, Number(target) || 0,
+                    trackHp !== false && (trackHp === true || target == null),
+                    cycle === true, Number(loop) || 6);
+            }
+            catch (e) { console.warn('[debug] eaHue failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: live-set the laser FX knobs (the ?lazershot showcase tuner). Drives
+        // Compat/DebugInput.SetLazer so the slider panel below (and the console) can retune the
+        // beam/chargeup without a page reload. Console: eaLazer(4, 1, 2, 30) — chargeScale (peak),
+        // capScale, tendril rate/sec, tendril drift speed. Same effect as the ?lazer* URL flags, live.
+        window.eaLazer = (chargeScale, capScale, arcRate, tendrilSpeed) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetLazer',
+                    Number(chargeScale) || 0, Number(capScale) || 0,
+                    Number(arcRate) || 0, Number(tendrilSpeed) || 0);
+            }
+            catch (e) { console.warn('[debug] eaLazer failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
+        // ?level=Level2&spiders tuner). Drives Compat/DebugInput.SetSpider so the slider panel below
+        // (and the console) can retune shadow/jump-frame/land-frame/jump-X without a page reload.
+        // Console: eaSpider(5, 42, 400, true, 37, 4, 0.95, 14, 1, 0.48, true) — jumpFrame, landFrame,
+        // jumpX, pinJumpX, shadowX, shadowY, shadowScale, airX, airY, phase, freezePhase. pinJumpX=false
+        // leaves launch X random; airX/airY nudge the airborne flying sprite (negative airY lifts it)
+        // for launch/land line-up; freezePhase=true FREEZES the harness at `phase` (0..1) so you can
+        // scrub to the last ground frame before launch (harness only — ignored in the live wave).
+        window.eaSpider = (jumpFrame, landFrame, jumpX, pinJumpX, shadowX, shadowY, shadowScale, airX, airY, phase, freezePhase) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetSpider',
+                    Number(jumpFrame) || 0, Number(landFrame) || 0, Number(jumpX) || 0,
+                    pinJumpX !== false, Number(shadowX) || 0, Number(shadowY) || 0,
+                    Number(shadowScale) || 1, Number(airX) || 0, Number(airY) || 0,
+                    Number(phase) || 0, freezePhase === true);
+            }
+            catch (e) { console.warn('[debug] eaSpider failed (game not booted yet?): ' + e.message); }
+        };
+
         // Consecutive failures out of TickDotNet before we give up rescheduling. Without a
         // guard here, the FIRST unhandled exception out of Game1.Tick() skips scheduleTick()
         // and permanently freezes the tab. We swallow a bad frame and keep looping so one
@@ -816,6 +862,572 @@
             try { return DotNet.invokeMethod("EvilAliensWeb", "ExportPreloadManifest"); }
             catch (e) { console.warn("eaPreloadExport failed (game not ready?)", e); return ""; }
         };
+    </script>
+
+    <!-- Live colorize-tuner slider panel for the ?harness=battleskull page (card 632d4cf7).
+         The BattleSkull "lightbulb" boss hue tuner was URL-flag only, so every nudge meant a
+         full page reload. This overlay drives Compat/DebugInput.SetHue (via eaHue) so the band
+         [start,end] + Target hue can be DRAGGED in real time. Built outside #app so it survives
+         Blazor's mount, and only created on the battleskull harness — a normal boot gets no
+         extra DOM and stays byte-identical. Positioned top-right (the game draws its own readout
+         top-left). -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]harness=battleskull\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?hue* flags already on the URL, else the in-game coded
+            // defaults: band (-10,10) and the full-HP green Target (100).
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var urlCycle = /[?&](huecycle|huesweep)\b/i.test(q);
+            var urlTarget = /[?&](huetarget|hue)=/i.test(q);
+            var st = {
+                start: num("huestart", -10),
+                end: num("hueend", 10),
+                target: num("huetarget", num("hue", 100)),
+                trackHp: !urlTarget && !urlCycle,   // pin the Target only if the URL did
+                cycle: urlCycle,
+                loop: num("hueloop", 6)
+            };
+
+            // Push the current state into the game. Returns false (and is retried) until the
+            // .NET runtime is up — eaHue swallows the pre-boot throw, so we call DotNet directly.
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetHue',
+                        st.start, st.end, st.target, st.trackHp, st.cycle, st.loop);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-hue{position:fixed;top:10px;right:10px;z-index:99999;width:260px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(150,140,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-hue h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#c9b8ff}" +
+                "#ea-hue .row{margin:7px 0}" +
+                "#ea-hue label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-hue .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-hue input[type=range]{width:100%;margin:3px 0 0;accent-color:#8f7bff}" +
+                "#ea-hue .chk{display:flex;align-items:center;gap:6px;margin:6px 0;cursor:pointer}" +
+                "#ea-hue .chk input{accent-color:#8f7bff}" +
+                "#ea-hue .dim{opacity:.4}" +
+                "#ea-hue .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(150,140,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-hue .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-hue";
+            el.innerHTML =
+                "<h4>Colorize tuner &mdash; BattleSkull</h4>" +
+                "<div class='row'><label>Band start<span class='v' id='eh-vs'></span></label>" +
+                "<input type='range' id='eh-start' min='-180' max='180' step='1'></div>" +
+                "<div class='row'><label>Band end<span class='v' id='eh-ve'></span></label>" +
+                "<input type='range' id='eh-end' min='-180' max='180' step='1'></div>" +
+                "<div class='row' id='eh-trow'><label>Target hue<span class='v' id='eh-vt'></span></label>" +
+                "<input type='range' id='eh-target' min='0' max='360' step='1'></div>" +
+                "<label class='chk'><input type='checkbox' id='eh-hp'> Target tracks HP</label>" +
+                "<label class='chk'><input type='checkbox' id='eh-cyc'> Auto-cycle target</label>" +
+                "<div class='out' id='eh-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
+                "then paste them to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var elStart = el.querySelector("#eh-start"), elEnd = el.querySelector("#eh-end"),
+                elTarget = el.querySelector("#eh-target"), elHp = el.querySelector("#eh-hp"),
+                elCyc = el.querySelector("#eh-cyc"), elTrow = el.querySelector("#eh-trow"),
+                elOut = el.querySelector("#eh-out"),
+                vs = el.querySelector("#eh-vs"), ve = el.querySelector("#eh-ve"), vt = el.querySelector("#eh-vt");
+
+            function render()
+            {
+                elStart.value = st.start; elEnd.value = st.end; elTarget.value = st.target;
+                elHp.checked = st.trackHp; elCyc.checked = st.cycle;
+                vs.textContent = st.start; ve.textContent = st.end;
+                vt.textContent = st.trackHp ? "HP" : (st.cycle ? st.target + " (cycling)" : st.target);
+                // The Target slider is inert while the Target follows HP.
+                elTrow.classList.toggle("dim", st.trackHp);
+                elTarget.disabled = st.trackHp;
+                var flags = "huestart=" + st.start + " hueend=" + st.end;
+                if (st.cycle) { flags += st.trackHp ? " huecycle" : (" huetarget=" + st.target + " huecycle"); }
+                else if (!st.trackHp) { flags += " huetarget=" + st.target; }
+                else { flags += "  (target: HP-based, i.e. the shipped default)"; }
+                elOut.textContent = flags;
+            }
+
+            function changed() { render(); push(); }
+
+            elStart.addEventListener("input", function () { st.start = +elStart.value; changed(); });
+            elEnd.addEventListener("input", function () { st.end = +elEnd.value; changed(); });
+            elTarget.addEventListener("input", function () { st.target = +elTarget.value; changed(); });
+            elHp.addEventListener("change", function () { st.trackHp = elHp.checked; changed(); });
+            elCyc.addEventListener("change", function () { st.cycle = elCyc.checked; changed(); });
+            elOut.addEventListener("click", function ()
+            {
+                var t = elOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+
+            render();
+            // Keep pushing until the .NET runtime is booted, then stop (input events push after).
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
+    </script>
+
+    <!-- Live laser-FX tuner slider panel for the ?lazershot showcase (Trello 20e03c36). The four
+         laser knobs were URL-flag only, so every nudge meant a full page reload. This overlay
+         drives Compat/DebugInput.SetLazer (via eaLazer) so chargeup scale / end-cap size / tendril
+         count / tendril lifespan can be DRAGGED in real time. Built outside #app so it survives
+         Blazor's mount, and only created on the ?lazershot page — a normal boot gets no extra DOM
+         and stays byte-identical. Positioned top-right (the game draws its caption top-left). -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]lazershot\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?lazer* flags already on the URL, else the in-game baked
+            // defaults (peak charge 4 / cap 1 / tendril rate 2 per sec / tendril speed 30 px/s).
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                charge: num("lazerchargescale", 4),
+                cap: num("lazercapscale", 1),
+                rate: num("lazerarcs", 2),
+                speed: num("lazertendrilspeed", 30)
+            };
+
+            // Push the current state into the game. Returns false (and is retried) until the .NET
+            // runtime is up — eaLazer swallows the pre-boot throw, so we call DotNet directly.
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetLazer',
+                        st.charge, st.cap, st.rate, st.speed);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-lazer{position:fixed;top:10px;right:10px;z-index:99999;width:260px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(140,170,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-lazer h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#b8d4ff}" +
+                "#ea-lazer .row{margin:7px 0}" +
+                "#ea-lazer label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-lazer .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-lazer input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fb0ff}" +
+                "#ea-lazer .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(140,170,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-lazer .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-lazer";
+            el.innerHTML =
+                "<h4>Laser FX tuner &mdash; ?lazershot</h4>" +
+                "<div class='row'><label>Chargeup peak scale<span class='v' id='el-vc'></span></label>" +
+                "<input type='range' id='el-charge' min='1' max='8' step='0.1' autocomplete='off'></div>" +
+                "<div class='row'><label>End-cap size<span class='v' id='el-vcap'></span></label>" +
+                "<input type='range' id='el-cap' min='0' max='2' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Tendril rate (/s)<span class='v' id='el-va'></span></label>" +
+                "<input type='range' id='el-rate' min='0' max='10' step='0.5' autocomplete='off'></div>" +
+                "<div class='row'><label>Tendril speed (px/s)<span class='v' id='el-val'></span></label>" +
+                "<input type='range' id='el-speed' min='0' max='500' step='10' autocomplete='off'></div>" +
+                "<div class='out' id='el-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
+                "then paste them to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var elCharge = el.querySelector("#el-charge"), elCap = el.querySelector("#el-cap"),
+                elRate = el.querySelector("#el-rate"), elSpeed = el.querySelector("#el-speed"),
+                elOut = el.querySelector("#el-out"),
+                vc = el.querySelector("#el-vc"), vcap = el.querySelector("#el-vcap"),
+                va = el.querySelector("#el-va"), val = el.querySelector("#el-val");
+
+            function render()
+            {
+                elCharge.value = st.charge; elCap.value = st.cap;
+                elRate.value = st.rate; elSpeed.value = st.speed;
+                vc.textContent = st.charge; vcap.textContent = st.cap;
+                va.textContent = st.rate; val.textContent = st.speed;
+                elOut.textContent = "lazerchargescale=" + st.charge + " lazercapscale=" + st.cap +
+                    " lazerarcs=" + st.rate + " lazertendrilspeed=" + st.speed;
+            }
+
+            function changed() { render(); push(); }
+
+            elCharge.addEventListener("input", function () { st.charge = +elCharge.value; changed(); });
+            elCap.addEventListener("input", function () { st.cap = +elCap.value; changed(); });
+            elRate.addEventListener("input", function () { st.rate = +elRate.value; changed(); });
+            elSpeed.addEventListener("input", function () { st.speed = +elSpeed.value; changed(); });
+            elOut.addEventListener("click", function ()
+            {
+                var t = elOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+
+            render();
+            // Keep pushing until the .NET runtime is booted, then stop (input events push after).
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
+    </script>
+
+    <!-- Live alignment-tuner slider panel for the Mars jumping-spider (card 5645a489). The six
+         alignment values (jump-beat frame, land-anim resume frame, launch X, shadow x/y/scale) were
+         URL-flag only, so every nudge meant a full page reload. This overlay drives
+         Compat/DebugInput.SetSpider (via eaSpider) so they can be DRAGGED in real time. Built outside
+         #app so it survives Blazor's mount, and only created on a spider-dialing page
+         (?harness=spiderjump, ?level=Level2&spiders, or a bare ?spidertune) — a normal boot gets no
+         extra DOM and stays byte-identical. Positioned top-right (the game draws its readout top-left). -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&](spidertune|spiders)\b/i.test(q) && !/harness=spiderjump\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?spider* flags already on the URL, else the in-game baked
+            // defaults: jump beat 5 (Spider.DefaultJumpFrame) / land 42 (Spider.LandFrame) / a 400
+            // launch-X marker / the dialed shadow (37,4) x0.95 / dialed air offset (14,1). Launch X is
+            // RANDOM per spider by default (exactly like shipped play), unless the URL pins it with
+            // ?spiderjumpx=; TICK "Pin launch X" only for repeatable dialing.
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                jumpFrame: num("spiderjumpframe", 5),
+                landFrame: num("spiderlandframe", 42),
+                jumpX: num("spiderjumpx", 400),
+                pinX: /[?&]spiderjumpx=/i.test(q),   // random per spider (like shipped) unless URL pins it
+                shadowX: num("spidershadowx", 37),
+                shadowY: num("spidershadowy", 4),
+                shadowScale: num("spidershadowscale", 0.95),
+                airX: num("spiderairx", 14),
+                airY: num("spiderairy", 1),
+                phase: num("spiderphase", 0.48),          // ~launch instant at jumpX 400
+                freeze: /[?&]spiderphase=/i.test(q)        // start frozen only if the URL asked
+            };
+
+            // Push the current state into the game. Returns false (and is retried) until the .NET
+            // runtime is up — eaSpider swallows the pre-boot throw, so we call DotNet directly.
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetSpider',
+                        st.jumpFrame, st.landFrame, st.jumpX, st.pinX,
+                        st.shadowX, st.shadowY, st.shadowScale, st.airX, st.airY,
+                        st.phase, st.freeze);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-spider{position:fixed;top:10px;right:10px;z-index:99999;width:262px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(150,200,150,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-spider h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#bfe8b8}" +
+                "#ea-spider .row{margin:7px 0}" +
+                "#ea-spider label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-spider .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-spider input[type=range]{width:100%;margin:3px 0 0;accent-color:#7bd06f}" +
+                "#ea-spider .chk{display:flex;align-items:center;gap:6px;margin:6px 0;cursor:pointer}" +
+                "#ea-spider .chk input{accent-color:#7bd06f}" +
+                "#ea-spider .dim{opacity:.4}" +
+                "#ea-spider .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(150,200,150,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-spider .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-spider";
+            el.innerHTML =
+                "<h4>Spider alignment tuner</h4>" +
+                "<label class='chk'><input type='checkbox' id='es-frz'> Freeze &amp; scrub phase (harness)</label>" +
+                "<div class='row' id='es-phrow'><label>Phase (0=crawl → launch → land)<span class='v' id='es-vph'></span></label>" +
+                "<input type='range' id='es-ph' min='0' max='1' step='0.005' autocomplete='off'></div>" +
+                "<div class='row'><label>Jump-beat frame<span class='v' id='es-vjf'></span></label>" +
+                "<input type='range' id='es-jf' min='0' max='48' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Land resume frame<span class='v' id='es-vlf'></span></label>" +
+                "<input type='range' id='es-lf' min='0' max='48' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Air offset X<span class='v' id='es-vax'></span></label>" +
+                "<input type='range' id='es-ax' min='-80' max='80' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Air offset Y (up = neg)<span class='v' id='es-vay'></span></label>" +
+                "<input type='range' id='es-ay' min='-140' max='60' step='1' autocomplete='off'></div>" +
+                "<div class='row' id='es-xrow'><label>Launch X<span class='v' id='es-vjx'></span></label>" +
+                "<input type='range' id='es-jx' min='0' max='800' step='5' autocomplete='off'></div>" +
+                "<label class='chk'><input type='checkbox' id='es-pin' checked> Pin launch X (else random)</label>" +
+                "<div class='row'><label>Shadow X<span class='v' id='es-vsx'></span></label>" +
+                "<input type='range' id='es-sx' min='-120' max='120' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Shadow Y<span class='v' id='es-vsy'></span></label>" +
+                "<input type='range' id='es-sy' min='-160' max='60' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Shadow scale<span class='v' id='es-vss'></span></label>" +
+                "<input type='range' id='es-ss' min='0.2' max='2' step='0.05' autocomplete='off'></div>" +
+                "<div class='out' id='es-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live (harness = instant; the ?spiders wave applies to " +
+                "the NEXT spider spawned). Freeze &amp; scrub Phase to ~0.48 to sit on the last ground " +
+                "frame before launch, then nudge the air offset so the flying pose lines up as you scrub " +
+                "across it. Click the orange line to copy, then paste to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var elFrz = el.querySelector("#es-frz"), elPh = el.querySelector("#es-ph"),
+                elPhrow = el.querySelector("#es-phrow"), vph = el.querySelector("#es-vph"),
+                elJf = el.querySelector("#es-jf"), elLf = el.querySelector("#es-lf"),
+                elAx = el.querySelector("#es-ax"), elAy = el.querySelector("#es-ay"),
+                elJx = el.querySelector("#es-jx"), elPin = el.querySelector("#es-pin"),
+                elXrow = el.querySelector("#es-xrow"),
+                elSx = el.querySelector("#es-sx"), elSy = el.querySelector("#es-sy"),
+                elSs = el.querySelector("#es-ss"), elOut = el.querySelector("#es-out"),
+                vjf = el.querySelector("#es-vjf"), vlf = el.querySelector("#es-vlf"),
+                vax = el.querySelector("#es-vax"), vay = el.querySelector("#es-vay"),
+                vjx = el.querySelector("#es-vjx"), vsx = el.querySelector("#es-vsx"),
+                vsy = el.querySelector("#es-vsy"), vss = el.querySelector("#es-vss");
+
+            function render()
+            {
+                elFrz.checked = st.freeze; elPh.value = st.phase; vph.textContent = st.phase;
+                elPhrow.classList.toggle("dim", !st.freeze); elPh.disabled = !st.freeze;
+                elJf.value = st.jumpFrame; elLf.value = st.landFrame; elJx.value = st.jumpX;
+                elAx.value = st.airX; elAy.value = st.airY; elPin.checked = st.pinX;
+                elSx.value = st.shadowX; elSy.value = st.shadowY; elSs.value = st.shadowScale;
+                vjf.textContent = st.jumpFrame; vlf.textContent = st.landFrame;
+                vax.textContent = st.airX; vay.textContent = st.airY;
+                vjx.textContent = st.pinX ? st.jumpX : (st.jumpX + " (random)");
+                vsx.textContent = st.shadowX; vsy.textContent = st.shadowY; vss.textContent = st.shadowScale;
+                // The Launch-X slider is inert while the launch X is left random.
+                elXrow.classList.toggle("dim", !st.pinX);
+                elJx.disabled = !st.pinX;
+                var flags = "spiderjumpframe=" + st.jumpFrame + " spiderlandframe=" + st.landFrame;
+                if (st.pinX) { flags += " spiderjumpx=" + st.jumpX; }
+                flags += " spidershadowx=" + st.shadowX + " spidershadowy=" + st.shadowY +
+                    " spidershadowscale=" + st.shadowScale +
+                    " spiderairx=" + st.airX + " spiderairy=" + st.airY;
+                elOut.textContent = flags;
+            }
+
+            function changed() { render(); push(); }
+
+            elFrz.addEventListener("change", function () { st.freeze = elFrz.checked; changed(); });
+            elPh.addEventListener("input", function () { st.phase = +elPh.value; changed(); });
+            elJf.addEventListener("input", function () { st.jumpFrame = +elJf.value; changed(); });
+            elLf.addEventListener("input", function () { st.landFrame = +elLf.value; changed(); });
+            elAx.addEventListener("input", function () { st.airX = +elAx.value; changed(); });
+            elAy.addEventListener("input", function () { st.airY = +elAy.value; changed(); });
+            elJx.addEventListener("input", function () { st.jumpX = +elJx.value; changed(); });
+            elPin.addEventListener("change", function () { st.pinX = elPin.checked; changed(); });
+            elSx.addEventListener("input", function () { st.shadowX = +elSx.value; changed(); });
+            elSy.addEventListener("input", function () { st.shadowY = +elSy.value; changed(); });
+            elSs.addEventListener("input", function () { st.shadowScale = +elSs.value; changed(); });
+            elOut.addEventListener("click", function ()
+            {
+                var t = elOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+
+            render();
+            // Keep pushing until the .NET runtime is booted, then stop (input events push after).
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
+    </script>
+
+    <!-- eaWcTune: live stepper panel for the webcam challenge's difficulty knobs (?wctune,
+         card 222beca4). The five WebcamLevel.Tunings[] values were URL-flag only
+         (?wchearts= etc.), so every nudge meant a full reload + re-joining the camera.
+         This panel +/-'s them in REAL TIME: each edit drives Compat/DebugInput.SetWcTune
+         and the level re-resolves on its next tick (hearts snap, on-screen saucer/orb
+         speeds rescale). Unlike the ea-hue panel it is NOT built from the URL at load —
+         WebcamLevel calls eaWcTune.show() (gated on ?wctune) when the level starts and
+         .hide() when it exits, and show() re-seeds it after every applied change so it
+         always displays the level's actual resolved values. Built outside #app; a boot
+         without ?wctune never calls show(), so the DOM stays byte-identical. -->
+    <script>
+        window.eaWcTune = (function ()
+        {
+            var el = null, body = null, out = null, title = null, st = null;
+
+            // The level (C#) is the source of truth; the panel just displays + nudges.
+            // Speeds are kept to 2 decimals so repeated +/- doesn't accumulate float fuzz.
+            var KNOBS = [
+                { key: "hearts",  label: "Hearts",         min: 1,   max: 20, step: 1,    int: true },
+                { key: "kills",   label: "Kills to win",   min: 1,   max: 99, step: 1,    int: true },
+                { key: "saucers", label: "Max saucers",    min: 1,   max: 15, step: 1,    int: true },
+                { key: "sspeed",  label: "Saucer speed x", min: 0.1, max: 3,  step: 0.05, int: false },
+                { key: "pspeed",  label: "Plasma speed x", min: 0.1, max: 3,  step: 0.05, int: false }
+            ];
+
+            function fmt(k, v) { return k.int ? String(v) : v.toFixed(2); }
+
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetWcTune',
+                        st.hearts, st.kills, st.saucers, st.sspeed, st.pspeed);
+                }
+                catch (e) { console.warn('[wctune] push failed: ' + e.message); }
+            }
+
+            function build()
+            {
+                var css = document.createElement("style");
+                css.textContent =
+                    "#ea-wctune{position:fixed;top:10px;right:10px;z-index:99999;width:250px;" +
+                    "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                    "background:rgba(10,8,20,.85);border:1px solid rgba(150,140,220,.35);" +
+                    "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                    "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                    "#ea-wctune h4{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                    "color:#c9b8ff;cursor:pointer}" +
+                    "#ea-wctune h4::after{content:' \\25B4';opacity:.6}" +
+                    "#ea-wctune.min h4::after{content:' \\25BE'}" +
+                    "#ea-wctune.min .bd{display:none}" +
+                    "#ea-wctune .row{display:flex;align-items:center;justify-content:space-between;" +
+                    "margin:7px 0}" +
+                    "#ea-wctune .row .lb{flex:1}" +
+                    "#ea-wctune .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600;" +
+                    "width:44px;text-align:center}" +
+                    "#ea-wctune button{width:26px;height:24px;border-radius:5px;border:1px solid " +
+                    "rgba(150,140,220,.45);background:rgba(70,58,120,.55);color:#e8e8f0;" +
+                    "font:700 14px/1 system-ui;cursor:pointer;padding:0}" +
+                    "#ea-wctune button:hover{background:rgba(110,90,190,.7)}" +
+                    "#ea-wctune button:active{background:rgba(143,123,255,.8)}" +
+                    "#ea-wctune .reset{width:100%;height:24px;font:600 11px/1 system-ui;margin-top:2px}" +
+                    "#ea-wctune .out{margin-top:9px;padding-top:8px;border-top:1px solid " +
+                    "rgba(150,140,220,.25);font-family:ui-monospace,Consolas,monospace;font-size:10px;" +
+                    "color:#ffd98f;word-break:break-all;cursor:pointer}" +
+                    "#ea-wctune .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+                document.head.appendChild(css);
+
+                el = document.createElement("div");
+                el.id = "ea-wctune";
+                var rows = "";
+                for (var i = 0; i < KNOBS.length; i++)
+                {
+                    var k = KNOBS[i];
+                    rows += "<div class='row'><span class='lb'>" + k.label + "</span>" +
+                        "<button data-k='" + k.key + "' data-d='-1'>&minus;</button>" +
+                        "<span class='v' id='wct-" + k.key + "'></span>" +
+                        "<button data-k='" + k.key + "' data-d='1'>+</button></div>";
+                }
+                el.innerHTML =
+                    "<h4 id='wct-title'></h4>" +
+                    "<div class='bd'>" + rows +
+                    "<button class='reset' id='wct-reset'>Reset to tier defaults</button>" +
+                    "<div class='out' id='wct-out' title='Click to copy'></div>" +
+                    "<div class='hint'>+/&minus; retunes live (works paused too; hearts snap, " +
+                    "on-screen speeds rescale). Click the orange row to copy, then paste it to " +
+                    "Claude to bake into Tunings[].</div></div>";
+                document.body.appendChild(el);
+                body = el.querySelector(".bd");
+                out = el.querySelector("#wct-out");
+                title = el.querySelector("#wct-title");
+
+                title.addEventListener("click", function () { el.classList.toggle("min"); });
+                el.addEventListener("click", function (ev)
+                {
+                    var b = ev.target.closest("button[data-k]");
+                    if (!b || !st) { return; }
+                    var k = null;
+                    for (var i = 0; i < KNOBS.length; i++) { if (KNOBS[i].key === b.dataset.k) { k = KNOBS[i]; } }
+                    var v = st[k.key] + k.step * (+b.dataset.d);
+                    v = Math.min(k.max, Math.max(k.min, v));
+                    st[k.key] = k.int ? Math.round(v) : Math.round(v * 100) / 100;
+                    render();
+                    push();
+                });
+                el.querySelector("#wct-reset").addEventListener("click", function ()
+                {
+                    // C# clears the overrides, re-resolves the tier row (+ any ?wc* URL
+                    // flags) and calls show() again with the real values — no local math.
+                    try { DotNet.invokeMethod('EvilAliensWeb', 'debugClearWcTune'); }
+                    catch (e) { console.warn('[wctune] reset failed: ' + e.message); }
+                });
+                out.addEventListener("click", function ()
+                {
+                    var t = out.textContent;
+                    if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                    var old = out.style.color; out.style.color = "#9ffcd0";
+                    setTimeout(function () { out.style.color = old; }, 250);
+                });
+            }
+
+            function render()
+            {
+                title.textContent = "Webcam tuner — " + st.tier;
+                for (var i = 0; i < KNOBS.length; i++)
+                {
+                    var k = KNOBS[i];
+                    el.querySelector("#wct-" + k.key).textContent = fmt(k, st[k.key]);
+                }
+                out.textContent = st.tier + ": { Hearts = " + st.hearts + ", KillTarget = " + st.kills +
+                    ", MaxSaucers = " + st.saucers + ", SaucerSpeedMul = " + st.sspeed +
+                    "f, PlasmaSpeedMul = " + st.pspeed + "f }";
+            }
+
+            return {
+                // Called from WebcamLevel (C#) at level start and after every applied
+                // change, with the ACTUAL resolved values — so this both shows and re-seeds.
+                show: function (tier, hearts, kills, saucers, sspeed, pspeed)
+                {
+                    st = {
+                        tier: tier, hearts: hearts, kills: kills, saucers: saucers,
+                        sspeed: Math.round(sspeed * 100) / 100,
+                        pspeed: Math.round(pspeed * 100) / 100
+                    };
+                    if (!el) { build(); }
+                    render();
+                    el.style.display = "block";
+                },
+                hide: function () { if (el) { el.style.display = "none"; } }
+            };
+        })();
     </script>
 </body>
 

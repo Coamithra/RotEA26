@@ -82,6 +82,11 @@ window.eaWebcam = (function () {
         return { x: (ww - dw) / 2, y: (wh - dh) / 2, w: Math.max(1, dw), h: Math.max(1, dh) };
     }
 
+    // Cap on the overlay's backing-store width. A 1280x720 camera cover-cropped
+    // to 4:3 yields a 960px-wide source, so pixels beyond ~that are upscale-only;
+    // a little headroom keeps a higher-res camera crisp without a huge canvas.
+    var OVERLAY_MAX_W = 1280;
+
     function placeOverlay() {
         if (!overlayCanvas) return;
         var r = destRect();
@@ -89,6 +94,17 @@ window.eaWebcam = (function () {
         overlayCanvas.style.top = r.y + "px";
         overlayCanvas.style.width = r.w + "px";
         overlayCanvas.style.height = r.h + "px";
+        // Size the BACKING STORE to the letterbox's device pixels (capped) —
+        // a fixed 800x600 store CSS-stretched to e.g. 1440x1080 softens the
+        // player image before the mask even matters. Only touch width/height
+        // when they actually change (assigning them clears the canvas).
+        var dpr = window.devicePixelRatio || 1;
+        var bw = Math.min(OVERLAY_MAX_W, Math.max(DESIGN_W, Math.round(r.w * dpr)));
+        var bh = Math.round(bw * 3 / 4);
+        if (overlayCanvas.width !== bw || overlayCanvas.height !== bh) {
+            overlayCanvas.width = bw;
+            overlayCanvas.height = bh;
+        }
     }
 
     // --- camera ------------------------------------------------------------
@@ -274,6 +290,10 @@ window.eaWebcam = (function () {
     function composite(target) {
         var ctx = target.getContext("2d");
         var w = target.width, h = target.height;
+        // "high" = bicubic-ish resampling: the camera upscales crisper and the
+        // 320x240 mask's soft edge stretches smoothly instead of stair-stepping.
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.clearRect(0, 0, w, h);
         drawCamera(ctx, w, h);
         ctx.globalCompositeOperation = "destination-in";

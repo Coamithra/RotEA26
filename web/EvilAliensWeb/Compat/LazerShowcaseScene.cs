@@ -65,6 +65,7 @@ namespace EvilAliensWeb.Compat
                 // particles animate + re-seed forever. Silent so it doesn't loop the charge SFX.
                 charge = LazerGenerator.NewLazerGenerator(Collection, base.Game);
                 charge.Setup(ChargePos, 2f, 1f, 0f, 0f);
+                charge.SetWindup(2.5f, loop: true); // LOOP the 1->peak ramp + energy-well growth so it can be watched
                 charge.SetupSilent(); // AFTER Setup (which clears silent) + BEFORE Add (Initialize plays the SFX)
                 // Add through the scene's ComponentBin (the in-game path) so it's actually TICKED
                 // each frame -- the swarm needs its Update to run (the particle alpha is 0 at birth
@@ -124,7 +125,7 @@ namespace EvilAliensWeb.Compat
             base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
             base.SpriteBatch.DrawString("lazershot   chargeup (left) + full beam (right)",
                 new Vector2(16f, 12f), new Color(Color.White, 0.85f), 0f, centered: false, 0.5f, (SpriteEffects)0, 0f);
-            base.SpriteBatch.DrawString("?lazerchargescale  ?lazercapscale  ?lazerarcs  ?lazerarclife",
+            base.SpriteBatch.DrawString("drag the top-right panel to tune live (chargeup / cap / tendrils)",
                 new Vector2(16f, 40f), new Color(Color.White, 0.55f), 0f, centered: false, 0.42f, (SpriteEffects)0, 0f);
             base.SpriteBatch.DrawString("Esc: menu", new Vector2(16f, 574f), new Color(Color.White, 0.5f), 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
         }

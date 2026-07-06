@@ -324,7 +324,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (`Compat/WebcamInterop.cs` + `Game/EvilAliens/WebcamLevel.cs`/`WebcamUfo.cs`/`WebcamPlasma.cs`). The
   collision surface is a 40x30 person-mask occupancy grid in design space, pushed ~30Hz from JS
   (`webcamMask`, ~200 B base64); the scene hit-tests saucers/plasma against it (`HitCircle`) and aims at
-  its `Centroid`. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
+  its `Centroid`. **The mask is REFINED in the worker (Meet-style post-processing — don't strip it):**
+  raw per-frame segmentation shimmers and has blobby edges, so `webcam-worker.js` runs (1) an adaptive
+  temporal EMA over the confidence (delta-weighted: stable pixels smooth hard, moving pixels snap — no
+  ghosting) and (2) a band-limited JOINT BILATERAL FILTER on the uncertain edge pixels guided by the
+  camera frame's RGB (the refinement MediaPipe's own docs + Google Meet's published pipeline use), then
+  builds BOTH the visual alpha and the occupancy grid from the refined confidence (hitbox stops
+  flickering too). The overlay canvas backing store is sized to the letterbox's DEVICE pixels (capped
+  `OVERLAY_MAX_W` 1280 ~= a 720p camera's 4:3 crop) instead of a fixed 800x600 CSS-stretch, with
+  `imageSmoothingQuality:"high"` on the composite — the player image is drawn at native res. Knobs are
+  consts at the top of `webcam-worker.js` (`EMA_MIN/MAX`, `JBF_*`). Vendored tasks-vision is 0.10.14;
+  0.10.35 exists (GL memory-barrier fix for GPU masks; WebGPU inference still unshipped) — a mechanical
+  vendor-bump follow-up. Rules: touch a saucer -> it asplodes; ignored saucers blink at an accelerating rate then
   fire ONE big slow plasma orb at you; hearts + kills-to-win are per-difficulty (see below). **Per-difficulty
   tuning (card `8fcc7a8e`):** `WebcamLevel.Tunings[]` is an Easy..Inzane table of the DISCRETE knobs —
   hearts, kills-to-win, max simultaneous saucers, saucer-speed × and plasma-speed × (the generic
@@ -333,7 +344,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `SoundManager.ClassicForDifficulty()` (Hard+ = lyrics). `WebcamUfo.Setup`/`WebcamPlasma.Setup` take a
   speed-× arg. **Live-tune the feel with the `?wc*` debug flags** (`Compat/DebugFlags.cs`): boot
   `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`,
-  then bake the chosen numbers back into `Tunings[]`. **GOTCHA — MediaPipe MUST stay in the
+  then bake the chosen numbers back into `Tunings[]`. **Better: `?wctune` shows a LIVE stepper panel**
+  (`eaWcTune` in `index.html`, outside `#app`, only built when the webcam level calls `show()` -- a boot
+  without the flag has no extra DOM): +/- all five knobs in real time, mid-play or paused, no reload.
+  Edits drive `DebugInput.SetWcTune` -> `DebugFlags.SetWebcamTuneOverride` (ABSOLUTE final values,
+  unlike the URL speed flags which are tier-baseline multipliers) and `WebcamLevel` re-resolves on its
+  next tick (`WebcamTuneVersion`): hearts snap to the new count, KillTarget/MaxSaucers are read live
+  anyway, and speed changes rescale the saucers/orbs already on screen (`SetSpeedMultiplier` on
+  `WebcamUfo`/`WebcamPlasma`). "Reset to tier defaults" clears the overrides via `debugClearWcTune`
+  and the level re-seeds the panel with its actual resolved row; the panel's orange readout prints the
+  bake-ready `Tunings[]` row (click to copy). e.g. `?menu&unlockall&wctune` then pick the challenge +
+  any tier from the menu. **GOTCHA — MediaPipe MUST stay in the
   worker (`webcam-worker.js`):** its Emscripten loader assigns the global `Module`, which Blazor's Mono
   runtime also uses — importing tasks-vision on the main thread kills the whole .NET runtime ("_malloc is
   not a function", reproduced). The ~10 MB runtime+model under `wwwroot/lib/mediapipe/` (see its README)
@@ -439,21 +460,47 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   white-hot core, each ONE continuous sprite, + tip/muzzle blooms + electric tendrils); the pre-fire
   chargeup swarm is `LazerGenerator` (10 converging `GFX/Menu/star` sparkles, additive). Three fixes
   landed with URL knobs so the feel can be A/B'd by eye (all null => baked defaults ship unchanged):
-  (1) **chargeup was too subtle** — `star.png` is a soft full-frame 4-point sparkle whose rays vanish
-  sub-pixel at the original `0.015` particle scale; `LazerGeneratorData` now multiplies scale by
-  `DefaultChargeScale` (**5** — a clear converging swarm; ~10x additive-whites the frame out,
-  `?lazerchargescale=`). (2) **beam ends looked "chopped" / a core-vs-flare seam** — the `lazermiddle`
-  strip has no soft falloff ALONG its length, so `Quad.Draw` now domes each end with a width-sized
-  round GLOW-then-CORE cap (`DefaultCapScale` **1.0**, `?lazercapscale=`). (3) **tendrils sat on one
-  spot forever** — `DrawArcs` is now a SHORTLIVED lifecycle: each tendril pops up at a hashed spot,
-  crackles for `~ArcLife` s while a `sin(pi*frac)` envelope fades it in/out, then respawns elsewhere
-  next cycle (`DefaultArcCount` **5** / `DefaultArcLife` **0.16s**; `?lazerarcs=` / `?lazerarclife=`;
-  the per-appearance anchor/shape re-roll off `floor(time/life)` via a `sin*43758` `Hash`, while the
-  bolt still writhes smoothly within one life). **Tune with `?lazershot`** — `Compat/LazerShowcaseScene.cs`
-  shows the chargeup swarm (left) + a full-grown beam (right) ANIMATING (unlike the frozen
-  `?harness`/`?bulletshot`); it drives a raw `Quad` for a stable beam + a real (Update-ticked, via
-  `Collection.Add`) `LazerGenerator` for the swarm. When the user settles on values, bake them into the
-  `Default*` constants. Straight-alpha additive tints throughout (do NOT premultiply).
+  (1) **chargeup is a WINDUP ANIMATION, not a flat swarm** — the per-particle scale RAMPS `1 -> peak`
+  (`DefaultPeakChargeScale` **4**, ease-out near-linear via `ChargeEase`) over the windup, applied at
+  DRAW time in `LazerGenerator.Draw` (so the whole swarm ramps crisply; `LazerGeneratorData` only bakes
+  the base `0.015` scale). PLUS an **"energy well"**: a white-hot orb at the convergence centre,
+  drawn as a STACK of additive `lazerglow` glows (blue halo -> cyan-white body -> white-hot core,
+  colours == Quad's beam layers) so its centre saturates white like the laser tip (a single flat-blue
+  draw read too dim); the core brightens with progress (glares before eruption). It grows `15% -> 100%`
+  of `1.6x the laser tip`
+  (`LaserTipDiameter` 48 = beam width 16 × `TipFlareScale` 3 × `WellTipFactor` 1.3) while fluctuating
+  ~90-110% erratically (3 incommensurate fast sines) — energy gathering before it bursts. Both driven by
+  `progress = elapsed/windupSeconds`. **The windup is FLEXIBLE**: callers pass the REAL (per-laser,
+  difficulty-scaled) duration via `LazerGenerator.SetWindup(seconds, loop)` — UFO 2.5s, SpiderHelper
+  `windupMs/1000`, showcase `loop:true` (repeats the ramp to watch it; in-game plays once + holds at full).
+  `?lazerchargescale=` overrides the peak. (2) **beam ends looked "chopped" / a core-vs-flare seam** — the
+  `lazermiddle` strip has no soft falloff ALONG its length, so `Quad.Draw` now domes each end with a
+  width-sized round GLOW-then-CORE cap (`DefaultCapScale` **1.0**, `?lazercapscale=`). (3) **tendrils SPAWN
+  STOCHASTICALLY + DRIFT** — `DrawArcs` is now STATEFUL (a `Tendril[]` pool): each frame one Bernoulli
+  trial spawns a tendril at `DefaultArcRate` **2**/sec (the `RandomHelper.RandomFromAverage` `rate*dt`
+  model, but on `Quad`'s FX RNG so it can't desync co-op), each lives a RANDOM `0.25..0.5s`
+  (`DefaultArcLifeMin/Max`; `?lazerarclife=` overrides the MEAN, ±33%), fades via a `sin(pi*frac)` envelope,
+  and DRIFTS along the beam at a random SIGNED speed up to `DefaultTendrilSpeed` **30** px/s (the whole
+  tendril -- anchor AND lean'd free end -- is clamped to the beam span so drift can't push it past a tip)
+  (`?lazertendrilspeed=`) — so they pop up out of sync "all over" and slide, vs the old fixed handful on a
+  shared cadence. `SetProperties` clears the pool (recycled beams). The bolt still writhes smoothly within
+  one life (time-driven midpoint displacement). `?lazerarcs=` is now the RATE (was a count).
+  **Tune with `?lazershot`** — `Compat/LazerShowcaseScene.cs` shows the chargeup swarm+well (left) + a
+  full-grown beam (right) ANIMATING (unlike the frozen `?harness`/`?bulletshot`); it drives a raw `Quad`
+  for a stable beam + a real (Update-ticked, via `Collection.Add`) `LazerGenerator` (with `loop:true`
+  windup) for the chargeup. **LIVE SLIDER PANEL (no reload needed):** `?lazershot` shows a top-right HTML
+  slider panel (built in `index.html` outside `#app`, ONLY on that page so a normal boot is byte-identical)
+  dragging the four knobs — **Chargeup peak scale / End-cap size / Tendril rate (/s) / Tendril speed (px/s)**
+  — in REAL TIME via `window.eaLazer` -> `Compat/DebugInput.SetLazer` ([JSInvokable `debugSetLazer`]) ->
+  `DebugFlags.SetLazerOverride` (`Quad` reads `CapScale` every Draw + `ArcRate`/`TendrilSpeed` at each
+  spawn; `LazerGenerator` reads the peak every Draw). The readout prints the
+  `lazerchargescale=/lazercapscale=/lazerarcs=/lazertendrilspeed=` string to paste back for baking in; the
+  `?lazer*` URL flags seed the sliders. `eaLazer(charge,cap,rate,speed)` also works from the console. (The
+  range inputs carry `autocomplete='off'` — without it Chrome's form-restoration re-seeds them post-load
+  and desyncs the game from the defaults.) When the user settles on values, bake them into the `Default*`
+  constants (`DefaultPeakChargeScale` in `LazerGenerator`; `DefaultCapScale`/`DefaultArcRate`/
+  `DefaultTendrilSpeed`/`DefaultArcLifeMin`/`Max` in `Quad`). Straight-alpha additive tints throughout (do
+  NOT premultiply).
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the
@@ -467,6 +514,14 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   hue band, in-game -10/10), `?huetarget=<deg>` (alias `?hue`, pin the target; default = HP-based),
   `?huecycle` (auto-sweep the target 0..360 so a screenshot shows any point; `?hueloop=<sec>` period).
   `HarnessScene` shows a live `colorize band [..]  target ..` readout (`HarnessColorize.Describe`).
+  **LIVE SLIDER PANEL (no reload needed):** `?harness=battleskull` now shows a top-right HTML slider
+  panel (built in `index.html` outside `#app`, ONLY on that harness so a normal boot is byte-identical)
+  that drags the band start/end + target hue + track-HP/auto-cycle toggles in REAL TIME — it drives
+  `window.eaHue` -> `Compat/DebugInput.SetHue` ([JSInvokable `debugSetHue`]) -> `DebugFlags.SetHueOverride`,
+  which `HarnessColorize.Apply` reads every frame, so a drag recolours the boss on the next Draw. The
+  panel's readout line prints the `huestart=/hueend=/huetarget=` string to paste back for baking in. The
+  `?hue*` URL flags still work and seed the sliders' initial values. `eaHue(start,end,target,trackHp,cycle,loop)`
+  is also callable from the console.
   Picker: `wwwroot/harness.html` (battleskull option + hue fields). When the user settles on values,
   the chosen band/target get written back into `BattleSkull.Draw`'s hard-coded `new Vector3(...)` (and
   the target curve if they change how it tracks HP). e.g. `?harness=battleskull&huestart=-20&hueend=40&huecycle`.
@@ -510,6 +565,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   that skips the level and runs a continuous pure-spider GROUND wave, so the jump is seen in REAL play (the
   harness sim's arc is only illustrative). Pair `?invuln`. Final dialing is the "For me" card 5645a489.
   e.g. `?level=Level2&spiders&invuln&spiderjumpframe=42&spidershadowy=-40`.
+- **Mars jumping-spider LIVE TUNER PANEL + the dialing is DONE and baked (card 5645a489).** The `?spider*`
+  knobs now have a live slider PANEL (`index.html`, outside `#app`; auto-shown on `?harness=spiderjump` /
+  `?level=Level2&spiders` / a bare `?spidertune`) -- drag jump-beat / land / launch-X / shadow x/y/scale +
+  a **flying-sprite Air offset X/Y**, plus a **Freeze & scrub Phase** control that parks the harness on any
+  point of the crawl->launch->land cycle (~0.47 = the last ground frame before launch) so the launch +
+  landing pose transitions can be lined up by eye. It drives `Compat/DebugInput.SetSpider` ([JSInvokable
+  `debugSetSpider`]) -> `DebugFlags.SetSpiderOverride` (all live, no reload; `eaSpider(...)` from the
+  console too); the orange readout prints the bake-ready `?spider*` string. **Baked-in dialed values:**
+  `DefaultJumpFrame` **5**, `LandFrame` **42**, `GroundY` 505 -> **485** (whole spider assembly lifted
+  ~20px) in `Spider.cs`; shadow **(37,4) x0.95** + **air offset (14,1)** carried as `DebugFlags` defaults
+  (read live by `Spider`). The **Air offset** nudges the airborne `spiderjump` sprite (whose visual anchor
+  differs from the ground rear-up sheet) so the first/last in-air pose connects with the ground launch/land
+  frames; the harness illustrative arc was raised (`v0` -600, ~200px apex, kept deterministic for
+  phase-scrub) so the flying sprite is clearly airborne while dialing. Live play jump HEIGHT/variance was
+  always fine (rand -8..-19 launch vel) -- only the old harness demo arc was low, which misled; not a
+  regression. Panel gate is a URL regex only (no C# flag, no `harness.html` picker entry). **The harness
+  SHADOW now goes through the real `Floor` math** (`Floor.ShadowScalars` / `Floor.DrawShadowScalars`,
+  extracted static + behavior-preserving for live) instead of a hand-rolled drawer that was fainter /
+  smaller / higher -- so the shadow the harness previews is byte-identical to what `Floor` casts in game
+  (the tuning finally translates). `HarnessScene.DrawSpiderShadow` reads the shadow knobs LIVE from
+  `DebugFlags` (what a freshly-spawned live spider would use) so a panel drag updates the preview at once.
 - **Landed Mars-UFO placement offsets (`Compat/LandedOffsets.cs` + `wwwroot/landed-editor.html` +
   `Content/data/landed_offsets.json`).** The Mars saucers that start parked on the ground
   (`ufometpootjes`/`Smallship_landed`/`Mediumship_landed`, spawned by `StationarySpawner`) and the
@@ -720,14 +796,19 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   source is missing (CI ships the committed png). Re-run after swapping the source; don't hand-edit
   `andromeda.png`. Knobs + how-to: `tools/nebula/README.md`. It's a background fly-by (no `?harness=` entry),
   so verify by booting Level 1 to the brains section.
-- **Mars far-hills layer is PROCEDURAL, not hand-drawn -- `tools/mars/build_marshills.py`.** The 2nd
-  Mars background layer (`GFX/MarsBG/marshills`, added by `Background.SetMars()` behind the HD `marsloop`
-  ground / in front of `clouds-background`, scrollspeed 0.7) used to be a low-res hand-drawn hazy tan
-  silhouette with a visible repeating seam. It's now SYNTHESIZED: numpy builds N back-to-front ridges as
-  circular-FFT (natively SEAMLESS -- `mirrorX=false`, so the layer just REPEATS every `realsize.X`; the
-  wrap MUST be seamless) fractal heightfields, composited with aerial perspective (farther ridges
-  lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers + lerps toward the haze
-  tone so it dissolves into the sky). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
+- **Mars far-hills are PROCEDURAL and PARALLAX -- three per-ridge textures from `tools/mars/build_marshills.py`.**
+  The Mars hills (added by `Background.SetMars()` behind the HD `marsloop` ground / in front of
+  `clouds-background`) used to be ONE low-res hand-drawn hazy tan silhouette with a visible repeating
+  seam, then one synthesized texture; they are now **three separate layers** -- `marshills1` (far) /
+  `marshills2` (mid) / `marshills3` (near), one texture per `RIDGES` entry -- each with its OWN
+  `scrollspeedmodifier` (**far 0.33 / mid 0.53 / near 0.85**, `hillScrolls` in `SetMars`, between the
+  sky's 0.3 and the ground's 1.0) so the ridges parallax against each other. Each layer is SYNTHESIZED:
+  numpy builds its ridge as a circular-FFT (natively SEAMLESS -- `mirrorX=false`, so a layer just
+  REPEATS every `realsize.X`; the wrap MUST be seamless) fractal heightfield with aerial perspective
+  (farther ridges lighter/softer/higher, nearer darker/rougher/lower; every crest alpha-feathers +
+  lerps toward the haze tone so it dissolves into the sky). The per-layer PNGs are STRAIGHT alpha
+  (no OVER-compositing at build time -- the game's layer stack composites at draw); the old single
+  `marshills.png` is gone (the tool deletes a stale copy). **Tight visible band:** in Level 2 the `marsloop` ground draws ON
   TOP from design y~448 down, so ONLY ~design y 405..450 (just above the rocky horizon) ever shows -- the
   `RIDGES` crests are placed to land there and each body just fills down to be occluded. All aesthetic
   knobs (palette, per-ridge base/amp/roughness/haze/feather, seed) are constants in the tool's CONFIG
@@ -735,9 +816,25 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   seam check -> `tools/mars/_preview_marshills.png`, gitignored), `--show` (composite over the real sky
   -> `_context_marshills.png`). Deterministic/offline (numpy+Pillow), like tools/earth & tools/favicon;
   CI ships the committed `marshills.png`. It's a plain PNG decoded at level preload (tiny, not in
-  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHA when editing the tool: the alpha
-  accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255 makes
-  the whole layer ~1/255 transparent -> invisible hills).
+  `textures.config`). Don't hand-edit the PNG -- re-run the tool. GOTCHAS when editing the tool: (1) the
+  alpha accumulator is 0..1 while RGB is 0..255, so the final cast must scale alpha by 255 (a missed *255
+  makes the whole layer ~1/255 transparent -> invisible hills); (2) the OVER loop accumulates
+  PREMULTIPLIED colour but the game renders the PNG with STRAIGHT alpha, so the export MUST un-premultiply
+  (divide RGB by alpha; transparent texels filled with the haze tone for bilinear) -- exporting the
+  accumulator verbatim turns every feathered crest into a DARK fringe (the original "hills stand out like
+  a sore thumb" bug). The palette is MEASURED, not vibed: the sky at the horizon is ~(188,154,116) and the
+  OG hand-drawn hills were ONE flat tone (177,144,107), a mere ~11 levels darker -- ridge bodies must stay
+  within ~a dozen levels of the sky or they read way too stark. **Tune it with the LIVE EDITOR:**
+  `python tools/mars/editor/serve.py` -> `http://localhost:5299/` -- sliders for every CONFIG knob
+  (per-ridge crest/height/haze/feather/smoothness/detail + SCROLL speed, palette colour pickers, dust,
+  seed+reroll), re-rendered per drag by the REAL generator (`build_layers(seed, cfg)` overrides) and
+  composited over the real sky + marsloop ground with the full scene PARALLAX-ANIMATED at the layers'
+  relative speeds (animate toggle + preview-speed slider; plus 2x horizon band + static wrap-seam check
+  views), a "Write into game" button that saves the three layer PNGs straight into wwwroot (then
+  cache-bust the game tab), and a paste-ready CONFIG block to bake the settled values back into
+  `build_marshills.py` -- scroll-speed changes are baked by hand into `SetMars`'s `hillScrolls` (the
+  block prints the line). Bake + re-run once before committing, so the committed tool reproduces the
+  committed PNGs.
 - **Tab favicon = the player-UFO sprite, not a drawn alien -- `tools/favicon/build_favicon.py`.** The
   browser tab icon used to be a hand-drawn green "grey alien" head (`wwwroot/favicon.svg`, deleted). It's
   now built from THE game art: frame 28 (top-3/4 "hero" pose) of the player saucer sheet

@@ -28,14 +28,14 @@ internal class FlyingSpider : KillableAlien
 	// of the OG 1x4 crawl sheet, which draws taller and a touch wider — measured on-screen silhouette
 	// ~147x174 design px vs the OG's ~122x93 — so the enemy reads bigger than in the XBLIG. This
 	// factor multiplies BOTH the foreground (1.0) and background (0.67) base scales to bring it back
-	// toward the original; 0.85 pulls the width in line (the stance is inherently taller, so height
-	// stays a bit above OG without re-cutting the art). Both the sprite AND its box hitbox (sized off
+	// toward the original; 0.75 was dialled in by eye in live Level 2 play (0.85 still read too big
+	// in-game — the reared stance is inherently taller/wider than the OG crawl sheet). Both the sprite AND its box hitbox (sized off
 	// the frame via DrawScale in retrieveBoundsFromTexture) shrink together, so collision keeps
 	// tracking the visible size. (Update already scales the vertical swivel amplitude by `scale`,
 	// so a smaller spider also bobs proportionally less — intended, and true of the OG coupling too.)
 	// Live-tune by eye with ?flyspiderscale=<f> (null => this default); once the value feels right,
 	// update this constant. See Compat/DebugFlags.cs.
-	public const float DefaultSizeFactor = 0.85f;
+	public const float DefaultSizeFactor = 0.75f;
 
 	private static float SizeFactor =>
 		EvilAliensWeb.Compat.DebugFlags.FlySpiderScale ?? DefaultSizeFactor;

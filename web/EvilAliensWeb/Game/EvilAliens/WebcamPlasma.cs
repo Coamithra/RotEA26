@@ -19,9 +19,11 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 		fly
 	}
 
-	private const float FullScale = 0.34f;   // ~80 design px radius — LARGE
+	// ~78 design px across (~1.3x a saucer's 60 px frame). Dialed by eye from the
+	// original 0.34 (~237 px, "way too large"): first halved, then trimmed to 66%.
+	private const float FullScale = 0.112f;
 
-	private const float FlySpeed = 0.085f;   // design px/ms — slow enough to dodge
+	private const float FlySpeed = 0.17f;    // design px/ms — brisk, still dodgeable by leaning
 
 	// Per-difficulty cruise-speed scale (WebcamLevel picks it from its tuning
 	// table). Resolved speed = FlySpeed * speedMul; 1 = the baseline.
@@ -33,7 +35,9 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 
 	private PlasmaState state;
 
-	private Timer stateTimer = new Timer(650f, repeating: false);
+	// entry-grow duration: how fast the orb swells to full size at the muzzle
+	// (was 650ms; halved so the shot reads as fired, not inflated)
+	private Timer stateTimer = new Timer(325f, repeating: false);
 
 	private CollisionSimpleCircle circle = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
@@ -78,6 +82,24 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 		flySpeed = FlySpeed * speedMultiplier;
 		base.Speed = 0f;
 		base.MaxSpeed = flySpeed;
+	}
+
+	// Live-retune hook (the ?wctune stepper panel): retarget the cruise speed of an
+	// orb already in flight. Speed > 0 means the entry-grow phase already handed the
+	// orb its cruise speed, so snap it to the new value; during entry Speed is 0 and
+	// the fly transition below picks up the new flySpeed by itself.
+	public void SetSpeedMultiplier(float multiplier)
+	{
+		if (multiplier <= 0f)
+		{
+			return;
+		}
+		flySpeed = FlySpeed * multiplier;
+		base.MaxSpeed = flySpeed;
+		if (base.Speed > 0f)
+		{
+			base.Speed = flySpeed;
+		}
 	}
 
 	public override void Initialize()

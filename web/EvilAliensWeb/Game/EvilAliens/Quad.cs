@@ -50,13 +50,25 @@ public class Quad
 	// seamless capsules (DrawCapsuleBeam) whose dome length this scales. Tunable via
 	// ?lazercapscale=; 0 = flat ends.
 	private const float DefaultCapScale = 1.0f;
-	// Electric tendrils are now SHORTLIVED and respawn all over (was: a fixed handful anchored to
-	// one spot forever). Defaults tuned by eye; overridable via ?lazerarcs= / ?lazerarclife=.
-	private const int DefaultArcCount = 5;       // max concurrent tendrils on a long beam
-	private const float DefaultArcLife = 0.16f;  // seconds one tendril lives before fading + respawning
+	// Electric tendrils SPAWN STOCHASTICALLY (a per-frame Bernoulli trial at DefaultArcRate/sec, the
+	// RandomHelper.RandomFromAverage model) instead of a fixed handful on a shared cadence -- so they
+	// pop up out of sync "all over" like real arcing energy. Each lives a random ArcLife seconds, then
+	// dies; while alive it also DRIFTS along the beam at a random (signed) speed up to DefaultTendrilSpeed.
+	// Defaults tuned by eye; overridable via ?lazerarcs= (rate) / ?lazertendrilspeed= / ?lazerarclife= (mean).
+	private const float DefaultArcRate = 2f;         // average tendrils spawned per second
+	private const float DefaultArcLifeMin = 0.25f;   // a tendril's lifespan is random in [min,max] seconds
+	private const float DefaultArcLifeMax = 0.5f;
+	private const float DefaultTendrilSpeed = 30f;   // max |drift| along the beam, design px/sec (dir randomised)
 	private static float CapScale => EvilAliensWeb.Compat.DebugFlags.LazerCapScale ?? DefaultCapScale;
-	private static int ArcCountMax => EvilAliensWeb.Compat.DebugFlags.LazerArcCount ?? DefaultArcCount;
-	private static float ArcLife => EvilAliensWeb.Compat.DebugFlags.LazerArcLife ?? DefaultArcLife;
+	private static float ArcRate => EvilAliensWeb.Compat.DebugFlags.LazerArcRate ?? DefaultArcRate;
+	private static float TendrilSpeed => EvilAliensWeb.Compat.DebugFlags.LazerTendrilSpeed ?? DefaultTendrilSpeed;
+	// Lifespan range: ?lazerarclife overrides the MEAN (range = mean +/-33%), else the baked 0.25..0.5.
+	private static void ArcLifeRange(out float lo, out float hi)
+	{
+		float? mean = EvilAliensWeb.Compat.DebugFlags.LazerArcLife;
+		if (mean.HasValue && mean.Value > 0f) { lo = mean.Value * 0.6667f; hi = mean.Value * 1.3333f; }
+		else { lo = DefaultArcLifeMin; hi = DefaultArcLifeMax; }
+	}
 	private static readonly Color CoreColor = new Color(210, 235, 255);   // white-hot beam core
 	private static readonly Color GlowColor = new Color(35, 110, 235);    // electric-blue beam glow
 	private static readonly Color FlareColor = new Color(150, 215, 255);  // cyan-white bloom
@@ -71,6 +83,25 @@ public class Quad
 	// Reusable midpoint-displacement scratch buffers (no per-frame allocation in Draw).
 	private static readonly Vector2[] boltA = new Vector2[64];
 	private static readonly Vector2[] boltB = new Vector2[64];
+
+	// Live tendril pool. Each tendril is spawned stochastically, holds its per-appearance shape for
+	// its whole (random) life, drifts along the beam, then dies -- so this is STATE, unlike the old
+	// stateless hash-of-time approach. `lastArcTime` gives the per-frame dt that drives the spawn
+	// probability (rate*dt). Pool is generous; at ~2/sec x ~0.375s life only ~1 is live at a time.
+	private struct Tendril
+	{
+		public bool active;
+		public float birth;   // time it spawned (seconds)
+		public float life;    // its lifespan (seconds)
+		public float seed;    // per-appearance shape seed (stable for its whole life)
+		public float ap;      // base anchor along the beam, 0..1 (before drift)
+		public float side;    // which side it whips out to, +/-1
+		public float reach;   // how far out it whips (design px)
+		public float lean;    // along-axis skew of the free end (design px)
+		public float drift;   // signed drift speed along the beam (design px/sec)
+	}
+	private readonly Tendril[] tendrils = new Tendril[24];
+	private float lastArcTime = float.NaN;
 
 	public void LoadContent()
 	{
@@ -246,81 +277,102 @@ public class Quad
 		DrawBeam(sb, middle, (p0 + p1) * 0.5f, rot, thickness, len, color);
 	}
 
-	// Electric tendrils crackling off the beam. Each tendril is SHORTLIVED: it pops up at a
-	// pseudo-random spot along the beam, crackles for ~ArcLife seconds while fading in then out,
-	// and on the next cycle respawns somewhere else -- so instead of a fixed handful growing out
-	// of one spot forever, the tendrils flicker "all over all the time" like real arcing energy
-	// (Trello "improve laser animation"). Within a single appearance the bolt still WRITHES via
-	// smooth time-driven midpoint displacement (no per-frame RNG strobing); it's only the
-	// per-appearance anchor/reach/side/seed that re-roll each cycle, keyed off floor(t) so they
-	// hold steady for that tendril's whole life. Drawn as a wide dim glow pass + a thin hot core,
-	// both fading toward the free end and scaled by the birth/death envelope.
+	// Electric tendrils crackling off the beam. Tendrils SPAWN STOCHASTICALLY (see DrawArcs's
+	// per-frame Bernoulli trial) rather than on a fixed shared cadence, so they pop up out of sync
+	// "all over" like real arcing energy (Trello "improve laser animation"). Each holds its
+	// per-appearance shape for its whole random life, DRIFTS along the beam at a random signed
+	// speed, and fades in/out via a sin envelope; within a life the bolt still WRITHES via smooth
+	// time-driven midpoint displacement (no per-frame RNG strobing). This method advances the pool
+	// (spawn + expire) and draws every live tendril.
 	private void DrawArcs(SpriteBatchWrapper sb, Vector2 tailPt, Vector2 axis, Vector2 perp, float bodyLen, float time)
 	{
-		if (bodyLen < width)
-		{
-			return;
-		}
-		int count = (int)(bodyLen / 70f);
-		if (count < 2) count = 2;
-		int max = ArcCountMax;
-		if (count > max) count = max;
-		if (count <= 0) return;
-		float life = ArcLife;
-		for (int i = 0; i < count; i++)
-		{
-			float slot = fxPhase + (float)i * 101.7f;
-			// Stagger each tendril's cycle so they don't all blink together, then split the clock
-			// into an integer appearance index (re-rolls the anchor/shape) + a 0..1 life fraction.
-			float t = time / life + Frac(slot * 0.017f) * 7.13f;
-			float cyc = (float)Math.Floor(t);
-			float frac = t - cyc;
-			// Birth->death envelope (0 at spawn, 1 mid-life, 0 at death) so the tendril pops in
-			// and fades out rather than snapping on/off.
-			float env = (float)Math.Sin(frac * Math.PI);
-			if (env <= 0.02f)
-			{
-				continue;
-			}
-			// Per-appearance seed: stable for this tendril's whole life, new next cycle.
-			float seed = slot + cyc * 57.13f;
-			float ap = 0.06f + 0.88f * Hash(seed);                 // anchor along the beam
-			float side = (Hash(seed * 1.7f) < 0.5f) ? 1f : -1f;    // which side it whips out to
-			float reach = width * (1.1f + 1.5f * Hash(seed * 2.3f));
-			float lean = width * 1.8f * (Hash(seed * 3.1f) - 0.5f);
-			Vector2 anchor = tailPt + axis * (bodyLen * ap);
-			Vector2 endPt = anchor + perp * (side * reach) + axis * lean;
+		// Per-frame dt drives the spawn probability (rate*dt = the RandomHelper.RandomFromAverage
+		// model). Clamp it: a fresh/recycled beam's first frame (lastArcTime NaN) or a long stall
+		// shouldn't dump a burst. Kept on the FX RNG so render-time jitter can't desync co-op.
+		float dt = float.IsNaN(lastArcTime) ? 0f : (time - lastArcTime);
+		lastArcTime = time;
+		if (dt < 0f) dt = 0f; else if (dt > 0.1f) dt = 0.1f;
 
-			Vector2 d = endPt - anchor;
-			float len = d.Length();
-			if (len < 1f)
+		bool longEnough = bodyLen >= width;
+		float rate = ArcRate;
+		if (longEnough && rate > 0f && (float)fxr.NextDouble() < rate * dt)
+		{
+			SpawnTendril();
+		}
+
+		for (int i = 0; i < tendrils.Length; i++)
+		{
+			if (!tendrils[i].active) continue;
+			float age = time - tendrils[i].birth;
+			if (age >= tendrils[i].life || !longEnough)
 			{
+				tendrils[i].active = false;
 				continue;
 			}
-			Vector2 bperp = new Vector2(0f - d.Y, d.X) / len;
-			float amp = Math.Min(len, reach) * 0.55f;
-			int n = BuildBolt(anchor, endPt, bperp, amp, time, seed);
-			// glow pass (wide, dim) then core pass (thin, hot), each fading toward the free end
-			// and dimmed by the life envelope.
-			for (int pass = 0; pass < 2; pass++)
+			DrawTendril(sb, ref tendrils[i], tailPt, axis, perp, bodyLen, time, age);
+		}
+	}
+
+	// Roll a fresh tendril into a free pool slot (skipped if the pool is somehow full -- never at
+	// sane rates). Anchor/side/reach/lean mirror the old per-appearance rolls; life is random in
+	// the ArcLife range and drift is a random SIGNED speed (dir + magnitude) up to TendrilSpeed.
+	private void SpawnTendril()
+	{
+		int slot = -1;
+		for (int i = 0; i < tendrils.Length; i++) { if (!tendrils[i].active) { slot = i; break; } }
+		if (slot < 0) return;
+		ArcLifeRange(out float lo, out float hi);
+		tendrils[slot].active = true;
+		tendrils[slot].birth = lastArcTime;
+		tendrils[slot].life = RandF(lo, hi);
+		tendrils[slot].seed = RandF(0f, 1000f);
+		tendrils[slot].ap = RandF(0.06f, 0.94f);
+		tendrils[slot].side = (fxr.NextDouble() < 0.5) ? 1f : -1f;
+		tendrils[slot].reach = width * (1.1f + 1.5f * (float)fxr.NextDouble());
+		tendrils[slot].lean = width * 1.8f * ((float)fxr.NextDouble() - 0.5f);
+		tendrils[slot].drift = RandF(-1f, 1f) * TendrilSpeed;
+	}
+
+	// Draw one live tendril: slide its anchor along the beam by drift*age (clamped to the beam
+	// span), build the writhing bolt, and stroke a wide dim glow pass + a thin hot core, both
+	// fading toward the free end and scaled by the birth->death sin envelope.
+	private void DrawTendril(SpriteBatchWrapper sb, ref Tendril tn, Vector2 tailPt, Vector2 axis, Vector2 perp, float bodyLen, float time, float age)
+	{
+		float env = (float)Math.Sin(age / tn.life * Math.PI);
+		if (env <= 0.02f) return;
+		float along = bodyLen * tn.ap + tn.drift * age;
+		if (along < 0f) along = 0f; else if (along > bodyLen) along = bodyLen;
+		Vector2 anchor = tailPt + axis * along;
+		// Keep the whole tendril between the two tips: the anchor is already clamped along the beam,
+		// but the along-axis `lean` on the free end could poke it past a tip once drift has pushed the
+		// anchor right up against one -- so clamp the end's axial position to [0, bodyLen] too.
+		float endAlong = along + tn.lean;
+		if (endAlong < 0f) endAlong = 0f; else if (endAlong > bodyLen) endAlong = bodyLen;
+		Vector2 endPt = anchor + perp * (tn.side * tn.reach) + axis * (endAlong - along);
+		Vector2 d = endPt - anchor;
+		float len = d.Length();
+		if (len < 1f) return;
+		Vector2 bperp = new Vector2(0f - d.Y, d.X) / len;
+		float amp = Math.Min(len, tn.reach) * 0.55f;
+		int n = BuildBolt(anchor, endPt, bperp, amp, time, tn.seed);
+		for (int pass = 0; pass < 2; pass++)
+		{
+			float thick = (pass == 0) ? ArcThickness * 2.6f : ArcThickness;
+			Color col = (pass == 0) ? ArcGlowColor : ArcColor;
+			for (int k = 0; k < n - 1; k++)
 			{
-				float thick = (pass == 0) ? ArcThickness * 2.6f : ArcThickness;
-				Color col = (pass == 0) ? ArcGlowColor : ArcColor;
-				for (int k = 0; k < n - 1; k++)
-				{
-					float fade = (1f - 0.6f * ((float)k / (float)(n - 1))) * env;
-					DrawLine(sb, boltA[k], boltA[k + 1], thick, col * fade);
-				}
+				float fade = (1f - 0.6f * ((float)k / (float)(n - 1))) * env;
+				DrawLine(sb, boltA[k], boltA[k + 1], thick, col * fade);
 			}
 		}
 	}
 
-	// Deterministic hash -> [0,1). Used to re-roll a tendril's anchor/shape each appearance
-	// (keyed off floor(time/life)), so the re-roll is stable for that appearance's whole life.
-	private static float Hash(float x)
+	// Clear the live tendrils (called when a pooled beam is re-Set up for a new laser, so stale
+	// tendrils from the previous use don't flash on the new one).
+	private void ResetArcs()
 	{
-		double s = Math.Sin(x) * 43758.5453;
-		return (float)(s - Math.Floor(s));
+		for (int i = 0; i < tendrils.Length; i++) tendrils[i].active = false;
+		lastArcTime = float.NaN;
 	}
 
 	// Midpoint-displacement subdivision into boltA[0..return). Each level inserts a displaced
@@ -367,11 +419,6 @@ public class Quad
 		return 0.6f * (float)Math.Sin(time * 5.5f + seed) + 0.4f * (float)Math.Sin(time * 2.3f + seed * 1.7f);
 	}
 
-	private static float Frac(float v)
-	{
-		return v - (float)Math.Floor(v);
-	}
-
 	private static float RandF(float min, float max)
 	{
 		return (float)(fxr.NextDouble() * (max - min)) + min;
@@ -388,6 +435,7 @@ public class Quad
 		height = length;
 		this.lead = lead;
 		calculatePoints();
+		ResetArcs(); // fresh laser: drop any tendrils left over from a recycled beam
 	}
 
 	public void SetLead(float lead)

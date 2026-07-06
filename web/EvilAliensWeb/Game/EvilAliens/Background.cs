@@ -910,17 +910,27 @@ public class Background : Scene
 		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.3f;
 		backgroundLayers.Add(backgroundImage);
-		backgroundImage = new BackgroundImage();
-		backgroundImage.position = Vector2.Zero;
-		backgroundImage.textures = new Texture2D[1, 1];
-		backgroundImage.texturenames = new string[1, 1];
-		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/MarsBG/marshills");
-		backgroundImage.texturenames[0, 0] = "GFX/MarsBG/marshills";
-		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
-		backgroundImage.scrollspeedmodifier = 0.7f;
-		backgroundLayers.Add(backgroundImage);
+		// Far hills: THREE parallax slices (far/mid/near ridge), one texture per
+		// RIDGES entry in tools/mars/build_marshills.py -- each natively seamless
+		// and scrolling at its own depth between the sky (0.3) and the ground
+		// (1.0), so the ridges parallax against each other instead of moving as
+		// one flat card. Change speeds here AND the note in the tool's docstring.
+		string[] hillNames = { "GFX/MarsBG/marshills1", "GFX/MarsBG/marshills2", "GFX/MarsBG/marshills3" };
+		float[] hillScrolls = { 0.33f, 0.53f, 0.85f };
+		for (int hi = 0; hi < hillNames.Length; hi++)
+		{
+			backgroundImage = new BackgroundImage();
+			backgroundImage.position = Vector2.Zero;
+			backgroundImage.textures = new Texture2D[1, 1];
+			backgroundImage.texturenames = new string[1, 1];
+			backgroundImage.textures[0, 0] = Content.Load<Texture2D>(hillNames[hi]);
+			backgroundImage.texturenames[0, 0] = hillNames[hi];
+			backgroundImage.size = 1f;
+			backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
+			backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+			backgroundImage.scrollspeedmodifier = hillScrolls[hi];
+			backgroundLayers.Add(backgroundImage);
+		}
 		backgroundImage = new BackgroundImage();
 		// HD looping Mars floor (mars-bg-remaster). The 12 `marsloop` tiles are the stitched,
 		// seamless, natively-LOOPABLE ground strip (tools/mars/STITCH_ALGORITHM.md), upscaled

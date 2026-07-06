@@ -105,6 +105,21 @@ internal class WebcamUfo : AlienDrawableGameComponent
 		wanderDir = MyMath.VectorToAngle(new Vector2(RandomHelper.RandomNextFloat(250f, 550f), RandomHelper.RandomNextFloat(200f, 400f)) - position);
 	}
 
+	// Live-retune hook (the ?wctune stepper panel): rescale this saucer's current +
+	// max drift speed in place so a mid-run speed change is felt immediately, not
+	// only by the next spawn. Ratio-based so the random per-instance base survives.
+	public void SetSpeedMultiplier(float multiplier)
+	{
+		if (multiplier <= 0f || speedMul <= 0f || multiplier == speedMul)
+		{
+			return;
+		}
+		float ratio = multiplier / speedMul;
+		speedMul = multiplier;
+		base.Speed *= ratio;
+		base.MaxSpeed *= ratio;
+	}
+
 	public override void Initialize()
 	{
 		base.Initialize();

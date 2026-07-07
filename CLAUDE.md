@@ -16,10 +16,17 @@ it lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programmin
   active board is a *different* one). e.g.
   `trello --backend local --board 10989a3d board` (show), `... list ls`, `... card ls <listId>`.
 - **Columns (list ids):** `Backlog` `79158996` · `In Progress` `3b43cba3` · `Done` `9c204b80`.
-- **Cards = the plan's stages; the Trello board is now the live tracker.** Done: Stages 1-10, 12, 15. In Progress: Stage 13 (menu reskin). Backlog:
-  Stage 11 (online co-op) + Stage 14 (trailers). Each card's description summarises that
-  stage; the now-archived `plans/plan.md` holds the full per-stage detail. When a stage's status changes, `card move <id> <listId>`
-  it and keep the description in sync.
+- **Cards = the plan's stages (+ smaller follow-up tasks); the Trello board is the live tracker.**
+  Done: Stages 1-10, 12-15 + the Stage 11 umbrella (design settled 2026-07-07 — see
+  `plans/stage11-online-coop.md`; distributed-authority state replication over P2P WebRTC, NOT
+  lockstep). In Progress: webcam difficulty-feel tuning. Backlog: the Stage 11 IMPLEMENTATION as
+  five phase cards `Stage 11.1`-`11.5` (net skeleton/ship mirroring → world authority + generous
+  claims → script replication/reset/tether → WebRTC + Hetzner signaling + lobby → hardening;
+  strictly sequential except 11.4, which only needs 11.1's transport interface; per-card
+  orchestration strategy is in each card's description) + the IndexedDB screenshot-storage
+  migration. Each card's description summarises its task; the now-archived `plans/plan.md` holds
+  the full per-stage detail. When a card's status changes, `card move <id> <listId>` it and keep
+  the description in sync.
 - Browse it visually with `trello --backend local --board 10989a3d serve` (drag-drop kanban web app).
 - **When picking up a card/task, FOLLOW [`CONTRIBUTING.md`](CONTRIBUTING.md).** It's the step-by-step
   runbook for this repo — claim the card (Backlog → In Progress), tracker doc, a per-card worktree

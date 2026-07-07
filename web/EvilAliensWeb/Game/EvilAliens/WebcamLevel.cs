@@ -48,6 +48,25 @@ internal class WebcamLevel : GameScene
 		public int MaxSaucers;     // simultaneous-saucer ceiling
 		public float SaucerSpeedMul; // WebcamUfo drift-speed scale
 		public float PlasmaSpeedMul; // WebcamPlasma cruise-speed scale
+		// Cadence as ABSOLUTE per-tier durations in milliseconds (NO difficulty-modifier
+		// divisor — each tier's feel is authored directly, then a small ±jitter is added at
+		// spawn for variety). SpawnIntervalMs = gap between successive saucer spawns;
+		// ArmDelayMs = wander time before a saucer starts charging (its "rate of fire" — a
+		// saucer fires exactly once per arm cycle, so bigger = fires less often); ChargeTimeMs
+		// = the blink-charge windup before the orb releases. Plan: author Easy + Very_Hard by
+		// feel, then interpolate the middle tiers off Settings.DifficultyModifier.
+		public float SpawnIntervalMs;
+		public float ArmDelayMs;
+		public float ChargeTimeMs;
+		// DeathStar-mine hazard (F2): MaxMines = simultaneous cap; MineSpawnMs = gap between
+		// mine spawns; MineLifeMs = how long a mine wanders before it flies off + despawns.
+		public int MaxMines;
+		public float MineSpawnMs;
+		public float MineLifeMs;
+		// Screen-bisecting mothership laser (F1): MothershipMs = gap between bisect events
+		// (0 disables). The event itself (enter -> charge -> fire -> leave) isn't otherwise
+		// tuned per-tier here — it's a fixed choreography, only how OFTEN it happens.
+		public float MothershipMs;
 	}
 
 	// Shipped baseline, indexed by (int)Settings.DifficultyLevel (Easy..Inzane).
@@ -55,11 +74,11 @@ internal class WebcamLevel : GameScene
 	// Compat/DebugFlags.cs) then bake the chosen numbers back here.
 	private static readonly DifficultyTuning[] Tunings = new DifficultyTuning[]
 	{
-		new DifficultyTuning { Hearts = 5, KillTarget = 12, MaxSaucers = 3, SaucerSpeedMul = 0.85f, PlasmaSpeedMul = 0.75f }, // Easy
-		new DifficultyTuning { Hearts = 4, KillTarget = 16, MaxSaucers = 4, SaucerSpeedMul = 1.0f,  PlasmaSpeedMul = 0.9f  }, // Medium
-		new DifficultyTuning { Hearts = 3, KillTarget = 20, MaxSaucers = 5, SaucerSpeedMul = 1.15f, PlasmaSpeedMul = 1.05f }, // Hard
-		new DifficultyTuning { Hearts = 2, KillTarget = 26, MaxSaucers = 6, SaucerSpeedMul = 1.3f,  PlasmaSpeedMul = 1.2f  }, // Very_Hard
-		new DifficultyTuning { Hearts = 2, KillTarget = 32, MaxSaucers = 7, SaucerSpeedMul = 1.5f,  PlasmaSpeedMul = 1.4f  }, // Inzane
+		new DifficultyTuning { Hearts = 5, KillTarget = 12, MaxSaucers = 3, SaucerSpeedMul = 0.85f, PlasmaSpeedMul = 0.75f, SpawnIntervalMs = 6000f, ArmDelayMs = 15000f, ChargeTimeMs = 4500f, MaxMines = 2, MineSpawnMs = 4000f, MineLifeMs = 8000f, MothershipMs = 20000f }, // Easy
+		new DifficultyTuning { Hearts = 4, KillTarget = 16, MaxSaucers = 4, SaucerSpeedMul = 1.0f,  PlasmaSpeedMul = 0.9f,  SpawnIntervalMs = 3600f, ArmDelayMs = 9500f, ChargeTimeMs = 3600f, MaxMines = 3, MineSpawnMs = 3200f, MineLifeMs = 7000f, MothershipMs = 16000f }, // Medium
+		new DifficultyTuning { Hearts = 3, KillTarget = 20, MaxSaucers = 5, SaucerSpeedMul = 1.15f, PlasmaSpeedMul = 1.05f, SpawnIntervalMs = 2800f, ArmDelayMs = 7000f, ChargeTimeMs = 3000f, MaxMines = 3, MineSpawnMs = 2600f, MineLifeMs = 6500f, MothershipMs = 13000f }, // Hard
+		new DifficultyTuning { Hearts = 2, KillTarget = 26, MaxSaucers = 6, SaucerSpeedMul = 1.3f,  PlasmaSpeedMul = 1.2f,  SpawnIntervalMs = 2200f, ArmDelayMs = 5500f, ChargeTimeMs = 2600f, MaxMines = 4, MineSpawnMs = 2200f, MineLifeMs = 6000f, MothershipMs = 11000f }, // Very_Hard
+		new DifficultyTuning { Hearts = 2, KillTarget = 32, MaxSaucers = 7, SaucerSpeedMul = 1.5f,  PlasmaSpeedMul = 1.4f,  SpawnIntervalMs = 1800f, ArmDelayMs = 4500f, ChargeTimeMs = 2200f, MaxMines = 5, MineSpawnMs = 1800f, MineLifeMs = 5500f, MothershipMs = 9000f }, // Inzane
 	};
 
 	// The active run's resolved tuning (difficulty row + any ?wc* debug overrides),
@@ -80,12 +99,22 @@ internal class WebcamLevel : GameScene
 
 	private Timer spawnTimer = new Timer(1800f, repeating: false);
 
-	// Post-hit mercy window: incoming plasma still bursts but doesn't hurt.
+	// F2 mines: gap between DeathStar-mine spawns (duration set live from tuning.MineSpawnMs).
+	private Timer mineTimer = new Timer(2200f, repeating: false);
+
+	// F1 mothership: gap between screen-bisecting laser events (duration = tuning.MothershipMs).
+	private Timer mothershipTimer = new Timer(11000f, repeating: false);
+
+	// Post-hit mercy window: incoming plasma/mine/beam still bursts but doesn't hurt.
 	private Timer graceTimer = new Timer(2200f, repeating: false);
 
 	private readonly List<WebcamUfo> ufos = new List<WebcamUfo>();
 
 	private readonly List<WebcamPlasma> plasmas = new List<WebcamPlasma>();
+
+	private readonly List<WebcamMine> mines = new List<WebcamMine>();
+
+	private readonly List<WebcamMothership> motherships = new List<WebcamMothership>();
 
 	private SpriteFont font;
 
@@ -165,8 +194,16 @@ internal class WebcamLevel : GameScene
 		introShown = false;
 		ufos.Clear();
 		plasmas.Clear();
+		mines.Clear();
+		motherships.Clear();
 		spawnTimer.Reset();
 		spawnTimer.Start();
+		mineTimer.Duration = tuning.MineSpawnMs;
+		mineTimer.Reset();
+		mineTimer.Start();
+		mothershipTimer.Duration = tuning.MothershipMs;
+		mothershipTimer.Reset();
+		mothershipTimer.Start();
 		graceTimer.Reset();
 		graceTimer.Stop();
 		// Hand the browser the stage: camera picker + preview + background
@@ -211,6 +248,34 @@ internal class WebcamLevel : GameScene
 		{
 			tuning.PlasmaSpeedMul *= DebugFlags.WebcamPlasmaSpeed.Value;
 		}
+		if (DebugFlags.WebcamSpawnInterval.HasValue)
+		{
+			tuning.SpawnIntervalMs = DebugFlags.WebcamSpawnInterval.Value;
+		}
+		if (DebugFlags.WebcamArmDelay.HasValue)
+		{
+			tuning.ArmDelayMs = DebugFlags.WebcamArmDelay.Value;
+		}
+		if (DebugFlags.WebcamChargeTime.HasValue)
+		{
+			tuning.ChargeTimeMs = DebugFlags.WebcamChargeTime.Value;
+		}
+		if (DebugFlags.WebcamMineMax.HasValue)
+		{
+			tuning.MaxMines = DebugFlags.WebcamMineMax.Value;
+		}
+		if (DebugFlags.WebcamMineSpawn.HasValue)
+		{
+			tuning.MineSpawnMs = DebugFlags.WebcamMineSpawn.Value;
+		}
+		if (DebugFlags.WebcamMineLife.HasValue)
+		{
+			tuning.MineLifeMs = DebugFlags.WebcamMineLife.Value;
+		}
+		if (DebugFlags.WebcamMothership.HasValue)
+		{
+			tuning.MothershipMs = DebugFlags.WebcamMothership.Value;
+		}
 		if (DebugFlags.WebcamTuneHearts.HasValue)
 		{
 			tuning.Hearts = DebugFlags.WebcamTuneHearts.Value;
@@ -230,6 +295,26 @@ internal class WebcamLevel : GameScene
 		if (DebugFlags.WebcamTunePlasmaSpeed.HasValue)
 		{
 			tuning.PlasmaSpeedMul = DebugFlags.WebcamTunePlasmaSpeed.Value;
+		}
+		if (DebugFlags.WebcamTuneSpawnInterval.HasValue)
+		{
+			tuning.SpawnIntervalMs = DebugFlags.WebcamTuneSpawnInterval.Value;
+		}
+		if (DebugFlags.WebcamTuneArmDelay.HasValue)
+		{
+			tuning.ArmDelayMs = DebugFlags.WebcamTuneArmDelay.Value;
+		}
+		if (DebugFlags.WebcamTuneChargeTime.HasValue)
+		{
+			tuning.ChargeTimeMs = DebugFlags.WebcamTuneChargeTime.Value;
+		}
+		if (DebugFlags.WebcamTuneMineMax.HasValue)
+		{
+			tuning.MaxMines = DebugFlags.WebcamTuneMineMax.Value;
+		}
+		if (DebugFlags.WebcamTuneMineSpawn.HasValue)
+		{
+			tuning.MineSpawnMs = DebugFlags.WebcamTuneMineSpawn.Value;
 		}
 	}
 
@@ -265,7 +350,8 @@ internal class WebcamLevel : GameScene
 		}
 		Console.WriteLine("[wctune] applied: hearts=" + tuning.Hearts + " kills=" + tuning.KillTarget
 			+ " saucers=" + tuning.MaxSaucers + " saucerspeed=" + tuning.SaucerSpeedMul
-			+ " plasmaspeed=" + tuning.PlasmaSpeedMul);
+			+ " plasmaspeed=" + tuning.PlasmaSpeedMul + " spawnMs=" + tuning.SpawnIntervalMs
+			+ " armMs=" + tuning.ArmDelayMs + " chargeMs=" + tuning.ChargeTimeMs);
 		SeedTunePanel();
 	}
 
@@ -277,7 +363,9 @@ internal class WebcamLevel : GameScene
 		{
 			WebcamInterop.TuneShow(Settings.GetInstance().CurrentDifficulty.ToString(),
 				tuning.Hearts, tuning.KillTarget, tuning.MaxSaucers,
-				tuning.SaucerSpeedMul, tuning.PlasmaSpeedMul);
+				tuning.SaucerSpeedMul, tuning.PlasmaSpeedMul,
+				tuning.SpawnIntervalMs, tuning.ArmDelayMs, tuning.ChargeTimeMs,
+				tuning.MaxMines, tuning.MineSpawnMs, tuning.MineLifeMs, tuning.MothershipMs);
 		}
 	}
 
@@ -292,12 +380,16 @@ internal class WebcamLevel : GameScene
 		score.EnableCombos();
 		ufos.Clear();
 		plasmas.Clear();
+		mines.Clear();
+		motherships.Clear();
 	}
 
 	public override void Update(GameTime gameTime)
 	{
 		graceTimer.Update(gameTime);
 		spawnTimer.Update(gameTime);
+		mineTimer.Update(gameTime);
+		mothershipTimer.Update(gameTime);
 		// Backed out of the camera-setup dialog: leave the level like a pause-menu
 		// exit would. (Stop() flips the state off Cancelled, so this fires once.)
 		if (WebcamInterop.State == WebcamInterop.SessionState.Cancelled)
@@ -314,6 +406,8 @@ internal class WebcamLevel : GameScene
 		base.UpdateNormal(gameTime);
 		Prune(ufos);
 		Prune(plasmas);
+		Prune(mines);
+		Prune(motherships);
 		// Live tuner panel (?wctune): pick up an edit before the Playing gate so a
 		// change made during camera setup (or applied on unpause) still lands.
 		if (DebugFlags.WebcamTuneVersion != appliedTuneVersion)
@@ -333,9 +427,14 @@ internal class WebcamLevel : GameScene
 		}
 		if (WebcamInterop.PlayerVisible)
 		{
+			float dt = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			SpawnSaucers();
-			TestPlayerTouchesSaucers();
-			TestPlasmaHitsPlayer();
+			TestPlayerTouchesSaucers();     // GOOD collision: instant (the player WANTS to hit saucers)
+			TestPlasmaHitsPlayer(dt);       // BAD collisions: need LeewayMs of STEADY contact to count
+			SpawnMines();
+			TestMinesHitPlayer(dt);
+			SpawnMothership();
+			TestBeamHitsPlayer(dt);
 		}
 		if (kills >= tuning.KillTarget && !won)
 		{
@@ -358,6 +457,24 @@ internal class WebcamLevel : GameScene
 		}
 	}
 
+	// Per-spawn timing variety: an authored cadence (ms) is multiplied by this so saucers
+	// don't arm/fire/spawn in robotic lockstep. +/-15% around the authored value.
+	private const float CadenceJitterFrac = 0.15f;
+
+	private static float CadenceJitter()
+	{
+		return RandomHelper.RandomNextFloat(1f - CadenceJitterFrac, 1f + CadenceJitterFrac);
+	}
+
+	// Bad-collision leeway (a gift to the player): a hazard that HURTS you (plasma orb, mothership
+	// beam, mine) only lands a hit after the mask has STEADILY overlapped it for this long -- so a
+	// jittery webcam mask or a split-second-late dodge doesn't cost a life. Continuous: the
+	// per-hazard contact accumulator resets the instant contact breaks. Killing SAUCERS is
+	// deliberately NOT leewayed (the player wants that; it stays instant). ?wchitleeway=<ms> tunes it.
+	private const float HitLeewayMs = 100f;   // ~0.1s
+
+	private float LeewayMs => DebugFlags.WebcamHitLeeway ?? HitLeewayMs;
+
 	private void SpawnSaucers()
 	{
 		if (won || !spawnTimer.Finished)
@@ -374,16 +491,18 @@ internal class WebcamLevel : GameScene
 			spawnTimer.Start();
 			return;
 		}
-		float difficulty = Settings.GetInstance().DifficultyModifier;
 		WebcamUfo webcamUfo = WebcamUfo.NewWebcamUfo(Collection, base.Game);
-		// harder difficulty + later waves arm faster and blink shorter
-		float armDelay = RandomHelper.RandomNextFloat(5000f, 9000f) / difficulty * MathHelper.Lerp(1f, 0.6f, Math.Min(1f, kills / (float)tuning.KillTarget));
-		float blinkTime = RandomHelper.RandomNextFloat(2400f, 3200f) / difficulty;
+		// Cadence = the tier's authored absolute ms + a small +/-jitter for variety. NO
+		// difficulty-modifier divisor (removed — each tier's feel is set directly in Tunings),
+		// and no within-run "arm faster over time" ramp (removed too, so the authored value
+		// IS the delay). Tune per tier live via the ?wctune panel or ?wcarm/?wccharge/?wcspawn.
+		float armDelay = tuning.ArmDelayMs * CadenceJitter();
+		float blinkTime = tuning.ChargeTimeMs * CadenceJitter();
 		webcamUfo.Setup(RandomEdgePosition(), armDelay, blinkTime, tuning.SaucerSpeedMul);
 		webcamUfo.OnFired += ufo_OnFired;
 		Collection.Add((GameComponent)(object)webcamUfo);
 		ufos.Add(webcamUfo);
-		spawnTimer.Duration = RandomHelper.RandomNextFloat(1400f, 3000f) / difficulty;
+		spawnTimer.Duration = tuning.SpawnIntervalMs * CadenceJitter();
 		spawnTimer.Reset();
 		spawnTimer.Start();
 	}
@@ -418,19 +537,25 @@ internal class WebcamLevel : GameScene
 		{
 			if (!ufo.IsDead && WebcamInterop.HitCircle(ufo.Position, ufo.HitRadius))
 			{
-				ufo.Asplode();
-				kills++;
-				score.AddScore(PointValues.WebcamUfo, isCombo: false, ufo.Position, 0);
-				// Grab the level-select thumbnail on the first splat: the player is
-				// clearly in frame and there's a saucer + explosion on screen. The
-				// generic busy-scene trigger never fires here (too few entities). No-op
-				// unless the opt-in Settings.WebcamScreenshot is on (ForceSnapshot gates
-				// on ScreenshotEnabled).
-				if (kills == 1)
-				{
-					ForceSnapshot();
-				}
+				KillSaucer(ufo);
 			}
+		}
+	}
+
+	// Asplode a saucer + credit the kill (score + KillTarget progress). Shared by the player's
+	// body-swat AND the mothership beam sweeping over it — both are legit kills the player wants.
+	private void KillSaucer(WebcamUfo ufo)
+	{
+		ufo.Asplode();
+		kills++;
+		score.AddScore(PointValues.WebcamUfo, isCombo: false, ufo.Position, 0);
+		// Grab the level-select thumbnail on the first splat: the player is clearly in frame and
+		// there's a saucer + explosion on screen. The generic busy-scene trigger never fires here
+		// (too few entities). No-op unless the opt-in Settings.WebcamScreenshot is on (ForceSnapshot
+		// gates on ScreenshotEnabled).
+		if (kills == 1)
+		{
+			ForceSnapshot();
 		}
 	}
 
@@ -444,15 +569,169 @@ internal class WebcamLevel : GameScene
 		}
 	}
 
-	private void TestPlasmaHitsPlayer()
+	private void TestPlasmaHitsPlayer(float dt)
 	{
 		foreach (WebcamPlasma plasma in plasmas)
 		{
-			// slightly forgiving: the orb must reach INTO the body, not just graze it
-			if (!plasma.IsDead && WebcamInterop.HitCircle(plasma.Position, plasma.HitRadius * 0.7f))
+			if (plasma.IsDead)
 			{
-				plasma.Detonate(withExplosion: true);
-				PlayerHit();
+				continue;
+			}
+			// slightly forgiving: the orb must reach INTO the body, not just graze it; AND it must
+			// stay there for LeewayMs (a brief graze / cam blip passes through harmlessly).
+			if (WebcamInterop.HitCircle(plasma.Position, plasma.HitRadius * 0.7f))
+			{
+				plasma.ContactMs += dt;
+				if (plasma.ContactMs >= LeewayMs)
+				{
+					plasma.Detonate(withZap: true);
+					PlayerHit();
+				}
+			}
+			else
+			{
+				plasma.ContactMs = 0f;   // steady-contact only: any break resets the clock
+			}
+		}
+	}
+
+	// F2: keep the DeathStar-mine population topped up to MaxMines on the MineSpawnMs cadence.
+	// Simpler than SpawnSaucers — mines aren't kill-gated and self-despawn on their lifetime.
+	private void SpawnMines()
+	{
+		if (won || !mineTimer.Finished)
+		{
+			return;
+		}
+		if (mines.Count >= tuning.MaxMines)
+		{
+			// full: recheck shortly instead of waiting a whole interval
+			mineTimer.Duration = 400f;
+			mineTimer.Reset();
+			mineTimer.Start();
+			return;
+		}
+		WebcamMine mine = WebcamMine.NewWebcamMine(Collection, base.Game);
+		mine.Setup(RandomEdgePosition(), tuning.MineLifeMs * CadenceJitter());
+		Collection.Add((GameComponent)(object)mine);
+		mines.Add(mine);
+		mineTimer.Duration = tuning.MineSpawnMs * CadenceJitter();
+		mineTimer.Reset();
+		mineTimer.Start();
+	}
+
+	// F2: touching a mine costs a life + bursts the blue DeathStar explosion — but only after
+	// LeewayMs of steady contact (same gift as the plasma).
+	private void TestMinesHitPlayer(float dt)
+	{
+		foreach (WebcamMine mine in mines)
+		{
+			if (mine.IsDead)
+			{
+				continue;
+			}
+			if (WebcamInterop.HitCircle(mine.Position, mine.HitRadius))
+			{
+				mine.ContactMs += dt;
+				if (mine.ContactMs >= LeewayMs)
+				{
+					mine.Detonate();
+					PlayerHit();
+				}
+			}
+			else
+			{
+				mine.ContactMs = 0f;
+			}
+		}
+	}
+
+	// F1: launch a screen-bisecting mothership every MothershipMs (0 disables), one at a time.
+	private void SpawnMothership()
+	{
+		if (won || tuning.MothershipMs <= 0f || !mothershipTimer.Finished)
+		{
+			return;
+		}
+		if (motherships.Count > 0)
+		{
+			// one bisector at a time: recheck shortly
+			mothershipTimer.Duration = 800f;
+			mothershipTimer.Reset();
+			mothershipTimer.Start();
+			return;
+		}
+		WebcamMothership ship = WebcamMothership.NewWebcamMothership(Collection, base.Game);
+		ship.Setup(PickBisectOrientation());
+		Collection.Add((GameComponent)(object)ship);
+		motherships.Add(ship);
+		mothershipTimer.Duration = tuning.MothershipMs * CadenceJitter();
+		mothershipTimer.Reset();
+		mothershipTimer.Start();
+	}
+
+	// Mostly the vertical top-down bisect; sometimes a horizontal one from a random side.
+	// ?wcmothershipdir=vertical|horizontal forces it for testing (null => the random mix).
+	private WebcamMothership.Bisect PickBisectOrientation()
+	{
+		string force = DebugFlags.WebcamMothershipDir;
+		if (force == "vertical")
+		{
+			return WebcamMothership.Bisect.VerticalDown;
+		}
+		if (force == "horizontal")
+		{
+			return (RandomHelper.Random.Next(2) == 0) ? WebcamMothership.Bisect.HorizontalFromLeft : WebcamMothership.Bisect.HorizontalFromRight;
+		}
+		int roll = RandomHelper.Random.Next(5);
+		if (roll < 3)
+		{
+			return WebcamMothership.Bisect.VerticalDown;   // ~60% vertical
+		}
+		return (roll == 3) ? WebcamMothership.Bisect.HorizontalFromLeft : WebcamMothership.Bisect.HorizontalFromRight;
+	}
+
+	// F1: while a mothership's beam is live, standing in it costs a life (grace-gated). The beam
+	// also sweeps any space MINES it crosses out of existence (a mercy for the player — plain
+	// explosion, no life cost).
+	private void TestBeamHitsPlayer(float dt)
+	{
+		foreach (WebcamMothership ship in motherships)
+		{
+			if (!ship.BeamActive)
+			{
+				ship.BeamContactMs = 0f;
+				continue;
+			}
+			// standing in the beam only costs a life after LeewayMs of steady contact.
+			if (WebcamInterop.HitBeam(ship.BeamOrigin, ship.BeamDirection, ship.BeamLength, ship.BeamHalfWidth))
+			{
+				ship.BeamContactMs += dt;
+				if (ship.BeamContactMs >= LeewayMs)
+				{
+					PlayerHit();
+					ship.BeamContactMs = 0f;   // re-accumulate; PlayerHit's grace window rate-limits repeats
+				}
+			}
+			else
+			{
+				ship.BeamContactMs = 0f;
+			}
+			// the beam clears MINES it crosses INSTANTLY (a mercy for the player, not a hit)...
+			foreach (WebcamMine mine in mines)
+			{
+				if (!mine.IsDead && WebcamMothership.BeamHitsCircle(ship.BeamOrigin, ship.BeamDirection, ship.BeamLength, ship.BeamHalfWidth, mine.Position, mine.HitRadius))
+				{
+					mine.DestroyByLaser();
+				}
+			}
+			// ...and KILLS saucers it crosses too, with full kill credit (a kill the player wanted).
+			foreach (WebcamUfo ufo in ufos)
+			{
+				if (!ufo.IsDead && WebcamMothership.BeamHitsCircle(ship.BeamOrigin, ship.BeamDirection, ship.BeamLength, ship.BeamHalfWidth, ufo.Position, ufo.HitRadius))
+				{
+					KillSaucer(ufo);
+				}
 			}
 		}
 	}

@@ -35,6 +35,10 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 
 	private PlasmaState state;
 
+	// Steady-contact accumulator for the bad-collision leeway (WebcamLevel manages it): ms the
+	// player mask has been continuously overlapping this orb; reset the instant contact breaks.
+	public float ContactMs;
+
 	// entry-grow duration: how fast the orb swells to full size at the muzzle
 	// (was 650ms; halved so the shot reads as fired, not inflated)
 	private Timer stateTimer = new Timer(325f, repeating: false);
@@ -82,6 +86,7 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 		flySpeed = FlySpeed * speedMultiplier;
 		base.Speed = 0f;
 		base.MaxSpeed = flySpeed;
+		ContactMs = 0f;
 	}
 
 	// Live-retune hook (the ?wctune stepper panel): retarget the cruise speed of an
@@ -156,14 +161,16 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 		}
 	}
 
-	// It reached the player (or the level is clearing shots): burst and vanish.
-	public void Detonate(bool withExplosion)
+	// It reached the player (or the level is clearing shots): pop into an electric ZAP burst and
+	// vanish. Electricity doesn't explode — instead of a fireball it discharges into a bloom +
+	// radiating lightning streaks (WebcamZap). The life (if any) is docked by WebcamLevel.PlayerHit.
+	public void Detonate(bool withZap)
 	{
-		if (withExplosion)
+		if (withZap)
 		{
-			Explosion explosion = Explosion.NewExplosion(collection, base.Game);
-			explosion.Setup(base.Position, 2.2f, 1.4f, 0f, 0f);
-			collection.Add((GameComponent)(object)explosion);
+			WebcamZap zap = WebcamZap.NewWebcamZap(collection, base.Game);
+			zap.Setup(base.Position, MathHelper.Clamp(HitRadius / 40f, 0.8f, 2f));
+			collection.Add((GameComponent)(object)zap);
 		}
 		Die();
 	}

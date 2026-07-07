@@ -99,9 +99,9 @@ namespace EvilAliensWeb.Compat
         // WebcamLevel gates the call on DebugFlags.WebcamTune, so a normal boot never
         // reaches JS). Also called after every applied change so the panel re-renders the
         // level's actual resolved values (e.g. after its "Reset to tier" button).
-        public static void TuneShow(string tier, int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed)
+        public static void TuneShow(string tier, int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed, float spawnInterval, float armDelay, float chargeTime, int mineMax, float mineSpawn, float mineLife, float mothership)
         {
-            _js?.InvokeVoid("eaWcTune.show", tier, hearts, kills, saucers, saucerSpeed, plasmaSpeed);
+            _js?.InvokeVoid("eaWcTune.show", tier, hearts, kills, saucers, saucerSpeed, plasmaSpeed, spawnInterval, armDelay, chargeTime, mineMax, mineSpawn, mineLife, mothership);
         }
 
         public static void TuneHide()
@@ -321,6 +321,55 @@ namespace EvilAliensWeb.Compat
                 }
             }
             return push;
+        }
+
+        // Does the player's mask overlap a thick beam SEGMENT right now? The segment runs
+        // from `origin` for `length` design px along `direction` (radians, (cos,sin) — same
+        // convention as MyMath.AngleToVector); a mask cell counts as hit if its centre is
+        // within halfWidth (+ a cell's slack, like HitCircle) of the segment. Used by the F1
+        // mothership's screen-bisecting laser (WebcamMothership) — the beam isn't an
+        // ICollidable, so WebcamLevel tests it against the mask here.
+        public static bool HitBeam(Vector2 origin, float direction, float length, float halfWidth)
+        {
+            if (!PlayerVisible || length <= 0f || halfWidth <= 0f)
+            {
+                return false;
+            }
+            float dirX = (float)Math.Cos(direction);
+            float dirY = (float)Math.Sin(direction);
+            Vector2 end = new Vector2(origin.X + dirX * length, origin.Y + dirY * length);
+            float reach = halfWidth + CellReach;
+            int gx0 = (int)((Math.Min(origin.X, end.X) - reach) / CellW);
+            int gx1 = (int)((Math.Max(origin.X, end.X) + reach) / CellW);
+            int gy0 = (int)((Math.Min(origin.Y, end.Y) - reach) / CellH);
+            int gy1 = (int)((Math.Max(origin.Y, end.Y) + reach) / CellH);
+            if (gx0 < 0) gx0 = 0;
+            if (gy0 < 0) gy0 = 0;
+            if (gx1 >= GridW) gx1 = GridW - 1;
+            if (gy1 >= GridH) gy1 = GridH - 1;
+            float reachSq = reach * reach;
+            for (int gy = gy0; gy <= gy1; gy++)
+            {
+                for (int gx = gx0; gx <= gx1; gx++)
+                {
+                    if (!grid[gy * GridW + gx])
+                    {
+                        continue;
+                    }
+                    float px = (gx + 0.5f) * CellW;
+                    float py = (gy + 0.5f) * CellH;
+                    // closest point on the segment to this cell centre (projection, clamped)
+                    float t = (px - origin.X) * dirX + (py - origin.Y) * dirY;
+                    if (t < 0f) t = 0f; else if (t > length) t = length;
+                    float dx = px - (origin.X + dirX * t);
+                    float dy = py - (origin.Y + dirY * t);
+                    if (dx * dx + dy * dy <= reachSq)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
     }
 }

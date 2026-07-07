@@ -99,6 +99,17 @@ tools/mars/**/__pycache__/
 # build_marshills.py --preview/--show diagnostics (the shipped asset is committed).
 tools/mars/_*.png
 
+# ---- Isolation-sim diagnostics (tools/sim) -----------------------------------
+# The *.py choreography sims are committed; their _*.png/_*.gif shape previews are
+# throwaway (re-render to reproduce).
+tools/sim/_*
+
+# ---- Channel-swap SFX auditions (tools/audio) --------------------------------
+# eleven_channelswap.py renders throwaway ElevenLabs candidates + an audition page
+# here; the PICKED one is committed as channelswap_source.mp3 (+ the shipped WAV),
+# so the candidates folder itself is local scratch. Re-render to reproduce.
+tools/audio/channelswap_out/
+
 # ---- Local secrets -----------------------------------------------------------
 # tools/tts/*.py read ELEVENLABSTOKEN from .env; keep the token out of the repo.
 .env

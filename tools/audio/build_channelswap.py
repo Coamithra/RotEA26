@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 """Synthesize the "static channel swap" SFX for the splash channel-flip.
 
+SUPERSEDED (do not run): the shipped channelswap.wav is now a picked ElevenLabs
+sound-effect render installed by tools/audio/pick_channelswap.py. Running this
+numpy synth would OVERWRITE that render with the old procedural static. Kept only
+as a reference / fallback synth. To change the cue, use eleven_channelswap.py +
+pick_channelswap.py instead.
+
 The "I made this!" splash (SplashScene index 1) does an analog-TV channel-flip
 glitch (channelflip.fx) that crossfades the old meme into the revenged image.
 The original XACT banks have no such cue (it's a port-era reskin gag), so this

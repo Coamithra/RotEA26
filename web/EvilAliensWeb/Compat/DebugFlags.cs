@@ -434,12 +434,56 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WebcamPlasmaSpeed { get; private set; }
 
+		// Cadence overrides as ABSOLUTE milliseconds (the difficulty-modifier divisor was
+		// removed — each tier authors these directly in WebcamLevel.Tunings). ?wcspawn= sets
+		// the gap between saucer spawns; ?wcarm= sets the wander time before a saucer starts
+		// charging (its fire cadence — bigger = fires less often); ?wccharge= sets the
+		// blink-charge windup before the orb releases. null => the tier's authored ms, so a
+		// normal build is unchanged. e.g. ?wcarm=5000 = a 5s arm delay.
+		public static float? WebcamSpawnInterval { get; private set; }
+
+		public static float? WebcamArmDelay { get; private set; }
+
+		public static float? WebcamChargeTime { get; private set; }
+
+		// F2 DeathStar-mine hazard overrides (absolute, like the cadence flags; null => the
+		// tier's authored value). ?wcminemax= = simultaneous mine cap; ?wcminespawn= = ms gap
+		// between mine spawns; ?wcminelife= = ms a mine wanders before it leaves.
+		public static int? WebcamMineMax { get; private set; }
+
+		public static float? WebcamMineSpawn { get; private set; }
+
+		public static float? WebcamMineLife { get; private set; }
+
+		// F1 screen-bisecting mothership. ?wcmothership=<ms> = gap between bisect events
+		// (0 disables); ?wcmothershipdir=vertical|horizontal forces the orientation for
+		// testing (null => the random vertical-mostly mix). Both null => tier default.
+		public static float? WebcamMothership { get; private set; }
+
+		public static string WebcamMothershipDir { get; private set; }
+
+		// ?wcmothershipfreeze=<ms>: halt a webcam mothership's choreography at this elapsed-ms
+		// phase (0..~6200) so a frozen frame can be captured — e.g. ~3600 for the beam mid-fire,
+		// to check its centring. null => normal real-time play. Debug-only; kept out of Active.
+		public static float? WebcamMothershipFreeze { get; private set; }
+
+		// ?wchitleeway=<ms>: how long the player mask must STEADILY overlap a bad hazard (plasma
+		// orb / mothership beam / mine) before it costs a life — the anti-cam-glitch / late-dodge
+		// grace. null => WebcamLevel's baked HitLeewayMs (~100ms). 0 = instant (old behavior).
+		public static float? WebcamHitLeeway { get; private set; }
+
 		// ?wcavoid=<f>: strength of the webcam saucers' player-avoidance/orbit steering
 		// ("fly around the player"). 0 disables it (pure random wander), 1 = the baked
 		// default feel, >1 more evasive. null => WebcamUfo's baked DefaultAvoidStrength,
 		// so a normal build is unchanged. Lets the "won't hit me if I sit still" feel be
 		// A/B'd by eye without a rebuild.
 		public static float? WebcamAvoid { get; private set; }
+
+		// ?wcreturndelay=<ms>: how long a webcam saucer holds off-screen after firing before
+		// it loops back into the field (WebcamUfo's flee -> return dwell). 0 = loop back
+		// immediately (the old instant U-turn), higher = a longer beat away. null =>
+		// WebcamUfo's baked ReturnDelayMs, so a normal build is unchanged.
+		public static float? WebcamReturnDelay { get; private set; }
 
 		// ?wctune: show the LIVE webcam-tuning stepper panel (index.html, outside #app)
 		// while the webcam level is up. The panel drives SetWebcamTuneOverride below via
@@ -463,19 +507,34 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WebcamTunePlasmaSpeed { get; private set; }
 
+		public static float? WebcamTuneSpawnInterval { get; private set; }
+
+		public static float? WebcamTuneArmDelay { get; private set; }
+
+		public static float? WebcamTuneChargeTime { get; private set; }
+
+		public static int? WebcamTuneMineMax { get; private set; }
+
+		public static float? WebcamTuneMineSpawn { get; private set; }
+
 		// Bumped on every SetWebcamTuneOverride/ClearWebcamTuneOverride so WebcamLevel can
 		// re-resolve its tuning the tick after a panel edit (a cheap int compare per Update).
 		public static int WebcamTuneVersion { get; private set; }
 
 		// Runtime setter for the live webcam tuner panel (Compat/DebugInput.SetWcTune ->
-		// eaWcTune in index.html). The panel always sends the full five-knob state.
-		internal static void SetWebcamTuneOverride(int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed)
+		// eaWcTune in index.html). The panel always sends the full ten-knob state.
+		internal static void SetWebcamTuneOverride(int hearts, int kills, int saucers, float saucerSpeed, float plasmaSpeed, float spawnInterval, float armDelay, float chargeTime, int mineMax, float mineSpawn)
 		{
 			WebcamTuneHearts = hearts > 0 ? hearts : (int?)null;
 			WebcamTuneKills = kills > 0 ? kills : (int?)null;
 			WebcamTuneSaucers = saucers > 0 ? saucers : (int?)null;
 			WebcamTuneSaucerSpeed = saucerSpeed > 0f ? saucerSpeed : (float?)null;
 			WebcamTunePlasmaSpeed = plasmaSpeed > 0f ? plasmaSpeed : (float?)null;
+			WebcamTuneSpawnInterval = spawnInterval > 0f ? spawnInterval : (float?)null;
+			WebcamTuneArmDelay = armDelay > 0f ? armDelay : (float?)null;
+			WebcamTuneChargeTime = chargeTime > 0f ? chargeTime : (float?)null;
+			WebcamTuneMineMax = mineMax > 0 ? mineMax : (int?)null;
+			WebcamTuneMineSpawn = mineSpawn > 0f ? mineSpawn : (float?)null;
 			WebcamTuneVersion++;
 		}
 
@@ -488,6 +547,11 @@ namespace EvilAliensWeb.Compat
 			WebcamTuneSaucers = null;
 			WebcamTuneSaucerSpeed = null;
 			WebcamTunePlasmaSpeed = null;
+			WebcamTuneSpawnInterval = null;
+			WebcamTuneArmDelay = null;
+			WebcamTuneChargeTime = null;
+			WebcamTuneMineMax = null;
+			WebcamTuneMineSpawn = null;
 			WebcamTuneVersion++;
 		}
 
@@ -752,10 +816,80 @@ namespace EvilAliensWeb.Compat
 						WebcamPlasmaSpeed = wcps;
 					}
 					break;
+				case "wcspawn":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcsp) && wcsp > 0f)
+					{
+						WebcamSpawnInterval = wcsp;
+					}
+					break;
+				case "wcarm":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcar) && wcar > 0f)
+					{
+						WebcamArmDelay = wcar;
+					}
+					break;
+				case "wccharge":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcch) && wcch > 0f)
+					{
+						WebcamChargeTime = wcch;
+					}
+					break;
+				case "wcminemax":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wcmm) && wcmm > 0)
+					{
+						WebcamMineMax = wcmm;
+					}
+					break;
+				case "wcminespawn":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcms) && wcms > 0f)
+					{
+						WebcamMineSpawn = wcms;
+					}
+					break;
+				case "wcminelife":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcml) && wcml > 0f)
+					{
+						WebcamMineLife = wcml;
+					}
+					break;
+				case "wcmothership":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcmo) && wcmo >= 0f)
+					{
+						WebcamMothership = wcmo;
+					}
+					break;
+				case "wcmothershipdir":
+					if (!string.IsNullOrEmpty(val))
+					{
+						string d = val.Trim().ToLowerInvariant();
+						if (d == "vertical" || d == "horizontal")
+						{
+							WebcamMothershipDir = d;
+						}
+					}
+					break;
+				case "wcmothershipfreeze":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcmf) && wcmf >= 0f)
+					{
+						WebcamMothershipFreeze = wcmf;
+					}
+					break;
+				case "wchitleeway":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wchl) && wchl >= 0f)
+					{
+						WebcamHitLeeway = wchl;
+					}
+					break;
 				case "wcavoid":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcav) && wcav >= 0f)
 					{
 						WebcamAvoid = wcav;
+					}
+					break;
+				case "wcreturndelay":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcrd) && wcrd >= 0f)
+					{
+						WebcamReturnDelay = wcrd;
 					}
 					break;
 				case "wctune":

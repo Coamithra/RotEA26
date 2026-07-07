@@ -40,6 +40,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   background, drawn by the real pipeline — so a screenshot is reliable every time. Full flag
   list + how it works + how to add an object are in the "Sprite harness" bullet below; the
   human picker is `wwwroot/harness.html`. Reach for this FIRST for any drawing-code change.
+- **Testing DYNAMIC behaviour (movement, attack patterns, timing, spawn cadence, physics, a
+  tuning curve over time)? DO NOT verify it with the real game + Chrome screenshots.** Motion and
+  over-time change are almost impossible to catch in a static frame — you can't time the capture to
+  the right instant, and a boss's attack pattern, an easing curve, or a spawn rhythm looks identical
+  across frames. Screenshots prove *drawing*, never *behaviour*. Instead, one of:
+  1. **Simulate it in isolation and inspect the DATA, not a picture (preferred).** Stub the game
+     (no Blazor/WASM boot needed), construct just the object, and tick its `Update` in a plain loop
+     with a fixed reasonable `deltaTime`, recording the quantity of interest (position, velocity,
+     hp, timer, fire events) each step. Then look at the numbers directly, or plot them
+     (position-over-time / value-over-time graph) and read the SHAPE off the graph. This is exactly
+     how the existing `HarnessApplyPhase`/`ApplyLifecycle`-style pure sims already work (see
+     `Blast.ApplyLifecycle`, `Spider.HarnessApplyPhase`) — reuse/extract the deterministic core so
+     the test drives the SAME math live play does. A throwaway console/xunit harness or a Python
+     re-implementation of the curve is fine; the goal is a signal you can *read*, not a frame you
+     have to *time*.
+  2. **If you genuinely must see it in the real game, build a BREAK/PAUSE** so the game freezes at
+     the exact moment worth capturing (e.g. a debug flag that halts `Update` on a condition — first
+     shot fired, apex of the arc, Nth spawn — using the existing `DebugFlags` seam), THEN screenshot
+     the frozen frame. Never chase a moving target hoping the shutter lands right.
+  Reach for (1) FIRST for any change to how something MOVES or CHANGES OVER TIME; screenshots are
+  for drawing/appearance only.
 - **A clean `dotnet build` does NOT mean it runs.** WASM runtime errors only appear in the
   **browser console** — always verify visually *and* read the console. Use the preview tools
   against the `eaweb` config in `.claude/launch.json` (`preview_start` → `preview_screenshot`

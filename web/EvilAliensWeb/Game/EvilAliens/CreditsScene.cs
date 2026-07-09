@@ -277,6 +277,7 @@ internal class CreditsScene : Scene
 		lines.Add("Ralf Pisters ");
 		lines.Add("BluntWAX");
 		lines.Add("Johann Sebastian Bach");
+		lines.Add("Mikey Shulman");
 		lines.Add("");
 		lines.Add("GRAPHICS: ");
 		lines.Add("Danny Holten");

@@ -352,12 +352,13 @@ public class Game1 : Game
 		// pump normally finishes warming during the splash; this catches anything still
 		// queued (e.g. the splash was mashed past) so the menu never pops in piecemeal.
 		DrainWarmQueue();
-		// Debug (?invuln): turn the Invulnerability cheat on before any level can spawn a
-		// player. Settings has loaded by the time Press Start completes, so this sticks.
-		if (DebugFlags.Invuln)
-		{
-			Settings.GetInstance().Invulnerability = true;
-		}
+		// Debug (?invuln): this used to write Settings.GetInstance().Invulnerability = true
+		// here, which PERSISTED into the localStorage save on the next Settings.SaveThreaded()
+		// (options exit, difficulty pick, etc.) -- so one test session with ?invuln left every
+		// LATER plain boot invulnerable forever (the field is otherwise unreachable in the
+		// shipped UI -- see PlayerShip.CollidesWith / WebcamLevel.PlayerHit, which now read
+		// DebugFlags.Invuln directly instead). Do NOT reintroduce a write to Settings here --
+		// the flag must stay a session-only runtime override, like ?unlockall.
 		// Debug (?difficulty=Easy..Inzane): pin the difficulty before any level boots. The
 		// spider-boss helper's speed + aim are difficulty-scaled, so this makes the test
 		// deterministic. No flag => the saved/menu-chosen difficulty is left untouched.

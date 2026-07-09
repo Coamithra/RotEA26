@@ -25,11 +25,19 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 
 	private ContentManager content;
 
+	// Card 1ec619b3: needed to MeasureString the two lines drawn in State.Show so long
+	// awardment names ("I Don't Get The Spider Boss") can be shrunk to fit the blade's box.
+	private SpriteFont font;
+
 	private string[] awardmentStrings;
 
 	private Awardment currentlyDisplaying;
 
 	private Queue<Awardment> awardmentsQueue;
+
+	// Fraction of the blade art's own design width the text is allowed to fill before
+	// shrinking -- leaves a margin inside the frame graphic on both sides.
+	private const float BladeTextWidthFraction = 0.82f;
 
 	public AwardmentBlade(Game game)
 		: base(game)
@@ -67,6 +75,7 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		batch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		content = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		blade = content.Load<Texture2D>("GFX/Sprites/awardmentblade");
+		font = content.Load<SpriteFont>("GFX/Menu/menufont");
 	}
 
 	public override void Update(GameTime gameTime)
@@ -155,8 +164,18 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 			float num3 = 1f;
 			float num4 = 1f;
 			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num4, num3) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
-			batch.DrawString("Awardment Unlocked!", new Vector2(400f, 433f), Color.AliceBlue, 0f, centered: true, new Vector2(num4, num3) * 0.8f, (SpriteEffects)0, 1f);
-			batch.DrawString(awardmentStrings[(int)currentlyDisplaying], new Vector2(400f, 467f), Color.AliceBlue, 0f, centered: true, new Vector2(num4, num3), (SpriteEffects)0, 1f);
+			// Card 1ec619b3: a long awardment name ("I Don't Get The Spider Boss") can overflow
+			// the blade's frame art at the fixed scale -- shrink to fit the frame's own design
+			// width (never scale up). The box width is derived the same way the frame draw above
+			// removes its supersample factor, so this tracks the art if it's ever re-authored.
+			string title = "Awardment Unlocked!";
+			string awardmentName = awardmentStrings[(int)currentlyDisplaying];
+			float boxWidth = (float)blade.Width / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width);
+			float maxTextWidth = boxWidth * BladeTextWidthFraction;
+			float titleScale = TextFit.FitScale(font.MeasureString(title).X, num4 * 0.8f, maxTextWidth);
+			float nameScale = TextFit.FitScale(font.MeasureString(awardmentName).X, num4, maxTextWidth);
+			batch.DrawString(title, new Vector2(400f, 433f), Color.AliceBlue, 0f, centered: true, new Vector2(titleScale, titleScale), (SpriteEffects)0, 1f);
+			batch.DrawString(awardmentName, new Vector2(400f, 467f), Color.AliceBlue, 0f, centered: true, new Vector2(nameScale, nameScale), (SpriteEffects)0, 1f);
 			break;
 		}
 		case State.Exit:

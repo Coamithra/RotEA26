@@ -156,8 +156,6 @@ internal class MenuScene : Scene
 
 	private GammaMenu gammaMenu;
 
-	private ScreenResizeMenu screenResizeMenu;
-
 	private TrailerScene trailerScene;
 
 	private MenuSub1 difficultyCaller;
@@ -296,8 +294,12 @@ internal class MenuScene : Scene
 		}
 		optionsMenu.AddEntry("Reset All Progress");
 		optionsMenu.AddEntryEvent(optionsMenu_LockAllSelected);
-		optionsMenu.AddEntry("Modify Screen Size");
-		optionsMenu.AddEntryEvent(optionsMenu_ScreenSizeSelected);
+		// "Modify Screen Size" (the old XBLIG TV-safe-area slider, Settings.Scale) removed --
+		// resolution is browser-driven since the Stage-10 unified presenter (RenderScale), so
+		// the option no longer did anything (Settings.Scale is set once in Game1.LoadContent
+		// for narrow displays and never read by any draw path). Settings.Scale itself is left
+		// in place (XML-serialized, appended fields must not be removed) — just unreachable
+		// from the menu now. Trello card 993db245.
 		optionsMenu.AddEntry("Gamma Correction");
 		optionsMenu.AddEntryEvent(optionsMenu_GammaCorrectionSelected);
 		playerSettingsMenu = new PlayerSettingsMenu(game, darken: true);
@@ -328,8 +330,6 @@ internal class MenuScene : Scene
 		difficultyMenu = new DifficultyMenu(base.Game);
 		difficultyMenu.OnExit += difficultyMenu_OnExit;
 		difficultyMenu.OnDifficultySelected += difficultyMenu_difficultySelected;
-		screenResizeMenu = new ScreenResizeMenu(game);
-		screenResizeMenu.OnFinished += screenResizeMenu_OnFinished;
 		gammaMenu = new GammaMenu(game);
 		gammaMenu.OnFinished += gammaMenu_OnFinished;
 		awardmentsMenu = new SubMenuAwardments(game);
@@ -415,16 +415,6 @@ internal class MenuScene : Scene
 	{
 		optionsMenu.Show();
 		playerSettingsMenu.Remove();
-	}
-
-	private void screenResizeMenu_OnFinished(object sender)
-	{
-		Settings.GetInstance().SaveThreaded();
-		Collection.Remove((GameComponent)(object)screenResizeMenu);
-		base.Visible = true;
-		base.Enabled = true;
-		((DrawableGameComponent)optionsMenu).Visible = true;
-		((GameComponent)optionsMenu).Enabled = true;
 	}
 
 	private void confirmationMenu_YesSelected(MenuSub1 sender)
@@ -690,15 +680,6 @@ internal class MenuScene : Scene
 	{
 		Settings.GetInstance().HideSafeArea = !Settings.GetInstance().HideSafeArea;
 		sender.SetEntry("Hide Safe Area: " + boolToGameString(Settings.GetInstance().HideSafeArea));
-	}
-
-	private void optionsMenu_ScreenSizeSelected(MenuSub1 sender)
-	{
-		Collection.Add((GameComponent)(object)screenResizeMenu);
-		base.Visible = false;
-		base.Enabled = false;
-		((DrawableGameComponent)optionsMenu).Visible = false;
-		((GameComponent)optionsMenu).Enabled = false;
 	}
 
 	private void optionsMenu_GammaCorrectionSelected(MenuSub1 sender)
@@ -1025,6 +1006,28 @@ internal class MenuScene : Scene
 		}
 		state = MenuState.Normal;
 		timer = TimeSpan.Zero;
+		// Reset the HUD ring's "autofocus hunt" dart machine alongside `timer` above.
+		// Initialize() runs on EVERY re-entry to the menu (level -> credits -> menu, not just
+		// the first boot), but until now only `timer` was zeroed here -- ringMoveStart/
+		// ringHoldUntil are ABSOLUTE timestamps measured against that same timer. Left stale
+		// from before a level launch (worst case: leaving mid-dart, ringHolding == false), they
+		// could sit far AHEAD of the freshly-reset `now`, and UpdateRing's smoothstep+Lerp
+		// extrapolates wildly for the deeply-out-of-range `u` this produces -- read as the ring
+		// "spinning at incredibly high speed" right after finishing a level (Trello fdbe3be0).
+		// The 2026-07-03 fix (6b2c2a7) capped the ambient COAST drift for a long menu IDLE but
+		// never touched this DART state, which only desyncs on a menu re-entry -- a different
+		// trigger, so it survived that fix. These are exactly the field initializers above,
+		// so first boot is unchanged; only a re-entry now gets the same fresh, calm state.
+		ringAngle = 0f;
+		ringFrom = 0f;
+		ringTo = 0f;
+		ringMoveStart = 0.0;
+		ringMoveDur = 0.0001;
+		ringHoldUntil = 0.0;
+		ringHolding = true;
+		ringDirAccumDeg = 0f;
+		ringDrift = 0f;
+		ringDriftVel = 0f;
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
 		currentBackdropSize = MathHelper.Max(800f / (float)backdrop.Width, 600f / (float)backdrop.Height);
 		originalBackdropSize = currentBackdropSize;

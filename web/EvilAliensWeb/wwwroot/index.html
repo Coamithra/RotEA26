@@ -816,6 +816,7 @@
                     };
                     req.onsuccess = function () { resolve(req.result); };
                     req.onerror = function () { reject(req.error); };
+                    req.onblocked = function () { reject(new Error("indexedDB.open blocked")); };
                 });
             }
 
@@ -886,21 +887,43 @@
             return {
                 available: function () { return _available; },
                 // Open the DB, load every blob into _cache, then migrate localStorage .dat.
+                // Raced against a timeout so a wedged IndexedDB open (blocked event, browser
+                // bug) can NEVER hang initRenderJS / the first game tick: on timeout the
+                // session falls back to localStorage mode (timedOut makes a late open a
+                // no-op, so the mode can't flip mid-session; blobs already in IndexedDB
+                // simply reappear next session — no data loss).
                 preload: function ()
                 {
-                    return openDb().then(function (db)
+                    var timedOut = false;
+                    var work = openDb().then(function (db)
                     {
-                        _db = db; _available = true;
-                        return idbGetAll();
-                    }).then(function (all)
-                    {
-                        _cache = all || {};
-                        return migrateFromLocalStorage();
+                        if (timedOut) { try { db.close(); } catch (e) { } return; }
+                        _db = db;
+                        return idbGetAll().then(function (all)
+                        {
+                            if (timedOut) return;
+                            _cache = all || {};
+                            _available = true;
+                            return migrateFromLocalStorage();
+                        });
                     }).catch(function (e)
                     {
                         _available = false; _cache = {};
                         console.warn("[eaSaveBlob] IndexedDB unavailable; screenshots stay in localStorage", e);
                     });
+                    var gate = new Promise(function (resolve)
+                    {
+                        setTimeout(function ()
+                        {
+                            if (!_available)
+                            {
+                                timedOut = true;
+                                console.warn("[eaSaveBlob] IndexedDB slow to open; booting with localStorage screenshots");
+                            }
+                            resolve();
+                        }, 3000);
+                    });
+                    return Promise.race([work, gate]);
                 },
                 // Synchronous snapshot for the C# hydrate (name -> base64).
                 getAll: function () { return _cache; },

@@ -348,6 +348,18 @@ public class Settings : Savable
 			XmlSerializer xmlSerializer = new XmlSerializer(typeof(Settings));
 			using StreamReader textReader = new StreamReader(path);
 			instance = xmlSerializer.Deserialize(textReader) as Settings;
+			// Self-heal a bug (fixed here): an earlier build of the ?invuln debug flag wrote
+			// straight into Settings.Invulnerability, which then persisted via any later
+			// Settings.SaveThreaded() (options exit, difficulty pick, ...), leaving a save
+			// permanently invulnerable even on a plain boot. There is currently NO shipped menu
+			// entry that legitimately sets this field true (the original "playtest" invincibility
+			// toggle was never wired into the web port's MenuScene), so a deserialized `true` can
+			// only be leftover fallout from that bug -- force it back off on load. If a real
+			// in-game toggle for this cheat is ever wired up, this line must be removed.
+			if (instance != null)
+			{
+				instance.Invulnerability = false;
+			}
 		}
 		else
 		{

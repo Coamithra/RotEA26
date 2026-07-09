@@ -115,9 +115,9 @@ namespace EvilAliensWeb.Compat
 
             Label("score chrome (?metalscore: a 0.7, parked glint)", new Vector2(30f, 116f));
             base.SpriteBatch.DrawShadowString("1234560", new Vector2(30f, 132f), 0.9f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);
-            Label("combo chrome", new Vector2(300f, 116f));
-            base.SpriteBatch.DrawShadowString("Combo!", new Vector2(300f, 132f), 0.6f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);
-            base.SpriteBatch.DrawShadowString("20x", new Vector2(310f, 150f), 1f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);
+            Label("combo chrome", new Vector2(420f, 116f));
+            base.SpriteBatch.DrawShadowString("Combo!", new Vector2(420f, 132f), 0.6f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);
+            base.SpriteBatch.DrawShadowString("20x", new Vector2(430f, 150f), 1f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);
 
             // --- Floating-pop rows: the pop's life runs num 1 -> 0 (scale grows 2x -> 3.2x base,
             // alpha fades 0.88 -> 0). Three fixed phases; "POWER UP!" is the amount-100 pop

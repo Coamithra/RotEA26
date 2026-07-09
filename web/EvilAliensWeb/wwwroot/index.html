@@ -380,6 +380,39 @@
             };
         })();
 
+        // eaSuppressEsc: the browser forces Esc to leave DOM fullscreen and that can't be
+        // preventDefault'd, but the same Esc keydown ALSO reaches KNI's keyboard state, so Esc
+        // would exit fullscreen AND step back a menu at once (card b0a2f525). On every
+        // fullscreen EXIT, ask C# to swallow the raw Esc for a short window (a second, deliberate
+        // Esc afterwards -- now not fullscreen -- navigates back as normal). F11 gets its own
+        // dedicated toggle so it doesn't fight menu navigation.
+        window.eaSuppressEsc = function ()
+        {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSuppressEsc'); }
+            catch (e) { /* game not booted yet — ignore */ }
+        };
+        (function ()
+        {
+            var onFsChange = function ()
+            {
+                if (!window.eaFullscreen.isFullscreen()) window.eaSuppressEsc();
+            };
+            document.addEventListener('fullscreenchange', onFsChange);
+            document.addEventListener('webkitfullscreenchange', onFsChange);
+            // F11 = dedicated game-fullscreen toggle. preventDefault the browser-native (whole
+            // chrome) fullscreen and route through eaFullscreen instead; the keydown is a user
+            // gesture, so requestFullscreen is allowed. KNI ignores F11 (not in keysToCheck),
+            // so this never fights gameplay/menu keys.
+            window.addEventListener('keydown', function (e)
+            {
+                if (e.key === 'F11' || e.keyCode === 122)
+                {
+                    e.preventDefault();
+                    if (window.eaFullscreen.supported()) window.eaFullscreen.toggle();
+                }
+            });
+        })();
+
         // eaHold: persistent press for the on-screen D-pad/fire button. Mirrors eaPress
         // but holds the key down until released (see Compat/DebugInput.cs Hold/Consume).
         window.eaHold = function (key, down)

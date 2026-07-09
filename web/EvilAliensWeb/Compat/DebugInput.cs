@@ -38,6 +38,18 @@ namespace EvilAliensWeb.Compat
 		private static readonly bool[] touchHeld =
 			new bool[Enum.GetValues(typeof(EvilAliens.MyKeys)).Length];
 
+		// Esc-suppression window (card b0a2f525). The browser RESERVES Esc to leave DOM
+		// fullscreen and it cannot be preventDefault'd -- but that same Esc keydown is ALSO
+		// delivered to KNI's keyboard state, so InputHandler would read it and ALSO step back
+		// in the menu (Esc doing two things at once). On fullscreenchange->exit the JS side
+		// (eaSuppressEsc in index.html) opens a short window here; InputHandler masks the raw
+		// keyboard Esc while it's active so leaving fullscreen doesn't also navigate back.
+		// escGrace = a minimum window (covers the exit keydown arriving a tick or two AFTER
+		// the fullscreenchange event); escGuard = a hard cap so a genuinely held Esc can't
+		// keep Esc dead forever (fail-open).
+		private static int escGraceTicks;
+		private static int escGuardTicks;
+
 		// JS bridge: DotNet.invokeMethod('EvilAliensWeb', 'debugPress', key, frames).
 		// `frames` is how many ticks to hold the key down (>=1; 1 == a single tap).
 		// Re-pressing extends to the longest pending hold.
@@ -214,6 +226,39 @@ namespace EvilAliensWeb.Compat
 		public static void ClearWcTune()
 		{
 			DebugFlags.ClearWebcamTuneOverride();
+		}
+
+		// JS bridge (eaSuppressEsc in index.html), fired from a fullscreenchange listener when
+		// the browser LEAVES fullscreen. Opens the Esc-swallow window so the Esc that exited
+		// fullscreen doesn't also step back a menu. Idempotent -- re-fires just refresh it.
+		[JSInvokable("debugSuppressEsc")]
+		public static void SuppressEsc()
+		{
+			escGraceTicks = 8;    // ~130ms min: covers the exit keydown landing a tick or two late
+			escGuardTicks = 40;   // ~0.66s hard cap so a held Esc can't kill Esc permanently
+		}
+
+		// Called once per InputHandler tick for the Esc key with its RAW keyboard-down state.
+		// Returns true while the post-fullscreen-exit Esc should be swallowed: through the grace
+		// window, then for as long as Esc stays physically down (the exit press), up to the
+		// guard cap. Clears once the window has elapsed AND Esc is released, so a fresh
+		// deliberate Esc a moment later still registers.
+		internal static bool EscSuppressActive(bool rawEscDown)
+		{
+			if (escGraceTicks <= 0 && !rawEscDown)
+			{
+				return false;
+			}
+			if (escGuardTicks <= 0)
+			{
+				return false;
+			}
+			if (escGraceTicks > 0)
+			{
+				escGraceTicks--;
+			}
+			escGuardTicks--;
+			return true;
 		}
 
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)

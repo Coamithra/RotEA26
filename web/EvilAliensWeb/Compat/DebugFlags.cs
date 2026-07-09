@@ -23,8 +23,10 @@ namespace EvilAliensWeb.Compat
 	//                  session-only (not saved), so a normal reload reverts it  (alias: ?unlock)
 	//   ?shake=<f>     scale the trauma-based screen shake (Compat/Juice.cs): 0 = off,
 	//                  1 = default, up to 3 to exaggerate while tuning. Pure camera look.
-	//   ?hitstop=0     disable the hit-stop freeze frames (kill micro-stop, player death,
-	//                  boss kill — Compat/Juice.cs). ON by default.
+	//   ?hitstop=1     re-enable the automatic per-kill/boss-kill hit-stop freeze frame
+	//                  (Compat/Juice.cs KillPunch). OFF by default — it read as a stutter,
+	//                  not juice (Trello bd5efd9d). Player-death hit-stop and the
+	//                  eaHitstop() console/JS hook are unaffected by this flag.
 	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (it is ON by default) to A/B the plain flattened drop shadow
 	//   ?hitboxes      draw every collidable's collision shape over the game, colour-coded by
@@ -182,10 +184,13 @@ namespace EvilAliensWeb.Compat
 		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
 		public static float ShakeAmount { get; private set; } = 1f;
 
-		// Hit-stop freeze frames (Compat/Juice.cs): the per-kill micro-stop + the longer
-		// player-death/boss-kill stops. ON by default; ?hitstop=0 disables. Technically a
-		// (tiny) gameplay-time effect, but like the shake it's a feel toggle — OUT of `Active`.
-		public static bool Hitstop { get; private set; } = true;
+		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from
+		// Juice.KillPunch (KillableAlien.HitBy) — NOT player-death hit-stop (PlayerShip
+		// calls Juice.AddHitStop directly) and NOT the eaHitstop() console/JS hook, both
+		// of which always fire. OFF by default (Trello bd5efd9d — the per-kill freeze read
+		// as the game stuttering, not juice); ?hitstop=1 re-enables it for A/B. The kill's
+		// screen-shake trauma is unaffected either way. A feel toggle — OUT of `Active`.
+		public static bool Hitstop { get; private set; }
 
 		// Route the in-game score / "Player X — Press Start" text through the chrome-sheen
 		// effect (metal.fx) instead of the plain flattened drop-shadow draw. ON by default

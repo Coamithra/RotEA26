@@ -1012,6 +1012,19 @@ internal class Wall : AlienDrawableGameComponent
 		Vector2 val2 = default(Vector2);
 		Color val3 = default(Color);
 		Color val4 = default(Color);
+		// Edge-line draw scale (card a54cc13a): `line` ("black line lalalal") is a SEPARATE, fixed-
+		// resolution texture -- a thin line inset near the right edge of its own square canvas, not
+		// part of the 8x8 wall sheet -- drawn `center:true` at each wall block's centre so it reaches
+		// out to the block's true edge. The on-screen block size is `texture.Width * scale` regardless
+		// of the wall sheet's resolution (the whole point of the 8x8 scheme), so the line's draw scale
+		// must track `texture.Width` the same way, not a bare constant: `2f` was only correct for the
+		// wall sheet's PRE-uprez width (512px -> 512*scale/line.Width(256) == 2*scale). Uprezzing
+		// 756-v1 to 1248px shrank `scale` to compensate (on-screen block size is unchanged) but the
+		// hard-coded `scale * 2f` shrank right along with it, so the line now reaches under half the
+		// distance to the block edge -- reading as "too close to the centre". Deriving it from
+		// texture.Width keeps the line's on-screen length pinned to the (resolution-independent) block
+		// size at any wall-sheet resolution.
+		float lineScale = scale * (float)texture.Width / (float)line.Width;
 		for (int i = 0; i < height; i++)
 		{
 			if (!((float)texture.Height * scale * (float)i + base.Position.Y > (float)(-texture.Height) * scale) || !((float)texture.Height * scale * (float)i + base.Position.Y <= 600f))
@@ -1035,19 +1048,19 @@ internal class Wall : AlienDrawableGameComponent
 					(val4) = new Color(new Vector4(1f, 1f, 1f, 0.3f));
 					if (isfree(j + 1, i))
 					{
-						spriteBatch.Draw(line, val + base.Position, 0f, scale * 2f, center: true, val3);
+						spriteBatch.Draw(line, val + base.Position, 0f, lineScale, center: true, val3);
 					}
 					if (isfree(j - 1, i))
 					{
-						spriteBatch.Draw(line, val + base.Position, (float)Math.PI, scale * 2f, center: true, val4);
+						spriteBatch.Draw(line, val + base.Position, (float)Math.PI, lineScale, center: true, val4);
 					}
 					if (isfree(j, i + 1))
 					{
-						spriteBatch.Draw(line, val + base.Position, (float)Math.PI / 2f, scale * 2f, center: true, val3);
+						spriteBatch.Draw(line, val + base.Position, (float)Math.PI / 2f, lineScale, center: true, val3);
 					}
 					if (isfree(j, i - 1))
 					{
-						spriteBatch.Draw(line, val + base.Position, -(float)Math.PI / 2f, scale * 2f, center: true, val4);
+						spriteBatch.Draw(line, val + base.Position, -(float)Math.PI / 2f, lineScale, center: true, val4);
 					}
 				}
 			}

@@ -21,6 +21,7 @@ namespace EvilAliensWeb.Pages
                 EvilAliensWeb.Compat.MusicInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.SaveInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.FullscreenInterop.Init(JsRuntime);
+                EvilAliensWeb.Compat.CursorInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.ExitInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.TrailerInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.WebcamInterop.Init(JsRuntime);

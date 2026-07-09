@@ -345,6 +345,41 @@
             };
         })();
 
+        // eaCursor: owns the OS cursor over the game canvas (card 51276dcd). KNI's BlazorGL
+        // never applies Game.IsMouseVisible to the DOM, so C# (Compat/CursorInterop ->
+        // MousePointer) drives canvas.style.cursor through here per scene:
+        //   "menu"    -> normal OS arrow (menus / non-aiming scenes)
+        //   "hidden"  -> cursor:none, while the gameplay intro reticle SPRITE animates
+        //   "reticle" -> the zero-lag aiming reticle IS the OS cursor during gameplay
+        // The reticle image lives at wwwroot/reticle.png (built by tools/cursor/build_cursor.py);
+        // resolve it against <base href> so it works under the CI "/RotEA26/" base too. Hotspot
+        // is the image centre (24,24 for the 48px art) since the reticle aims from its centre;
+        // `crosshair` is the graceful fallback if a browser rejects the custom image.
+        window.eaCursor = (function ()
+        {
+            var reticleCss = null;
+            function reticle()
+            {
+                if (reticleCss === null)
+                {
+                    var href = "reticle.png";
+                    try { href = new URL("reticle.png", document.baseURI).href; } catch (e) { }
+                    reticleCss = "url('" + href + "') 24 24, crosshair";
+                }
+                return reticleCss;
+            }
+            return {
+                set: function (mode)
+                {
+                    var c = document.getElementById('theCanvas');
+                    if (!c) return;
+                    if (mode === 'reticle') c.style.cursor = reticle();
+                    else if (mode === 'hidden') c.style.cursor = 'none';
+                    else c.style.cursor = 'auto';   // 'menu' / anything else -> normal arrow
+                }
+            };
+        })();
+
         // eaHold: persistent press for the on-screen D-pad/fire button. Mirrors eaPress
         // but holds the key down until released (see Compat/DebugInput.cs Hold/Consume).
         window.eaHold = function (key, down)

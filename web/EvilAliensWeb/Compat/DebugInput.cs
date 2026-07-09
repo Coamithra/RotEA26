@@ -240,17 +240,20 @@ namespace EvilAliensWeb.Compat
 
 		// Called once per InputHandler tick for the Esc key with its RAW keyboard-down state.
 		// Returns true while the post-fullscreen-exit Esc should be swallowed: through the grace
-		// window, then for as long as Esc stays physically down (the exit press), up to the
-		// guard cap. Clears once the window has elapsed AND Esc is released, so a fresh
-		// deliberate Esc a moment later still registers.
+		// window, then for as long as Esc stays CONTINUOUSLY held (the exit press), up to the
+		// guard cap. The first tick with the grace elapsed AND Esc released ENDS the window --
+		// both counters are zeroed -- so a deliberate second Esc press is never swallowed by a
+		// leftover guard; the guard only bounds the continuous-hold case (fail-open).
 		internal static bool EscSuppressActive(bool rawEscDown)
 		{
 			if (escGraceTicks <= 0 && !rawEscDown)
 			{
+				escGuardTicks = 0;
 				return false;
 			}
 			if (escGuardTicks <= 0)
 			{
+				escGraceTicks = 0;
 				return false;
 			}
 			if (escGraceTicks > 0)

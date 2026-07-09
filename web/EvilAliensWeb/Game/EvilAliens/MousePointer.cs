@@ -138,20 +138,47 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		Vector2 mousePosition = input.MousePosition;
 		mousePosition.X = MathHelper.Clamp(input.MousePosition.X, 0f, 800f);
 		mousePosition.Y = MathHelper.Clamp(input.MousePosition.Y, 0f, 600f);
+		// Land the intro EXACTLY on the CSS cursor's on-screen size so the sprite -> OS-cursor
+		// handoff doesn't pop. The CSS reticle is a fixed CssCursorPx window px while the sprite
+		// draws at (texture px x design scale x window-per-design), so the end scale is
+		// window-size-dependent; recomputed per frame (cheap) in case of a mid-intro resize.
+		float endScale = CssHandoffScale();
 		if (showtimer.Active)
 		{
-			// Normalized counts 1 -> 0, so the reticle starts big + spinning and settles to
-			// scale 1 / rotation 0, matching the CSS reticle it hands off to.
+			// Normalized counts 1 -> 0: the reticle starts 4x its final size + spinning and
+			// settles to endScale / rotation 0, matching the CSS reticle it hands off to.
 			float num = MathHelper.SmoothStep(0f, 1f, showtimer.Normalized);
-			float scale = 1f + num * 3f;
+			float scale = endScale * (1f + num * 3f);
 			float rotation = num * ((float)Math.PI * 2f) * 1.5f;
 			spriteBatch.Draw(texture, mousePosition, rotation, scale, center: true);
 		}
 		else
 		{
-			spriteBatch.Draw(texture, mousePosition, 0f, 1f, center: true);
+			spriteBatch.Draw(texture, mousePosition, 0f, endScale, center: true);
 		}
 		base.Draw(gameTime);
+	}
+
+	// wwwroot/reticle.png's pixel size in tools/cursor/build_cursor.py (a CSS cursor image is
+	// fixed CSS px, which == canvas backing px here: index.html sizes the canvas to
+	// clientWidth/Height, no devicePixelRatio factor). Keep in sync with the tool's SIZE.
+	private const float CssCursorPx = 48f;
+
+	// Design-space draw scale at which the reticle SPRITE's on-screen size equals the CSS
+	// cursor's. On-screen px per design px is the UNCAPPED letterbox fit (WindowDestRect
+	// height / design height) -- NOT RenderScale.Scale, which is capped at MaxHeight and
+	// diverges from the on-screen geometry on very large windows. cursor2's art fills its full
+	// 26px texture (alpha bbox == texture bounds) and reticle.png is that art bbox-fit into
+	// 48px, so texture.Width is the correct sprite-size denominator.
+	private float CssHandoffScale()
+	{
+		Rectangle dest = RenderScale.WindowDestRect(RenderScale.WindowWidth, RenderScale.WindowHeight);
+		float windowPerDesign = (float)dest.Height / RenderScale.DesignHeight;
+		if (windowPerDesign <= 0f)
+		{
+			windowPerDesign = 1f;
+		}
+		return CssCursorPx / windowPerDesign / texture.Width;
 	}
 
 	public override void Update(GameTime gameTime)

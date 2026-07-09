@@ -1364,16 +1364,15 @@ internal class MenuScene : Scene
 
 	public override void Update(GameTime gameTime)
 	{
-		// While the menu is up, show the reticle cursor so mouse users see where they're
-		// pointing (the menus are hover/click-selectable). Re-show only when found hidden,
-		// so each off->on edge (notably menu entry) replays the cursor's intro spin once
-		// rather than every tick; hidden again when the scene is removed (OnComponentRemoved),
-		// mirroring GameScene. Unconditional by design: in menus no player is added yet, so
-		// GameScene's keyboard-device gate would hide it; HWMouse mode is handled inside
-		// MousePointer (OS cursor) regardless.
-		if (!((DrawableGameComponent)_cursor).Visible)
+		// Menus use the plain OS arrow, NOT the aiming reticle, and never play the reticle
+		// intro (card 51276dcd: the spin should introduce the pointer->reticle change at the
+		// START OF GAMEPLAY, not in the menu). MousePointer maps Visible==false -> "menu"
+		// (arrow); force it off here so a stray Visible==true left over from a level can't
+		// leak the gameplay reticle into the menu. Only acts on the true->false edge (no
+		// event fires when already false), so this is cheap.
+		if (((DrawableGameComponent)_cursor).Visible)
 		{
-			((DrawableGameComponent)_cursor).Visible = true;
+			((DrawableGameComponent)_cursor).Visible = false;
 		}
 		if (!General.IsTrial)
 		{

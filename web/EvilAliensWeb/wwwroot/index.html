@@ -353,6 +353,74 @@
             };
         })();
 
+        // eaCursor: owns the OS cursor over the game canvas (card 51276dcd). KNI's BlazorGL
+        // never applies Game.IsMouseVisible to the DOM, so C# (Compat/CursorInterop ->
+        // MousePointer) drives canvas.style.cursor through here per scene:
+        //   "menu"    -> normal OS arrow (menus / non-aiming scenes)
+        //   "hidden"  -> cursor:none, while the gameplay intro reticle SPRITE animates
+        //   "reticle" -> the zero-lag aiming reticle IS the OS cursor during gameplay
+        // The reticle image lives at wwwroot/reticle.png (built by tools/cursor/build_cursor.py);
+        // resolve it against <base href> so it works under the CI "/RotEA26/" base too. Hotspot
+        // is the image centre (24,24 for the 48px art) since the reticle aims from its centre;
+        // `crosshair` is the graceful fallback if a browser rejects the custom image.
+        window.eaCursor = (function ()
+        {
+            var reticleCss = null;
+            function reticle()
+            {
+                if (reticleCss === null)
+                {
+                    var href = "reticle.png";
+                    try { href = new URL("reticle.png", document.baseURI).href; } catch (e) { }
+                    reticleCss = "url('" + href + "') 24 24, crosshair";
+                }
+                return reticleCss;
+            }
+            return {
+                set: function (mode)
+                {
+                    var c = document.getElementById('theCanvas');
+                    if (!c) return;
+                    if (mode === 'reticle') c.style.cursor = reticle();
+                    else if (mode === 'hidden') c.style.cursor = 'none';
+                    else c.style.cursor = 'auto';   // 'menu' / anything else -> normal arrow
+                }
+            };
+        })();
+
+        // eaSuppressEsc: the browser forces Esc to leave DOM fullscreen and that can't be
+        // preventDefault'd, but the same Esc keydown ALSO reaches KNI's keyboard state, so Esc
+        // would exit fullscreen AND step back a menu at once (card b0a2f525). On every
+        // fullscreen EXIT, ask C# to swallow the raw Esc for a short window (a second, deliberate
+        // Esc afterwards -- now not fullscreen -- navigates back as normal). F11 gets its own
+        // dedicated toggle so it doesn't fight menu navigation.
+        window.eaSuppressEsc = function ()
+        {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSuppressEsc'); }
+            catch (e) { /* game not booted yet — ignore */ }
+        };
+        (function ()
+        {
+            var onFsChange = function ()
+            {
+                if (!window.eaFullscreen.isFullscreen()) window.eaSuppressEsc();
+            };
+            document.addEventListener('fullscreenchange', onFsChange);
+            document.addEventListener('webkitfullscreenchange', onFsChange);
+            // F11 = dedicated game-fullscreen toggle. preventDefault the browser-native (whole
+            // chrome) fullscreen and route through eaFullscreen instead; the keydown is a user
+            // gesture, so requestFullscreen is allowed. KNI ignores F11 (not in keysToCheck),
+            // so this never fights gameplay/menu keys.
+            window.addEventListener('keydown', function (e)
+            {
+                if (e.key === 'F11' || e.keyCode === 122)
+                {
+                    e.preventDefault();
+                    if (window.eaFullscreen.supported()) window.eaFullscreen.toggle();
+                }
+            });
+        })();
+
         // eaHold: persistent press for the on-screen D-pad/fire button. Mirrors eaPress
         // but holds the key down until released (see Compat/DebugInput.cs Hold/Consume).
         window.eaHold = function (key, down)

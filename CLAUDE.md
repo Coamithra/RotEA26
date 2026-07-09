@@ -333,6 +333,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
   "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
   outside-`#app` pattern.
+- **Aiming cursor + fullscreen-Esc (cards 51276dcd / b0a2f525).** KNI's BlazorGL NEVER applies
+  `Game.IsMouseVisible` to the DOM (its `_isMouseHidden` is dead, `Mouse.PlatformSetCursor` throws), so
+  the OS arrow is always over the canvas unless C# owns `canvas.style.cursor`. The reticle
+  (`MousePointer`) now does: `Compat/CursorInterop` → `window.eaCursor.set(mode)` in `index.html` picks
+  `menu` (plain arrow — all menus + the intro is OFF there), `hidden` (cursor:none while the scale+rotate
+  intro SPRITE plays at the START of a keyboard level), or `reticle` (the aiming reticle IS the OS cursor
+  via `cursor:url(reticle.png)` — ZERO-LAG, no trailing sprite; `HWMouse=true` opts back to the plain
+  arrow). Driven off `MousePointer.Visible` (GameScene sets it, incl. Tutorial; MenuScene forces it off).
+  Reticle art = `wwwroot/reticle.png` from `tools/cursor/build_cursor.py` (48px, hotspot 24,24). Fullscreen:
+  the browser reserves Esc to exit and it can't be preventDefault'd, but the same Esc ALSO reaches KNI and
+  stepped back a menu — so `index.html`'s `fullscreenchange`→exit calls `eaSuppressEsc` →
+  `DebugInput.SuppressEsc`/`EscSuppressActive`, which masks the raw Esc in `InputHandler` for a short
+  window (grace + held-guard); **F11** is a dedicated toggle (preventDefault native, route through
+  `eaFullscreen`).
 - **Trailers (Stage 14)** are an embedded **YouTube** overlay, NOT ported video. The original
   `Content/VFX/*.wmv` (VC-1) won't play in a browser and there's no video loader, so the old
   `TrailerScene`'s `Content.Load<Video>("VFX/..")` crashed the loop — it's now DEAD (constructed but

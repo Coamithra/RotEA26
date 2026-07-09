@@ -28,11 +28,12 @@ public class Settings : Savable
 
 	public bool PlayMusic = true;
 
-	// Web default: software reticle (MousePointer) instead of the OS arrow for aiming.
-	// false => while the cursor component is Visible (i.e. in a keyboard-controlled level)
-	// MousePointer draws the reticle every frame -- spinning intro via showtimer, then the
-	// static reticle -- and never forces Game.IsMouseVisible true, so the OS cursor stays
-	// hidden over the canvas (it reappears off-canvas, where the reticle is also hidden).
+	// Web default (false): the aiming reticle IS the OS cursor during gameplay (card 51276dcd).
+	// In a keyboard-controlled level MousePointer plays a one-shot scale+rotate intro (the OS
+	// cursor hidden while the reticle SPRITE animates), then hands off to the CSS reticle cursor
+	// (canvas.style.cursor: url(reticle.png)) so aiming is zero-lag -- no game-loop sprite
+	// trailing the mouse. true => the plain OS arrow instead (no reticle, no intro). Menus always
+	// use the plain arrow. See MousePointer / Compat/CursorInterop / eaCursor in index.html.
 	public bool HWMouse = false;
 
 	public bool VSync = true;

@@ -224,6 +224,15 @@ public class InputHandler : IInputHandlerService
 				flag |= (int)(state).RightButton == 1;
 				break;
 			}
+			// Swallow the Esc that the browser delivers when it EXITS fullscreen on Esc, so
+			// leaving fullscreen doesn't also step back a menu (card b0a2f525). `flag` here is
+			// the raw keyboard Esc (the mouse switch above only touches Mouse1/Mouse2); mask it
+			// BEFORE the scripted-input add so eaPress('Esc') automation is unaffected. Called
+			// once per tick (i loops once over Esc), which is how EscSuppressActive counts down.
+			if (i == (int)MyKeys.Esc && DebugInput.EscSuppressActive(flag))
+			{
+				flag = false;
+			}
 			// Debug input injection (immune to the rAF frame-timing miss): force this key
 			// down for any remaining injected ticks. Done inside the tick so a scripted
 			// tap can't fall between keyboard polls. See Compat/DebugInput.cs / eaPress().

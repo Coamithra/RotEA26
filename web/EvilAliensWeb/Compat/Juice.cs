@@ -54,8 +54,10 @@ namespace EvilAliensWeb.Compat
     {
         // Peak shake at full trauma: max per-axis offset in 800x600 design px, and
         // max roll in degrees. Both sampled fresh every tick, scaled by strength.
-        public const float MaxOffsetDesignPx = 14f;
-        public const float MaxRollDegrees = 2f;
+        // Halved from the original 14/2 (Trello 8e439865) — full trauma was strong
+        // enough to impact gameplay (readability of bullets/aim), not just "juice".
+        public const float MaxOffsetDesignPx = 7f;
+        public const float MaxRollDegrees = 1f;
 
         // Trauma lost per real second — a full bar shakes for ~0.7s (strength, being
         // trauma^2, falls below "visible" well before trauma itself reaches 0).

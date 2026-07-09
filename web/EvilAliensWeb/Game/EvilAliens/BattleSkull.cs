@@ -191,8 +191,12 @@ internal class BattleSkull : KillableAlien
 			color = new Color(new Vector3(MathHelper.Lerp(1f, 0.5f, num)));
 			if ((double)RandomHelper.RandomNextFloat(0f, 1f) <= (double)MathHelper.Lerp(8f, 24f, num) * gameTime.ElapsedGameTime.TotalSeconds)
 			{
+				// Trello 8e439865: this is the death-flicker SERIES (many small pops over the
+				// ~2.5s dying animation, before the DeathTimer.Finished finale below) — no shake
+				// per pop, or a procession of these minibosses dying together rattles the screen
+				// nonstop. The finale explosions above keep their shake.
 				Explosion explosion2 = Explosion.NewExplosion(collection, base.Game);
-				explosion2.Setup(base.Position + new Vector2(RandomHelper.RandomNextFloat(-60f, 60f), RandomHelper.RandomNextFloat(-90f, 90f)) * scale, 0.8f * scale, 0.8f * scale, 0f, 0f);
+				explosion2.Setup(base.Position + new Vector2(RandomHelper.RandomNextFloat(-60f, 60f), RandomHelper.RandomNextFloat(-90f, 90f)) * scale, 0.8f * scale, 0.8f * scale, 0f, 0f, noShake: true);
 				collection.Add((GameComponent)(object)explosion2);
 				sound.PlayCue("expl1");
 			}
@@ -209,8 +213,11 @@ internal class BattleSkull : KillableAlien
 		base.Collides = false;
 		DeathTimer.Start();
 		DeathTimer.Reset();
+		// Trello 8e439865: the opening pop of the death SERIES that continues through the dying
+		// animation below (Update's random flicker) — no shake here either; only the
+		// DeathTimer.Finished finale explosions (Update, above) still shake the screen.
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
-		explosion.Setup(base.Position, 2.3f, 1.3f, base.Speed * 0.95f, base.Direction);
+		explosion.Setup(base.Position, 2.3f, 1.3f, base.Speed * 0.95f, base.Direction, noShake: true);
 		collection.Add((GameComponent)(object)explosion);
 		sound.PlayCue("expl2");
 	}

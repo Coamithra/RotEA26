@@ -111,8 +111,14 @@ internal class JunkBoss : KillableAlien
 		SetHitPoints(150, scaleWithDifficulty: false);
 	}
 
-	private void Components_ComponentRemoved(object sender, GameComponentCollectionEventArgs e)
+	// Was a dead event-handler-shaped method that nothing ever subscribed (JunkBoss never wired
+	// it to game.Components.ComponentRemoved) -- fixed into the real virtual override
+	// (AlienDrawableGameComponent/IComponentWatcher, the same seam LazerGenerator.OnComponentRemoved
+	// uses to stop its own SFX) so a dangling `suckeffect` reference can't survive this boss's own
+	// removal by some future path that doesn't go through KilledBy's explicit cleanup above.
+	public override void OnComponentRemoved(GameComponentCollectionEventArgs e)
 	{
+		base.OnComponentRemoved(e);
 		if (e.GameComponent == this && suckeffect != null)
 		{
 			suckeffect = null;
@@ -472,5 +478,15 @@ internal class JunkBoss : KillableAlien
 		generictimer.Duration = 125f;
 		generictimer.Start();
 		generictimer.Reset();
+		// Bug fix: a boss killed mid-`attracting` used to leave `suckeffect` (the swirling suck-in
+		// particle swarm) orphaned in the collection. Its particles self-respawn every frame (see
+		// LazerGenerator.Update), so it never naturally dies, and its looped "lazercharge" SFX
+		// (CueConfig loop:true) never stops -- both the effect and its sound played forever. The
+		// `attracting -> normal` transition already did this cleanup; asplode needs the same.
+		if (suckeffect != null)
+		{
+			collection.Remove((GameComponent)(object)suckeffect);
+			suckeffect = null;
+		}
 	}
 }

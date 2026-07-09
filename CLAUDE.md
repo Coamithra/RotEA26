@@ -460,7 +460,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
   authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
   `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
-- **In-game score / "Player X — Press Start" text = ONE flattened sprite, chrome by default
+- **In-game score / "Player X — Press Start" text = ONE flattened sprite, plain by default (chrome via ?metalscore)
   (`SpriteBatchWrapper.DrawShadowString`).** `ScoreVisualiser.DrawStr` no longer draws the
   drop shadow and the text as two separate translucent `DrawString`s (the old "shadow bleeds
   THROUGH the text" bug — both were at the same partial alpha, so the 2px-offset shadow showed
@@ -468,9 +468,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   at FULL opacity into the shared grow-only text RT (`metalRT`, via the extracted `EnsureTextRT`,
   same plumbing as Stage-13 `DrawMetalString`) and composites the whole element ONCE at the
   target alpha — so shadow+text fade as a single sprite, no bleed-through. The chrome sheen
-  (`metal.fx`) is ON by default (`DebugFlags.MetalScore`, default true; **`?metalscore=0`** A/Bs
-  the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
-  sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
+  (`metal.fx`) is now OFF by default (`DebugFlags.MetalScore`, default false -- card 37c4ccca: the
+  chrome's dark mid-band spans only ~1-2px on the tiny HUD glyphs and reads crunchy/jaggy;
+  **`?metalscore`** re-enables it to A/B; menus keep their chrome -- they go through
+  `DrawMetalString`/`Cached`, not gated by this flag); when enabled the metal path uses a touch more
+  opacity (0.7 vs the plain 0.55) since the sheen darkens the mid-band. **The flatten RT is
+  PREMULTIPLIED** (`PremultiplyOver` rasterise -> One/InvSrcAlpha composite, same card) -- the
+  deliberate premult-INTERMEDIATE exception to the straight-alpha rule: stacking two straight-alpha
+  layers with either stock blend hard-edges the text's AA over its own drop shadow (the "jaggy /
+  no transparency" bug). Verify flattened-text changes with the frozen **`?textshot`** reference
+  grid (`Compat/TextShowcaseScene.cs`; score/combo/pop rows, plain + chrome, live animation
+  phases), not live-pop screenshots. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
   back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
   The chrome **glint sweep is EVENT-DRIVEN on the score, not on a timer.** The static chrome
   gradient (GradTop/Mid/Bot) is time-independent and always shows; only the moving white-hot
@@ -535,6 +543,13 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   default, so a shipped build is unchanged). Applies in play AND the sprite harness, so
   `?harness=flyingspider&play&flyspiderscale=0.8` previews it (also a field in `wwwroot/harness.html`).
   To retune: pick a value by eye, then update the `DefaultSizeFactor` constant.
+- **Group-flatten for translucent multi-part sprites (`SpriteBatchWrapper.BeginGroupFlatten`/
+  `EndGroupFlatten`).** Overlapping straight-alpha sprites each drawn at partial alpha double-brighten
+  where they overlap; bracket their draws to flatten them OPAQUE into a shared grow-only RT, then the
+  union composites ONCE at the group alpha (used by the background fog `FlyingSpider` -- body + wings
+  fade as one silhouette; foreground spiders draw directly). Like the text flatten, the capture is
+  PREMULTIPLIED (`PremultiplyOver` -> One/InvSrcAlpha composite with a premultiplied tint; callers
+  still pass a normal straight tint) so a layer's AA edges blend correctly over the layer below.
 - **Laser FX (`Quad.cs` beam + `LazerGeneratorData.cs` chargeup) — LIVE tuning via `?lazershot`
   (Trello "improve laser animation").** The Protoss-style beam is `Quad.Draw` (a wide blue glow +
   white-hot core, each ONE continuous sprite, + tip/muzzle blooms + electric tendrils); the pre-fire

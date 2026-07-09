@@ -27,8 +27,9 @@ namespace EvilAliensWeb.Compat
 	//                  (Compat/Juice.cs KillPunch). OFF by default — it read as a stutter,
 	//                  not juice (Trello bd5efd9d). Player-death hit-stop and the
 	//                  eaHitstop() console/JS hook are unaffected by this flag.
-	//   ?metalscore=0  disable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
-	//                  text (it is ON by default) to A/B the plain flattened drop shadow
+	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
+	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
+	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
 	//   ?hitboxes      draw every collidable's collision shape over the game, colour-coded by
 	//                  kind (box/circle/line). OFF by default; also toggleable via eaHitboxes()
 	//   ?slowmotrail=0 disable the cinematic slow-motion ghost-trail post-process (ON by default;
@@ -40,6 +41,10 @@ namespace EvilAliensWeb.Compat
 	//                  the player ship + a UFO cluster + both bullet types on the starfield,
 	//                  drawn by the real pipeline. A composed cousin of ?harness, built for
 	//                  redrawing the bullet sprites (see Compat/BulletShowcaseScene.cs).
+	//   ?textshot      TEXT SHOWCASE: a FROZEN grid of the flattened HUD text (DrawShadowString)
+	//                  -- score digits / Combo! / the POWER UP! pop at its live animation phases,
+	//                  plain AND chrome rows -- so one screenshot judges the text rendering
+	//                  (see Compat/TextShowcaseScene.cs; card 37c4ccca).
 	//   ?harness=<Obj> SPRITE HARNESS: boot straight onto a space background showing ONE
 	//                  game object (an enemy/boss/projectile), FROZEN on a frame, drawn by
 	//                  the real in-game Draw path (same SpriteBatchWrapper / RenderScale /
@@ -193,11 +198,14 @@ namespace EvilAliensWeb.Compat
 		public static bool Hitstop { get; private set; }
 
 		// Route the in-game score / "Player X — Press Start" text through the chrome-sheen
-		// effect (metal.fx) instead of the plain flattened drop-shadow draw. ON by default
-		// (the card author kept the chrome look); ?metalscore=0 / =false disables it to A/B
-		// the plain flatten. Does NOT alter the boot path — purely a render look, so it is
-		// deliberately left OUT of `Active` (a clean boot stays "no debug flags").
-		public static bool MetalScore { get; private set; } = true;
+		// effect (metal.fx) instead of the plain flattened drop-shadow draw. OFF by default
+		// (card 37c4ccca reversed the Stage-13 chrome-on-score default: metal.fx's dark
+		// mid-band gradient spans only ~1-2px on the tiny HUD glyphs, so the score/combo
+		// digits read crunchy/jaggy — live A/B confirmed; menus keep their chrome, they're
+		// big glyphs on a different path). ?metalscore / =1 re-enables the chrome to A/B.
+		// Does NOT alter the boot path — purely a render look, so it is deliberately left
+		// OUT of `Active` (a clean boot stays "no debug flags").
+		public static bool MetalScore { get; private set; } = false;
 
 		// Draw every live collidable's collision shape over the frame, colour-coded by kind
 		// (box -> rectangle, circle -> ring, line -> segment) so a sprite whose DRAW is offset
@@ -281,6 +289,13 @@ namespace EvilAliensWeb.Compat
 		// so the tendrils / chargeup / caps can be watched while tuning. Opt in with ?lazershot;
 		// non-null => SkipSplash + AutoStart and the boot routes into the showcase.
 		public static bool Lazershot { get; private set; }
+
+		// Flattened-text showcase scene (Compat/TextShowcaseScene.cs): a FROZEN reference grid of
+		// the DrawShadowString HUD text — score digits / Combo! / the "POWER UP!" pop at its exact
+		// live animation phases, plain AND chrome — on the space background, nothing Update-driven,
+		// so ONE screenshot at any moment shows the whole matrix pixel-reliably (card 37c4ccca).
+		// Opt in with ?textshot; => SkipSplash + AutoStart and the boot routes into the showcase.
+		public static bool Textshot { get; private set; }
 
 		// Colorize (hue-remap) tuning knobs for the alienboss "lightbulb" boss in the sprite
 		// harness (?harness=battleskull). The BattleSkull recolours a band of the alienboss
@@ -712,6 +727,14 @@ namespace EvilAliensWeb.Compat
 						AutoStart = true;
 					}
 					break;
+				case "textshot":
+					Textshot = IsOn(val);
+					if (Textshot)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
 				case "flyspiderscale":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fss) && fss > 0f)
 					{
@@ -1038,7 +1061,7 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || CastBrain || CastShow;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -1417,7 +1418,10 @@ public class PlayerShip : AlienDrawableGameComponent
 					connector.TakeHit();
 				}
 			}
-			else if (!Settings.GetInstance().Invulnerability)
+			// DebugFlags.Invuln (?invuln) is a session-only runtime override -- it must NEVER
+			// write into Settings.Invulnerability (that would persist into the save; see Game1's
+			// startScreen_OnFinished comment for the history of that bug).
+			else if (!Settings.GetInstance().Invulnerability && !DebugFlags.Invuln)
 			{
 				if (other is Wall)
 				{

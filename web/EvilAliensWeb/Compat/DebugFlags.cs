@@ -109,8 +109,11 @@ namespace EvilAliensWeb.Compat
 		// Unlock every gated menu option (session-only) so the full menu can be explored.
 		public static bool UnlockAll { get; private set; }
 
-		// Force the Invulnerability cheat ON at boot (so playtesting a level doesn't keep
-		// dying). Applied in Game1.startScreen_OnFinished after Settings has loaded.
+		// Force invulnerability ON for the session (so playtesting a level doesn't keep dying).
+		// SESSION-ONLY, like ?unlockall -- it must never write into Settings.Invulnerability
+		// (that field gets persisted to localStorage by later saves, which used to leave a
+		// player permanently invulnerable after a single ?invuln test session). Read directly
+		// at the two damage gates instead (PlayerShip.CollidesWith, WebcamLevel.PlayerHit).
 		public static bool Invuln { get; private set; }
 
 		// TEMP DEBUG (repro only): in any GameScene, jump straight to Victory() once the

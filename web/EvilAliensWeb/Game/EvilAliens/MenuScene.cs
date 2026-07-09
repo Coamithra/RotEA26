@@ -1006,6 +1006,28 @@ internal class MenuScene : Scene
 		}
 		state = MenuState.Normal;
 		timer = TimeSpan.Zero;
+		// Reset the HUD ring's "autofocus hunt" dart machine alongside `timer` above.
+		// Initialize() runs on EVERY re-entry to the menu (level -> credits -> menu, not just
+		// the first boot), but until now only `timer` was zeroed here -- ringMoveStart/
+		// ringHoldUntil are ABSOLUTE timestamps measured against that same timer. Left stale
+		// from before a level launch (worst case: leaving mid-dart, ringHolding == false), they
+		// could sit far AHEAD of the freshly-reset `now`, and UpdateRing's smoothstep+Lerp
+		// extrapolates wildly for the deeply-out-of-range `u` this produces -- read as the ring
+		// "spinning at incredibly high speed" right after finishing a level (Trello fdbe3be0).
+		// The 2026-07-03 fix (6b2c2a7) capped the ambient COAST drift for a long menu IDLE but
+		// never touched this DART state, which only desyncs on a menu re-entry -- a different
+		// trigger, so it survived that fix. These are exactly the field initializers above,
+		// so first boot is unchanged; only a re-entry now gets the same fresh, calm state.
+		ringAngle = 0f;
+		ringFrom = 0f;
+		ringTo = 0f;
+		ringMoveStart = 0.0;
+		ringMoveDur = 0.0001;
+		ringHoldUntil = 0.0;
+		ringHolding = true;
+		ringDirAccumDeg = 0f;
+		ringDrift = 0f;
+		ringDriftVel = 0f;
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
 		currentBackdropSize = MathHelper.Max(800f / (float)backdrop.Width, 600f / (float)backdrop.Height);
 		originalBackdropSize = currentBackdropSize;

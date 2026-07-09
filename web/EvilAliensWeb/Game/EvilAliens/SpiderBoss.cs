@@ -883,13 +883,15 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		collection.Add((GameComponent)(object)helper);
 	}
 
-	// A little warning arrow, top-left, announcing the incoming mothership -- visual only (Nothing
-	// speech, no "Danger!" voice). Reuses the boss's own redwarning arrow; points up-left toward where
-	// the helper eases in from. Fired HelperWarningLeadMs BEFORE SpawnHelper so it leads the arrival.
+	// A little warning arrow, top-left, announcing the incoming mothership -- now with the same
+	// "ttf_warning" voice line every other boss/level warning banner plays (card 7deda68d: this used
+	// to pass Nothing, so the arrow showed but never spoke). Reuses the boss's own redwarning arrow;
+	// points up-left toward where the helper eases in from. Fired HelperWarningLeadMs BEFORE
+	// SpawnHelper so it leads the arrival.
 	private void WarnHelperIncoming()
 	{
 		AnimatedMessage warning = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
-		warning.Setup("Warning!", SoundManager.Texts.Nothing, AnimatedMessage.MessageType.redwarning);
+		warning.Setup("Warning!", SoundManager.Texts.Warning, AnimatedMessage.MessageType.redwarning);
 		warning.SetWarningDirection((float)Math.PI * 5f / 4f);
 		warning.MakeShort();
 		collection.Add((GameComponent)(object)warning);

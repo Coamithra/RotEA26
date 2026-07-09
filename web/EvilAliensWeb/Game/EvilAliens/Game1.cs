@@ -166,6 +166,21 @@ public class Game1 : Game
 	// level's manifest set from such a run. Debug-only boots; accepted.
 	private readonly Queue<Action> idleWarmQueue = new Queue<Action>();
 
+	// Pre-launch LEVEL warm (card fe25712a): a level's whole preload used to decode
+	// inside ONE JS-driven tick (GameScene.LoadContent runs synchronously when the
+	// scene is Added), starving the browser event loop for seconds -> Chrome's "page
+	// unresponsive" popup. Before the level component is added, WarmThenLaunch queues
+	// the level's manifest texture set (LoadProfiler.ManifestAssets) here and
+	// PumpLevelWarm decodes ONE per tick — tickJS returns to rAF between decodes, so
+	// the browser paints/responds throughout — then runs pendingLevelLaunch (the
+	// actual scene Add). The level's own PreloadGraphicalContent/ApplyManifest stay
+	// unchanged and synchronous; the warmed textures are cache hits, so the remaining
+	// blocking tick is short. A level with no manifest entries launches immediately
+	// (today's behaviour — self-healing fallback).
+	private readonly Queue<Action> levelWarmQueue = new Queue<Action>();
+
+	private Action pendingLevelLaunch;
+
 	public Game1()
 	{
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
@@ -344,12 +359,13 @@ public class Game1 : Game
 		// pump normally finishes warming during the splash; this catches anything still
 		// queued (e.g. the splash was mashed past) so the menu never pops in piecemeal.
 		DrainWarmQueue();
-		// Debug (?invuln): turn the Invulnerability cheat on before any level can spawn a
-		// player. Settings has loaded by the time Press Start completes, so this sticks.
-		if (DebugFlags.Invuln)
-		{
-			Settings.GetInstance().Invulnerability = true;
-		}
+		// Debug (?invuln): this used to write Settings.GetInstance().Invulnerability = true
+		// here, which PERSISTED into the localStorage save on the next Settings.SaveThreaded()
+		// (options exit, difficulty pick, etc.) -- so one test session with ?invuln left every
+		// LATER plain boot invulnerable forever (the field is otherwise unreachable in the
+		// shipped UI -- see PlayerShip.CollidesWith / WebcamLevel.PlayerHit, which now read
+		// DebugFlags.Invuln directly instead). Do NOT reintroduce a write to Settings here --
+		// the flag must stay a session-only runtime override, like ?unlockall.
 		// Debug (?difficulty=Easy..Inzane): pin the difficulty before any level boots. The
 		// spider-boss helper's speed + aim are difficulty-scaled, so this makes the test
 		// deterministic. No flag => the saved/menu-chosen difficulty is left untouched.
@@ -632,17 +648,81 @@ public class Game1 : Game
 
 	protected void MenuFinished(object sender, ControlDevice starter, Levels selectedLevel)
 	{
-		collectionHelper.ClearCache();
-		collectionHelper.Remove((GameComponent)(object)menuScene);
-		oracle.ResetPlayers();
-		oracle.AddPlayer(starter);
-		bragScene.StoreCompletionProgress();
-		LaunchLevel(selectedLevel);
+		// Freeze the menu for the pre-launch warm: OnFinished fires from the menu's
+		// FadeToGame Update with the fade held at full, so an un-frozen menu would
+		// re-fire OnFinished every tick until it's removed. Enabled=false stops its
+		// Update (input + attract timer included) while it keeps drawing the faded
+		// frame — the player sees the same fade-hold "loading" as before, but the
+		// browser stays responsive. ComponentBin.Add re-enables on the next Add, so
+		// returning to the menu after the level is unaffected.
+		menuScene.Enabled = false;
+		WarmThenLaunch(selectedLevel, delegate
+		{
+			collectionHelper.ClearCache();
+			collectionHelper.Remove((GameComponent)(object)menuScene);
+			oracle.ResetPlayers();
+			oracle.AddPlayer(starter);
+			bragScene.StoreCompletionProgress();
+			AddLevelComponent(selectedLevel);
+		});
+	}
+
+	// Warm `level`'s manifest texture set one-per-tick (see levelWarmQueue), then run
+	// `launch` (the actual scene setup + Add). Covers every level-launch path: the
+	// menu (MenuFinished — incl. the attract-demo auto-launch, which is a MenuFinished
+	// with Demo1/2/3) and the ?level= debug boot (LaunchLevelDirect). Bracketed as a
+	// preload for the LoadProfiler so the hitch watchdog doesn't flag the deliberate
+	// one-decode ticks and ?loadlog attributes the decodes to the level as preloads.
+	private void WarmThenLaunch(Levels level, Action launch)
+	{
+		if (pendingLevelLaunch != null)
+		{
+			// Shouldn't happen (the menu is frozen while warming; ?level= fires once)
+			// — but if it ever does, the NEW request wins and the old launch is dropped.
+			System.Console.WriteLine("[levelwarm] launch requested while another was warming — replacing");
+			levelWarmQueue.Clear();
+			pendingLevelLaunch = null;
+		}
+		List<string> ids = EvilAliensWeb.Compat.LoadProfiler.ManifestAssets(level.ToString());
+		if (ids.Count == 0)
+		{
+			launch();
+			return;
+		}
+		EvilAliensWeb.Compat.LoadProfiler.BeginPreload(level.ToString());
+		foreach (string id in ids)
+		{
+			string captured = id;
+			levelWarmQueue.Enqueue(() => Warm<Texture2D>(captured));
+		}
+		pendingLevelLaunch = launch;
+	}
+
+	// Decode ONE queued level asset per tick; when the queue drains, close the preload
+	// bracket and run the deferred launch. The launch runs on its own tick (not the
+	// last decode's) so the browser gets a paint between the final warm and the level's
+	// remaining synchronous LoadContent work.
+	private void PumpLevelWarm()
+	{
+		if (pendingLevelLaunch == null)
+		{
+			return;
+		}
+		if (levelWarmQueue.Count > 0)
+		{
+			levelWarmQueue.Dequeue()();
+			return;
+		}
+		Action launch = pendingLevelLaunch;
+		pendingLevelLaunch = null;
+		EvilAliensWeb.Compat.LoadProfiler.EndPreload();
+		launch();
 	}
 
 	// Add the GameScene for `selectedLevel` to the live component bin. Shared by the
-	// normal menu path (MenuFinished) and the ?level=... debug direct-launch.
-	private void LaunchLevel(Levels selectedLevel)
+	// normal menu path (MenuFinished) and the ?level=... debug direct-launch — both
+	// via the WarmThenLaunch pre-launch warm.
+	private void AddLevelComponent(Levels selectedLevel)
 	{
 		switch (selectedLevel)
 		{
@@ -704,11 +784,14 @@ public class Game1 : Game
 	// shown) and forces a keyboard starter.
 	private void LaunchLevelDirect(Levels selectedLevel)
 	{
-		collectionHelper.ClearCache();
-		oracle.ResetPlayers();
-		oracle.AddPlayer(ControlDevice.Keyboard);
-		bragScene.StoreCompletionProgress();
-		LaunchLevel(selectedLevel);
+		WarmThenLaunch(selectedLevel, delegate
+		{
+			collectionHelper.ClearCache();
+			oracle.ResetPlayers();
+			oracle.AddPlayer(ControlDevice.Keyboard);
+			bragScene.StoreCompletionProgress();
+			AddLevelComponent(selectedLevel);
+		});
 	}
 
 	private void gameScene_OnFinished(object sender, GameScene.FinishedArgs args)
@@ -844,6 +927,13 @@ public class Game1 : Game
 			base.Update(gameTime);
 			collectionHelper.Update();
 			collisionHandler.DetectCollisions();
+			// A pending level launch takes warm priority (and excludes the other
+			// queues that tick, so a tick never pays two decodes).
+			if (pendingLevelLaunch != null)
+			{
+				PumpLevelWarm();
+				return;
+			}
 			// Warm one queued asset per tick (menu queue first, then the low-priority
 			// idle set — see PumpWarmQueue). No-op once both queues are drained.
 			PumpWarmQueue();

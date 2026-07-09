@@ -333,6 +333,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
   "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
   outside-`#app` pattern.
+- **Aiming cursor + fullscreen-Esc (cards 51276dcd / b0a2f525).** KNI's BlazorGL NEVER applies
+  `Game.IsMouseVisible` to the DOM (its `_isMouseHidden` is dead, `Mouse.PlatformSetCursor` throws), so
+  the OS arrow is always over the canvas unless C# owns `canvas.style.cursor`. The reticle
+  (`MousePointer`) now does: `Compat/CursorInterop` → `window.eaCursor.set(mode)` in `index.html` picks
+  `menu` (plain arrow — all menus + the intro is OFF there), `hidden` (cursor:none while the scale+rotate
+  intro SPRITE plays at the START of a keyboard level), or `reticle` (the aiming reticle IS the OS cursor
+  via `cursor:url(reticle.png)` — ZERO-LAG, no trailing sprite; `HWMouse=true` opts back to the plain
+  arrow). Driven off `MousePointer.Visible` (GameScene sets it, incl. Tutorial; MenuScene forces it off).
+  Reticle art = `wwwroot/reticle.png` from `tools/cursor/build_cursor.py` (48px, hotspot 24,24). Fullscreen:
+  the browser reserves Esc to exit and it can't be preventDefault'd, but the same Esc ALSO reaches KNI and
+  stepped back a menu — so `index.html`'s `fullscreenchange`→exit calls `eaSuppressEsc` →
+  `DebugInput.SuppressEsc`/`EscSuppressActive`, which masks the raw Esc in `InputHandler` for a short
+  window (grace + held-guard); **F11** is a dedicated toggle (preventDefault native, route through
+  `eaFullscreen`).
 - **Trailers (Stage 14)** are an embedded **YouTube** overlay, NOT ported video. The original
   `Content/VFX/*.wmv` (VC-1) won't play in a browser and there's no video loader, so the old
   `TrailerScene`'s `Content.Load<Video>("VFX/..")` crashed the loop — it's now DEAD (constructed but
@@ -717,18 +731,23 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research
   -> mapping). **Shake** is the trauma model: events call `Juice.AddTrauma` (`Explosion.Initialize`
   sized by explosion size, `Blast.Initialize` by bomb power, player death), strength = trauma^2 (so
-  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 14
-  design px) + roll (max 2 deg). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
+  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 7
+  design px) + roll (max 1 deg — both halved from 14/2, card 8e439865: full shake impacted
+  gameplay). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
   slight zoom so edges stay covered) — a pure camera effect: no gameplay coordinate, collision, or
-  mouse mapping (`WindowToDesign`) is touched. **Hit-stop** freezes GAME time (folded into
+  mouse mapping (`WindowToDesign`) is touched. An explosion SERIES can opt out of shake per
+  instance (`Explosion.Setup(..., noShake: true)`) — the L3 `BattleSkull` miniboss death does,
+  so only its finale blast shakes (card 8e439865). **Hit-stop** freezes GAME time (folded into
   `Game1.Update`'s existing turbo x slowmotion scale as `Juice.TimeScale`) while REAL time keeps
-  ticking Juice/shake/input: every kill lands a ~1.5-frame micro-stop (`Juice.KillPunch` in
-  `KillableAlien.HitBy`, rate-limited 250ms so a bomb-cleared wave is one punch, not a stutter),
-  boss kills 90ms + real shake, player death 180ms + extra trauma (`PlayerShip.Asplode`/
+  ticking Juice/shake/input: the per-kill ~1.5-frame micro-stop + 90ms boss-kill stop
+  (`Juice.KillPunch` in `KillableAlien.HitBy`) are **OFF by default** (card bd5efd9d — they read
+  as stutter, not juice; `?hitstop=1` re-enables for A/B, kill-shake trauma unaffected); player
+  death keeps its 180ms stop + extra trauma (`PlayerShip.Asplode`/
   `AsplodeWall`). Draw-time cosmetics (the Blast rim spin, metal sheen) keep animating during a
-  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=0`; QA from
+  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=1`; QA from
   the console anywhere: `eaShake()`/`eaShake(1)`, `eaHitstop()`/`eaHitstop(500)` (DebugInput +
-  index.html, same seam as eaSlowmo). Both are feel toggles kept OUT of `DebugFlags.Active`.
+  index.html, same seam as eaSlowmo; eaHitstop always fires, ungated). Both are feel toggles kept
+  OUT of `DebugFlags.Active`.
   GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs in `Game1.Update` BEFORE the
   time scale) — a scaled-time timer would freeze and never thaw.
 - **Cinematic slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up-powerup slowmo
@@ -1136,6 +1155,28 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the manifest (or rebuild without it) + delete the `brainov_<name>.png`. Don't hand-edit the sheets /
   manifest -- re-run the tools. If a big new sheet stutters at preload, add it to `textures.config` for
   DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
+- **Screenshot `.dat` blobs live in IndexedDB, the small save XML in localStorage (card a5145e9e).**
+  The `eaSave` JS facade (`index.html`) routes by extension: `.dat` -> `window.eaSaveBlob` (IndexedDB
+  store `eaweb_save/screenshots`, huge quota), else localStorage -- C# (`SaveInterop`/`StorageStub`)
+  is backend-agnostic. IndexedDB is async but the game reads saves synchronously, so
+  `eaSaveBlob.preload()` (awaited by `initRenderJS` BEFORE the first game tick, raced against a 3s
+  timeout so a wedged open can't hang boot) pulls every blob into an in-memory map that `eaSave.load`
+  merges; it also one-time-migrates any `.dat` older builds left in localStorage (deleted only after
+  the IDB transaction commits). IndexedDB unavailable/slow -> `.dat` falls back to localStorage (the
+  pre-split path, no data loss). Don't make C# talk to IndexedDB directly -- keep the routing in JS.
+- **Level launches are gated by a PRE-LAUNCH manifest warm (card fe25712a).** A level's whole preload
+  used to decode in ONE JS tick (seconds of blocked event loop -> Chrome "page unresponsive").
+  `Game1.WarmThenLaunch` (every launch path: menu incl. attract demos via `MenuFinished`, and
+  `?level=` via `LaunchLevelDirect`) decodes the level's `Content/preload/manifest.txt` texture set
+  ONE per tick (`levelWarmQueue`/`PumpLevelWarm`) BEFORE the scene is Added, so the browser paints
+  between decodes; the level's own `PreloadGraphicalContent`/`ApplyManifest` stay synchronous and
+  become cache hits. The menu is frozen during the warm (`menuScene.Enabled=false` -- an un-frozen
+  menu re-fires OnFinished every tick from its held FadeToGame state; `ComponentBin.Add` re-enables
+  on return) and keeps drawing its faded frame. The warm is bracketed `BeginPreload`/`EndPreload` so
+  the hitch watchdog stays quiet and `?loadlog` counts it as preload (two preload summary lines per
+  level under `?loadlog` -- warm + residual -- is expected). A level with NO manifest entries
+  launches synchronously (the old behaviour, self-healing); a still-hitching level is a manifest
+  DATA gap -- fix by playing it with `?loadlog` + `eaPreloadExport()`, not by code.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

@@ -459,7 +459,10 @@ internal class WebcamLevel : GameScene
 
 	private void PlayerHit()
 	{
-		if (graceTimer.Active || Settings.GetInstance().Invulnerability)
+		// DebugFlags.Invuln (?invuln) is a session-only runtime override -- see the comment on
+		// the equivalent check in PlayerShip.CollidesWith for why it must never write into
+		// Settings.Invulnerability.
+		if (graceTimer.Active || Settings.GetInstance().Invulnerability || DebugFlags.Invuln)
 		{
 			return;
 		}

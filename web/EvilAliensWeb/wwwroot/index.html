@@ -247,7 +247,7 @@
             canvas.height = holder.clientHeight || window.innerHeight || 720;
         }
 
-        window.initRenderJS = (instance) =>
+        window.initRenderJS = async (instance) =>
         {
             window.theInstance = instance;
 
@@ -264,6 +264,14 @@
             };
             document.getElementById('theCanvas').addEventListener("pointerenter", () => eaSetOnCanvas(true));
             document.getElementById('theCanvas').addEventListener("pointerleave", () => eaSetOnCanvas(false));
+
+            // Pull the level-select screenshot blobs out of IndexedDB into memory BEFORE the
+            // first game tick, so the synchronous save-hydrate (StorageStub, on the first
+            // OpenContainer a few ticks in) sees them. IndexedDB is async but the game reads
+            // saves synchronously — awaiting here is the guaranteed ordering gate. Fast (a
+            // getAll of a handful of blobs) and best-effort: a failure never blocks boot.
+            try { await window.eaSaveBlob.preload(); }
+            catch (e) { console.warn("[eaSaveBlob] preload failed", e); }
 
             // begin game loop
             scheduleTick();
@@ -343,6 +351,74 @@
                 toggle: function () { if (isFs()) exit(); else enter(); },
                 set: function (on) { if (on && !isFs()) enter(); else if (!on && isFs()) exit(); }
             };
+        })();
+
+        // eaCursor: owns the OS cursor over the game canvas (card 51276dcd). KNI's BlazorGL
+        // never applies Game.IsMouseVisible to the DOM, so C# (Compat/CursorInterop ->
+        // MousePointer) drives canvas.style.cursor through here per scene:
+        //   "menu"    -> normal OS arrow (menus / non-aiming scenes)
+        //   "hidden"  -> cursor:none, while the gameplay intro reticle SPRITE animates
+        //   "reticle" -> the zero-lag aiming reticle IS the OS cursor during gameplay
+        // The reticle image lives at wwwroot/reticle.png (built by tools/cursor/build_cursor.py);
+        // resolve it against <base href> so it works under the CI "/RotEA26/" base too. Hotspot
+        // is the image centre (24,24 for the 48px art) since the reticle aims from its centre;
+        // `crosshair` is the graceful fallback if a browser rejects the custom image.
+        window.eaCursor = (function ()
+        {
+            var reticleCss = null;
+            function reticle()
+            {
+                if (reticleCss === null)
+                {
+                    var href = "reticle.png";
+                    try { href = new URL("reticle.png", document.baseURI).href; } catch (e) { }
+                    reticleCss = "url('" + href + "') 24 24, crosshair";
+                }
+                return reticleCss;
+            }
+            return {
+                set: function (mode)
+                {
+                    var c = document.getElementById('theCanvas');
+                    if (!c) return;
+                    if (mode === 'reticle') c.style.cursor = reticle();
+                    else if (mode === 'hidden') c.style.cursor = 'none';
+                    else c.style.cursor = 'auto';   // 'menu' / anything else -> normal arrow
+                }
+            };
+        })();
+
+        // eaSuppressEsc: the browser forces Esc to leave DOM fullscreen and that can't be
+        // preventDefault'd, but the same Esc keydown ALSO reaches KNI's keyboard state, so Esc
+        // would exit fullscreen AND step back a menu at once (card b0a2f525). On every
+        // fullscreen EXIT, ask C# to swallow the raw Esc for a short window (a second, deliberate
+        // Esc afterwards -- now not fullscreen -- navigates back as normal). F11 gets its own
+        // dedicated toggle so it doesn't fight menu navigation.
+        window.eaSuppressEsc = function ()
+        {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSuppressEsc'); }
+            catch (e) { /* game not booted yet — ignore */ }
+        };
+        (function ()
+        {
+            var onFsChange = function ()
+            {
+                if (!window.eaFullscreen.isFullscreen()) window.eaSuppressEsc();
+            };
+            document.addEventListener('fullscreenchange', onFsChange);
+            document.addEventListener('webkitfullscreenchange', onFsChange);
+            // F11 = dedicated game-fullscreen toggle. preventDefault the browser-native (whole
+            // chrome) fullscreen and route through eaFullscreen instead; the keydown is a user
+            // gesture, so requestFullscreen is allowed. KNI ignores F11 (not in keysToCheck),
+            // so this never fights gameplay/menu keys.
+            window.addEventListener('keydown', function (e)
+            {
+                if (e.key === 'F11' || e.keyCode === 122)
+                {
+                    e.preventDefault();
+                    if (window.eaFullscreen.supported()) window.eaFullscreen.toggle();
+                }
+            });
         })();
 
         // eaHold: persistent press for the on-screen D-pad/fire button. Mirrors eaPress
@@ -775,17 +851,184 @@
     </script>
 
     <script>
+        // ----- eaSaveBlob: IndexedDB store for the large screenshot (.dat) blobs ----
+        // localStorage (~5MB/origin) is too small for the level-select screenshots
+        // (~360KB base64 each x up to 12 challenges = ~4.3MB, near the cap). Move those
+        // blobs to IndexedDB (hundreds of MB quota) while the small settings/unlockables/
+        // awardments XML stays in localStorage (eaSave). IndexedDB is async but the game
+        // reads saves synchronously, so preload() pulls every blob into an in-memory map
+        // at boot (awaited by initRenderJS before the first tick), and getAll() serves
+        // that map synchronously to the C# hydrate. It also MIGRATES any .dat older builds
+        // left in localStorage. If IndexedDB is unavailable (private mode / disabled),
+        // available() stays false and eaSave falls back to the pre-migration localStorage
+        // path, so behaviour only ever degrades to what shipped before.
+        window.eaSaveBlob = (function ()
+        {
+            var DB = "eaweb_save", STORE = "screenshots", PREFIX = "eaweb_save:";
+            var _cache = {};        // relpath -> base64, populated by preload()
+            var _db = null;
+            var _available = false;
+
+            function openDb()
+            {
+                return new Promise(function (resolve, reject)
+                {
+                    var req;
+                    try { req = indexedDB.open(DB, 1); }
+                    catch (e) { reject(e); return; }
+                    req.onupgradeneeded = function ()
+                    {
+                        var db = req.result;
+                        if (!db.objectStoreNames.contains(STORE))
+                            db.createObjectStore(STORE);   // out-of-line keys = the relpath string
+                    };
+                    req.onsuccess = function () { resolve(req.result); };
+                    req.onerror = function () { reject(req.error); };
+                    req.onblocked = function () { reject(new Error("indexedDB.open blocked")); };
+                });
+            }
+
+            function store(mode) { return _db.transaction(STORE, mode).objectStore(STORE); }
+
+            function idbGetAll()
+            {
+                return new Promise(function (resolve)
+                {
+                    var out = {};
+                    try
+                    {
+                        var cur = store("readonly").openCursor();
+                        cur.onsuccess = function ()
+                        {
+                            var c = cur.result;
+                            if (c) { out[c.key] = c.value; c.continue(); }
+                            else resolve(out);
+                        };
+                        cur.onerror = function () { resolve(out); };
+                    }
+                    catch (e) { resolve(out); }
+                });
+            }
+
+            // Move any .dat blobs older builds wrote to localStorage into IndexedDB, then
+            // drop them from localStorage to reclaim the ~5MB budget. One-time; a no-op once
+            // done (no .dat keys remain in localStorage).
+            function migrateFromLocalStorage()
+            {
+                var moved = [];
+                try
+                {
+                    for (var i = 0; i < localStorage.length; i++)
+                    {
+                        var k = localStorage.key(i);
+                        if (k && k.indexOf(PREFIX) === 0 && k.slice(-4) === ".dat")
+                            moved.push(k);
+                    }
+                }
+                catch (e) { return Promise.resolve(); }
+                if (!moved.length) return Promise.resolve();
+                return new Promise(function (resolve)
+                {
+                    try
+                    {
+                        var t = _db.transaction(STORE, "readwrite");
+                        var s = t.objectStore(STORE);
+                        moved.forEach(function (k)
+                        {
+                            var name = k.substring(PREFIX.length);
+                            var val = localStorage.getItem(k);
+                            if (val != null) { s.put(val, name); _cache[name] = val; }
+                        });
+                        t.oncomplete = function ()
+                        {
+                            // Only drop the localStorage copies once the IDB write committed.
+                            moved.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
+                            console.log("[eaSaveBlob] migrated " + moved.length + " screenshot(s) from localStorage to IndexedDB");
+                            resolve();
+                        };
+                        t.onerror = function () { resolve(); };   // leave localStorage copies if the move failed
+                    }
+                    catch (e) { resolve(); }
+                });
+            }
+
+            return {
+                available: function () { return _available; },
+                // Open the DB, load every blob into _cache, then migrate localStorage .dat.
+                // Raced against a timeout so a wedged IndexedDB open (blocked event, browser
+                // bug) can NEVER hang initRenderJS / the first game tick: on timeout the
+                // session falls back to localStorage mode (timedOut makes a late open a
+                // no-op, so the mode can't flip mid-session; blobs already in IndexedDB
+                // simply reappear next session — no data loss).
+                preload: function ()
+                {
+                    var timedOut = false;
+                    var work = openDb().then(function (db)
+                    {
+                        if (timedOut) { try { db.close(); } catch (e) { } return; }
+                        _db = db;
+                        return idbGetAll().then(function (all)
+                        {
+                            if (timedOut) return;
+                            _cache = all || {};
+                            _available = true;
+                            return migrateFromLocalStorage();
+                        });
+                    }).catch(function (e)
+                    {
+                        _available = false; _cache = {};
+                        console.warn("[eaSaveBlob] IndexedDB unavailable; screenshots stay in localStorage", e);
+                    });
+                    var gate = new Promise(function (resolve)
+                    {
+                        setTimeout(function ()
+                        {
+                            if (!_available)
+                            {
+                                timedOut = true;
+                                console.warn("[eaSaveBlob] IndexedDB slow to open; booting with localStorage screenshots");
+                            }
+                            resolve();
+                        }, 3000);
+                    });
+                    return Promise.race([work, gate]);
+                },
+                // Synchronous snapshot for the C# hydrate (name -> base64).
+                getAll: function () { return _cache; },
+                // Best-effort async write; updates _cache synchronously and returns true
+                // optimistically (screenshots are non-critical and IDB quota is huge).
+                set: function (name, b64)
+                {
+                    if (!_available) return false;
+                    _cache[name] = b64;
+                    try { store("readwrite").put(b64, name); }
+                    catch (e) { console.warn("[eaSaveBlob] put failed for " + name, e); return false; }
+                    return true;
+                },
+                remove: function (name)
+                {
+                    delete _cache[name];
+                    if (!_available) return;
+                    try { store("readwrite").delete(name); } catch (e) { }
+                }
+            };
+        })();
+
         // ----- eaSave: localStorage persistence for the save tree (Stage 7) ----
         // The game writes settings / unlockables / awardments / level screenshots
         // to the in-memory WASM filesystem (StorageStub.cs). This mirrors that tree
-        // to localStorage so it survives a reload; C# drives it via SaveInterop.
-        // Keys are "eaweb_save:<relpath>" (e.g. eaweb_save:EvilAliens/Settings.xml);
-        // values are base64 of the raw file bytes.
+        // so it survives a reload; C# drives it via SaveInterop. Keys are
+        // "eaweb_save:<relpath>" (e.g. eaweb_save:EvilAliens/Settings.xml); values are
+        // base64 of the raw file bytes. BACKEND SPLIT: the large screenshot ".dat" blobs
+        // go to IndexedDB (eaSaveBlob, big quota) and the small XML stays in localStorage;
+        // when IndexedDB is unavailable, .dat falls back to localStorage (the old path).
         window.eaSave = (function ()
         {
             var PREFIX = "eaweb_save:";
+            var isBlob = function (name) { return name.slice(-4) === ".dat" && window.eaSaveBlob.available(); };
             return {
-                // Returns JSON { "<relpath>": "<base64>", ... } for every entry.
+                // Returns JSON { "<relpath>": "<base64>", ... } for every entry, merging the
+                // localStorage XML (+ any un-migrated .dat) with the IndexedDB screenshot blobs.
                 load: function ()
                 {
                     var out = {};
@@ -799,12 +1042,20 @@
                         }
                     }
                     catch (e) { console.warn("eaSave.load failed", e); }
+                    try
+                    {
+                        var blobs = window.eaSaveBlob.getAll();
+                        for (var name in blobs)
+                            if (Object.prototype.hasOwnProperty.call(blobs, name)) out[name] = blobs[name];
+                    }
+                    catch (e) { console.warn("eaSave.load blobs failed", e); }
                     return JSON.stringify(out);
                 },
                 // Returns false if it didn't stick (quota / disabled storage), so C#
                 // keeps the file dirty and retries on the next save.
                 set: function (name, b64)
                 {
+                    if (isBlob(name)) return window.eaSaveBlob.set(name, b64);
                     try { localStorage.setItem(PREFIX + name, b64); return true; }
                     catch (e)
                     {
@@ -814,6 +1065,7 @@
                 },
                 remove: function (name)
                 {
+                    if (name.slice(-4) === ".dat") window.eaSaveBlob.remove(name);
                     try { localStorage.removeItem(PREFIX + name); } catch (e) { }
                 }
             };

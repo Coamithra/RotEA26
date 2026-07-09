@@ -120,19 +120,24 @@ public class ScreenshotSaver
 			RenderTarget2D val = new RenderTarget2D(graphicsDevice, (int)SIZE.X, (int)SIZE.Y, false, graphicsDevice.PresentationParameters.BackBufferFormat, DepthFormat.None);
 			graphicsDevice.SetRenderTarget(0, val);
 			graphicsDevice.Clear(Color.White);
+			// DrawPresent (identity transform) composites the full resolved frame into the fixed
+			// SIZE (300x225) thumbnail RT. The plain Draw() path bakes in RenderScale.Matrix, which
+			// scales this dest rect up by RenderScale.Scale so only the top-left corner of the field
+			// lands in the small target — the "screenshot is just a section / cropped" bug. Screenshot
+			// (the resolved scene target) is the full 4:3 playing field, so identity gives the whole
+			// field, downscaled to the thumbnail.
 			spriteBatchWrapper.BlendMode = (SpriteBlendMode)0;
-			spriteBatchWrapper.Draw(Screenshot, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
-			spriteBatchWrapper.Flush();
+			spriteBatchWrapper.DrawPresent(Screenshot, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
 			// Composite the player overlay on top of the game frame (webcam challenge).
 			// Straight (non-premultiplied) alpha; the overlay is transparent except the
 			// segmented person, which draws over the starfield/saucers just like on screen.
 			// Gated on WebcamAliens: a stray overlay must never leak the camera image into
-			// another level's thumbnail (it's still disposed below either way).
+			// another level's thumbnail (it's still disposed below either way). Same identity
+			// DrawPresent so the overlay lines up 1:1 with the (now un-cropped) game frame.
 			if (pendingOverlay != null && level == Levels.WebcamAliens)
 			{
 				spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
-				spriteBatchWrapper.Draw(pendingOverlay, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
-				spriteBatchWrapper.Flush();
+				spriteBatchWrapper.DrawPresent(pendingOverlay, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
 			}
 			spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 			graphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);

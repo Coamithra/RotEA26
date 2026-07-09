@@ -25,6 +25,18 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// used sub-rect to the shader as UvExtent so the local UV stays 0..1.
 	private RenderTarget2D metalRT;
 
+	// Group-flatten (card "flying spiders drawn on a rendertarget as a group, given one opacity"):
+	// shared grow-only RT + a design->RT capture matrix. Between BeginGroupFlatten/EndGroupFlatten
+	// every wrapper draw is redirected here (OPAQUE), then the union is composited ONCE at a group
+	// alpha — so N overlapping translucent sprites don't double-brighten where they cover each other.
+	private RenderTarget2D groupRT;
+	private bool capturing;
+	private Matrix captureMatrix;
+	private RenderTargetBinding[] captureRestore;
+	private int groupUsedW;
+	private int groupUsedH;
+	private Rectangle groupDesignRect;
+
 	// The chrome-sheen effect (metal.fx), owned here so call sites don't each load/pass
 	// it. Loaded in LoadContent; null => DrawMetalString degrades to a plain DrawString.
 	private Effect metalEffect;
@@ -173,7 +185,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			// effects are pixel-only (the internal sprite VS stays bound), so the
 			// transform flows through them unchanged.
 			effectHandler.LoadEffects();
-			spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effectHandler.CurrentEffect, RenderScale.Matrix);
+			// While flattening a group into groupRT, force BlendState.AlphaBlend (One/InvSrcAlpha)
+			// so straight-alpha sprites copy into the transparent RT verbatim (same reason
+			// RasteriseShadowText does — NonPremultiplied would premultiply + square the edge alpha),
+			// and use the design->RT capture matrix instead of the design->render one. The group
+			// alpha is applied by EndGroupFlatten's single composite, so the callers still draw at
+			// full opacity here. Ignores per-caller BlendMode changes (base.Draw resets it), which is
+			// intended: every sprite in the group must land opaque for the union to have no double-up.
+			BlendState bs = capturing ? BlendState.AlphaBlend : ToBlendState(blendmode);
+			Matrix mtx = capturing ? captureMatrix : RenderScale.Matrix;
+			spriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effectHandler.CurrentEffect, mtx);
 			enabled = true;
 		}
 	}
@@ -200,6 +221,91 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
 		spriteBatch.Draw(texture, position, (Rectangle?)null, color, 0f, origin, scale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
+	}
+
+	// Draw `texture` filling `dest` with an IDENTITY transform, bypassing the design->render
+	// RenderScale.Matrix that every content draw bakes in. Use when the destination is a
+	// fixed-size target that is NOT the scaled scene (the level-select thumbnail RT: SIZE is a
+	// literal 300x225, not an 800x600 design coord). Going through the plain Draw()/_beginDrawing
+	// path would multiply `dest` by RenderScale.Scale and overflow the small target, so only its
+	// top-left corner would receive the image (the "screenshot is cropped" bug). Honours the
+	// current BlendMode; default linear sampling gives a clean downscale.
+	public void DrawPresent(Texture2D texture, Rectangle dest, Color color)
+	{
+		Flush();
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
+		spriteBatch.Draw(texture, dest, color);
+		spriteBatch.End();
+	}
+
+	// Begin flattening a group of overlapping sprites into the shared offscreen RT. `designRect` is
+	// the group's bounding box in 800x600 design space; between here and EndGroupFlatten every
+	// wrapper draw is redirected into groupRT (at render resolution, OPAQUE — see _beginDrawing) with
+	// a matrix that maps the box onto the RT's top-left corner, so callers keep drawing at their
+	// normal design coords. Grow-only shared RT, recreated on a render-scale (window) change; ONE RT
+	// is reused across every group in a frame (each brackets its own draws + composite). Not
+	// re-entrant. The classic use is a translucent multi-part sprite (flying-spider body + two
+	// wings): flatten the union opaque, then fade it as one silhouette so the overlaps don't
+	// double-brighten. See FlyingSpider.Draw.
+	public void BeginGroupFlatten(Rectangle designRect)
+	{
+		Flush();
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		int usedW = Math.Max(1, (int)Math.Ceiling(designRect.Width * rs));
+		int usedH = Math.Max(1, (int)Math.Ceiling(designRect.Height * rs));
+		EnsureGroupRT(usedW, usedH);
+		groupUsedW = usedW;
+		groupUsedH = usedH;
+		groupDesignRect = designRect;
+		// Capture whatever is bound (the scene target, or a menu RT) so EndGroupFlatten restores IT,
+		// not a hardcoded null — same mid-draw ping-pong the metal-text RT does.
+		captureRestore = base.GraphicsDevice.GetRenderTargets();
+		base.GraphicsDevice.SetRenderTarget(0, groupRT);
+		base.GraphicsDevice.Clear(Color.Transparent);
+		// design coord -> RT texel: (coord - box.TopLeft) * rs, landing the box at the RT origin.
+		captureMatrix = Matrix.CreateTranslation(0f - designRect.X, 0f - designRect.Y, 0f) * Matrix.CreateScale(rs);
+		capturing = true;
+	}
+
+	// Finish the group: composite the flattened union ONCE, back at the design bbox, tinted by
+	// `groupColor` (its alpha is the group opacity). The RT holds render-res texels, so drawScale =
+	// 1/rs under RenderScale.Matrix maps them 1:1 into the scene. Honours the current BlendMode
+	// (NonPremultiplied for the fog spiders) so the faded silhouette blends straight-alpha.
+	public void EndGroupFlatten(Color groupColor)
+	{
+		Flush();
+		capturing = false;
+		if (captureRestore != null && captureRestore.Length > 0)
+		{
+			base.GraphicsDevice.SetRenderTargets(captureRestore);
+		}
+		else
+		{
+			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
+		}
+		captureRestore = null;
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		Rectangle used = new Rectangle(0, 0, groupUsedW, groupUsedH);
+		Vector2 pos = new Vector2((float)groupDesignRect.X, (float)groupDesignRect.Y);
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, RenderScale.Matrix);
+		spriteBatch.Draw(groupRT, pos, (Rectangle?)used, groupColor, 0f, Vector2.Zero, 1f / rs, (SpriteEffects)0, 0f);
+		spriteBatch.End();
+	}
+
+	private void EnsureGroupRT(int w, int h)
+	{
+		int haveW = (groupRT != null && !((GraphicsResource)groupRT).IsDisposed) ? ((Texture2D)groupRT).Width : 0;
+		int haveH = (groupRT != null && !((GraphicsResource)groupRT).IsDisposed) ? ((Texture2D)groupRT).Height : 0;
+		if (haveW < w || haveH < h)
+		{
+			if (groupRT != null && !((GraphicsResource)groupRT).IsDisposed)
+			{
+				((GraphicsResource)groupRT).Dispose();
+			}
+			groupRT = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, w), Math.Max(haveH, h), false, SurfaceFormat.Color, DepthFormat.None);
+		}
 	}
 
 	// Stage 10: draw `texture` over `designRect` (800x600 space) through a custom
@@ -1041,6 +1147,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			}
 		}
 		metalSpriteCache.Clear();
+		if (groupRT != null && !((GraphicsResource)groupRT).IsDisposed)
+		{
+			((GraphicsResource)groupRT).Dispose();
+		}
 		spriteBatch.Dispose();
 		base.UnloadContent();
 	}

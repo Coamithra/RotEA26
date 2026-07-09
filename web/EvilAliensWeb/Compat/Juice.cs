@@ -25,10 +25,19 @@
 //     take the MAX, never the sum, so a multi-kill can't freeze the game solid.
 //   * KillPunch() is the per-kill micro-stop (~1.5 frames) with a real-time
 //     cooldown so a bomb clearing 20 enemies reads as one meaty impact, not a
-//     stutter; boss kills get a longer, cooldown-exempt stop.
+//     stutter; boss kills get a longer, cooldown-exempt stop. **Both are OFF by
+//     default** — a micro-stutter on every kill read as the game hitching, not
+//     juice (Trello bd5efd9d) — gated on DebugFlags.Hitstop (default false;
+//     ?hitstop=1 re-enables for A/B). The kill's screen-shake trauma is
+//     untouched either way. Player-death hit-stop (PlayerShip.Asplode/
+//     AsplodeWall) calls AddHitStop directly and is NOT gated by that flag — a
+//     beat when the PLAYER is destroyed reads as intentional, not stuttery.
+//     The eaHitstop() console/JS hook also calls AddHitStop directly, so it
+//     always fires on demand regardless of the flag.
 //
 // Tuning/QA:
-//   * URL: ?shake=0 (off) / ?shake=1.5 (amplify, 0..3) · ?hitstop=0 (off).
+//   * URL: ?shake=0 (off) / ?shake=1.5 (amplify, 0..3) · ?hitstop=1 (re-enable
+//     the per-kill/boss-kill micro-stop, off by default — see above).
 //     Both are pure feel/render toggles, deliberately OUT of DebugFlags.Active.
 //   * Console: eaShake() / eaShake(0.8) fires a shake burst on demand;
 //     eaHitstop() / eaHitstop(250) a freeze — see DebugInput + index.html.
@@ -45,8 +54,10 @@ namespace EvilAliensWeb.Compat
     {
         // Peak shake at full trauma: max per-axis offset in 800x600 design px, and
         // max roll in degrees. Both sampled fresh every tick, scaled by strength.
-        public const float MaxOffsetDesignPx = 14f;
-        public const float MaxRollDegrees = 2f;
+        // Halved from the original 14/2 (Trello 8e439865) — full trauma was strong
+        // enough to impact gameplay (readability of bullets/aim), not just "juice".
+        public const float MaxOffsetDesignPx = 7f;
+        public const float MaxRollDegrees = 1f;
 
         // Trauma lost per real second — a full bar shakes for ~0.7s (strength, being
         // trauma^2, falls below "visible" well before trauma itself reaches 0).
@@ -97,9 +108,12 @@ namespace EvilAliensWeb.Compat
 
         // Freeze game time for `seconds` of REAL time. Overlapping requests take the
         // max (never accumulate), so stacked events can't freeze the game solid.
+        // NOT gated by DebugFlags.Hitstop here — that flag only governs whether
+        // KillPunch's automatic per-kill/boss-kill stop fires (see below); a direct
+        // caller (player death, the eaHitstop() console/JS hook) always gets its freeze.
         public static void AddHitStop(float seconds)
         {
-            if (!DebugFlags.Hitstop || seconds <= 0f)
+            if (seconds <= 0f)
             {
                 return;
             }
@@ -109,14 +123,20 @@ namespace EvilAliensWeb.Compat
             }
         }
 
-        // The per-kill impact: micro freeze + a tap of shake. Called from the central
-        // kill branch (KillableAlien.HitBy); the cooldown makes kill CHAINS read as one
-        // punch. Boss kills bypass the cooldown and hit harder.
+        // The per-kill impact: a tap of shake, always; a micro freeze-frame ONLY if
+        // DebugFlags.Hitstop is on (default false — Trello bd5efd9d: the freeze read as
+        // a stutter, not juice). Called from the central kill branch
+        // (KillableAlien.HitBy); the cooldown makes kill CHAINS read as one punch (and
+        // gates the freeze the same way whether or not it's actually enabled). Boss
+        // kills bypass the cooldown and hit harder.
         public static void KillPunch(bool boss)
         {
             if (boss)
             {
-                AddHitStop(BossStopSeconds);
+                if (DebugFlags.Hitstop)
+                {
+                    AddHitStop(BossStopSeconds);
+                }
                 AddTrauma(BossTrauma);
                 return;
             }
@@ -125,7 +145,10 @@ namespace EvilAliensWeb.Compat
                 return;
             }
             killStopCooldown = KillStopCooldownSeconds;
-            AddHitStop(KillStopSeconds);
+            if (DebugFlags.Hitstop)
+            {
+                AddHitStop(KillStopSeconds);
+            }
             AddTrauma(KillTrauma);
         }
 

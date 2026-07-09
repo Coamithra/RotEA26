@@ -702,18 +702,23 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research
   -> mapping). **Shake** is the trauma model: events call `Juice.AddTrauma` (`Explosion.Initialize`
   sized by explosion size, `Blast.Initialize` by bomb power, player death), strength = trauma^2 (so
-  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 14
-  design px) + roll (max 2 deg). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
+  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 7
+  design px) + roll (max 1 deg — both halved from 14/2, card 8e439865: full shake impacted
+  gameplay). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
   slight zoom so edges stay covered) — a pure camera effect: no gameplay coordinate, collision, or
-  mouse mapping (`WindowToDesign`) is touched. **Hit-stop** freezes GAME time (folded into
+  mouse mapping (`WindowToDesign`) is touched. An explosion SERIES can opt out of shake per
+  instance (`Explosion.Setup(..., noShake: true)`) — the L3 `BattleSkull` miniboss death does,
+  so only its finale blast shakes (card 8e439865). **Hit-stop** freezes GAME time (folded into
   `Game1.Update`'s existing turbo x slowmotion scale as `Juice.TimeScale`) while REAL time keeps
-  ticking Juice/shake/input: every kill lands a ~1.5-frame micro-stop (`Juice.KillPunch` in
-  `KillableAlien.HitBy`, rate-limited 250ms so a bomb-cleared wave is one punch, not a stutter),
-  boss kills 90ms + real shake, player death 180ms + extra trauma (`PlayerShip.Asplode`/
+  ticking Juice/shake/input: the per-kill ~1.5-frame micro-stop + 90ms boss-kill stop
+  (`Juice.KillPunch` in `KillableAlien.HitBy`) are **OFF by default** (card bd5efd9d — they read
+  as stutter, not juice; `?hitstop=1` re-enables for A/B, kill-shake trauma unaffected); player
+  death keeps its 180ms stop + extra trauma (`PlayerShip.Asplode`/
   `AsplodeWall`). Draw-time cosmetics (the Blast rim spin, metal sheen) keep animating during a
-  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=0`; QA from
+  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=1`; QA from
   the console anywhere: `eaShake()`/`eaShake(1)`, `eaHitstop()`/`eaHitstop(500)` (DebugInput +
-  index.html, same seam as eaSlowmo). Both are feel toggles kept OUT of `DebugFlags.Active`.
+  index.html, same seam as eaSlowmo; eaHitstop always fires, ungated). Both are feel toggles kept
+  OUT of `DebugFlags.Active`.
   GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs in `Game1.Update` BEFORE the
   time scale) — a scaled-time timer would freeze and never thaw.
 - **Cinematic slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up-powerup slowmo

@@ -126,6 +126,12 @@ public class Background : Scene
 
 	private BackgroundImage holoGrid;
 
+	// The far (dimmer) holo-grid layer, tracked alongside holoGrid (the near one) so both can be
+	// held back and drawn AFTER a fly-by doodad (card 02c0e9c0: the nebula/sim-earth doodad in
+	// ClassicAliens was drawing on top of the grid; the grid is a see-through simulation overlay
+	// and should render in front of anything projected "inside" it).
+	private BackgroundImage holoGridFar;
+
 	private Timer glitchTimer = new Timer(170f, repeating: false);
 
 	private Vector2 glitchSlip;
@@ -597,9 +603,17 @@ public class Background : Scene
 		}
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
+			// The holodeck's cyan simulation grid is a see-through overlay -- it should render IN
+			// FRONT of a fly-by doodad (a projected planet/nebula "inside" the simulation), not
+			// behind it. Both grid layers are held back and drawn after the doodad below (card
+			// 02c0e9c0). Every other scene's backgroundLayers has neither field set, so this is a
+			// no-op there.
+			if (backgroundLayer == holoGrid || backgroundLayer == holoGridFar)
+			{
+				continue;
+			}
 			backgroundLayer.Draw(base.SpriteBatch, gameTime);
 		}
-		DrawHoloPulse();
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		if (showdoodad)
 		{
@@ -607,6 +621,15 @@ public class Background : Scene
 			base.SpriteBatch.Draw(doodad, doodadPos, 0f, doodadscale, center: true, doodadcolor);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		}
+		if (holoGridFar != null)
+		{
+			holoGridFar.Draw(base.SpriteBatch, gameTime);
+		}
+		if (holoGrid != null)
+		{
+			holoGrid.Draw(base.SpriteBatch, gameTime);
+		}
+		DrawHoloPulse();
 		float factor = Convert.ToSingle((double)(0.15f + oscilatereach) + Math.Sin((double)oscilatespeed * timer.TotalMilliseconds) * (double)oscilatereach);
 		if (!DebugToggles.Active || DebugToggles.BgVeil)
 		{
@@ -697,6 +720,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		holoGridFar = null;
 		DisposeStarfield();
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
@@ -755,6 +779,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		holoGridFar = null;
 		// Stage 13 reskin: replace the three hand-placed Starfield2/tileablestarfield
 		// layers with a deterministic, infinite, scrolling grid of overlapping high-res
 		// nebula tiles, crossfaded by starwindow.fx. See ProceduralStarfield. The legacy
@@ -825,6 +850,7 @@ public class Background : Scene
 		backgroundImage.scrollspeedmodifier = 0.25f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
+		holoGridFar = backgroundImage;
 		// holo-grid, near: cyan hero -> the layer the glitch slips most
 		backgroundImage = new BackgroundImage();
 		backgroundImage.color = new Color(0.42f, 0.82f, 0.95f, 0.55f);
@@ -898,6 +924,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		holoGridFar = null;
 		DisposeStarfield();
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundImage.position = Vector2.Zero;

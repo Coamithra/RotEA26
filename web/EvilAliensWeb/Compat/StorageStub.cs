@@ -62,11 +62,13 @@ namespace Microsoft.Xna.Framework.Storage
         }
     }
 
-    // Mirrors the save tree (/eaweb_save/**) to browser localStorage so settings,
-    // unlockables, awardments and level screenshots survive a page reload. Entries
-    // are keyed by path relative to Root (e.g. "EvilAliens/Settings.xml"). Sync only
-    // writes files whose bytes changed since the last persist and prunes ones the
-    // game deleted (e.g. cleared screenshots).
+    // Mirrors the save tree (/eaweb_save/**) to the browser so settings, unlockables,
+    // awardments and level screenshots survive a page reload. Entries are keyed by path
+    // relative to Root (e.g. "EvilAliens/Settings.xml"). Sync only writes files whose
+    // bytes changed since the last persist and prunes ones the game deleted (e.g. cleared
+    // screenshots). BACKEND SPLIT (routed inside eaSave, index.html): the small XML lives
+    // in localStorage; the large ".dat" screenshot blobs live in IndexedDB (big quota) —
+    // this C# side is backend-agnostic and drives both through SaveInterop.
     internal static class PersistentSave
     {
         private static bool _hydrated;
@@ -110,8 +112,10 @@ namespace Microsoft.Xna.Framework.Storage
 
                 string[] files = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
                 // Small files (settings/unlockables/awardments XML) first, large ones
-                // (.dat screenshots) last — so if a screenshot blows the ~5MB
-                // localStorage quota, the critical data is already persisted.
+                // (.dat screenshots) last. Screenshots now route to IndexedDB (separate,
+                // large quota) via eaSave's backend split, so they no longer compete with
+                // the XML for the ~5MB localStorage cap; the ordering is kept as belt-and-
+                // suspenders for the IndexedDB-unavailable fallback (where .dat -> localStorage).
                 Array.Sort(files, (a, b) =>
                 {
                     long la = new FileInfo(a).Length;

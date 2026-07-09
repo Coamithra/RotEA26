@@ -1126,6 +1126,28 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   the manifest (or rebuild without it) + delete the `brainov_<name>.png`. Don't hand-edit the sheets /
   manifest -- re-run the tools. If a big new sheet stutters at preload, add it to `textures.config` for
   DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
+- **Screenshot `.dat` blobs live in IndexedDB, the small save XML in localStorage (card a5145e9e).**
+  The `eaSave` JS facade (`index.html`) routes by extension: `.dat` -> `window.eaSaveBlob` (IndexedDB
+  store `eaweb_save/screenshots`, huge quota), else localStorage -- C# (`SaveInterop`/`StorageStub`)
+  is backend-agnostic. IndexedDB is async but the game reads saves synchronously, so
+  `eaSaveBlob.preload()` (awaited by `initRenderJS` BEFORE the first game tick, raced against a 3s
+  timeout so a wedged open can't hang boot) pulls every blob into an in-memory map that `eaSave.load`
+  merges; it also one-time-migrates any `.dat` older builds left in localStorage (deleted only after
+  the IDB transaction commits). IndexedDB unavailable/slow -> `.dat` falls back to localStorage (the
+  pre-split path, no data loss). Don't make C# talk to IndexedDB directly -- keep the routing in JS.
+- **Level launches are gated by a PRE-LAUNCH manifest warm (card fe25712a).** A level's whole preload
+  used to decode in ONE JS tick (seconds of blocked event loop -> Chrome "page unresponsive").
+  `Game1.WarmThenLaunch` (every launch path: menu incl. attract demos via `MenuFinished`, and
+  `?level=` via `LaunchLevelDirect`) decodes the level's `Content/preload/manifest.txt` texture set
+  ONE per tick (`levelWarmQueue`/`PumpLevelWarm`) BEFORE the scene is Added, so the browser paints
+  between decodes; the level's own `PreloadGraphicalContent`/`ApplyManifest` stay synchronous and
+  become cache hits. The menu is frozen during the warm (`menuScene.Enabled=false` -- an un-frozen
+  menu re-fires OnFinished every tick from its held FadeToGame state; `ComponentBin.Add` re-enables
+  on return) and keeps drawing its faded frame. The warm is bracketed `BeginPreload`/`EndPreload` so
+  the hitch watchdog stays quiet and `?loadlog` counts it as preload (two preload summary lines per
+  level under `?loadlog` -- warm + residual -- is expected). A level with NO manifest entries
+  launches synchronously (the old behaviour, self-healing); a still-hitching level is a manifest
+  DATA gap -- fix by playing it with `?loadlog` + `eaPreloadExport()`, not by code.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

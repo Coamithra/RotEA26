@@ -1,16 +1,21 @@
 // ---------------------------------------------------------------------------
-// SaveInterop — thin C# -> JS bridge to browser localStorage (Stage 7).
+// SaveInterop — thin C# -> JS bridge to browser save storage (Stage 7).
 //
 // The game saves to the in-memory WASM filesystem (see StorageStub.cs): settings,
 // unlockables, awardments (Achievements.xml) and the level-select screenshots all
 // land under /eaweb_save/EvilAliens/. That tree is lost on reload, so we mirror it
-// to localStorage: the StorageStub hydrates MEMFS from here before the first read
+// to the browser: the StorageStub hydrates MEMFS from here before the first read
 // and flushes changed files back here on every container Dispose.
 //
 // Mirrors the Stage-6 MusicInterop/eaMusic pattern. Keys are paths relative to the
 // save root (e.g. "EvilAliens/Settings.xml"); values are base64 of the raw file
-// bytes (the .dat screenshots are binary). The JS side (window.eaSave in
-// index.html) owns the actual localStorage access.
+// bytes (the .dat screenshots are binary). The JS side (window.eaSave in index.html)
+// owns the actual access and ROUTES by kind: the small XML uses localStorage, the
+// large ".dat" screenshot blobs use IndexedDB (window.eaSaveBlob, a much bigger
+// quota). This C# side is backend-agnostic — it just passes name+base64 through.
+// The IndexedDB blobs are async, so eaSaveBlob.preload() (awaited by initRenderJS
+// before the first game tick) pulls them into memory; Load() then reads them
+// synchronously alongside the localStorage XML.
 // ---------------------------------------------------------------------------
 using System;
 using System.Collections.Generic;

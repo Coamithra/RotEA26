@@ -71,6 +71,11 @@ public class Game1 : Game
 	// launched from startScreen_OnFinished instead of the menu when DebugFlags.Lazershot is set.
 	private EvilAliensWeb.Compat.LazerShowcaseScene lazerShowcaseScene;
 
+	// Web-port text showcase (?textshot): a FROZEN grid of the flattened HUD text (score /
+	// combo / POWER UP pop, plain + chrome) so one screenshot judges the text rendering.
+	// Created in Initialize, launched from startScreen_OnFinished when DebugFlags.Textshot is set.
+	private EvilAliensWeb.Compat.TextShowcaseScene textShowcaseScene;
+
 	private AsteroidChase spaceDodge;
 
 	private BraineroidsLevel braineroids;
@@ -321,6 +326,8 @@ public class Game1 : Game
 		bulletShowcaseScene.OnExitToMenu = bulletShowcaseScene_OnExitToMenu;
 		lazerShowcaseScene = new EvilAliensWeb.Compat.LazerShowcaseScene((Game)(object)this);
 		lazerShowcaseScene.OnExitToMenu = lazerShowcaseScene_OnExitToMenu;
+		textShowcaseScene = new EvilAliensWeb.Compat.TextShowcaseScene((Game)(object)this);
+		textShowcaseScene.OnExitToMenu = textShowcaseScene_OnExitToMenu;
 		creditsScene = new CreditsScene((Game)(object)this);
 		creditsScene.OnFinished += creditsScene_OnFinished;
 		bragScene = new BragScene((Game)(object)this);
@@ -392,6 +399,12 @@ public class Game1 : Game
 		else if (DebugFlags.Lazershot)
 		{
 			collectionHelper.Add((GameComponent)(object)lazerShowcaseScene);
+		}
+		// Debug (?textshot): bypass the menu and boot straight into the frozen text showcase.
+		// menuScene is still wired above, so Esc drops back via textShowcaseScene_OnExitToMenu.
+		else if (DebugFlags.Textshot)
+		{
+			collectionHelper.Add((GameComponent)(object)textShowcaseScene);
 		}
 		// Debug (?level=...): bypass the menu and boot straight into the requested level.
 		// menuScene is still created + wired above, so returning from the level (or losing)
@@ -751,6 +764,13 @@ public class Game1 : Game
 	{
 		lazerShowcaseScene.Teardown();
 		collectionHelper.Remove((GameComponent)(object)lazerShowcaseScene);
+		collectionHelper.Add((GameComponent)(object)menuScene);
+	}
+
+	private void textShowcaseScene_OnExitToMenu()
+	{
+		textShowcaseScene.Teardown();
+		collectionHelper.Remove((GameComponent)(object)textShowcaseScene);
 		collectionHelper.Add((GameComponent)(object)menuScene);
 	}
 

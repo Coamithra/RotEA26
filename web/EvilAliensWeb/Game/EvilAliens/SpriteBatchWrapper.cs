@@ -90,6 +90,25 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// sweep and bloom have overshoot room and don't clip at the glyph edges.
 	private const int MetalPad = 6;
 
+	// Straight-alpha source -> PREMULTIPLIED destination OVER, for flattening LAYERED straight-alpha
+	// draws into an RT (RasteriseShadowText's shadow-then-text). Neither stock state can stack
+	// straight layers correctly: NonPremultiplied squares the alpha onto a transparent target, and
+	// AlphaBlend (One/InvSrcAlpha) only copies the FIRST layer verbatim — a second straight-alpha
+	// layer's anti-aliased edge texels then land at FULL brightness over the layer below
+	// (out.rgb = src.rgb + dst.rgb*(1-a), the premultiplied equation fed straight colour), which
+	// destroyed the text's AA everywhere it overlapped its own drop shadow — the "combo counter /
+	// POWER UP pop looks jaggy, like it renders no transparency" bug (card 37c4ccca). This state
+	// premultiplies each incoming straight layer (color SrcAlpha/InvSrcAlpha) while accumulating
+	// correct coverage (alpha One/InvSrcAlpha), so the RT ends up a correct PREMULTIPLIED flatten;
+	// the composite then draws it with One/InvSrcAlpha (see CompositeShadowText).
+	private static readonly BlendState PremultiplyOver = new BlendState
+	{
+		ColorSourceBlend = Blend.SourceAlpha,
+		ColorDestinationBlend = Blend.InverseSourceAlpha,
+		AlphaSourceBlend = Blend.One,
+		AlphaDestinationBlend = Blend.InverseSourceAlpha,
+	};
+
 	// Glint-sweep timing fed to metal.fx (Time mod SweepPeriod in [0, Period*Active] = one
 	// crossing). Public so an event-driven caller (the score, which sweeps on a digit
 	// rollover rather than the continuous menu marquee clock) can compute the matching
@@ -685,13 +704,15 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		CompositeShadowText(sprite.Rt, sprite.UsedW, sprite.UsedH, sprite.BoxH, sprite.ShadowOffset, position, alpha, metal, glintTime, rs);
 	}
 
-	// Pass 1: rasterise shadow-then-text OPAQUE into `rt`'s top-left corner at render res.
-	// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the straight-alpha
-	// glyphs verbatim (same trick DrawMetalString documents). The text top-left sits at the
-	// MetalPad inset; the shadow is offset from there by shadowOffset, so the whole drop fits inside
-	// the padded box. Where the opaque text covers the opaque shadow, the text wins — the
-	// bleed-through fix. Does the mid-draw target ping-pong and restores whatever was bound on entry
-	// (scene target, or a menu's own RT), NOT a hardcoded null — see the long note in DrawMetalString.
+	// Pass 1: rasterise shadow-then-text OPAQUE into `rt`'s top-left corner at render res, as a
+	// PREMULTIPLIED flatten (PremultiplyOver — see its comment; the old BlendState.AlphaBlend here
+	// only copied the FIRST layer verbatim and hard-edged the text's AA wherever it overlapped the
+	// shadow, the card-37c4ccca jaggies). The text top-left sits at the MetalPad inset; the shadow is
+	// offset from there by shadowOffset, so the whole drop fits inside the padded box. Where the
+	// opaque text covers the opaque shadow, the text wins — the bleed-through fix — and the AA edge
+	// texels now blend correctly over the shadow instead of landing at full brightness. Does the
+	// mid-draw target ping-pong and restores whatever was bound on entry (scene target, or a menu's
+	// own RT), NOT a hardcoded null — see the long note in DrawMetalString.
 	private void RasteriseShadowText(RenderTarget2D rt, string text, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float rs)
 	{
 		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
@@ -701,7 +722,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Matrix m = Matrix.CreateTranslation(MetalPad, MetalPad, 0f) * Matrix.CreateScale(rs);
 		Color shadowOpaque = new Color(shadowColor.R, shadowColor.G, shadowColor.B, byte.MaxValue);
 		Color textOpaque = new Color(textColor.R, textColor.G, textColor.B, byte.MaxValue);
-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, m);
+		spriteBatch.Begin(SpriteSortMode.Deferred, PremultiplyOver, null, null, null, null, m);
 		DrawStringScaled(font, text, shadowOffset, shadowOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
 		DrawStringScaled(font, text, Vector2.Zero, textOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
 		spriteBatch.End();
@@ -716,11 +737,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	}
 
 	// Pass 2: composite `rt`'s used sub-rect (usedW x usedH) ONCE at `position`/`alpha`, optionally
-	// through metal.fx. The RT holds a straight-alpha image; composite with the current BlendMode
-	// (NonPremultiplied for the score) and a white tint carrying `alpha`, so the element fades as one
-	// sprite. metal.fx returns float4(rgb, mask) * color, so the same tint alpha carries through the
-	// chrome path too. boxH + shadowOffset.Y feed the asymmetric glyph-band insets (the drop shadow
-	// extends the bottom) so the chrome gradient lands on the letters, not on the shadow overshoot.
+	// through metal.fx. The RT holds a PREMULTIPLIED flatten (see RasteriseShadowText), so the
+	// composite uses One/InvSrcAlpha (BlendState.AlphaBlend — correct here BECAUSE the source is
+	// premultiplied; this is the deliberate premult-intermediate exception, NOT the straight-content
+	// trap CLAUDE.md warns about) with an (a,a,a,a) tint: rgb and coverage scale together, so the
+	// element fades as one sprite. metal.fx returns float4(rgb, mask) * color, so the same tint
+	// carries through the chrome path too (its gradient is a linear multiply — premult-safe; only the
+	// additive glint isn't mask-multiplied, so a mid-sweep streak can faintly show in the padded box —
+	// chrome is opt-in ?metalscore, acceptable for an A/B look). boxH + shadowOffset.Y feed the
+	// asymmetric glyph-band insets (the drop shadow extends the bottom) so the chrome gradient lands
+	// on the letters, not on the shadow overshoot.
 	private void CompositeShadowText(RenderTarget2D rt, int usedW, int usedH, float boxH, Vector2 shadowOffset, Vector2 position, float alpha, bool metal, float glintTime, float rs)
 	{
 		// End any active wrapper batch before opening our own. RasteriseShadowText already flushes,
@@ -729,7 +755,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// again until End". Idempotent when a rasterise just ran (enabled is already false).
 		Flush();
 		Rectangle used = new Rectangle(0, 0, usedW, usedH);
-		Color composite = new Color((byte)255, (byte)255, (byte)255, (byte)MathHelper.Clamp(alpha * 255f, 0f, 255f));
+		float fade = MathHelper.Clamp(alpha, 0f, 1f);
+		Color composite = new Color(fade, fade, fade, fade);   // premultiplied fade: rgb + coverage together
 		Effect fx = (metal && metalEffect != null) ? metalEffect : null;
 		if (fx != null)
 		{
@@ -744,7 +771,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		}
 		float drawScale = 1f / rs;
 		Vector2 rtOrigin = new Vector2(MetalPad, MetalPad) * rs;    // text top-left in RT texels
-		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, fx, RenderScale.Matrix);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, fx, RenderScale.Matrix);
 		spriteBatch.Draw(rt, position, (Rectangle?)used, composite, 0f, rtOrigin, drawScale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
 	}

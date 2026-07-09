@@ -204,14 +204,17 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			// effects are pixel-only (the internal sprite VS stays bound), so the
 			// transform flows through them unchanged.
 			effectHandler.LoadEffects();
-			// While flattening a group into groupRT, force BlendState.AlphaBlend (One/InvSrcAlpha)
-			// so straight-alpha sprites copy into the transparent RT verbatim (same reason
-			// RasteriseShadowText does — NonPremultiplied would premultiply + square the edge alpha),
+			// While flattening a group into groupRT, force PremultiplyOver so the LAYERED
+			// straight-alpha sprites stack correctly into a PREMULTIPLIED flatten (same fix as
+			// RasteriseShadowText: One/InvSrcAlpha only copies the FIRST layer verbatim — a wing's
+			// AA edge texels would land at full brightness over the already-drawn body, the
+			// destroyed-AA fringe of card 37c4ccca; NonPremultiplied would square the edge alpha),
 			// and use the design->RT capture matrix instead of the design->render one. The group
-			// alpha is applied by EndGroupFlatten's single composite, so the callers still draw at
-			// full opacity here. Ignores per-caller BlendMode changes (base.Draw resets it), which is
-			// intended: every sprite in the group must land opaque for the union to have no double-up.
-			BlendState bs = capturing ? BlendState.AlphaBlend : ToBlendState(blendmode);
+			// alpha is applied by EndGroupFlatten's single premult composite, so the callers still
+			// draw at full opacity here. Ignores per-caller BlendMode changes (base.Draw resets it),
+			// which is intended: every sprite in the group must land opaque for the union to have no
+			// double-up.
+			BlendState bs = capturing ? PremultiplyOver : ToBlendState(blendmode);
 			Matrix mtx = capturing ? captureMatrix : RenderScale.Matrix;
 			spriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effectHandler.CurrentEffect, mtx);
 			enabled = true;
@@ -288,9 +291,13 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	}
 
 	// Finish the group: composite the flattened union ONCE, back at the design bbox, tinted by
-	// `groupColor` (its alpha is the group opacity). The RT holds render-res texels, so drawScale =
-	// 1/rs under RenderScale.Matrix maps them 1:1 into the scene. Honours the current BlendMode
-	// (NonPremultiplied for the fog spiders) so the faded silhouette blends straight-alpha.
+	// `groupColor` (a STRAIGHT tint whose alpha is the group opacity — callers keep the normal
+	// convention). The RT holds a PREMULTIPLIED flatten (see _beginDrawing), so the tint is
+	// premultiplied here (rgb*a, a) and the draw uses One/InvSrcAlpha (BlendState.AlphaBlend —
+	// correct BECAUSE the source is premultiplied; the same premult-intermediate exception as
+	// CompositeShadowText): rgb and coverage scale together, so the whole silhouette fades as one
+	// sprite with correctly blended internal AA edges. Render-res texels, so drawScale = 1/rs
+	// under RenderScale.Matrix maps them 1:1 into the scene.
 	public void EndGroupFlatten(Color groupColor)
 	{
 		Flush();
@@ -308,8 +315,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		if (rs <= 0f) { rs = 1f; }
 		Rectangle used = new Rectangle(0, 0, groupUsedW, groupUsedH);
 		Vector2 pos = new Vector2((float)groupDesignRect.X, (float)groupDesignRect.Y);
-		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, RenderScale.Matrix);
-		spriteBatch.Draw(groupRT, pos, (Rectangle?)used, groupColor, 0f, Vector2.Zero, 1f / rs, (SpriteEffects)0, 0f);
+		Vector4 t = groupColor.ToVector4();
+		Color premultTint = new Color(t.X * t.W, t.Y * t.W, t.Z * t.W, t.W);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, RenderScale.Matrix);
+		spriteBatch.Draw(groupRT, pos, (Rectangle?)used, premultTint, 0f, Vector2.Zero, 1f / rs, (SpriteEffects)0, 0f);
 		spriteBatch.End();
 	}
 

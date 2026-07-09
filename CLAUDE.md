@@ -533,7 +533,9 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `EndGroupFlatten`).** Overlapping straight-alpha sprites each drawn at partial alpha double-brighten
   where they overlap; bracket their draws to flatten them OPAQUE into a shared grow-only RT, then the
   union composites ONCE at the group alpha (used by the background fog `FlyingSpider` -- body + wings
-  fade as one silhouette; foreground spiders draw directly).
+  fade as one silhouette; foreground spiders draw directly). Like the text flatten, the capture is
+  PREMULTIPLIED (`PremultiplyOver` -> One/InvSrcAlpha composite with a premultiplied tint; callers
+  still pass a normal straight tint) so a layer's AA edges blend correctly over the layer below.
 - **Laser FX (`Quad.cs` beam + `LazerGeneratorData.cs` chargeup) — LIVE tuning via `?lazershot`
   (Trello "improve laser animation").** The Protoss-style beam is `Quad.Draw` (a wide blue glow +
   white-hot core, each ONE continuous sprite, + tip/muzzle blooms + electric tendrils); the pre-fire

@@ -53,7 +53,7 @@ internal sealed class BrainBossOverlays
         public float TexCenterX, TexCenterY, TexW, TexH;
         public int CellW, CellH;
         public bool PingPong;
-        // false => draw the nearest frame, no interpolation shader. The eye's discrete
+        // false => draw the current (floor) frame, no interpolation shader. The eye's discrete
         // open/look/close reads better STEPPED than cross-faded (the tween morphs the
         // eyeball). Mechanical flicker (pods) keeps interpolation for smooth light changes.
         public bool Interpolate;

@@ -166,6 +166,145 @@ Measured cost: ~600-1500 batched slice draws on the dense variations, **~3.6 ms/
 path (median 24.7 vs 21.1 ms, WASM Debug). No new hitch -- the 121 ms frame at wall spawn reproduces
 with `?walltowers=0` and is pre-existing.
 
+## Feel-dialing pass (card 9dcb4695)
+
+Three deltas on top of "As built", all from watching it under `?level=Level3&wallsonly&invuln`:
+
+6. **The side sheet needed MORE AXES; a square cell can never texture a side face.** Every slice
+   sampled the same square, so the thin sliver it left exposed was always the same BORDER texels of
+   that cell, smeared radially out of the VP -- the shafts read as vertical streaks with no surface
+   of their own. This is inherent to the slice trick, not a tuning failure: no value of slice step,
+   fog, or side darkening can put detail on an axis the sheet doesn't have. `build_wall_side.py` now
+   emits a 2D **scan plane** per cell (640x640): area-averaged (which is what keeps delta 5's comb
+   gone), mirror-tiled so it wraps seamlessly on both axes, wrap-padded by the window size.
+   `?wallsidescan=` slides a `SideWindow`-sized window across the block's own plane as the shaft
+   descends, so successive slivers expose successive texels.
+
+   **The scan must travel PERPENDICULAR to the exposed edge**, and this is the whole reason it is a
+   plane rather than a strip. The exposed sliver is the slice rect's edge FACING the VP. A block
+   above/below the VP exposes a horizontal edge, whose sliver is a ROW of the window (perpendicular =
+   Y). A block left/right of the VP exposes a vertical edge, whose sliver is a COLUMN (perpendicular
+   = X); sliding in Y merely TRANSLATES that column's pattern along the face, re-showing the same
+   texels, and stacked over 64 slices the features trace **hard diagonal streaks**. (A vertical-strip
+   sheet was built first and did exactly that to every left/right shaft; caught on the first live
+   look, not by the offline render -- which only exercised a below-VP block.)
+
+   The fix is to scan **DIAGONALLY** -- the same offset on both axes. That advances the exposed row
+   AND the exposed column by one texel per slice, so every orientation gets the full perpendicular
+   travel at once, corner blocks (which expose two faces) included. It also depends only on `t`, so
+   it is a pure function of depth.
+
+   **Rejected: picking the axis per block from `|dx|` vs `|dy|`.** It looks right in a still -- each
+   block scans perpendicular to its dominant face -- but a wall SCROLLS, so `dy` sweeps through zero
+   while `dx` is fixed, and every block crosses the `|dx| = |dy|` boundary mid-screen. The axis flips
+   in one frame and the texture **pops**. Shipped, spotted immediately, reverted. A static offline
+   render cannot show a defect that only exists over time; this is the lesson of the delta.
+
+   The price of the diagonal is that the offset perpendicular to one edge is PARALLEL to the other,
+   so each face is also sheared ~45 degrees along its length. Consecutive slivers carry genuinely
+   different texels, so it reads as diagonal grain rather than the coherent lines a pure translation
+   produces. A dedicated per-axis scan is slightly crisper on the face it serves; the diagonal trades
+   that for being correct, branch-free and pop-free everywhere.
+
+   The scan advances `scan * scanSpan / slices` texels per slice, so the natural value is **one texel
+   per slice**: `scan = MaxSlices / scanSpan` = 64/64 = **1** (baked). Below it slices repeat a window
+   and smear; above it they skip texels and the shaft corrugates into visible ridges.
+   `Wall.SideWindow` is a CONTRACT with the tool's `CELL`; the game derives
+   `planePitch = side.Width/8` and `scanSpan = planePitch - SideWindow`, so a square (pre-plane) sheet
+   gives span 0 and degrades to the old streaked look, never garbage.
+
+7. **Baked slice step 1 -- but the step is inert there and `MaxSlices` is what binds.** Worst on-screen
+   lean is ~170 px, so step 1 asks for ~170 slices and is clamped to 64: an effective ~2.7 px step at
+   the far corners, finer everywhere else. That is exactly why 5 -> 1 barely moved the frame time
+   (slice count 34 -> 64, not 34 -> 170). Resolving a true 1 px step means raising `MaxSlices`, at ~3x
+   the slice draws -- not done; nobody has asked for it by eye.
+
+8. **`?walltwist=<deg>` -- the shaft twists between cap and base.** Each depth-layer is rotated by
+   `twist * (1 - t)` (zero at the cap, so it meets the unrotated top face cleanly). Baked **0**.
+
+   The rotation is applied to the WHOLE LAYER about the VANISHING POINT, never to each slice about
+   its own centre. A rigid rotation of a layer about the VP keeps every footprint at that depth an
+   affine image of the others, so adjacent blocks stay glued edge to edge and footprints stay
+   DISJOINT -- which is precisely what makes the single global painter's order (delta 1) correct.
+   Rotating each slice in place tiles nothing: squares rotated about their own centres do not meet,
+   so every solid block cluster opens X-shaped cracks down its shaft and corners swing outside their
+   footprint into a neighbour's. Verified offline on a 2x2 cluster; the per-slice variant fans the
+   slices apart into stacked offset cards.
+
+   KNOW WHAT IT ACTUALLY DOES: rotating about the VP does not twist a tower about its OWN axis, it
+   ORBITS it about screen centre. Tangential displacement is `radius * angle`, so towers far from
+   the VP sweep long arcs and bend, while central ones barely move -- a swirl, not a uniform twist.
+   A true per-tower twist would need a per-tower centre, and the slice pass has no notion of a
+   tower, only of independent blocks. (SpriteBatch source rects are axis-aligned, so the texture
+   cannot be rotated independently of the geometry either.)
+
+9. **Seams between adjacent blocks: the side sheet must be ONE seamless image, not per-cell tiles.**
+   The first plane sheet gave every block its own isolated, mirror-tiled island, so neighbouring shafts
+   had unrelated texture phases and hard-edged at every block boundary. `756-v1` already tiles seamlessly
+   (the top faces have always relied on that), so the side sheet is now a contiguous area-averaged copy of
+   it, wrap-padded by the window size: block j's window sits at `j*CELL` and its neighbour's ABUTS it, so
+   at a shared screen edge both sample the identical texel.
+
+   A SECOND cause survived that fix: adjacent atlas windows do not filter across their shared edge -- each
+   CLAMPS -- so a magnified window still leaves a mismatched band. The window is now 64 texels (~1 per
+   on-screen pixel at a typical block), making the clamp sub-pixel. Measured across a block boundary: the
+   step is 0.91x an ordinary interior texel step (1.0 = seamless). Also: `?wallsidescan=` is in TEXELS PER
+   SLICE, not wrap-cycles, so its natural value stays 1 when the sheet is resized.
+
+10. **Corners: per-face shading needs a PIXEL SHADER, not more draws.** With the texture continuous across
+   blocks, nothing distinguishes a north face from an east face. A sprite carries one tint and a slice's
+   visible sliver is the border RING of its square, spanning two faces -- so a per-sprite tint cannot shade
+   them apart. `tools/shaders/src/faceshade.fx` classifies each pixel by which triangle of the square's two
+   DIAGONALS it lands in (mitred corners, as a real box has) and scales rgb by that face's factor.
+
+   The trick that keeps it one batch: SpriteBatch passes ATLAS texcoords, and every block samples a
+   different window -- but the origins are `j*SideWindow + off` mod a multiple of `SideWindow`, so they are
+   all congruent to `off` mod `SideWindow`. One per-slice uniform therefore recovers every sprite's local
+   UV. Cost: ~64 batch flushes per wall, versus the ~1500 extra managed sprite draws a two-tints-per-slice
+   geometric split would need (and managed per-draw cost is the bottleneck here -- see the 3D spike card).
+
+   **Only OUTER edges are faces.** Shading all four sides of every block mitres a dark wedge into each
+   block's corner, and two of them meet at every interior boundary -- a seam grid across what should be a
+   continuous surface. (Shipped; spotted immediately in game.) The shader therefore shades by NEAREST
+   EXPOSED EDGE, with hidden sides pushed out of the search: a north band then runs unbroken to the block's
+   edge when there is no east face to mitre against, and the mitre survives only at genuine wall corners.
+   The mask is per-BLOCK, and a per-block uniform would break the batch -- but the slice TINT is per-SLICE,
+   so the two swap: tint becomes the `SliceTint` uniform, and the sprite's vertex colour carries the 4-bit
+   mask (`Wall.FaceMask`, the same `isfree()` the edge lines use). Zero extra flushes. Verified as a unit
+   test of the decision rule, not by eye: an image probe across a boundary averages several slices at
+   different local v and smears the wedge away.
+
+   Factors are DARKEN-ONLY (the tint already carries the fog lerp; >1 clips the hazy base to white) and
+   lerp toward 1 with the haze so shading dissolves into fog at the base. The corner contrast comes from
+   ORIENTATION (vertical faces darken, horizontal ones don't), not from the light: a block always shows one
+   horizontal and one vertical face, so every corner in every quadrant reads. A pure directional light
+   would give exactly zero contrast in two of the four quadrants. `?wallfaceangle` adds a weak directional
+   term on top so north != south and east != west.
+
+11. **Unloading must be deferred past the bottom edge (`Wall.DeathY`).** Bases project toward the VP, so a
+   block below the VP has its shaft drawn ABOVE its cap: when the last cap crosses y=600 the towers are
+   still on screen and `Position.Y > 600 -> Die()` pops them away. The last visible point is the base of
+   the topmost row, at Position.Y, so solve `VanishY + (Position.Y - VanishY)*depth >= 600`, giving
+   `deathY = VanishY + (600 - VanishY)/depth` (754.5 at depth 0.66; exactly 600 at depth 1, and 600 with
+   the towers off, so `?walltowers=0` unloads unchanged).
+
+   NOT purely cosmetic: `Walls.wall_OnDeath` calls `Terminate()`, so this delays the level's NEXT EVENT by
+   the extra ~154 px of scroll (~0.6 s at the wall sections' `4.3/16.667` px/ms). Deliberate -- the section
+   is not over until its towers have gone -- but it is a pacing change, not just a draw change.
+
+12. **`?walltoplift=` -- tower tops drawn proud of the gameplay plane.** Top faces (and their edge
+   lines) project at depth `1 + lift`, i.e. scaled away from the VP, exactly as their shaft's topmost
+   slice is. Baked **0** (flush). COSMETIC ONLY: `CollisionType`/`CollisionLevelMap` keep using the
+   unprojected block rects, so a lift drifts the sprite off its own hitbox by `lift * distance-from-VP`
+   (~8 design px at a screen corner for lift 0.02). Small values only; check with `?hitboxes`.
+
+Drawing verified offline (a Pillow re-implementation of the slice sampling against the real PNGs,
+rendering a below-VP and a left-of-VP block under each scan axis) as well as live -- the wall
+scrolls, and the canvas is black whenever its tab is backgrounded, so the offline render is what
+makes a still comparison possible at all. Note the offline render is what the eye missed: the
+strip sheet looked fine on a below-VP block, and only a LIVE look at a full walls section showed
+the left/right shafts shearing. Render both orientations when touching this.
+
 ## Work breakdown
 
 1. Projection + slice pass + tints in `Wall.Draw` (+ `walltowers` kill switch). The core.

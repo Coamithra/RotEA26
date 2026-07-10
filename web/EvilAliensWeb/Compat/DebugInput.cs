@@ -141,6 +141,25 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitstop " + ms + "ms");
 		}
 
+		// JS bridge for the wall-tower cost meter (eaWallPerf / eaWallStats in wwwroot/index.html,
+		// polled by the eaWalls slider panel). WallPerf(on) arms the accumulators; WallStats() returns
+		// one formatted line (fps, frame ms + p95, tower-pass ms, slice draws). Off by default, so a
+		// normal boot never touches the stopwatch.
+		//
+		// The panel POLLS this ~4x/second rather than pushing per frame: a per-frame JS interop call
+		// would itself cost more than the thing being measured.
+		[JSInvokable("debugWallPerf")]
+		public static void WallPerf(bool on)
+		{
+			WallProfiler.SetEnabled(on);
+		}
+
+		[JSInvokable("debugWallStats")]
+		public static string WallStats()
+		{
+			return WallProfiler.Report();
+		}
+
 		// JS bridge for the hitbox debug overlay (eaHitboxes in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitboxes', on). Toggles the ?hitboxes
 		// overlay at runtime (draws every collidable's collision shape colour-coded by kind);
@@ -187,13 +206,14 @@ namespace EvilAliensWeb.Compat
 
 		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
 		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
-		// 'debugSetWalls', towers, depth, sliceStep, fog, sideDark, wisps, wispSpeed). Overrides the
-		// Level-3 tower-extrusion knobs in real time so the sliders retune without a page reload —
-		// same effect as the ?walltowers/?walldepth/?wallslicestep/?wallfog/?wallsidedark/?wallwisps/
-		// ?wallwispspeed URL flags, just live. (?wallfogcolor stays URL-only — a colour picker is a
-		// different widget and the tint reads fine off the two brightness knobs.)
+		// 'debugSetWalls', towers, depth, sliceStep, fog, sideDark, sideScan, twist, faceLight, faceAngle, topLift, wisps,
+		// wispSpeed). Overrides the Level-3 tower-extrusion knobs in real time so the sliders retune
+		// without a page reload — same effect as the ?walltowers/?walldepth/?wallslicestep/?wallfog/
+		// ?wallsidedark/?wallsidescan/?walltwist/?wallfacelight/?wallfaceangle/?walltoplift/?wallwisps/?wallwispspeed URL flags,
+		// just live. (?wallfogcolor stays URL-only — a colour picker is a different widget and the
+		// tint reads fine off the two brightness knobs.)
 		[JSInvokable("debugSetWalls")]
-		public static void SetWalls(bool towers, double depth, double sliceStep, double fog, double sideDark, double wisps, double wispSpeed)
+		public static void SetWalls(bool towers, double depth, double sliceStep, double fog, double sideDark, double sideScan, double twist, double faceLight, double faceAngle, double topLift, double wisps, double wispSpeed)
 		{
 			DebugFlags.SetWallsOverride(
 				towers,
@@ -201,6 +221,11 @@ namespace EvilAliensWeb.Compat
 				(float)sliceStep,
 				(float)fog,
 				(float)sideDark,
+				(float)sideScan,
+				(float)twist,
+				(float)faceLight,
+				(float)faceAngle,
+				(float)topLift,
 				(float)wisps,
 				(float)wispSpeed);
 		}

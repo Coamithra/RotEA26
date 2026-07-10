@@ -44,6 +44,7 @@ WORK = REPO / "new_assets_raw/brainanim"
 SPRITES = REPO / "web/EvilAliensWeb/wwwroot/Content/gfx/sprites"
 DATA = REPO / "web/EvilAliensWeb/wwwroot/Content/data"
 MANIFEST = DATA / "brainoverlays.json"
+PRELOAD = REPO / "web/EvilAliensWeb/wwwroot/Content/preload/manifest.txt"
 BRAIN_W, BRAIN_H = 1448, 1086            # brainbosshd.png dims (texture space)
 
 # --- packing / look knobs ---
@@ -53,6 +54,8 @@ FEATHER = 0.20          # edge feather as a fraction of the smaller cell dim (di
 DEFAULT_FPS = 10.0      # playback fps (ping-ponged in game); mech faster, flesh slower via regions
 SEP = 1                 # transparent cell gutter so interpolation can't bleed across cells
 STAB_BAND = 0.15        # outer band fraction the camera fit is scored on (see stabilize)
+STAB_DEADZONE_ZOOM = 0.003   # |s-1| below this AND shift below the px deadzone -> don't warp
+STAB_DEADZONE_PX = 0.4       # a fit this small is noise; warping would only soften the frame
 
 
 def load_regions():
@@ -62,14 +65,18 @@ def load_regions():
 
 def apply_knobs(entry, region):
     """Copy the PLAYBACK knobs from a region onto a manifest entry. These don't depend on
-    the packed pixels, so they stay retunable long after the raw frames are gone."""
+    the packed pixels, so they stay retunable long after the raw frames are gone. Each knob
+    is popped then re-inserted so the key ORDER is identical whether the entry came from a
+    fresh build() or a --sync of an old one -- otherwise the two paths churn the committed
+    JSON diff."""
+    entry.pop("fps", None)
     entry["fps"] = region.get("fps", DEFAULT_FPS)
+    entry.pop("blend", None)
     entry["blend"] = region.get("blend", "alpha")
+    entry.pop("triggerAvgSeconds", None)
     trigger = region.get("triggerAvgSeconds")
     if trigger:
         entry["triggerAvgSeconds"] = float(trigger)   # rest on frame 0, play ~every N s
-    else:
-        entry.pop("triggerAvgSeconds", None)          # continuous ping-pong loop
     return entry
 
 
@@ -77,6 +84,20 @@ def load_manifest():
     if not MANIFEST.exists():
         return {}
     return {e["name"]: e for e in json.loads(MANIFEST.read_text(encoding="utf-8"))["overlays"]}
+
+
+def drop_from_preload(name):
+    """Strip every `<Level>|gfx/sprites/brainov_<name>` line from the level preload manifest
+    so --drop leaves no dangling texture load (ApplyManifest would log a failed load each
+    boss level otherwise). Returns how many lines were removed."""
+    if not PRELOAD.exists():
+        return 0
+    asset = f"gfx/sprites/brainov_{name}"
+    lines = PRELOAD.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept = [ln for ln in lines if ln.rstrip("\r\n").split("|")[-1] != asset]
+    if len(kept) != len(lines):
+        PRELOAD.write_text("".join(kept), encoding="utf-8", newline="")
+    return len(lines) - len(kept)
 
 
 def write_manifest(manifest, regions):
@@ -203,6 +224,10 @@ def stabilize(frames):
     colour_match undoes the VAE's colour drift. Frame 0 is the untouched crop, so locking
     to it also guarantees the resting pose matches the sprite underneath.
 
+    A fit within the deadzone (essentially identity) leaves the frame UNTOUCHED: the SSD
+    minimum on a genuinely locked-off take can sit at a spurious sub-pixel warp, and warping
+    to it would only add bilinear softening where there was no camera move to remove.
+
     Returns (frames, max_zoom_pct, max_shift_px) so build() can report what it removed."""
     if len(frames) < 2:
         return frames, 0.0, 0.0
@@ -211,10 +236,14 @@ def stabilize(frames):
     zooms, shifts = [], []
     for f in frames[1:]:
         s, dx, dy = _fit_camera(ref_g, f.mean(axis=2).astype(np.float32))
-        zooms.append(abs(s - 1.0))
-        shifts.append(math.hypot(dx, dy))
+        zoom, shift = abs(s - 1.0), math.hypot(dx, dy)
+        if zoom < STAB_DEADZONE_ZOOM and shift < STAB_DEADZONE_PX:
+            out.append(f)                            # fit is noise; leave the frame alone
+            continue
+        zooms.append(zoom)
+        shifts.append(shift)
         out.append(np.clip(_warp(f, s, dx, dy), 0, 255))
-    return out, 100.0 * max(zooms), max(shifts)
+    return out, 100.0 * max(zooms, default=0.0), max(shifts, default=0.0)
 
 
 def colour_match(frames, crop_rgb, crop_alpha):
@@ -250,7 +279,7 @@ def build(name, region):
     if not frames:
         print(f"  {name}: NO FRAMES (run gen_brain_anims.py first) - skipped")
         return None
-    motion, drift = triage(frames)
+    motion, _ = triage(frames)   # full-rate motion, for the STATIC-DUD screen only
     x0, y0, x1, y1 = region["box"]
     brain = np.asarray(Image.open(
         REPO / "web/EvilAliensWeb/wwwroot/Content/gfx/sprites/brainbosshd.png"
@@ -335,7 +364,9 @@ def main():
                 continue
             sheet = SPRITES / f"brainov_{name}.png"
             sheet.unlink(missing_ok=True)
-            print(f"  {name}: dropped (removed {sheet.name})")
+            removed = drop_from_preload(name)
+            print(f"  {name}: dropped (removed {sheet.name}"
+                  f"{f', {removed} preload line(s)' if removed else ''})")
         write_manifest(manifest, regions)
         return
     if "--sync" in flags:

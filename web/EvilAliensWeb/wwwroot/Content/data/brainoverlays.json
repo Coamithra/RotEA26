@@ -7,7 +7,6 @@
    "cols": 3,
    "rows": 6,
    "frames": 17,
-   "fps": 7,
    "texCenterX": 705.0,
    "texCenterY": 565.0,
    "texW": 320,
@@ -15,8 +14,9 @@
    "cellW": 224,
    "cellH": 190,
    "sep": 1,
-   "blend": "alpha",
    "pingpong": true,
+   "fps": 7,
+   "blend": "alpha",
    "triggerAvgSeconds": 15.0
   },
   {

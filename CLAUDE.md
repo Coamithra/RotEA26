@@ -1326,7 +1326,8 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `preload/manifest.txt` so they don't decode mid-fight. **To retune:** edit `regions.json` (box/prompt/
   seed/fps/trigger), re-run `gen_brain_anims.py <name>` then `build_brain_overlays.py <name>...` with ONLY
   the winners (that rebuilds their sheets + rewrites the manifest); **`--drop <name>`** removes an overlay
-  (manifest entry + its `brainov_<name>.png`) and **`--sync`** re-syncs playback knobs only. Don't
+  (manifest entry + its `brainov_<name>.png` + its `preload/manifest.txt` lines) and **`--sync`** re-syncs
+  playback knobs only. Don't
   hand-edit the sheets / manifest -- re-run the tools. If a big new sheet stutters at preload, add it to
   `textures.config` for DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
   **GOTCHA -- the model ALWAYS invents a slow camera zoom; the build STABILISES it out.** Each patch is

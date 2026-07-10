@@ -41,10 +41,6 @@ public class EffectHandler
 
 	private Effect staticAlphaEffectFile;
 
-	private FaceShadeEffect faceShadeEffect;
-
-	private Effect faceShadeEffectFile;
-
 	private Effect colorize_lightenEffectFile;
 
 	private Effect colorize_fadeEffectFile;
@@ -77,8 +73,6 @@ public class EffectHandler
 
 	public StaticAlphaEffect StaticAlphaEffect => staticAlphaEffect;
 
-	public FaceShadeEffect FaceShadeEffect => faceShadeEffect;
-
 	// The effect SpriteBatchWrapper should apply for the current batch (null = the
 	// default sprite shader). Valid after LoadEffects(), cleared by UnloadEffects().
 	public Effect CurrentEffect => currentEffect;
@@ -91,7 +85,6 @@ public class EffectHandler
 		outlineEffect = new OutlineEffect();
 		fadeEffect = new FadeEffect();
 		staticAlphaEffect = new StaticAlphaEffect();
-		faceShadeEffect = new FaceShadeEffect();
 		currentEffect = null;
 	}
 
@@ -103,7 +96,6 @@ public class EffectHandler
 		flag |= outlineEffect.hasStateChanged();
 		flag |= fadeEffect.hasStateChanged();
 		flag |= interpolateEffect.hasStateChanged();
-		flag |= faceShadeEffect.hasStateChanged();
 		return flag | staticAlphaEffect.hasStateChanged();
 	}
 
@@ -129,7 +121,6 @@ public class EffectHandler
 		fadeEffect.SaveState();
 		interpolateEffect.SaveState();
 		staticAlphaEffect.SaveState();
-		faceShadeEffect.SaveState();
 
 		currentEffect = SelectEffect();
 		if (currentEffect == null)
@@ -141,14 +132,6 @@ public class EffectHandler
 		// Tinting: the FADE variants receive the sprite colour via FadeValue (the
 		// game enables fade for exactly those draws); non-fade variants tint via
 		// the vertex colour the normal SpriteBatch way.
-		if (faceShadeEffect.Enabled)
-		{
-			Set("FaceFactors", faceShadeEffect.Factors);
-			Set("SliceTint", faceShadeEffect.SliceTint);
-			Set("Window", faceShadeEffect.Window);
-			Set("SheetSize", faceShadeEffect.SheetSize);
-			Set("WindowOrigin", faceShadeEffect.WindowOrigin);
-		}
 		if (staticAlphaEffect.Enabled)
 		{
 			Set("Alpha", staticAlphaEffect.Alpha);
@@ -176,10 +159,6 @@ public class EffectHandler
 	{
 		// Highest precedence: it is enabled only around the wall-tower slice loop, which composes
 		// with nothing else. A missing file (partial deploy) falls through to the flat-shaded look.
-		if (faceShadeEffect.Enabled && faceShadeEffectFile != null)
-		{
-			return faceShadeEffectFile;
-		}
 		if (staticAlphaEffect.Enabled)
 		{
 			return staticAlphaEffectFile;
@@ -304,7 +283,6 @@ public class EffectHandler
 		lighten_interpolateEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten_interpolate");
 		colorize_lighten_interpolate_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/colorize_lighten_interpolate_fade");
 		lighten_interpolate_fadeEffectFile = contentManager.Load<Effect>("GFX/Effects/lighten_interpolate_fade");
-		faceShadeEffectFile = contentManager.Load<Effect>("GFX/Effects/faceshade");
 		// staticAlpha must be loaded LAST: LoadEffects() uses staticAlphaEffectFile
 		// != null as the "effects are ready" sentinel.
 		staticAlphaEffectFile = contentManager.Load<Effect>("GFX/Effects/staticAlpha");

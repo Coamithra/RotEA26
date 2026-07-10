@@ -1,4 +1,4 @@
-"""Offline preview + matrix check for Wall.DrawTowerShafts3D (?wall3d, Trello a66fc73e).
+"""Offline preview + matrix check for Wall.DrawTowerShafts3D (Trello a66fc73e).
 
 CLAUDE.md forbids verifying wall drawing with a live screenshot: the wall scrolls, and the
 canvas is black whenever its tab is backgrounded. So the 3D pass is checked here instead,
@@ -8,15 +8,16 @@ Two things are proven:
 
 1. MATRIX CHECK. Wall.cs builds a real perspective camera (View * Projection) so the GPU
    does the perspective divide and interpolates UVs correctly. That camera must reproduce
-   Wall.Project(top, d) = VP + (top - VP) * d exactly, or the 3D towers land on different
-   pixels than the slice towers and the top faces stop lining up with their shafts. This
-   pushes vertices through the same XNA matrices (row-vector convention) and compares.
+   Wall.Project(top, d) = VP + (top - VP) * d exactly, or the shafts stop lining up with the
+   sprite-drawn top faces they hang from. This pushes vertices through the same XNA matrices
+   (row-vector convention) and compares.
 
 2. IMAGE. Rasterise the side faces the way the GPU will: for each pixel solve the ruled
    surface p(s,d) = VP + (lerp(A,B,s) - VP) * d for (s, d) -- which is precisely what
    perspective-correct interpolation computes -- then sample the block's real 8x8 cell at
-   (u,v) and tint by the shared ShaftTint curve. Blocks are painter-sorted by distance
-   from the VP (see verify_tower_order.py); top faces are painted last, as in Wall.Draw.
+   (u,v), shade it by the wall's face factor, and lerp it toward the haze with the same
+   distance fog BasicEffect applies. Blocks are painter-sorted by distance from the VP (see
+   verify_tower_order.py); top faces are painted last, as in Wall.Draw.
 
 Run:  python tools/walls/preview_wall3d.py
 Writes tools/walls/_preview_wall3d.png (gitignored).
@@ -29,12 +30,15 @@ W, H = 800, 600
 DEPTH = 0.66
 EYE = 600.0
 NEAR_FRAC = 0.9
-BANDS_NOTE = "bands only quantise the colour ramp; geometry/UV are exact here"
+BANDS_NOTE = "bands only quantise the bottom dissolve; geometry, UV and fog are exact here"
 
 SIDE_DARK = 0.55
 FOG_AMOUNT = 1.0
 FOG_COLOR = np.array([158.0, 199.0, 242.0])
 DISSOLVE = 0.18
+FACE_LIGHT = 0.35
+FACE_ANGLE = 225.0
+FACE_DIR_WEIGHT = 0.35
 
 WALL_PNG = "web/EvilAliensWeb/wwwroot/Content/gfx/base/756-v1.png"
 LEVEL3 = "web/EvilAliensWeb/wwwroot/Content/levels/level3.txt"
@@ -112,13 +116,34 @@ def matrix_check(depth=DEPTH):
 
 
 # ---------------------------------------------------------------- shading
-def shaft_tint(t):
-    k = np.clip(FOG_AMOUNT * (1.0 - t), 0.0, 1.0)[..., None]
-    side = np.full(3, 255.0 * SIDE_DARK)
-    rgb = side * (1 - k) + FOG_COLOR * k
+def shaft_alpha(f):
+    """Coverage at height fraction f (0 = cap, 1 = ground). Mirrors Wall.ShaftAlpha."""
+    t = 1.0 - f
     s = np.clip(t / DISSOLVE, 0.0, 1.0)
-    alpha = np.where(t < DISSOLVE, s * s * (3 - 2 * s), 1.0)
-    return rgb, alpha
+    return np.where(t < DISSOLVE, s * s * (3 - 2 * s), 1.0)
+
+
+def face_factors(light, angle_deg):
+    """(north, south, east, west) flat shades. Mirrors Wall.FaceFactors."""
+    a = np.radians(angle_deg)
+    lx, ly = np.cos(a), np.sin(a)
+    d = FACE_DIR_WEIGHT * light
+    north = 1.0 - d * (1.0 + ly) * 0.5
+    south = 1.0 - d * (1.0 - ly) * 0.5
+    east = (1.0 - light) * (1.0 - d * (1.0 - lx) * 0.5)
+    west = (1.0 - light) * (1.0 - d * (1.0 + lx) * 0.5)
+    return north, south, east, west
+
+
+def fog_factor(d, depth):
+    """BasicEffect distance fog, keyed on eye distance e/d. Mirrors DrawTowerShafts3D."""
+    if FOG_AMOUNT <= 0.001:
+        return np.zeros_like(d)
+    start = EYE / 1.0                      # the cap (topD == 1 here)
+    end = EYE / depth
+    if FOG_AMOUNT < 1.0:
+        end = start + (end - start) / FOG_AMOUNT
+    return np.clip((EYE / np.clip(d, 1e-6, None) - start) / (end - start), 0.0, 1.0)
 
 
 def solve_sd(A, B, px, py):
@@ -181,6 +206,19 @@ def render(blocks, pos, tex):
                              + (bh * (t[0] + .5) + pos[1] - VANISH[1]) ** 2))
 
     shaftH = shaft_height(DEPTH)
+    n_f, s_f, e_f, w_f = face_factors(FACE_LIGHT, FACE_ANGLE)
+
+    def free(jj, ii):
+        """Mirrors Wall.isfree EXACTLY, asymmetry included: out-of-range x reads SOLID (the wall
+        spans the full screen width, so its leftmost/rightmost columns sit at x=0/800 and their
+        outer walls are off-screen), while out-of-range y reads FREE (a section's first and last
+        rows are genuinely exposed ends)."""
+        if jj < 0 or jj >= w:
+            return False
+        if ii < 0 or ii >= h:
+            return True
+        return not blocks[ii, jj]
+
     for (i, j) in vis:
         x0 = bw * j + pos[0]
         y0 = bh * i + pos[1]
@@ -191,13 +229,14 @@ def render(blocks, pos, tex):
         # (A, B, alongA, alongB, down0, down1, alongIsX) -- along-edge follows the axis the edge
         # runs along (vertical edge spans rows -> v; horizontal edge spans columns -> u), which is
         # what makes coplanar neighbouring walls continue instead of seaming. See Wall.cs.
+        # Emitted only when the side is an OUTER edge (no neighbouring block) AND faces the eye.
         faces = []
-        if x0 > VANISH[0]: faces.append((np.array([x0, y0]), np.array([x0, y1]), v0, v1, u0, u1, False))
-        if x1 < VANISH[0]: faces.append((np.array([x1, y1]), np.array([x1, y0]), v1, v0, u1, u0, False))
-        if y0 > VANISH[1]: faces.append((np.array([x1, y0]), np.array([x0, y0]), u1, u0, v0, v1, True))
-        if y1 < VANISH[1]: faces.append((np.array([x0, y1]), np.array([x1, y1]), u0, u1, v1, v0, True))
+        if x0 > VANISH[0] and free(j - 1, i): faces.append((np.array([x0, y0]), np.array([x0, y1]), v0, v1, u0, u1, False, w_f))
+        if x1 < VANISH[0] and free(j + 1, i): faces.append((np.array([x1, y1]), np.array([x1, y0]), v1, v0, u1, u0, False, e_f))
+        if y0 > VANISH[1] and free(j, i - 1): faces.append((np.array([x1, y0]), np.array([x0, y0]), u1, u0, v0, v1, True, n_f))
+        if y1 < VANISH[1] and free(j, i + 1): faces.append((np.array([x0, y1]), np.array([x1, y1]), u0, u1, v1, v0, True, s_f))
 
-        for (A, B, alongA, alongB, down0, down1, along_is_x) in faces:
+        for (A, B, alongA, alongB, down0, down1, along_is_x, shade) in faces:
             r = solve_sd(A, B, px, py)
             if r is None:
                 continue
@@ -211,9 +250,11 @@ def render(blocks, pos, tex):
             down = down0 + (down1 - down0) * f
             u, v = (along, down) if along_is_x else (down, along)
             texel = sample(tex, u, v).astype(float)
-            rgb, alpha = shaft_tint(1.0 - f)
-            src = texel * (rgb / 255.0)
-            a = (alpha * ok)[..., None]
+            src = texel * (SIDE_DARK * shade)
+            # Real distance fog: LERP toward the haze colour (a sprite tint could only multiply).
+            fw = fog_factor(d, DEPTH)[..., None]
+            src = src * (1.0 - fw) + FOG_COLOR * fw
+            a = (shaft_alpha(f) * ok)[..., None]
             img = img * (1 - a) + src * a
 
     # top faces last (d == 1, nearest the eye) -- unchanged from the sprite pass

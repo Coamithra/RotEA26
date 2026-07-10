@@ -12,46 +12,27 @@ each dimension — any resolution works, and **no game code changes**.
 The current `756-v1.png` is a low-res **512×512**; it looks blurry because each 64-px cell is
 blown up hugely on screen. This folder is the pipeline to ship a **higher-res** version.
 
-## Companion sheet: `756-v1-side.png` (`build_wall_side.py`)
+## Verification: `verify_tower_order.py` and `preview_wall3d.py`
 
-Since card `d59266cc`, `Wall.Draw` also extrudes each block **downward into a 3D tower shaft**
-(see `plans/walls-3d-towers.md`). The shaft slices sample a **separate sheet**, never the wall
-texture: slicing the full-res cell makes the shaft corduroy (consecutive slices redraw the same
-high-frequency detail at slightly different scales, so the sliver each one leaves exposed repeats
-it rather than smearing into a wall face).
+Since cards `d59266cc` + `a66fc73e`, `Wall.DrawTowerShafts3D` extrudes each block **downward into a
+real 3D tower shaft** whose side faces sample this same `756-v1` sheet with genuine UVs, in one
+batched `DrawUserIndexedPrimitives` (see `plans/spike-wall3d.md`). There is no longer a companion
+side sheet: `756-v1-side.png` and its builder existed only for the old stacked-sprite-slice
+extrusion and are gone (recoverable from commit `906f344`).
 
-Each cell of that sheet is a 2D **scan plane**, not a square — the cell area-averaged (which is
-what keeps the corduroy gone), mirror-tiled so it wraps seamlessly on both axes, then wrap-padded
-by the window size. The extra axes are what let `Wall.DrawTowerShafts` give the side faces a
-texture at all: it slides a `CELL`-sized window across the plane as the shaft descends
-(`?wallsidescan=`). With no scan, every slice samples the same square and the shaft is just the
-cell's border texels smeared radially — the streak look.
-
-**The scan has to move perpendicular to the exposed edge**, which is why a plane and not a strip.
-A block above/below the vanishing point exposes a horizontal edge (its sliver is a *row* —
-perpendicular is Y); one to the left/right exposes a vertical edge (its sliver is a *column* —
-perpendicular is X). Slide only one axis and the other orientation gets zero perpendicular travel:
-its sliver just translates *along* the face, re-showing the same texels, which over 64 slices
-traces hard diagonal streaks. So `Wall.cs` walks the window **diagonally** — one texel on *both*
-axes per slice — which serves every orientation at once, corners included, and depends only on
-depth so it cannot pop as the wall scrolls.
-
-**`756-v1-side.png` is derived from `756-v1.png`, so re-run the builder whenever you replace the
-wall texture** (after the tileable step below):
+Wall drawing is **never** verified from a live screenshot — the wall scrolls, and the canvas is
+black whenever its tab is backgrounded. Two offline tools instead:
 
 ```
-python tools/walls/build_wall_side.py             # rebuild (640×640, ~860 KB)
-python tools/walls/build_wall_side.py --span 128  # longer scan cycle (bigger sheet)
+python tools/walls/verify_tower_order.py   # proves a CPU painter's sort is exact (no depth buffer)
+python tools/walls/preview_wall3d.py       # matrix check + a rendered contact sheet
 ```
 
-`--cell` is a **contract** with `Wall.SideWindow` (16) — the sampling-window size. `--span` is the
-wrap period in texels; `Wall.cs` derives it as `side.Width/8 - SideWindow`. The natural
-`?wallsidescan=` is `MaxSlices / span` (one texel per slice; 64/64 = 1 by default).
-
-Area-averaging (rather than cropping the cell's centre) is load-bearing: the centre texel of some
-cells is a bright highlight — RGB(121,194,240) against a cell-average luminance range of only
-72..116 — which as a slice tint would render that block's tower as a glowing white slab.
-Don't hand-edit the output.
+`verify_tower_order.py` builds the real "occludes" relation between visible side faces from
+per-pixel depth comparisons and asserts it is acyclic *and* that the shipped sort key (block-centre
+distance from the vanishing point) is a valid topological order of it. `preview_wall3d.py` asserts
+the 3D camera reproduces `Wall.Project()` to ~1e-13 px, then re-implements the pass's exact
+projection, UVs, fog and per-face shading in numpy/Pillow against the real PNGs.
 
 ## The flow (art step is yours; the tileable step is automated)
 

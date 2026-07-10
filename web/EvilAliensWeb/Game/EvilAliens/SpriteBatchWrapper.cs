@@ -138,8 +138,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public StaticAlphaEffect staticAlphaEffect => effectHandler.StaticAlphaEffect;
 
-	public FaceShadeEffect faceShadeEffect => effectHandler.FaceShadeEffect;
-
 	public InterpolateEffect interpolateEffect => effectHandler.InterpolateEffect;
 
 	public LightenEffect lightenEffect => effectHandler.LightenEffect;
@@ -291,10 +289,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// (sceneTarget has no depth attachment) and culling is OFF, so the caller must submit only the
 	// faces it wants, back-to-front — see the painter's-order argument in Wall.DrawTowerShafts3D.
 	//
+	// Optional fixed-function DISTANCE FOG (fogStart/fogEnd are eye distances). It LERPS rgb toward
+	// fogColor and leaves alpha untouched, so a caller can fog a surface's COLOUR while still fading
+	// its COVERAGE with vertex alpha. Only real geometry can have this: a sprite Color tint
+	// multiplies, so it can never paint a sprite UP to a haze colour, only scale it down.
+	//
 	// Nothing is restored by hand afterwards: the wrapper's next _beginDrawing() calls
 	// SpriteBatch.Begin, which re-applies blend / depth / rasterizer / sampler state itself.
 	public void DrawGeometry3D(Texture2D texture, VertexPositionColorTexture[] verts, int vertexCount,
-		int[] indices, int primitiveCount, Matrix view, Matrix projection)
+		int[] indices, int primitiveCount, Matrix view, Matrix projection,
+		bool fogEnabled = false, Vector3 fogColor = default(Vector3), float fogStart = 0f, float fogEnd = 1f)
 	{
 		if (basicEffect == null || vertexCount < 3 || primitiveCount < 1)
 		{
@@ -305,6 +309,13 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		basicEffect.View = view;
 		basicEffect.Projection = projection;
 		basicEffect.Texture = texture;
+		basicEffect.FogEnabled = fogEnabled;
+		if (fogEnabled)
+		{
+			basicEffect.FogColor = fogColor;
+			basicEffect.FogStart = fogStart;
+			basicEffect.FogEnd = fogEnd;
+		}
 		gd.BlendState = ToBlendState(blendmode);
 		gd.DepthStencilState = DepthStencilState.None;
 		gd.RasterizerState = RasterizerState.CullNone;

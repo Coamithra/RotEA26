@@ -171,18 +171,6 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
-		// JS bridge for the ?wall3d spike (eaWall3d in wwwroot/index.html):
-		// DotNet.invokeMethod('EvilAliensWeb', 'debugWall3d', on). Swaps the Level-3 tower
-		// shafts between the sprite-slice path and the batched 3D pass at runtime. Live
-		// toggling is what makes the two comparable: freeze the scroll with eaHitstop(20000),
-		// then flip this and diff gl.readPixels -- the top faces must come back identical.
-		[JSInvokable("debugWall3d")]
-		public static void Wall3d(bool on)
-		{
-			DebugFlags.SetWall3D(on);
-			Console.WriteLine("[debug] eaWall3d " + (on ? "ON" : "OFF"));
-		}
-
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
 		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull
@@ -218,26 +206,24 @@ namespace EvilAliensWeb.Compat
 
 		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
 		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
-		// 'debugSetWalls', towers, depth, sliceStep, fog, sideDark, sideScan, twist, faceLight, faceAngle, topLift, wisps,
-		// wispSpeed). Overrides the Level-3 tower-extrusion knobs in real time so the sliders retune
-		// without a page reload — same effect as the ?walltowers/?walldepth/?wallslicestep/?wallfog/
-		// ?wallsidedark/?wallsidescan/?walltwist/?wallfacelight/?wallfaceangle/?walltoplift/?wallwisps/?wallwispspeed URL flags,
+		// 'debugSetWalls', towers, depth, fog, sideDark, faceLight, faceAngle, topLift, bands, wisps,
+		// wispSpeed). Overrides the Level-3 tower knobs in real time so the sliders retune without a
+		// page reload — same effect as the ?walltowers/?walldepth/?wallfog/?wallsidedark/
+		// ?wallfacelight/?wallfaceangle/?walltoplift/?wall3dbands/?wallwisps/?wallwispspeed URL flags,
 		// just live. (?wallfogcolor stays URL-only — a colour picker is a different widget and the
-		// tint reads fine off the two brightness knobs.)
+		// haze reads fine off the two brightness knobs.)
 		[JSInvokable("debugSetWalls")]
-		public static void SetWalls(bool towers, double depth, double sliceStep, double fog, double sideDark, double sideScan, double twist, double faceLight, double faceAngle, double topLift, double wisps, double wispSpeed)
+		public static void SetWalls(bool towers, double depth, double fog, double sideDark, double faceLight, double faceAngle, double topLift, double bands, double wisps, double wispSpeed)
 		{
 			DebugFlags.SetWallsOverride(
 				towers,
 				(float)depth,
-				(float)sliceStep,
 				(float)fog,
 				(float)sideDark,
-				(float)sideScan,
-				(float)twist,
 				(float)faceLight,
 				(float)faceAngle,
 				(float)topLift,
+				(float)bands,
 				(float)wisps,
 				(float)wispSpeed);
 		}

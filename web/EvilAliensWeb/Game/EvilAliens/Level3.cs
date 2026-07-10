@@ -51,7 +51,6 @@ internal class Level3 : GameScene
 		contentManager.Load<Texture2D>("GFX/Sprites/smallship");
 		contentManager.Load<Texture2D>("GFX/Base/black line lalalal");
 		contentManager.Load<Texture2D>("GFX/Base/756-v1");
-		contentManager.Load<Texture2D>("GFX/Base/756-v1-side");
 		contentManager.Load<Texture2D>("GFX/Base/756");
 		contentManager.Load<Texture2D>("GFX/Base/756-v5");
 		contentManager.Load<Texture2D>("GFX/Base/756-v3");

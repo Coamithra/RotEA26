@@ -285,28 +285,30 @@ namespace EvilAliensWeb.Compat
 			LazerTendrilSpeed = tendrilSpeed;
 		}
 
-		// Level-3 wall TOWER knobs (Trello d59266cc, plans/walls-3d-towers.md). Wall.Draw extrudes
-		// each collidable block downward into a stacked-slice shaft standing on the alien-base
-		// ground, so the walls read as towers rising out of the fog. ALL null => the baked
-		// Wall.Default* consts ship unchanged; ?walltowers=0 restores today's flat look exactly.
-		//   ?walltowers=0        kill switch -- skip the slice + wisp passes entirely.
+		// Level-3 wall TOWER knobs (Trello d59266cc / a66fc73e, plans/walls-3d-towers.md +
+		// plans/spike-wall3d.md). Wall.Draw extrudes each collidable block downward into a REAL 3D
+		// shaft standing on the alien-base ground, so the walls read as towers rising out of the fog.
+		// ALL null => the baked Wall.Default* consts ship unchanged; ?walltowers=0 restores the old
+		// flat look exactly.
+		//   ?walltowers=0        kill switch -- skip the tower + wisp passes entirely.
 		//   ?walldepth=<f>       perspective depth factor of the tower BASE (default 0.66, which is
 		//                        the alien-base ground layer's scrollspeedmodifier -- that match is
 		//                        what glues the bases to the scrolling floor; change it and they slide).
-		//   ?wallslicestep=<px>  design px of lean per slice; smaller = smoother shaft, more draws.
-		//   ?wallfog=<0..1>      how far a slice's tint lerps toward the haze colour at the base.
+		//   ?wallfog=<0..1>      how fogged the shaft is at its base. This is REAL distance fog
+		//                        (BasicEffect.FogEnabled), so it lerps TO the haze colour rather than
+		//                        multiplying by it -- see Wall.DefaultFogColor.
 		//   ?wallfogcolor=<hex>  the haze colour shafts dissolve into (rrggbb; sampled from the
 		//                        alien-base ground + its additive fog layers).
-		//   ?wallsidedark=<f>    brightness of the shaft's top slice (1 = as bright as the top face).
-		//   ?wallsidescan=<f>    plane cycles the slice pass scans diagonally down a shaft (0 = off, and
-		//                        the shaft's sides degenerate to radial streaks -- see Wall.DefaultSideScan).
-		//   ?walltwist=<deg>    degrees the shaft twists between its cap and its base (0 = none; may be
-		//                        negative). Rotates each depth-layer rigidly about the VP.
+		//   ?wallsidedark=<f>    brightness of the shaft at its cap (1 = as bright as the top face).
 		//   ?wallfacelight=<0..1> per-face shading contrast, so tower CORNERS read (0 = flat-shaded).
-		//                        Runs in faceshade.fx; vertical faces darken, horizontal ones don't.
+		//                        Vertical faces darken, horizontal ones don't; each wall quad is one
+		//                        face, so this is just its vertex colour.
 		//   ?wallfaceangle=<deg> light azimuth, screen space (0 = from +x, 90 = from +y; 225 = upper left).
 		//   ?walltoplift=<f>     lift the tower TOPS above the gameplay plane, as a fraction of depth
 		//                        (0 = flush). Cosmetic only -- the hitbox does not move with it.
+		//   ?wall3dbands=<n>     vertical strips a side face is tessellated into (default 4). Geometry
+		//                        and fog are exact at 1; the bands only resolve the smoothstep bottom
+		//                        dissolve, which rides per-vertex alpha.
 		//   ?wallwisps=<0..1>    alpha of the additive fog wisps drawn across the shafts (0 = off).
 		//   ?wallwispspeed=<f>   the wisps' scroll modifier vs the wall (default 0.8 = the near fog
 		//                        background layer, which sits inside the shaft's 0.66..1.0 depth band).
@@ -314,17 +316,11 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WallDepth { get; private set; }
 
-		public static float? WallSliceStep { get; private set; }
-
 		public static float? WallFog { get; private set; }
 
 		public static Color? WallFogColor { get; private set; }
 
 		public static float? WallSideDark { get; private set; }
-
-		public static float? WallSideScan { get; private set; }
-
-		public static float? WallTwist { get; private set; }
 
 		public static float? WallFaceLight { get; private set; }
 
@@ -332,45 +328,26 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WallTopLift { get; private set; }
 
+		public static int? Wall3DBands { get; private set; }
+
 		public static float? WallWisps { get; private set; }
 
 		public static float? WallWispSpeed { get; private set; }
-
-		// Spike (Trello a66fc73e, plans/spike-wall3d.md): draw the tower SIDE FACES as real 3D
-		// geometry in one batched DrawUserIndexedPrimitives instead of the stacked sprite slices.
-		//   ?wall3d              opt in. Default off, so a shipped build keeps the slice path.
-		//   ?wall3dbands=<n>     vertical strips a side face is tessellated into (default 4). The
-		//                        fog lerp + the bottom dissolve are per-vertex colour, so the bands
-		//                        are what resolve their curvature; 1 gives a straight linear fade.
-		// Kept OUT of Active -- a pure render-path toggle, like MetalScore / SlowmoTrail.
-		public static bool Wall3D { get; private set; }
-
-		public static int? Wall3DBands { get; private set; }
-
-		// Runtime toggle for the 3D tower pass (Compat/DebugInput.Wall3d -> eaWall3d() in
-		// index.html). Wall.Draw re-reads it every frame, so the two paths can be A/B'd on the
-		// SAME frozen frame -- which is the only way to diff them, since the wall scrolls.
-		internal static void SetWall3D(bool on)
-		{
-			Wall3D = on;
-		}
 
 		// Runtime setter for the live wall-tower slider panel (Compat/DebugInput.SetWalls ->
 		// eaWalls() in index.html, shown on ?level=Level3&wallsonly / a bare ?walltune). Wall.Draw
 		// re-reads every knob each frame, so a drag re-projects the towers on the next Draw. Same
 		// effect as the ?wall* URL flags, live. `towers` doubles as the kill switch.
-		internal static void SetWallsOverride(bool towers, float? depth, float? sliceStep, float? fog, float? sideDark, float? sideScan, float? twist, float? faceLight, float? faceAngle, float? topLift, float? wisps, float? wispSpeed)
+		internal static void SetWallsOverride(bool towers, float? depth, float? fog, float? sideDark, float? faceLight, float? faceAngle, float? topLift, float? bands, float? wisps, float? wispSpeed)
 		{
-			WallFaceLight = faceLight;
-			WallFaceAngle = faceAngle;
 			WallTowers = towers;
 			WallDepth = depth;
-			WallSliceStep = sliceStep;
 			WallFog = fog;
 			WallSideDark = sideDark;
-			WallSideScan = sideScan;
-			WallTwist = twist;
+			WallFaceLight = faceLight;
+			WallFaceAngle = faceAngle;
 			WallTopLift = topLift;
+			Wall3DBands = (bands.HasValue && bands.Value >= 1f) ? (int?)(int)bands.Value : null;
 			WallWisps = wisps;
 			WallWispSpeed = wispSpeed;
 		}
@@ -828,9 +805,6 @@ namespace EvilAliensWeb.Compat
 				case "wallsonly":
 					WallsOnly = IsOn(val);
 					break;
-				case "wall3d":
-					Wall3D = IsOn(val);
-					break;
 				case "wall3dbands":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var w3b) && w3b >= 1 && w3b <= 64)
 					{
@@ -841,12 +815,6 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wd) && wd > 0f && wd < 1f)
 					{
 						WallDepth = wd;
-					}
-					break;
-				case "wallslicestep":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wss) && wss > 0f)
-					{
-						WallSliceStep = wss;
 					}
 					break;
 				case "wallfog":
@@ -865,19 +833,6 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wsd) && wsd >= 0f)
 					{
 						WallSideDark = wsd;
-					}
-					break;
-				case "wallsidescan":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wsc) && wsc >= 0f)
-					{
-						WallSideScan = wsc;
-					}
-					break;
-				case "walltwist":
-					// Signed: a negative twist spirals the other way.
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wtw))
-					{
-						WallTwist = wtw;
 					}
 					break;
 				case "wallfacelight":

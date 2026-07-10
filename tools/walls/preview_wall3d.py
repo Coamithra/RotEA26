@@ -32,12 +32,12 @@ EYE = 600.0
 NEAR_FRAC = 0.9
 BANDS_NOTE = "bands only quantise the bottom dissolve; geometry, UV and fog are exact here"
 
-SIDE_DARK = 0.55
-FOG_AMOUNT = 1.0
+SIDE_DARK = 0.7
+FOG_AMOUNT = 0.1
 FOG_COLOR = np.array([158.0, 199.0, 242.0])
 DISSOLVE = 0.18
 FACE_LIGHT = 0.35
-FACE_ANGLE = 225.0
+FACE_ANGLE = 140.0
 FACE_DIR_WEIGHT = 0.35
 
 WALL_PNG = "web/EvilAliensWeb/wwwroot/Content/gfx/base/756-v1.png"

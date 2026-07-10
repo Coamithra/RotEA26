@@ -1076,14 +1076,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Walls.wall_OnDeath` -> `Terminate()`, i.e. the level's NEXT EVENT**, by the ~154 design px of extra
   scroll (~0.6s at Level 3's `4.3/16.667` px/ms wall-section speed). Intended: the section isn't over until
   its towers have gone.
-  **The haze is REAL DISTANCE FOG** (`BasicEffect.FogEnabled`, keyed on eye distance `e/d`), which is
+  **The haze is REAL DISTANCE FOG** (`BasicEffect.FogEnabled`, keyed on eye distance `e/d`; `?wallfog`
+  baked **0.1**, because a LERP bites far harder than the old multiplicative tint did at the same
+  number), which is
   something only real geometry can have: a sprite `Color` tint MULTIPLIES, so the slice path could only
   ever scale the wall texture down -- never paint it UP to a haze colour -- and had to lean on a bright
   `DefaultFogColor` plus the alpha dissolve to sell the fade. Fog LERPS toward the colour, so the base
   genuinely converges on it, and the fog factor is linear in world z so interpolating it is exact (more
   `?wall3dbands` does NOT smooth the fog -- the bands only resolve the smoothstep bottom dissolve, which
   rides per-vertex alpha and takes COVERAGE to zero so the shaft melts into the floor art). Fog touches
-  rgb only, so the dissolve survives it. **Per-face shading** (`?wallfacelight`, baked 0.35; angle 225)
+  rgb only, so the dissolve survives it. **Per-face shading** (`?wallfacelight`, baked 0.35; `?wallfaceangle` baked 140)
   is now just each quad's flat vertex colour -- real geometry knows which wall it is. The slice path had
   to fake this with a dedicated pixel shader reading a per-sprite face mask, which is what mitred a dark
   wedge into every interior corner; that shader, `FaceShadeEffect`, `Wall.FaceMask`, the `756-v1-side.png`

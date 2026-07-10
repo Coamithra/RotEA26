@@ -48,8 +48,10 @@ internal class Wall : AlienDrawableGameComponent
 	// ~8 design px at a screen corner for lift 0.02. Keep it small, and check with ?hitboxes.
 	internal const float DefaultTopLift = 0f;
 
-	// How far the shaft is fogged at its base (1 = fully the haze colour, 0 = fog off).
-	internal const float DefaultFog = 1f;
+	// How far the shaft is fogged at its base (1 = fully the haze colour, 0 = fog off). Dialed to a
+	// light 0.1: real fog LERPS, so it bites far harder than the old multiplicative tint did at the
+	// same number -- a full 1 washes the towers out to the haze colour well before the base.
+	internal const float DefaultFog = 0.1f;
 
 	// The haze colour a shaft dissolves into at its base.
 	//
@@ -65,8 +67,9 @@ internal class Wall : AlienDrawableGameComponent
 	private static readonly Color DefaultFogColor = new Color(158, 199, 242);
 
 	// Brightness of the shaft at its cap (1 = as bright as the top face). Sides are darker than the
-	// lit top, as they would be under a top-down light.
-	internal const float DefaultSideDark = 0.55f;
+	// lit top, as they would be under a top-down light. Dialed up from the slice path's 0.55 now that
+	// the fog no longer has to brighten the shaft to fake the haze.
+	internal const float DefaultSideDark = 0.7f;
 
 	// Per-face shading contrast (0 = every face the same shade, the pre-shading look). Once the side
 	// texture runs continuously across block boundaries, nothing distinguishes a tower's north face
@@ -85,8 +88,9 @@ internal class Wall : AlienDrawableGameComponent
 	internal const float DefaultFaceLight = 0.35f;
 
 	// Azimuth of the light, degrees, screen space: 0 = from the right (+x), 90 = from below (+y).
-	// 225 = from the upper left, the usual convention.
-	internal const float DefaultFaceAngle = 225f;
+	// Dialed to 140 (from the lower left), which reads best against the alien-base floor's own
+	// lighting; 225 would be the usual upper-left convention.
+	internal const float DefaultFaceAngle = 140f;
 
 	// How much of DefaultFaceLight the directional term gets. Small: the orientation contrast above is
 	// what makes corners legible, and a strong directional term would cancel it in some quadrant.

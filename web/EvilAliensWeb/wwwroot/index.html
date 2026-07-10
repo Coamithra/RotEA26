@@ -160,6 +160,24 @@
             catch (e) { console.warn('[debug] eaLazer failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the Level-3 wall-tower knobs (the ?level=Level3&wallsonly tuner). Drives
+        // Compat/DebugInput.SetWalls so the slider panel below (and the console) can retune the
+        // tower extrusion without a page reload. Console: eaWalls(true, 0.66, 5, 1, 0.55, 0.15, 0.8)
+        // — towers on, depth, slice step px, fog amount, side darkening, wisp alpha, wisp speed.
+        // Same effect as the ?wall* URL flags, live. eaWalls(false) restores the flat look.
+        window.eaWalls = (towers, depth, sliceStep, fog, sideDark, wisps, wispSpeed) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
+                    towers !== false,
+                    Number(depth) || 0.66, Number(sliceStep) || 5,
+                    fog === undefined ? 1 : Number(fog) || 0,
+                    Number(sideDark) || 0.55,
+                    wisps === undefined ? 0.15 : Number(wisps) || 0,
+                    Number(wispSpeed) || 0.8);
+            }
+            catch (e) { console.warn('[debug] eaWalls failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
         // ?level=Level2&spiders tuner). Drives Compat/DebugInput.SetSpider so the slider panel below
         // (and the console) can retune shadow/jump-frame/land-frame/jump-X without a page reload.
@@ -1348,6 +1366,140 @@
                 if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
                 var old = elOut.style.color; elOut.style.color = "#9ffcd0";
                 setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+
+            render();
+            // Keep pushing until the .NET runtime is booted, then stop (input events push after).
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
+    </script>
+
+    <!-- Live tuner slider panel for the Level-3 wall towers (card d59266cc, plans/walls-3d-towers.md).
+         The tower-extrusion knobs were URL-flag only, so every nudge meant a full page reload AND a
+         re-run of the walls section. This overlay drives Compat/DebugInput.SetWalls (via eaWalls) so
+         depth / slice step / fog / side darkening / wisp alpha + speed can be DRAGGED in real time,
+         with a checkbox to A/B the flat look. Built outside #app so it survives Blazor's mount, and
+         only created on a wall-dialing page (?level=Level3&wallsonly, or a bare ?walltune) — a normal
+         boot gets no extra DOM and stays byte-identical. Positioned top-right. -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]wallsonly\b/i.test(q) && !/[?&]walltune\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?wall* flags already on the URL, else the in-game baked
+            // defaults (see the Default* consts in Game/EvilAliens/Wall.cs).
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                towers: !/[?&]walltowers=(0|false|off|no)\b/i.test(q),
+                depth: num("walldepth", 0.66),
+                step: num("wallslicestep", 5),
+                fog: num("wallfog", 1),
+                side: num("wallsidedark", 0.55),
+                wisps: num("wallwisps", 0.15),
+                wispspeed: num("wallwispspeed", 0.8)
+            };
+
+            // Push the current state into the game. Returns false (and is retried) until the .NET
+            // runtime is up — eaWalls swallows the pre-boot throw, so we call DotNet directly.
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
+                        st.towers, st.depth, st.step, st.fog, st.side, st.wisps, st.wispspeed);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-walls{position:fixed;top:10px;right:10px;z-index:99999;width:262px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(140,170,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-walls h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#b8d4ff}" +
+                "#ea-walls .row{margin:7px 0}" +
+                "#ea-walls label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-walls .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-walls input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fb0ff}" +
+                "#ea-walls .chk{display:flex;gap:7px;align-items:center;margin:2px 0 6px}" +
+                "#ea-walls .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(140,170,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-walls .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-walls";
+            el.innerHTML =
+                "<h4>Wall towers &mdash; ?wallsonly</h4>" +
+                "<div class='chk'><input type='checkbox' id='ew-on' autocomplete='off'>" +
+                "<label for='ew-on' style='display:inline'>3D towers (off = flat)</label></div>" +
+                "<div class='row'><label>Depth (base)<span class='v' id='ew-vd'></span></label>" +
+                "<input type='range' id='ew-depth' min='0.3' max='0.95' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Slice step (px)<span class='v' id='ew-vs'></span></label>" +
+                "<input type='range' id='ew-step' min='1' max='30' step='0.5' autocomplete='off'></div>" +
+                "<div class='row'><label>Fog amount<span class='v' id='ew-vf'></span></label>" +
+                "<input type='range' id='ew-fog' min='0' max='1' step='0.02' autocomplete='off'></div>" +
+                "<div class='row'><label>Side darkening<span class='v' id='ew-vsd'></span></label>" +
+                "<input type='range' id='ew-side' min='0' max='1' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Wisp alpha<span class='v' id='ew-vw'></span></label>" +
+                "<input type='range' id='ew-wisps' min='0' max='0.6' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Wisp speed<span class='v' id='ew-vws'></span></label>" +
+                "<input type='range' id='ew-wispspeed' min='0' max='1.5' step='0.02' autocomplete='off'></div>" +
+                "<div class='out' id='ew-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
+                "then paste them to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var ewOn = el.querySelector("#ew-on"), ewDepth = el.querySelector("#ew-depth"),
+                ewStep = el.querySelector("#ew-step"), ewFog = el.querySelector("#ew-fog"),
+                ewSide = el.querySelector("#ew-side"), ewWisps = el.querySelector("#ew-wisps"),
+                ewWispSpeed = el.querySelector("#ew-wispspeed"), ewOut = el.querySelector("#ew-out"),
+                vd = el.querySelector("#ew-vd"), vs = el.querySelector("#ew-vs"),
+                vf = el.querySelector("#ew-vf"), vsd = el.querySelector("#ew-vsd"),
+                vw = el.querySelector("#ew-vw"), vws = el.querySelector("#ew-vws");
+
+            function render()
+            {
+                ewOn.checked = st.towers;
+                ewDepth.value = st.depth; ewStep.value = st.step; ewFog.value = st.fog;
+                ewSide.value = st.side; ewWisps.value = st.wisps; ewWispSpeed.value = st.wispspeed;
+                vd.textContent = st.depth; vs.textContent = st.step; vf.textContent = st.fog;
+                vsd.textContent = st.side; vw.textContent = st.wisps; vws.textContent = st.wispspeed;
+                ewOut.textContent = st.towers
+                    ? ("walldepth=" + st.depth + " wallslicestep=" + st.step + " wallfog=" + st.fog +
+                        " wallsidedark=" + st.side + " wallwisps=" + st.wisps +
+                        " wallwispspeed=" + st.wispspeed)
+                    : "walltowers=0";
+            }
+
+            function changed() { render(); push(); }
+
+            ewOn.addEventListener("change", function () { st.towers = ewOn.checked; changed(); });
+            ewDepth.addEventListener("input", function () { st.depth = +ewDepth.value; changed(); });
+            ewStep.addEventListener("input", function () { st.step = +ewStep.value; changed(); });
+            ewFog.addEventListener("input", function () { st.fog = +ewFog.value; changed(); });
+            ewSide.addEventListener("input", function () { st.side = +ewSide.value; changed(); });
+            ewWisps.addEventListener("input", function () { st.wisps = +ewWisps.value; changed(); });
+            ewWispSpeed.addEventListener("input", function () { st.wispspeed = +ewWispSpeed.value; changed(); });
+            ewOut.addEventListener("click", function ()
+            {
+                var t = ewOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = ewOut.style.color; ewOut.style.color = "#9ffcd0";
+                setTimeout(function () { ewOut.style.color = old; }, 250);
             });
 
             render();

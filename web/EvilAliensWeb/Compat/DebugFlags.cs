@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat
 {
@@ -283,6 +284,58 @@ namespace EvilAliensWeb.Compat
 			LazerArcRate = arcRate;
 			LazerTendrilSpeed = tendrilSpeed;
 		}
+
+		// Level-3 wall TOWER knobs (Trello d59266cc, plans/walls-3d-towers.md). Wall.Draw extrudes
+		// each collidable block downward into a stacked-slice shaft standing on the alien-base
+		// ground, so the walls read as towers rising out of the fog. ALL null => the baked
+		// Wall.Default* consts ship unchanged; ?walltowers=0 restores today's flat look exactly.
+		//   ?walltowers=0        kill switch -- skip the slice + wisp passes entirely.
+		//   ?walldepth=<f>       perspective depth factor of the tower BASE (default 0.66, which is
+		//                        the alien-base ground layer's scrollspeedmodifier -- that match is
+		//                        what glues the bases to the scrolling floor; change it and they slide).
+		//   ?wallslicestep=<px>  design px of lean per slice; smaller = smoother shaft, more draws.
+		//   ?wallfog=<0..1>      how far a slice's tint lerps toward the haze colour at the base.
+		//   ?wallfogcolor=<hex>  the haze colour shafts dissolve into (rrggbb; sampled from the
+		//                        alien-base ground + its additive fog layers).
+		//   ?wallsidedark=<f>    brightness of the shaft's top slice (1 = as bright as the top face).
+		//   ?wallwisps=<0..1>    alpha of the additive fog wisps drawn across the shafts (0 = off).
+		//   ?wallwispspeed=<f>   the wisps' scroll modifier vs the wall (default 0.8 = the near fog
+		//                        background layer, which sits inside the shaft's 0.66..1.0 depth band).
+		public static bool WallTowers { get; private set; } = true;
+
+		public static float? WallDepth { get; private set; }
+
+		public static float? WallSliceStep { get; private set; }
+
+		public static float? WallFog { get; private set; }
+
+		public static Color? WallFogColor { get; private set; }
+
+		public static float? WallSideDark { get; private set; }
+
+		public static float? WallWisps { get; private set; }
+
+		public static float? WallWispSpeed { get; private set; }
+
+		// Runtime setter for the live wall-tower slider panel (Compat/DebugInput.SetWalls ->
+		// eaWalls() in index.html, shown on ?level=Level3&wallsonly / a bare ?walltune). Wall.Draw
+		// re-reads every knob each frame, so a drag re-projects the towers on the next Draw. Same
+		// effect as the ?wall* URL flags, live. `towers` doubles as the kill switch.
+		internal static void SetWallsOverride(bool towers, float? depth, float? sliceStep, float? fog, float? sideDark, float? wisps, float? wispSpeed)
+		{
+			WallTowers = towers;
+			WallDepth = depth;
+			WallSliceStep = sliceStep;
+			WallFog = fog;
+			WallSideDark = sideDark;
+			WallWisps = wisps;
+			WallWispSpeed = wispSpeed;
+		}
+
+		// Fast-boot Level3 straight to a looping walls section (?level=Level3&wallsonly) -- mirrors
+		// ?spiderboss for Level2. Skips the whole wave sequence so the towers can be watched without
+		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
+		public static bool WallsOnly { get; private set; }
 
 		// Laser showcase scene (Compat/LazerShowcaseScene.cs): the chargeup swarm + a full-grown
 		// beam side by side on the starfield, ANIMATING (unlike the frozen ?harness/?bulletshot),
@@ -719,6 +772,54 @@ namespace EvilAliensWeb.Compat
 						LazerArcLife = lal;
 					}
 					break;
+				case "walltowers":
+					WallTowers = IsOn(val);
+					break;
+				case "wallsonly":
+					WallsOnly = IsOn(val);
+					break;
+				case "walldepth":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wd) && wd > 0f && wd < 1f)
+					{
+						WallDepth = wd;
+					}
+					break;
+				case "wallslicestep":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wss) && wss > 0f)
+					{
+						WallSliceStep = wss;
+					}
+					break;
+				case "wallfog":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wf) && wf >= 0f)
+					{
+						WallFog = wf;
+					}
+					break;
+				case "wallfogcolor":
+					if (TryParseHexColor(val, out var wfc))
+					{
+						WallFogColor = wfc;
+					}
+					break;
+				case "wallsidedark":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wsd) && wsd >= 0f)
+					{
+						WallSideDark = wsd;
+					}
+					break;
+				case "wallwisps":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ww) && ww >= 0f)
+					{
+						WallWisps = ww;
+					}
+					break;
+				case "wallwispspeed":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wws) && wws >= 0f)
+					{
+						WallWispSpeed = wws;
+					}
+					break;
 				case "lazershot":
 					Lazershot = IsOn(val);
 					if (Lazershot)
@@ -1097,6 +1198,33 @@ namespace EvilAliensWeb.Compat
 			{
 				HarnessY = y;
 			}
+		}
+
+		// Parse a "?wallfogcolor=rrggbb" value (a leading '#' or '0x' is tolerated) into an
+		// opaque Color. The alpha channel is never taken from the string -- the wall slices
+		// carry their own dissolve alpha, so a colour here only ever names a hue.
+		private static bool TryParseHexColor(string val, out Color color)
+		{
+			color = default(Color);
+			if (string.IsNullOrEmpty(val))
+			{
+				return false;
+			}
+			string hex = val.Trim();
+			if (hex.StartsWith("#", StringComparison.Ordinal))
+			{
+				hex = hex.Substring(1);
+			}
+			else if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+			{
+				hex = hex.Substring(2);
+			}
+			if (hex.Length != 6 || !int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
+			{
+				return false;
+			}
+			color = new Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+			return true;
 		}
 
 		private static void Hint()

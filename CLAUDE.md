@@ -977,6 +977,49 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   preload stutters on a big new PNG, add
   `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
   `tools/walls/README.md`.
+- **Level-3 walls are 3D TOWERS rising out of the fog (`Wall.Draw`, card d59266cc, `plans/walls-3d-towers.md`).**
+  Each collidable block is extruded DOWNWARD into a shaft standing on the alien-base ground; the
+  gameplay plane (ship + collision) stays the tower TOPS, and the top-face pass + `CollisionLevelMap`
+  are byte-identical to before. Fake top-down perspective: vanishing point at design centre (400,300),
+  base rect = `VP + (topRect - VP) * 0.66`. **The 0.66 is not a taste knob** -- it is exactly the
+  alien-base GROUND layer's `scrollspeedmodifier` (`Background.SetAlienBase`), so a base projected at
+  0.66 moves at 0.66x the wall's speed = the floor's speed and the towers stay glued to the scrolling
+  ground for free. Change it and the bases slide. Bases project TOWARD the VP, so towers lean away from
+  screen centre (the GTA1 look) and a wall entering the top shows its bases before its top faces --
+  that's the emergence, no special-case animation. Shafts are stacked sprite slices inside the existing
+  batch (NOT `DrawUserIndexedPrimitives` -- the `Quad.cs` WebGL lesson). Three things that are easy to
+  get wrong and are load-bearing: (1) **one global depth ladder for all blocks** -- per-block slice
+  counts break painter's order, since a tall shaft can lean over a block nearer the VP; (2) **the slice
+  row cull is WIDER than the top-face loop's** (`RowShaftVisible`), because a block off the bottom still
+  shows its base and one above the screen already does; (3) **slices sample `GFX/Base/756-v1-side`, not
+  the wall sheet** -- a low-frequency companion (each 8x8-grid cell area-averaged to 16x16 texels) built
+  by **`tools/walls/build_wall_side.py`**, because re-slicing the full-res cell makes the shaft corduroy
+  (the sliver each slice leaves exposed is ~2 design px, the same order as the cell's detail, so it
+  repeats detail instead of smearing). **Re-run that tool whenever `756-v1.png` changes**; don't
+  hand-edit the sheet. A `Color` tint MULTIPLIES, so it can't paint a slice up to a haze colour: the
+  floor composites bright blue (~RGB(46,125,199)), so shafts BRIGHTEN toward `DefaultFogColor` as they
+  descend, then alpha-dissolve over the bottom `DissolveFraction` (slices are otherwise OPAQUE -- a
+  translucent stack accumulates back to opaque and kills the dissolve). Drifting fog **wisps** (additive
+  `2331-v5`, the same texture + blend the two background fog layers use) draw BETWEEN the shafts and the
+  crisp top faces; additive can't occlude, but fog over a dark object IS a brightening and the bright
+  tops draw after, so it reads right. They tile **by position, never by a drifting source rect** (the
+  batch begins with a null samplerState = LinearClamp, so an out-of-bounds source window clamps instead
+  of wrapping), phase = `Position.Y * 0.8`, and their alpha is gated on the visible-block count so the
+  screen-wide haze can't pop in with the `Wall` entity's spawn/death. Cost ~600-1500 batched draws,
+  ~3.6ms/tick over the flat path. **Tuning:** `?walltowers=0` is the kill switch (reproduces the old
+  flat look exactly) · `?walldepth= ?wallslicestep= ?wallfog= ?wallfogcolor=<rrggbb> ?wallsidedark=
+  ?wallwisps= ?wallwispspeed=` (all null => the baked `Wall.Default*` consts, so a plain boot is
+  unchanged) · **`?level=Level3&wallsonly`** fast-boots a looping walls section (mirrors `?spiderboss`;
+  pair with `?invuln`), and shows a **live `eaWalls` slider panel** (`index.html`, outside `#app`, also
+  on a bare `?walltune`) driving `DebugInput.SetWalls` -> `DebugFlags.SetWallsOverride`, read every
+  Draw; the orange readout prints the bake-ready query string. `eaWalls(...)` works from the console.
+  Slice step bands above ~8px (baked 5). Final feel-dialing is a "For me" step -- bake settled values
+  into the `Default*` consts in `Wall.cs`. **Verify the drawing OFFLINE, not with a live screenshot** --
+  the wall scrolls, and the real trap is that the canvas is black whenever its tab is backgrounded
+  (Chrome won't composite the WebGL surface, though `setTimeout` keeps the loop ticking). Re-implement
+  `Wall.Draw`'s projection in numpy/Pillow against the real PNGs and look at the image; to check the
+  LIVE pipeline, freeze with `eaHitstop(20000)` and diff `gl.readPixels` between `eaWalls(true,...)`
+  and `eaWalls(false)` (top-face pixels must come back identical).
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

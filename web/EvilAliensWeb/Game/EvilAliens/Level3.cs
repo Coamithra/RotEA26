@@ -83,6 +83,15 @@ internal class Level3 : GameScene
 			PopulateWallsOnly();
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.BrainBoss)
+		{
+			// DEBUG (?brainboss): skip Level 3's whole wave sequence and drop straight into the
+			// real BrainBoss fight -- UNCONDITIONALLY (any difficulty), so the brain-boss animated
+			// overlays + hit_boss SFX can be verified without grinding the level or being on Hard+.
+			// Mirrors the boss tail of BrainBossHard() (music -> spawn -> halt), then Victory.
+			PopulateBrainBossOnly();
+			return;
+		}
 		WaitEvent waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += slowdown;
@@ -342,6 +351,23 @@ internal class Level3 : GameScene
 		eventList.AddEvent(brainBossSpawner);
 		eventList.MakeConditional(brainBossSpawner, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		eventList.AddHalt();
+	}
+
+	// DEBUG (?brainboss): the boss tail of BrainBossHard() with the difficulty gate REMOVED --
+	// gives lives, plays the boss music, spawns the real BrainBoss, halts until it dies, then
+	// Victory. Reached only via DebugFlags.BrainBoss, so live play is unaffected.
+	private void PopulateBrainBossOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		waitEvent.OnFinished += playbossmusic;
+		BrainBossSpawner brainBossSpawner = new BrainBossSpawner(base.Game, challenge: false);
+		eventList.AddEvent(brainBossSpawner);
+		eventList.AddHalt();
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
 	}
 
 	private void playbossmusic(GameEvent sender)

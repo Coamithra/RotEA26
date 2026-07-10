@@ -15,19 +15,38 @@ blown up hugely on screen. This folder is the pipeline to ship a **higher-res** 
 ## Companion sheet: `756-v1-side.png` (`build_wall_side.py`)
 
 Since card `d59266cc`, `Wall.Draw` also extrudes each block **downward into a 3D tower shaft**
-(see `plans/walls-3d-towers.md`). The shaft slices sample a **separate, low-frequency sheet** —
-the same 8×8 grid with every cell **area-averaged** down to 16×16 texels — because slicing the
-full-res cell makes the shaft corduroy (consecutive slices redraw the same high-frequency detail
-at slightly different scales, so the sliver each one leaves exposed repeats it rather than
-smearing into a wall face).
+(see `plans/walls-3d-towers.md`). The shaft slices sample a **separate sheet**, never the wall
+texture: slicing the full-res cell makes the shaft corduroy (consecutive slices redraw the same
+high-frequency detail at slightly different scales, so the sliver each one leaves exposed repeats
+it rather than smearing into a wall face).
+
+Each cell of that sheet is a 2D **scan plane**, not a square — the cell area-averaged (which is
+what keeps the corduroy gone), mirror-tiled so it wraps seamlessly on both axes, then wrap-padded
+by the window size. The extra axes are what let `Wall.DrawTowerShafts` give the side faces a
+texture at all: it slides a `CELL`-sized window across the plane as the shaft descends
+(`?wallsidescan=`). With no scan, every slice samples the same square and the shaft is just the
+cell's border texels smeared radially — the streak look.
+
+**The scan has to move perpendicular to the exposed edge**, which is why a plane and not a strip.
+A block above/below the vanishing point exposes a horizontal edge (its sliver is a *row* —
+perpendicular is Y); one to the left/right exposes a vertical edge (its sliver is a *column* —
+perpendicular is X). Slide only one axis and the other orientation gets zero perpendicular travel:
+its sliver just translates *along* the face, re-showing the same texels, which over 64 slices
+traces hard diagonal streaks. So `Wall.cs` walks the window **diagonally** — one texel on *both*
+axes per slice — which serves every orientation at once, corners included, and depends only on
+depth so it cannot pop as the wall scrolls.
 
 **`756-v1-side.png` is derived from `756-v1.png`, so re-run the builder whenever you replace the
 wall texture** (after the tileable step below):
 
 ```
-python tools/walls/build_wall_side.py         # rebuild (128×128, a few KB)
-python tools/walls/build_wall_side.py --cell 8   # flatter/smoother shafts
+python tools/walls/build_wall_side.py             # rebuild (640×640, ~860 KB)
+python tools/walls/build_wall_side.py --span 128  # longer scan cycle (bigger sheet)
 ```
+
+`--cell` is a **contract** with `Wall.SideWindow` (16) — the sampling-window size. `--span` is the
+wrap period in texels; `Wall.cs` derives it as `side.Width/8 - SideWindow`. The natural
+`?wallsidescan=` is `MaxSlices / span` (one texel per slice; 64/64 = 1 by default).
 
 Area-averaging (rather than cropping the cell's centre) is load-bearing: the centre texel of some
 cells is a bright highlight — RGB(121,194,240) against a cell-average luminance range of only

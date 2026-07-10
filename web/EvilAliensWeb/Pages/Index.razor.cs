@@ -86,6 +86,9 @@ namespace EvilAliensWeb.Pages
             {
                 _tickSw.Stop();
                 EvilAliensWeb.Compat.LoadProfiler.NoteFrame(_tickSw.Elapsed.TotalMilliseconds);
+                // Same measurement, different consumer: the wall-tower cost meter (eaWalls panel).
+                // No-ops unless eaWallPerf turned it on.
+                EvilAliensWeb.Compat.WallProfiler.EndFrame(_tickSw.Elapsed.TotalMilliseconds);
             }
         }
     }

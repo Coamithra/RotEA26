@@ -138,6 +138,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public StaticAlphaEffect staticAlphaEffect => effectHandler.StaticAlphaEffect;
 
+	public FaceShadeEffect faceShadeEffect => effectHandler.FaceShadeEffect;
+
 	public InterpolateEffect interpolateEffect => effectHandler.InterpolateEffect;
 
 	public LightenEffect lightenEffect => effectHandler.LightenEffect;

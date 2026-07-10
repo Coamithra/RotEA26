@@ -298,6 +298,15 @@ namespace EvilAliensWeb.Compat
 		//   ?wallfogcolor=<hex>  the haze colour shafts dissolve into (rrggbb; sampled from the
 		//                        alien-base ground + its additive fog layers).
 		//   ?wallsidedark=<f>    brightness of the shaft's top slice (1 = as bright as the top face).
+		//   ?wallsidescan=<f>    plane cycles the slice pass scans diagonally down a shaft (0 = off, and
+		//                        the shaft's sides degenerate to radial streaks -- see Wall.DefaultSideScan).
+		//   ?walltwist=<deg>    degrees the shaft twists between its cap and its base (0 = none; may be
+		//                        negative). Rotates each depth-layer rigidly about the VP.
+		//   ?wallfacelight=<0..1> per-face shading contrast, so tower CORNERS read (0 = flat-shaded).
+		//                        Runs in faceshade.fx; vertical faces darken, horizontal ones don't.
+		//   ?wallfaceangle=<deg> light azimuth, screen space (0 = from +x, 90 = from +y; 225 = upper left).
+		//   ?walltoplift=<f>     lift the tower TOPS above the gameplay plane, as a fraction of depth
+		//                        (0 = flush). Cosmetic only -- the hitbox does not move with it.
 		//   ?wallwisps=<0..1>    alpha of the additive fog wisps drawn across the shafts (0 = off).
 		//   ?wallwispspeed=<f>   the wisps' scroll modifier vs the wall (default 0.8 = the near fog
 		//                        background layer, which sits inside the shaft's 0.66..1.0 depth band).
@@ -312,6 +321,16 @@ namespace EvilAliensWeb.Compat
 		public static Color? WallFogColor { get; private set; }
 
 		public static float? WallSideDark { get; private set; }
+
+		public static float? WallSideScan { get; private set; }
+
+		public static float? WallTwist { get; private set; }
+
+		public static float? WallFaceLight { get; private set; }
+
+		public static float? WallFaceAngle { get; private set; }
+
+		public static float? WallTopLift { get; private set; }
 
 		public static float? WallWisps { get; private set; }
 
@@ -340,13 +359,18 @@ namespace EvilAliensWeb.Compat
 		// eaWalls() in index.html, shown on ?level=Level3&wallsonly / a bare ?walltune). Wall.Draw
 		// re-reads every knob each frame, so a drag re-projects the towers on the next Draw. Same
 		// effect as the ?wall* URL flags, live. `towers` doubles as the kill switch.
-		internal static void SetWallsOverride(bool towers, float? depth, float? sliceStep, float? fog, float? sideDark, float? wisps, float? wispSpeed)
+		internal static void SetWallsOverride(bool towers, float? depth, float? sliceStep, float? fog, float? sideDark, float? sideScan, float? twist, float? faceLight, float? faceAngle, float? topLift, float? wisps, float? wispSpeed)
 		{
+			WallFaceLight = faceLight;
+			WallFaceAngle = faceAngle;
 			WallTowers = towers;
 			WallDepth = depth;
 			WallSliceStep = sliceStep;
 			WallFog = fog;
 			WallSideDark = sideDark;
+			WallSideScan = sideScan;
+			WallTwist = twist;
+			WallTopLift = topLift;
 			WallWisps = wisps;
 			WallWispSpeed = wispSpeed;
 		}
@@ -465,6 +489,13 @@ namespace EvilAliensWeb.Compat
 		// Fast-boot Level2 straight to the TWIN-mothership (MarsBoss) fight -- like ?spiderboss but for
 		// the twins. See Level2.PopulateMarsBossOnly.
 		public static bool MarsBoss { get; private set; }
+
+		// Fast-boot Level3 straight to the REAL BrainBoss fight (the big-brain finale) -- like
+		// ?spiderboss but for Level 3. Spawns the brain UNCONDITIONALLY (any difficulty), skipping
+		// the whole wave sequence, so the brain-boss animated overlays + hit SFX can be verified
+		// without grinding the level or being on Hard+. Pair with ?level=Level3 (+ ?invuln,
+		// ?difficulty=Hard). See Level3.PopulateBrainBossOnly.
+		public static bool BrainBoss { get; private set; }
 
 		// ?difficulty=<Easy|Medium|Hard|Very_Hard|Inzane>: pin the difficulty at boot (applied before
 		// any level Initialize runs). The helper's glide speed + aim are difficulty-scaled, so this
@@ -836,6 +867,38 @@ namespace EvilAliensWeb.Compat
 						WallSideDark = wsd;
 					}
 					break;
+				case "wallsidescan":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wsc) && wsc >= 0f)
+					{
+						WallSideScan = wsc;
+					}
+					break;
+				case "walltwist":
+					// Signed: a negative twist spirals the other way.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wtw))
+					{
+						WallTwist = wtw;
+					}
+					break;
+				case "wallfacelight":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wfl) && wfl >= 0f)
+					{
+						WallFaceLight = wfl;
+					}
+					break;
+				case "wallfaceangle":
+					// Signed: any azimuth.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wfa))
+					{
+						WallFaceAngle = wfa;
+					}
+					break;
+				case "walltoplift":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wtl) && wtl >= 0f)
+					{
+						WallTopLift = wtl;
+					}
+					break;
 				case "wallwisps":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ww) && ww >= 0f)
 					{
@@ -1021,6 +1084,9 @@ namespace EvilAliensWeb.Compat
 				case "marsboss":
 					MarsBoss = IsOn(val);
 					break;
+				case "brainboss":
+					BrainBoss = IsOn(val);
+					break;
 				case "spiders":
 					Spiders = IsOn(val);
 					break;
@@ -1190,7 +1256,10 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow;
+			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
+			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
+			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || WallsOnly || BrainBoss;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1198,6 +1267,10 @@ namespace EvilAliensWeb.Compat
 					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
 					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln + " loadLog=" + LoadLog
 						+ " metalScore=" + MetalScore
+							// Level fast-boots print only when set: they REPLACE a level's whole event list,
+							// so "why is this level not playing normally" needs an answer in the log.
+							+ (WallsOnly ? " wallsonly" : "")
+							+ (BrainBoss ? " brainboss" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

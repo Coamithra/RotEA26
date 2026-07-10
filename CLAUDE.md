@@ -100,6 +100,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `?invuln` (force the Invulnerability cheat ON so playtesting a level doesn't keep dying;
   aliases `?invulnerability`/`?god`); `?unlockall` (reveal every gated menu option);
   `?skipsplash` / `?autostart` as building blocks. e.g. `…:5280/?level=Level2&noattract`.
+  **Level FAST-BOOTS replace a level's whole event list** — each skips its waves and drops straight
+  into one fight/section, so a change there can be watched in seconds instead of minutes of play:
+  `?spiderboss` (Level2's spider boss — `Level2.PopulateSpiderBossOnly`) · `?spiders` (Level2, a
+  continuous pure-spider ground wave) · `?wallsonly` (Level3's walls sections, looped —
+  `Level3.PopulateWallsOnly`) · **`?brainboss`** (Level3 straight into the REAL BrainBoss finale —
+  `Level3.PopulateBrainBossOnly`; **spawns it UNCONDITIONALLY, bypassing the Hard+ gate in
+  `BrainBossHard()`**, so the brain's animated overlays + `hit_boss` SFX can be verified on any
+  difficulty). Pair with `?invuln`. All are `false` by default, and all are IN `DebugFlags.Active`
+  (unlike the render/feel toggles, which stay out) so they print in the `[debug] flags active` line —
+  they hijack a level, and `?brainboss` alone reaching Level 3 *from the menu* would otherwise do so
+  silently. e.g. `…:5280/?level=Level3&brainboss&invuln`.
 - **Sprite harness — USE THIS to debug an object's drawing code instead of booting the game
   and trying to screenshot a moving enemy at the right instant.** `?harness=<Obj>` boots
   straight onto a space background showing ONE game object, drawn by its OWN `Draw()` through
@@ -363,7 +374,19 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   intro SPRITE plays at the START of a keyboard level), or `reticle` (the aiming reticle IS the OS cursor
   via `cursor:url(reticle.png)` — ZERO-LAG, no trailing sprite; `HWMouse=true` opts back to the plain
   arrow). Driven off `MousePointer.Visible` (GameScene sets it, incl. Tutorial; MenuScene forces it off).
-  Reticle art = `wwwroot/reticle.png` from `tools/cursor/build_cursor.py` (48px, hotspot 24,24). Fullscreen:
+  **Both reticle images are DRAWN by `tools/cursor/build_cursor.py`, not resampled** — it emits the CSS
+  cursor `wwwroot/reticle.png` (48px, hotspot 24,24) AND the intro sprite `Content/gfx/cursor2.png` (192px
+  = the intro's 4x start size, so its largest frame is 1:1). The old tool tried to upscale the original
+  26px `cursor2.png` with `Image.thumbnail`, which only ever SHRINKS — so the shipped cursor was 26px of
+  art floating in a 48px canvas and the OS cursor came out ~half the size the intro ended at (the "reticle
+  looks small since we upscale the game" bug). **Invariant: in both images the crosshair bars run edge to
+  edge (alpha bbox == full canvas)** — `MousePointer.CssHandoffScale()` sizes the sprite as
+  `CssCursorPx / windowPerDesign / texture.Width`, so padding would shrink it below the cursor, and the
+  hotspot is the image centre. That formula makes the intro land on exactly `CssCursorPx` on-screen px at
+  every window size and is texture-resolution-independent, so re-authoring either image bigger needs no
+  code change — only `CURSOR_PX` must stay in sync with `MousePointer.CssCursorPx` + index.html's hotspot.
+  Verify OFFLINE (an OS cursor never appears in a canvas screenshot): check the two PNGs' bboxes and
+  compare `reticle.png` against `cursor2.png` downscaled to 48px. Fullscreen:
   the browser reserves Esc to exit and it can't be preventDefault'd, but the same Esc ALSO reaches KNI and
   stepped back a menu — so `index.html`'s `fullscreenchange`→exit calls `eaSuppressEsc` →
   `DebugInput.SuppressEsc`/`EscSuppressActive`, which masks the raw Esc in `InputHandler` for a short
@@ -1014,11 +1037,40 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   counts break painter's order, since a tall shaft can lean over a block nearer the VP; (2) **the slice
   row cull is WIDER than the top-face loop's** (`RowShaftVisible`), because a block off the bottom still
   shows its base and one above the screen already does; (3) **slices sample `GFX/Base/756-v1-side`, not
-  the wall sheet** -- a low-frequency companion (each 8x8-grid cell area-averaged to 16x16 texels) built
-  by **`tools/walls/build_wall_side.py`**, because re-slicing the full-res cell makes the shaft corduroy
-  (the sliver each slice leaves exposed is ~2 design px, the same order as the cell's detail, so it
-  repeats detail instead of smearing). **Re-run that tool whenever `756-v1.png` changes**; don't
-  hand-edit the sheet. A `Color` tint MULTIPLIES, so it can't paint a slice up to a haze colour: the
+  the wall sheet** -- a companion built by **`tools/walls/build_wall_side.py`**, because re-slicing the
+  full-res cell makes the shaft corduroy (the sliver each slice leaves exposed is ~2 design px, the same
+  order as the cell's detail, so it repeats detail instead of smearing). **Re-run that tool whenever
+  `756-v1.png` changes**; don't hand-edit the sheet. That sheet is **a 2D SCAN PLANE per cell** (640x640 =
+  an 8x8 grid of mirror-tiled, area-averaged, wrap-padded planes), because the side faces need extra axes
+  to carry texture. **`?wallsidescan=`** slides a `SideWindow`(16)-sized window **DIAGONALLY** across the
+  block's own plane as the shaft descends; with scan 0 every slice samples the SAME window, so the exposed
+  sliver is always the same border texels smeared radially out of the VP and the shafts read as **streaks
+  with no surface** -- inherent to the slice trick, not a tuning failure. **The scan must travel
+  PERPENDICULAR to the exposed edge**, and a DIAGONAL is what serves every face at once: a block
+  above/below the VP exposes a HORIZONTAL edge (sliver = a row, perpendicular = Y), one left/right exposes
+  a VERTICAL edge (sliver = a column, perpendicular = X), and a diagonal advances BOTH by one texel per
+  slice. Either single axis gives one orientation the ideal rate and the other exactly ZERO -- its sliver
+  merely translates along its own length, re-showing the same texels, which over 64 slices traces hard
+  diagonal streaks (what a strip/Y-only sheet did to the left/right shafts). **Do NOT "fix" that by
+  picking the axis per block from `|dx|` vs `|dy|`**: that flips as a block scrolls past the VP diagonal
+  and the texture POPS mid-screen (tried; reverted). The offset depends only on `t`, so it is a pure
+  function of depth and nothing can pop. Price: the offset perpendicular to one edge is parallel to the
+  other, so each face is sheared ~45 deg along its length -- reads as diagonal grain, not as the coherent
+  lines a pure translation gives, because consecutive slivers carry genuinely different texels. The
+  natural scan is **one texel of travel per slice**, `scan = MaxSlices / scanSpan` (= 64/64 = **1**, the
+  baked default): below it slices repeat a window and smear, above it they skip texels and the shaft
+  corrugates into ridges. `SideWindow` is a **contract** with the tool's `CELL`; the game derives
+  `planePitch = side.Width/8` and `scanSpan = planePitch - SideWindow`, so a square (pre-plane) sheet
+  yields span 0 and degrades to the old streaked look rather than reading garbage.
+  **Unloading is DEFERRED past the bottom edge (`Wall.DeathY`).** A block's base projects TOWARD the VP,
+  so a block below the VP has its shaft drawn ABOVE its cap -- when the last cap crosses y=600 the towers
+  are still on screen, and the old `Position.Y > 600` `Die()` popped them out of existence. The last thing
+  to leave is the base of the TOPMOST row, so the wall dies at `VanishY + (600 - VanishY)/depth` (= 754.5
+  at depth 0.66; collapses to 600 at depth 1, and IS 600 with `?walltowers=0`). **This also delays
+  `Walls.wall_OnDeath` -> `Terminate()`, i.e. the level's NEXT EVENT**, by the ~154 design px of extra
+  scroll (~0.6s at Level 3's `4.3/16.667` px/ms wall-section speed). Intended: the section isn't over until
+  its towers have gone.
+  A `Color` tint MULTIPLIES, so it can't paint a slice up to a haze colour: the
   floor composites bright blue (~RGB(46,125,199)), so shafts BRIGHTEN toward `DefaultFogColor` as they
   descend, then alpha-dissolve over the bottom `DissolveFraction` (slices are otherwise OPAQUE -- a
   translucent stack accumulates back to opaque and kills the dissolve). Drifting fog **wisps** (additive
@@ -1030,12 +1082,56 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   screen-wide haze can't pop in with the `Wall` entity's spawn/death. Cost ~600-1500 batched draws,
   ~3.6ms/tick over the flat path. **Tuning:** `?walltowers=0` is the kill switch (reproduces the old
   flat look exactly) · `?walldepth= ?wallslicestep= ?wallfog= ?wallfogcolor=<rrggbb> ?wallsidedark=
-  ?wallwisps= ?wallwispspeed=` (all null => the baked `Wall.Default*` consts, so a plain boot is
+  ?wallsidescan= ?walltwist=<deg> ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wallwisps= ?wallwispspeed=` (all null => the baked
+  `Wall.Default*` consts, so a plain boot is
   unchanged) · **`?level=Level3&wallsonly`** fast-boots a looping walls section (mirrors `?spiderboss`;
   pair with `?invuln`), and shows a **live `eaWalls` slider panel** (`index.html`, outside `#app`, also
   on a bare `?walltune`) driving `DebugInput.SetWalls` -> `DebugFlags.SetWallsOverride`, read every
   Draw; the orange readout prints the bake-ready query string. `eaWalls(...)` works from the console.
-  Slice step bands above ~8px (baked 5). Final feel-dialing is a "For me" step -- bake settled values
+  Slice step bands above ~8px; **baked 1, where the step is inert and `MaxSlices` (64) is what binds** --
+  the worst on-screen lean is ~170px, so 1px asks for ~170 slices and gets 64 (an effective ~2.7px step
+  at the far corners). That is why 5 -> 1 barely moved the frame time: it only took the count 34 -> 64.
+  To resolve a true 1px step the lever is `MaxSlices`, at ~3x the slice draws.
+  **`?wallfacelight=<0..1>`** (baked **0.35**) shades the four faces differently so tower CORNERS read --
+  once the side texture runs continuously across block boundaries, nothing distinguishes a north face
+  from an east one. A sprite has ONE tint and a slice's visible sliver is the BORDER RING of its square,
+  spanning two faces at once, so this is a PIXEL SHADER (`tools/shaders/src/faceshade.fx` ->
+  `GFX/Effects/faceshade`, wired through `FaceShadeEffect` + `EffectHandler` like the other sprite
+  effects; `Wall.DrawTowerShafts` enables it around the slice loop only). The square's two DIAGONALS cut
+  the ring into the four faces, mitring the corners the way a real box corner does -- the shader shades by
+  NEAREST EXPOSED EDGE, so ties fall on a diagonal and give the mitre for free. **ONLY OUTER EDGES ARE
+  FACES:** a side shared with a neighbouring block is not a face of the wall, and shading it anyway mitres
+  a dark wedge into every block's corner -- two meeting at each interior boundary, reading as a SEAM GRID.
+  So each sprite's VERTEX COLOUR carries a 4-bit mask of which sides are exposed (`Wall.FaceMask`, the same
+  `isfree()` the top-face edge lines use; r/g/b = north/south/east, a = west as 255/128 so no batcher can
+  read the sprite as fully transparent), and hidden sides are excluded from the nearest-edge search. The
+  mask has to be per-BLOCK and a per-block uniform would break the batch -- so the slice TINT (identical for
+  every block at one depth) moves to the `SliceTint` uniform and the vertex colour is freed to carry it.
+  A fully-interior block resolves to factor 1 (unshaded). **GOTCHA:** SpriteBatch
+  hands the shader ATLAS texcoords, not local 0..1 -- but every window origin is `j*SideWindow + off` mod a
+  multiple of `SideWindow`, hence congruent to `off` mod `SideWindow`, so ONE per-slice uniform recovers
+  each sprite's local UV (`local = frac((uv*SheetSize - WindowOrigin)/Window)`). That makes the pass cost
+  `slices` (~64) batch flushes rather than the ~1500 extra sprite draws a two-tints-per-slice split needs.
+  Factors are **darken-only** (<= 1; the tint already carries the fog lerp, so >1 would clip the hazy base
+  to white) and are lerped toward 1 with the haze, so shading dissolves into the fog at the base. The
+  contrast that makes a corner read is between ORIENTATIONS (vertical faces darken by `light`, horizontal
+  ones don't) -- a block only ever shows one horizontal + one vertical face, so every corner in every
+  quadrant gets contrast; a pure directional light gives ZERO contrast in two quadrants (where both visible
+  normals catch it equally). **`?wallfaceangle=<deg>`** (baked **225**, from the upper left) adds a weaker
+  directional term so north != south and east != west. 0 => flat-shaded, no flushes.
+  **`?walltwist=<deg>`** (baked **0**, signed) rotates each depth-layer by `twist*(1-t)` -- 0 at the cap,
+  so it meets the unrotated top face. The rotation is of the WHOLE LAYER about the VP, never of each
+  slice about its own centre: a rigid layer rotation keeps footprints affine images of each other, so
+  blocks stay glued and disjoint (which is what makes the global painter's order correct), whereas
+  rotating squares in place tiles nothing and opens X-shaped cracks down every solid cluster. Know what
+  it does though -- rotating about the VP ORBITS a tower around screen centre rather than twisting it
+  about its own axis (tangential shift = `radius*angle`), so outer towers bend and central ones barely
+  move. A true per-tower twist needs a per-tower centre, which the slice pass has no notion of.
+  **`?walltoplift=<f>`** draws the tower TOPS projected at depth `1 + lift` (scaled away from the VP) so
+  the caps sit proud of the gameplay plane; baked **0** (flush). It is COSMETIC ONLY -- `CollisionLevelMap`
+  still uses the unprojected block rects, so a lift drifts the sprite off its own hitbox by
+  `lift * distance-from-VP` (~8 design px at a screen corner for lift 0.02). Keep it small and check with
+  `?hitboxes`. Final feel-dialing is a "For me" step -- bake settled values
   into the `Default*` consts in `Wall.cs`. **Verify the drawing OFFLINE, not with a live screenshot** --
   the wall scrolls, and the real trap is that the canvas is black whenever its tab is backgrounded
   (Chrome won't composite the WebGL surface, though `setTimeout` keeps the loop ticking). Re-implement

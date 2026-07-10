@@ -171,20 +171,40 @@
 
         // Debug: live-set the Level-3 wall-tower knobs (the ?level=Level3&wallsonly tuner). Drives
         // Compat/DebugInput.SetWalls so the slider panel below (and the console) can retune the
-        // tower extrusion without a page reload. Console: eaWalls(true, 0.66, 5, 1, 0.55, 0.15, 0.8)
-        // — towers on, depth, slice step px, fog amount, side darkening, wisp alpha, wisp speed.
+        // tower extrusion without a page reload. Console:
+        // eaWalls(true, 0.66, 1, 1, 0.55, 1, 0, 0.35, 225, 0, 0.15, 0.8) — towers on, depth, slice step
+        // px, fog amount, side darkening, side scan, twist deg, face light, face angle deg, top lift,
+        // wisp alpha, wisp speed.
         // Same effect as the ?wall* URL flags, live. eaWalls(false) restores the flat look.
-        window.eaWalls = (towers, depth, sliceStep, fog, sideDark, wisps, wispSpeed) => {
+        window.eaWalls = (towers, depth, sliceStep, fog, sideDark, sideScan, twist, faceLight, faceAngle, topLift, wisps, wispSpeed) => {
             try {
                 DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
                     towers !== false,
-                    Number(depth) || 0.66, Number(sliceStep) || 5,
+                    Number(depth) || 0.66, Number(sliceStep) || 1,
                     fog === undefined ? 1 : Number(fog) || 0,
                     Number(sideDark) || 0.55,
+                    sideScan === undefined ? 1 : Number(sideScan) || 0,
+                    Number(twist) || 0,
+                    faceLight === undefined ? 0.35 : Number(faceLight) || 0,
+                    faceAngle === undefined ? 225 : Number(faceAngle) || 0,
+                    Number(topLift) || 0,
                     wisps === undefined ? 0.15 : Number(wisps) || 0,
                     Number(wispSpeed) || 0.8);
             }
             catch (e) { console.warn('[debug] eaWalls failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the wall-tower cost meter. eaWallPerf(true) arms it, eaWallStats() reads one line
+        // (fps, frame ms + p95, tower-pass ms, slice draws). The eaWalls panel arms + polls it for you.
+        // NOTE a backgrounded tab throttles requestAnimationFrame, so FOCUS THE WINDOW or every number
+        // is meaningless — the report says so rather than lying.
+        window.eaWallPerf = (on) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', on !== false); }
+            catch (e) { console.warn('[debug] eaWallPerf failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaWallStats = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats'); }
+            catch (e) { return 'not booted'; }
         };
 
         // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
@@ -1269,6 +1289,35 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 
@@ -1383,6 +1432,35 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 
@@ -1414,9 +1492,14 @@
             var st = {
                 towers: !/[?&]walltowers=(0|false|off|no)\b/i.test(q),
                 depth: num("walldepth", 0.66),
-                step: num("wallslicestep", 5),
+                step: num("wallslicestep", 1),
                 fog: num("wallfog", 1),
                 side: num("wallsidedark", 0.55),
+                scan: num("wallsidescan", 1),
+                twist: num("walltwist", 0),
+                facelight: num("wallfacelight", 0.35),
+                faceangle: num("wallfaceangle", 225),
+                lift: num("walltoplift", 0),
                 wisps: num("wallwisps", 0.15),
                 wispspeed: num("wallwispspeed", 0.8)
             };
@@ -1428,7 +1511,8 @@
                 try
                 {
                     DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
-                        st.towers, st.depth, st.step, st.fog, st.side, st.wisps, st.wispspeed);
+                        st.towers, st.depth, st.step, st.fog, st.side, st.scan, st.twist,
+                        st.facelight, st.faceangle, st.lift, st.wisps, st.wispspeed);
                     return true;
                 }
                 catch (e) { return false; }
@@ -1451,7 +1535,9 @@
                 "#ea-walls .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(140,170,220,.25);" +
                 "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
                 "word-break:break-all;cursor:pointer}" +
-                "#ea-walls .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+                "#ea-walls .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}" +
+                "#ea-walls .perf{margin-top:8px;padding-top:7px;border-top:1px solid rgba(140,170,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:#9ffcd0;line-height:1.35}";
             document.head.appendChild(css);
 
             var el = document.createElement("div");
@@ -1468,10 +1554,21 @@
                 "<input type='range' id='ew-fog' min='0' max='1' step='0.02' autocomplete='off'></div>" +
                 "<div class='row'><label>Side darkening<span class='v' id='ew-vsd'></span></label>" +
                 "<input type='range' id='ew-side' min='0' max='1' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Side scan (texels/slice)<span class='v' id='ew-vsc'></span></label>" +
+                "<input type='range' id='ew-scan' min='0' max='4' step='0.1' autocomplete='off'></div>" +
+                "<div class='row'><label>Slice twist (deg)<span class='v' id='ew-vt'></span></label>" +
+                "<input type='range' id='ew-twist' min='-30' max='30' step='0.5' autocomplete='off'></div>" +
+                "<div class='row'><label>Face light (corners)<span class='v' id='ew-vfl'></span></label>" +
+                "<input type='range' id='ew-facelight' min='0' max='1' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Light angle (deg)<span class='v' id='ew-vfa'></span></label>" +
+                "<input type='range' id='ew-faceangle' min='0' max='359' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Top lift<span class='v' id='ew-vl'></span></label>" +
+                "<input type='range' id='ew-lift' min='0' max='0.1' step='0.002' autocomplete='off'></div>" +
                 "<div class='row'><label>Wisp alpha<span class='v' id='ew-vw'></span></label>" +
                 "<input type='range' id='ew-wisps' min='0' max='0.6' step='0.01' autocomplete='off'></div>" +
                 "<div class='row'><label>Wisp speed<span class='v' id='ew-vws'></span></label>" +
                 "<input type='range' id='ew-wispspeed' min='0' max='1.5' step='0.02' autocomplete='off'></div>" +
+                "<div class='perf' id='ew-perf'>perf: waiting for frames…</div>" +
                 "<div class='out' id='ew-out' title='Click to copy'></div>" +
                 "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
                 "then paste them to Claude to bake in.</div>";
@@ -1479,23 +1576,37 @@
 
             var ewOn = el.querySelector("#ew-on"), ewDepth = el.querySelector("#ew-depth"),
                 ewStep = el.querySelector("#ew-step"), ewFog = el.querySelector("#ew-fog"),
-                ewSide = el.querySelector("#ew-side"), ewWisps = el.querySelector("#ew-wisps"),
+                ewSide = el.querySelector("#ew-side"), ewScan = el.querySelector("#ew-scan"),
+                ewTwist = el.querySelector("#ew-twist"),
+                ewFaceLight = el.querySelector("#ew-facelight"), ewFaceAngle = el.querySelector("#ew-faceangle"),
+                ewLift = el.querySelector("#ew-lift"), ewWisps = el.querySelector("#ew-wisps"),
                 ewWispSpeed = el.querySelector("#ew-wispspeed"), ewOut = el.querySelector("#ew-out"),
                 vd = el.querySelector("#ew-vd"), vs = el.querySelector("#ew-vs"),
                 vf = el.querySelector("#ew-vf"), vsd = el.querySelector("#ew-vsd"),
+                vsc = el.querySelector("#ew-vsc"), vt = el.querySelector("#ew-vt"),
+                vfl = el.querySelector("#ew-vfl"), vfa = el.querySelector("#ew-vfa"),
+                vl = el.querySelector("#ew-vl"),
                 vw = el.querySelector("#ew-vw"), vws = el.querySelector("#ew-vws");
 
             function render()
             {
                 ewOn.checked = st.towers;
                 ewDepth.value = st.depth; ewStep.value = st.step; ewFog.value = st.fog;
-                ewSide.value = st.side; ewWisps.value = st.wisps; ewWispSpeed.value = st.wispspeed;
+                ewSide.value = st.side; ewScan.value = st.scan; ewTwist.value = st.twist;
+                ewFaceLight.value = st.facelight; ewFaceAngle.value = st.faceangle;
+                ewLift.value = st.lift;
+                ewWisps.value = st.wisps; ewWispSpeed.value = st.wispspeed;
                 vd.textContent = st.depth; vs.textContent = st.step; vf.textContent = st.fog;
-                vsd.textContent = st.side; vw.textContent = st.wisps; vws.textContent = st.wispspeed;
+                vsd.textContent = st.side; vsc.textContent = st.scan; vt.textContent = st.twist;
+                vfl.textContent = st.facelight; vfa.textContent = st.faceangle;
+                vl.textContent = st.lift;
+                vw.textContent = st.wisps; vws.textContent = st.wispspeed;
                 ewOut.textContent = st.towers
                     ? ("walldepth=" + st.depth + " wallslicestep=" + st.step + " wallfog=" + st.fog +
-                        " wallsidedark=" + st.side + " wallwisps=" + st.wisps +
-                        " wallwispspeed=" + st.wispspeed)
+                        " wallsidedark=" + st.side + " wallsidescan=" + st.scan +
+                        " walltwist=" + st.twist + " wallfacelight=" + st.facelight +
+                        " wallfaceangle=" + st.faceangle + " walltoplift=" + st.lift +
+                        " wallwisps=" + st.wisps + " wallwispspeed=" + st.wispspeed)
                     : "walltowers=0";
             }
 
@@ -1506,6 +1617,11 @@
             ewStep.addEventListener("input", function () { st.step = +ewStep.value; changed(); });
             ewFog.addEventListener("input", function () { st.fog = +ewFog.value; changed(); });
             ewSide.addEventListener("input", function () { st.side = +ewSide.value; changed(); });
+            ewScan.addEventListener("input", function () { st.scan = +ewScan.value; changed(); });
+            ewTwist.addEventListener("input", function () { st.twist = +ewTwist.value; changed(); });
+            ewFaceLight.addEventListener("input", function () { st.facelight = +ewFaceLight.value; changed(); });
+            ewFaceAngle.addEventListener("input", function () { st.faceangle = +ewFaceAngle.value; changed(); });
+            ewLift.addEventListener("input", function () { st.lift = +ewLift.value; changed(); });
             ewWisps.addEventListener("input", function () { st.wisps = +ewWisps.value; changed(); });
             ewWispSpeed.addEventListener("input", function () { st.wispspeed = +ewWispSpeed.value; changed(); });
             ewOut.addEventListener("click", function ()
@@ -1522,6 +1638,35 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 
@@ -1692,6 +1837,35 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 

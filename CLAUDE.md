@@ -1282,13 +1282,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   few SELECTED on-screen regions are animated offline with the LOCAL Wan 2.2 14B Lightning i2v model
   (via the `../animgen` ComfyUI plumbing) and composited back as small feathered sprite-sheet patches
   that track the boss. Shipped overlays: **`eye_reveal`** (fleshy folds part to reveal an orange eye
-  that looks around, centre), **`pods_flicker`** (the bottom blue mechanical pod cluster flickering,
-  mechanical), **`lens_right`** (a blue mechanical iris blooming open on the right). **INVARIANT --
+  that looks around, centre) and **`pods_flicker`** (the bottom blue mechanical pod cluster flickering).
+  A third, `lens_right` (a blue iris on the right), was DROPPED -- it never stopped clashing with the
+  static art around it; its region stays in `regions.json` for reference. **INVARIANT --
   never animate the top of the sprite:** the boss draws at design `(400,100)` with `textureScale
   ~1.703`, so texture rows `< ~373` (incl. the central mechanical eye) are ABOVE the top of the screen;
   every `regions.json` box has `ty0 >= ~400`. **Pipeline (`tools/brainanim/`, run with the AnimGen venv
   `C:/Programming/animgen/.venv/Scripts/python.exe`):** (1) `regions.json` = the crop boxes (texture px)
-  + i2v prompts + seeds + per-region `fps`; (2) `gen_brain_anims.py` crops each region and runs it
+  + i2v prompts + seeds + per-region `fps`/`triggerAvgSeconds`/`negative`; (2) `gen_brain_anims.py` crops
+  each region and runs it
   through `comfy_client.generate` as an OPEN-ENDED i2v (start = crop, no end frame -> the FLF template
   degrades to I2V; auto-launches ComfyUI with the safe TDR flags), extracting mp4 frames into
   `new_assets_raw/brainanim/<name>/` (gitignored); (3) `build_brain_overlays.py <name>...` TRIAGES motion
@@ -1306,16 +1308,46 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   for a seamless loop, and rides the frame-interpolation shader (`interpolateEffect`, same path as the
   animated Braineroid) so the low frame count still plays smooth. It advances on DRAW time (cosmetic --
   unaffected by hit-stop, like the metal sheen). Straight (non-premultiplied) alpha throughout.
+  **A patch with `triggerAvgSeconds` does NOT loop** -- it rests on frame 0 (which IS the untouched crop,
+  so it reads as the static art) and plays ONE ping-pong cycle whenever
+  `RandomHelper.RandomFromAverage(1/triggerAvgSeconds, gameTime)` fires, skipping the roll mid-cycle so
+  the mean GAP between animations is that many seconds. `eye_reveal` uses **15** (an eye that opens, looks
+  around and closes now and then is a punctuation mark; on repeat it's wallpaper). Omit the key for a
+  continuous loop (`pods_flicker`). The roll happens in Draw, so it consumes the shared
+  `RandomHelper.Random` at frame rate -- fine today (the boss is cosmetic and the planned co-op is
+  state-replicated, not lockstep), but a `Quad`-style private FX RNG is the move if that ever changes.
+  **`triggerAvgSeconds` + `fps` + `blend` are PLAYBACK knobs, not pixels:** `build_brain_overlays.py`
+  re-syncs them from `regions.json` into every existing manifest entry on each run (`--sync` does only
+  that), so they can be retuned long after the gitignored raw frames are gone.
   **Verify WITHOUT a browser:** `tools/brainanim/preview_ingame.py` composites the boss + overlays in the
   exact 800x600 player framing (mirrors the Draw math) -> `_ingame_contact.png` (static vs 4 phases) +
   `_ingame.gif`. Live: **`?harness=brainboss`** shows the full boss with the overlays ANIMATING (they
-  advance on Draw, so the frozen harness still plays them). Both boss levels warm the three sheets in
+  advance on Draw, so the frozen harness still plays them). Both boss levels warm the sheets in
   `preload/manifest.txt` so they don't decode mid-fight. **To retune:** edit `regions.json` (box/prompt/
-  seed/fps), re-run `gen_brain_anims.py <name>` then `build_brain_overlays.py <name>...` with ONLY the
-  winners (that rebuilds their sheets + rewrites the manifest); to DROP an overlay, remove its entry from
-  the manifest (or rebuild without it) + delete the `brainov_<name>.png`. Don't hand-edit the sheets /
-  manifest -- re-run the tools. If a big new sheet stutters at preload, add it to `textures.config` for
-  DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
+  seed/fps/trigger), re-run `gen_brain_anims.py <name>` then `build_brain_overlays.py <name>...` with ONLY
+  the winners (that rebuilds their sheets + rewrites the manifest); **`--drop <name>`** removes an overlay
+  (manifest entry + its `brainov_<name>.png` + its `preload/manifest.txt` lines) and **`--sync`** re-syncs
+  playback knobs only. Don't
+  hand-edit the sheets / manifest -- re-run the tools. If a big new sheet stutters at preload, add it to
+  `textures.config` for DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
+  **GOTCHA -- the model ALWAYS invents a slow camera zoom; the build STABILISES it out.** Each patch is
+  composited over the STATIC brain, so any whole-frame camera motion Wan adds (a slow push/pull + drift)
+  reads as the patch sliding against the surrounding art -- the one artifact this pipeline can't tolerate.
+  Two things attack it. (1) The NEGATIVE prompt: `gen_brain_anims.py` originally passed `negative=None`,
+  leaving animgen's SHARED workflow template's baked negative in place -- written for a fighting-game
+  character, it ENDS with **`"frozen, still image, static pose"`**, which on a locked-off shot of a
+  barely-moving pod cluster fights the whole point (the cheapest way to not be a "still image" is to move
+  the frame). Saying "locked static camera" LOUDER in the positive prompt never won that argument (it was
+  already there). `DEFAULT_NEGATIVE` replaces it with explicit anti-camera-motion terms, keeping the
+  template's quality terms and dropping the anti-stillness ones. But it only HELPS -- measured on
+  `pods_flicker`, the template negative gave a **6.4%** zoom + ~4px drift; `DEFAULT_NEGATIVE` still **5.1%**
+  + 2px. (2) The real fix is `build_brain_overlays.py`'s **`stabilize()`**: it fits each frame's uniform
+  zoom+translation against frame 0 (a coarse-to-fine outer-band SSD fit, scored on the border so the
+  intended interior flicker doesn't dominate) and warps it back, exactly as `colour_match` undoes VAE
+  colour drift. Frame 0 is the untouched crop, so locking to it also nails the resting pose to the sprite
+  underneath. The build prints `stabilised out X% zoom / Ypx shift` + the before/after border-drift.
+  **`--list`'s border-drift number alone can't tell a zoom from edge flicker** -- to eyeball a take's
+  camera move, fit a global scale+translation of each frame against frame 0.
 - **Screenshot `.dat` blobs live in IndexedDB, the small save XML in localStorage (card a5145e9e).**
   The `eaSave` JS facade (`index.html`) routes by extension: `.dat` -> `window.eaSaveBlob` (IndexedDB
   store `eaweb_save/screenshots`, huge quota), else localStorage -- C# (`SaveInterop`/`StorageStub`)

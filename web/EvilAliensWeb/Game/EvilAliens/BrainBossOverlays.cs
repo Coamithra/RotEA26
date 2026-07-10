@@ -53,6 +53,10 @@ internal sealed class BrainBossOverlays
         public float TexCenterX, TexCenterY, TexW, TexH;
         public int CellW, CellH;
         public bool PingPong;
+        // false => draw the current (floor) frame, no interpolation shader. The eye's discrete
+        // open/look/close reads better STEPPED than cross-faded (the tween morphs the
+        // eyeball). Mechanical flicker (pods) keeps interpolation for smooth light changes.
+        public bool Interpolate;
         public SpriteBlendMode Blend;
         public float Clock;   // seconds of real (draw) time
         // > 0 => triggered: rest on frame 0, play one cycle every ~this many seconds.
@@ -142,6 +146,7 @@ internal sealed class BrainBossOverlays
             CellW = Math.Max(1, GetInt(e, "cellW", 1)),
             CellH = Math.Max(1, GetInt(e, "cellH", 1)),
             PingPong = !e.TryGetProperty("pingpong", out JsonElement pp) || pp.ValueKind != JsonValueKind.False,
+            Interpolate = !e.TryGetProperty("interpolate", out JsonElement it) || it.ValueKind != JsonValueKind.False,
             Blend = ParseBlend(e),
             TriggerAvgSeconds = Math.Max(0f, GetFloat(e, "triggerAvgSeconds", 0f)),
         };
@@ -192,7 +197,7 @@ internal sealed class BrainBossOverlays
             var patchPos = new Vector2(centerX, centerY);
 
             sb.BlendMode = ov.Blend;
-            if (frac > 0.0001f && f1 != f0)
+            if (ov.Interpolate && frac > 0.0001f && f1 != f0)
             {
                 sb.interpolateEffect.Enable();
                 sb.interpolateEffect.Offset = new Vector2(r1.Left - r0.Left, r1.Top - r0.Top)

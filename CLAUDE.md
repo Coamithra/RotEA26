@@ -1316,9 +1316,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   footprint to its brain-texel crop (`texCenter`/`texW`/`texH`, reference 1448x1086), so it sits exactly
   over the region it was cut from and **pulses + moves with the boss** (uses the boss's `DrawScale` +
   `Position`), tints by the boss's live `color` (so patches redden in lockstep on low HP), **ping-pongs**
-  for a seamless loop, and rides the frame-interpolation shader (`interpolateEffect`, same path as the
-  animated Braineroid) so the low frame count still plays smooth. It advances on DRAW time (cosmetic --
+  for a seamless loop, and (unless `interpolate:false`) rides the frame-interpolation shader
+  (`interpolateEffect`, same path as the animated Braineroid) so the low frame count still plays smooth.
+  `eye_reveal` sets **`interpolate:false`** -- its discrete open/look/close reads better STEPPED than
+  cross-faded (the tween morphs the eyeball); `pods_flicker` keeps interpolation for smooth light changes.
+  It advances on DRAW time (cosmetic --
   unaffected by hit-stop, like the metal sheen). Straight (non-premultiplied) alpha throughout.
+  **The overlays fade out WITH the boss on death:** `BrainBoss`'s `smallwaitafterasplosion` end state is a
+  quick (~300ms) ALPHA fade of the boss `color` (a scale-down would bare the single sprite's hard
+  rectangular edges now that brain+cables are ONE sprite), and the overlays draw with that same `color`,
+  so they dissolve in lockstep.
   **A patch with `triggerAvgSeconds` does NOT loop** -- it rests on frame 0 (which IS the untouched crop,
   so it reads as the static art) and plays ONE ping-pong cycle whenever
   `RandomHelper.RandomFromAverage(1/triggerAvgSeconds, gameTime)` fires, skipping the roll mid-cycle so
@@ -1327,9 +1334,9 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   continuous loop (`pods_flicker`). The roll happens in Draw, so it consumes the shared
   `RandomHelper.Random` at frame rate -- fine today (the boss is cosmetic and the planned co-op is
   state-replicated, not lockstep), but a `Quad`-style private FX RNG is the move if that ever changes.
-  **`triggerAvgSeconds` + `fps` + `blend` are PLAYBACK knobs, not pixels:** `build_brain_overlays.py`
-  re-syncs them from `regions.json` into every existing manifest entry on each run (`--sync` does only
-  that), so they can be retuned long after the gitignored raw frames are gone.
+  **`triggerAvgSeconds` + `fps` + `blend` + `interpolate` are PLAYBACK knobs, not pixels:**
+  `build_brain_overlays.py` re-syncs them from `regions.json` into every existing manifest entry on each
+  run (`--sync` does only that), so they can be retuned long after the gitignored raw frames are gone.
   **Verify WITHOUT a browser:** `tools/brainanim/preview_ingame.py` composites the boss + overlays in the
   exact 800x600 player framing (mirrors the Draw math) -> `_ingame_contact.png` (static vs 4 phases) +
   `_ingame.gif`. Live: **`?harness=brainboss`** shows the full boss with the overlays ANIMATING (they

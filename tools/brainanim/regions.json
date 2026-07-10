@@ -38,6 +38,7 @@
       "kind": "flesh",
       "fps": 7,
       "triggerAvgSeconds": 15,
+      "interpolate": false,
       "prompt": "Extreme close-up of wet fleshy brain tissue; a slit between the folds slowly parts open to reveal a single glistening organic eyeball that blinks and looks slowly from side to side, then the fold relaxes. Moist shiny surface, veins twitching. Locked static camera, no camera movement, no zoom, frame edges perfectly still. Body-horror, cinematic."
     }
   ]

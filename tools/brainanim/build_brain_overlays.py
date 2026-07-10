@@ -77,6 +77,9 @@ def apply_knobs(entry, region):
     trigger = region.get("triggerAvgSeconds")
     if trigger:
         entry["triggerAvgSeconds"] = float(trigger)   # rest on frame 0, play ~every N s
+    entry.pop("interpolate", None)
+    if region.get("interpolate") is False:
+        entry["interpolate"] = False                  # draw current (floor) frame, no cross-fade
     return entry
 
 
@@ -110,6 +113,7 @@ def write_manifest(manifest, regions):
                  "texCenter/texW/texH are in brainbosshd texture pixels; the game pins the on-screen "
                  "footprint to that crop so patches pulse with the boss. triggerAvgSeconds (optional) "
                  "makes a patch rest on frame 0 and play one cycle every ~N seconds instead of looping. "
+                 "interpolate:false (optional) draws the current (floor) frame with no cross-fade shader. "
                  "Built by tools/brainanim/build_brain_overlays.py; don't hand-edit.",
          "overlays": list(manifest.values())}, indent=1))
     print(f"-> {MANIFEST.relative_to(REPO)} ({len(manifest)} overlays)")

@@ -100,6 +100,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `?invuln` (force the Invulnerability cheat ON so playtesting a level doesn't keep dying;
   aliases `?invulnerability`/`?god`); `?unlockall` (reveal every gated menu option);
   `?skipsplash` / `?autostart` as building blocks. e.g. `…:5280/?level=Level2&noattract`.
+  **Level FAST-BOOTS replace a level's whole event list** — each skips its waves and drops straight
+  into one fight/section, so a change there can be watched in seconds instead of minutes of play:
+  `?spiderboss` (Level2's spider boss — `Level2.PopulateSpiderBossOnly`) · `?spiders` (Level2, a
+  continuous pure-spider ground wave) · `?wallsonly` (Level3's walls sections, looped —
+  `Level3.PopulateWallsOnly`) · **`?brainboss`** (Level3 straight into the REAL BrainBoss finale —
+  `Level3.PopulateBrainBossOnly`; **spawns it UNCONDITIONALLY, bypassing the Hard+ gate in
+  `BrainBossHard()`**, so the brain's animated overlays + `hit_boss` SFX can be verified on any
+  difficulty). Pair with `?invuln`. All are `false` by default, and all are IN `DebugFlags.Active`
+  (unlike the render/feel toggles, which stay out) so they print in the `[debug] flags active` line —
+  they hijack a level, and `?brainboss` alone reaching Level 3 *from the menu* would otherwise do so
+  silently. e.g. `…:5280/?level=Level3&brainboss&invuln`.
 - **Sprite harness — USE THIS to debug an object's drawing code instead of booting the game
   and trying to screenshot a moving enemy at the right instant.** `?harness=<Obj>` boots
   straight onto a space background showing ONE game object, drawn by its OWN `Draw()` through

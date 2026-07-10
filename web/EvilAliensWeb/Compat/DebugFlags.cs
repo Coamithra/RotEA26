@@ -1228,7 +1228,10 @@ namespace EvilAliensWeb.Compat
 					break;
 				}
 			}
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow;
+			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
+			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
+			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || WallsOnly || BrainBoss;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1236,6 +1239,10 @@ namespace EvilAliensWeb.Compat
 					+ " level=" + (Level.HasValue ? Level.Value.ToString() : "-")
 					+ " unlockAll=" + UnlockAll + " invuln=" + Invuln + " loadLog=" + LoadLog
 						+ " metalScore=" + MetalScore
+							// Level fast-boots print only when set: they REPLACE a level's whole event list,
+							// so "why is this level not playing normally" needs an answer in the log.
+							+ (WallsOnly ? " wallsonly" : "")
+							+ (BrainBoss ? " brainboss" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

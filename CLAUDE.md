@@ -1033,46 +1033,52 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   preload stutters on a big new PNG, add
   `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
   `tools/walls/README.md`.
-- **Level-3 walls are 3D TOWERS rising out of the fog (`Wall.Draw`, card d59266cc, `plans/walls-3d-towers.md`).**
+- **Level-3 walls are REAL 3D TOWERS rising out of the fog (`Wall.DrawTowerShafts3D`, cards d59266cc +
+  a66fc73e, `plans/walls-3d-towers.md` + `plans/spike-wall3d.md`).**
   Each collidable block is extruded DOWNWARD into a shaft standing on the alien-base ground; the
   gameplay plane (ship + collision) stays the tower TOPS, and the top-face pass + `CollisionLevelMap`
-  are byte-identical to before. Fake top-down perspective: vanishing point at design centre (400,300),
-  base rect = `VP + (topRect - VP) * 0.66`. **The 0.66 is not a taste knob** -- it is exactly the
-  alien-base GROUND layer's `scrollspeedmodifier` (`Background.SetAlienBase`), so a base projected at
-  0.66 moves at 0.66x the wall's speed = the floor's speed and the towers stay glued to the scrolling
-  ground for free. Change it and the bases slide. Bases project TOWARD the VP, so towers lean away from
-  screen centre (the GTA1 look) and a wall entering the top shows its bases before its top faces --
-  that's the emergence, no special-case animation. Shafts are stacked sprite slices inside the existing
-  batch (NOT `DrawUserIndexedPrimitives` -- the `Quad.cs` WebGL lesson). Three things that are easy to
-  get wrong and are load-bearing: (1) **one global depth ladder for all blocks** -- per-block slice
-  counts break painter's order, since a tall shaft can lean over a block nearer the VP; (2) **the slice
-  row cull is WIDER than the top-face loop's** (`RowShaftVisible`), because a block off the bottom still
-  shows its base and one above the screen already does; (3) **slices sample `GFX/Base/756-v1-side`, not
-  the wall sheet** -- a companion built by **`tools/walls/build_wall_side.py`**, because re-slicing the
-  full-res cell makes the shaft corduroy (the sliver each slice leaves exposed is ~2 design px, the same
-  order as the cell's detail, so it repeats detail instead of smearing). **Re-run that tool whenever
-  `756-v1.png` changes**; don't hand-edit the sheet. That sheet is **a 2D SCAN PLANE per cell** (640x640 =
-  an 8x8 grid of mirror-tiled, area-averaged, wrap-padded planes), because the side faces need extra axes
-  to carry texture. **`?wallsidescan=`** slides a `SideWindow`(16)-sized window **DIAGONALLY** across the
-  block's own plane as the shaft descends; with scan 0 every slice samples the SAME window, so the exposed
-  sliver is always the same border texels smeared radially out of the VP and the shafts read as **streaks
-  with no surface** -- inherent to the slice trick, not a tuning failure. **The scan must travel
-  PERPENDICULAR to the exposed edge**, and a DIAGONAL is what serves every face at once: a block
-  above/below the VP exposes a HORIZONTAL edge (sliver = a row, perpendicular = Y), one left/right exposes
-  a VERTICAL edge (sliver = a column, perpendicular = X), and a diagonal advances BOTH by one texel per
-  slice. Either single axis gives one orientation the ideal rate and the other exactly ZERO -- its sliver
-  merely translates along its own length, re-showing the same texels, which over 64 slices traces hard
-  diagonal streaks (what a strip/Y-only sheet did to the left/right shafts). **Do NOT "fix" that by
-  picking the axis per block from `|dx|` vs `|dy|`**: that flips as a block scrolls past the VP diagonal
-  and the texture POPS mid-screen (tried; reverted). The offset depends only on `t`, so it is a pure
-  function of depth and nothing can pop. Price: the offset perpendicular to one edge is parallel to the
-  other, so each face is sheared ~45 deg along its length -- reads as diagonal grain, not as the coherent
-  lines a pure translation gives, because consecutive slivers carry genuinely different texels. The
-  natural scan is **one texel of travel per slice**, `scan = MaxSlices / scanSpan` (= 64/64 = **1**, the
-  baked default): below it slices repeat a window and smear, above it they skip texels and the shaft
-  corrugates into ridges. `SideWindow` is a **contract** with the tool's `CELL`; the game derives
-  `planePitch = side.Width/8` and `scanSpan = planePitch - SideWindow`, so a square (pre-plane) sheet
-  yields span 0 and degrades to the old streaked look rather than reading garbage.
+  are byte-identical to the flat original. Vanishing point at design centre (400,300), base rect =
+  `VP + (topRect - VP) * 0.66`. **The 0.66 is not a taste knob** -- it is exactly the alien-base GROUND
+  layer's `scrollspeedmodifier` (`Background.SetAlienBase`), so a base projected at 0.66 moves at 0.66x
+  the wall's speed = the floor's speed and the towers stay glued to the scrolling ground for free.
+  Change it and the bases slide. Bases project TOWARD the VP, so towers lean away from screen centre
+  (the GTA1 look) and a wall entering the top shows its bases before its top faces -- that's the
+  emergence, no special-case animation.
+  **The side faces are GENUINE 3D GEOMETRY in ONE batched draw** (`SpriteBatchWrapper.DrawGeometry3D`
+  -> a single `DrawUserIndexedPrimitives` through a shared `BasicEffect`), NOT the stacked sprite
+  slices this started as. The old "3D is unviable on WebGL, see `Quad.cs`" reading was wrong: that
+  comment describes THREE immediate-mode draws PER BEAM, each forcing a leading `SpriteBatch` flush --
+  a batching pathology. BlazorGL creates and destroys a transient vertex + index buffer per CALL, so
+  the overhead is **per-call, not per-vertex**, and one call per wall is exactly the shape that path
+  wants. Measured (focused tab, interleaved to defeat scroll drift): **towers now cost ~0.4 ms/tick over
+  the flat baseline, down from ~3.8 ms** -- about a 10x cut. `BasicEffect` is real on BlazorGL (KNI
+  embeds `Resources.BasicEffect.fxo` in `Kni.Platform.dll`), so no bespoke `.fx` -- and no hand-written
+  vertex shader, which this project has never needed -- is involved.
+  **The geometry is 3D rather than pre-projected** because flat pre-projected quads lose `w` and give
+  affine (PS1-style) texture warp; emitting real boxes lets the GPU do the perspective divide, so the
+  side faces sample the REAL `756-v1` cell with correct UVs. The camera (`View`/`Projection`) is built
+  to reproduce `Wall.Project()` exactly -- eye at the VP, `z=0` the gameplay plane, `z=ZAtDepth(depth)`
+  the ground -- and `tools/walls/preview_wall3d.py` asserts that to ~1e-13 px.
+  **NO DEPTH BUFFER, and that is proved rather than lucky.** `sceneTarget` is `DepthFormat.None`. The
+  shafts are equal-height vertical boxes on a ground plane under a perspective camera at the VP, so in
+  polar coordinates about the VP a face's depth at radius `r` is `r / r0` (`r0` = its near edge). Two
+  blocks sharing a ray can never interleave -- the one whose near edge is closer to the VP wins at every
+  shared radius -- so the occludes relation is ACYCLIC and a CPU painter's sort by distance from the VP
+  is EXACT. `tools/walls/verify_tower_order.py` certifies this over the real `level3.txt` and every
+  `Wall.Setup` width (14k+ overlapping face pairs) and REJECTS two plausible-looking sort keys, so it
+  isn't passing vacuously. Top faces sit at depth 1 (the maximum), so drawing them last stays correct.
+  **Three things that are load-bearing:** (1) the shaft row cull is WIDER than the top-face loop's
+  (`RowShaftVisible`), because a block off the bottom still shows its base and one above the screen
+  already does; (2) a face is emitted only when it is BOTH an outer edge (`isfree` -- a side shared with
+  a neighbour is interior to the solid, two coincident quads that shouldn't exist) AND turned toward the
+  eye; (3) **UV orientation is what kills the seams, on both axes.** Blocks step through the sheet as
+  (u -> columns, v -> rows), so a face's ALONG-EDGE coordinate must follow the axis its edge runs along
+  (a vertical edge spans rows -> `v`); get it backwards and two stacked blocks' coplanar walls each
+  restart the same range, hard-seaming every block boundary. And the DOWN-THE-SHAFT coordinate must
+  START at the cell edge the wall hangs from, so the sheet folds over the top face's rim -- hence the
+  down range reverses between the west wall and the east one. **No half-texel inset:** adjacent atlas
+  cells ARE the correct continuation (row `i`'s `v1` is row `i+1`'s `v0`), so insetting re-opens the seam
+  it means to close.
   **Unloading is DEFERRED past the bottom edge (`Wall.DeathY`).** A block's base projects TOWARD the VP,
   so a block below the VP has its shaft drawn ABOVE its cap -- when the last cap crosses y=600 the towers
   are still on screen, and the old `Position.Y > 600` `Die()` popped them out of existence. The last thing
@@ -1081,74 +1087,68 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Walls.wall_OnDeath` -> `Terminate()`, i.e. the level's NEXT EVENT**, by the ~154 design px of extra
   scroll (~0.6s at Level 3's `4.3/16.667` px/ms wall-section speed). Intended: the section isn't over until
   its towers have gone.
-  A `Color` tint MULTIPLIES, so it can't paint a slice up to a haze colour: the
-  floor composites bright blue (~RGB(46,125,199)), so shafts BRIGHTEN toward `DefaultFogColor` as they
-  descend, then alpha-dissolve over the bottom `DissolveFraction` (slices are otherwise OPAQUE -- a
-  translucent stack accumulates back to opaque and kills the dissolve). Drifting fog **wisps** (additive
-  `2331-v5`, the same texture + blend the two background fog layers use) draw BETWEEN the shafts and the
-  crisp top faces; additive can't occlude, but fog over a dark object IS a brightening and the bright
-  tops draw after, so it reads right. They tile **by position, never by a drifting source rect** (the
-  batch begins with a null samplerState = LinearClamp, so an out-of-bounds source window clamps instead
-  of wrapping), phase = `Position.Y * 0.8`, and their alpha is gated on the visible-block count so the
-  screen-wide haze can't pop in with the `Wall` entity's spawn/death. Cost ~600-1500 batched draws,
-  ~3.6ms/tick over the flat path. **Tuning:** `?walltowers=0` is the kill switch (reproduces the old
-  flat look exactly) · `?walldepth= ?wallslicestep= ?wallfog= ?wallfogcolor=<rrggbb> ?wallsidedark=
-  ?wallsidescan= ?walltwist=<deg> ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wallwisps= ?wallwispspeed=` (all null => the baked
-  `Wall.Default*` consts, so a plain boot is
-  unchanged) · **`?level=Level3&wallsonly`** fast-boots a looping walls section (mirrors `?spiderboss`;
-  pair with `?invuln`), and shows a **live `eaWalls` slider panel** (`index.html`, outside `#app`, also
-  on a bare `?walltune`) driving `DebugInput.SetWalls` -> `DebugFlags.SetWallsOverride`, read every
-  Draw; the orange readout prints the bake-ready query string. `eaWalls(...)` works from the console.
-  Slice step bands above ~8px; **baked 1, where the step is inert and `MaxSlices` (64) is what binds** --
-  the worst on-screen lean is ~170px, so 1px asks for ~170 slices and gets 64 (an effective ~2.7px step
-  at the far corners). That is why 5 -> 1 barely moved the frame time: it only took the count 34 -> 64.
-  To resolve a true 1px step the lever is `MaxSlices`, at ~3x the slice draws.
-  **`?wallfacelight=<0..1>`** (baked **0.35**) shades the four faces differently so tower CORNERS read --
-  once the side texture runs continuously across block boundaries, nothing distinguishes a north face
-  from an east one. A sprite has ONE tint and a slice's visible sliver is the BORDER RING of its square,
-  spanning two faces at once, so this is a PIXEL SHADER (`tools/shaders/src/faceshade.fx` ->
-  `GFX/Effects/faceshade`, wired through `FaceShadeEffect` + `EffectHandler` like the other sprite
-  effects; `Wall.DrawTowerShafts` enables it around the slice loop only). The square's two DIAGONALS cut
-  the ring into the four faces, mitring the corners the way a real box corner does -- the shader shades by
-  NEAREST EXPOSED EDGE, so ties fall on a diagonal and give the mitre for free. **ONLY OUTER EDGES ARE
-  FACES:** a side shared with a neighbouring block is not a face of the wall, and shading it anyway mitres
-  a dark wedge into every block's corner -- two meeting at each interior boundary, reading as a SEAM GRID.
-  So each sprite's VERTEX COLOUR carries a 4-bit mask of which sides are exposed (`Wall.FaceMask`, the same
-  `isfree()` the top-face edge lines use; r/g/b = north/south/east, a = west as 255/128 so no batcher can
-  read the sprite as fully transparent), and hidden sides are excluded from the nearest-edge search. The
-  mask has to be per-BLOCK and a per-block uniform would break the batch -- so the slice TINT (identical for
-  every block at one depth) moves to the `SliceTint` uniform and the vertex colour is freed to carry it.
-  A fully-interior block resolves to factor 1 (unshaded). **GOTCHA:** SpriteBatch
-  hands the shader ATLAS texcoords, not local 0..1 -- but every window origin is `j*SideWindow + off` mod a
-  multiple of `SideWindow`, hence congruent to `off` mod `SideWindow`, so ONE per-slice uniform recovers
-  each sprite's local UV (`local = frac((uv*SheetSize - WindowOrigin)/Window)`). That makes the pass cost
-  `slices` (~64) batch flushes rather than the ~1500 extra sprite draws a two-tints-per-slice split needs.
-  Factors are **darken-only** (<= 1; the tint already carries the fog lerp, so >1 would clip the hazy base
-  to white) and are lerped toward 1 with the haze, so shading dissolves into the fog at the base. The
-  contrast that makes a corner read is between ORIENTATIONS (vertical faces darken by `light`, horizontal
-  ones don't) -- a block only ever shows one horizontal + one vertical face, so every corner in every
-  quadrant gets contrast; a pure directional light gives ZERO contrast in two quadrants (where both visible
-  normals catch it equally). **`?wallfaceangle=<deg>`** (baked **225**, from the upper left) adds a weaker
-  directional term so north != south and east != west. 0 => flat-shaded, no flushes.
-  **`?walltwist=<deg>`** (baked **0**, signed) rotates each depth-layer by `twist*(1-t)` -- 0 at the cap,
-  so it meets the unrotated top face. The rotation is of the WHOLE LAYER about the VP, never of each
-  slice about its own centre: a rigid layer rotation keeps footprints affine images of each other, so
-  blocks stay glued and disjoint (which is what makes the global painter's order correct), whereas
-  rotating squares in place tiles nothing and opens X-shaped cracks down every solid cluster. Know what
-  it does though -- rotating about the VP ORBITS a tower around screen centre rather than twisting it
-  about its own axis (tangential shift = `radius*angle`), so outer towers bend and central ones barely
-  move. A true per-tower twist needs a per-tower centre, which the slice pass has no notion of.
-  **`?walltoplift=<f>`** draws the tower TOPS projected at depth `1 + lift` (scaled away from the VP) so
-  the caps sit proud of the gameplay plane; baked **0** (flush). It is COSMETIC ONLY -- `CollisionLevelMap`
-  still uses the unprojected block rects, so a lift drifts the sprite off its own hitbox by
-  `lift * distance-from-VP` (~8 design px at a screen corner for lift 0.02). Keep it small and check with
-  `?hitboxes`. Final feel-dialing is a "For me" step -- bake settled values
-  into the `Default*` consts in `Wall.cs`. **Verify the drawing OFFLINE, not with a live screenshot** --
-  the wall scrolls, and the real trap is that the canvas is black whenever its tab is backgrounded
-  (Chrome won't composite the WebGL surface, though `setTimeout` keeps the loop ticking). Re-implement
-  `Wall.Draw`'s projection in numpy/Pillow against the real PNGs and look at the image; to check the
-  LIVE pipeline, freeze with `eaHitstop(20000)` and diff `gl.readPixels` between `eaWalls(true,...)`
-  and `eaWalls(false)` (top-face pixels must come back identical).
+  **Spawning is ADVANCED above the top edge (`Wall.EntryLead`) -- the mirror image.** The flat-era spawn
+  (`Position.Y = -rowH*height`) only hides the TOP faces; a block's projected base leads its cap by
+  `VanishY*(1/depth - 1)` (~154.5px) of scroll, so a grid with blocks in its bottom row(s) materialised
+  its towers ~100-155px INTO the screen on the spawn frame (the "towers pop in as the section scrolls in"
+  bug -- only bottom-row-occupied grids, hence "sometimes"; variation 3's lone corner block was the
+  reliable single-pillar repro). `Setup`/`SetupFromFile` now spawn `EntryLead()` higher, so towers enter
+  base-first through the edge; 0 with `?walltowers=0`, so the flat path spawns exactly as the original.
+  Entry and exit are now symmetric (~0.6s each way at walls-section scroll).
+  **Wall grid files load via `TitleContainer.OpenStream` (`Wall.OpenLevelGrid`, `Content/levels/...`),
+  never `new StreamReader(path)`** -- a plain file read hits the WASM in-memory FS, which never contains
+  wwwroot content (it's HTTP-only), so it throws on web. Consequence fixed in passing: variation 2
+  (`level3.txt`, used by **OwnLevel**) had silently fallen back to its hard-coded 5x19 grid since the
+  port began; it now renders the real committed `Content/levels/level3.txt`.
+  **Entry diagnostics:** `?walltrace` logs each wall's spawn / first-shaft / first-top-face (posY +
+  quad counts) and flags any block whose shaft starts or stops drawing while fully mid-screen
+  (`POP IN`/`POP OUT` -- scroll only moves geometry through the edges, so any hit means a cull/spawn
+  assumption broke). `?level=Level3&wallpoptest` chains ten SMALL grid-file sections
+  (`Content/levels/poptest0..9.txt`, `Level3.PopulateWallPopTest`) and drops the scroll to ~10% once the
+  second loads, so every entry is slow and unmistakable. Both are opt-in and OUT of `DebugFlags.Active`.
+  **The haze is REAL DISTANCE FOG** (`BasicEffect.FogEnabled`, keyed on eye distance `e/d`; `?wallfog`
+  baked **0.55**, fogging toward the measured FLOOR colour RGB(46,125,201) -- fog LERPS, so the old
+  bright `DefaultFogColor` overshot and LIT the base up; the floor colour is darker than the shaft so
+  the base recedes into it), which is
+  something only real geometry can have: a sprite `Color` tint MULTIPLIES, so the slice path could only
+  ever scale the wall texture down -- never paint it UP to a haze colour -- and had to lean on a bright
+  `DefaultFogColor` plus the alpha dissolve to sell the fade. Fog LERPS toward the colour, so the base
+  genuinely converges on it, and the fog factor is linear in world z so interpolating it is exact (more
+  `?wall3dbands` does NOT smooth the fog -- the bands only resolve the smoothstep bottom dissolve, which
+  rides per-vertex alpha and takes COVERAGE to zero so the shaft melts into the floor art). Fog touches
+  rgb only, so the dissolve survives it. **Per-face shading** (`?wallfacelight`, baked 0.35; `?wallfaceangle` baked 140)
+  is now just each quad's flat vertex colour -- real geometry knows which wall it is. The slice path had
+  to fake this with a dedicated pixel shader reading a per-sprite face mask, which is what mitred a dark
+  wedge into every interior corner; that shader, `FaceShadeEffect`, `Wall.FaceMask`, the `756-v1-side.png`
+  companion sheet and `tools/walls/build_wall_side.py` are all **deleted** -- their logic is preserved in
+  commit `906f344` ("Level-3 wall towers: feel pass") if it is ever wanted.
+  Drifting fog **wisps** (additive `2331-v5`, the same texture + blend the two background fog layers use)
+  draw BETWEEN the shafts and the crisp top faces; additive can't occlude, but fog over a dark object IS a
+  brightening and the bright tops draw after, so it reads right. They tile **by position, never by a
+  drifting source rect** (the batch begins with a null samplerState = LinearClamp, so an out-of-bounds
+  source window clamps instead of wrapping), phase = `Position.Y * 0.8`, and their alpha is gated on the
+  visible-block count so the screen-wide haze can't pop in with the `Wall` entity's spawn/death.
+  **Tuning:** `?walltowers=0` is the kill switch (reproduces the old flat look exactly) ·
+  `?walldepth= ?wallfog= ?wallfogcolor=<rrggbb> ?wallsidedark= ?wallfacelight= ?wallfaceangle=
+  ?walltoplift= ?wall3dbands= ?wallwisps= ?wallwispspeed=` (all null => the baked `Wall.Default*` consts,
+  so a plain boot is unchanged) · **`?level=Level3&wallsonly`** fast-boots a looping walls section
+  (mirrors `?spiderboss`; pair with `?invuln`), and shows a **live `eaWalls` slider panel** (`index.html`,
+  outside `#app`, also on a bare `?walltune`) driving `DebugInput.SetWalls` -> `DebugFlags.SetWallsOverride`,
+  read every Draw; the orange readout prints the bake-ready query string. `eaWalls(...)` works from the
+  console. **`?walltoplift=<f>`** (baked **0**) draws the tower TOPS at depth `1 + lift` so the caps sit
+  proud of the gameplay plane; COSMETIC ONLY -- `CollisionLevelMap` still uses the unprojected block rects,
+  so a lift drifts the sprite off its own hitbox by `lift * distance-from-VP` (~8 design px at a screen
+  corner for lift 0.02). Keep it small and check with `?hitboxes`.
+  **Cost meter:** `eaWallPerf(true)` arms `Compat/WallProfiler`; the `eaWalls` panel polls `eaWallStats()`
+  ~4x/sec (a per-frame interop call would cost more than the thing it measures) and prints fps, frame ms +
+  p95, and the tower-pass ms. **Verify the drawing OFFLINE, not with a live screenshot** -- the wall
+  scrolls, and the canvas is black whenever its tab is backgrounded (Chrome won't composite the WebGL
+  surface, though `setTimeout` keeps the loop ticking). `tools/walls/preview_wall3d.py` re-implements the
+  exact projection + shading in numpy/Pillow against the real PNGs and writes a contact sheet. **And when
+  you DO measure frame cost, the tab must be FOCUSED** -- Chrome throttles a background tab (an unfocused
+  read said 14.2 ms/tick where the focused one said 6.2), and FPS alone tells you nothing because it is
+  vsync-capped. Note `scheduleTick` uses `rAF` when visible and `setTimeout` when hidden, so a frame queued
+  via `rAF` just before the tab hides never fires and the loop parks until it is visible again.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed

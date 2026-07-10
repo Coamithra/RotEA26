@@ -22,9 +22,11 @@ internal class Wall : AlienDrawableGameComponent
 	// which is the floor's speed, and the towers stay glued to the scrolling ground for free.
 	// Change DefaultDepth and the bases slide against the floor.
 	//
-	// Shafts are drawn as stacked sprite slices (GTA1 voxel-slice style), NOT real 3D quads --
-	// per-quad DrawUserIndexedPrimitives forces a batch flush and is brutal on WebGL/WASM (the
-	// Quad.cs lesson). Everything below stays inside the one existing SpriteBatch.
+	// Shafts are REAL 3D geometry: the side faces of every visible tower go out in ONE buffered
+	// DrawUserIndexedPrimitives (SpriteBatchWrapper.DrawGeometry3D), which is why they cost ~0.4ms
+	// over drawing no towers at all where the old stacked-sprite-slice extrusion cost ~3.8ms. The
+	// "3D is unviable on WebGL" reading of Quad.cs was about three immediate-mode draws PER BEAM,
+	// each forcing a batch flush -- a batching pathology, not 3D throughput.
 	//
 	// The Default* values below are MIRRORED as literals by the eaWalls slider panel in
 	// wwwroot/index.html (it seeds its sliders from them, then pushes them in). Re-bake one here
@@ -34,58 +36,6 @@ internal class Wall : AlienDrawableGameComponent
 	private const float VanishY = 300f;
 
 	internal const float DefaultDepth = 0.66f;
-
-	// Design px of corner "lean" per slice. The lean is (topD - depth) * |corner - VP|, so it is
-	// ~0 at the screen centre and ~170px at the far corners; the slice count is derived from the
-	// worst lean on screen rather than fixed, so centre blocks don't pay for edge blocks. Above
-	// ~8px the shrinking slice rects stop overlapping cleanly and the shaft bands into vertical
-	// strips with a staircased bottom edge.
-	//
-	// NOTE the step is CLAMPED by MaxSlices, and at the baked 1px it is the clamp that binds, not
-	// the step: the worst on-screen lean is ~170px, so 1px asks for ~170 slices and gets 64 (an
-	// effective ~2.7px step at the far corners, finer everywhere else). That is why dropping the
-	// step from 5 to 1 barely moved the frame time -- it only took the slice count 34 -> 64. To
-	// actually resolve a true 1px step the lever is MaxSlices, and it costs ~3x the slice draws.
-	internal const float DefaultSliceStep = 1f;
-
-	private const int MaxSlices = 64;
-
-	// Size of the window the slice pass samples out of 756-v1-side.png, and that sheet's per-cell
-	// pitch. A CONTRACT with tools/walls/build_wall_side.py's CELL -- the sheet is wrap-padded by
-	// exactly this much, so a window whose origin lands anywhere in [0, scanSpan)^2 stays inside it.
-	//
-	// 64 rather than a token 16 because adjacent atlas windows do NOT filter across their shared
-	// edge -- each clamps -- so a magnified window leaves a soft mismatched band at every block
-	// boundary even when the CONTENT is continuous. At 64 one texel is about one on-screen pixel at
-	// a typical block size (~67 design px) and that clamp is sub-pixel.
-	private const int SideWindow = 64;
-
-	// How far the slice pass scans DIAGONALLY across the side sheet, in TEXELS OF TRAVEL PER SLICE
-	// (0 = no scan). Without a scan every slice samples the SAME window, so the sliver each slice
-	// leaves exposed is always the same border texels smeared radially out of the VP -- the shaft
-	// reads as streaks with no surface of its own. Sliding the window as the shaft descends makes
-	// successive slivers expose successive texels, which is what gives the vertical faces a texture
-	// at all. The sheet tiles seamlessly (build_wall_side.py), so the walk wraps without a seam.
-	//
-	// Texels-per-slice, not wrap-cycles, so the natural value is simply 1 and it does not move when
-	// the sheet is resized. Below 1 consecutive slices repeat a window and smear; above it they skip
-	// texels and the shaft corrugates into visible ridges.
-	internal const float DefaultSideScan = 1f;
-
-	// Degrees the shaft TWISTS between its cap and its base (0 = no twist). Each depth-layer is
-	// rotated by twist * (1 - t) -- zero at the cap, so it meets the unrotated top face cleanly.
-	//
-	// The rotation is applied to the WHOLE LAYER about the VANISHING POINT, not to each slice about
-	// its own centre. That distinction is load-bearing:
-	//   - A rigid rotation of the layer about the VP keeps every footprint at that depth an affine
-	//     image of the others, so adjacent blocks stay glued edge to edge and the footprints stay
-	//     DISJOINT -- which is exactly what makes the single global painter's order correct.
-	//   - Rotating each slice about its own centre would tile nothing: squares rotated in place
-	//     don't meet, so every solid block cluster would open X-shaped cracks down its shaft, and
-	//     the corners would swing outside their footprint into a neighbour's.
-	// Because SpriteBatch source rects are axis-aligned, the texture cannot be rotated independently
-	// of the geometry -- so this rotates both, and reads as a spiral shear down the tower.
-	internal const float DefaultSliceTwist = 0f;
 
 	// How far the tower TOPS are lifted above the gameplay plane, as a fraction of the VP depth
 	// (0 = flush, the shipped XBLIG look). The top faces are drawn projected at depth 1 + lift,
@@ -98,21 +48,30 @@ internal class Wall : AlienDrawableGameComponent
 	// ~8 design px at a screen corner for lift 0.02. Keep it small, and check with ?hitboxes.
 	internal const float DefaultTopLift = 0f;
 
-	// How far a slice's tint lerps toward the haze colour at the base (1 = fully fogged).
-	internal const float DefaultFog = 1f;
+	// How far the shaft is fogged at its base (1 = fully the floor colour, 0 = fog off). Now that the
+	// haze colour IS the floor (a mid, saturated blue below the shaft's brightness, not the old
+	// near-white that lit the base UP), a strong fade darkens the base into the floor as intended.
+	internal const float DefaultFog = 0.55f;
 
-	// The haze tint a shaft leans toward at its base. NOTE this is a MULTIPLICATIVE sprite tint,
-	// so it can only scale the wall texture -- it can never paint a slice up to a literal fog
-	// colour. The alien-base floor composites bright blue (756 plus its two additive 2331-v5
-	// layers averages RGB(46,125,199)), so the convincing cue is for the shaft to BRIGHTEN and
-	// desaturate as it descends and then alpha-dissolve into that floor. Hence a high-value
-	// blue-white here, above DefaultSideDark rather than below it: the lit-but-shadowed upper
-	// shaft is the darkest part, the fogged base the palest.
-	private static readonly Color DefaultFogColor = new Color(158, 199, 242);
+	// FALLBACK haze colour. In play the shaft actually fogs toward the LIVE floor colour
+	// (`oracle.AlienBaseFloorColor`, which tracks the five Level-3 floor switches); this is only used
+	// for the first floor and off-level (e.g. the harness). It is the initial floor: 756 plus its two
+	// additive 2331-v5 fog layers, measured RGB(46,125,201).
+	//
+	// This is now REAL DISTANCE FOG (BasicEffect.FogEnabled), not a tint, and that inverts what the
+	// colour has to be. A sprite Color tint MULTIPLIES -- it can only ever scale the wall texture DOWN,
+	// never paint it up to a colour -- so the slice path needed a high-value blue-white (158,199,242)
+	// sitting ABOVE DefaultSideDark just to lift the base toward the haze, and leaned on the alpha
+	// dissolve to finish the fade. Fog LERPS, so that same bright colour now overshoots the other way
+	// and makes the base BRIGHTER than the shaft (the "bottom lightens, looks off" bug). Fogging toward
+	// the real floor colour instead -- darker and more saturated than the shaft's lit mid-body -- makes
+	// the base recede into the floor it melts into, which is what a shaft dropping into shadow does.
+	private static readonly Color DefaultFogColor = new Color(46, 125, 201);
 
-	// Brightness of the shaft's topmost slice (1 = as bright as the top face). Slice sides are
-	// darker than the lit top, as they would be under a top-down light.
-	internal const float DefaultSideDark = 0.55f;
+	// Brightness of the shaft at its cap (1 = as bright as the top face). Sides are darker than the
+	// lit top, as they would be under a top-down light. Dialed up from the slice path's 0.55 now that
+	// the fog no longer has to brighten the shaft to fake the haze.
+	internal const float DefaultSideDark = 0.7f;
 
 	// Per-face shading contrast (0 = every face the same shade, the pre-shading look). Once the side
 	// texture runs continuously across block boundaries, nothing distinguishes a tower's north face
@@ -131,8 +90,9 @@ internal class Wall : AlienDrawableGameComponent
 	internal const float DefaultFaceLight = 0.35f;
 
 	// Azimuth of the light, degrees, screen space: 0 = from the right (+x), 90 = from below (+y).
-	// 225 = from the upper left, the usual convention.
-	internal const float DefaultFaceAngle = 225f;
+	// Dialed to 140 (from the lower left), which reads best against the alien-base floor's own
+	// lighting; 225 would be the usual upper-left convention.
+	internal const float DefaultFaceAngle = 140f;
 
 	// How much of DefaultFaceLight the directional term gets. Small: the orientation contrast above is
 	// what makes corners legible, and a strong directional term would cancel it in some quadrant.
@@ -145,10 +105,52 @@ internal class Wall : AlienDrawableGameComponent
 
 	internal const float DefaultWispSpeed = 0.8f;
 
-	// Bottom fraction of the shaft that alpha-dissolves into the fog. Slices are otherwise drawn
-	// OPAQUE: consecutive slices overlap heavily, so a stack of translucent ones would accumulate
-	// back to opaque and defeat the dissolve. Lerping the tint to the haze colour does the work.
+	// Bottom fraction of the shaft that alpha-dissolves into the floor. The fog takes the shaft's
+	// COLOUR to the haze; this takes its COVERAGE to zero, so it melts into the floor art rather
+	// than ending on a hard (if correctly-coloured) edge.
 	private const float DissolveFraction = 0.18f;
+
+	// --- Real 3D tower geometry (Trello a66fc73e, plans/spike-wall3d.md) ------------------
+	// Distance from the eye to the gameplay plane, in the 3D pass's world units. Arbitrary --
+	// only the RATIO to the tower height matters, and that is pinned by DefaultDepth. Together
+	// with ShaftHeight below it reproduces Project() exactly, so the towers land on the same pixels
+	// the top faces do.
+	private const float EyeDistance = 600f;
+
+	// The near plane sits slightly in FRONT of the gameplay plane, and the frustum's near-plane
+	// extents shrink to match, so the projection is unchanged. Without this the top ring of shaft
+	// vertices would lie exactly ON the near plane and could clip out on float error.
+	private const float NearFrac = 0.9f;
+
+	// Vertical strips a side face is tessellated into. NOT a slice stack -- each band is a real
+	// textured quad, and the geometry would be exact at 1. The bands exist only to resolve the
+	// SMOOTHSTEP bottom dissolve, which is carried as per-vertex alpha and interpolated linearly
+	// between bands; at 1 the dissolve degrades to a straight linear fade. The fog needs no bands
+	// at all: it is linear in world z, so interpolating it is exact.
+	private const int DefaultBands = 4;
+
+	private VertexPositionColorTexture[] towerVerts;
+
+	private int[] towerIndices;
+
+	// Visible blocks for the 3D pass, packed as i * width + j, painter-sorted each frame.
+	private readonly List<int> towerOrder = new List<int>();
+
+	// World z at which the projection's scale factor E/(E+z) equals `d` -- i.e. the height whose
+	// footprint is exactly Project(top, d). Negative above the gameplay plane (d > 1, a lifted cap).
+	private static float ZAtDepth(float d) => EyeDistance * (1f / d - 1f);
+
+	// Distance from the eye to depth `d`. Falls straight out of the same relation (E + z == E/d) and
+	// is what the fog is keyed on, so the haze is a function of a tower's real depth.
+	private static float EyeDistanceAtDepth(float d) => EyeDistance / d;
+
+	// Shaft coverage at height fraction `f` (0 = the cap, 1 = the ground): opaque until the bottom
+	// DissolveFraction, then smoothstepped away so the base melts into the floor art.
+	private static float ShaftAlpha(float f)
+	{
+		float t = 1f - f;
+		return (t < DissolveFraction) ? MathHelper.SmoothStep(0f, 1f, t / DissolveFraction) : 1f;
+	}
 
 	// Visible-block count at which the wisps reach full alpha. The wisp pass is screen-wide, but
 	// a Wall spawns and dies per section (Walls.cs), so gating the alpha on how many blocks are
@@ -161,17 +163,19 @@ internal class Wall : AlienDrawableGameComponent
 	// background decoded it long before the first wall spawns).
 	private Texture2D fog;
 
-	// Companion to the wall sheet (tools/walls/build_wall_side.py): the same 8x8 grid, but each cell
-	// is a 2D SCAN PLANE rather than a square -- a mirror-tiled, area-averaged version of that cell,
-	// wrap-padded by SideWindow. Area-averaged because slicing the full-res cell makes the shaft
-	// corduroy (consecutive slices re-draw the same high-frequency detail at slightly different
-	// scales, so the sliver each one leaves exposed repeats it instead of smearing into a face); a
-	// PLANE rather than a square or a strip because DefaultSideScan must be able to walk EITHER
-	// axis -- see the axis choice in DrawTowerShafts. Mirror-tiled, so the scan wraps seamlessly.
-	// One texture switch per frame (side -> wall), so the slices batch separately from the tops.
-	private Texture2D side;
-
 	private bool[,] blocks;
+
+	// TEMP (?walltrace) per-instance diagnostic state; see DebugFlags.WallTrace.
+	private static int traceIdCounter;
+	private int traceId = -1;
+	private int traceFrame;
+	private bool traceLoggedShaft;
+	private bool traceLoggedTop;
+	private int traceShaftQuads;
+
+	// TEMP (?walltrace): last frame's visible-block set, for the mid-screen pop detector.
+	// Non-null only while tracing (allocated in Setup/SetupFromFile).
+	private System.Collections.Generic.HashSet<int> traceShaftPrev;
 
 	private Texture2D line;
 
@@ -204,7 +208,6 @@ internal class Wall : AlienDrawableGameComponent
 		base.LoadContent();
 		line = content.Load<Texture2D>("GFX/Base/black line lalalal");
 		fog = content.Load<Texture2D>("GFX/Base/2331-v5");
-		side = content.Load<Texture2D>("GFX/Base/756-v1-side");
 	}
 
 	public Wall(Game game)
@@ -230,6 +233,14 @@ internal class Wall : AlienDrawableGameComponent
 		//IL_027e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0283: Unknown result type (might be due to invalid IL or missing references)
 		collisionMap = null;
+		traceId = -1;
+		traceFrame = 0;
+		traceLoggedShaft = false;
+		traceLoggedTop = false;
+		traceShaftQuads = 0;
+		// Empty (not null) so anything visible on the very first frame logs as a POP IN.
+		traceShaftPrev = EvilAliensWeb.Compat.DebugFlags.WallTrace
+			? new System.Collections.Generic.HashSet<int>() : null;
 		switch (variation)
 		{
 		case 0:
@@ -841,7 +852,7 @@ internal class Wall : AlienDrawableGameComponent
 			{
 				List<string> list = new List<string>();
 				int num;
-				using (StreamReader streamReader = new StreamReader(General.Path + "Levels/level3.txt"))
+				using (StreamReader streamReader = OpenLevelGrid("level3.txt"))
 				{
 					string text = streamReader.ReadLine();
 					num = Convert.ToInt32(text.Remove(0, 6));
@@ -1117,10 +1128,83 @@ internal class Wall : AlienDrawableGameComponent
 		}
 		scale = 800f / (float)(texture.Width * width);
 		float num3 = (float)texture.Height * scale;
-		base.Position = new Vector2(0f, (0f - num3) * (float)height);
+		base.Position = new Vector2(0f, (0f - num3) * (float)height - EntryLead());
 		base.Direction = (float)Math.PI / 2f;
 		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 		base.Speed = (backgroundSpeed).Length() * 1f;
+	}
+
+	// How far ABOVE the flat spawn point (-rowH*height, bottom row's top face at the screen edge)
+	// the wall must start so NOTHING is visible on its first frame. A block's projected base leads
+	// its cap by VanishY*(1/depth - 1) px of scroll -- the same geometry that defers DeathY past
+	// 600 on the way out -- so a grid with blocks in its bottom row would otherwise materialise its
+	// shafts ~150px INTO the screen at spawn (the "towers pop in as the section starts" bug;
+	// grids with empty bottom rows entered smoothly, which is why it only happened sometimes).
+	// 0 with the towers off, so ?walltowers=0 spawns exactly as the flat original.
+	private static float EntryLead()
+	{
+		if (!EvilAliensWeb.Compat.DebugFlags.WallTowers)
+		{
+			return 0f;
+		}
+		float depth = MathHelper.Clamp(EvilAliensWeb.Compat.DebugFlags.WallDepth ?? DefaultDepth, 0.05f, 1f);
+		return VanishY * (1f / depth - 1f);
+	}
+
+	// Bundled level grids live in wwwroot/Content/levels (lowercase under Content/, the live-host
+	// case-sensitivity rule). A plain new StreamReader(path) reads the WASM in-memory FS, which
+	// never contains wwwroot content (it's only served over HTTP) -- TitleContainer.OpenStream is
+	// the web-safe read, same as LandedOffsets/BrainBossOverlays.
+	private static StreamReader OpenLevelGrid(string file)
+	{
+		return new StreamReader(TitleContainer.OpenStream(General.Path + "levels/" + file));
+	}
+
+	// Debug (?wallpoptest): build a wall from an arbitrary grid file under Content/levels, same
+	// format as level3.txt (width=N header, X/space rows, an `end` line). Used by
+	// Level3.PopulateWallPopTest to chain several SMALL sections so the entry "pop" can be watched
+	// in isolation. No difficulty halving (the poptest grids are already sized for ~2 screens).
+	public void SetupFromFile(string relPath)
+	{
+		collisionMap = null;
+		traceId = -1;
+		traceFrame = 0;
+		traceLoggedShaft = false;
+		traceLoggedTop = false;
+		traceShaftQuads = 0;
+		// Empty (not null) so anything visible on the very first frame logs as a POP IN.
+		traceShaftPrev = EvilAliensWeb.Compat.DebugFlags.WallTrace
+			? new System.Collections.Generic.HashSet<int>() : null;
+		System.Collections.Generic.List<string> list = new System.Collections.Generic.List<string>();
+		int num;
+		using (StreamReader streamReader = OpenLevelGrid(relPath))
+		{
+			string text = streamReader.ReadLine();
+			num = Convert.ToInt32(text.Remove(0, 6));
+			while (true)
+			{
+				text = streamReader.ReadLine();
+				if (text != null && !text.Contains("end"))
+				{
+					list.Add(text);
+					continue;
+				}
+				break;
+			}
+		}
+		blocks = new bool[list.Count, num];
+		for (int i = 0; i < list.Count; i++)
+		{
+			for (int j = 0; j < num; j++)
+			{
+				blocks[i, j] = j < list[i].Length && list[i][j] != ' ';
+			}
+		}
+		scale = 800f / (float)(texture.Width * width);
+		float rowH = (float)texture.Height * scale;
+		base.Position = new Vector2(0f, (0f - rowH) * (float)height - EntryLead());
+		base.Direction = (float)Math.PI / 2f;
+		base.Speed = oracle.BackgroundSpeed.Length();
 	}
 
 	public override void Initialize()
@@ -1179,27 +1263,9 @@ internal class Wall : AlienDrawableGameComponent
 		return hi > 0f && lo < 600f;
 	}
 
-	// Which of block (i, j)'s four sides are OUTER EDGES of the wall, packed into a sprite colour for
-	// faceshade.fx: r/g/b = north/south/east exposed, a = west. A side shared with a neighbouring
-	// block is not a face of the wall at all, and shading it anyway mitres a dark wedge into the top
-	// corner of every block -- two of them meeting at each interior boundary, reading as a seam grid.
-	//
-	// The alpha channel encodes west as 255/128 rather than 255/0: nothing in the batcher should drop
-	// a fully-transparent sprite, but the sprite's alpha is meaningless here (SliceTint carries the
-	// real one) and it costs nothing not to find out.
-	private Color FaceMask(int i, int j)
-	{
-		return new Color(
-			isfree(j, i - 1) ? 255 : 0,
-			isfree(j, i + 1) ? 255 : 0,
-			isfree(j + 1, i) ? 255 : 0,
-			isfree(j - 1, i) ? 255 : 128);
-	}
-
-	// The four face multipliers, (north, south, east, west), for faceshade.fx.
-	//
-	// DARKEN-ONLY (all <= 1): the slice tint already carries the fog lerp, so a factor above 1 would
-	// clip the hazy base to white. Two terms:
+	// The four face multipliers, (north, south, east, west), used as each wall quad's flat vertex
+	// colour. DARKEN-ONLY (all <= 1) so a wall is never brighter than the lit top face it hangs
+	// from. Two terms:
 	//   ORIENTATION -- vertical faces (east/west) darken by `light`, horizontal ones (north/south)
 	//     don't. A block only ever shows one horizontal and one vertical face, so a corner is ALWAYS
 	//     a horizontal meeting a vertical, and this term alone gives every corner in every quadrant
@@ -1223,32 +1289,46 @@ internal class Wall : AlienDrawableGameComponent
 		return new Vector4(north, south, east, west);
 	}
 
-	// Stacked-slice extrusion. Returns the number of blocks whose shaft was drawn (the wisp pass
-	// fades on that count). Draws slice depth k for EVERY block before depth k+1: at one depth all
-	// footprints are the same affine scaling of disjoint rects about the VP, so they stay disjoint
-	// and painter's order across the whole wall is correct. Per-block slice ladders would NOT be
-	// safe -- a tall shaft can lean over a block nearer the VP, and only a shared depth ordering
-	// guarantees the nearer slice lands last.
-	private int DrawTowerShafts(float topD)
+	// ?wall3d (Trello a66fc73e): the same towers as REAL 3D geometry -- one batched
+	// DrawUserIndexedPrimitives of the side faces -- instead of the stacked sprite slices.
+	// Returns the number of blocks whose shaft was drawn, like DrawTowerShafts.
+	//
+	// The whole wall goes out in ONE buffered draw via SpriteBatchWrapper.DrawGeometry3D (which is
+	// also where the "why this is nothing like the Quad.cs per-beam immediate-mode pathology"
+	// argument lives); this method only builds the geometry for it.
+	//
+	// WHY THE GEOMETRY IS 3D RATHER THAN PRE-PROJECTED. Sending flat pre-projected quads would
+	// lose w and give affine (PS1-style) texture warp across the foreshortened faces. Emitting
+	// real boxes and letting the GPU do the perspective divide keeps UV interpolation correct --
+	// which is the whole point, since the side faces then sample the REAL 756-v1 cell rather
+	// than the radial smear the slice trick leaves behind.
+	//
+	// WHY NO DEPTH BUFFER. sceneTarget is DepthFormat.None. It doesn't need one: the shafts are
+	// vertical boxes of equal height on a ground plane under a perspective camera at the VP, so
+	// in polar coordinates about the VP a face's depth at radius r is r / r0 (r0 = its near
+	// edge). Two blocks sharing a ray therefore never interleave -- the one whose near edge is
+	// closer to the VP wins at every shared radius -- so the occludes relation is acyclic and a
+	// painter's sort by distance from the VP is EXACT. Certified over the real level3.txt and
+	// every Wall.Setup width by tools/walls/verify_tower_order.py. Top faces sit at depth 1 (the
+	// maximum), so the existing "tops last" pass stays correct untouched.
+	private int DrawTowerShafts3D(float topD)
 	{
 		float depth = EvilAliensWeb.Compat.DebugFlags.WallDepth ?? DefaultDepth;
-		float step = EvilAliensWeb.Compat.DebugFlags.WallSliceStep ?? DefaultSliceStep;
 		float fogAmount = EvilAliensWeb.Compat.DebugFlags.WallFog ?? DefaultFog;
 		float sideDark = EvilAliensWeb.Compat.DebugFlags.WallSideDark ?? DefaultSideDark;
-		Color fogColorFlag = EvilAliensWeb.Compat.DebugFlags.WallFogColor ?? DefaultFogColor;
-		float scan = Math.Max(0f, EvilAliensWeb.Compat.DebugFlags.WallSideScan ?? DefaultSideScan);
-		float twist = MathHelper.ToRadians(EvilAliensWeb.Compat.DebugFlags.WallTwist ?? DefaultSliceTwist);
-		float faceLight = MathHelper.Clamp(EvilAliensWeb.Compat.DebugFlags.WallFaceLight ?? DefaultFaceLight, 0f, 1f);
+		float faceLight = EvilAliensWeb.Compat.DebugFlags.WallFaceLight ?? DefaultFaceLight;
 		float faceAngle = MathHelper.ToRadians(EvilAliensWeb.Compat.DebugFlags.WallFaceAngle ?? DefaultFaceAngle);
-		// Skipped entirely at 0, which reproduces the flat-shaded look and costs no batch flushes.
-		bool faceShade = faceLight > 0.001f;
-		Vector4 faceFactors = faceShade ? FaceFactors(faceLight, faceAngle) : Vector4.One;
+		// Haze colour: an explicit ?wallfogcolor wins; otherwise the LIVE alien-base floor colour, so a
+		// shaft's base recedes into whatever floor is currently scrolling under it (it switches five
+		// times across Level 3); DefaultFogColor is only the fallback for the first floor / off-level.
+		Color fogColorFlag = EvilAliensWeb.Compat.DebugFlags.WallFogColor ?? oracle.AlienBaseFloorColor ?? DefaultFogColor;
+		int bands = EvilAliensWeb.Compat.DebugFlags.Wall3DBands ?? DefaultBands;
 		float blockW = (float)texture.Width * scale;
 		float blockH = (float)texture.Height * scale;
-		// One pass to find the worst corner lean on screen; the slice count follows from it, so a
-		// wall sitting near the VP (all shafts foreshortened to nothing) costs almost no draws.
-		float maxLean = 0f;
-		int visibleBlocks = 0;
+
+		// Collect the visible blocks, then painter-sort them FAR-from-VP first so nearer-VP
+		// towers paint over the ones leaning across them.
+		towerOrder.Clear();
 		for (int i = 0; i < height; i++)
 		{
 			float topY = blockH * (float)i + base.Position.Y;
@@ -1258,154 +1338,248 @@ internal class Wall : AlienDrawableGameComponent
 			}
 			for (int j = 0; j < width; j++)
 			{
-				if (!blocks[i, j])
+				if (blocks[i, j])
 				{
-					continue;
+					towerOrder.Add(i * width + j);
 				}
-				visibleBlocks++;
-				float x = blockW * (float)j + base.Position.X;
-				float dx = Math.Max(Math.Abs(x - VanishX), Math.Abs(x + blockW - VanishX));
-				float dy = Math.Max(Math.Abs(topY - VanishY), Math.Abs(topY + blockH - VanishY));
-				maxLean = Math.Max(maxLean, (topD - depth) * (float)Math.Sqrt(dx * dx + dy * dy));
 			}
 		}
-		if (visibleBlocks == 0)
+		if (EvilAliensWeb.Compat.DebugFlags.WallTrace)
 		{
+			TraceShaftSetDiff(depth, topD, blockH);
+		}
+		if (towerOrder.Count == 0)
+		{
+			traceShaftQuads = 0;
 			return 0;
 		}
-		int slices = (int)MathHelper.Clamp((float)Math.Ceiling(maxLean / step), 1f, MaxSlices);
-		EvilAliensWeb.Compat.WallProfiler.NoteSlices(slices, visibleBlocks);
-		Vector3 sideColor = Vector3.One * sideDark;
-		Vector3 fogColor = fogColorFlag.ToVector3();
-		// The side sheet is ONE contiguous, seamless area-averaged copy of the wall sheet, wrap-padded
-		// by SideWindow (build_wall_side.py). scanSpan is its wrap period (== 8 * SideWindow); the
-		// padding is what lets a window whose origin lands anywhere in [0, scanSpan) stay in bounds.
-		int scanSpan = Math.Max(1, side.Width - SideWindow);
-		// One effect switch for the WHOLE slice pass, not one per sprite: faceshade.fx classifies each
-		// pixel into a face from its own position inside the slice, so it needs no per-block data. Its
-		// only per-slice uniform is WindowOrigin, so the pass costs `slices` batch flushes (~64) rather
-		// than the ~1500 extra sprite draws a two-tints-per-slice split would have cost.
-		if (faceShade)
+		int w = width;
+		Vector2 pos = base.Position;
+		towerOrder.Sort((a, b) => BlockVpDistanceSq(b, w, blockW, blockH, pos)
+			.CompareTo(BlockVpDistanceSq(a, w, blockW, blockH, pos)));
+
+		// Worst case is 2 visible faces per block (a block straddling the VP on an axis shows
+		// fewer), each tessellated into `bands` quads.
+		EnsureTowerBuffers(towerOrder.Count * 2 * bands);
+
+		// The shaft spans the cap (topD, above the plane when lifted) down to the ground (depth).
+		float zCap = ZAtDepth(topD);
+		float zBase = ZAtDepth(depth);
+		// Per-face brightness, (north, south, east, west). The old slice path had to fake this with a
+		// dedicated shader reading a per-sprite face mask, because a stack of axis-aligned sprites has
+		// no notion of which wall it belongs to. Real geometry knows: each quad IS one wall, so its
+		// shade is just its vertex colour.
+		Vector4 face = FaceFactors(faceLight, faceAngle);
+		int cw = texture.Width / 8;
+		int ch = texture.Height / 8;
+
+		int nv = 0;
+		int quads = 0;
+		foreach (int packed in towerOrder)
 		{
-			spriteBatch.faceShadeEffect.Window = (float)SideWindow;
-			spriteBatch.faceShadeEffect.SheetSize = (float)side.Width;
-			spriteBatch.faceShadeEffect.Enable();
+			int i = packed / w;
+			int j = packed % w;
+			float x0 = blockW * (float)j + base.Position.X;
+			float y0 = blockH * (float)i + base.Position.Y;
+			float x1 = x0 + blockW;
+			float y1 = y0 + blockH;
+			// The block's own cell of the seamless 8x8 sheet. NO half-texel inset: neighbouring
+			// cells ARE the correct continuation (block (i,j) samples cell (j%8, i%8)), so insetting
+			// would pull each face away from its neighbour's and re-open the seam it means to avoid.
+			float u0 = (float)(j % 8 * cw) / (float)texture.Width;
+			float u1 = (float)((j % 8 + 1) * cw) / (float)texture.Width;
+			float v0 = (float)(i % 8 * ch) / (float)texture.Height;
+			float v1 = (float)((i % 8 + 1) * ch) / (float)texture.Height;
+
+			// A wall is emitted only when it is BOTH an outer edge of the wall and turned toward
+			// the eye.
+			//
+			// OUTER EDGE (isfree): a side shared with a neighbouring block is interior to the solid
+			// -- two coplanar, coincident quads that should not exist at all. The old slice path could
+			// not skip them (a slice is a whole block, not a face), so it passed a per-sprite face mask
+			// to a shader just to avoid SHADING them, which is what mitred a dark wedge into every
+			// interior corner. Real geometry simply doesn't build them.
+			//
+			// FACING THE EYE: the base projects toward the VP, so a block right of it shows its west
+			// wall. A block straddling the VP on an axis shows neither of that axis's walls.
+			//
+			// UV ORIENTATION IS WHAT KILLS THE SEAMS, on both axes, and neither is arbitrary.
+			//
+			// ALONG the edge: blocks step through the sheet as (u -> columns, v -> rows), so a
+			// face's along-edge coordinate must follow the axis its edge runs along -- a vertical
+			// edge spans rows, so it is `v`; a horizontal edge spans columns, so it is `u`. Get
+			// that backwards and two stacked blocks' coplanar walls each restart the same range
+			// instead of continuing it, hard-seaming every block boundary.
+			//
+			// DOWN the shaft: the wall hangs off one particular cell edge, so it has to START at
+			// that edge's coordinate and run away from it -- the sheet then folds over the top
+			// face's rim continuously instead of cutting to the far side of the cell. Hence the
+			// down range reverses between the west wall (u0 -> u1) and the east one (u1 -> u0).
+			//
+			// Every tower spans the same world z, so spending one whole cell down the shaft is
+			// uniform for every block, however long the shaft happens to look on screen.
+			if (x0 > VanishX && isfree(j - 1, i))
+				AddFace(ref nv, ref quads, x0, y0, x0, y1, v0, v1, u0, u1, alongIsX: false, bands, zCap, zBase, sideDark * face.W);
+			if (x1 < VanishX && isfree(j + 1, i))
+				AddFace(ref nv, ref quads, x1, y1, x1, y0, v1, v0, u1, u0, alongIsX: false, bands, zCap, zBase, sideDark * face.Z);
+			if (y0 > VanishY && isfree(j, i - 1))
+				AddFace(ref nv, ref quads, x1, y0, x0, y0, u1, u0, v0, v1, alongIsX: true, bands, zCap, zBase, sideDark * face.X);
+			if (y1 < VanishY && isfree(j, i + 1))
+				AddFace(ref nv, ref quads, x0, y1, x1, y1, u0, u1, v1, v0, alongIsX: true, bands, zCap, zBase, sideDark * face.Y);
 		}
-		for (int k = 0; k < slices; k++)
+		if (quads == 0)
 		{
-			// t: 0 at the base, -> 1 at the top face (never reaching it -- the real top face is
-			// drawn after and covers the last step's worth of seam).
-			float t = (float)k / (float)slices;
-			float d = depth + (topD - depth) * t;
-			float haze = MathHelper.Clamp(fogAmount * (1f - t), 0f, 1f);
-			Vector3 rgb = Vector3.Lerp(sideColor, fogColor, haze);
-			float alpha = (t < DissolveFraction) ? MathHelper.SmoothStep(0f, 1f, t / DissolveFraction) : 1f;
-			Color tint = new Color(new Vector4(rgb, alpha));
-			// Anchor the scan at the TOP of the shaft (offset 0 at t == 1) so the topmost sliver
-			// samples the plane's origin and meets the top face continuously; the window then walks
-			// across the plane as the shaft descends. Whole-texel, so a scan wide enough to resolve
-			// one texel per slice is what makes a face read as texture rather than bands.
-			// `scan` is texels per slice, so the travel at depth t is (1 - t) * scan * slices.
-			int off = (int)MyMath.Mod((1f - t) * scan * (float)slices, (float)scanSpan);
-			if (faceShade)
+			traceShaftQuads = 0;
+			return towerOrder.Count;
+		}
+
+		// Eye at the VP, `e` in front of the gameplay plane, looking down -Z (XNA is right-handed).
+		// z = 0 is the gameplay plane (where the tower tops sit when unlifted), z = zBase the
+		// alien-base ground; design y runs down, hence the y flip. A vertex at (x, y, z) lands at
+		// VP + (xy - VP) * e/(e+z) -- which is Project(xy, d) with d = e/(e+z), so d == depth
+		// exactly at z == zBase and d == topD at z == zCap. Verified against Project() to ~1e-13 px
+		// by tools/walls/preview_wall3d.py's matrix check.
+		float e = EyeDistance;
+		Matrix view = Matrix.CreateTranslation(0f - VanishX, 0f - VanishY, 0f)
+			* Matrix.CreateScale(1f, -1f, -1f)
+			* Matrix.CreateTranslation(0f, 0f, 0f - e);
+		Matrix projection = Matrix.CreatePerspectiveOffCenter(
+			-400f * NearFrac, 400f * NearFrac, -300f * NearFrac, 300f * NearFrac, e * NearFrac, e + zBase + 1f);
+
+		// REAL DISTANCE FOG, which is what genuine 3D buys here. The shaft's haze is now a function
+		// of how far a texel is from the eye, evaluated by the fixed-function fog in BasicEffect,
+		// rather than a colour the CPU bakes into each vertex. Two things follow:
+		//   * It LERPS toward fogColor instead of multiplying by it, so the base actually converges
+		//     on the haze colour. A sprite tint can only ever scale the texture (see DefaultFogColor).
+		//   * The fog factor is linear in world z, so interpolating it across a band is exact -- the
+		//     bands exist only for the dissolve, and adding more does not smooth the fog.
+		// Distance to depth d is e/d (EyeDistanceAtDepth), so fog starts at the cap and reaches
+		// `fogAmount` at the ground. Extending FogEnd past the ground by 1/fogAmount is what makes a
+		// partial `?wallfog` land exactly on fogAmount at the base rather than clipping to fully hazed.
+		float fogStart = EyeDistanceAtDepth(topD);
+		float fogEnd = EyeDistanceAtDepth(depth);
+		bool fogOn = fogAmount > 0.001f;
+		if (fogOn && fogAmount < 1f)
+		{
+			fogEnd = fogStart + (fogEnd - fogStart) / fogAmount;
+		}
+
+		// The wrapper owns the shared BasicEffect + the batch, and hands the device back after the
+		// one buffered draw. BlendMode is AlphaBlend here (set at the top of Draw) -> straight alpha.
+		// Fog touches rgb only, so the bottom dissolve carried in vertex alpha survives it.
+		traceShaftQuads = quads;
+		spriteBatch.DrawGeometry3D(texture, towerVerts, nv, towerIndices, quads * 2, view, projection,
+			fogOn, fogColorFlag.ToVector3(), fogStart, fogEnd);
+		return towerOrder.Count;
+	}
+
+	// TEMP (?walltrace): the mid-screen pop detector. The wall only ever scrolls, so a block's
+	// shaft should START drawing while it straddles a screen edge and STOP the same way -- a
+	// visible-set transition whose whole shaft interval is well inside the screen is a POP the eye
+	// can see, and means a cull/spawn assumption is broken. Compares this frame's row-culled block
+	// set against last frame's and logs any mid-screen transition with the exact geometry.
+	private void TraceShaftSetDiff(float depth, float topD, float blockH)
+	{
+		var cur = new System.Collections.Generic.HashSet<int>(towerOrder);
+		if (traceShaftPrev != null)
+		{
+			foreach (int packed in cur)
 			{
-				// Every block's window origin is congruent to `off` mod SideWindow (the origins are
-				// j*SideWindow + off, mod a multiple of SideWindow), so this ONE value lets the shader
-				// recover each sprite's local UV from its atlas UV. See faceshade.fx.
-				spriteBatch.faceShadeEffect.WindowOrigin = (float)(off % SideWindow);
-				// Fade the shading into the haze as the shaft descends: at the fogged base the faces
-				// converge, as fog does, instead of darkening the fog itself.
-				spriteBatch.faceShadeEffect.Factors = Vector4.Lerp(faceFactors, Vector4.One, haze);
-				// The tint moves to a uniform because it is the same for every block at this depth --
-				// which is exactly what frees each sprite's vertex colour to carry its face mask.
-				spriteBatch.faceShadeEffect.SliceTint = new Vector4(rgb, alpha);
+				if (!traceShaftPrev.Contains(packed))
+				{
+					TraceShaftTransition("POP IN", packed, depth, topD, blockH);
+				}
 			}
-			// A slice covers the same on-screen area as the block's top face, shrunk by d. Scaled
-			// per-axis off the block size rather than by one factor, so a non-square wall sheet
-			// (blockW != blockH) can't silently squash the shafts.
-			Vector2 sliceScale = new Vector2(blockW * d / (float)SideWindow, blockH * d / (float)SideWindow);
-			// This depth-layer's rigid rotation about the VP: 0 at the cap, `twist` at the base.
-			// Each slice is drawn about its own centre (origin = half the source window) and its
-			// centre is orbited about the VP by the same angle -- together that is one rotation of
-			// the whole layer, so blocks stay glued and footprints stay disjoint.
-			float ang = twist * (1f - t);
-			bool twisted = ang != 0f;
-			float cos = twisted ? (float)Math.Cos(ang) : 1f;
-			float sin = twisted ? (float)Math.Sin(ang) : 0f;
-			Vector2 sliceOrigin = new Vector2((float)SideWindow * 0.5f);
-			for (int i = 0; i < height; i++)
+			foreach (int packed in traceShaftPrev)
 			{
-				float topY = blockH * (float)i + base.Position.Y;
-				if (!RowShaftVisible(topY, blockH, depth, topD))
+				if (!cur.Contains(packed))
 				{
-					continue;
-				}
-				for (int j = 0; j < width; j++)
-				{
-					if (!blocks[i, j])
-					{
-						continue;
-					}
-					float x = blockW * (float)j + base.Position.X;
-					// The scan walks the window DIAGONALLY -- the same offset on both axes -- and
-					// that is what makes one rule serve every face.
-					//
-					// The only part of a slice you ever see is its edge FACING the VP, so the scan
-					// has to travel PERPENDICULAR to that edge to expose new texels. A block above
-					// or below the VP shows a horizontal edge, whose sliver is a ROW of the window
-					// (perpendicular = Y); one to its left or right shows a vertical edge, whose
-					// sliver is a COLUMN (perpendicular = X). A diagonal advances BOTH by one texel
-					// per slice, so every orientation gets the full perpendicular travel at once --
-					// where either single axis would give one orientation the ideal rate and the
-					// other exactly zero (its sliver would merely translate along its own length,
-					// re-showing the same texels, which over N slices traces hard diagonal streaks).
-					//
-					// Do NOT "fix" this by picking an axis per block from |dx| vs |dy|: that flips
-					// as a block scrolls past the VP diagonal, and the texture POPS mid-screen.
-					// Depending only on t keeps the scan a pure function of depth, so nothing can pop.
-					//
-					// The price is that the offset perpendicular to one edge is PARALLEL to the
-					// other, so each face is also sheared ~45 degrees along its length. Consecutive
-					// slivers carry genuinely different texels, so it reads as diagonal grain, not
-					// as the coherent lines a pure translation produces.
-					// A block's window sits at its own cell of the shared sheet, so the NEIGHBOURING
-					// block's window abuts it in the source. Both stretch their window across
-					// footprints that are edge-to-edge on screen, so at a shared edge they sample
-					// the identical texel and the texture runs straight through -- no seam. (Per-cell
-					// isolated tiles hard-edge at every block boundary; that was the bug.) The scan
-					// `off` is the same for every block, so it slides the whole wall's sampling in
-					// lockstep and cannot break that. Mod the wrap period: the sheet tiles seamlessly,
-					// so a block walking off the 8th cell continues into the 1st.
-					Rectangle src = new Rectangle(
-						(j % 8 * SideWindow + off) % scanSpan,
-						(i % 8 * SideWindow + off) % scanSpan,
-						SideWindow, SideWindow);
-					// Draw about the block's CENTRE (origin = half the window, in source texels, so
-					// scale carries it to half the on-screen slice) -- identical to the old top-left
-					// placement at ang == 0, and the only anchor a rotation can use.
-					Vector2 p = Project(new Vector2(x + blockW * 0.5f, topY + blockH * 0.5f), d);
-					if (twisted)
-					{
-						float vx = p.X - VanishX;
-						float vy = p.Y - VanishY;
-						p = new Vector2(VanishX + vx * cos - vy * sin, VanishY + vx * sin + vy * cos);
-					}
-					// When face-shading, the sprite colour is NOT a tint (that moved to SliceTint) --
-					// it is this block's mask of which sides are OUTER EDGES of the wall. A side shared
-					// with a neighbour is not a face, and shading it puts a dark mitre wedge at every
-					// interior block corner, which reads as a seam grid. Same isfree() test the
-					// top-face edge lines use.
-					spriteBatch.Draw(side, src, p, ang, sliceScale, sliceOrigin, faceShade ? FaceMask(i, j) : tint);
+					TraceShaftTransition("POP OUT", packed, depth, topD, blockH);
 				}
 			}
 		}
-		// The crisp top faces and the fog wisps must NOT be face-shaded; the wrapper flushes the last
-		// slice batch on the next draw, when it sees the effect state change.
-		if (faceShade)
+		traceShaftPrev = cur;
+	}
+
+	private void TraceShaftTransition(string kind, int packed, float depth, float topD, float blockH)
+	{
+		int i = packed / width;
+		int j = packed % width;
+		float topY = blockH * (float)i + base.Position.Y;
+		float baseY = VanishY + (topY - VanishY) * depth;
+		float capY = (topD == 1f) ? topY : VanishY + (topY - VanishY) * topD;
+		float lo = Math.Min(capY, baseY);
+		float hi = Math.Max(capY + blockH * topD, baseY + blockH * depth);
+		// Entering/leaving through an edge is the normal, smooth case -- only log when the whole
+		// shaft interval is comfortably inside the screen at the moment it (dis)appears.
+		if (lo > 30f && hi < 570f)
 		{
-			spriteBatch.faceShadeEffect.Disable();
+			System.Console.WriteLine($"[walltrace] wall #{traceId} {kind} block r{i} c{j} at frame {traceFrame} posY={base.Position.Y:F0} shaftY=[{lo:F0}..{hi:F0}]");
 		}
-		return visibleBlocks;
+	}
+
+	// The painter's key: how far a block's CENTRE is from the vanishing point, squared. Certified
+	// as a valid topological order of the occludes relation by tools/walls/verify_tower_order.py
+	// (the block's min-corner distance is NOT -- it fails on real level3 geometry).
+	private static float BlockVpDistanceSq(int packed, int w, float blockW, float blockH, Vector2 pos)
+	{
+		float dx = blockW * ((float)(packed % w) + 0.5f) + pos.X - VanishX;
+		float dy = blockH * ((float)(packed / w) + 0.5f) + pos.Y - VanishY;
+		return dx * dx + dy * dy;
+	}
+
+	// One side face: the top edge (ax,ay)->(bx,by) swept from the cap (zCap) down to the ground
+	// (zBase), cut into `bands` vertical strips so the bottom dissolve survives as interpolated
+	// vertex alpha. `shade` is this wall's flat brightness (sideDark x its face factor) -- the haze
+	// is real fog now, applied by the effect, so the colour does not vary down the shaft.
+	// `alongA`/`alongB` are the along-edge texture coordinate at each end of the top edge;
+	// `down0`/`down1` are the down-the-shaft one at the cap and the base. `alongIsX` says which
+	// texture channel each belongs to -- see the UV note in DrawTowerShafts3D.
+	private void AddFace(ref int nv, ref int quads, float ax, float ay, float bx, float by,
+		float alongA, float alongB, float down0, float down1, bool alongIsX, int bands,
+		float zCap, float zBase, float shade)
+	{
+		for (int k = 0; k < bands; k++)
+		{
+			float fTop = (float)k / (float)bands;
+			float fBot = (float)(k + 1) / (float)bands;
+			float zTop = MathHelper.Lerp(zCap, zBase, fTop);
+			float zBot = MathHelper.Lerp(zCap, zBase, fBot);
+			Color cTop = new Color(new Vector4(shade, shade, shade, ShaftAlpha(fTop)));
+			Color cBot = new Color(new Vector4(shade, shade, shade, ShaftAlpha(fBot)));
+			float dTop = MathHelper.Lerp(down0, down1, fTop);
+			float dBot = MathHelper.Lerp(down0, down1, fBot);
+			int b = nv;
+			towerVerts[nv++] = new VertexPositionColorTexture(new Vector3(ax, ay, zTop), cTop, FaceUv(alongA, dTop, alongIsX));
+			towerVerts[nv++] = new VertexPositionColorTexture(new Vector3(bx, by, zTop), cTop, FaceUv(alongB, dTop, alongIsX));
+			towerVerts[nv++] = new VertexPositionColorTexture(new Vector3(bx, by, zBot), cBot, FaceUv(alongB, dBot, alongIsX));
+			towerVerts[nv++] = new VertexPositionColorTexture(new Vector3(ax, ay, zBot), cBot, FaceUv(alongA, dBot, alongIsX));
+			int t = quads * 6;
+			towerIndices[t] = b;
+			towerIndices[t + 1] = b + 1;
+			towerIndices[t + 2] = b + 2;
+			towerIndices[t + 3] = b;
+			towerIndices[t + 4] = b + 2;
+			towerIndices[t + 5] = b + 3;
+			quads++;
+		}
+	}
+
+	private static Vector2 FaceUv(float along, float down, bool alongIsX)
+	{
+		return alongIsX ? new Vector2(along, down) : new Vector2(down, along);
+	}
+
+	// Grow-only scratch arrays; the quad count is stable frame to frame, so this settles at once.
+	// The index pattern is positional, so it is rewritten with the vertices rather than cached --
+	// BlazorGL re-uploads the whole index array by .Length every call anyway.
+	private void EnsureTowerBuffers(int maxQuads)
+	{
+		if (towerVerts == null || towerVerts.Length < maxQuads * 4)
+		{
+			towerVerts = new VertexPositionColorTexture[maxQuads * 4];
+			towerIndices = new int[maxQuads * 6];
+		}
 	}
 
 	// Drifting fog wisps ACROSS the shafts: background fog -> tower shafts -> these -> crisp top
@@ -1483,10 +1657,10 @@ internal class Wall : AlienDrawableGameComponent
 		bool lifted = topD != 1f;
 		if (EvilAliensWeb.Compat.DebugFlags.WallTowers)
 		{
-			// Timed so the tower cost can be weighed against the flat path (and against the real-3D
-			// spike) with a number rather than an argument. Zero cost unless eaWallPerf is on.
+			// Timed so the tower cost can be weighed against the flat path with a number rather
+			// than an argument. Zero cost unless eaWallPerf is on.
 			long perf = EvilAliensWeb.Compat.WallProfiler.Begin();
-			DrawFogWisps(DrawTowerShafts(topD));
+			DrawFogWisps(DrawTowerShafts3D(topD));
 			EvilAliensWeb.Compat.WallProfiler.EndTowers(perf);
 		}
 		Vector2 val2 = default(Vector2);
@@ -1505,6 +1679,7 @@ internal class Wall : AlienDrawableGameComponent
 		// texture.Width keeps the line's on-screen length pinned to the (resolution-independent) block
 		// size at any wall-sheet resolution.
 		float lineScale = scale * (float)texture.Width / (float)line.Width;
+		int traceTopFaces = 0;
 		for (int i = 0; i < height; i++)
 		{
 			if (!((float)texture.Height * scale * (float)i + base.Position.Y > (float)(-texture.Height) * scale) || !((float)texture.Height * scale * (float)i + base.Position.Y <= 600f))
@@ -1515,6 +1690,7 @@ internal class Wall : AlienDrawableGameComponent
 			{
 				if (blocks[i, j])
 				{
+					traceTopFaces++;
 					Vector2 val = default(Vector2);
 					val.X = (float)texture.Width * scale * (float)j;
 					val.Y = (float)texture.Height * scale * (float)i;
@@ -1556,6 +1732,33 @@ internal class Wall : AlienDrawableGameComponent
 				}
 			}
 		}
+
+		// TEMP (?walltrace): log the first frame this wall's top faces appear vs the first frame its
+		// shafts appear, plus a coarse per-entry sample -- to settle the "top slides in before its
+		// pillar" report with numbers rather than reasoning.
+		if (EvilAliensWeb.Compat.DebugFlags.WallTrace)
+		{
+			if (traceId < 0)
+			{
+				traceId = traceIdCounter++;
+				System.Console.WriteLine($"[walltrace] wall #{traceId} spawned at posY={base.Position.Y:F0} (h={height} w={width})");
+			}
+			traceFrame++;
+			if (!traceLoggedTop && traceTopFaces > 0)
+			{
+				traceLoggedTop = true;
+				System.Console.WriteLine($"[walltrace] wall #{traceId} FIRST TOP FACE at frame {traceFrame} posY={base.Position.Y:F0} (topFaces={traceTopFaces}, shaftQuads={traceShaftQuads})");
+			}
+			if (!traceLoggedShaft && traceShaftQuads > 0)
+			{
+				traceLoggedShaft = true;
+				System.Console.WriteLine($"[walltrace] wall #{traceId} FIRST SHAFT at frame {traceFrame} posY={base.Position.Y:F0} (topFaces={traceTopFaces}, shaftQuads={traceShaftQuads})");
+			}
+			if (traceFrame <= 40 && traceFrame % 8 == 0)
+			{
+				System.Console.WriteLine($"[walltrace] wall #{traceId} f{traceFrame} posY={base.Position.Y:F0} top={traceTopFaces} shaft={traceShaftQuads}");
+			}
+		}
 	}
 
 	// The Y at which the wall has fully left the screen and may be unloaded.
@@ -1570,8 +1773,7 @@ internal class Wall : AlienDrawableGameComponent
 	//
 	// NOTE this also delays Walls.wall_OnDeath -> Terminate(), i.e. the level's next event, by the time
 	// it takes to scroll the extra distance. That is intended: the section is not over until its towers
-	// have gone. (?walltwist orbits slices about the VP and can push a shaft slightly past this; it is
-	// a tuning knob defaulting to 0, and the overshoot is well inside the base's alpha dissolve.)
+	// have gone.
 	private float DeathY()
 	{
 		if (!EvilAliensWeb.Compat.DebugFlags.WallTowers)

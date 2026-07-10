@@ -206,26 +206,24 @@ namespace EvilAliensWeb.Compat
 
 		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
 		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
-		// 'debugSetWalls', towers, depth, sliceStep, fog, sideDark, sideScan, twist, faceLight, faceAngle, topLift, wisps,
-		// wispSpeed). Overrides the Level-3 tower-extrusion knobs in real time so the sliders retune
-		// without a page reload — same effect as the ?walltowers/?walldepth/?wallslicestep/?wallfog/
-		// ?wallsidedark/?wallsidescan/?walltwist/?wallfacelight/?wallfaceangle/?walltoplift/?wallwisps/?wallwispspeed URL flags,
+		// 'debugSetWalls', towers, depth, fog, sideDark, faceLight, faceAngle, topLift, bands, wisps,
+		// wispSpeed). Overrides the Level-3 tower knobs in real time so the sliders retune without a
+		// page reload — same effect as the ?walltowers/?walldepth/?wallfog/?wallsidedark/
+		// ?wallfacelight/?wallfaceangle/?walltoplift/?wall3dbands/?wallwisps/?wallwispspeed URL flags,
 		// just live. (?wallfogcolor stays URL-only — a colour picker is a different widget and the
-		// tint reads fine off the two brightness knobs.)
+		// haze reads fine off the two brightness knobs.)
 		[JSInvokable("debugSetWalls")]
-		public static void SetWalls(bool towers, double depth, double sliceStep, double fog, double sideDark, double sideScan, double twist, double faceLight, double faceAngle, double topLift, double wisps, double wispSpeed)
+		public static void SetWalls(bool towers, double depth, double fog, double sideDark, double faceLight, double faceAngle, double topLift, double bands, double wisps, double wispSpeed)
 		{
 			DebugFlags.SetWallsOverride(
 				towers,
 				(float)depth,
-				(float)sliceStep,
 				(float)fog,
 				(float)sideDark,
-				(float)sideScan,
-				(float)twist,
 				(float)faceLight,
 				(float)faceAngle,
 				(float)topLift,
+				(float)bands,
 				(float)wisps,
 				(float)wispSpeed);
 		}

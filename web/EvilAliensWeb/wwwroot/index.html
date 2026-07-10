@@ -1489,13 +1489,11 @@
             var st = {
                 towers: !/[?&]walltowers=(0|false|off|no)\b/i.test(q),
                 depth: num("walldepth", 0.66),
-                step: num("wallslicestep", 1),
-                fog: num("wallfog", 1),
-                side: num("wallsidedark", 0.55),
-                scan: num("wallsidescan", 1),
-                twist: num("walltwist", 0),
+                fog: num("wallfog", 0.55),
+                side: num("wallsidedark", 0.7),
+                bands: num("wall3dbands", 4),
                 facelight: num("wallfacelight", 0.35),
-                faceangle: num("wallfaceangle", 225),
+                faceangle: num("wallfaceangle", 140),
                 lift: num("walltoplift", 0),
                 wisps: num("wallwisps", 0.15),
                 wispspeed: num("wallwispspeed", 0.8)
@@ -1508,8 +1506,8 @@
                 try
                 {
                     DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
-                        st.towers, st.depth, st.step, st.fog, st.side, st.scan, st.twist,
-                        st.facelight, st.faceangle, st.lift, st.wisps, st.wispspeed);
+                        st.towers, st.depth, st.fog, st.side,
+                        st.facelight, st.faceangle, st.lift, st.bands, st.wisps, st.wispspeed);
                     return true;
                 }
                 catch (e) { return false; }
@@ -1542,19 +1540,15 @@
             el.innerHTML =
                 "<h4>Wall towers &mdash; ?wallsonly</h4>" +
                 "<div class='chk'><input type='checkbox' id='ew-on' autocomplete='off'>" +
-                "<label for='ew-on' style='display:inline'>3D towers (off = flat)</label></div>" +
+                "<label for='ew-on' style='display:inline'>Towers (off = flat)</label></div>" +
                 "<div class='row'><label>Depth (base)<span class='v' id='ew-vd'></span></label>" +
                 "<input type='range' id='ew-depth' min='0.3' max='0.95' step='0.01' autocomplete='off'></div>" +
-                "<div class='row'><label>Slice step (px)<span class='v' id='ew-vs'></span></label>" +
-                "<input type='range' id='ew-step' min='1' max='30' step='0.5' autocomplete='off'></div>" +
                 "<div class='row'><label>Fog amount<span class='v' id='ew-vf'></span></label>" +
                 "<input type='range' id='ew-fog' min='0' max='1' step='0.02' autocomplete='off'></div>" +
                 "<div class='row'><label>Side darkening<span class='v' id='ew-vsd'></span></label>" +
                 "<input type='range' id='ew-side' min='0' max='1' step='0.01' autocomplete='off'></div>" +
-                "<div class='row'><label>Side scan (texels/slice)<span class='v' id='ew-vsc'></span></label>" +
-                "<input type='range' id='ew-scan' min='0' max='4' step='0.1' autocomplete='off'></div>" +
-                "<div class='row'><label>Slice twist (deg)<span class='v' id='ew-vt'></span></label>" +
-                "<input type='range' id='ew-twist' min='-30' max='30' step='0.5' autocomplete='off'></div>" +
+                "<div class='row'><label>Dissolve bands<span class='v' id='ew-vb'></span></label>" +
+                "<input type='range' id='ew-bands' min='1' max='16' step='1' autocomplete='off'></div>" +
                 "<div class='row'><label>Face light (corners)<span class='v' id='ew-vfl'></span></label>" +
                 "<input type='range' id='ew-facelight' min='0' max='1' step='0.01' autocomplete='off'></div>" +
                 "<div class='row'><label>Light angle (deg)<span class='v' id='ew-vfa'></span></label>" +
@@ -1572,15 +1566,14 @@
             document.body.appendChild(el);
 
             var ewOn = el.querySelector("#ew-on"), ewDepth = el.querySelector("#ew-depth"),
-                ewStep = el.querySelector("#ew-step"), ewFog = el.querySelector("#ew-fog"),
-                ewSide = el.querySelector("#ew-side"), ewScan = el.querySelector("#ew-scan"),
-                ewTwist = el.querySelector("#ew-twist"),
+                ewFog = el.querySelector("#ew-fog"),
+                ewSide = el.querySelector("#ew-side"), ewBands = el.querySelector("#ew-bands"),
                 ewFaceLight = el.querySelector("#ew-facelight"), ewFaceAngle = el.querySelector("#ew-faceangle"),
                 ewLift = el.querySelector("#ew-lift"), ewWisps = el.querySelector("#ew-wisps"),
                 ewWispSpeed = el.querySelector("#ew-wispspeed"), ewOut = el.querySelector("#ew-out"),
-                vd = el.querySelector("#ew-vd"), vs = el.querySelector("#ew-vs"),
+                vd = el.querySelector("#ew-vd"),
                 vf = el.querySelector("#ew-vf"), vsd = el.querySelector("#ew-vsd"),
-                vsc = el.querySelector("#ew-vsc"), vt = el.querySelector("#ew-vt"),
+                vb = el.querySelector("#ew-vb"),
                 vfl = el.querySelector("#ew-vfl"), vfa = el.querySelector("#ew-vfa"),
                 vl = el.querySelector("#ew-vl"),
                 vw = el.querySelector("#ew-vw"), vws = el.querySelector("#ew-vws");
@@ -1588,20 +1581,20 @@
             function render()
             {
                 ewOn.checked = st.towers;
-                ewDepth.value = st.depth; ewStep.value = st.step; ewFog.value = st.fog;
-                ewSide.value = st.side; ewScan.value = st.scan; ewTwist.value = st.twist;
+                ewDepth.value = st.depth; ewFog.value = st.fog;
+                ewSide.value = st.side; ewBands.value = st.bands;
                 ewFaceLight.value = st.facelight; ewFaceAngle.value = st.faceangle;
                 ewLift.value = st.lift;
                 ewWisps.value = st.wisps; ewWispSpeed.value = st.wispspeed;
-                vd.textContent = st.depth; vs.textContent = st.step; vf.textContent = st.fog;
-                vsd.textContent = st.side; vsc.textContent = st.scan; vt.textContent = st.twist;
+                vd.textContent = st.depth; vf.textContent = st.fog;
+                vsd.textContent = st.side; vb.textContent = st.bands;
                 vfl.textContent = st.facelight; vfa.textContent = st.faceangle;
                 vl.textContent = st.lift;
                 vw.textContent = st.wisps; vws.textContent = st.wispspeed;
                 ewOut.textContent = st.towers
-                    ? ("walldepth=" + st.depth + " wallslicestep=" + st.step + " wallfog=" + st.fog +
-                        " wallsidedark=" + st.side + " wallsidescan=" + st.scan +
-                        " walltwist=" + st.twist + " wallfacelight=" + st.facelight +
+                    ? ("walldepth=" + st.depth + " wallfog=" + st.fog +
+                        " wallsidedark=" + st.side + " wall3dbands=" + st.bands +
+                        " wallfacelight=" + st.facelight +
                         " wallfaceangle=" + st.faceangle + " walltoplift=" + st.lift +
                         " wallwisps=" + st.wisps + " wallwispspeed=" + st.wispspeed)
                     : "walltowers=0";
@@ -1611,11 +1604,9 @@
 
             ewOn.addEventListener("change", function () { st.towers = ewOn.checked; changed(); });
             ewDepth.addEventListener("input", function () { st.depth = +ewDepth.value; changed(); });
-            ewStep.addEventListener("input", function () { st.step = +ewStep.value; changed(); });
             ewFog.addEventListener("input", function () { st.fog = +ewFog.value; changed(); });
             ewSide.addEventListener("input", function () { st.side = +ewSide.value; changed(); });
-            ewScan.addEventListener("input", function () { st.scan = +ewScan.value; changed(); });
-            ewTwist.addEventListener("input", function () { st.twist = +ewTwist.value; changed(); });
+            ewBands.addEventListener("input", function () { st.bands = +ewBands.value; changed(); });
             ewFaceLight.addEventListener("input", function () { st.facelight = +ewFaceLight.value; changed(); });
             ewFaceAngle.addEventListener("input", function () { st.faceangle = +ewFaceAngle.value; changed(); });
             ewLift.addEventListener("input", function () { st.lift = +ewLift.value; changed(); });

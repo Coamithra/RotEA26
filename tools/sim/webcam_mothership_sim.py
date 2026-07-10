@@ -12,7 +12,7 @@ shows ~40%, exits pass/retreat the right way).
 import math
 
 # --- constants (mirror WebcamMothership.cs) ---
-EnterMs, WindupMs, BeamSweepMs, BeamHoldMs, LeaveMs = 1400, 1800, 500, 1300, 1200
+EnterMs, WindupMs, BeamSweepMs, BeamHoldMs, LeaveMs = 1400, 2500, 500, 6000, 1200
 FireMs = BeamSweepMs + BeamHoldMs
 ChargeStart, FireStart, FireEnd, LeaveEnd = EnterMs, EnterMs + WindupMs, EnterMs + WindupMs + FireMs, EnterMs + WindupMs + FireMs + LeaveMs
 
@@ -75,7 +75,7 @@ def run(title, orientation, enter_left=True, bx=400.0):
             entrance_ys.append(y)
     # compact: show enter end, rest, fire start, exit
     for t, ph, x, y in positions:
-        if t in (0, int(ChargeStart), int(FireStart), int(FireEnd), int(LeaveEnd)) or t == 3400:
+        if t in (0, int(ChargeStart), int(FireStart), int(FireEnd), int(LeaveEnd)) or t == 6000:
             print("   t=%-5d %-7s (%.1f, %.1f)" % (t, ph, x, y))
     check(orientation, es, rp, xp, fd, bo, entrance_ys, bx)
 

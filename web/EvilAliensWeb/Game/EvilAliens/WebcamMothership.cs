@@ -43,11 +43,11 @@ internal class WebcamMothership : AlienDrawableGameComponent
 	// span; the hold keeps it lethal a beat; enter/leave are the horizontal glide on/off screen.
 	private const float EnterMs = 1400f;
 
-	private const float WindupMs = 1800f;
+	private const float WindupMs = 2500f;   // charge telegraph — long enough to give the player time to duck
 
 	private const float BeamSweepMs = 500f;
 
-	private const float BeamHoldMs = 1300f;
+	private const float BeamHoldMs = 6000f; // held lethal a long beat for max discomfort
 
 	private const float LeaveMs = 1200f;
 
@@ -98,11 +98,11 @@ internal class WebcamMothership : AlienDrawableGameComponent
 
 	private const float HorizVisibleFrac = 0.4f;
 
-	// Vertical-bisect x positions: dead centre + the two third-centres (down the middle / the
-	// left third / the right third), rolled 50% / 25% / 25% in Setup.
-	private const float ThirdLeft = 133f;
+	// Vertical-bisect x positions: dead centre + two off-centre columns at 35% / 65% of the
+	// 800-wide screen (280 / 520), rolled 50% / 25% / 25% in Setup.
+	private const float LeftColumnX = 280f;
 
-	private const float ThirdRight = 667f;
+	private const float RightColumnX = 520f;
 
 	private Bisect orientation;
 
@@ -210,7 +210,7 @@ internal class WebcamMothership : AlienDrawableGameComponent
 		return ship;
 	}
 
-	public void Setup(Bisect orientation)
+	public void Setup(Bisect orientation, bool allowCenter = true)
 	{
 		this.orientation = orientation;
 		// sideways ship parks with its CENTRE off-screen so only HorizVisibleFrac (40%) shows.
@@ -219,10 +219,20 @@ internal class WebcamMothership : AlienDrawableGameComponent
 		{
 		case Bisect.VerticalDown:
 		{
-			// beam x: 50% dead centre, 25% left third, 25% right third — the ship parks over it
-			// (a fair telegraph of where the beam will fall), slides in from a random side, passes out.
-			int roll = RandomHelper.Random.Next(4);
-			float bx = (roll < 2) ? 400f : ((roll == 2) ? ThirdLeft : ThirdRight);
+			// beam x: when allowCenter (the harder tiers) it's 50% dead centre / 25% left column
+			// (35%) / 25% right column (65%); when not (Easy/Medium) it's a 50/50 pick of just the
+			// off-centre 35%/65% columns — never centre. The ship parks over it (a fair telegraph of
+			// where the beam will fall), slides in from a random side, passes out.
+			float bx;
+			if (allowCenter)
+			{
+				int roll = RandomHelper.Random.Next(4);
+				bx = (roll < 2) ? 400f : ((roll == 2) ? LeftColumnX : RightColumnX);
+			}
+			else
+			{
+				bx = (RandomHelper.Random.Next(2) == 0) ? LeftColumnX : RightColumnX;
+			}
 			bool enterLeft = RandomHelper.Random.Next(2) == 0;
 			enterStart = new Vector2(enterLeft ? OffLeft : OffRight, VertRestY);
 			restPos = new Vector2(bx, VertRestY);

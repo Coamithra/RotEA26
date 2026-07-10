@@ -107,6 +107,14 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	// plasma shot (it owns projectile bookkeeping).
 	public event FiredHandler OnFired;
 
+	// Soft "one ball at a time" cheat: when the blink-charge completes the saucer asks the
+	// level whether the field is clear of plasma before actually firing. If a ball is already
+	// out it HOLDS its charge (keeps blinking at max) and re-checks each tick, firing the
+	// instant the ball clears. null => no gate (always fire). Two saucers finishing their
+	// charge on the same tick can still both fire (they don't see each other's not-yet-spawned
+	// ball) — that's the accepted edge case, not worth over-engineering out.
+	public Func<bool> CanFire;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -234,7 +242,10 @@ internal class WebcamUfo : AlienDrawableGameComponent
 			float t = 1f - blinkClock.Normalized;   // Normalized is time REMAINING; invert to 0->1
 			float period = MathHelper.Lerp(400f, 70f, t);
 			blinkPhase += dt / period;
-			if (blinkClock.Finished)
+			// Fire once fully charged — but only if the field is clear of plasma (the soft
+			// one-ball cheat). If a ball is out, hold here (blinkClock stays Finished, so t=1
+			// keeps it blinking at max) and re-check next tick until it clears.
+			if (blinkClock.Finished && (CanFire == null || CanFire()))
 			{
 				Fire();
 			}

@@ -235,7 +235,11 @@ internal class WebcamMine : AlienDrawableGameComponent
 		explosion.Setup(base.Position, 2f, 1.3f, 0.06f, base.Direction);
 		explosion.MakeBlue();
 		collection.Add((GameComponent)(object)explosion);
+		// The "tweety" hone-in beep as a cheeky callback, PLUS a big explosion boom (expl2 —
+		// the same large-burst cue StarMine.Asplode uses) so the player-damaging blue pop
+		// actually sounds as beefy as it looks.
 		sound.PlayCue("targetacquired");
+		sound.PlayCue("expl2");
 		Die();
 	}
 

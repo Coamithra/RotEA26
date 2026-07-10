@@ -36,11 +36,11 @@ namespace EvilAliens;
 // so LoseLife() lands directly in the GameOver flow when the hearts run out).
 internal class WebcamLevel : GameScene
 {
-	// The discrete, per-difficulty knobs for the challenge. The generic cadence
-	// (saucer arm/blink/spawn timing) already scales off Settings.DifficultyModifier
-	// in SpawnSaucers; this table adds the things that don't come from that single
-	// float: how many hits you can take, how many kills win, how many saucers can be
-	// on screen at once, and how fast the saucers drift + the plasma cruises.
+	// The discrete, per-difficulty knobs for the challenge: how many hits you can take,
+	// how many kills win, how many saucers/mines can be on screen at once, how fast the
+	// saucers drift + the plasma cruises, and the spawn cadences. Spawns (saucer/mine/
+	// mothership) are random Poisson rolls whose MEAN gap is the *Ms field; the per-saucer
+	// arm/charge timers stay authored absolute ms.
 	private struct DifficultyTuning
 	{
 		public int Hearts;         // lives (hearts) you start with
@@ -48,24 +48,26 @@ internal class WebcamLevel : GameScene
 		public int MaxSaucers;     // simultaneous-saucer ceiling
 		public float SaucerSpeedMul; // WebcamUfo drift-speed scale
 		public float PlasmaSpeedMul; // WebcamPlasma cruise-speed scale
-		// Cadence as ABSOLUTE per-tier durations in milliseconds (NO difficulty-modifier
-		// divisor — each tier's feel is authored directly, then a small ±jitter is added at
-		// spawn for variety). SpawnIntervalMs = gap between successive saucer spawns;
-		// ArmDelayMs = wander time before a saucer starts charging (its "rate of fire" — a
-		// saucer fires exactly once per arm cycle, so bigger = fires less often); ChargeTimeMs
-		// = the blink-charge windup before the orb releases. Plan: author Easy + Very_Hard by
-		// feel, then interpolate the middle tiers off Settings.DifficultyModifier.
+		// Cadence in milliseconds. SpawnIntervalMs = AVERAGE gap between saucer spawns (a random
+		// Poisson roll at rate 1/SpawnIntervalMs — not a fixed timer). ArmDelayMs = wander time
+		// before a saucer starts charging (its "rate of fire" — a saucer fires exactly once per
+		// arm cycle, so bigger = fires less often); ChargeTimeMs = the blink-charge windup before
+		// the orb releases. Arm/charge are authored absolute ms + a small ±jitter at spawn for
+		// variety (NO difficulty-modifier divisor — each tier's feel is set directly).
 		public float SpawnIntervalMs;
 		public float ArmDelayMs;
 		public float ChargeTimeMs;
-		// DeathStar-mine hazard (F2): MaxMines = simultaneous cap; MineSpawnMs = gap between
-		// mine spawns; MineLifeMs = how long a mine wanders before it flies off + despawns.
+		// DeathStar-mine hazard (F2): MaxMines = simultaneous cap; MineSpawnMs = AVERAGE gap between
+		// mine spawns (Poisson roll, rate 1/MineSpawnMs); MineLifeMs = how long a mine wanders
+		// before it flies off + despawns.
 		public int MaxMines;
 		public float MineSpawnMs;
 		public float MineLifeMs;
-		// Screen-bisecting mothership laser (F1): MothershipMs = gap between bisect events
-		// (0 disables). The event itself (enter -> charge -> fire -> leave) isn't otherwise
-		// tuned per-tier here — it's a fixed choreography, only how OFTEN it happens.
+		// Screen-bisecting mothership laser (F1): MothershipMs = AVERAGE ms between bisect events
+		// (0 disables). Spawns are a random Poisson process at rate 1/MothershipMs (RandomFromAverage),
+		// NOT a fixed timer — so the gaps vary around this mean. Never two at once. The event itself
+		// (enter -> charge -> fire -> leave) isn't otherwise tuned per-tier here — it's a fixed
+		// choreography, only how OFTEN it happens on average.
 		public float MothershipMs;
 	}
 
@@ -74,16 +76,25 @@ internal class WebcamLevel : GameScene
 	// Compat/DebugFlags.cs) then bake the chosen numbers back here.
 	private static readonly DifficultyTuning[] Tunings = new DifficultyTuning[]
 	{
-		new DifficultyTuning { Hearts = 5, KillTarget = 12, MaxSaucers = 3, SaucerSpeedMul = 0.85f, PlasmaSpeedMul = 0.75f, SpawnIntervalMs = 6000f, ArmDelayMs = 15000f, ChargeTimeMs = 4500f, MaxMines = 2, MineSpawnMs = 4000f, MineLifeMs = 8000f, MothershipMs = 20000f }, // Easy
-		new DifficultyTuning { Hearts = 4, KillTarget = 16, MaxSaucers = 4, SaucerSpeedMul = 1.0f,  PlasmaSpeedMul = 0.9f,  SpawnIntervalMs = 3600f, ArmDelayMs = 9500f, ChargeTimeMs = 3600f, MaxMines = 3, MineSpawnMs = 3200f, MineLifeMs = 7000f, MothershipMs = 16000f }, // Medium
-		new DifficultyTuning { Hearts = 3, KillTarget = 20, MaxSaucers = 5, SaucerSpeedMul = 1.15f, PlasmaSpeedMul = 1.05f, SpawnIntervalMs = 2800f, ArmDelayMs = 7000f, ChargeTimeMs = 3000f, MaxMines = 3, MineSpawnMs = 2600f, MineLifeMs = 6500f, MothershipMs = 13000f }, // Hard
-		new DifficultyTuning { Hearts = 2, KillTarget = 26, MaxSaucers = 6, SaucerSpeedMul = 1.3f,  PlasmaSpeedMul = 1.2f,  SpawnIntervalMs = 2200f, ArmDelayMs = 5500f, ChargeTimeMs = 2600f, MaxMines = 4, MineSpawnMs = 2200f, MineLifeMs = 6000f, MothershipMs = 11000f }, // Very_Hard
-		new DifficultyTuning { Hearts = 2, KillTarget = 32, MaxSaucers = 7, SaucerSpeedMul = 1.5f,  PlasmaSpeedMul = 1.4f,  SpawnIntervalMs = 1800f, ArmDelayMs = 4500f, ChargeTimeMs = 2200f, MaxMines = 5, MineSpawnMs = 1800f, MineLifeMs = 5500f, MothershipMs = 9000f }, // Inzane
+		new DifficultyTuning { Hearts = 5, KillTarget = 75, MaxSaucers = 15, SaucerSpeedMul = 0.85f, PlasmaSpeedMul = 0.75f, SpawnIntervalMs = 1000f, ArmDelayMs = 15000f, ChargeTimeMs = 4500f, MaxMines = 3, MineSpawnMs = 6000f, MineLifeMs = 8000f, MothershipMs = 12000f }, // Easy
+		new DifficultyTuning { Hearts = 4, KillTarget = 75, MaxSaucers = 15, SaucerSpeedMul = 1.0f,  PlasmaSpeedMul = 0.9f,  SpawnIntervalMs = 1000f, ArmDelayMs = 9500f, ChargeTimeMs = 3600f, MaxMines = 3, MineSpawnMs = 6000f, MineLifeMs = 7000f, MothershipMs = 12000f }, // Medium
+		new DifficultyTuning { Hearts = 3, KillTarget = 75, MaxSaucers = 15, SaucerSpeedMul = 1.15f, PlasmaSpeedMul = 1.05f, SpawnIntervalMs = 1000f, ArmDelayMs = 7000f, ChargeTimeMs = 3000f, MaxMines = 3, MineSpawnMs = 6000f, MineLifeMs = 6500f, MothershipMs = 12000f }, // Hard
+		new DifficultyTuning { Hearts = 2, KillTarget = 150, MaxSaucers = 15, SaucerSpeedMul = 1.3f,  PlasmaSpeedMul = 1.2f,  SpawnIntervalMs = 1000f, ArmDelayMs = 5500f, ChargeTimeMs = 2600f, MaxMines = 3, MineSpawnMs = 6000f, MineLifeMs = 6000f, MothershipMs = 12000f }, // Very_Hard
+		new DifficultyTuning { Hearts = 2, KillTarget = 75, MaxSaucers = 15, SaucerSpeedMul = 1.5f,  PlasmaSpeedMul = 1.4f,  SpawnIntervalMs = 1000f, ArmDelayMs = 4500f, ChargeTimeMs = 2200f, MaxMines = 3, MineSpawnMs = 6000f, MineLifeMs = 5500f, MothershipMs = 12000f }, // Inzane
 	};
 
 	// The active run's resolved tuning (difficulty row + any ?wc* debug overrides),
 	// set in Initialize before play begins.
 	private DifficultyTuning tuning;
+
+	// Difficulty-scaled webcam knobs that aren't plain struct columns: the max simultaneous
+	// plasma orbs the saucers keep on screen, and which mothership shapes are unlocked. All
+	// three are (re)computed from the tier's difficulty number in ResolveTuning.
+	private int resolvedMaxPlasma = 1;
+
+	private bool mothershipAllowCenter = true;
+
+	private bool mothershipAllowHorizontal = true;
 
 	// Last DebugFlags.WebcamTuneVersion this run resolved against — the live tuner
 	// panel (?wctune) bumps the version on every edit and UpdateNormal re-resolves.
@@ -97,13 +108,9 @@ internal class WebcamLevel : GameScene
 
 	private bool introShown;
 
-	private Timer spawnTimer = new Timer(1800f, repeating: false);
-
-	// F2 mines: gap between DeathStar-mine spawns (duration set live from tuning.MineSpawnMs).
-	private Timer mineTimer = new Timer(2200f, repeating: false);
-
-	// F1 mothership: gap between screen-bisecting laser events (duration = tuning.MothershipMs).
-	private Timer mothershipTimer = new Timer(11000f, repeating: false);
+	// Saucers (SpawnIntervalMs), mines (MineSpawnMs) and the mothership (MothershipMs) all spawn
+	// on a random Poisson roll (RandomFromAverage, rate 1/interval) in their Spawn* methods, not
+	// timers — so no per-spawner Timer field is needed here.
 
 	// Post-hit mercy window: incoming plasma/mine/beam still bursts but doesn't hurt.
 	private Timer graceTimer = new Timer(2200f, repeating: false);
@@ -196,14 +203,6 @@ internal class WebcamLevel : GameScene
 		plasmas.Clear();
 		mines.Clear();
 		motherships.Clear();
-		spawnTimer.Reset();
-		spawnTimer.Start();
-		mineTimer.Duration = tuning.MineSpawnMs;
-		mineTimer.Reset();
-		mineTimer.Start();
-		mothershipTimer.Duration = tuning.MothershipMs;
-		mothershipTimer.Reset();
-		mothershipTimer.Start();
 		graceTimer.Reset();
 		graceTimer.Stop();
 		// Hand the browser the stage: camera picker + preview + background
@@ -228,6 +227,37 @@ internal class WebcamLevel : GameScene
 			idx = Tunings.Length - 1;
 		}
 		tuning = Tunings[idx];
+		// --- Difficulty-SCALED knobs (webcam difficulty pass) -----------------------------
+		// Anchored on the values chosen for Medium and scaled by the tier's difficulty number
+		// (GetDifficultyValue: Easy .35 / Medium .6 / Hard .8 / Very_Hard 1 / Inzane 1.2), so
+		// Easy/Hard/Inzane fall out automatically. `m` is the per-tier base value (ramp-immune —
+		// the challenge locks difficulty). These OVERWRITE the matching table columns; the
+		// URL/panel overrides below still layer on top for live tuning.
+		float m = Settings.GetInstance().GetDifficultyValue(difficulty);
+		// Lives (hearts): Medium 6, more on Easy, fewer on the hard tiers (decreasing in m).
+		//   -> Easy 8 / Medium 6 / Hard 5 / Very_Hard 3 / Inzane 2.
+		tuning.Hearts = MathHelper.Clamp((int)Math.Round(6.0 + (0.6f - m) * 7.5, MidpointRounding.AwayFromZero), 1, 9);
+		// Kill target: two anchors — Medium 50, Very_Hard 150 — linear in m; Easy floored at 30.
+		//   -> Easy 30 / Medium 50 / Hard 100 / Very_Hard 150 / Inzane 200.
+		tuning.KillTarget = Math.Max(30, (int)Math.Round(50.0 + (m - 0.6f) * 250.0, MidpointRounding.AwayFromZero));
+		// Space mines on screen at once: Medium 1, up to 4 on Inzane (floor 1).
+		//   -> Easy 1 / Medium 1 / Hard 2 / Very_Hard 3 / Inzane 4.
+		tuning.MaxMines = MathHelper.Clamp((int)Math.Round(1.0 + (m - 0.6f) * 5.0, MidpointRounding.AwayFromZero), 1, 4);
+		// UFO chargeup telegraph DOUBLED (Medium 3600 -> 7200) — the authored per-tier curve x2.
+		tuning.ChargeTimeMs *= 2f;
+		// UFO fire chance HALVED = arm delay doubled (Medium 9500 -> 19000) — authored curve x2.
+		tuning.ArmDelayMs *= 2f;
+		// Mothership cadence: Medium ~half as often as Very_Hard (24000 vs 12000 ms), linear in m.
+		//   -> Easy 31500 / Medium 24000 / Hard 18000 / Very_Hard 12000 / Inzane 6000.
+		tuning.MothershipMs = 12000f + (1f - m) * 30000f;
+		// Max plasma orbs the saucers keep on screen: Medium 2, 1 on Easy, up to 3 on Hard+.
+		//   -> Easy 1 / Medium 2 / Hard 2 / Very_Hard 3 / Inzane 3.
+		resolvedMaxPlasma = MathHelper.Clamp(1 + (int)Math.Round((m - 0.35f) / 0.85f * 2.0, MidpointRounding.AwayFromZero), 1, 3);
+		// Mothership variety unlocks with difficulty: Easy/Medium fire ONLY the off-centre 35%/65%
+		// vertical columns; Hard adds the centre column; Very_Hard+ adds the horizontal sweep.
+		mothershipAllowCenter = m >= 0.8f;
+		mothershipAllowHorizontal = m >= 1.0f;
+		// ----------------------------------------------------------------------------------
 		if (DebugFlags.WebcamHearts.HasValue)
 		{
 			tuning.Hearts = DebugFlags.WebcamHearts.Value;
@@ -387,9 +417,6 @@ internal class WebcamLevel : GameScene
 	public override void Update(GameTime gameTime)
 	{
 		graceTimer.Update(gameTime);
-		spawnTimer.Update(gameTime);
-		mineTimer.Update(gameTime);
-		mothershipTimer.Update(gameTime);
 		// Backed out of the camera-setup dialog: leave the level like a pause-menu
 		// exit would. (Stop() flips the state off Cancelled, so this fires once.)
 		if (WebcamInterop.State == WebcamInterop.SessionState.Cancelled)
@@ -428,12 +455,12 @@ internal class WebcamLevel : GameScene
 		if (WebcamInterop.PlayerVisible)
 		{
 			float dt = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
-			SpawnSaucers();
+			SpawnSaucers(gameTime);
 			TestPlayerTouchesSaucers();     // GOOD collision: instant (the player WANTS to hit saucers)
 			TestPlasmaHitsPlayer(dt);       // BAD collisions: need LeewayMs of STEADY contact to count
-			SpawnMines();
+			SpawnMines(gameTime);
 			TestMinesHitPlayer(dt);
-			SpawnMothership();
+			SpawnMothership(gameTime);
 			TestBeamHitsPlayer(dt);
 		}
 		if (kills >= tuning.KillTarget && !won)
@@ -475,50 +502,69 @@ internal class WebcamLevel : GameScene
 
 	private float LeewayMs => DebugFlags.WebcamHitLeeway ?? HitLeewayMs;
 
-	private void SpawnSaucers()
+	private void SpawnSaucers(GameTime gameTime)
 	{
-		if (won || !spawnTimer.Finished)
+		if (won)
 		{
 			return;
 		}
-		// population ramps up as the player racks up kills, capped per difficulty
-		int cap = Math.Min(1 + kills / 4, tuning.MaxSaucers);
-		if (ufos.Count >= cap)
+		// fill straight to the tier's ceiling — no kill-ramp, keep it busy from the start
+		if (ufos.Count >= tuning.MaxSaucers)
 		{
-			// full house: check again shortly
-			spawnTimer.Duration = 400f;
-			spawnTimer.Reset();
-			spawnTimer.Start();
+			return;
+		}
+		// Random Poisson spawn averaging SpawnIntervalMs between saucers (rate = 1000/ms in
+		// hits/sec), not a fixed timer — so the gaps vary around the mean.
+		if (!RandomHelper.RandomFromAverage(1000f / tuning.SpawnIntervalMs, gameTime))
+		{
 			return;
 		}
 		WebcamUfo webcamUfo = WebcamUfo.NewWebcamUfo(Collection, base.Game);
-		// Cadence = the tier's authored absolute ms + a small +/-jitter for variety. NO
-		// difficulty-modifier divisor (removed — each tier's feel is set directly in Tunings),
-		// and no within-run "arm faster over time" ramp (removed too, so the authored value
-		// IS the delay). Tune per tier live via the ?wctune panel or ?wcarm/?wccharge/?wcspawn.
+		// Arm/charge cadence stays a per-tier authored absolute ms + a small +/-jitter for
+		// variety (NO difficulty-modifier divisor, no within-run ramp — the authored value IS
+		// the delay). Tune per tier live via the ?wctune panel or ?wcarm/?wccharge.
 		float armDelay = tuning.ArmDelayMs * CadenceJitter();
 		float blinkTime = tuning.ChargeTimeMs * CadenceJitter();
 		webcamUfo.Setup(RandomEdgePosition(), armDelay, blinkTime, tuning.SaucerSpeedMul);
 		webcamUfo.OnFired += ufo_OnFired;
+		webcamUfo.CanFire = BelowPlasmaCap;   // soft "N plasma balls at a time" cap (resolvedMaxPlasma; see WebcamUfo)
 		Collection.Add((GameComponent)(object)webcamUfo);
 		ufos.Add(webcamUfo);
-		spawnTimer.Duration = tuning.SpawnIntervalMs * CadenceJitter();
-		spawnTimer.Reset();
-		spawnTimer.Start();
 	}
+
+	// True while the field has fewer than the tier's plasma cap (resolvedMaxPlasma) of live orbs
+	// — the gate WebcamUfo checks before firing, so no more than that many balls are out at once
+	// (an about-to-fire saucer holds its charge while the field is at the cap). Counts non-dead
+	// balls (one that died this tick may linger in `plasmas` until the next Prune).
+	private bool BelowPlasmaCap()
+	{
+		int alive = 0;
+		foreach (WebcamPlasma plasma in plasmas)
+		{
+			if (!plasma.IsDead)
+			{
+				alive++;
+			}
+		}
+		return alive < resolvedMaxPlasma;
+	}
+
+	// Both saucers AND mines enter only from the TOP, LEFT, or RIGHT — never the bottom — and when
+	// they come from a SIDE they enter in the TOP 40% of the screen (y in [60, 240]). So a hazard
+	// always drifts in from above the player rather than creeping up from underneath, and its
+	// wander (which flows around the player) starts from a readable, high-up position.
+	private const float SpawnSideMaxY = 600f * 0.4f;   // 240: bottom of the top 40% band
 
 	private static Vector2 RandomEdgePosition()
 	{
-		switch (RandomHelper.Random.Next(4))
+		switch (RandomHelper.Random.Next(3))
 		{
 		case 0:
-			return new Vector2(-40f, RandomHelper.RandomNextFloat(60f, 540f));
+			return new Vector2(-40f, RandomHelper.RandomNextFloat(60f, SpawnSideMaxY));   // left, top 40%
 		case 1:
-			return new Vector2(840f, RandomHelper.RandomNextFloat(60f, 540f));
-		case 2:
-			return new Vector2(RandomHelper.RandomNextFloat(60f, 740f), -40f);
+			return new Vector2(840f, RandomHelper.RandomNextFloat(60f, SpawnSideMaxY));   // right, top 40%
 		default:
-			return new Vector2(RandomHelper.RandomNextFloat(60f, 740f), 640f);
+			return new Vector2(RandomHelper.RandomNextFloat(60f, 740f), -40f);            // top
 		}
 	}
 
@@ -597,27 +643,21 @@ internal class WebcamLevel : GameScene
 
 	// F2: keep the DeathStar-mine population topped up to MaxMines on the MineSpawnMs cadence.
 	// Simpler than SpawnSaucers — mines aren't kill-gated and self-despawn on their lifetime.
-	private void SpawnMines()
+	private void SpawnMines(GameTime gameTime)
 	{
-		if (won || !mineTimer.Finished)
+		if (won || mines.Count >= tuning.MaxMines)
 		{
 			return;
 		}
-		if (mines.Count >= tuning.MaxMines)
+		// Random Poisson spawn averaging MineSpawnMs between mines (rate = 1000/ms in hits/sec).
+		if (!RandomHelper.RandomFromAverage(1000f / tuning.MineSpawnMs, gameTime))
 		{
-			// full: recheck shortly instead of waiting a whole interval
-			mineTimer.Duration = 400f;
-			mineTimer.Reset();
-			mineTimer.Start();
 			return;
 		}
 		WebcamMine mine = WebcamMine.NewWebcamMine(Collection, base.Game);
 		mine.Setup(RandomEdgePosition(), tuning.MineLifeMs * CadenceJitter());
 		Collection.Add((GameComponent)(object)mine);
 		mines.Add(mine);
-		mineTimer.Duration = tuning.MineSpawnMs * CadenceJitter();
-		mineTimer.Reset();
-		mineTimer.Start();
 	}
 
 	// F2: touching a mine costs a life + bursts the blue DeathStar explosion — but only after
@@ -646,28 +686,25 @@ internal class WebcamLevel : GameScene
 		}
 	}
 
-	// F1: launch a screen-bisecting mothership every MothershipMs (0 disables), one at a time.
-	private void SpawnMothership()
+	// F1: launch a screen-bisecting mothership on a random Poisson roll averaging tuning.MothershipMs
+	// between spawns (0 disables), never more than one at a time. Rate = 1/MothershipMs converted to
+	// hits/sec for RandomFromAverage; while one is alive we don't roll, so the average gap is measured
+	// from when the field is clear.
+	private void SpawnMothership(GameTime gameTime)
 	{
-		if (won || tuning.MothershipMs <= 0f || !mothershipTimer.Finished)
+		if (won || tuning.MothershipMs <= 0f || motherships.Count > 0)
 		{
 			return;
 		}
-		if (motherships.Count > 0)
+		// hits/sec = 1000 / MothershipMs (ms) — e.g. 12000ms -> 0.0833/s -> ~12s average wait.
+		if (!RandomHelper.RandomFromAverage(1000f / tuning.MothershipMs, gameTime))
 		{
-			// one bisector at a time: recheck shortly
-			mothershipTimer.Duration = 800f;
-			mothershipTimer.Reset();
-			mothershipTimer.Start();
 			return;
 		}
 		WebcamMothership ship = WebcamMothership.NewWebcamMothership(Collection, base.Game);
-		ship.Setup(PickBisectOrientation());
+		ship.Setup(PickBisectOrientation(), mothershipAllowCenter);
 		Collection.Add((GameComponent)(object)ship);
 		motherships.Add(ship);
-		mothershipTimer.Duration = tuning.MothershipMs * CadenceJitter();
-		mothershipTimer.Reset();
-		mothershipTimer.Start();
 	}
 
 	// Mostly the vertical top-down bisect; sometimes a horizontal one from a random side.
@@ -682,6 +719,12 @@ internal class WebcamLevel : GameScene
 		if (force == "horizontal")
 		{
 			return (RandomHelper.Random.Next(2) == 0) ? WebcamMothership.Bisect.HorizontalFromLeft : WebcamMothership.Bisect.HorizontalFromRight;
+		}
+		// Horizontal cross-screen sweeps only unlock on the harder tiers (mothershipAllowHorizontal,
+		// set in ResolveTuning); Easy/Medium/Hard get vertical-only motherships.
+		if (!mothershipAllowHorizontal)
+		{
+			return WebcamMothership.Bisect.VerticalDown;
 		}
 		int roll = RandomHelper.Random.Next(5);
 		if (roll < 3)

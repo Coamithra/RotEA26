@@ -734,6 +734,13 @@
             window.addEventListener("pointerdown", kick);
 
             return {
+                // Explicit unlock for flows whose join gesture never reaches the window
+                // kick listeners — notably the webcam setup dialog, which swallows the
+                // Enter keydown (stopImmediatePropagation) so "press Enter to join" would
+                // otherwise leave the AudioContext suspended and the level's music silent.
+                // Safe to call anytime: kick() is idempotent and only unlocks from within
+                // the caller's own user-activation context.
+                unlock: function () { kick(); },
                 play: function (cue)
                 {
                     curRate = 1;

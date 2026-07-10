@@ -854,6 +854,13 @@
             window.addEventListener("pointerdown", kick);
 
             return {
+                // Explicit unlock for flows whose join gesture never reaches the window
+                // kick listeners — notably the webcam setup dialog, which swallows the
+                // Enter keydown (stopImmediatePropagation) so "press Enter to join" would
+                // otherwise leave the AudioContext suspended and the level's music silent.
+                // Safe to call anytime: kick() is idempotent and only unlocks from within
+                // the caller's own user-activation context.
+                unlock: function () { kick(); },
                 play: function (cue)
                 {
                     curRate = 1;
@@ -1879,7 +1886,12 @@
                 { key: "kills",   label: "Kills to win",   min: 1,   max: 99, step: 1,    int: true },
                 { key: "saucers", label: "Max saucers",    min: 1,   max: 15, step: 1,    int: true },
                 { key: "sspeed",  label: "Saucer speed x", min: 0.1, max: 3,  step: 0.05, int: false },
-                { key: "pspeed",  label: "Plasma speed x", min: 0.1, max: 3,  step: 0.05, int: false }
+                { key: "pspeed",  label: "Plasma speed x", min: 0.1, max: 3,  step: 0.05, int: false },
+                { key: "spawn",   label: "Spawn gap (ms)",  min: 500,  max: 12000, step: 250, int: true },
+                { key: "arm",     label: "Arm delay (ms)",  min: 1000, max: 30000, step: 500, int: true },
+                { key: "charge",  label: "Charge (ms)",     min: 500,  max: 10000, step: 250, int: true },
+                { key: "minemax", label: "Max mines",       min: 1,    max: 12,    step: 1,   int: true },
+                { key: "minespawn", label: "Mine spawn (ms)", min: 500, max: 12000, step: 250, int: true }
             ];
 
             function fmt(k, v) { return k.int ? String(v) : v.toFixed(2); }
@@ -1889,7 +1901,8 @@
                 try
                 {
                     DotNet.invokeMethod('EvilAliensWeb', 'debugSetWcTune',
-                        st.hearts, st.kills, st.saucers, st.sspeed, st.pspeed);
+                        st.hearts, st.kills, st.saucers, st.sspeed, st.pspeed,
+                        st.spawn, st.arm, st.charge, st.minemax, st.minespawn);
                 }
                 catch (e) { console.warn('[wctune] push failed: ' + e.message); }
             }
@@ -1988,18 +2001,29 @@
                 }
                 out.textContent = st.tier + ": { Hearts = " + st.hearts + ", KillTarget = " + st.kills +
                     ", MaxSaucers = " + st.saucers + ", SaucerSpeedMul = " + st.sspeed +
-                    "f, PlasmaSpeedMul = " + st.pspeed + "f }";
+                    "f, PlasmaSpeedMul = " + st.pspeed + "f, SpawnIntervalMs = " + st.spawn +
+                    "f, ArmDelayMs = " + st.arm + "f, ChargeTimeMs = " + st.charge +
+                    "f, MaxMines = " + st.minemax + ", MineSpawnMs = " + st.minespawn +
+                    "f, MineLifeMs = " + st.minelife + "f, MothershipMs = " + st.mothership + "f }";
             }
 
             return {
                 // Called from WebcamLevel (C#) at level start and after every applied
                 // change, with the ACTUAL resolved values — so this both shows and re-seeds.
-                show: function (tier, hearts, kills, saucers, sspeed, pspeed)
+                show: function (tier, hearts, kills, saucers, sspeed, pspeed, spawn, arm, charge, minemax, minespawn, minelife, mothership)
                 {
                     st = {
                         tier: tier, hearts: hearts, kills: kills, saucers: saucers,
                         sspeed: Math.round(sspeed * 100) / 100,
-                        pspeed: Math.round(pspeed * 100) / 100
+                        pspeed: Math.round(pspeed * 100) / 100,
+                        spawn: Math.round(spawn * 100) / 100,
+                        arm: Math.round(arm * 100) / 100,
+                        charge: Math.round(charge * 100) / 100,
+                        minemax: minemax,
+                        minespawn: Math.round(minespawn),
+                        // display-only (no stepper) — URL-tunable, shown in the bake row
+                        minelife: Math.round(minelife),
+                        mothership: Math.round(mothership)
                     };
                     if (!el) { build(); }
                     render();

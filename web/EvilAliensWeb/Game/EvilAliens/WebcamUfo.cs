@@ -47,6 +47,17 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	// around and flies back in. It only ever despawns when the player swats it.
 	private const float RetreatMargin = 50f;
 
+	// After a getaway the saucer holds off-screen for this long before looping back in,
+	// so the retreat reads as a real exit (a beat of breathing room) rather than an
+	// instant U-turn. Live-overridable via ?wcreturndelay= (ms); null => this baked value.
+	private const float ReturnDelayMs = 900f;
+
+	// Arming (blink-charge + fire) is only allowed to START when the saucer is at least
+	// this far inside every edge, so a shot can NEVER originate off-screen or half-off it
+	// (expressly-forbidden behavior). If the arm timer expires while the saucer is nearer
+	// an edge than this, arming simply waits until wander containment has drawn it back in.
+	private const float ArmInset = 60f;
+
 	// Fly-around AI (item): while wandering, steer away from + orbit the player's mask
 	// silhouette so a still player isn't drifted into. Strength is overridable live via
 	// ?wcavoid= (null => DefaultAvoidStrength; 0 disables). AvoidRadius = how close (design
@@ -81,6 +92,13 @@ internal class WebcamUfo : AlienDrawableGameComponent
 
 	private float blinkPhase;
 
+	// flee -> return dwell: once the saucer is fully off-screen after firing, this holds it
+	// out for ReturnDelayMs before ReturnToField loops it back in. awaitingReturn latches the
+	// dwell so it starts exactly once per getaway.
+	private Timer returnTimer = new Timer(ReturnDelayMs, repeating: false);
+
+	private bool awaitingReturn;
+
 	private CollisionSimpleCircle circle = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
 	public delegate void FiredHandler(WebcamUfo sender, Vector2 target);
@@ -88,6 +106,14 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	// Raised at the instant the blink phase completes; the level spawns the
 	// plasma shot (it owns projectile bookkeeping).
 	public event FiredHandler OnFired;
+
+	// Soft "one ball at a time" cheat: when the blink-charge completes the saucer asks the
+	// level whether the field is clear of plasma before actually firing. If a ball is already
+	// out it HOLDS its charge (keeps blinking at max) and re-checks each tick, firing the
+	// instant the ball clears. null => no gate (always fire). Two saucers finishing their
+	// charge on the same tick can still both fire (they don't see each other's not-yet-spawned
+	// ball) — that's the accepted edge case, not worth over-engineering out.
+	public Func<bool> CanFire;
 
 	public override ICollisionType CollisionType
 	{
@@ -112,6 +138,7 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	{
 		AddTimer(armTimer);
 		AddTimer(blinkClock);
+		AddTimer(returnTimer);
 		base.Collides = false;
 		base.DrawOrder = 19;
 		PointValue = PointValues.WebcamUfo;
@@ -165,6 +192,8 @@ internal class WebcamUfo : AlienDrawableGameComponent
 		blinkPhase = 0f;
 		armTimer.Stop();
 		blinkClock.Stop();
+		returnTimer.Stop();
+		awaitingReturn = false;
 		base.Direction = wanderDir;
 		base.Speed = RandomHelper.RandomNextFloat(0.1f, 0.15f) * speedMul;
 		base.MaxSpeed = 0.18f * speedMul;
@@ -189,7 +218,11 @@ internal class WebcamUfo : AlienDrawableGameComponent
 			break;
 		case UfoState.wander:
 			UpdateWander(gameTime);
-			if (armTimer.Finished)
+			// Arm ONLY once the arm delay has elapsed AND the saucer is safely inside every
+			// edge — so the halt/blink/fire can never happen off-screen. If the timer is up
+			// but it's hugging an edge, keep wandering (containment reels it in) and arm the
+			// moment it's inset. The timer stays Finished, so this defers, never skips.
+			if (armTimer.Finished && OnScreenToArm())
 			{
 				state = UfoState.arming;
 				blinkPhase = 0f;
@@ -209,7 +242,10 @@ internal class WebcamUfo : AlienDrawableGameComponent
 			float t = 1f - blinkClock.Normalized;   // Normalized is time REMAINING; invert to 0->1
 			float period = MathHelper.Lerp(400f, 70f, t);
 			blinkPhase += dt / period;
-			if (blinkClock.Finished)
+			// Fire once fully charged — but only if the field is clear of plasma (the soft
+			// one-ball cheat). If a ball is out, hold here (blinkClock stays Finished, so t=1
+			// keeps it blinking at max) and re-check next tick until it clears.
+			if (blinkClock.Finished && (CanFire == null || CanFire()))
 			{
 				Fire();
 			}
@@ -218,9 +254,20 @@ internal class WebcamUfo : AlienDrawableGameComponent
 		case UfoState.flee:
 			Move((float?)wanderDir, gameTime);
 			base.Update(gameTime);
-			if (OffScreen(RetreatMargin))
+			if (!awaitingReturn)
 			{
-				// off-screen after the getaway: loop back into the field instead of despawning
+				if (OffScreen(RetreatMargin))
+				{
+					// fully off-screen after the getaway: start the dwell, then loop back in
+					// (below) once it elapses — a beat of breathing room, not an instant U-turn.
+					awaitingReturn = true;
+					returnTimer.Duration = DebugFlags.WebcamReturnDelay ?? ReturnDelayMs;
+					returnTimer.Reset();
+					returnTimer.Start();
+				}
+			}
+			else if (returnTimer.Finished)
+			{
 				ReturnToField();
 			}
 			break;
@@ -228,10 +275,34 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	}
 
 	// Standard bouncing drift, borrowed from UFO's normal state: keep off the edges,
-	// occasionally pick a fresh heading, and steer around the player (below).
+	// occasionally pick a fresh heading, and steer around the player. ORDER MATTERS —
+	// the player-avoidance steering is applied FIRST and the edge containment LAST, so
+	// containment is authoritative: avoidance can never point the heading out through an
+	// edge (the old order let it, which drifted saucers off-screen with no way back).
 	private void UpdateWander(GameTime gameTime)
 	{
 		Vector2 v = MyMath.AngleToVector(wanderDir);
+		// occasional fresh heading (before containment, so containment still has final say)
+		if ((double)RandomHelper.RandomNextFloat(0f, 1f) <= 0.0005 * gameTime.ElapsedGameTime.TotalMilliseconds)
+		{
+			v = MyMath.AngleToVector(RandomHelper.RandomNextFloat(0f, (float)Math.PI * 2f));
+		}
+		// Fly-around AI: bias the heading away from + tangentially around the player's mask
+		// silhouette, so a saucer flows around a still player instead of drifting into them
+		// (driven by the actual camera image, not just the centroid). ?wcavoid= tunes it.
+		float avoidStrength = DebugFlags.WebcamAvoid ?? DefaultAvoidStrength;
+		if (avoidStrength > 0f)
+		{
+			Vector2 away = WebcamInterop.AvoidanceVector(base.Position, AvoidRadius);
+			if (away.LengthSquared() > 1E-04f)
+			{
+				away.Normalize();
+				Vector2 tangent = new Vector2(0f - away.Y, away.X) * orbitSign;
+				v += away * avoidStrength + tangent * (OrbitStrength * avoidStrength);
+			}
+		}
+		// Edge containment LAST: reflect any heading component that points out through a near
+		// edge, so the saucer is kept in the field no matter what avoidance asked for.
 		int margin = 80;
 		if (base.Position.X > (float)(800 - margin) && v.X > 0f)
 		{
@@ -249,31 +320,25 @@ internal class WebcamUfo : AlienDrawableGameComponent
 		{
 			v.Y *= -1f;
 		}
-		wanderDir = MyMath.VectorToAngle(v);
-		if ((double)RandomHelper.RandomNextFloat(0f, 1f) <= 0.0005 * gameTime.ElapsedGameTime.TotalMilliseconds)
+		// Hard watchdog: if it has slipped past a screen edge anyway, forget everything and
+		// head straight back to field centre — so a wandering saucer can never stall off-screen.
+		if (OffScreen(0f))
 		{
-			wanderDir = RandomHelper.RandomNextFloat(0f, (float)Math.PI * 2f);
+			v = new Vector2(400f, 300f) - base.Position;
 		}
-		// Fly-around AI: bias the heading away from + tangentially around the player's mask
-		// silhouette, so a saucer flows around a still player instead of drifting into them
-		// (driven by the actual camera image, not just the centroid). ?wcavoid= tunes it.
-		float avoidStrength = DebugFlags.WebcamAvoid ?? DefaultAvoidStrength;
-		if (avoidStrength > 0f)
+		if (v.LengthSquared() > 1E-04f)
 		{
-			Vector2 away = WebcamInterop.AvoidanceVector(base.Position, AvoidRadius);
-			if (away.LengthSquared() > 1E-04f)
-			{
-				away.Normalize();
-				Vector2 tangent = new Vector2(0f - away.Y, away.X) * orbitSign;
-				Vector2 steer = MyMath.AngleToVector(wanderDir) + away * avoidStrength + tangent * (OrbitStrength * avoidStrength);
-				if (steer.LengthSquared() > 1E-04f)
-				{
-					wanderDir = MyMath.VectorToAngle(steer);
-				}
-			}
+			wanderDir = MyMath.VectorToAngle(v);
 		}
 		Move((float?)wanderDir, gameTime);
 		base.Update(gameTime);
+	}
+
+	// True only when the saucer is at least ArmInset inside every edge — the precondition
+	// for entering the arming (blink-charge + fire) phase, so a shot never comes from off-screen.
+	private bool OnScreenToArm()
+	{
+		return base.Position.X >= ArmInset && base.Position.X <= 800f - ArmInset && base.Position.Y >= ArmInset && base.Position.Y <= 600f - ArmInset;
 	}
 
 	private void Fire()
@@ -300,6 +365,8 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	private void ReturnToField()
 	{
 		state = UfoState.flyin;
+		awaitingReturn = false;
+		returnTimer.Stop();
 		wanderDir = MyMath.VectorToAngle(new Vector2(RandomHelper.RandomNextFloat(250f, 550f), RandomHelper.RandomNextFloat(200f, 400f)) - base.Position);
 		base.Direction = wanderDir;
 		base.Speed = 0.15f * speedMul;

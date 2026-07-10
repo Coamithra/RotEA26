@@ -478,6 +478,11 @@ window.eaWebcam = (function () {
 
     function join() {
         if (mode !== "setup") return;
+        // Joining is always a user gesture (click OR Enter), but the Enter path is
+        // swallowed by onKey (stopImmediatePropagation) before it reaches eaMusic's
+        // window kick listener — so unlock WebAudio explicitly here or the level's
+        // music stays silent for keyboard joiners.
+        try { if (window.eaMusic) window.eaMusic.unlock(); } catch (e) { }
         mode = "play";
         removeDialog();
         buildOverlay();

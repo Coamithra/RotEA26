@@ -307,14 +307,18 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   now applies the faithful curve `2^((Pitch-50)/50)` and `eaMusic.setRate` just sets `playbackRate`.
   (6) Music uses the authored **2.5s crossfade** (`MUSIC_FADE` in `index.html`). **There is NO DSP/reverb
   in the bank** (0 presets) — that XACT feature was never authored, nothing to port.
-- **Splash "static channel swap" SFX (a port-era cue, not in the banks) — `tools/audio/build_channelswap.py`.**
+- **Splash "static channel swap" SFX (a port-era cue, not in the banks) — `tools/audio/pick_channelswap.py`.**
   The "I made this!" splash (`SplashScene` index 1) channel-flips the old meme into the revenged image
   (`channelflip.fx`); a bright TV-static burst now punctuates it. `SplashScene.Update` fires
   `SoundManager.PlayCue("channelswap")` ONCE the instant the glitch starts (`stateTimer >= holdMs`),
   gated on `variantPicked` so it only sounds when the flip actually renders (shader + reveal present),
-  one-shot via `flipSoundPlayed` (reset in `BeginDisplay`). The cue is synthesized offline (numpy,
-  deterministic seed) to `Content/sfx/channelswap.wav` (mono 16-bit PCM, 22050 Hz) — re-run the script
-  after changing a knob; don't hand-edit the WAV. Its `SoundManager._cfg` entry is `volByte:100, vary:false`
+  one-shot via `flipSoundPlayed` (reset in `BeginDisplay`). The cue is now a picked ElevenLabs
+  sound-effect render (candidate `02_channel_static`, prompt "Television static noise when switching
+  channels") decoded to `Content/sfx/channelswap.wav` (mono 16-bit PCM, 44100 Hz, peak-normalized 0.92
+  so the cue-volume calibration still holds) by `pick_channelswap.py`, which keeps the chosen MP3 as a
+  committed source-of-record (`channelswap_source.mp3`) and SUPERSEDES the old numpy synth
+  `build_channelswap.py` as the cue's owner -- don't re-run that synth or it clobbers the render; to swap
+  the sound, re-render candidates with `eleven_channelswap.py` then `pick_channelswap.py <slug>`. Its `SoundManager._cfg` entry is `volByte:100, vary:false`
   (a touch above baseline, no pitch/vol humanize). **Autoplay caveat:** the splash runs BEFORE any user
   gesture, so on a truly cold first load the AudioContext may be suspended and the burst is silently
   dropped (standard browser policy); it sounds once anything has unlocked audio (any prior click/key).
@@ -437,14 +441,24 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   fire ONE big slow plasma orb at you; hearts + kills-to-win are per-difficulty (see below). **Per-difficulty
   tuning (card `8fcc7a8e`):** `WebcamLevel.Tunings[]` is an Easy..Inzane table of the DISCRETE knobs —
   hearts, kills-to-win, max simultaneous saucers, saucer-speed × and plasma-speed × (the generic
-  arm/blink/spawn cadence already scales off `Settings.DifficultyModifier`). `Initialize` reads
+  arm/blink/spawn cadence is now authored as ABSOLUTE per-tier milliseconds -- `SpawnIntervalMs` (gap
+  between spawns), `ArmDelayMs` (the "rate of fire" -- wander time before a saucer starts charging; bigger
+  = fires less often) and `ChargeTimeMs` (the blink-charge windup before the orb releases), each +/-15%
+  jittered at spawn (`CadenceJitter`) for variety. The `Settings.DifficultyModifier` divisor was REMOVED
+  from these calcs (and the old within-run "arm faster over time" ramp too), so each tier's feel is set
+  directly -- plan is to author Easy + Very_Hard by feel then interpolate the middle tiers off the
+  modifier. NB the saucers do NOT use a `RandomFromAverage(rate*dt)` fire model -- each fires exactly once
+  per arm cycle, so `ArmDelayMs` IS the fire-rate lever). `Initialize` reads
   `Settings.CurrentDifficulty` (the menu pick), resolves the row, and picks the music via
   `SoundManager.ClassicForDifficulty()` (Hard+ = lyrics). `WebcamUfo.Setup`/`WebcamPlasma.Setup` take a
   speed-× arg. **Live-tune the feel with the `?wc*` debug flags** (`Compat/DebugFlags.cs`): boot
-  `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`,
+  `?level=WebcamAliens&wcdiff=<tier>` and A/B `?wchearts=/?wckills=/?wcsaucers=/?wcsaucerspeed=/?wcplasmaspeed=`
+  (+ the cadence `?wcspawn=/?wcarm=/?wccharge=`, now ABSOLUTE ms e.g. `?wcarm=5000`),
   then bake the chosen numbers back into `Tunings[]`. **Better: `?wctune` shows a LIVE stepper panel**
   (`eaWcTune` in `index.html`, outside `#app`, only built when the webcam level calls `show()` -- a boot
-  without the flag has no extra DOM): +/- all five knobs in real time, mid-play or paused, no reload.
+  without the flag has no extra DOM): +/- 10 live knobs (hearts/kills/max-saucers/saucer-speed/plasma-speed
+  + spawn-gap/arm-delay/charge-time + max-mines/mine-spawn) in real time, mid-play or paused, no reload;
+  mine-life + mothership-ms are shown DISPLAY-ONLY in the bake row (URL-tunable) so a copied row is complete.
   Edits drive `DebugInput.SetWcTune` -> `DebugFlags.SetWebcamTuneOverride` (ABSOLUTE final values,
   unlike the URL speed flags which are tier-baseline multipliers) and `WebcamLevel` re-resolves on its
   next tick (`WebcamTuneVersion`): hearts snap to the new count, KillTarget/MaxSaucers are read live
@@ -492,7 +506,16 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `ReturnToField()` snap-turns it back in (the turn is off-screen so the cheat is invisible) to
   re-arm/fire again; the ONLY despawn is a player swat (`Asplode`) -- no more off-screen GC. Because they
   persist, the swarm fills to the tier's `MaxSaucers` and stays there (a new one spawns only after a
-  swat). (3) **Fly-around AI**: while wandering they steer away from + orbit the player's mask via
+  swat). **On-screen hardening (keep-the-ufo-on-screen fixes):** three coupled guards keep a persistent
+  saucer honest -- (a) wander containment is AUTHORITATIVE: `UpdateWander` applies the player-avoidance
+  steer FIRST then the edge-bounce LAST (was the reverse, which let avoidance point a saucer out through
+  an edge), plus an `OffScreen(0)` watchdog that steers a slipped saucer straight back to field centre --
+  so a wanderer can't stall off-screen; (b) arming only STARTS when the saucer is >= `ArmInset`(60px)
+  inside every edge (`OnScreenToArm`; if the arm timer expires while it's hugging an edge, arming DEFERS
+  until containment reels it in) -- so a shot can never originate off-screen (was possible, the reported
+  "fired from off-screen" bug); (c) after firing, the retreat holds off-screen for `ReturnDelayMs`(900)
+  before `ReturnToField` loops it back (a beat of breathing room vs the old instant U-turn), live via
+  **`?wcreturndelay=<ms>`** (`DebugFlags.WebcamReturnDelay`; 0 = old instant return). (3) **Fly-around AI**: while wandering they steer away from + orbit the player's mask via
   `WebcamInterop.AvoidanceVector` (image-driven, not just the `Centroid`), so a still player isn't
   drifted into but a lunge still swats them; strength is live-tunable with **`?wcavoid=<f>`**
   (`DebugFlags.WebcamAvoid`; 0 disables, null => baked `DefaultAvoidStrength`). (4) Plasma already aims
@@ -500,6 +523,56 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Doom BrainBoss-hit cue) not `head_asplode`. (6) Hearts moved TOP-CENTRE + smaller (were overlapping the
   top-left score). "Explosions on top of the feed" was scoped out: the JS-overlay feed can't cheaply
   enter the C# scene (a ~5MB/frame canvas->WASM texture copy, or hacking KNI's private GL context).
+- **Webcam hazards: screen-bisecting mothership (F1) + DeathStar mines (F2).** Two dodge hazards added to
+  the "I Made This!" mode, both `Collides=false` (mask-hit-tested like the saucers, not via CollisionHandler).
+  **F1 `WebcamMothership`** is a stripped cousin of `SpiderHelperMothership`: it SLIDES in horizontally from
+  a screen edge (SpiderHelper-style), winds up a `LazerGenerator` spark swarm, then fires a big laser that
+  BISECTS the screen, holds a beat, and slides out. It CANNOT be harmed (pure "get out the way!"); standing
+  in the beam costs a life (`WebcamInterop.HitBeam` -- a mask-vs-thick-segment test -- -> `PlayerHit`,
+  grace-gated). Two orientations (`WebcamLevel.PickBisectOrientation`, ~60/40 mix): **VerticalDown** slides
+  in from a random side, parks HIGH over one of {dead-centre, left-third `x=133`, right-third `x=667`}
+  (rolled 50/25/25 -- the ship telegraphs where the beam falls) ~half cut off at the top, fires straight
+  DOWN, then passes out the far side; **HorizontalFrom{Left,Right}** slides in from that side to ~33% down
+  (`BisectY`), parks with its centre off-screen so only ~40% shows, fires ACROSS (duck under), retreats.
+  (The mothershipB art sits 16px left of its frame centre, so the DRAW is re-centred on Position via
+  `SpriteArtOffset` -- the beam then lines up with the hull's VISUAL centre, not just its frame origin.) The beam is a `Quad` drawn
+  DIRECTLY (like Lazer internally) so its length is a fixed tier-independent sweep-then-hold, not Lazer's
+  difficulty-scaled growth. **The whole choreography is a PURE function of `elapsed` ms since spawn
+  (`WebcamMothership.PoseAt` + phase thresholds)** -- so the MOVEMENT is verified as DATA by the isolation
+  sim `tools/sim/webcam_mothership_sim.py` (which mirrors `PoseAt`; run it, read the trajectory + invariant
+  checks), NOT screenshot-timed. **`?wcmothershipfreeze=<ms>`** halts a mothership at a chosen phase (e.g.
+  ~3600 = beam mid-fire) so a frozen APPEARANCE can be captured without chasing the frame. Interval knob
+  `MothershipMs` (per tier; `?wcmothership=<ms>`, 0 disables); `?wcmothershipdir=vertical|horizontal` forces
+  the orientation for testing. **F2 `WebcamMine`** reuses the DeathStar sprite (`GFX/Sprites/deathstarsheet2`)
+  and wanders EXACTLY like `WebcamUfo` (same containment + player-avoidance steering -- it flows AROUND a
+  still player, does NOT home like the Level-3 `DeathStar`). TOUCHING it costs a life + bursts a BEEFY blue
+  explosion (two stacked `Explosion.MakeBlue` bursts `3.5/2.5`+`2/1.3`, mirroring `StarMine.Asplode`) with
+  the DeathStar's `targetacquired` "tweety" hone-in cue as a callback -- so you DODGE it (opposite of the
+  swat-me saucers). The MOTHERSHIP BEAM also sweeps anything it crosses out of the field
+  (`WebcamMothership.BeamHitsCircle`): MINES pop with a plain non-damaging explosion
+  (`WebcamMine.DestroyByLaser`, a mercy), and SAUCERS are killed with FULL credit (the shared
+  `KillSaucer` helper -- score + KillTarget progress, same as a body-swat, since it's a kill the player
+  wanted anyway). Both are instant (no leeway -- leeway is only for hazards that HURT the player). Unlike the persistent saucers, a mine only lives `MineLifeMs` then flies off the
+  nearest edge and despawns. **The saucer plasma orb, on reaching the player, POPS into an electric ZAP
+  (`WebcamZap` -- a bloom + radiating jagged lightning streaks built from the laser's `lazermiddle`/
+  `lazerglow` + midpoint-displaced bolts) INSTEAD of an explosion** (electricity doesn't explode); the life
+  is still docked by `PlayerHit`. Its shape can be plotted in isolation (see `tools/sim/_zap_preview.png`).
+  **Bad-collision LEEWAY (a gift to the player):** a hazard that HURTS you (plasma orb / mothership beam /
+  mine) only lands its hit after the mask has STEADILY overlapped it for `HitLeewayMs` (~100ms;
+  `?wchitleeway=<ms>`) -- a per-hazard `ContactMs`/`BeamContactMs` accumulator in `WebcamLevel`'s three
+  BAD tests (`TestPlasmaHitsPlayer`/`TestMinesHitPlayer`/`TestBeamHitsPlayer`, all now taking `dt`) that
+  accumulates real time while overlapping and RESETS the instant contact breaks. So a jittery mask or a
+  split-second-late dodge (a brief graze, or on/off flicker) never costs a life; it's framerate-independent
+  (accumulates ms, not frames). **Killing SAUCERS is deliberately NOT leewayed -- it stays instant**
+  (`TestPlayerTouchesSaucers`, the one test with no `dt`), because the player WANTS to hit those. The
+  leeway timing is verified as DATA, not screenshots (a tiny accumulate/reset/trigger sim). Per-tier knobs `MaxMines` (simultaneous cap) / `MineSpawnMs` (spawn gap) / `MineLifeMs`
+  (lifetime), URL `?wcminemax=/?wcminespawn=/?wcminelife=` (absolute). **Tuning panel** now has 10 live
+  steppers (added **Max mines** + **Mine spawn (ms)**); **Mine life** + **Mothership** ms are shown
+  DISPLAY-ONLY in the panel's bake row (URL-tunable) so a copied `Tunings[]` row is complete. The panel
+  interop (`debugSetWcTune`/`eaWcTune.show`/`SetWebcamTuneOverride`/`TuneShow`) grew accordingly; all default
+  so a shipped build is unchanged. Both hazards spawn only while `PlayerVisible` (like the saucers). **VERIFY
+  DYNAMIC BEHAVIOUR VIA THE SIM OR A FREEZE, NOT LIVE SCREENSHOTS** (per the "Testing DYNAMIC behaviour"
+  rule in Build/run/verify).
 - **No longer stubbed:** audio (Stage 6), saves persist (Stage 7), and the **controls-help screen now
   shows the keyboard layout** (Stage 9 — un-skipped `Displays.Keyboard` in `InstructionsMenu` +
   `HelpText`; its homes are the attract demos and the in-game pause → "Instructions", there's no

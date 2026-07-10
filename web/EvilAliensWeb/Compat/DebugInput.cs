@@ -253,14 +253,14 @@ namespace EvilAliensWeb.Compat
 
 		// JS bridge for the live webcam-tuner stepper panel (eaWcTune in wwwroot/index.html,
 		// shown on the webcam level when ?wctune is set): DotNet.invokeMethod('EvilAliensWeb',
-		// 'debugSetWcTune', hearts, kills, saucers, saucerSpeed, plasmaSpeed). Overrides the
-		// five WebcamLevel.Tunings[] knobs in real time — ABSOLUTE final values (what you'd
-		// bake into the table), unlike the ?wcsaucerspeed/?wcplasmaspeed URL multipliers.
-		// WebcamLevel picks the change up on its next Update via WebcamTuneVersion.
+		// 'debugSetWcTune', hearts, kills, saucers, saucerSpeed, plasmaSpeed, spawnInterval,
+		// armDelay, chargeTime). Overrides the eight WebcamLevel.Tunings[] knobs in real time
+		// — ABSOLUTE final values (what you'd bake into the table), unlike the ?wc* URL
+		// multipliers. WebcamLevel picks the change up on its next Update via WebcamTuneVersion.
 		[JSInvokable("debugSetWcTune")]
-		public static void SetWcTune(int hearts, int kills, int saucers, double saucerSpeed, double plasmaSpeed)
+		public static void SetWcTune(int hearts, int kills, int saucers, double saucerSpeed, double plasmaSpeed, double spawnInterval, double armDelay, double chargeTime, int mineMax, double mineSpawn)
 		{
-			DebugFlags.SetWebcamTuneOverride(hearts, kills, saucers, (float)saucerSpeed, (float)plasmaSpeed);
+			DebugFlags.SetWebcamTuneOverride(hearts, kills, saucers, (float)saucerSpeed, (float)plasmaSpeed, (float)spawnInterval, (float)armDelay, (float)chargeTime, mineMax, (float)mineSpawn);
 		}
 
 		// Companion: drop all runtime webcam-tuner overrides (the panel's "Reset to tier"

@@ -126,6 +126,12 @@ public class Background : Scene
 
 	private BackgroundImage holoGrid;
 
+	// The far (dimmer) holo-grid layer, tracked alongside holoGrid (the near one) so both can be
+	// held back and drawn AFTER a fly-by doodad (card 02c0e9c0: the nebula/sim-earth doodad in
+	// ClassicAliens was drawing on top of the grid; the grid is a see-through simulation overlay
+	// and should render in front of anything projected "inside" it).
+	private BackgroundImage holoGridFar;
+
 	private Timer glitchTimer = new Timer(170f, repeating: false);
 
 	private Vector2 glitchSlip;
@@ -139,6 +145,48 @@ public class Background : Scene
 	private bool pulseActive;
 
 	public Vector2 ScrollSpeed => scrollspeed;
+
+	// Average composite colour of the alien-base FLOOR the Level-3 towers stand on -- layer 0's
+	// current base texture PLUS the two constant additive 2331-v5 fog layers -- measured offline per
+	// variant (tools: the mean-colour snippet in the Wall-tower commit). The floor is SWITCHED five
+	// times across the level (SetAlienBase / SetAlienBase2..6, each a StartSwitch crossfade), and the
+	// variants differ a lot (a deep (32,56,150) to a lighter (70,77,154)), so a fixed fog colour would
+	// be wrong for most of the map. Wall.DrawTowerShafts3D fogs its bases toward THIS so a shaft always
+	// recedes into whatever floor is currently scrolling under it. The additive contribution is the
+	// same for every state (those layers never switch), so it is folded into each composite.
+	private static readonly Dictionary<string, Color> AlienBaseFloorColors = new Dictionary<string, Color>
+	{
+		{ "GFX/Base/756",    new Color(46, 125, 201) },   // initial (SetAlienBase)
+		{ "GFX/Base/756-v5", new Color(49,  77, 176) },   // SetAlienBase2
+		{ "GFX/Base/756-v3", new Color(32,  56, 150) },   // SetAlienBase3
+		{ "GFX/Base/756-v4", new Color(70,  77, 154) },   // SetAlienBase4
+		{ "GFX/Base/756-v6", new Color(62,  97, 182) },   // SetAlienBase5
+		{ "GFX/Base/756-v8", new Color(51,  85, 168) },   // SetAlienBase6
+	};
+
+	// The current floor colour, crossfaded during a texture switch, or null when there is no
+	// alien-base floor (any non-Level-3 scene) or its texture isn't in the table -- the caller then
+	// keeps its own default. Layer 0 is the switchable base floor. During a switch the current texture
+	// draws at switchTimer.Normalized (fading OUT) and the new one at 1 - Normalized (fading IN), so
+	// Color.Lerp(next, current, Normalized) reproduces exactly what is on screen.
+	public Color? AlienBaseFloorColor()
+	{
+		if (backgroundLayers == null || backgroundLayers.Count == 0)
+		{
+			return null;
+		}
+		BackgroundImage floor = backgroundLayers[0];
+		if (floor.texturenames == null || !AlienBaseFloorColors.TryGetValue(floor.texturenames[0, 0], out Color current))
+		{
+			return null;
+		}
+		if (floor.switchTimer.Active && floor.new_texturenames != null
+			&& AlienBaseFloorColors.TryGetValue(floor.new_texturenames[0, 0], out Color next))
+		{
+			return Color.Lerp(next, current, floor.switchTimer.Normalized);
+		}
+		return current;
+	}
 
 	// True while a fly-by doodad (hero earth / sim-earth / small earth / andromeda)
 	// is crossing the screen. WaitForDoodadEvent polls this so Level 1 can hold the
@@ -597,9 +645,17 @@ public class Background : Scene
 		}
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
+			// The holodeck's cyan simulation grid is a see-through overlay -- it should render IN
+			// FRONT of a fly-by doodad (a projected planet/nebula "inside" the simulation), not
+			// behind it. Both grid layers are held back and drawn after the doodad below (card
+			// 02c0e9c0). Every other scene's backgroundLayers has neither field set, so this is a
+			// no-op there.
+			if (backgroundLayer == holoGrid || backgroundLayer == holoGridFar)
+			{
+				continue;
+			}
 			backgroundLayer.Draw(base.SpriteBatch, gameTime);
 		}
-		DrawHoloPulse();
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		if (showdoodad)
 		{
@@ -607,6 +663,15 @@ public class Background : Scene
 			base.SpriteBatch.Draw(doodad, doodadPos, 0f, doodadscale, center: true, doodadcolor);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		}
+		if (holoGridFar != null)
+		{
+			holoGridFar.Draw(base.SpriteBatch, gameTime);
+		}
+		if (holoGrid != null)
+		{
+			holoGrid.Draw(base.SpriteBatch, gameTime);
+		}
+		DrawHoloPulse();
 		float factor = Convert.ToSingle((double)(0.15f + oscilatereach) + Math.Sin((double)oscilatespeed * timer.TotalMilliseconds) * (double)oscilatereach);
 		if (!DebugToggles.Active || DebugToggles.BgVeil)
 		{
@@ -697,6 +762,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		holoGridFar = null;
 		DisposeStarfield();
 		backgroundImage.position = Vector2.Zero;
 		backgroundImage.textures = new Texture2D[1, 1];
@@ -755,6 +821,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		holoGridFar = null;
 		// Stage 13 reskin: replace the three hand-placed Starfield2/tileablestarfield
 		// layers with a deterministic, infinite, scrolling grid of overlapping high-res
 		// nebula tiles, crossfaded by starwindow.fx. See ProceduralStarfield. The legacy
@@ -825,6 +892,7 @@ public class Background : Scene
 		backgroundImage.scrollspeedmodifier = 0.25f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
+		holoGridFar = backgroundImage;
 		// holo-grid, near: cyan hero -> the layer the glitch slips most
 		backgroundImage = new BackgroundImage();
 		backgroundImage.color = new Color(0.42f, 0.82f, 0.95f, 0.55f);
@@ -898,6 +966,7 @@ public class Background : Scene
 		foregroundLayers.Clear();
 		isHolodeck = false;
 		holoGrid = null;
+		holoGridFar = null;
 		DisposeStarfield();
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundImage.position = Vector2.Zero;

@@ -203,13 +203,7 @@ namespace EvilAliensWeb.Compat
             try { cm = ServiceHelper.Get<IContentManagerService>().ContentManager; }
             catch { return; }
 
-            var ids = new List<string>();
-            if (Shipped().TryGetValue(level, out var shippedIds))
-                ids.AddRange(shippedIds);
-            if (Recording && _byLevel.TryGetValue(level, out var lvl))
-                ids.AddRange(lvl.Keys);
-
-            foreach (string id in ids)
+            foreach (string id in ManifestAssets(level))
             {
                 try { cm.Load<Texture2D>(id); }      // cache-deduped against the code list
                 catch (Exception ex)
@@ -217,6 +211,24 @@ namespace EvilAliensWeb.Compat
                     Console.WriteLine($"[loadprofile] manifest entry '{id}' for {level} failed: {ex.Message}");
                 }
             }
+        }
+
+        // The asset ids the manifest associates with `level`: ALWAYS the shipped manifest,
+        // plus (debug ?loadlog only) the localStorage-learned set, so a gap hit last run is
+        // covered this run. Feeds ApplyManifest above AND Game1's pre-launch level warm
+        // (card fe25712a), which decodes these one-per-tick BEFORE the level component is
+        // added, so the level's own synchronous preload becomes cache hits and the browser
+        // event loop keeps breathing (no Chrome "page unresponsive" popup).
+        public static List<string> ManifestAssets(string level)
+        {
+            var ids = new List<string>();
+            if (string.IsNullOrEmpty(level))
+                return ids;
+            if (Shipped().TryGetValue(level, out var shippedIds))
+                ids.AddRange(shippedIds);
+            if (Recording && _byLevel.TryGetValue(level, out var lvl))
+                ids.AddRange(lvl.Keys);
+            return ids;
         }
 
         // Build + download the accumulated manifest (and echo it to the console).

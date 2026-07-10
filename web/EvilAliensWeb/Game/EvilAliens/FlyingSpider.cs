@@ -173,20 +173,41 @@ internal class FlyingSpider : KillableAlien
 	public override void Draw(GameTime gameTime)
 	{
 		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0108: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0132: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0134: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0143: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0148: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0175: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		if (isbackground)
+		{
+			// Fog spiders are translucent (alpha 0.2). Drawing wing+body+wing separately at 0.2 with
+			// straight-alpha blending makes the overlaps composite to ~0.36, so the wings read more
+			// solid than the body — the reported "opacity is off". Flatten the three sprites OPAQUE
+			// into a shared RT (the union has no internal double-up), then composite the whole
+			// silhouette ONCE at the fog alpha, so body + wings fade as one. Foreground spiders are
+			// opaque (alpha 1) — no double-up — so they skip this and draw directly.
+			Color fog = color;
+			// Design bbox centred on Position, generous enough to hold the reared body + both swung
+			// wings at this scale without clipping (transparent padding costs nothing; the composite
+			// only touches the used sub-rect).
+			float half = 200f * scale;
+			Rectangle box = new Rectangle(
+				(int)Math.Floor(base.Position.X - half),
+				(int)Math.Floor(base.Position.Y - half),
+				(int)Math.Ceiling(2f * half),
+				(int)Math.Ceiling(2f * half));
+			color = new Color(fog.R, fog.G, fog.B, (byte)255);
+			spriteBatch.BeginGroupFlatten(box);
+			DrawSprites(gameTime);
+			spriteBatch.BlendMode = (SpriteBlendMode)1;
+			spriteBatch.EndGroupFlatten(new Color((byte)255, (byte)255, (byte)255, fog.A));
+			color = fog;
+		}
+		else
+		{
+			DrawSprites(gameTime);
+		}
+	}
+
+	private void DrawSprites(GameTime gameTime)
+	{
+		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
 		float num = flaptimer.Duration / 2f;
 		if (base.hittimeractive)
 		{

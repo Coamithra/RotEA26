@@ -53,6 +53,27 @@ MODEL_ID = "local-wan14b-lightning"
 LENGTH = 33          # i2v frame count (4k+1); interpolated/ping-ponged in game
 LONG_SIDE = 448      # gen long-side px (mult of 16); Wan sweet spot, fast enough
 
+# Every patch is composited over the STATIC brain sprite, so whole-frame camera motion the
+# model invents (drift, a slow push-in) reads as the patch sliding against the art around
+# it -- the one artifact this pipeline cannot tolerate.
+#
+# We MUST pass a negative, because the shared workflow template's baked-in one was written
+# for animgen's fighting-game character and ends with "frozen, still image, static pose".
+# On a locked-off shot of a barely-moving pod cluster that term fights the whole point: the
+# cheapest way for the model to avoid "still image" is to move the entire frame, so it
+# invents a zoom. The positive prompt's "locked static camera" loses that argument -- which
+# is why saying it louder there never worked. Note what is deliberately ABSENT below.
+#
+# Per-region "negative" overrides this; build_brain_overlays.py's border-drift triage (and
+# a scale fit against frame 0) is what confirms it took.
+DEFAULT_NEGATIVE = (
+    "camera movement, camera motion, camera pan, camera zoom, zoom in, zoom out, dolly, "
+    "push in, pull out, tilt, tracking shot, handheld, camera shake, drifting frame, "
+    "rotating camera, scale change, the whole frame moving, cropping, letterboxing, "
+    "scene change, background change, "
+    "realistic, photorealistic, 3D render, motion blur, blurry, low quality, text, watermark"
+)
+
 
 def load_model():
     lib = json.loads((ANIMGEN / "model_library.json").read_text(encoding="utf-8"))
@@ -121,6 +142,7 @@ def main():
             template, mp4,
             start=str(crop_path),
             prompt=r["prompt"],
+            negative=r.get("negative", DEFAULT_NEGATIVE),
             seed=r["seed"],
             node_roles=roles,
             sets={"11.width": gw, "11.height": gh, "11.length": LENGTH},

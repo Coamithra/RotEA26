@@ -160,6 +160,44 @@
             catch (e) { console.warn('[debug] eaLazer failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the Level-3 wall-tower knobs (the ?level=Level3&wallsonly tuner). Drives
+        // Compat/DebugInput.SetWalls so the slider panel below (and the console) can retune the
+        // tower extrusion without a page reload. Console:
+        // eaWalls(true, 0.66, 1, 1, 0.55, 1, 0, 0.35, 225, 0, 0.15, 0.8) — towers on, depth, slice step
+        // px, fog amount, side darkening, side scan, twist deg, face light, face angle deg, top lift,
+        // wisp alpha, wisp speed.
+        // Same effect as the ?wall* URL flags, live. eaWalls(false) restores the flat look.
+        window.eaWalls = (towers, depth, sliceStep, fog, sideDark, sideScan, twist, faceLight, faceAngle, topLift, wisps, wispSpeed) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
+                    towers !== false,
+                    Number(depth) || 0.66, Number(sliceStep) || 1,
+                    fog === undefined ? 1 : Number(fog) || 0,
+                    Number(sideDark) || 0.55,
+                    sideScan === undefined ? 1 : Number(sideScan) || 0,
+                    Number(twist) || 0,
+                    faceLight === undefined ? 0.35 : Number(faceLight) || 0,
+                    faceAngle === undefined ? 225 : Number(faceAngle) || 0,
+                    Number(topLift) || 0,
+                    wisps === undefined ? 0.15 : Number(wisps) || 0,
+                    Number(wispSpeed) || 0.8);
+            }
+            catch (e) { console.warn('[debug] eaWalls failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the wall-tower cost meter. eaWallPerf(true) arms it, eaWallStats() reads one line
+        // (fps, frame ms + p95, tower-pass ms, slice draws). The eaWalls panel arms + polls it for you.
+        // NOTE a backgrounded tab throttles requestAnimationFrame, so FOCUS THE WINDOW or every number
+        // is meaningless — the report says so rather than lying.
+        window.eaWallPerf = (on) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', on !== false); }
+            catch (e) { console.warn('[debug] eaWallPerf failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaWallStats = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats'); }
+            catch (e) { return 'not booted'; }
+        };
+
         // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
         // ?level=Level2&spiders tuner). Drives Compat/DebugInput.SetSpider so the slider panel below
         // (and the console) can retune shadow/jump-frame/land-frame/jump-X without a page reload.
@@ -247,7 +285,7 @@
             canvas.height = holder.clientHeight || window.innerHeight || 720;
         }
 
-        window.initRenderJS = (instance) =>
+        window.initRenderJS = async (instance) =>
         {
             window.theInstance = instance;
 
@@ -264,6 +302,14 @@
             };
             document.getElementById('theCanvas').addEventListener("pointerenter", () => eaSetOnCanvas(true));
             document.getElementById('theCanvas').addEventListener("pointerleave", () => eaSetOnCanvas(false));
+
+            // Pull the level-select screenshot blobs out of IndexedDB into memory BEFORE the
+            // first game tick, so the synchronous save-hydrate (StorageStub, on the first
+            // OpenContainer a few ticks in) sees them. IndexedDB is async but the game reads
+            // saves synchronously — awaiting here is the guaranteed ordering gate. Fast (a
+            // getAll of a handful of blobs) and best-effort: a failure never blocks boot.
+            try { await window.eaSaveBlob.preload(); }
+            catch (e) { console.warn("[eaSaveBlob] preload failed", e); }
 
             // begin game loop
             scheduleTick();
@@ -343,6 +389,80 @@
                 toggle: function () { if (isFs()) exit(); else enter(); },
                 set: function (on) { if (on && !isFs()) enter(); else if (!on && isFs()) exit(); }
             };
+        })();
+
+        // eaCursor: owns the OS cursor over the game canvas (card 51276dcd). KNI's BlazorGL
+        // never applies Game.IsMouseVisible to the DOM, so C# (Compat/CursorInterop ->
+        // MousePointer) drives canvas.style.cursor through here per scene:
+        //   "menu"    -> normal OS arrow (menus / non-aiming scenes)
+        //   "hidden"  -> cursor:none, while the gameplay intro reticle SPRITE animates
+        //   "reticle" -> the zero-lag aiming reticle IS the OS cursor during gameplay
+        // A CSS cursor image is a fixed pixel size and can't be scaled, but the game
+        // letterbox-upscales its 800x600 design space to the window -- so the reticle ships as a
+        // LADDER of pre-drawn sizes at wwwroot/reticle/<px>.png (built by
+        // tools/cursor/build_cursor.py) and MousePointer passes the rung matching the current
+        // letterbox. Resolve against <base href> so it works under the CI "/RotEA26/" base too.
+        // Hotspot is the image centre (px/2) since the reticle aims from its centre; `crosshair`
+        // is the graceful fallback if a browser rejects the custom image.
+        window.eaCursor = (function ()
+        {
+            var reticleCss = {};   // px -> css value (each rung is a separate image)
+            function reticle(px)
+            {
+                if (!reticleCss[px])
+                {
+                    var rel = "reticle/" + px + ".png";
+                    var href = rel;
+                    try { href = new URL(rel, document.baseURI).href; } catch (e) { }
+                    var hot = px / 2;
+                    reticleCss[px] = "url('" + href + "') " + hot + " " + hot + ", crosshair";
+                }
+                return reticleCss[px];
+            }
+            return {
+                // px is the reticle rung to show; only meaningful for mode 'reticle'.
+                set: function (mode, px)
+                {
+                    var c = document.getElementById('theCanvas');
+                    if (!c) return;
+                    if (mode === 'reticle') c.style.cursor = reticle(px);
+                    else if (mode === 'hidden') c.style.cursor = 'none';
+                    else c.style.cursor = 'auto';   // 'menu' / anything else -> normal arrow
+                }
+            };
+        })();
+
+        // eaSuppressEsc: the browser forces Esc to leave DOM fullscreen and that can't be
+        // preventDefault'd, but the same Esc keydown ALSO reaches KNI's keyboard state, so Esc
+        // would exit fullscreen AND step back a menu at once (card b0a2f525). On every
+        // fullscreen EXIT, ask C# to swallow the raw Esc for a short window (a second, deliberate
+        // Esc afterwards -- now not fullscreen -- navigates back as normal). F11 gets its own
+        // dedicated toggle so it doesn't fight menu navigation.
+        window.eaSuppressEsc = function ()
+        {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSuppressEsc'); }
+            catch (e) { /* game not booted yet — ignore */ }
+        };
+        (function ()
+        {
+            var onFsChange = function ()
+            {
+                if (!window.eaFullscreen.isFullscreen()) window.eaSuppressEsc();
+            };
+            document.addEventListener('fullscreenchange', onFsChange);
+            document.addEventListener('webkitfullscreenchange', onFsChange);
+            // F11 = dedicated game-fullscreen toggle. preventDefault the browser-native (whole
+            // chrome) fullscreen and route through eaFullscreen instead; the keydown is a user
+            // gesture, so requestFullscreen is allowed. KNI ignores F11 (not in keysToCheck),
+            // so this never fights gameplay/menu keys.
+            window.addEventListener('keydown', function (e)
+            {
+                if (e.key === 'F11' || e.keyCode === 122)
+                {
+                    e.preventDefault();
+                    if (window.eaFullscreen.supported()) window.eaFullscreen.toggle();
+                }
+            });
         })();
 
         // eaHold: persistent press for the on-screen D-pad/fire button. Mirrors eaPress
@@ -782,17 +902,184 @@
     </script>
 
     <script>
+        // ----- eaSaveBlob: IndexedDB store for the large screenshot (.dat) blobs ----
+        // localStorage (~5MB/origin) is too small for the level-select screenshots
+        // (~360KB base64 each x up to 12 challenges = ~4.3MB, near the cap). Move those
+        // blobs to IndexedDB (hundreds of MB quota) while the small settings/unlockables/
+        // awardments XML stays in localStorage (eaSave). IndexedDB is async but the game
+        // reads saves synchronously, so preload() pulls every blob into an in-memory map
+        // at boot (awaited by initRenderJS before the first tick), and getAll() serves
+        // that map synchronously to the C# hydrate. It also MIGRATES any .dat older builds
+        // left in localStorage. If IndexedDB is unavailable (private mode / disabled),
+        // available() stays false and eaSave falls back to the pre-migration localStorage
+        // path, so behaviour only ever degrades to what shipped before.
+        window.eaSaveBlob = (function ()
+        {
+            var DB = "eaweb_save", STORE = "screenshots", PREFIX = "eaweb_save:";
+            var _cache = {};        // relpath -> base64, populated by preload()
+            var _db = null;
+            var _available = false;
+
+            function openDb()
+            {
+                return new Promise(function (resolve, reject)
+                {
+                    var req;
+                    try { req = indexedDB.open(DB, 1); }
+                    catch (e) { reject(e); return; }
+                    req.onupgradeneeded = function ()
+                    {
+                        var db = req.result;
+                        if (!db.objectStoreNames.contains(STORE))
+                            db.createObjectStore(STORE);   // out-of-line keys = the relpath string
+                    };
+                    req.onsuccess = function () { resolve(req.result); };
+                    req.onerror = function () { reject(req.error); };
+                    req.onblocked = function () { reject(new Error("indexedDB.open blocked")); };
+                });
+            }
+
+            function store(mode) { return _db.transaction(STORE, mode).objectStore(STORE); }
+
+            function idbGetAll()
+            {
+                return new Promise(function (resolve)
+                {
+                    var out = {};
+                    try
+                    {
+                        var cur = store("readonly").openCursor();
+                        cur.onsuccess = function ()
+                        {
+                            var c = cur.result;
+                            if (c) { out[c.key] = c.value; c.continue(); }
+                            else resolve(out);
+                        };
+                        cur.onerror = function () { resolve(out); };
+                    }
+                    catch (e) { resolve(out); }
+                });
+            }
+
+            // Move any .dat blobs older builds wrote to localStorage into IndexedDB, then
+            // drop them from localStorage to reclaim the ~5MB budget. One-time; a no-op once
+            // done (no .dat keys remain in localStorage).
+            function migrateFromLocalStorage()
+            {
+                var moved = [];
+                try
+                {
+                    for (var i = 0; i < localStorage.length; i++)
+                    {
+                        var k = localStorage.key(i);
+                        if (k && k.indexOf(PREFIX) === 0 && k.slice(-4) === ".dat")
+                            moved.push(k);
+                    }
+                }
+                catch (e) { return Promise.resolve(); }
+                if (!moved.length) return Promise.resolve();
+                return new Promise(function (resolve)
+                {
+                    try
+                    {
+                        var t = _db.transaction(STORE, "readwrite");
+                        var s = t.objectStore(STORE);
+                        moved.forEach(function (k)
+                        {
+                            var name = k.substring(PREFIX.length);
+                            var val = localStorage.getItem(k);
+                            if (val != null) { s.put(val, name); _cache[name] = val; }
+                        });
+                        t.oncomplete = function ()
+                        {
+                            // Only drop the localStorage copies once the IDB write committed.
+                            moved.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
+                            console.log("[eaSaveBlob] migrated " + moved.length + " screenshot(s) from localStorage to IndexedDB");
+                            resolve();
+                        };
+                        t.onerror = function () { resolve(); };   // leave localStorage copies if the move failed
+                    }
+                    catch (e) { resolve(); }
+                });
+            }
+
+            return {
+                available: function () { return _available; },
+                // Open the DB, load every blob into _cache, then migrate localStorage .dat.
+                // Raced against a timeout so a wedged IndexedDB open (blocked event, browser
+                // bug) can NEVER hang initRenderJS / the first game tick: on timeout the
+                // session falls back to localStorage mode (timedOut makes a late open a
+                // no-op, so the mode can't flip mid-session; blobs already in IndexedDB
+                // simply reappear next session — no data loss).
+                preload: function ()
+                {
+                    var timedOut = false;
+                    var work = openDb().then(function (db)
+                    {
+                        if (timedOut) { try { db.close(); } catch (e) { } return; }
+                        _db = db;
+                        return idbGetAll().then(function (all)
+                        {
+                            if (timedOut) return;
+                            _cache = all || {};
+                            _available = true;
+                            return migrateFromLocalStorage();
+                        });
+                    }).catch(function (e)
+                    {
+                        _available = false; _cache = {};
+                        console.warn("[eaSaveBlob] IndexedDB unavailable; screenshots stay in localStorage", e);
+                    });
+                    var gate = new Promise(function (resolve)
+                    {
+                        setTimeout(function ()
+                        {
+                            if (!_available)
+                            {
+                                timedOut = true;
+                                console.warn("[eaSaveBlob] IndexedDB slow to open; booting with localStorage screenshots");
+                            }
+                            resolve();
+                        }, 3000);
+                    });
+                    return Promise.race([work, gate]);
+                },
+                // Synchronous snapshot for the C# hydrate (name -> base64).
+                getAll: function () { return _cache; },
+                // Best-effort async write; updates _cache synchronously and returns true
+                // optimistically (screenshots are non-critical and IDB quota is huge).
+                set: function (name, b64)
+                {
+                    if (!_available) return false;
+                    _cache[name] = b64;
+                    try { store("readwrite").put(b64, name); }
+                    catch (e) { console.warn("[eaSaveBlob] put failed for " + name, e); return false; }
+                    return true;
+                },
+                remove: function (name)
+                {
+                    delete _cache[name];
+                    if (!_available) return;
+                    try { store("readwrite").delete(name); } catch (e) { }
+                }
+            };
+        })();
+
         // ----- eaSave: localStorage persistence for the save tree (Stage 7) ----
         // The game writes settings / unlockables / awardments / level screenshots
         // to the in-memory WASM filesystem (StorageStub.cs). This mirrors that tree
-        // to localStorage so it survives a reload; C# drives it via SaveInterop.
-        // Keys are "eaweb_save:<relpath>" (e.g. eaweb_save:EvilAliens/Settings.xml);
-        // values are base64 of the raw file bytes.
+        // so it survives a reload; C# drives it via SaveInterop. Keys are
+        // "eaweb_save:<relpath>" (e.g. eaweb_save:EvilAliens/Settings.xml); values are
+        // base64 of the raw file bytes. BACKEND SPLIT: the large screenshot ".dat" blobs
+        // go to IndexedDB (eaSaveBlob, big quota) and the small XML stays in localStorage;
+        // when IndexedDB is unavailable, .dat falls back to localStorage (the old path).
         window.eaSave = (function ()
         {
             var PREFIX = "eaweb_save:";
+            var isBlob = function (name) { return name.slice(-4) === ".dat" && window.eaSaveBlob.available(); };
             return {
-                // Returns JSON { "<relpath>": "<base64>", ... } for every entry.
+                // Returns JSON { "<relpath>": "<base64>", ... } for every entry, merging the
+                // localStorage XML (+ any un-migrated .dat) with the IndexedDB screenshot blobs.
                 load: function ()
                 {
                     var out = {};
@@ -806,12 +1093,20 @@
                         }
                     }
                     catch (e) { console.warn("eaSave.load failed", e); }
+                    try
+                    {
+                        var blobs = window.eaSaveBlob.getAll();
+                        for (var name in blobs)
+                            if (Object.prototype.hasOwnProperty.call(blobs, name)) out[name] = blobs[name];
+                    }
+                    catch (e) { console.warn("eaSave.load blobs failed", e); }
                     return JSON.stringify(out);
                 },
                 // Returns false if it didn't stick (quota / disabled storage), so C#
                 // keeps the file dirty and retries on the next save.
                 set: function (name, b64)
                 {
+                    if (isBlob(name)) return window.eaSaveBlob.set(name, b64);
                     try { localStorage.setItem(PREFIX + name, b64); return true; }
                     catch (e)
                     {
@@ -821,6 +1116,7 @@
                 },
                 remove: function (name)
                 {
+                    if (name.slice(-4) === ".dat") window.eaSaveBlob.remove(name);
                     try { localStorage.removeItem(PREFIX + name); } catch (e) { }
                 }
             };
@@ -997,6 +1293,35 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 
@@ -1111,6 +1436,232 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
+        })();
+    </script>
+
+    <!-- Live tuner slider panel for the Level-3 wall towers (card d59266cc, plans/walls-3d-towers.md).
+         The tower-extrusion knobs were URL-flag only, so every nudge meant a full page reload AND a
+         re-run of the walls section. This overlay drives Compat/DebugInput.SetWalls (via eaWalls) so
+         depth / slice step / fog / side darkening / wisp alpha + speed can be DRAGGED in real time,
+         with a checkbox to A/B the flat look. Built outside #app so it survives Blazor's mount, and
+         only created on a wall-dialing page (?level=Level3&wallsonly, or a bare ?walltune) — a normal
+         boot gets no extra DOM and stays byte-identical. Positioned top-right. -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]wallsonly\b/i.test(q) && !/[?&]walltune\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?wall* flags already on the URL, else the in-game baked
+            // defaults. These literals MIRROR the Default* consts in Game/EvilAliens/Wall.cs, and
+            // are pushed into the game immediately -- which turns each null override ("use the
+            // baked default") into an explicit value. So if you re-bake a Default* const there,
+            // update the matching literal here too, or a ?wallsonly / ?walltune boot renders with
+            // the stale number while a normal boot uses the new one. (Same duplication as the
+            // eaLazer / eaSpider panels.)
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                towers: !/[?&]walltowers=(0|false|off|no)\b/i.test(q),
+                depth: num("walldepth", 0.66),
+                fog: num("wallfog", 0.55),
+                side: num("wallsidedark", 0.7),
+                bands: num("wall3dbands", 4),
+                facelight: num("wallfacelight", 0.35),
+                faceangle: num("wallfaceangle", 140),
+                lift: num("walltoplift", 0),
+                wisps: num("wallwisps", 0.15),
+                wispspeed: num("wallwispspeed", 0.8)
+            };
+
+            // Push the current state into the game. Returns false (and is retried) until the .NET
+            // runtime is up — eaWalls swallows the pre-boot throw, so we call DotNet directly.
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
+                        st.towers, st.depth, st.fog, st.side,
+                        st.facelight, st.faceangle, st.lift, st.bands, st.wisps, st.wispspeed);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-walls{position:fixed;top:10px;right:10px;z-index:99999;width:262px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(140,170,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-walls h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#b8d4ff}" +
+                "#ea-walls .row{margin:7px 0}" +
+                "#ea-walls label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-walls .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-walls input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fb0ff}" +
+                "#ea-walls .chk{display:flex;gap:7px;align-items:center;margin:2px 0 6px}" +
+                "#ea-walls .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(140,170,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-walls .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}" +
+                "#ea-walls .perf{margin-top:8px;padding-top:7px;border-top:1px solid rgba(140,170,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:#9ffcd0;line-height:1.35}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-walls";
+            el.innerHTML =
+                "<h4>Wall towers &mdash; ?wallsonly</h4>" +
+                "<div class='chk'><input type='checkbox' id='ew-on' autocomplete='off'>" +
+                "<label for='ew-on' style='display:inline'>Towers (off = flat)</label></div>" +
+                "<div class='row'><label>Depth (base)<span class='v' id='ew-vd'></span></label>" +
+                "<input type='range' id='ew-depth' min='0.3' max='0.95' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Fog amount<span class='v' id='ew-vf'></span></label>" +
+                "<input type='range' id='ew-fog' min='0' max='1' step='0.02' autocomplete='off'></div>" +
+                "<div class='row'><label>Side darkening<span class='v' id='ew-vsd'></span></label>" +
+                "<input type='range' id='ew-side' min='0' max='1' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Dissolve bands<span class='v' id='ew-vb'></span></label>" +
+                "<input type='range' id='ew-bands' min='1' max='16' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Face light (corners)<span class='v' id='ew-vfl'></span></label>" +
+                "<input type='range' id='ew-facelight' min='0' max='1' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Light angle (deg)<span class='v' id='ew-vfa'></span></label>" +
+                "<input type='range' id='ew-faceangle' min='0' max='359' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Top lift<span class='v' id='ew-vl'></span></label>" +
+                "<input type='range' id='ew-lift' min='0' max='0.1' step='0.002' autocomplete='off'></div>" +
+                "<div class='row'><label>Wisp alpha<span class='v' id='ew-vw'></span></label>" +
+                "<input type='range' id='ew-wisps' min='0' max='0.6' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Wisp speed<span class='v' id='ew-vws'></span></label>" +
+                "<input type='range' id='ew-wispspeed' min='0' max='1.5' step='0.02' autocomplete='off'></div>" +
+                "<div class='perf' id='ew-perf'>perf: waiting for frames…</div>" +
+                "<div class='out' id='ew-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
+                "then paste them to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var ewOn = el.querySelector("#ew-on"), ewDepth = el.querySelector("#ew-depth"),
+                ewFog = el.querySelector("#ew-fog"),
+                ewSide = el.querySelector("#ew-side"), ewBands = el.querySelector("#ew-bands"),
+                ewFaceLight = el.querySelector("#ew-facelight"), ewFaceAngle = el.querySelector("#ew-faceangle"),
+                ewLift = el.querySelector("#ew-lift"), ewWisps = el.querySelector("#ew-wisps"),
+                ewWispSpeed = el.querySelector("#ew-wispspeed"), ewOut = el.querySelector("#ew-out"),
+                vd = el.querySelector("#ew-vd"),
+                vf = el.querySelector("#ew-vf"), vsd = el.querySelector("#ew-vsd"),
+                vb = el.querySelector("#ew-vb"),
+                vfl = el.querySelector("#ew-vfl"), vfa = el.querySelector("#ew-vfa"),
+                vl = el.querySelector("#ew-vl"),
+                vw = el.querySelector("#ew-vw"), vws = el.querySelector("#ew-vws");
+
+            function render()
+            {
+                ewOn.checked = st.towers;
+                ewDepth.value = st.depth; ewFog.value = st.fog;
+                ewSide.value = st.side; ewBands.value = st.bands;
+                ewFaceLight.value = st.facelight; ewFaceAngle.value = st.faceangle;
+                ewLift.value = st.lift;
+                ewWisps.value = st.wisps; ewWispSpeed.value = st.wispspeed;
+                vd.textContent = st.depth; vf.textContent = st.fog;
+                vsd.textContent = st.side; vb.textContent = st.bands;
+                vfl.textContent = st.facelight; vfa.textContent = st.faceangle;
+                vl.textContent = st.lift;
+                vw.textContent = st.wisps; vws.textContent = st.wispspeed;
+                ewOut.textContent = st.towers
+                    ? ("walldepth=" + st.depth + " wallfog=" + st.fog +
+                        " wallsidedark=" + st.side + " wall3dbands=" + st.bands +
+                        " wallfacelight=" + st.facelight +
+                        " wallfaceangle=" + st.faceangle + " walltoplift=" + st.lift +
+                        " wallwisps=" + st.wisps + " wallwispspeed=" + st.wispspeed)
+                    : "walltowers=0";
+            }
+
+            function changed() { render(); push(); }
+
+            ewOn.addEventListener("change", function () { st.towers = ewOn.checked; changed(); });
+            ewDepth.addEventListener("input", function () { st.depth = +ewDepth.value; changed(); });
+            ewFog.addEventListener("input", function () { st.fog = +ewFog.value; changed(); });
+            ewSide.addEventListener("input", function () { st.side = +ewSide.value; changed(); });
+            ewBands.addEventListener("input", function () { st.bands = +ewBands.value; changed(); });
+            ewFaceLight.addEventListener("input", function () { st.facelight = +ewFaceLight.value; changed(); });
+            ewFaceAngle.addEventListener("input", function () { st.faceangle = +ewFaceAngle.value; changed(); });
+            ewLift.addEventListener("input", function () { st.lift = +ewLift.value; changed(); });
+            ewWisps.addEventListener("input", function () { st.wisps = +ewWisps.value; changed(); });
+            ewWispSpeed.addEventListener("input", function () { st.wispspeed = +ewWispSpeed.value; changed(); });
+            ewOut.addEventListener("click", function ()
+            {
+                var t = ewOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = ewOut.style.color; ewOut.style.color = "#9ffcd0";
+                setTimeout(function () { ewOut.style.color = old; }, 250);
+            });
+
+            render();
+            // Keep pushing until the .NET runtime is booted, then stop (input events push after).
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 
@@ -1281,6 +1832,35 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
+
+            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
+            // pushing per frame, because a per-frame interop call would cost more than the tower pass
+            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
+            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
+            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
+            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
+            // throttled, so the average isn't poisoned for the next two seconds.
+            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
+            setInterval(function ()
+            {
+                var unfocused = document.hidden || !document.hasFocus();
+                try
+                {
+                    if (!armed || (wasUnfocused && !unfocused))
+                    {
+                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
+                        armed = true;
+                    }
+                    wasUnfocused = unfocused;
+                    if (unfocused)
+                    {
+                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
+                        return;
+                    }
+                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
+                }
+                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
+            }, 250);
         })();
     </script>
 

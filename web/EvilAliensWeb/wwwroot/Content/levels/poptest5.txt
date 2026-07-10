@@ -1,0 +1,15 @@
+width=7
+
+XXXXXXX
+      X
+XXXXXXX
+X      
+XXXXXXX
+      X
+XXXXXXX
+       
+  X X  
+  X X  
+       
+
+end

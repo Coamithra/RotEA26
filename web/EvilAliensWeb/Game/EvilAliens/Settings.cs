@@ -28,11 +28,12 @@ public class Settings : Savable
 
 	public bool PlayMusic = true;
 
-	// Web default: software reticle (MousePointer) instead of the OS arrow for aiming.
-	// false => while the cursor component is Visible (i.e. in a keyboard-controlled level)
-	// MousePointer draws the reticle every frame -- spinning intro via showtimer, then the
-	// static reticle -- and never forces Game.IsMouseVisible true, so the OS cursor stays
-	// hidden over the canvas (it reappears off-canvas, where the reticle is also hidden).
+	// Web default (false): the aiming reticle IS the OS cursor during gameplay (card 51276dcd).
+	// In a keyboard-controlled level MousePointer plays a one-shot scale+rotate intro (the OS
+	// cursor hidden while the reticle SPRITE animates), then hands off to the CSS reticle cursor
+	// (canvas.style.cursor: url(reticle/<px>.png)) so aiming is zero-lag -- no game-loop sprite
+	// trailing the mouse. true => the plain OS arrow instead (no reticle, no intro). Menus always
+	// use the plain arrow. See MousePointer / Compat/CursorInterop / eaCursor in index.html.
 	public bool HWMouse = false;
 
 	public bool VSync = true;
@@ -348,6 +349,18 @@ public class Settings : Savable
 			XmlSerializer xmlSerializer = new XmlSerializer(typeof(Settings));
 			using StreamReader textReader = new StreamReader(path);
 			instance = xmlSerializer.Deserialize(textReader) as Settings;
+			// Self-heal a bug (fixed here): an earlier build of the ?invuln debug flag wrote
+			// straight into Settings.Invulnerability, which then persisted via any later
+			// Settings.SaveThreaded() (options exit, difficulty pick, ...), leaving a save
+			// permanently invulnerable even on a plain boot. There is currently NO shipped menu
+			// entry that legitimately sets this field true (the original "playtest" invincibility
+			// toggle was never wired into the web port's MenuScene), so a deserialized `true` can
+			// only be leftover fallout from that bug -- force it back off on load. If a real
+			// in-game toggle for this cheat is ever wired up, this line must be removed.
+			if (instance != null)
+			{
+				instance.Invulnerability = false;
+			}
 		}
 		else
 		{

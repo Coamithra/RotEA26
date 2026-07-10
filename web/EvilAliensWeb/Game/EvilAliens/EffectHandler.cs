@@ -157,6 +157,8 @@ public class EffectHandler
 
 	private Effect SelectEffect()
 	{
+		// Highest precedence: it is enabled only around the wall-tower slice loop, which composes
+		// with nothing else. A missing file (partial deploy) falls through to the flat-shaded look.
 		if (staticAlphaEffect.Enabled)
 		{
 			return staticAlphaEffectFile;

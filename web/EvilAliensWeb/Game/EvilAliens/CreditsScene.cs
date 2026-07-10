@@ -103,7 +103,7 @@ internal class CreditsScene : Scene
 		{
 			((IDisposable)enumerator).Dispose();
 		}
-		base.SoundManager.PlayMusic(Songs.SjaakSlow);
+		base.SoundManager.PlayMusic(Songs.LastSignal);
 		fadetimer.Reset();
 		fadetimer.Start();
 		fadeouttimer.Stop();
@@ -277,6 +277,7 @@ internal class CreditsScene : Scene
 		lines.Add("Ralf Pisters ");
 		lines.Add("BluntWAX");
 		lines.Add("Johann Sebastian Bach");
+		lines.Add("Mikey Shulman");
 		lines.Add("");
 		lines.Add("GRAPHICS: ");
 		lines.Add("Danny Holten");

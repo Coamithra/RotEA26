@@ -43,6 +43,11 @@ public class Oracle : GameComponent, IOracleService
 		}
 	}
 
+	// The current alien-base floor colour (crossfaded across the Level-3 floor switches), or null off
+	// that floor. Wall.DrawTowerShafts3D fogs its tower bases toward this so they recede into whatever
+	// floor is scrolling under them. Mirrors BackgroundSpeed's null-safe wrap of `background`.
+	public Color? AlienBaseFloorColor => background?.AlienBaseFloorColor();
+
 	public int Players
 	{
 		get

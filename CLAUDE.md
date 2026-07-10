@@ -100,6 +100,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `?invuln` (force the Invulnerability cheat ON so playtesting a level doesn't keep dying;
   aliases `?invulnerability`/`?god`); `?unlockall` (reveal every gated menu option);
   `?skipsplash` / `?autostart` as building blocks. e.g. `…:5280/?level=Level2&noattract`.
+  **Level FAST-BOOTS replace a level's whole event list** — each skips its waves and drops straight
+  into one fight/section, so a change there can be watched in seconds instead of minutes of play:
+  `?spiderboss` (Level2's spider boss — `Level2.PopulateSpiderBossOnly`) · `?spiders` (Level2, a
+  continuous pure-spider ground wave) · `?wallsonly` (Level3's walls sections, looped —
+  `Level3.PopulateWallsOnly`) · **`?brainboss`** (Level3 straight into the REAL BrainBoss finale —
+  `Level3.PopulateBrainBossOnly`; **spawns it UNCONDITIONALLY, bypassing the Hard+ gate in
+  `BrainBossHard()`**, so the brain's animated overlays + `hit_boss` SFX can be verified on any
+  difficulty). Pair with `?invuln`. All are `false` by default, and all are IN `DebugFlags.Active`
+  (unlike the render/feel toggles, which stay out) so they print in the `[debug] flags active` line —
+  they hijack a level, and `?brainboss` alone reaching Level 3 *from the menu* would otherwise do so
+  silently. e.g. `…:5280/?level=Level3&brainboss&invuln`.
 - **Sprite harness — USE THIS to debug an object's drawing code instead of booting the game
   and trying to screenshot a moving enemy at the right instant.** `?harness=<Obj>` boots
   straight onto a space background showing ONE game object, drawn by its OWN `Draw()` through
@@ -228,7 +239,35 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `build_audio.py` calls it as its last step; re-run `python tools/audio/refine_loops.py` standalone
   after a bank rebuild (needs `pymusiclooper`; absent → whole-wave points are left in place). Per-track
   hand-tunes go in its `OVERRIDES`; don't hand-edit the loop points. `--dry-run` previews.
-- **The `classic` tune is a BESPOKE EXTERNAL track in TWO variants, difficulty-gated — `tools/audio/install_classic.py`.**
+- **The BESPOKE EXTERNAL music cues (not in the XACT banks) — `tools/audio/install_external.py`.** Three
+  tracks: the two `classic` variants (below) and **`lastsignal`** (below that). Each is copied straight into
+  `wwwroot/Content/music/<cue>.ogg` and gets its `music.json` loop from pymusiclooper. Re-run
+  `python tools/audio/install_external.py` after swapping a source; don't hand-edit the `.ogg`s /
+  `music.json`. `--dry-run` previews; `--cue <name>` installs just one; `--source <path>` overrides that
+  cue's source. `build_audio.py`'s `main()` calls `install_external.install()` and `build_music` **merges**
+  into the existing `music.json`, so a full rebuild never drops or clobbers an external entry (a missing
+  source leaves that cue's committed track untouched — safe in CI / fresh clones).
+  **Loop choice is CLICK-AWARE, not just top-ranked.** pymusiclooper ranks pairs by how alike the two
+  points *sound*; neighbouring candidates are the same musical loop shifted by a fraction of a beat, so
+  they score nearly identically while their raw waveform step at the wrap differs a lot — and WebAudio's
+  loop is a HARD SPLICE, so only a low step is inaudible. `find_loop` therefore takes the best-scoring
+  pair whose `splice_click` (the shared `refine_loops.py` metric) is already `<= SEAMLESS` (3.0), falling
+  back to the least-clicky. This reproduces the committed `classic`/`classicclean` points exactly (their
+  top-ranked pair was already seamless) and only changes which pair `lastsignal` gets. **Don't trust a
+  single `splice_click` reading to compare NEAR-IDENTICAL candidates** — it's a one-sample step, so it
+  swings wildly under a ±20-sample shift and Chrome's OGG decode disagrees with libsndfile's. It's a
+  coarse "does this wrap tick" screen (orders of magnitude: `stage1` read ~617 before refinement), not a
+  fine ranking. To genuinely compare two candidate loops, use a windowed measure (RMS of the audio
+  *preceding* `loopEnd` against the audio *preceding* `loopStart`).
+- **`lastsignal` (`Songs.LastSignal` → `songFiles[7]` → `Content/music/lastsignal.ogg`) is the end-of-level
+  TEXT-CRAWL theme** — "The Last Signal", played by `CreditsScene` (the screen after each level win). It
+  REPLACED the bank's old **`sjaakslow`** cue, which was the menu theme (`sjaak`) cut to its first ~27.5s
+  and rate-shifted to ≈0.40× (≈ −15.8 semitones) offline back in 2008. Both `sjaakslow` the cue and the
+  `.ogg` are GONE (dropped from `MUSIC_CUES`, `music.json`, and the enum); don't reintroduce them. Source:
+  `new_assets_raw/lastsignalloopable.ogg` (gitignored raw), 44100 stereo, 169.41s = a once-only ~67.6s
+  intro then a `67.60→168.67` body loop. `CreditsScene` plays it at rate 1.0 — nothing calls
+  `SoundManager.SetMusicRate` on this path (only `Level3`/`BrainBoss` sweep the rate).
+- **The `classic` tune is a BESPOKE EXTERNAL track in TWO variants, difficulty-gated.**
   The retro-minigame song was replaced with a user-authored "Evil Aliens Revenged" track, and now ships
   in two cuts: **`classic`** (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`) is the full
   Japanese-vocal cut, and **`classicclean`** (`Songs.ClassicClean` → `songFiles[8]` →
@@ -243,18 +282,12 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   instead of the old hard-coded `LockDifficulty(Medium)`, so the lyric cut is earned on Hard+ like the
   other challenges, not always on). Both cues are bespoke external tracks (NOT in
   the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by
-  `install_classic.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
+  `install_external.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
   `new_assets_raw/EvilAliensRevengedLoopable.ogg` (lyrics) and
   `new_assets_raw/classicaliensremixloopable_nolyrics.ogg` (clean) — gitignored raw; the committed `.ogg`s
   are the shipped artifacts. The tool copies each source straight (already OGG/Vorbis 44100 stereo — a copy
-  avoids a re-encode) and writes each `music.json` loop from **pymusiclooper's own top-ranked pair**
-  (lyrics: intro ~75s, body loop `75.06→414.18`; clean: intro ~55s, body loop `54.78→208.76`;
-  `introEnd = loopStart`). `build_music` **merges** into the existing `music.json` so a full `build_audio.py`
-  rebuild preserves both external entries, and `main()` calls `install_classic.install()` which installs
-  **both** cues (a missing source leaves that cue's committed track untouched — safe in CI / fresh clones).
-  Re-run `python tools/audio/install_classic.py` after swapping a source; don't hand-edit the `.ogg`s /
-  `music.json`. `--dry-run` previews; `--cue <classic|classicclean>` installs just one; `--source <path>`
-  overrides that cue's source.
+  avoids a re-encode) and writes each `music.json` loop (lyrics: intro ~75s, body loop `75.06→414.18`;
+  clean: intro ~55s, body loop `54.78→208.76`; `introEnd = loopStart`).
 - **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
   WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
   (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;
@@ -337,6 +370,43 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   → `window.eaFullscreen` (KNI's `graphics.IsFullScreen` is a no-op on BlazorGL); the in-menu
   "Fullscreen" option routes through it too. A new HUD/overlay button should follow the same
   outside-`#app` pattern.
+- **Aiming cursor + fullscreen-Esc (cards 51276dcd / b0a2f525).** KNI's BlazorGL NEVER applies
+  `Game.IsMouseVisible` to the DOM (its `_isMouseHidden` is dead, `Mouse.PlatformSetCursor` throws), so
+  the OS arrow is always over the canvas unless C# owns `canvas.style.cursor`. The reticle
+  (`MousePointer`) now does: `Compat/CursorInterop` → `window.eaCursor.set(mode)` in `index.html` picks
+  `menu` (plain arrow — all menus + the intro is OFF there), `hidden` (cursor:none while the scale+rotate
+  intro SPRITE plays at the START of a keyboard level), or `reticle` (the aiming reticle IS the OS cursor
+  via `cursor:url(reticle/<px>.png)` — ZERO-LAG, no trailing sprite; `HWMouse=true` opts back to the plain
+  arrow). Driven off `MousePointer.Visible` (GameScene sets it, incl. Tutorial; MenuScene forces it off).
+  **The reticle SIZE-TRACKS THE WINDOW via a LADDER of cursor images.** A CSS cursor is a fixed pixel size
+  and cannot be scaled, but the game letterbox-upscales 800x600 design space to the window — so ONE fixed
+  cursor is correctly sized at exactly one window size and reads tiny on a big monitor. So
+  `tools/cursor/build_cursor.py` emits `wwwroot/reticle/<px>.png` for `SIZES = range(24, 97, 8)` and
+  `MousePointer.ChooseCursorPx()` picks the rung nearest `ReticleDesignPx (30) * windowPerDesign`, clamped
+  to [24,96] (browsers ignore a cursor image past ~128px). `CursorInterop.SetReticle(px)` →
+  `eaCursor.set('reticle', px)` builds `url(reticle/<px>.png) px/2 px/2, crosshair`. `Update` re-picks
+  every tick while handed off, so a **window resize swaps the rung**. Tune by eye with
+  **`?reticlesize=<designpx>`** (`DebugFlags.ReticleSize`; null => the baked 30, so a shipped build is
+  unchanged; kept OUT of `Active`), then bake into `MousePointer.DefaultReticleDesignPx`.
+  **Every image is DRAWN, never resampled** — the reticle is four axis-aligned bars, so each rung plus the
+  intro sprite `Content/gfx/cursor2.png` (384px = 4x the largest rung, i.e. the intro's start size) is
+  rasterised at its native resolution. (The old tool tried to upscale the original 26px `cursor2.png` with
+  `Image.thumbnail`, which only ever SHRINKS — so the shipped `reticle.png` was 26px of art floating in a
+  48px canvas and the OS cursor came out ~half the size the intro ended at. That was the "reticle looks
+  small since we upscale the game" bug.) **Invariant: in every image the bars run edge to edge (alpha bbox
+  == full canvas)** — `MousePointer.CssHandoffScale()` sizes the intro sprite as
+  `ChooseCursorPx() / windowPerDesign / texture.Width`, so padding would shrink it below the cursor, and
+  the hotspot is the image centre. Deriving the end scale from the SAME `ChooseCursorPx` is what makes the
+  sprite→cursor handoff never pop at any window size, and it's texture-resolution-independent (re-author
+  any image bigger with no code change; only the ladder's step/min/max need stay in sync with the tool's
+  `SIZES`). Verify OFFLINE — an OS cursor never appears in a canvas screenshot: check each PNG's bbox, and
+  simulate `ChooseCursorPx`/`CssHandoffScale` across window sizes (the intro's on-screen size must equal
+  the chosen rung exactly). Fullscreen:
+  the browser reserves Esc to exit and it can't be preventDefault'd, but the same Esc ALSO reaches KNI and
+  stepped back a menu — so `index.html`'s `fullscreenchange`→exit calls `eaSuppressEsc` →
+  `DebugInput.SuppressEsc`/`EscSuppressActive`, which masks the raw Esc in `InputHandler` for a short
+  window (grace + held-guard); **F11** is a dedicated toggle (preventDefault native, route through
+  `eaFullscreen`).
 - **Trailers (Stage 14)** are an embedded **YouTube** overlay, NOT ported video. The original
   `Content/VFX/*.wmv` (VC-1) won't play in a browser and there's no video loader, so the old
   `TrailerScene`'s `Content.Load<Video>("VFX/..")` crashed the loop — it's now DEAD (constructed but
@@ -519,7 +589,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
   authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
   `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
-- **In-game score / "Player X — Press Start" text = ONE flattened sprite, chrome by default
+- **In-game score / "Player X — Press Start" text = ONE flattened sprite, plain by default (chrome via ?metalscore)
   (`SpriteBatchWrapper.DrawShadowString`).** `ScoreVisualiser.DrawStr` no longer draws the
   drop shadow and the text as two separate translucent `DrawString`s (the old "shadow bleeds
   THROUGH the text" bug — both were at the same partial alpha, so the 2px-offset shadow showed
@@ -527,9 +597,17 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   at FULL opacity into the shared grow-only text RT (`metalRT`, via the extracted `EnsureTextRT`,
   same plumbing as Stage-13 `DrawMetalString`) and composites the whole element ONCE at the
   target alpha — so shadow+text fade as a single sprite, no bleed-through. The chrome sheen
-  (`metal.fx`) is ON by default (`DebugFlags.MetalScore`, default true; **`?metalscore=0`** A/Bs
-  the plain flatten); the metal path uses a touch more opacity (0.7 vs the plain 0.55) since the
-  sheen darkens the mid-band. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
+  (`metal.fx`) is now OFF by default (`DebugFlags.MetalScore`, default false -- card 37c4ccca: the
+  chrome's dark mid-band spans only ~1-2px on the tiny HUD glyphs and reads crunchy/jaggy;
+  **`?metalscore`** re-enables it to A/B; menus keep their chrome -- they go through
+  `DrawMetalString`/`Cached`, not gated by this flag); when enabled the metal path uses a touch more
+  opacity (0.7 vs the plain 0.55) since the sheen darkens the mid-band. **The flatten RT is
+  PREMULTIPLIED** (`PremultiplyOver` rasterise -> One/InvSrcAlpha composite, same card) -- the
+  deliberate premult-INTERMEDIATE exception to the straight-alpha rule: stacking two straight-alpha
+  layers with either stock blend hard-edges the text's AA over its own drop shadow (the "jaggy /
+  no transparency" bug). Verify flattened-text changes with the frozen **`?textshot`** reference
+  grid (`Compat/TextShowcaseScene.cs`; score/combo/pop rows, plain + chrome, live animation
+  phases), not live-pop screenshots. Don't revert `DrawStr` to two `DrawString`s — that brings the bug
   back and (with the supersampled atlas) needs `DrawStringScaled`, not stock `DrawString`.
   The chrome **glint sweep is EVENT-DRIVEN on the score, not on a timer.** The static chrome
   gradient (GradTop/Mid/Bot) is time-independent and always shows; only the moving white-hot
@@ -594,6 +672,13 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   default, so a shipped build is unchanged). Applies in play AND the sprite harness, so
   `?harness=flyingspider&play&flyspiderscale=0.8` previews it (also a field in `wwwroot/harness.html`).
   To retune: pick a value by eye, then update the `DefaultSizeFactor` constant.
+- **Group-flatten for translucent multi-part sprites (`SpriteBatchWrapper.BeginGroupFlatten`/
+  `EndGroupFlatten`).** Overlapping straight-alpha sprites each drawn at partial alpha double-brighten
+  where they overlap; bracket their draws to flatten them OPAQUE into a shared grow-only RT, then the
+  union composites ONCE at the group alpha (used by the background fog `FlyingSpider` -- body + wings
+  fade as one silhouette; foreground spiders draw directly). Like the text flatten, the capture is
+  PREMULTIPLIED (`PremultiplyOver` -> One/InvSrcAlpha composite with a premultiplied tint; callers
+  still pass a normal straight tint) so a layer's AA edges blend correctly over the layer below.
 - **Laser FX (`Quad.cs` beam + `LazerGeneratorData.cs` chargeup) — LIVE tuning via `?lazershot`
   (Trello "improve laser animation").** The Protoss-style beam is `Quad.Draw` (a wide blue glow +
   white-hot core, each ONE continuous sprite, + tip/muzzle blooms + electric tendrils); the pre-fire
@@ -775,18 +860,23 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   particles, slowmo, ghost trails, floating text already existed — `plans/juice.md` has the research
   -> mapping). **Shake** is the trauma model: events call `Juice.AddTrauma` (`Explosion.Initialize`
   sized by explosion size, `Blast.Initialize` by bomb power, player death), strength = trauma^2 (so
-  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 14
-  design px) + roll (max 2 deg). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
+  stacked events read bigger than any one), decays ~0.7s, each tick samples a random offset (max 7
+  design px) + roll (max 1 deg — both halved from 14/2, card 8e439865: full shake impacted
+  gameplay). Applied at the PRESENT BLIT in `Game1.Draw` (offset + roll + a
   slight zoom so edges stay covered) — a pure camera effect: no gameplay coordinate, collision, or
-  mouse mapping (`WindowToDesign`) is touched. **Hit-stop** freezes GAME time (folded into
+  mouse mapping (`WindowToDesign`) is touched. An explosion SERIES can opt out of shake per
+  instance (`Explosion.Setup(..., noShake: true)`) — the L3 `BattleSkull` miniboss death does,
+  so only its finale blast shakes (card 8e439865). **Hit-stop** freezes GAME time (folded into
   `Game1.Update`'s existing turbo x slowmotion scale as `Juice.TimeScale`) while REAL time keeps
-  ticking Juice/shake/input: every kill lands a ~1.5-frame micro-stop (`Juice.KillPunch` in
-  `KillableAlien.HitBy`, rate-limited 250ms so a bomb-cleared wave is one punch, not a stutter),
-  boss kills 90ms + real shake, player death 180ms + extra trauma (`PlayerShip.Asplode`/
+  ticking Juice/shake/input: the per-kill ~1.5-frame micro-stop + 90ms boss-kill stop
+  (`Juice.KillPunch` in `KillableAlien.HitBy`) are **OFF by default** (card bd5efd9d — they read
+  as stutter, not juice; `?hitstop=1` re-enables for A/B, kill-shake trauma unaffected); player
+  death keeps its 180ms stop + extra trauma (`PlayerShip.Asplode`/
   `AsplodeWall`). Draw-time cosmetics (the Blast rim spin, metal sheen) keep animating during a
-  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=0`; QA from
+  freeze by design — Draw gets raw time. Tune/A-B: `?shake=<0..3>` (0 = off), `?hitstop=1`; QA from
   the console anywhere: `eaShake()`/`eaShake(1)`, `eaHitstop()`/`eaHitstop(500)` (DebugInput +
-  index.html, same seam as eaSlowmo). Both are feel toggles kept OUT of `DebugFlags.Active`.
+  index.html, same seam as eaSlowmo; eaHitstop always fires, ungated). Both are feel toggles kept
+  OUT of `DebugFlags.Active`.
   GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs in `Game1.Update` BEFORE the
   time scale) — a scaled-time timer would freeze and never thaw.
 - **Cinematic slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up-powerup slowmo
@@ -1016,6 +1106,122 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   preload stutters on a big new PNG, add
   `756-v1` to `textures.config` for DXT (mult-of-8 dims already satisfy the mult-of-4 rule). See
   `tools/walls/README.md`.
+- **Level-3 walls are REAL 3D TOWERS rising out of the fog (`Wall.DrawTowerShafts3D`, cards d59266cc +
+  a66fc73e, `plans/walls-3d-towers.md` + `plans/spike-wall3d.md`).**
+  Each collidable block is extruded DOWNWARD into a shaft standing on the alien-base ground; the
+  gameplay plane (ship + collision) stays the tower TOPS, and the top-face pass + `CollisionLevelMap`
+  are byte-identical to the flat original. Vanishing point at design centre (400,300), base rect =
+  `VP + (topRect - VP) * 0.66`. **The 0.66 is not a taste knob** -- it is exactly the alien-base GROUND
+  layer's `scrollspeedmodifier` (`Background.SetAlienBase`), so a base projected at 0.66 moves at 0.66x
+  the wall's speed = the floor's speed and the towers stay glued to the scrolling ground for free.
+  Change it and the bases slide. Bases project TOWARD the VP, so towers lean away from screen centre
+  (the GTA1 look) and a wall entering the top shows its bases before its top faces -- that's the
+  emergence, no special-case animation.
+  **The side faces are GENUINE 3D GEOMETRY in ONE batched draw** (`SpriteBatchWrapper.DrawGeometry3D`
+  -> a single `DrawUserIndexedPrimitives` through a shared `BasicEffect`), NOT the stacked sprite
+  slices this started as. The old "3D is unviable on WebGL, see `Quad.cs`" reading was wrong: that
+  comment describes THREE immediate-mode draws PER BEAM, each forcing a leading `SpriteBatch` flush --
+  a batching pathology. BlazorGL creates and destroys a transient vertex + index buffer per CALL, so
+  the overhead is **per-call, not per-vertex**, and one call per wall is exactly the shape that path
+  wants. Measured (focused tab, interleaved to defeat scroll drift): **towers now cost ~0.4 ms/tick over
+  the flat baseline, down from ~3.8 ms** -- about a 10x cut. `BasicEffect` is real on BlazorGL (KNI
+  embeds `Resources.BasicEffect.fxo` in `Kni.Platform.dll`), so no bespoke `.fx` -- and no hand-written
+  vertex shader, which this project has never needed -- is involved.
+  **The geometry is 3D rather than pre-projected** because flat pre-projected quads lose `w` and give
+  affine (PS1-style) texture warp; emitting real boxes lets the GPU do the perspective divide, so the
+  side faces sample the REAL `756-v1` cell with correct UVs. The camera (`View`/`Projection`) is built
+  to reproduce `Wall.Project()` exactly -- eye at the VP, `z=0` the gameplay plane, `z=ZAtDepth(depth)`
+  the ground -- and `tools/walls/preview_wall3d.py` asserts that to ~1e-13 px.
+  **NO DEPTH BUFFER, and that is proved rather than lucky.** `sceneTarget` is `DepthFormat.None`. The
+  shafts are equal-height vertical boxes on a ground plane under a perspective camera at the VP, so in
+  polar coordinates about the VP a face's depth at radius `r` is `r / r0` (`r0` = its near edge). Two
+  blocks sharing a ray can never interleave -- the one whose near edge is closer to the VP wins at every
+  shared radius -- so the occludes relation is ACYCLIC and a CPU painter's sort by distance from the VP
+  is EXACT. `tools/walls/verify_tower_order.py` certifies this over the real `level3.txt` and every
+  `Wall.Setup` width (14k+ overlapping face pairs) and REJECTS two plausible-looking sort keys, so it
+  isn't passing vacuously. Top faces sit at depth 1 (the maximum), so drawing them last stays correct.
+  **Three things that are load-bearing:** (1) the shaft row cull is WIDER than the top-face loop's
+  (`RowShaftVisible`), because a block off the bottom still shows its base and one above the screen
+  already does; (2) a face is emitted only when it is BOTH an outer edge (`isfree` -- a side shared with
+  a neighbour is interior to the solid, two coincident quads that shouldn't exist) AND turned toward the
+  eye; (3) **UV orientation is what kills the seams, on both axes.** Blocks step through the sheet as
+  (u -> columns, v -> rows), so a face's ALONG-EDGE coordinate must follow the axis its edge runs along
+  (a vertical edge spans rows -> `v`); get it backwards and two stacked blocks' coplanar walls each
+  restart the same range, hard-seaming every block boundary. And the DOWN-THE-SHAFT coordinate must
+  START at the cell edge the wall hangs from, so the sheet folds over the top face's rim -- hence the
+  down range reverses between the west wall and the east one. **No half-texel inset:** adjacent atlas
+  cells ARE the correct continuation (row `i`'s `v1` is row `i+1`'s `v0`), so insetting re-opens the seam
+  it means to close.
+  **Unloading is DEFERRED past the bottom edge (`Wall.DeathY`).** A block's base projects TOWARD the VP,
+  so a block below the VP has its shaft drawn ABOVE its cap -- when the last cap crosses y=600 the towers
+  are still on screen, and the old `Position.Y > 600` `Die()` popped them out of existence. The last thing
+  to leave is the base of the TOPMOST row, so the wall dies at `VanishY + (600 - VanishY)/depth` (= 754.5
+  at depth 0.66; collapses to 600 at depth 1, and IS 600 with `?walltowers=0`). **This also delays
+  `Walls.wall_OnDeath` -> `Terminate()`, i.e. the level's NEXT EVENT**, by the ~154 design px of extra
+  scroll (~0.6s at Level 3's `4.3/16.667` px/ms wall-section speed). Intended: the section isn't over until
+  its towers have gone.
+  **Spawning is ADVANCED above the top edge (`Wall.EntryLead`) -- the mirror image.** The flat-era spawn
+  (`Position.Y = -rowH*height`) only hides the TOP faces; a block's projected base leads its cap by
+  `VanishY*(1/depth - 1)` (~154.5px) of scroll, so a grid with blocks in its bottom row(s) materialised
+  its towers ~100-155px INTO the screen on the spawn frame (the "towers pop in as the section scrolls in"
+  bug -- only bottom-row-occupied grids, hence "sometimes"; variation 3's lone corner block was the
+  reliable single-pillar repro). `Setup`/`SetupFromFile` now spawn `EntryLead()` higher, so towers enter
+  base-first through the edge; 0 with `?walltowers=0`, so the flat path spawns exactly as the original.
+  Entry and exit are now symmetric (~0.6s each way at walls-section scroll).
+  **Wall grid files load via `TitleContainer.OpenStream` (`Wall.OpenLevelGrid`, `Content/levels/...`),
+  never `new StreamReader(path)`** -- a plain file read hits the WASM in-memory FS, which never contains
+  wwwroot content (it's HTTP-only), so it throws on web. Consequence fixed in passing: variation 2
+  (`level3.txt`, used by **OwnLevel**) had silently fallen back to its hard-coded 5x19 grid since the
+  port began; it now renders the real committed `Content/levels/level3.txt`.
+  **Entry diagnostics:** `?walltrace` logs each wall's spawn / first-shaft / first-top-face (posY +
+  quad counts) and flags any block whose shaft starts or stops drawing while fully mid-screen
+  (`POP IN`/`POP OUT` -- scroll only moves geometry through the edges, so any hit means a cull/spawn
+  assumption broke). `?level=Level3&wallpoptest` chains ten SMALL grid-file sections
+  (`Content/levels/poptest0..9.txt`, `Level3.PopulateWallPopTest`) and drops the scroll to ~10% once the
+  second loads, so every entry is slow and unmistakable. Both are opt-in and OUT of `DebugFlags.Active`.
+  **The haze is REAL DISTANCE FOG** (`BasicEffect.FogEnabled`, keyed on eye distance `e/d`; `?wallfog`
+  baked **0.55**, fogging toward the measured FLOOR colour RGB(46,125,201) -- fog LERPS, so the old
+  bright `DefaultFogColor` overshot and LIT the base up; the floor colour is darker than the shaft so
+  the base recedes into it), which is
+  something only real geometry can have: a sprite `Color` tint MULTIPLIES, so the slice path could only
+  ever scale the wall texture down -- never paint it UP to a haze colour -- and had to lean on a bright
+  `DefaultFogColor` plus the alpha dissolve to sell the fade. Fog LERPS toward the colour, so the base
+  genuinely converges on it, and the fog factor is linear in world z so interpolating it is exact (more
+  `?wall3dbands` does NOT smooth the fog -- the bands only resolve the smoothstep bottom dissolve, which
+  rides per-vertex alpha and takes COVERAGE to zero so the shaft melts into the floor art). Fog touches
+  rgb only, so the dissolve survives it. **Per-face shading** (`?wallfacelight`, baked 0.35; `?wallfaceangle` baked 140)
+  is now just each quad's flat vertex colour -- real geometry knows which wall it is. The slice path had
+  to fake this with a dedicated pixel shader reading a per-sprite face mask, which is what mitred a dark
+  wedge into every interior corner; that shader, `FaceShadeEffect`, `Wall.FaceMask`, the `756-v1-side.png`
+  companion sheet and `tools/walls/build_wall_side.py` are all **deleted** -- their logic is preserved in
+  commit `906f344` ("Level-3 wall towers: feel pass") if it is ever wanted.
+  Drifting fog **wisps** (additive `2331-v5`, the same texture + blend the two background fog layers use)
+  draw BETWEEN the shafts and the crisp top faces; additive can't occlude, but fog over a dark object IS a
+  brightening and the bright tops draw after, so it reads right. They tile **by position, never by a
+  drifting source rect** (the batch begins with a null samplerState = LinearClamp, so an out-of-bounds
+  source window clamps instead of wrapping), phase = `Position.Y * 0.8`, and their alpha is gated on the
+  visible-block count so the screen-wide haze can't pop in with the `Wall` entity's spawn/death.
+  **Tuning:** `?walltowers=0` is the kill switch (reproduces the old flat look exactly) ·
+  `?walldepth= ?wallfog= ?wallfogcolor=<rrggbb> ?wallsidedark= ?wallfacelight= ?wallfaceangle=
+  ?walltoplift= ?wall3dbands= ?wallwisps= ?wallwispspeed=` (all null => the baked `Wall.Default*` consts,
+  so a plain boot is unchanged) · **`?level=Level3&wallsonly`** fast-boots a looping walls section
+  (mirrors `?spiderboss`; pair with `?invuln`), and shows a **live `eaWalls` slider panel** (`index.html`,
+  outside `#app`, also on a bare `?walltune`) driving `DebugInput.SetWalls` -> `DebugFlags.SetWallsOverride`,
+  read every Draw; the orange readout prints the bake-ready query string. `eaWalls(...)` works from the
+  console. **`?walltoplift=<f>`** (baked **0**) draws the tower TOPS at depth `1 + lift` so the caps sit
+  proud of the gameplay plane; COSMETIC ONLY -- `CollisionLevelMap` still uses the unprojected block rects,
+  so a lift drifts the sprite off its own hitbox by `lift * distance-from-VP` (~8 design px at a screen
+  corner for lift 0.02). Keep it small and check with `?hitboxes`.
+  **Cost meter:** `eaWallPerf(true)` arms `Compat/WallProfiler`; the `eaWalls` panel polls `eaWallStats()`
+  ~4x/sec (a per-frame interop call would cost more than the thing it measures) and prints fps, frame ms +
+  p95, and the tower-pass ms. **Verify the drawing OFFLINE, not with a live screenshot** -- the wall
+  scrolls, and the canvas is black whenever its tab is backgrounded (Chrome won't composite the WebGL
+  surface, though `setTimeout` keeps the loop ticking). `tools/walls/preview_wall3d.py` re-implements the
+  exact projection + shading in numpy/Pillow against the real PNGs and writes a contact sheet. **And when
+  you DO measure frame cost, the tab must be FOCUSED** -- Chrome throttles a background tab (an unfocused
+  read said 14.2 ms/tick where the focused one said 6.2), and FPS alone tells you nothing because it is
+  vsync-capped. Note `scheduleTick` uses `rAF` when visible and `setTimeout` when hidden, so a frame queued
+  via `rAF` just before the tab hides never fires and the loop parks until it is visible again.
 - **Menu art is warmed DURING THE SPLASH to kill the level->menu pop-in.** `Game1.QueueMenuWarm()` (end
   of `LoadContent`) decodes the menu's heavy PNGs (`planet`, `title-revenged`, + the rest) ONCE so the
   first menu show -- and especially the cold end-of-level credits->menu handoff (which never displayed
@@ -1160,13 +1366,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   few SELECTED on-screen regions are animated offline with the LOCAL Wan 2.2 14B Lightning i2v model
   (via the `../animgen` ComfyUI plumbing) and composited back as small feathered sprite-sheet patches
   that track the boss. Shipped overlays: **`eye_reveal`** (fleshy folds part to reveal an orange eye
-  that looks around, centre), **`pods_flicker`** (the bottom blue mechanical pod cluster flickering,
-  mechanical), **`lens_right`** (a blue mechanical iris blooming open on the right). **INVARIANT --
+  that looks around, centre) and **`pods_flicker`** (the bottom blue mechanical pod cluster flickering).
+  A third, `lens_right` (a blue iris on the right), was DROPPED -- it never stopped clashing with the
+  static art around it; its region stays in `regions.json` for reference. **INVARIANT --
   never animate the top of the sprite:** the boss draws at design `(400,100)` with `textureScale
   ~1.703`, so texture rows `< ~373` (incl. the central mechanical eye) are ABOVE the top of the screen;
   every `regions.json` box has `ty0 >= ~400`. **Pipeline (`tools/brainanim/`, run with the AnimGen venv
   `C:/Programming/animgen/.venv/Scripts/python.exe`):** (1) `regions.json` = the crop boxes (texture px)
-  + i2v prompts + seeds + per-region `fps`; (2) `gen_brain_anims.py` crops each region and runs it
+  + i2v prompts + seeds + per-region `fps`/`triggerAvgSeconds`/`negative`; (2) `gen_brain_anims.py` crops
+  each region and runs it
   through `comfy_client.generate` as an OPEN-ENDED i2v (start = crop, no end frame -> the FLF template
   degrades to I2V; auto-launches ComfyUI with the safe TDR flags), extracting mp4 frames into
   `new_assets_raw/brainanim/<name>/` (gitignored); (3) `build_brain_overlays.py <name>...` TRIAGES motion
@@ -1181,19 +1389,78 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   footprint to its brain-texel crop (`texCenter`/`texW`/`texH`, reference 1448x1086), so it sits exactly
   over the region it was cut from and **pulses + moves with the boss** (uses the boss's `DrawScale` +
   `Position`), tints by the boss's live `color` (so patches redden in lockstep on low HP), **ping-pongs**
-  for a seamless loop, and rides the frame-interpolation shader (`interpolateEffect`, same path as the
-  animated Braineroid) so the low frame count still plays smooth. It advances on DRAW time (cosmetic --
+  for a seamless loop, and (unless `interpolate:false`) rides the frame-interpolation shader
+  (`interpolateEffect`, same path as the animated Braineroid) so the low frame count still plays smooth.
+  `eye_reveal` sets **`interpolate:false`** -- its discrete open/look/close reads better STEPPED than
+  cross-faded (the tween morphs the eyeball); `pods_flicker` keeps interpolation for smooth light changes.
+  It advances on DRAW time (cosmetic --
   unaffected by hit-stop, like the metal sheen). Straight (non-premultiplied) alpha throughout.
+  **The overlays fade out WITH the boss on death:** `BrainBoss`'s `smallwaitafterasplosion` end state is a
+  quick (~300ms) ALPHA fade of the boss `color` (a scale-down would bare the single sprite's hard
+  rectangular edges now that brain+cables are ONE sprite), and the overlays draw with that same `color`,
+  so they dissolve in lockstep.
+  **A patch with `triggerAvgSeconds` does NOT loop** -- it rests on frame 0 (which IS the untouched crop,
+  so it reads as the static art) and plays ONE ping-pong cycle whenever
+  `RandomHelper.RandomFromAverage(1/triggerAvgSeconds, gameTime)` fires, skipping the roll mid-cycle so
+  the mean GAP between animations is that many seconds. `eye_reveal` uses **15** (an eye that opens, looks
+  around and closes now and then is a punctuation mark; on repeat it's wallpaper). Omit the key for a
+  continuous loop (`pods_flicker`). The roll happens in Draw, so it consumes the shared
+  `RandomHelper.Random` at frame rate -- fine today (the boss is cosmetic and the planned co-op is
+  state-replicated, not lockstep), but a `Quad`-style private FX RNG is the move if that ever changes.
+  **`triggerAvgSeconds` + `fps` + `blend` + `interpolate` are PLAYBACK knobs, not pixels:**
+  `build_brain_overlays.py` re-syncs them from `regions.json` into every existing manifest entry on each
+  run (`--sync` does only that), so they can be retuned long after the gitignored raw frames are gone.
   **Verify WITHOUT a browser:** `tools/brainanim/preview_ingame.py` composites the boss + overlays in the
   exact 800x600 player framing (mirrors the Draw math) -> `_ingame_contact.png` (static vs 4 phases) +
   `_ingame.gif`. Live: **`?harness=brainboss`** shows the full boss with the overlays ANIMATING (they
-  advance on Draw, so the frozen harness still plays them). Both boss levels warm the three sheets in
+  advance on Draw, so the frozen harness still plays them). Both boss levels warm the sheets in
   `preload/manifest.txt` so they don't decode mid-fight. **To retune:** edit `regions.json` (box/prompt/
-  seed/fps), re-run `gen_brain_anims.py <name>` then `build_brain_overlays.py <name>...` with ONLY the
-  winners (that rebuilds their sheets + rewrites the manifest); to DROP an overlay, remove its entry from
-  the manifest (or rebuild without it) + delete the `brainov_<name>.png`. Don't hand-edit the sheets /
-  manifest -- re-run the tools. If a big new sheet stutters at preload, add it to `textures.config` for
-  DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
+  seed/fps/trigger), re-run `gen_brain_anims.py <name>` then `build_brain_overlays.py <name>...` with ONLY
+  the winners (that rebuilds their sheets + rewrites the manifest); **`--drop <name>`** removes an overlay
+  (manifest entry + its `brainov_<name>.png` + its `preload/manifest.txt` lines) and **`--sync`** re-syncs
+  playback knobs only. Don't
+  hand-edit the sheets / manifest -- re-run the tools. If a big new sheet stutters at preload, add it to
+  `textures.config` for DXT (a follow-up; PNG-at-preload is fine for the boss-only load screen).
+  **GOTCHA -- the model ALWAYS invents a slow camera zoom; the build STABILISES it out.** Each patch is
+  composited over the STATIC brain, so any whole-frame camera motion Wan adds (a slow push/pull + drift)
+  reads as the patch sliding against the surrounding art -- the one artifact this pipeline can't tolerate.
+  Two things attack it. (1) The NEGATIVE prompt: `gen_brain_anims.py` originally passed `negative=None`,
+  leaving animgen's SHARED workflow template's baked negative in place -- written for a fighting-game
+  character, it ENDS with **`"frozen, still image, static pose"`**, which on a locked-off shot of a
+  barely-moving pod cluster fights the whole point (the cheapest way to not be a "still image" is to move
+  the frame). Saying "locked static camera" LOUDER in the positive prompt never won that argument (it was
+  already there). `DEFAULT_NEGATIVE` replaces it with explicit anti-camera-motion terms, keeping the
+  template's quality terms and dropping the anti-stillness ones. But it only HELPS -- measured on
+  `pods_flicker`, the template negative gave a **6.4%** zoom + ~4px drift; `DEFAULT_NEGATIVE` still **5.1%**
+  + 2px. (2) The real fix is `build_brain_overlays.py`'s **`stabilize()`**: it fits each frame's uniform
+  zoom+translation against frame 0 (a coarse-to-fine outer-band SSD fit, scored on the border so the
+  intended interior flicker doesn't dominate) and warps it back, exactly as `colour_match` undoes VAE
+  colour drift. Frame 0 is the untouched crop, so locking to it also nails the resting pose to the sprite
+  underneath. The build prints `stabilised out X% zoom / Ypx shift` + the before/after border-drift.
+  **`--list`'s border-drift number alone can't tell a zoom from edge flicker** -- to eyeball a take's
+  camera move, fit a global scale+translation of each frame against frame 0.
+- **Screenshot `.dat` blobs live in IndexedDB, the small save XML in localStorage (card a5145e9e).**
+  The `eaSave` JS facade (`index.html`) routes by extension: `.dat` -> `window.eaSaveBlob` (IndexedDB
+  store `eaweb_save/screenshots`, huge quota), else localStorage -- C# (`SaveInterop`/`StorageStub`)
+  is backend-agnostic. IndexedDB is async but the game reads saves synchronously, so
+  `eaSaveBlob.preload()` (awaited by `initRenderJS` BEFORE the first game tick, raced against a 3s
+  timeout so a wedged open can't hang boot) pulls every blob into an in-memory map that `eaSave.load`
+  merges; it also one-time-migrates any `.dat` older builds left in localStorage (deleted only after
+  the IDB transaction commits). IndexedDB unavailable/slow -> `.dat` falls back to localStorage (the
+  pre-split path, no data loss). Don't make C# talk to IndexedDB directly -- keep the routing in JS.
+- **Level launches are gated by a PRE-LAUNCH manifest warm (card fe25712a).** A level's whole preload
+  used to decode in ONE JS tick (seconds of blocked event loop -> Chrome "page unresponsive").
+  `Game1.WarmThenLaunch` (every launch path: menu incl. attract demos via `MenuFinished`, and
+  `?level=` via `LaunchLevelDirect`) decodes the level's `Content/preload/manifest.txt` texture set
+  ONE per tick (`levelWarmQueue`/`PumpLevelWarm`) BEFORE the scene is Added, so the browser paints
+  between decodes; the level's own `PreloadGraphicalContent`/`ApplyManifest` stay synchronous and
+  become cache hits. The menu is frozen during the warm (`menuScene.Enabled=false` -- an un-frozen
+  menu re-fires OnFinished every tick from its held FadeToGame state; `ComponentBin.Add` re-enables
+  on return) and keeps drawing its faded frame. The warm is bracketed `BeginPreload`/`EndPreload` so
+  the hitch watchdog stays quiet and `?loadlog` counts it as preload (two preload summary lines per
+  level under `?loadlog` -- warm + residual -- is expected). A level with NO manifest entries
+  launches synchronously (the old behaviour, self-healing); a still-hitching level is a manifest
+  DATA gap -- fix by playing it with `?loadlog` + `eaPreloadExport()`, not by code.
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

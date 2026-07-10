@@ -47,10 +47,8 @@ Demo2|gfx/sprites/brainanimatedglow
 # the boss spawns. Warm them on the two levels that spawn the boss so the fight opens clean.
 Level3|gfx/sprites/brainov_eye_reveal
 Level3|gfx/sprites/brainov_pods_flicker
-Level3|gfx/sprites/brainov_lens_right
 InsaneBossI|gfx/sprites/brainov_eye_reveal
 InsaneBossI|gfx/sprites/brainov_pods_flicker
-InsaneBossI|gfx/sprites/brainov_lens_right
 
 # Asteroids. The AsteroidSpawner picks AsteroidSmall1..4 at RANDOM per spawn
 # (Asteroid.Setup), and the big level-opener uses large_asteroid. None of the four

@@ -83,6 +83,10 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 
 	private Vector4 initialcolor;
 
+	// Card 623f16d9: max design-space width the "X Unlocked!" popup's two lines are allowed
+	// to fill before shrinking (800-wide playfield, ~40px margin each side).
+	private const float UnlockedTextMaxWidth = 720f;
+
 	public event FinishEvent OnFinished;
 
 	protected override void LoadContent()
@@ -289,9 +293,15 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 		{
 			Vector2 origin2 = font.MeasureString("Unlocked!") / 2f;
 			Vector2 origin3 = font.MeasureString(text) / 2f;
+			// Card 623f16d9: a long challenge/level/cheat name ("Evil Aliens Classic") could
+			// overflow the 800-wide playfield at the fixed popup scale -- shrink each line to
+			// fit independently (never scale up), reusing the already-measured widths so the
+			// unscaled origin/centering above is unaffected.
+			float headerScale = TextFit.FitScale(origin2.X * 2f, scale, UnlockedTextMaxWidth);
+			float bodyScale = TextFit.FitScale(origin3.X * 2f, scale, UnlockedTextMaxWidth);
 			// In-game unlock popup: plain text (chrome sheen removed, card 2b5867da - read wrong in gameplay).
-			spriteBatch.DrawString(font, "Unlocked!", position, color, 0f, origin2, scale, (SpriteEffects)0, 0f);
-			spriteBatch.DrawString(font, text, new Vector2(800f - position.X, position.Y + 125f), color, 0f, origin3, scale, (SpriteEffects)0, 0f);
+			spriteBatch.DrawString(font, "Unlocked!", position, color, 0f, origin2, headerScale, (SpriteEffects)0, 0f);
+			spriteBatch.DrawString(font, text, new Vector2(800f - position.X, position.Y + 125f), color, 0f, origin3, bodyScale, (SpriteEffects)0, 0f);
 			break;
 		}
 		case MessageType.defeat:

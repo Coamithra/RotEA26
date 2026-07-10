@@ -119,3 +119,6 @@ tools/audio/channelswap_out/
 # previews (_*.png / _*.gif) and raw i2v work (mp4s + extracted frames, kept in
 # new_assets_raw/brainanim) stay local; re-run the tools to reproduce.
 tools/brainanim/_*
+
+# Wall-tower 3D spike: regenerated preview render (tools/walls/preview_wall3d.py).
+tools/walls/_*.png

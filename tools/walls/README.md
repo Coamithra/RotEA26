@@ -12,6 +12,28 @@ each dimension — any resolution works, and **no game code changes**.
 The current `756-v1.png` is a low-res **512×512**; it looks blurry because each 64-px cell is
 blown up hugely on screen. This folder is the pipeline to ship a **higher-res** version.
 
+## Verification: `verify_tower_order.py` and `preview_wall3d.py`
+
+Since cards `d59266cc` + `a66fc73e`, `Wall.DrawTowerShafts3D` extrudes each block **downward into a
+real 3D tower shaft** whose side faces sample this same `756-v1` sheet with genuine UVs, in one
+batched `DrawUserIndexedPrimitives` (see `plans/spike-wall3d.md`). There is no longer a companion
+side sheet: `756-v1-side.png` and its builder existed only for the old stacked-sprite-slice
+extrusion and are gone (recoverable from commit `906f344`).
+
+Wall drawing is **never** verified from a live screenshot — the wall scrolls, and the canvas is
+black whenever its tab is backgrounded. Two offline tools instead:
+
+```
+python tools/walls/verify_tower_order.py   # proves a CPU painter's sort is exact (no depth buffer)
+python tools/walls/preview_wall3d.py       # matrix check + a rendered contact sheet
+```
+
+`verify_tower_order.py` builds the real "occludes" relation between visible side faces from
+per-pixel depth comparisons and asserts it is acyclic *and* that the shipped sort key (block-centre
+distance from the vanishing point) is a valid topological order of it. `preview_wall3d.py` asserts
+the 3D camera reproduces `Wall.Project()` to ~1e-13 px, then re-implements the pass's exact
+projection, UVs, fog and per-face shading in numpy/Pillow against the real PNGs.
+
 ## The flow (art step is yours; the tileable step is automated)
 
 1. **Upscale the art (you).** Give ChatGPT / an image upscaler the current

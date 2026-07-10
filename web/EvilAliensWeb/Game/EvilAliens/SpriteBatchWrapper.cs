@@ -25,9 +25,35 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// used sub-rect to the shader as UvExtent so the local UV stays 0..1.
 	private RenderTarget2D metalRT;
 
+	// Group-flatten (card "flying spiders drawn on a rendertarget as a group, given one opacity"):
+	// shared grow-only RT + a design->RT capture matrix. Between BeginGroupFlatten/EndGroupFlatten
+	// every wrapper draw is redirected here (OPAQUE), then the union is composited ONCE at a group
+	// alpha — so N overlapping translucent sprites don't double-brighten where they cover each other.
+	private RenderTarget2D groupRT;
+	private bool capturing;
+	private Matrix captureMatrix;
+	private RenderTargetBinding[] captureRestore;
+	private int groupUsedW;
+	private int groupUsedH;
+	private Rectangle groupDesignRect;
+
 	// The chrome-sheen effect (metal.fx), owned here so call sites don't each load/pass
 	// it. Loaded in LoadContent; null => DrawMetalString degrades to a plain DrawString.
 	private Effect metalEffect;
+
+	// The one 3D effect (see DrawGeometry3D — the Level-3 tower shafts). Owned here for the same
+	// reason metalEffect is: this class is the single choke point that owns the sprite batch and
+	// every shared Effect, so a call site never constructs (and re-links) its own. That matters
+	// here: constructing a BasicEffect re-reads and re-links its precompiled shader, and Level 3
+	// spawns a fresh Wall per section, so a per-caller effect would pay that on every section.
+	// Created once in LoadContent, disposed in UnloadContent; null => DrawGeometry3D no-ops, the
+	// same graceful degrade metalEffect gets on a partial deploy.
+	//
+	// BasicEffect is real on BlazorGL — KNI embeds Resources.BasicEffect.fxo in the platform
+	// assembly — and TextureEnabled + VertexColorEnabled IS a textured + vertex-colour shader, so
+	// no bespoke .fx (and no hand-written vertex shader, which this project has never needed) has
+	// to be compiled for it.
+	private BasicEffect basicEffect;
 
 	// Cached metal.fx EffectParameter handles for the params that VARY per call (Time / the two
 	// glyph-band insets / the used-subrect UV). The invariant params (GradTop/Mid/Bot, Glint*,
@@ -77,6 +103,25 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// Transparent border (design px) baked around the text in the metal RT so the glint
 	// sweep and bloom have overshoot room and don't clip at the glyph edges.
 	private const int MetalPad = 6;
+
+	// Straight-alpha source -> PREMULTIPLIED destination OVER, for flattening LAYERED straight-alpha
+	// draws into an RT (RasteriseShadowText's shadow-then-text). Neither stock state can stack
+	// straight layers correctly: NonPremultiplied squares the alpha onto a transparent target, and
+	// AlphaBlend (One/InvSrcAlpha) only copies the FIRST layer verbatim — a second straight-alpha
+	// layer's anti-aliased edge texels then land at FULL brightness over the layer below
+	// (out.rgb = src.rgb + dst.rgb*(1-a), the premultiplied equation fed straight colour), which
+	// destroyed the text's AA everywhere it overlapped its own drop shadow — the "combo counter /
+	// POWER UP pop looks jaggy, like it renders no transparency" bug (card 37c4ccca). This state
+	// premultiplies each incoming straight layer (color SrcAlpha/InvSrcAlpha) while accumulating
+	// correct coverage (alpha One/InvSrcAlpha), so the RT ends up a correct PREMULTIPLIED flatten;
+	// the composite then draws it with One/InvSrcAlpha (see CompositeShadowText).
+	private static readonly BlendState PremultiplyOver = new BlendState
+	{
+		ColorSourceBlend = Blend.SourceAlpha,
+		ColorDestinationBlend = Blend.InverseSourceAlpha,
+		AlphaSourceBlend = Blend.One,
+		AlphaDestinationBlend = Blend.InverseSourceAlpha,
+	};
 
 	// Glint-sweep timing fed to metal.fx (Time mod SweepPeriod in [0, Period*Active] = one
 	// crossing). Public so an event-driven caller (the score, which sweeps on a digit
@@ -173,7 +218,19 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			// effects are pixel-only (the internal sprite VS stays bound), so the
 			// transform flows through them unchanged.
 			effectHandler.LoadEffects();
-			spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effectHandler.CurrentEffect, RenderScale.Matrix);
+			// While flattening a group into groupRT, force PremultiplyOver so the LAYERED
+			// straight-alpha sprites stack correctly into a PREMULTIPLIED flatten (same fix as
+			// RasteriseShadowText: One/InvSrcAlpha only copies the FIRST layer verbatim — a wing's
+			// AA edge texels would land at full brightness over the already-drawn body, the
+			// destroyed-AA fringe of card 37c4ccca; NonPremultiplied would square the edge alpha),
+			// and use the design->RT capture matrix instead of the design->render one. The group
+			// alpha is applied by EndGroupFlatten's single premult composite, so the callers still
+			// draw at full opacity here. Ignores per-caller BlendMode changes (base.Draw resets it),
+			// which is intended: every sprite in the group must land opaque for the union to have no
+			// double-up.
+			BlendState bs = capturing ? PremultiplyOver : ToBlendState(blendmode);
+			Matrix mtx = capturing ? captureMatrix : RenderScale.Matrix;
+			spriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effectHandler.CurrentEffect, mtx);
 			enabled = true;
 		}
 	}
@@ -200,6 +257,150 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
 		spriteBatch.Draw(texture, position, (Rectangle?)null, color, 0f, origin, scale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
+	}
+
+	// Draw `texture` filling `dest` with an IDENTITY transform, bypassing the design->render
+	// RenderScale.Matrix that every content draw bakes in. Use when the destination is a
+	// fixed-size target that is NOT the scaled scene (the level-select thumbnail RT: SIZE is a
+	// literal 300x225, not an 800x600 design coord). Going through the plain Draw()/_beginDrawing
+	// path would multiply `dest` by RenderScale.Scale and overflow the small target, so only its
+	// top-left corner would receive the image (the "screenshot is cropped" bug). Honours the
+	// current BlendMode; default linear sampling gives a clean downscale.
+	public void DrawPresent(Texture2D texture, Rectangle dest, Color color)
+	{
+		Flush();
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
+		spriteBatch.Draw(texture, dest, color);
+		spriteBatch.End();
+	}
+
+	// Draw indexed 3D geometry through the shared BasicEffect, in ONE buffered call, inside the
+	// scene the sprites are drawing into (the Level-3 tower shafts — Wall.DrawTowerShafts3D).
+	//
+	// This is NOT the Quad.cs mistake. That class's comment describes the ORIGINAL beam pushing
+	// three textured quads per laser via DrawUserIndexedPrimitives, each forcing a leading
+	// SpriteBatch flush — a batching pathology, not a verdict on 3D throughput. BlazorGL creates
+	// and destroys a transient vertex + index buffer per CALL, so the overhead is per-call, not
+	// per-vertex: one call for a whole wall is exactly the shape that path wants.
+	//
+	// `verts`/`indices` may be grow-only scratch arrays larger than the used range; only
+	// `vertexCount` vertices and `primitiveCount` triangles are drawn. `view`/`projection` are the
+	// caller's camera (World stays identity). Honours the current BlendMode. Depth testing is OFF
+	// (sceneTarget has no depth attachment) and culling is OFF, so the caller must submit only the
+	// faces it wants, back-to-front — see the painter's-order argument in Wall.DrawTowerShafts3D.
+	//
+	// Optional fixed-function DISTANCE FOG (fogStart/fogEnd are eye distances). It LERPS rgb toward
+	// fogColor and leaves alpha untouched, so a caller can fog a surface's COLOUR while still fading
+	// its COVERAGE with vertex alpha. Only real geometry can have this: a sprite Color tint
+	// multiplies, so it can never paint a sprite UP to a haze colour, only scale it down.
+	//
+	// Nothing is restored by hand afterwards: the wrapper's next _beginDrawing() calls
+	// SpriteBatch.Begin, which re-applies blend / depth / rasterizer / sampler state itself.
+	public void DrawGeometry3D(Texture2D texture, VertexPositionColorTexture[] verts, int vertexCount,
+		int[] indices, int primitiveCount, Matrix view, Matrix projection,
+		bool fogEnabled = false, Vector3 fogColor = default(Vector3), float fogStart = 0f, float fogEnd = 1f)
+	{
+		if (basicEffect == null || vertexCount < 3 || primitiveCount < 1)
+		{
+			return;
+		}
+		Flush();
+		GraphicsDevice gd = base.GraphicsDevice;
+		basicEffect.View = view;
+		basicEffect.Projection = projection;
+		basicEffect.Texture = texture;
+		basicEffect.FogEnabled = fogEnabled;
+		if (fogEnabled)
+		{
+			basicEffect.FogColor = fogColor;
+			basicEffect.FogStart = fogStart;
+			basicEffect.FogEnd = fogEnd;
+		}
+		gd.BlendState = ToBlendState(blendmode);
+		gd.DepthStencilState = DepthStencilState.None;
+		gd.RasterizerState = RasterizerState.CullNone;
+		gd.SamplerStates[0] = SamplerState.LinearClamp;
+		foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
+		{
+			pass.Apply();
+			gd.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, verts, 0, vertexCount, indices, 0, primitiveCount);
+		}
+	}
+
+	// Begin flattening a group of overlapping sprites into the shared offscreen RT. `designRect` is
+	// the group's bounding box in 800x600 design space; between here and EndGroupFlatten every
+	// wrapper draw is redirected into groupRT (at render resolution, OPAQUE — see _beginDrawing) with
+	// a matrix that maps the box onto the RT's top-left corner, so callers keep drawing at their
+	// normal design coords. Grow-only shared RT, recreated on a render-scale (window) change; ONE RT
+	// is reused across every group in a frame (each brackets its own draws + composite). Not
+	// re-entrant. The classic use is a translucent multi-part sprite (flying-spider body + two
+	// wings): flatten the union opaque, then fade it as one silhouette so the overlaps don't
+	// double-brighten. See FlyingSpider.Draw.
+	public void BeginGroupFlatten(Rectangle designRect)
+	{
+		Flush();
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		int usedW = Math.Max(1, (int)Math.Ceiling(designRect.Width * rs));
+		int usedH = Math.Max(1, (int)Math.Ceiling(designRect.Height * rs));
+		EnsureGroupRT(usedW, usedH);
+		groupUsedW = usedW;
+		groupUsedH = usedH;
+		groupDesignRect = designRect;
+		// Capture whatever is bound (the scene target, or a menu RT) so EndGroupFlatten restores IT,
+		// not a hardcoded null — same mid-draw ping-pong the metal-text RT does.
+		captureRestore = base.GraphicsDevice.GetRenderTargets();
+		base.GraphicsDevice.SetRenderTarget(0, groupRT);
+		base.GraphicsDevice.Clear(Color.Transparent);
+		// design coord -> RT texel: (coord - box.TopLeft) * rs, landing the box at the RT origin.
+		captureMatrix = Matrix.CreateTranslation(0f - designRect.X, 0f - designRect.Y, 0f) * Matrix.CreateScale(rs);
+		capturing = true;
+	}
+
+	// Finish the group: composite the flattened union ONCE, back at the design bbox, tinted by
+	// `groupColor` (a STRAIGHT tint whose alpha is the group opacity — callers keep the normal
+	// convention). The RT holds a PREMULTIPLIED flatten (see _beginDrawing), so the tint is
+	// premultiplied here (rgb*a, a) and the draw uses One/InvSrcAlpha (BlendState.AlphaBlend —
+	// correct BECAUSE the source is premultiplied; the same premult-intermediate exception as
+	// CompositeShadowText): rgb and coverage scale together, so the whole silhouette fades as one
+	// sprite with correctly blended internal AA edges. Render-res texels, so drawScale = 1/rs
+	// under RenderScale.Matrix maps them 1:1 into the scene.
+	public void EndGroupFlatten(Color groupColor)
+	{
+		Flush();
+		capturing = false;
+		if (captureRestore != null && captureRestore.Length > 0)
+		{
+			base.GraphicsDevice.SetRenderTargets(captureRestore);
+		}
+		else
+		{
+			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
+		}
+		captureRestore = null;
+		float rs = RenderScale.Scale;
+		if (rs <= 0f) { rs = 1f; }
+		Rectangle used = new Rectangle(0, 0, groupUsedW, groupUsedH);
+		Vector2 pos = new Vector2((float)groupDesignRect.X, (float)groupDesignRect.Y);
+		Vector4 t = groupColor.ToVector4();
+		Color premultTint = new Color(t.X * t.W, t.Y * t.W, t.Z * t.W, t.W);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, RenderScale.Matrix);
+		spriteBatch.Draw(groupRT, pos, (Rectangle?)used, premultTint, 0f, Vector2.Zero, 1f / rs, (SpriteEffects)0, 0f);
+		spriteBatch.End();
+	}
+
+	private void EnsureGroupRT(int w, int h)
+	{
+		int haveW = (groupRT != null && !((GraphicsResource)groupRT).IsDisposed) ? ((Texture2D)groupRT).Width : 0;
+		int haveH = (groupRT != null && !((GraphicsResource)groupRT).IsDisposed) ? ((Texture2D)groupRT).Height : 0;
+		if (haveW < w || haveH < h)
+		{
+			if (groupRT != null && !((GraphicsResource)groupRT).IsDisposed)
+			{
+				((GraphicsResource)groupRT).Dispose();
+			}
+			groupRT = new RenderTarget2D(base.GraphicsDevice, Math.Max(haveW, w), Math.Max(haveH, h), false, SurfaceFormat.Color, DepthFormat.None);
+		}
 	}
 
 	// Stage 10: draw `texture` over `designRect` (800x600 space) through a custom
@@ -579,13 +780,15 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		CompositeShadowText(sprite.Rt, sprite.UsedW, sprite.UsedH, sprite.BoxH, sprite.ShadowOffset, position, alpha, metal, glintTime, rs);
 	}
 
-	// Pass 1: rasterise shadow-then-text OPAQUE into `rt`'s top-left corner at render res.
-	// BlendState.AlphaBlend (One/InvSrcAlpha) onto a TRANSPARENT target copies the straight-alpha
-	// glyphs verbatim (same trick DrawMetalString documents). The text top-left sits at the
-	// MetalPad inset; the shadow is offset from there by shadowOffset, so the whole drop fits inside
-	// the padded box. Where the opaque text covers the opaque shadow, the text wins — the
-	// bleed-through fix. Does the mid-draw target ping-pong and restores whatever was bound on entry
-	// (scene target, or a menu's own RT), NOT a hardcoded null — see the long note in DrawMetalString.
+	// Pass 1: rasterise shadow-then-text OPAQUE into `rt`'s top-left corner at render res, as a
+	// PREMULTIPLIED flatten (PremultiplyOver — see its comment; the old BlendState.AlphaBlend here
+	// only copied the FIRST layer verbatim and hard-edged the text's AA wherever it overlapped the
+	// shadow, the card-37c4ccca jaggies). The text top-left sits at the MetalPad inset; the shadow is
+	// offset from there by shadowOffset, so the whole drop fits inside the padded box. Where the
+	// opaque text covers the opaque shadow, the text wins — the bleed-through fix — and the AA edge
+	// texels now blend correctly over the shadow instead of landing at full brightness. Does the
+	// mid-draw target ping-pong and restores whatever was bound on entry (scene target, or a menu's
+	// own RT), NOT a hardcoded null — see the long note in DrawMetalString.
 	private void RasteriseShadowText(RenderTarget2D rt, string text, float scale, Color shadowColor, Color textColor, Vector2 shadowOffset, float rs)
 	{
 		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
@@ -595,7 +798,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Matrix m = Matrix.CreateTranslation(MetalPad, MetalPad, 0f) * Matrix.CreateScale(rs);
 		Color shadowOpaque = new Color(shadowColor.R, shadowColor.G, shadowColor.B, byte.MaxValue);
 		Color textOpaque = new Color(textColor.R, textColor.G, textColor.B, byte.MaxValue);
-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, null, m);
+		spriteBatch.Begin(SpriteSortMode.Deferred, PremultiplyOver, null, null, null, null, m);
 		DrawStringScaled(font, text, shadowOffset, shadowOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
 		DrawStringScaled(font, text, Vector2.Zero, textOpaque, 0f, Vector2.Zero, new Vector2(scale, scale), (SpriteEffects)0, 0f);
 		spriteBatch.End();
@@ -610,11 +813,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	}
 
 	// Pass 2: composite `rt`'s used sub-rect (usedW x usedH) ONCE at `position`/`alpha`, optionally
-	// through metal.fx. The RT holds a straight-alpha image; composite with the current BlendMode
-	// (NonPremultiplied for the score) and a white tint carrying `alpha`, so the element fades as one
-	// sprite. metal.fx returns float4(rgb, mask) * color, so the same tint alpha carries through the
-	// chrome path too. boxH + shadowOffset.Y feed the asymmetric glyph-band insets (the drop shadow
-	// extends the bottom) so the chrome gradient lands on the letters, not on the shadow overshoot.
+	// through metal.fx. The RT holds a PREMULTIPLIED flatten (see RasteriseShadowText), so the
+	// composite uses One/InvSrcAlpha (BlendState.AlphaBlend — correct here BECAUSE the source is
+	// premultiplied; this is the deliberate premult-intermediate exception, NOT the straight-content
+	// trap CLAUDE.md warns about) with an (a,a,a,a) tint: rgb and coverage scale together, so the
+	// element fades as one sprite. metal.fx returns float4(rgb, mask) * color, so the same tint
+	// carries through the chrome path too (its gradient is a linear multiply — premult-safe; only the
+	// additive glint isn't mask-multiplied, so a mid-sweep streak can faintly show in the padded box —
+	// chrome is opt-in ?metalscore, acceptable for an A/B look). boxH + shadowOffset.Y feed the
+	// asymmetric glyph-band insets (the drop shadow extends the bottom) so the chrome gradient lands
+	// on the letters, not on the shadow overshoot.
 	private void CompositeShadowText(RenderTarget2D rt, int usedW, int usedH, float boxH, Vector2 shadowOffset, Vector2 position, float alpha, bool metal, float glintTime, float rs)
 	{
 		// End any active wrapper batch before opening our own. RasteriseShadowText already flushes,
@@ -623,7 +831,8 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		// again until End". Idempotent when a rasterise just ran (enabled is already false).
 		Flush();
 		Rectangle used = new Rectangle(0, 0, usedW, usedH);
-		Color composite = new Color((byte)255, (byte)255, (byte)255, (byte)MathHelper.Clamp(alpha * 255f, 0f, 255f));
+		float fade = MathHelper.Clamp(alpha, 0f, 1f);
+		Color composite = new Color(fade, fade, fade, fade);   // premultiplied fade: rgb + coverage together
 		Effect fx = (metal && metalEffect != null) ? metalEffect : null;
 		if (fx != null)
 		{
@@ -638,7 +847,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		}
 		float drawScale = 1f / rs;
 		Vector2 rtOrigin = new Vector2(MetalPad, MetalPad) * rs;    // text top-left in RT texels
-		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, fx, RenderScale.Matrix);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, null, null, null, fx, RenderScale.Matrix);
 		spriteBatch.Draw(rt, position, (Rectangle?)used, composite, 0f, rtOrigin, drawScale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
 	}
@@ -1018,6 +1227,23 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			mpPadBot = metalEffect.Parameters["PadFracBot"];
 			mpUvExtent = metalEffect.Parameters["UvExtent"];
 		}
+		// The shared 3D effect (DrawGeometry3D). Same create-once / degrade-to-null contract as
+		// metalEffect above; World never changes, and View/Projection are set per call.
+		try
+		{
+			basicEffect = new BasicEffect(ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice)
+			{
+				TextureEnabled = true,
+				VertexColorEnabled = true,
+				LightingEnabled = false,
+				World = Matrix.Identity,
+			};
+		}
+		catch (System.Exception ex)
+		{
+			basicEffect = null;
+			System.Console.WriteLine("[basic3d] effect create failed: " + ex);
+		}
 		effectHandler.LoadGraphicsContent(loadAllContent: true);
 	}
 
@@ -1041,6 +1267,15 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			}
 		}
 		metalSpriteCache.Clear();
+		if (groupRT != null && !((GraphicsResource)groupRT).IsDisposed)
+		{
+			((GraphicsResource)groupRT).Dispose();
+		}
+		if (basicEffect != null && !((GraphicsResource)basicEffect).IsDisposed)
+		{
+			((GraphicsResource)basicEffect).Dispose();
+			basicEffect = null;
+		}
 		spriteBatch.Dispose();
 		base.UnloadContent();
 	}

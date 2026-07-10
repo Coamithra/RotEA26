@@ -31,6 +31,12 @@ internal class Explosion : AlienDrawableGameComponent
 
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
+	// Trello 8e439865: an explosion normally rattles the camera (see Initialize below); a
+	// caller spawning a RAPID SERIES of them (e.g. BattleSkull's death flicker) can opt a given
+	// instance OUT of that shake so only the series' actual finale contributes trauma. Defaults
+	// false, so every existing call site (which doesn't pass the new Setup arg) is unaffected.
+	private bool noShake;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -82,7 +88,7 @@ internal class Explosion : AlienDrawableGameComponent
 		return explosion;
 	}
 
-	public void Setup(Vector2 position, float size, float lifetime, float impulse, float direction)
+	public void Setup(Vector2 position, float size, float lifetime, float impulse, float direction, bool noShake = false)
 	{
 		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
@@ -93,6 +99,7 @@ internal class Explosion : AlienDrawableGameComponent
 		this.lifetime = lifetime;
 		base.Direction = direction;
 		this.impulse = MyMath.AngleToVector(direction) * impulse;
+		this.noShake = noShake;
 		blue = false;
 		collisiontimer.Stop();
 		base.Collides = false;
@@ -133,7 +140,11 @@ internal class Explosion : AlienDrawableGameComponent
 		// size, so a routine blast nudges (~0.1) while a player death / boss finale (several
 		// size 2-3.5 explosions stacking) builds a real shake. The fixed camera shows the
 		// whole arena, so no distance attenuation (unlike the per-player Vibrate above).
-		EvilAliensWeb.Compat.Juice.AddTrauma(0.05f + size * 0.06f);
+		// Skipped entirely when noShake (a rapid death-flicker series opting out — see the field).
+		if (!noShake)
+		{
+			EvilAliensWeb.Compat.Juice.AddTrauma(0.05f + size * 0.06f);
+		}
 		curframe = 0f;
 		rotation = RandomHelper.RandomNextAngle();
 	}

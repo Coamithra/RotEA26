@@ -21,6 +21,7 @@ namespace EvilAliensWeb.Pages
                 EvilAliensWeb.Compat.MusicInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.SaveInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.FullscreenInterop.Init(JsRuntime);
+                EvilAliensWeb.Compat.CursorInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.ExitInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.TrailerInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.WebcamInterop.Init(JsRuntime);
@@ -85,6 +86,9 @@ namespace EvilAliensWeb.Pages
             {
                 _tickSw.Stop();
                 EvilAliensWeb.Compat.LoadProfiler.NoteFrame(_tickSw.Elapsed.TotalMilliseconds);
+                // Same measurement, different consumer: the wall-tower cost meter (eaWalls panel).
+                // No-ops unless eaWallPerf turned it on.
+                EvilAliensWeb.Compat.WallProfiler.EndFrame(_tickSw.Elapsed.TotalMilliseconds);
             }
         }
     }

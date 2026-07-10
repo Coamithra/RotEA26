@@ -74,6 +74,31 @@ internal class Level3 : GameScene
 
 	protected override void PopulateEventList()
 	{
+		if (EvilAliensWeb.Compat.DebugFlags.WallsOnly)
+		{
+			// DEBUG (?level=Level3&wallsonly): skip the whole wave sequence and loop the walls
+			// sections back to back, so the 3D tower rendering can be watched without minutes of
+			// play per iteration. Mirrors Level2's ?spiderboss. Pair with ?invuln.
+			PopulateWallsOnly();
+			return;
+		}
+		if (EvilAliensWeb.Compat.DebugFlags.WallPopTest)
+		{
+			// DEBUG (?level=Level3&wallpoptest): chain ten SMALL (~2-screen) wall sections and drop
+			// the scroll to ~10% once the 2nd loads, so the entry pop is slow + unmistakable. Pair
+			// with ?invuln (and ?walltrace for numbers).
+			PopulateWallPopTest();
+			return;
+		}
+		if (EvilAliensWeb.Compat.DebugFlags.BrainBoss)
+		{
+			// DEBUG (?brainboss): skip Level 3's whole wave sequence and drop straight into the
+			// real BrainBoss fight -- UNCONDITIONALLY (any difficulty), so the brain-boss animated
+			// overlays + hit_boss SFX can be verified without grinding the level or being on Hard+.
+			// Mirrors the boss tail of BrainBossHard() (music -> spawn -> halt), then Victory.
+			PopulateBrainBossOnly();
+			return;
+		}
 		WaitEvent waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += slowdown;
@@ -240,6 +265,77 @@ internal class Level3 : GameScene
 		Background.SetAlienBase2();
 	}
 
+	// DEBUG (?wallsonly): gives lives, jumps to the level's normal walls-section scroll speed, then
+	// runs the three big wall variations back to back (twice) with nothing else spawning, so the
+	// 3D towers are seen in REAL play. Reached only via DebugFlags.WallsOnly -- live play unaffected.
+	private void PopulateWallsOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		waitEvent.OnFinished += speedup;
+		// 1 = the dense maze (most tower-like), 0 = tall sparse pillars, 3 = big diagonal slabs.
+		int[] variations = new int[3] { 1, 0, 3 };
+		// Cycle the alien-base FLOOR through all six variants as the sections scroll, so the tower fog
+		// (which tracks the live floor colour via oracle.AlienBaseFloorColor) can be watched changing
+		// without playing the whole level. Same handlers the real Level 3 uses; the initial floor is
+		// SetAlienBase (set in Populate), then one swap per section.
+		GameEvent.GameEventMessage[] floorSwaps = { swapBG1, swapBG2, swapBG3, swapBG4, swapBG5 };
+		int section = 0;
+		for (int cycle = 0; cycle < 2; cycle++)
+		{
+			for (int i = 0; i < variations.Length; i++)
+			{
+				Walls walls = new Walls(base.Game, variations[i]);
+				if (section < floorSwaps.Length)
+				{
+					walls.OnFinished += floorSwaps[section];
+				}
+				section++;
+				eventList.AddEvent(walls, halting: true);
+				eventList.SetLastEventAsCheckPoint();
+				eventList.AddHalt();
+			}
+		}
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
+	}
+
+	// DEBUG (?wallpoptest): chain ten SMALL (~2-screen) wall sections (poptest0..9.txt), each a
+	// distinct pattern, halting so they play strictly one after another. Section 0 runs at normal
+	// speed; the instant it ends (section 1 loads at the top) the scroll drops to ~10% via
+	// popTestSlow, so every later section's ENTRY is slow and unmistakable -- making it obvious
+	// whether the "pop" tracks a block's screen POSITION (a geometry/cull effect) or is a one-off
+	// load/cache hitch (which would happen once, not on every slow entry).
+	private void PopulateWallPopTest()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		waitEvent.OnFinished += speedup;   // section 0 at normal speed
+		for (int i = 0; i < 10; i++)
+		{
+			Walls walls = new Walls(base.Game, "poptest" + i + ".txt");
+			if (i == 0)
+			{
+				walls.OnFinished += popTestSlow;   // drop to 10% as section 1 enters
+			}
+			eventList.AddEvent(walls, halting: true);
+			eventList.SetLastEventAsCheckPoint();
+			eventList.AddHalt();
+		}
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
+	}
+
+	private void popTestSlow(GameEvent sender)
+	{
+		// 10% of the normal wall-section speed (speedup uses 4.3 x difficulty).
+		Background.SetSpeed(new Vector2(0f, 0.43f * Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty)) / 16.666666f);
+	}
+
 	private void returnlives(GameEvent sender)
 	{
 		if (score.Lives >= 0)
@@ -307,6 +403,23 @@ internal class Level3 : GameScene
 		eventList.AddEvent(brainBossSpawner);
 		eventList.MakeConditional(brainBossSpawner, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		eventList.AddHalt();
+	}
+
+	// DEBUG (?brainboss): the boss tail of BrainBossHard() with the difficulty gate REMOVED --
+	// gives lives, plays the boss music, spawns the real BrainBoss, halts until it dies, then
+	// Victory. Reached only via DebugFlags.BrainBoss, so live play is unaffected.
+	private void PopulateBrainBossOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		waitEvent.OnFinished += playbossmusic;
+		BrainBossSpawner brainBossSpawner = new BrainBossSpawner(base.Game, challenge: false);
+		eventList.AddEvent(brainBossSpawner);
+		eventList.AddHalt();
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
 	}
 
 	private void playbossmusic(GameEvent sender)

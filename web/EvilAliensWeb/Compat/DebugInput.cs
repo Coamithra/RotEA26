@@ -38,6 +38,18 @@ namespace EvilAliensWeb.Compat
 		private static readonly bool[] touchHeld =
 			new bool[Enum.GetValues(typeof(EvilAliens.MyKeys)).Length];
 
+		// Esc-suppression window (card b0a2f525). The browser RESERVES Esc to leave DOM
+		// fullscreen and it cannot be preventDefault'd -- but that same Esc keydown is ALSO
+		// delivered to KNI's keyboard state, so InputHandler would read it and ALSO step back
+		// in the menu (Esc doing two things at once). On fullscreenchange->exit the JS side
+		// (eaSuppressEsc in index.html) opens a short window here; InputHandler masks the raw
+		// keyboard Esc while it's active so leaving fullscreen doesn't also navigate back.
+		// escGrace = a minimum window (covers the exit keydown arriving a tick or two AFTER
+		// the fullscreenchange event); escGuard = a hard cap so a genuinely held Esc can't
+		// keep Esc dead forever (fail-open).
+		private static int escGraceTicks;
+		private static int escGuardTicks;
+
 		// JS bridge: DotNet.invokeMethod('EvilAliensWeb', 'debugPress', key, frames).
 		// `frames` is how many ticks to hold the key down (>=1; 1 == a single tap).
 		// Re-pressing extends to the longest pending hold.
@@ -129,6 +141,25 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitstop " + ms + "ms");
 		}
 
+		// JS bridge for the wall-tower cost meter (eaWallPerf / eaWallStats in wwwroot/index.html,
+		// polled by the eaWalls slider panel). WallPerf(on) arms the accumulators; WallStats() returns
+		// one formatted line (fps, frame ms + p95, tower-pass ms, slice draws). Off by default, so a
+		// normal boot never touches the stopwatch.
+		//
+		// The panel POLLS this ~4x/second rather than pushing per frame: a per-frame JS interop call
+		// would itself cost more than the thing being measured.
+		[JSInvokable("debugWallPerf")]
+		public static void WallPerf(bool on)
+		{
+			WallProfiler.SetEnabled(on);
+		}
+
+		[JSInvokable("debugWallStats")]
+		public static string WallStats()
+		{
+			return WallProfiler.Report();
+		}
+
 		// JS bridge for the hitbox debug overlay (eaHitboxes in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitboxes', on). Toggles the ?hitboxes
 		// overlay at runtime (draws every collidable's collision shape colour-coded by kind);
@@ -173,6 +204,30 @@ namespace EvilAliensWeb.Compat
 				(float)tendrilSpeed);
 		}
 
+		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
+		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetWalls', towers, depth, fog, sideDark, faceLight, faceAngle, topLift, bands, wisps,
+		// wispSpeed). Overrides the Level-3 tower knobs in real time so the sliders retune without a
+		// page reload — same effect as the ?walltowers/?walldepth/?wallfog/?wallsidedark/
+		// ?wallfacelight/?wallfaceangle/?walltoplift/?wall3dbands/?wallwisps/?wallwispspeed URL flags,
+		// just live. (?wallfogcolor stays URL-only — a colour picker is a different widget and the
+		// haze reads fine off the two brightness knobs.)
+		[JSInvokable("debugSetWalls")]
+		public static void SetWalls(bool towers, double depth, double fog, double sideDark, double faceLight, double faceAngle, double topLift, double bands, double wisps, double wispSpeed)
+		{
+			DebugFlags.SetWallsOverride(
+				towers,
+				(float)depth,
+				(float)fog,
+				(float)sideDark,
+				(float)faceLight,
+				(float)faceAngle,
+				(float)topLift,
+				(float)bands,
+				(float)wisps,
+				(float)wispSpeed);
+		}
+
 		// JS bridge for the live spider-tuner slider panel (eaSpider in wwwroot/index.html, shown on
 		// ?harness=spiderjump / ?level=Level2&spiders / ?spidertune): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetSpider', jumpFrame, landFrame, jumpX, pinJumpX, shadowX, shadowY, shadowScale, airX, airY).
@@ -214,6 +269,42 @@ namespace EvilAliensWeb.Compat
 		public static void ClearWcTune()
 		{
 			DebugFlags.ClearWebcamTuneOverride();
+		}
+
+		// JS bridge (eaSuppressEsc in index.html), fired from a fullscreenchange listener when
+		// the browser LEAVES fullscreen. Opens the Esc-swallow window so the Esc that exited
+		// fullscreen doesn't also step back a menu. Idempotent -- re-fires just refresh it.
+		[JSInvokable("debugSuppressEsc")]
+		public static void SuppressEsc()
+		{
+			escGraceTicks = 8;    // ~130ms min: covers the exit keydown landing a tick or two late
+			escGuardTicks = 40;   // ~0.66s hard cap so a held Esc can't kill Esc permanently
+		}
+
+		// Called once per InputHandler tick for the Esc key with its RAW keyboard-down state.
+		// Returns true while the post-fullscreen-exit Esc should be swallowed: through the grace
+		// window, then for as long as Esc stays CONTINUOUSLY held (the exit press), up to the
+		// guard cap. The first tick with the grace elapsed AND Esc released ENDS the window --
+		// both counters are zeroed -- so a deliberate second Esc press is never swallowed by a
+		// leftover guard; the guard only bounds the continuous-hold case (fail-open).
+		internal static bool EscSuppressActive(bool rawEscDown)
+		{
+			if (escGraceTicks <= 0 && !rawEscDown)
+			{
+				escGuardTicks = 0;
+				return false;
+			}
+			if (escGuardTicks <= 0)
+			{
+				escGraceTicks = 0;
+				return false;
+			}
+			if (escGraceTicks > 0)
+			{
+				escGraceTicks--;
+			}
+			escGuardTicks--;
+			return true;
 		}
 
 		// Called once per MyKeys per InputHandler tick: returns true (and decrements)

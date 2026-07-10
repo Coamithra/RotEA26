@@ -28,7 +28,7 @@ Usage:
     python tools/models/build_models.py --selftest     # exercise pack + .dat round-trip, no Blender
 
 An object whose `source` model is missing is SKIPPED (inert) -- safe in CI / fresh clones,
-same pattern as tools/audio/install_classic.py.
+same pattern as tools/audio/install_external.py.
 """
 
 from __future__ import annotations

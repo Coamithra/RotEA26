@@ -48,18 +48,18 @@
     "duration": 266.8437,
     "introEnd": 0.0
   },
-  "sjaakslow": {
-    "file": "Content/music/sjaakslow.ogg",
-    "loopStart": 0.0,
-    "loopEnd": 68.5453,
-    "duration": 68.5453,
-    "introEnd": 0.0
-  },
   "classicclean": {
     "file": "Content/music/classicclean.ogg",
     "loopStart": 54.7764,
     "loopEnd": 208.7608,
     "duration": 209.2154,
     "introEnd": 54.7764
+  },
+  "lastsignal": {
+    "file": "Content/music/lastsignal.ogg",
+    "loopStart": 67.6045,
+    "loopEnd": 168.6683,
+    "duration": 169.4109,
+    "introEnd": 67.6045
   }
 }

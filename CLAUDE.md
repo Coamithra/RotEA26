@@ -228,7 +228,35 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `build_audio.py` calls it as its last step; re-run `python tools/audio/refine_loops.py` standalone
   after a bank rebuild (needs `pymusiclooper`; absent → whole-wave points are left in place). Per-track
   hand-tunes go in its `OVERRIDES`; don't hand-edit the loop points. `--dry-run` previews.
-- **The `classic` tune is a BESPOKE EXTERNAL track in TWO variants, difficulty-gated — `tools/audio/install_classic.py`.**
+- **The BESPOKE EXTERNAL music cues (not in the XACT banks) — `tools/audio/install_external.py`.** Three
+  tracks: the two `classic` variants (below) and **`lastsignal`** (below that). Each is copied straight into
+  `wwwroot/Content/music/<cue>.ogg` and gets its `music.json` loop from pymusiclooper. Re-run
+  `python tools/audio/install_external.py` after swapping a source; don't hand-edit the `.ogg`s /
+  `music.json`. `--dry-run` previews; `--cue <name>` installs just one; `--source <path>` overrides that
+  cue's source. `build_audio.py`'s `main()` calls `install_external.install()` and `build_music` **merges**
+  into the existing `music.json`, so a full rebuild never drops or clobbers an external entry (a missing
+  source leaves that cue's committed track untouched — safe in CI / fresh clones).
+  **Loop choice is CLICK-AWARE, not just top-ranked.** pymusiclooper ranks pairs by how alike the two
+  points *sound*; neighbouring candidates are the same musical loop shifted by a fraction of a beat, so
+  they score nearly identically while their raw waveform step at the wrap differs a lot — and WebAudio's
+  loop is a HARD SPLICE, so only a low step is inaudible. `find_loop` therefore takes the best-scoring
+  pair whose `splice_click` (the shared `refine_loops.py` metric) is already `<= SEAMLESS` (3.0), falling
+  back to the least-clicky. This reproduces the committed `classic`/`classicclean` points exactly (their
+  top-ranked pair was already seamless) and only changes which pair `lastsignal` gets. **Don't trust a
+  single `splice_click` reading to compare NEAR-IDENTICAL candidates** — it's a one-sample step, so it
+  swings wildly under a ±20-sample shift and Chrome's OGG decode disagrees with libsndfile's. It's a
+  coarse "does this wrap tick" screen (orders of magnitude: `stage1` read ~617 before refinement), not a
+  fine ranking. To genuinely compare two candidate loops, use a windowed measure (RMS of the audio
+  *preceding* `loopEnd` against the audio *preceding* `loopStart`).
+- **`lastsignal` (`Songs.LastSignal` → `songFiles[7]` → `Content/music/lastsignal.ogg`) is the end-of-level
+  TEXT-CRAWL theme** — "The Last Signal", played by `CreditsScene` (the screen after each level win). It
+  REPLACED the bank's old **`sjaakslow`** cue, which was the menu theme (`sjaak`) cut to its first ~27.5s
+  and rate-shifted to ≈0.40× (≈ −15.8 semitones) offline back in 2008. Both `sjaakslow` the cue and the
+  `.ogg` are GONE (dropped from `MUSIC_CUES`, `music.json`, and the enum); don't reintroduce them. Source:
+  `new_assets_raw/lastsignalloopable.ogg` (gitignored raw), 44100 stereo, 169.41s = a once-only ~67.6s
+  intro then a `67.60→168.67` body loop. `CreditsScene` plays it at rate 1.0 — nothing calls
+  `SoundManager.SetMusicRate` on this path (only `Level3`/`BrainBoss` sweep the rate).
+- **The `classic` tune is a BESPOKE EXTERNAL track in TWO variants, difficulty-gated.**
   The retro-minigame song was replaced with a user-authored "Evil Aliens Revenged" track, and now ships
   in two cuts: **`classic`** (`Songs.Classic` → `songFiles[5]` → `Content/music/classic.ogg`) is the full
   Japanese-vocal cut, and **`classicclean`** (`Songs.ClassicClean` → `songFiles[8]` →
@@ -243,18 +271,12 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   instead of the old hard-coded `LockDifficulty(Medium)`, so the lyric cut is earned on Hard+ like the
   other challenges, not always on). Both cues are bespoke external tracks (NOT in
   the XACT banks, so both removed from `build_audio.py`'s cracked `MUSIC_CUES`), installed by
-  `install_classic.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
+  `install_external.py` (same pattern as `build_channelswap.py` owning the one port-era SFX cue). Sources:
   `new_assets_raw/EvilAliensRevengedLoopable.ogg` (lyrics) and
   `new_assets_raw/classicaliensremixloopable_nolyrics.ogg` (clean) — gitignored raw; the committed `.ogg`s
   are the shipped artifacts. The tool copies each source straight (already OGG/Vorbis 44100 stereo — a copy
-  avoids a re-encode) and writes each `music.json` loop from **pymusiclooper's own top-ranked pair**
-  (lyrics: intro ~75s, body loop `75.06→414.18`; clean: intro ~55s, body loop `54.78→208.76`;
-  `introEnd = loopStart`). `build_music` **merges** into the existing `music.json` so a full `build_audio.py`
-  rebuild preserves both external entries, and `main()` calls `install_classic.install()` which installs
-  **both** cues (a missing source leaves that cue's committed track untouched — safe in CI / fresh clones).
-  Re-run `python tools/audio/install_classic.py` after swapping a source; don't hand-edit the `.ogg`s /
-  `music.json`. `--dry-run` previews; `--cue <classic|classicclean>` installs just one; `--source <path>`
-  overrides that cue's source.
+  avoids a re-encode) and writes each `music.json` loop (lyrics: intro ~75s, body loop `75.06→414.18`;
+  clean: intro ~55s, body loop `54.78→208.76`; `introEnd = loopStart`).
 - **XACT mix metadata is un-stubbed (faithful, no offline boost).** Stage 6 cracked the banks to
   WAV/OGG but dropped XACT's per-cue mix data; it's now recovered and re-applied. `xact.py` parses it
   (`parse_soundbank_meta` = per-cue category/volume/pitch; `parse_xgs` = category gains + RPC presets;

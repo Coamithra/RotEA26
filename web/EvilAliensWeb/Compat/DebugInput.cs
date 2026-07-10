@@ -204,6 +204,22 @@ namespace EvilAliensWeb.Compat
 				(float)tendrilSpeed);
 		}
 
+		// JS bridge for the live connector-tuner slider panel (eaConnector in wwwroot/index.html, shown
+		// on ?level=TeamChallenge / a bare ?connectortune): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetConnector', boltCount, arcRate, jitter, pulse, glow). Overrides the ShipConnector
+		// lightning knobs in real time — same effect as the ?connectorbolts/?connectorarcs/
+		// ?connectorjitter/?connectorpulse/?connectorglow URL flags, just live.
+		[JSInvokable("debugSetConnector")]
+		public static void SetConnector(double boltCount, double arcRate, double jitter, double pulse, double glow)
+		{
+			DebugFlags.SetConnectorOverride(
+				(int)System.Math.Round(boltCount),
+				(float)arcRate,
+				(float)jitter,
+				(float)pulse,
+				(float)glow);
+		}
+
 		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
 		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetWalls', towers, depth, fog, sideDark, faceLight, faceAngle, topLift, bands, wisps,

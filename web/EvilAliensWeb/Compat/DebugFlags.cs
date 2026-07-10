@@ -279,6 +279,40 @@ namespace EvilAliensWeb.Compat
 
 		public static float? LazerArcLife { get; private set; }
 
+		// Ship-connector lightning knobs (Trello "ship connector too static"). The multiplayer
+		// docking connector (ShipConnector, the twin-orb GFX/Sprites/connector sprite held between
+		// two linked ships) used to be a single frozen sprite; it now pulses and crackles live
+		// electric bolts between its two orbs (same fractal-bolt technique as the Quad laser).
+		// ALL null => the baked ShipConnector.Default* consts ship unchanged.
+		//   ?connectorbolts=<n>   number of continuously-writhing main bolts spanning the two orbs.
+		//   ?connectorarcs=<f>    average short crackle tendrils SPAWNED PER SECOND off the link
+		//                         (stochastic, like the laser's ?lazerarcs).
+		//   ?connectorjitter=<f>  multiplies the bolt zig-zag amplitude (0 = straight, taut arc).
+		//   ?connectorpulse=<f>   breathe frequency (Hz) of the base sprite + orb blooms.
+		//   ?connectorglow=<f>    orb-bloom intensity/size vs the baked default (0 = no extra blooms).
+		public static float? ConnectorArcRate { get; private set; }
+
+		public static int? ConnectorBoltCount { get; private set; }
+
+		public static float? ConnectorJitter { get; private set; }
+
+		public static float? ConnectorPulse { get; private set; }
+
+		public static float? ConnectorGlow { get; private set; }
+
+		// Runtime setter for the live connector-tuner slider panel (Compat/DebugInput.SetConnector ->
+		// eaConnector() in index.html, shown on ?level=TeamChallenge / a bare ?connectortune). Lets the
+		// five knobs be dragged in real time; ShipConnector reads them every Draw. Same effect as the
+		// ?connector* URL flags, live.
+		internal static void SetConnectorOverride(int? boltCount, float? arcRate, float? jitter, float? pulse, float? glow)
+		{
+			ConnectorBoltCount = boltCount;
+			ConnectorArcRate = arcRate;
+			ConnectorJitter = jitter;
+			ConnectorPulse = pulse;
+			ConnectorGlow = glow;
+		}
+
 		// Runtime setter for the live laser-tuner slider panel (Compat/DebugInput.SetLazer ->
 		// eaLazer() in index.html, shown on the ?lazershot showcase). Lets the four knobs be
 		// dragged in real time instead of reloading with new ?lazer* flags each nudge. Quad.cs
@@ -888,6 +922,36 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lal) && lal > 0f)
 					{
 						LazerArcLife = lal;
+					}
+					break;
+				case "connectorbolts":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cbolts) && cbolts >= 0)
+					{
+						ConnectorBoltCount = cbolts;
+					}
+					break;
+				case "connectorarcs":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var carc) && carc >= 0f)
+					{
+						ConnectorArcRate = carc;
+					}
+					break;
+				case "connectorjitter":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cjit) && cjit >= 0f)
+					{
+						ConnectorJitter = cjit;
+					}
+					break;
+				case "connectorpulse":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cpul) && cpul >= 0f)
+					{
+						ConnectorPulse = cpul;
+					}
+					break;
+				case "connectorglow":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cglo) && cglo >= 0f)
+					{
+						ConnectorGlow = cglo;
 					}
 					break;
 				case "walltowers":

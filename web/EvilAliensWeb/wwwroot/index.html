@@ -160,6 +160,23 @@
             catch (e) { console.warn('[debug] eaLazer failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives
+        // Compat/DebugInput.SetConnector so the slider panel below (and the console) can retune the
+        // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1) — main bolt
+        // count, crackle rate/sec, bolt jitter, pulse Hz, orb-glow amount. Same effect as the
+        // ?connector* URL flags, live.
+        window.eaConnector = (boltCount, arcRate, jitter, pulse, glow) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetConnector',
+                    boltCount === undefined ? 2 : Number(boltCount) || 0,
+                    arcRate === undefined ? 6 : Number(arcRate) || 0,
+                    jitter === undefined ? 1 : Number(jitter) || 0,
+                    pulse === undefined ? 2.5 : Number(pulse) || 0,
+                    glow === undefined ? 1 : Number(glow) || 0);
+            }
+            catch (e) { console.warn('[debug] eaConnector failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the Level-3 wall-tower knobs (the ?level=Level3&wallsonly tuner). Drives
         // Compat/DebugInput.SetWalls so the slider panel below (and the console) can retune the
         // tower extrusion without a page reload. Console:
@@ -1322,6 +1339,123 @@
                 }
                 catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
             }, 250);
+        })();
+    </script>
+
+    <!-- Live tuner slider panel for the ship-connector lightning (Trello "connector too static").
+         The five connector knobs were URL-flag only, so every nudge meant a full page reload. This
+         overlay drives Compat/DebugInput.SetConnector (via eaConnector) so bolt count / crackle rate /
+         jitter / pulse / orb-glow can be DRAGGED in real time. Built outside #app so it survives
+         Blazor's mount, and only created on ?level=TeamChallenge (two ships dock immediately) or a bare
+         ?connectortune — a normal boot gets no extra DOM. Positioned top-right (score is top-left). -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]connectortune\b/i.test(q) && !/level=TeamChallenge\b/i.test(q) && !/harness=connector\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?connector* flags already on the URL, else the in-game baked
+            // defaults (bolts 2 / crackle 6 per sec / jitter 1 / pulse 2.5 Hz / orb-glow 1).
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                bolts: num("connectorbolts", 2),
+                rate: num("connectorarcs", 6),
+                jitter: num("connectorjitter", 1),
+                pulse: num("connectorpulse", 2.5),
+                glow: num("connectorglow", 1)
+            };
+
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetConnector',
+                        st.bolts, st.rate, st.jitter, st.pulse, st.glow);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-conn{position:fixed;top:10px;right:10px;z-index:99999;width:260px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(140,170,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-conn h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#b8d4ff}" +
+                "#ea-conn .row{margin:7px 0}" +
+                "#ea-conn label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-conn .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-conn input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fb0ff}" +
+                "#ea-conn .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(140,170,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-conn .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-conn";
+            el.innerHTML =
+                "<h4>Connector FX tuner</h4>" +
+                "<div class='row'><label>Main bolts<span class='v' id='ec-vb'></span></label>" +
+                "<input type='range' id='ec-bolts' min='0' max='6' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Crackle rate (/s)<span class='v' id='ec-vr'></span></label>" +
+                "<input type='range' id='ec-rate' min='0' max='20' step='0.5' autocomplete='off'></div>" +
+                "<div class='row'><label>Bolt jitter<span class='v' id='ec-vj'></span></label>" +
+                "<input type='range' id='ec-jit' min='0' max='3' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Pulse (Hz)<span class='v' id='ec-vp'></span></label>" +
+                "<input type='range' id='ec-pulse' min='0' max='8' step='0.1' autocomplete='off'></div>" +
+                "<div class='row'><label>Orb glow<span class='v' id='ec-vg'></span></label>" +
+                "<input type='range' id='ec-glow' min='0' max='3' step='0.05' autocomplete='off'></div>" +
+                "<div class='out' id='ec-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
+                "then paste them to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var elBolts = el.querySelector("#ec-bolts"), elRate = el.querySelector("#ec-rate"),
+                elJit = el.querySelector("#ec-jit"), elPulse = el.querySelector("#ec-pulse"),
+                elGlow = el.querySelector("#ec-glow"), elOut = el.querySelector("#ec-out"),
+                vb = el.querySelector("#ec-vb"), vr = el.querySelector("#ec-vr"),
+                vj = el.querySelector("#ec-vj"), vp = el.querySelector("#ec-vp"),
+                vg = el.querySelector("#ec-vg");
+
+            function render()
+            {
+                elBolts.value = st.bolts; elRate.value = st.rate; elJit.value = st.jitter;
+                elPulse.value = st.pulse; elGlow.value = st.glow;
+                vb.textContent = st.bolts; vr.textContent = st.rate; vj.textContent = st.jitter;
+                vp.textContent = st.pulse; vg.textContent = st.glow;
+                elOut.textContent = "connectorbolts=" + st.bolts + " connectorarcs=" + st.rate +
+                    " connectorjitter=" + st.jitter + " connectorpulse=" + st.pulse +
+                    " connectorglow=" + st.glow;
+            }
+
+            function changed() { render(); push(); }
+
+            elBolts.addEventListener("input", function () { st.bolts = +elBolts.value; changed(); });
+            elRate.addEventListener("input", function () { st.rate = +elRate.value; changed(); });
+            elJit.addEventListener("input", function () { st.jitter = +elJit.value; changed(); });
+            elPulse.addEventListener("input", function () { st.pulse = +elPulse.value; changed(); });
+            elGlow.addEventListener("input", function () { st.glow = +elGlow.value; changed(); });
+            elOut.addEventListener("click", function ()
+            {
+                var t = elOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+
+            render();
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
         })();
     </script>
 

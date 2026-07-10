@@ -725,6 +725,38 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   constants (`DefaultPeakChargeScale` in `LazerGenerator`; `DefaultCapScale`/`DefaultArcRate`/
   `DefaultTendrilSpeed`/`DefaultArcLifeMin`/`Max` in `Quad`). Straight-alpha additive tints throughout (do
   NOT premultiply).
+- **Ship-connector docking lightning (`Game/EvilAliens/ShipConnector.cs`) — LIVE, not a frozen sprite
+  (Trello "connector too static").** The multiplayer docking connector (formed when a linked ship picks
+  up a `2`/Linker, holding two ships at a FIXED ±39px around their midpoint) was ONE static
+  `GFX/Sprites/connector` sprite (twin blue orbs + baked crackle) — dead-still, worst with two ships
+  parked. It now: (1) the base sprite **breathes** (a sine brightness pulse on `color`, straight-alpha,
+  look otherwise unchanged); (2) live **fractal lightning** crackles over the gap between the two ship
+  positions — a few continuously-writhing main bolts (blue-glow + white-hot core, `DrawLine` of
+  `lazermiddle`) plus a stochastic pool of short **crackle tendrils** that spawn/whip/fade; (3) a churning
+  **energy-well orb** on each ship (`DrawEnergyOrb`) — a STACK of additive `lazerglow` layers (blue halo
+  -> cyan-white body -> white-hot core), each shimmering on its own incommensurate sines (`Wobble`) + a
+  hard core glare, the two orbs on decorrelated phases so they don't pulse in lockstep. That's the SAME
+  layered-well recipe as the laser chargeup (`LazerGenerator.DrawWell`), NOT the old single flat bloom
+  (which read static). Same midpoint-displacement + time-driven
+  `Wiggle` technique as the `Quad` laser (`BuildBolt`/`Wiggle`), reimplemented self-contained here (own
+  FX RNG off `RandomHelper` so it can't desync a future lockstep co-op; static scratch buffers) rather
+  than dragging in the beam pipeline. All **additive, straight-alpha (do NOT premultiply)**. **The FX
+  advance on RAW Draw time** (`fxTime += dt` in `Draw`, like the metal sheen / brain overlays) so they
+  keep crackling through a hit-stop freeze; nothing is in `Update`. **Tuning** (all null => baked
+  `Default*` consts, so a shipped build is byte-identical): `?connectorbolts=<n>` (main bolt count) ·
+  `?connectorarcs=<f>` (crackle tendrils/sec) · `?connectorjitter=<f>` (bolt zig-zag amplitude ×) ·
+  `?connectorpulse=<f>` (breathe Hz) · `?connectorglow=<f>` (orb-bloom size/intensity, 0=off). Bake
+  chosen values into the `Default*` consts in `ShipConnector`. **LIVE SLIDER PANEL** (`eaConnector` in
+  `index.html`, outside `#app`, only built on `?level=TeamChallenge` / `?harness=connector` / a bare
+  `?connectortune`) drives
+  `DebugInput.SetConnector` → `DebugFlags.SetConnectorOverride` (read every Draw); the orange readout
+  prints the bake-ready `?connector*` string; `eaConnector(bolts,rate,jitter,pulse,glow)` from the
+  console too. **VERIFY WITH `?harness=connector`** — the sprite harness draws it with NO ships
+  (`ShipConnector.HarnessMode` derives the two orbs from the component's own `Position`/`rotation`, which
+  `HarnessScene` drives), and the FX still animate because they're Draw-driven. This is the way to see
+  it: `TeamChallenge` (the real two-ship dock) auto-pauses on focus loss and the ships fly in, so it's a
+  moving/paused target the harness sidesteps. Picker entry in `wwwroot/harness.html`. Reuses
+  `lazermiddle`/`lazerglow`/`connector` (all already preloaded).
 - **Level-3 alienboss "lightbulb" colorize tuner (`Compat/HarnessColorize.cs` + `?harness=battleskull`).**
   The alienboss sprite (`GFX/alienboss/alienboss`, used by `BattleSkull`/`FakeBoss`/`ClassicBoss`) is
   the "little lightbulb" boss. `BattleSkull` is the one that **hue-remaps** it (the others only do the

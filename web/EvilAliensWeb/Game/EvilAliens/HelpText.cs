@@ -324,7 +324,11 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		(color) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;
 		string text = Powerup.PowerUpString(powerupType);
-		Vector2 position = new Vector2(80f, y);
+		// The powerup label is left-aligned at x=80 and the description starts at x=120.
+		// Single-char labels (B/O/F/R/2) fit the gap, but "1up" is 3 glyphs wide and
+		// overruns into the description, so nudge that wider label left to clear it.
+		float labelX = (powerupType == Powerup.PowerupType.OneUp) ? 60f : 80f;
+		Vector2 position = new Vector2(labelX, y);
 		Color val = Powerup.PowerUpColor(powerupType);
 		spriteBatchWrapper.DrawString(text, position, new Color(new Vector4((val).ToVector3(), visibility)), 0f, Vector2.Zero, 0.8f, (SpriteEffects)0, 0f);
 		spriteBatch.Flush();

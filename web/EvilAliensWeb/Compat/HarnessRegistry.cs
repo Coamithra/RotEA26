@@ -67,6 +67,10 @@ namespace EvilAliensWeb.Compat
                 ["paratrooper"] = (bin, g, p) => { var a = ParatrooperAlien.NewAlien(bin, g); a.Setup(); return a; },
                 ["paratrooperbrain"] = (bin, g, p) => { var b = ParatrooperBrain.NewAlien(bin, g); b.Setup(p); return b; },
                 ["wall"] = (bin, g, p) => { var w = Wall.NewWall(bin, g); w.Setup(0); return w; },
+                // Multiplayer docking connector. The real one links two live PlayerShips; here it
+                // runs in HarnessMode, deriving its two orbs from Position/rotation so the animated
+                // lightning FX can be watched/tuned with NO ships (?connector* flags / eaConnector).
+                ["connector"] = (bin, g, p) => { var c = ShipConnector.NewAlien(bin, g); c.HarnessSetup(p); return c; },
 
                 // --- projectiles ---
                 ["bullet"] = (bin, g, p) => { var b = Bullet.NewBullet(bin, g); b.Setup(p, (float)Math.PI / 2f, 999999f, 0); return b; },

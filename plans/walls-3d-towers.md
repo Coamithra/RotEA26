@@ -127,6 +127,45 @@ Follow the eaLazer/eaHue/eaSpider pattern exactly:
 - **Fog as a full-screen shader pass:** overkill; tint + one wisp layer achieves the depth cue
   within the existing pipeline.
 
+## As built (card d59266cc) -- where reality differed from the plan above
+
+Steps 1-3 shipped, plus step 6's side texture (it turned out to be needed, not optional). Five
+deltas from the design above, each forced by something the plan assumed wrong:
+
+1. **Uniform global depth passes, not per-block adaptive slice counts.** The painter's-order
+   argument ("footprints at the same depth are disjoint") only holds if every block shares the
+   same `d` in a given pass. With per-block depth ladders a tall shaft can lean over a block
+   nearer the VP and land in the wrong order. `slices` is now derived once from the *wall's*
+   worst on-screen corner lean, and every block steps through the same depths.
+2. **The slice pass needs a WIDER row cull than the top-face loop.** Bases project toward the VP,
+   so a block whose top face has scrolled off the bottom (topY up to ~754) still shows its base,
+   and a block still above the screen (topY down to ~-154) already shows its base below the top
+   edge. That second case *is* the base-first emergence. `RowShaftVisible` handles both; the
+   top-face loop's cull is deliberately untouched.
+3. **A `Color` tint MULTIPLIES -- it cannot lerp a slice up to a haze colour.** The alien-base
+   floor composites *bright* blue (756 plus its two additive 2331-v5 layers averages
+   RGB(46,125,199)), so the shaft must BRIGHTEN and desaturate as it descends, then alpha-dissolve
+   into that floor. `DefaultFogColor` is therefore a high-value blue-white *above* `DefaultSideDark`,
+   not the dark teal the plan implies. Slices stay opaque except the bottom `DissolveFraction`;
+   a translucent stack would accumulate back to opaque and defeat the dissolve.
+4. **Wisps are full-screen (as planned) but their alpha is gated on the visible-block count.** A
+   `Wall` spawns and dies per section, so an ungated screen-wide haze pops in and out with the
+   entity. They tile by POSITION, never by a drifting source rect: `SpriteBatchWrapper` begins the
+   batch with a null samplerState (LinearClamp), so an out-of-bounds source window clamps instead of
+   wrapping. Drift modifier defaults to **0.8** (the existing near-fog layer, which sits inside the
+   shaft's 0.66..1.0 depth band), not 0.52 -- that layer is slower than the ground it draws in
+   front of.
+5. **Step 6 was required.** Slicing the block's own full-res 8x8 cell makes the shaft *corduroy*:
+   the exposed sliver per slice is ~2 design px, the same order as the cell's own detail, so slices
+   repeat that detail instead of smearing into a face. Reducing the slice step does NOT fix it
+   (verified by sweep -- identical comb at steps 3/4/6/8). `tools/walls/build_wall_side.py` emits a
+   low-frequency companion sheet (each cell area-averaged to 16x16 texels). Slice step then only
+   controls silhouette smoothness; it bands above ~8px, so the baked default is **5**.
+
+Measured cost: ~600-1500 batched slice draws on the dense variations, **~3.6 ms/tick** over the flat
+path (median 24.7 vs 21.1 ms, WASM Debug). No new hitch -- the 121 ms frame at wall spawn reproduces
+with `?walltowers=0` and is pre-existing.
+
 ## Work breakdown
 
 1. Projection + slice pass + tints in `Wall.Draw` (+ `walltowers` kill switch). The core.

@@ -51,6 +51,7 @@ internal class Level3 : GameScene
 		contentManager.Load<Texture2D>("GFX/Sprites/smallship");
 		contentManager.Load<Texture2D>("GFX/Base/black line lalalal");
 		contentManager.Load<Texture2D>("GFX/Base/756-v1");
+		contentManager.Load<Texture2D>("GFX/Base/756-v1-side");
 		contentManager.Load<Texture2D>("GFX/Base/756");
 		contentManager.Load<Texture2D>("GFX/Base/756-v5");
 		contentManager.Load<Texture2D>("GFX/Base/756-v3");
@@ -74,6 +75,14 @@ internal class Level3 : GameScene
 
 	protected override void PopulateEventList()
 	{
+		if (EvilAliensWeb.Compat.DebugFlags.WallsOnly)
+		{
+			// DEBUG (?level=Level3&wallsonly): skip the whole wave sequence and loop the walls
+			// sections back to back, so the 3D tower rendering can be watched without minutes of
+			// play per iteration. Mirrors Level2's ?spiderboss. Pair with ?invuln.
+			PopulateWallsOnly();
+			return;
+		}
 		WaitEvent waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += slowdown;
@@ -238,6 +247,32 @@ internal class Level3 : GameScene
 	private void swapBG1(GameEvent sender)
 	{
 		Background.SetAlienBase2();
+	}
+
+	// DEBUG (?wallsonly): gives lives, jumps to the level's normal walls-section scroll speed, then
+	// runs the three big wall variations back to back (twice) with nothing else spawning, so the
+	// 3D towers are seen in REAL play. Reached only via DebugFlags.WallsOnly -- live play unaffected.
+	private void PopulateWallsOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		waitEvent.OnFinished += speedup;
+		// 1 = the dense maze (most tower-like), 0 = tall sparse pillars, 3 = big diagonal slabs.
+		int[] variations = new int[3] { 1, 0, 3 };
+		for (int cycle = 0; cycle < 2; cycle++)
+		{
+			for (int i = 0; i < variations.Length; i++)
+			{
+				Walls walls = new Walls(base.Game, variations[i]);
+				eventList.AddEvent(walls, halting: true);
+				eventList.SetLastEventAsCheckPoint();
+				eventList.AddHalt();
+			}
+		}
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
 	}
 
 	private void returnlives(GameEvent sender)

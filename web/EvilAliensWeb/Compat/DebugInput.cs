@@ -185,6 +185,26 @@ namespace EvilAliensWeb.Compat
 				(float)tendrilSpeed);
 		}
 
+		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
+		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetWalls', towers, depth, sliceStep, fog, sideDark, wisps, wispSpeed). Overrides the
+		// Level-3 tower-extrusion knobs in real time so the sliders retune without a page reload —
+		// same effect as the ?walltowers/?walldepth/?wallslicestep/?wallfog/?wallsidedark/?wallwisps/
+		// ?wallwispspeed URL flags, just live. (?wallfogcolor stays URL-only — a colour picker is a
+		// different widget and the tint reads fine off the two brightness knobs.)
+		[JSInvokable("debugSetWalls")]
+		public static void SetWalls(bool towers, double depth, double sliceStep, double fog, double sideDark, double wisps, double wispSpeed)
+		{
+			DebugFlags.SetWallsOverride(
+				towers,
+				(float)depth,
+				(float)sliceStep,
+				(float)fog,
+				(float)sideDark,
+				(float)wisps,
+				(float)wispSpeed);
+		}
+
 		// JS bridge for the live spider-tuner slider panel (eaSpider in wwwroot/index.html, shown on
 		// ?harness=spiderjump / ?level=Level2&spiders / ?spidertune): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetSpider', jumpFrame, landFrame, jumpX, pinJumpX, shadowX, shadowY, shadowScale, airX, airY).

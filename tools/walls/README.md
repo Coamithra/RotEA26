@@ -12,6 +12,28 @@ each dimension — any resolution works, and **no game code changes**.
 The current `756-v1.png` is a low-res **512×512**; it looks blurry because each 64-px cell is
 blown up hugely on screen. This folder is the pipeline to ship a **higher-res** version.
 
+## Companion sheet: `756-v1-side.png` (`build_wall_side.py`)
+
+Since card `d59266cc`, `Wall.Draw` also extrudes each block **downward into a 3D tower shaft**
+(see `plans/walls-3d-towers.md`). The shaft slices sample a **separate, low-frequency sheet** —
+the same 8×8 grid with every cell **area-averaged** down to 16×16 texels — because slicing the
+full-res cell makes the shaft corduroy (consecutive slices redraw the same high-frequency detail
+at slightly different scales, so the sliver each one leaves exposed repeats it rather than
+smearing into a wall face).
+
+**`756-v1-side.png` is derived from `756-v1.png`, so re-run the builder whenever you replace the
+wall texture** (after the tileable step below):
+
+```
+python tools/walls/build_wall_side.py         # rebuild (128×128, a few KB)
+python tools/walls/build_wall_side.py --cell 8   # flatter/smoother shafts
+```
+
+Area-averaging (rather than cropping the cell's centre) is load-bearing: the centre texel of some
+cells is a bright highlight — RGB(121,194,240) against a cell-average luminance range of only
+72..116 — which as a slice tint would render that block's tower as a glowing white slab.
+Don't hand-edit the output.
+
 ## The flow (art step is yours; the tileable step is automated)
 
 1. **Upscale the art (you).** Give ChatGPT / an image upscaler the current

@@ -9,8 +9,12 @@
 // in index.html so MousePointer can pick the mode per scene:
 //   "menu"    -> normal OS arrow (menus / non-aiming scenes)
 //   "hidden"  -> cursor:none (while the gameplay intro sprite animates)
-//   "reticle" -> cursor:url(reticle.png) — the zero-lag aiming reticle IS the OS
+//   "reticle" -> cursor:url(reticle/<px>.png) — the zero-lag aiming reticle IS the OS
 //                cursor during gameplay (no trailing game-loop sprite)
+//
+// A CSS cursor image is a fixed pixel size and cannot be scaled, so the reticle ships
+// as a LADDER of pre-drawn sizes (tools/cursor/build_cursor.py) and MousePointer picks
+// the rung matching the current letterbox — hence SetReticle's px argument.
 // ---------------------------------------------------------------------------
 using System;
 using Microsoft.JSInterop;
@@ -27,11 +31,19 @@ namespace EvilAliensWeb.Compat
             _js = js as IJSInProcessRuntime;
         }
 
-        // mode: "menu" | "hidden" | "reticle". Best-effort — swallow if the game
-        // isn't wired to JS yet (mirrors the other Compat interops).
+        // mode: "menu" | "hidden". Best-effort — swallow if the game isn't wired to JS
+        // yet (mirrors the other Compat interops).
         public static void Set(string mode)
         {
             try { _js?.InvokeVoid("eaCursor.set", mode); }
+            catch (Exception) { }
+        }
+
+        // px: which rung of wwwroot/reticle/<px>.png to show. The hotspot is the image
+        // centre, so JS derives it as px/2.
+        public static void SetReticle(int px)
+        {
+            try { _js?.InvokeVoid("eaCursor.set", "reticle", px); }
             catch (Exception) { }
         }
     }

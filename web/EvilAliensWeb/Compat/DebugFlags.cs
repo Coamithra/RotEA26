@@ -31,6 +31,8 @@ namespace EvilAliensWeb.Compat
 	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
 	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
+	//   ?reticlesize=<designpx>  aiming-reticle size in 800x600 design px (default 30). Scaled by
+	//                  the letterbox to pick a cursor rung, so it holds its size at any window size.
 	//   ?hitboxes      draw every collidable's collision shape over the game, colour-coded by
 	//                  kind (box/circle/line). OFF by default; also toggleable via eaHitboxes()
 	//   ?slowmotrail=0 disable the cinematic slow-motion ghost-trail post-process (ON by default;
@@ -231,6 +233,13 @@ namespace EvilAliensWeb.Compat
 		public static float? BlastActiveAlpha { get; private set; }
 
 		public static float? BlastHitFactor { get; private set; }
+
+		// Aiming-reticle size, in DESIGN px (800x600 space) -- MousePointer scales it by the
+		// letterbox to pick a cursor rung, so the reticle holds its size relative to the play
+		// field at any window size. null => MousePointer.DefaultReticleDesignPx (30). A pure
+		// look/feel knob, so — like MetalScore — deliberately kept OUT of `Active`.
+		//   ?reticlesize=<designpx>  e.g. 26 = the original XBLIG art's size, 40 = chunky.
+		public static float? ReticleSize { get; private set; }
 
 		// Flying-spider size multiplier (Trello: "make the flying spiders slightly smaller").
 		// The reared-up HD stance (FlyingSpider loops spider_sheet2 frames 22..30) draws taller
@@ -765,6 +774,12 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bh) && bh > 0f)
 					{
 						BlastHitFactor = bh;
+					}
+					break;
+				case "reticlesize":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var rs) && rs > 0f)
+					{
+						ReticleSize = rs;
 					}
 					break;
 				case "blastloop":

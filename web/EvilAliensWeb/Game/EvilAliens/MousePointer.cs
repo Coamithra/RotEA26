@@ -12,7 +12,7 @@ namespace EvilAliens;
 //   Visible == true   -> "gameplay": play a one-shot scale+rotate intro that introduces
 //                        the pointer -> reticle change (OS cursor HIDDEN while the reticle
 //                        sprite animates), then hand the pointer off to the CSS reticle
-//                        cursor (canvas.style.cursor: url(reticle.png)) so it is ZERO-LAG
+//                        cursor (canvas.style.cursor: url(reticle/<px>.png)) so it is ZERO-LAG
 //                        for the rest of the level (no game-loop sprite trailing the mouse).
 //                        Exactly one pointer is visible at all times.
 // (KNI's BlazorGL never applies Game.IsMouseVisible to the DOM -- its _isMouseHidden flag is
@@ -32,6 +32,10 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 	// reticle cursor (or immediately, in HWMouse mode). While true we draw NOTHING -- the OS
 	// cursor is the reticle. Reset to false each time the gameplay intro (re)starts.
 	private bool reticleHandedOff;
+
+	// The cursor-ladder size (window px) currently pushed to JS, or 0 for "none pushed".
+	// Re-checked every Update while handed off so a window resize re-picks the bucket.
+	private int cursorPx;
 
 	// Set from JS (canvas pointerenter/leave, see wwwroot/index.html). While the intro sprite
 	// animates we don't draw it off-canvas (cursor:none only applies over the canvas, so the
@@ -70,6 +74,7 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 	private void EnterMenu()
 	{
 		reticleHandedOff = false;
+		cursorPx = 0;
 		showtimer.Stop();
 		showtimer.Reset();
 		CursorInterop.Set("menu");
@@ -83,12 +88,14 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		{
 			// Player opted for the plain OS arrow -- no reticle, no intro.
 			reticleHandedOff = true;
+			cursorPx = 0;
 			showtimer.Stop();
 			showtimer.Reset();
 			CursorInterop.Set("menu");
 			return;
 		}
 		reticleHandedOff = false;
+		cursorPx = 0;
 		showtimer.Reset();
 		showtimer.Start();
 		CursorInterop.Set("hidden");
@@ -139,9 +146,10 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		mousePosition.X = MathHelper.Clamp(input.MousePosition.X, 0f, 800f);
 		mousePosition.Y = MathHelper.Clamp(input.MousePosition.Y, 0f, 600f);
 		// Land the intro EXACTLY on the CSS cursor's on-screen size so the sprite -> OS-cursor
-		// handoff doesn't pop. The CSS reticle is a fixed CssCursorPx window px while the sprite
-		// draws at (texture px x design scale x window-per-design), so the end scale is
-		// window-size-dependent; recomputed per frame (cheap) in case of a mid-intro resize.
+		// handoff doesn't pop. The cursor is whichever ladder rung ChooseCursorPx lands on (a
+		// fixed window-px image) while the sprite draws at (texture px x design scale x
+		// window-per-design), so the end scale is window-size-dependent; recomputed per frame
+		// (cheap) so a mid-intro resize is tracked, exactly as the handed-off cursor is.
 		float endScale = CssHandoffScale();
 		if (showtimer.Active)
 		{
@@ -159,37 +167,68 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		base.Draw(gameTime);
 	}
 
-	// wwwroot/reticle.png's pixel size in tools/cursor/build_cursor.py (a CSS cursor image is
-	// fixed CSS px, which == canvas backing px here: index.html sizes the canvas to
-	// clientWidth/Height, no devicePixelRatio factor). Keep in sync with the tool's SIZE.
-	private const float CssCursorPx = 48f;
+	// The reticle's size in DESIGN space (800x600). A CSS cursor image is a fixed pixel size,
+	// but the game letterbox-upscales design space to the window -- so a fixed cursor is only
+	// correctly sized at one window size and reads small on a big monitor (the bug this
+	// replaced). Holding a design-space size instead makes the reticle occupy the same
+	// fraction of the play field everywhere. 30 is the original 26px art plus the "a bit
+	// bigger" it wanted; override live with ?reticlesize=<designpx>.
+	private const float DefaultReticleDesignPx = 30f;
 
-	// Design-space draw scale at which the reticle SPRITE's on-screen size equals the CSS
-	// cursor's. On-screen px per design px is the UNCAPPED letterbox fit (WindowDestRect
-	// height / design height) -- NOT RenderScale.Scale, which is capped at MaxHeight and
-	// diverges from the on-screen geometry on very large windows. cursor2's art fills its full
-	// 26px texture (alpha bbox == texture bounds) and reticle.png is that art bbox-fit into
-	// 48px, so texture.Width is the correct sprite-size denominator.
-	private float CssHandoffScale()
+	// The cursor ladder built by tools/cursor/build_cursor.py (wwwroot/reticle/<px>.png).
+	// Keep in sync with its SIZES: `range(24, 97, 8)`.
+	private const int CursorPxStep = 8;
+	private const int MinCursorPx = 24;
+	private const int MaxCursorPx = 96;
+
+	// On-screen px per design px: the UNCAPPED letterbox fit (WindowDestRect height / design
+	// height) -- NOT RenderScale.Scale, which is capped at MaxHeight and so diverges from the
+	// on-screen geometry on very large windows.
+	private static float WindowPerDesign()
 	{
 		Rectangle dest = RenderScale.WindowDestRect(RenderScale.WindowWidth, RenderScale.WindowHeight);
 		float windowPerDesign = (float)dest.Height / RenderScale.DesignHeight;
-		if (windowPerDesign <= 0f)
-		{
-			windowPerDesign = 1f;
-		}
-		return CssCursorPx / windowPerDesign / texture.Width;
+		return (windowPerDesign > 0f) ? windowPerDesign : 1f;
+	}
+
+	// Which rung of the cursor ladder best matches the wanted design-space size at the current
+	// window size. Quantized to CursorPxStep (<=4px of error), because each rung is a separate
+	// natively-drawn PNG -- a CSS cursor can't be scaled, only chosen.
+	private static int ChooseCursorPx(float windowPerDesign)
+	{
+		float wanted = (DebugFlags.ReticleSize ?? DefaultReticleDesignPx) * windowPerDesign;
+		int px = (int)Math.Round(wanted / CursorPxStep) * CursorPxStep;
+		return MathHelper.Clamp(px, MinCursorPx, MaxCursorPx);
+	}
+
+	// Design-space draw scale at which the reticle SPRITE's on-screen size equals the CSS
+	// cursor's, so the intro lands exactly on the cursor it hands off to at ANY window size.
+	// Derived from the SAME ChooseCursorPx the handoff pushes to JS -- the two can't drift.
+	// build_cursor.py draws every cursor rung and cursor2 as one crosshair at different
+	// resolutions, all with the bars running edge to edge (alpha bbox == texture bounds), so
+	// texture.Width is the right sprite-size denominator and this survives re-authoring.
+	private float CssHandoffScale()
+	{
+		float windowPerDesign = WindowPerDesign();
+		return ChooseCursorPx(windowPerDesign) / windowPerDesign / texture.Width;
 	}
 
 	public override void Update(GameTime gameTime)
 	{
 		showtimer.Update(gameTime);
 		// Intro just finished: hand the pointer to the zero-lag CSS reticle cursor and stop
-		// drawing the sprite.
-		if (base.Visible && !reticleHandedOff && !Settings.GetInstance().HWMouse && !showtimer.Active)
+		// drawing the sprite. Once handed off, keep re-checking the ladder so a window resize
+		// (or a ?reticlesize= tweak) re-picks the rung -- the cursor is a fixed-px image, so
+		// it can only track the letterbox by swapping to a different one.
+		if (base.Visible && !Settings.GetInstance().HWMouse && !showtimer.Active)
 		{
-			reticleHandedOff = true;
-			CursorInterop.Set("reticle");
+			int px = ChooseCursorPx(WindowPerDesign());
+			if (!reticleHandedOff || px != cursorPx)
+			{
+				reticleHandedOff = true;
+				cursorPx = px;
+				CursorInterop.SetReticle(px);
+			}
 		}
 		base.Update(gameTime);
 	}

@@ -397,29 +397,35 @@
         //   "menu"    -> normal OS arrow (menus / non-aiming scenes)
         //   "hidden"  -> cursor:none, while the gameplay intro reticle SPRITE animates
         //   "reticle" -> the zero-lag aiming reticle IS the OS cursor during gameplay
-        // The reticle image lives at wwwroot/reticle.png (built by tools/cursor/build_cursor.py);
-        // resolve it against <base href> so it works under the CI "/RotEA26/" base too. Hotspot
-        // is the image centre (24,24 for the 48px art) since the reticle aims from its centre;
-        // `crosshair` is the graceful fallback if a browser rejects the custom image.
+        // A CSS cursor image is a fixed pixel size and can't be scaled, but the game
+        // letterbox-upscales its 800x600 design space to the window -- so the reticle ships as a
+        // LADDER of pre-drawn sizes at wwwroot/reticle/<px>.png (built by
+        // tools/cursor/build_cursor.py) and MousePointer passes the rung matching the current
+        // letterbox. Resolve against <base href> so it works under the CI "/RotEA26/" base too.
+        // Hotspot is the image centre (px/2) since the reticle aims from its centre; `crosshair`
+        // is the graceful fallback if a browser rejects the custom image.
         window.eaCursor = (function ()
         {
-            var reticleCss = null;
-            function reticle()
+            var reticleCss = {};   // px -> css value (each rung is a separate image)
+            function reticle(px)
             {
-                if (reticleCss === null)
+                if (!reticleCss[px])
                 {
-                    var href = "reticle.png";
-                    try { href = new URL("reticle.png", document.baseURI).href; } catch (e) { }
-                    reticleCss = "url('" + href + "') 24 24, crosshair";
+                    var rel = "reticle/" + px + ".png";
+                    var href = rel;
+                    try { href = new URL(rel, document.baseURI).href; } catch (e) { }
+                    var hot = px / 2;
+                    reticleCss[px] = "url('" + href + "') " + hot + " " + hot + ", crosshair";
                 }
-                return reticleCss;
+                return reticleCss[px];
             }
             return {
-                set: function (mode)
+                // px is the reticle rung to show; only meaningful for mode 'reticle'.
+                set: function (mode, px)
                 {
                     var c = document.getElementById('theCanvas');
                     if (!c) return;
-                    if (mode === 'reticle') c.style.cursor = reticle();
+                    if (mode === 'reticle') c.style.cursor = reticle(px);
                     else if (mode === 'hidden') c.style.cursor = 'none';
                     else c.style.cursor = 'auto';   // 'menu' / anything else -> normal arrow
                 }

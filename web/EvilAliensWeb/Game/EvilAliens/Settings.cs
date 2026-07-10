@@ -31,7 +31,7 @@ public class Settings : Savable
 	// Web default (false): the aiming reticle IS the OS cursor during gameplay (card 51276dcd).
 	// In a keyboard-controlled level MousePointer plays a one-shot scale+rotate intro (the OS
 	// cursor hidden while the reticle SPRITE animates), then hands off to the CSS reticle cursor
-	// (canvas.style.cursor: url(reticle.png)) so aiming is zero-lag -- no game-loop sprite
+	// (canvas.style.cursor: url(reticle/<px>.png)) so aiming is zero-lag -- no game-loop sprite
 	// trailing the mouse. true => the plain OS arrow instead (no reticle, no intro). Menus always
 	// use the plain arrow. See MousePointer / Compat/CursorInterop / eaCursor in index.html.
 	public bool HWMouse = false;

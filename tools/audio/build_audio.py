@@ -48,11 +48,13 @@ SFX_CUES = [
 
 # Music cues -> the SongInstance.songFiles ids. Cues with two waves are an
 # authored intro + loop body (the intro plays once, then the body loops).
-# "classic" is NOT here: it was replaced with a bespoke external track and is
-# installed by install_classic.py (called from main); build_music preserves its
-# music.json entry so a rebuild never drops or clobbers it.
+# "classic"/"classicclean"/"lastsignal" are NOT here: each was replaced with a
+# bespoke external track and is installed by install_external.py (called from
+# main); build_music preserves their music.json entries so a rebuild never drops
+# or clobbers them. The bank's own "sjaakslow" wave (a pitched-down cut of the
+# menu theme) is dead — "lastsignal" took over the CreditsScene crawl.
 MUSIC_CUES = ["stage1", "stage2", "stage3", "bach",
-              "sjaak", "kylikova", "sjaakslow"]
+              "sjaak", "kylikova"]
 
 
 def sanitize(name):
@@ -122,7 +124,8 @@ def build_narration():
 def build_music(entries, cues):
     os.makedirs(MUSIC_DIR, exist_ok=True)
     # Merge into the existing manifest so externally-installed cues (classic,
-    # via install_classic.py) survive a rebuild instead of being dropped.
+    # classicclean, lastsignal — via install_external.py) survive a rebuild
+    # instead of being dropped.
     manifest_path = os.path.join(MUSIC_DIR, "music.json")
     manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
     for cue in MUSIC_CUES:
@@ -175,14 +178,15 @@ def main():
     build_narration()
     print("Music:")
     build_music(entries, cues)
-    # "classic" is a bespoke external track, not a bank cue — install it (copy +
-    # pymusiclooper loop). A missing source leaves the committed classic in place.
-    print("External music (classic):")
+    # classic / classicclean / lastsignal are bespoke external tracks, not bank
+    # cues — install them (copy + pymusiclooper loop). A missing source leaves
+    # that cue's committed .ogg in place.
+    print("External music:")
     try:
-        import install_classic
-        install_classic.install()
+        import install_external
+        install_external.install()
     except ImportError:
-        print("  (pymusiclooper not installed — skipped; run install_classic.py later)")
+        print("  (pymusiclooper not installed — skipped; run install_external.py later)")
     # The loop points written above are the raw XACT whole-wave points, which
     # seam under WebAudio's hard-splice loop. Refine them to waveform-matched
     # points (pymusiclooper). Optional — a missing pymusiclooper just leaves the

@@ -35,7 +35,7 @@
 #
 # SAFE NO-OP: if the source is missing, the shipped PNG is left untouched (so CI /
 # a fresh clone with no raw source never regresses the committed art). Same pattern
-# as tools/audio/install_classic.py.
+# as tools/audio/install_external.py.
 #
 # Re-run after swapping the source or a knob:  python tools/nebula/build_nebula.py
 # Don't hand-edit andromeda.png. Flags: --source PATH --out PATH --dry-run

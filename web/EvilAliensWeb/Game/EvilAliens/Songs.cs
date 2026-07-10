@@ -9,6 +9,6 @@ public enum Songs
 	Level3,
 	Classic,
 	Kylikova,
-	SjaakSlow,
+	LastSignal,
 	ClassicClean
 }

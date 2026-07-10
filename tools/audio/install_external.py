@@ -1,25 +1,32 @@
 # ---------------------------------------------------------------------------
-# install_classic.py — install the two "classic" music cues from EXTERNAL
-# tracks instead of the XACT banks.
+# install_external.py — install the bespoke EXTERNAL music cues, i.e. the tracks
+# that do NOT come from the recovered XACT banks.
 #
-# WHY: the retro tune has two bespoke external variants (neither in the recovered
-# banks), so build_audio.py doesn't crack them — this tool installs both, the way
+# WHY: a few tunes were replaced with user-authored tracks, so build_audio.py
+# can't crack them out of the banks — this tool owns them, the way
 # build_channelswap.py owns the one port-era SFX cue:
 #   * "classic"      (Songs.Classic)      — the full Japanese-vocal "Evil Aliens
 #     Revenged" cut, served only as a reward on Hard+ challenges.
 #   * "classicclean" (Songs.ClassicClean) — a lyric-free loopable instrumental,
 #     the default for the tutorial + Easy/Medium challenges.
-# SoundManager.ClassicForDifficulty() picks between them; both are played by the
-# retro minigames (AsteroidChase / BraineroidsLevel / ClassicAliens / CrazyGame).
+#     SoundManager.ClassicForDifficulty() picks between those two; both are played
+#     by the retro minigames (AsteroidChase / BraineroidsLevel / ClassicAliens /
+#     CrazyGame).
+#   * "lastsignal"   (Songs.LastSignal)   — "The Last Signal", the end-of-level
+#     text-crawl theme (CreditsScene). Replaces the bank's old "sjaakslow" cue,
+#     which was a pitched-down cut of the menu theme.
 #
 # What it does per cue (offline, committed output — mirrors the tools/audio
 # philosophy):
 #   1. copy the source OGG straight to wwwroot/Content/music/<cue>.ogg
-#      (the sources are already OGG Vorbis 44100 stereo, so a copy avoids a
+#      (the sources are already OGG Vorbis 44100, so a copy avoids a
 #      decode->re-encode generation loss; no need to round-trip through PCM).
-#   2. run pymusiclooper on it and take the tool's top-ranked loop pair — each
-#      track has an intro then a seamless body, which is exactly what
-#      pymusiclooper is for.
+#   2. run pymusiclooper on it and pick a loop pair — each track has an intro
+#      then a seamless body, which is exactly what pymusiclooper is for. Of its
+#      ranked candidates we take the best-scoring one whose SPLICE CLICK is
+#      already seamless (see find_loop); a high score means the two points sound
+#      alike, but only a low click means the WebAudio hard-splice at the wrap is
+#      inaudible — and the top-ranked pair is not always both.
 #   3. write those loop points into music.json's "<cue>" entry, preserving
 #      every other cue's entry.
 #
@@ -28,10 +35,10 @@
 # .ogg files are the shipped artifacts. build_audio.py calls install() at the end
 # of a full rebuild — a missing source leaves that cue's committed artifact as-is.
 #
-#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py            # both cues
-#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --dry-run
-#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --cue classicclean
-#   PYTHONIOENCODING=utf-8 python tools/audio/install_classic.py --cue classic --source <path>
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_external.py            # every cue
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_external.py --dry-run
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_external.py --cue classicclean
+#   PYTHONIOENCODING=utf-8 python tools/audio/install_external.py --cue classic --source <path>
 # ---------------------------------------------------------------------------
 import argparse
 import json
@@ -47,24 +54,33 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MUSIC_DIR = os.path.join(ROOT, "web", "EvilAliensWeb", "wwwroot", "Content", "music")
 MANIFEST = os.path.join(MUSIC_DIR, "music.json")
 
-# Two variants of the retro tune, each a bespoke external track (not from the
-# banks). "classic" = the full Japanese-vocal cut (the Hard+ challenge reward);
-# "classicclean" = a lyric-free loopable instrumental (tutorial + Easy/Medium).
-# Songs.Classic / Songs.ClassicClean pick between them via
-# SoundManager.ClassicForDifficulty(). Each gets its own committed .ogg +
-# music.json loop entry. A missing source leaves that cue's committed artifact
-# untouched (safe in CI / fresh clones).
+# Every bespoke external track (not from the banks). Two variants of the retro
+# tune — "classic" = the full Japanese-vocal cut (the Hard+ challenge reward),
+# "classicclean" = a lyric-free loopable instrumental (tutorial + Easy/Medium),
+# picked between by SoundManager.ClassicForDifficulty() — plus "lastsignal", the
+# CreditsScene text-crawl theme. Each gets its own committed .ogg + music.json
+# loop entry. A missing source leaves that cue's committed artifact untouched
+# (safe in CI / fresh clones).
 TRACKS = {
     "classic": os.path.join(ROOT, "new_assets_raw", "EvilAliensRevengedLoopable.ogg"),
     "classicclean": os.path.join(ROOT, "new_assets_raw", "classicaliensremixloopable_nolyrics.ogg"),
+    "lastsignal": os.path.join(ROOT, "new_assets_raw", "lastsignalloopable.ogg"),
 }
 CUE = "classic"  # back-compat default for --source with no --cue
 DEFAULT_SOURCE = TRACKS[CUE]
 
+# A candidate at/below this splice click is effectively click-free at the loop
+# wrap (same metric + threshold refine_loops.py uses). Among pymusiclooper's
+# ranked pairs we take the FIRST (best-scoring) one that clears it, so we never
+# ship a musically-perfect loop that audibly ticks. Nothing clears it -> fall
+# back to the least-clicky candidate.
+SEAMLESS = 3.0
+
 
 def find_loop(path):
-    """Return (loopStart, loopEnd, score, click) for the source track, using
-    pymusiclooper's own top-ranked loop pair. Import is late (heavy + optional)."""
+    """Return (loopStart, loopEnd, score, click) for the source track: the
+    best-scoring pymusiclooper pair whose splice click is already seamless.
+    Import is late (heavy + optional)."""
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from refine_loops import splice_click  # shared splice-click metric
@@ -75,18 +91,22 @@ def find_loop(path):
     pairs = ml.find_loop_pairs()
     if not pairs:
         raise RuntimeError(f"pymusiclooper found no loop in {path}")
-    # pymusiclooper ranks pairs by loop quality; [0] is its best pick. Print a
-    # few so a re-run's choice is auditable.
-    print("  pymusiclooper candidates (top 5):")
-    for pr in pairs[:5]:
+    # pymusiclooper ranks pairs by loop quality (musical similarity of the two
+    # points). Neighbouring candidates are the same musical loop shifted by a
+    # fraction of a beat, so they score nearly alike while their raw waveform
+    # step at the wrap differs a lot — pick on the click, break ties on score.
+    cands = []
+    for pr in pairs:
         s = ml.samples_to_seconds(pr.loop_start)
         e = ml.samples_to_seconds(pr.loop_end)
+        cands.append((s, e, pr.score, splice_click(audio, rate, s, e)))
+    print("  pymusiclooper candidates (top 5):")
+    for s, e, score, click in cands[:5]:
         print(f"    {s:8.3f} -> {e:8.3f}  len={e - s:7.2f}s  "
-              f"score={pr.score:.4f}  click={splice_click(audio, rate, s, e):.2f}")
-    best = pairs[0]
-    s = ml.samples_to_seconds(best.loop_start)
-    e = ml.samples_to_seconds(best.loop_end)
-    return round(s, 4), round(e, 4), best.score, splice_click(audio, rate, s, e)
+              f"score={score:.4f}  click={click:.2f}")
+    seamless = [c for c in cands if c[3] <= SEAMLESS]
+    s, e, score, click = (seamless[0] if seamless else min(cands, key=lambda c: c[3]))
+    return round(s, 4), round(e, 4), score, click
 
 
 def install_one(cue, source, dry_run=False):
@@ -129,7 +149,7 @@ def install_one(cue, source, dry_run=False):
 
 
 def install(dry_run=False):
-    """Install every external classic-tune variant (classic + classicclean)."""
+    """Install every bespoke external music cue."""
     ok = False
     for cue, source in TRACKS.items():
         ok = install_one(cue, source, dry_run=dry_run) or ok
@@ -139,7 +159,7 @@ def install(dry_run=False):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cue", choices=sorted(TRACKS),
-                    help="install only this cue (default: all — classic + classicclean)")
+                    help="install only this cue (default: every cue in TRACKS)")
     ap.add_argument("--source",
                     help="override the source OGG for --cue (default: the cue's TRACKS path)")
     ap.add_argument("--dry-run", action="store_true",

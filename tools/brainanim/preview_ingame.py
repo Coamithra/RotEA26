@@ -14,6 +14,11 @@ Math mirrored from the C#:
   overlay footprint = (texW,texH) * drawScale   (pinned to the brain-texel crop)
   overlay frame ping-pongs 0..N-1..0
 
+A `triggerAvgSeconds` overlay rests on frame 0 in game and plays this same cycle only
+now and then; the preview sweeps its whole cycle regardless, because the point here is
+to inspect the ARTWORK, not the timing. Phase 0 IS its resting pose, so the "static" and
+"phase 0.0" tiles of the contact sheet should be near-identical.
+
 Outputs (gitignored): tools/brainanim/_ingame_contact.png (static vs overlay + a
 few animated phases) and tools/brainanim/_ingame.gif (the boss animating on space).
 

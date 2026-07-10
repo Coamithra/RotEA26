@@ -19,6 +19,12 @@
 // smooth. Advancing on Draw time (not Update) keeps it cosmetic — unaffected by
 // hit-stop, like the metal sheen.
 //
+// A patch with `triggerAvgSeconds` set does NOT loop: it rests on frame 0 (the
+// untouched crop, so it reads as the static art) and plays ONE ping-pong cycle each
+// time a chance-per-tick roll fires — on average once per that many seconds. That's
+// the eye: a lidded eye that opens, looks around and closes now and then is a
+// punctuation mark; the same motion on repeat is wallpaper.
+//
 // A missing/broken manifest, or a sheet that won't load, just draws nothing — the
 // boss falls back to its static self. Built by tools/brainanim/build_brain_overlays.py.
 // ---------------------------------------------------------------------------
@@ -49,6 +55,10 @@ internal sealed class BrainBossOverlays
         public bool PingPong;
         public SpriteBlendMode Blend;
         public float Clock;   // seconds of real (draw) time
+        // > 0 => triggered: rest on frame 0, play one cycle every ~this many seconds.
+        public float TriggerAvgSeconds;
+        public float CycleSeconds;   // length of one full playthrough at Fps
+        public bool Playing;         // triggered patches only
     }
 
     private readonly List<Overlay> _overlays = new List<Overlay>();
@@ -59,7 +69,10 @@ internal sealed class BrainBossOverlays
     public void Reset()
     {
         foreach (Overlay ov in _overlays)
+        {
             ov.Clock = 0f;
+            ov.Playing = false;
+        }
     }
 
     // Sheets are loaded through the shared ContentManager (which caches by asset name and
@@ -130,8 +143,21 @@ internal sealed class BrainBossOverlays
             CellH = Math.Max(1, GetInt(e, "cellH", 1)),
             PingPong = !e.TryGetProperty("pingpong", out JsonElement pp) || pp.ValueKind != JsonValueKind.False,
             Blend = ParseBlend(e),
+            TriggerAvgSeconds = Math.Max(0f, GetFloat(e, "triggerAvgSeconds", 0f)),
         };
+        ov.CycleSeconds = CycleLength(ov);
+        // A patch that can't animate (one frame / no fps) has nothing to trigger; leaving
+        // it "triggered" would just roll dice every frame to show frame 0 either way.
+        if (ov.CycleSeconds <= 0f)
+            ov.TriggerAvgSeconds = 0f;
         _overlays.Add(ov);
+    }
+
+    private static float CycleLength(Overlay ov)
+    {
+        if (ov.Frames <= 1 || ov.Fps <= 0f)
+            return 0f;
+        return (ov.PingPong ? 2f * (ov.Frames - 1) : ov.Frames) / ov.Fps;
     }
 
     /// <summary>
@@ -154,7 +180,7 @@ internal sealed class BrainBossOverlays
         SpriteBlendMode savedBlend = sb.BlendMode;
         foreach (Overlay ov in _overlays)
         {
-            ov.Clock += dt;
+            AdvanceClock(ov, dt, gameTime);
             FramePair(ov, out int f0, out int f1, out float frac);
             Rectangle r0 = CellRect(ov, f0);
             Rectangle r1 = CellRect(ov, f1);
@@ -184,6 +210,31 @@ internal sealed class BrainBossOverlays
             }
         }
         sb.BlendMode = savedBlend;
+    }
+
+    // Continuous patches just accumulate draw time. A TRIGGERED patch sits at clock 0
+    // (frame 0 = the untouched crop) and rolls RandomHelper's chance-per-tick each frame;
+    // when it fires, one full cycle plays out and the clock snaps back to rest. The roll
+    // is skipped mid-cycle, so the average gap between animations is TriggerAvgSeconds.
+    private static void AdvanceClock(Overlay ov, float dt, GameTime gameTime)
+    {
+        if (ov.TriggerAvgSeconds <= 0f)
+        {
+            ov.Clock += dt;
+            return;
+        }
+        if (!ov.Playing)
+        {
+            if (RandomHelper.RandomFromAverage(1f / ov.TriggerAvgSeconds, gameTime))
+                ov.Playing = true;
+            return;
+        }
+        ov.Clock += dt;
+        if (ov.Clock >= ov.CycleSeconds)
+        {
+            ov.Clock = 0f;
+            ov.Playing = false;
+        }
     }
 
     // Ping-pong (0..N-1..0) triangle so the loop is seamless (no hard cut back to frame 0).

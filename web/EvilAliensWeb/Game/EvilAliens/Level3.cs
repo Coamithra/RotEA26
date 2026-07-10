@@ -82,6 +82,14 @@ internal class Level3 : GameScene
 			PopulateWallsOnly();
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.WallPopTest)
+		{
+			// DEBUG (?level=Level3&wallpoptest): chain ten SMALL (~2-screen) wall sections and drop
+			// the scroll to ~10% once the 2nd loads, so the entry pop is slow + unmistakable. Pair
+			// with ?invuln (and ?walltrace for numbers).
+			PopulateWallPopTest();
+			return;
+		}
 		if (EvilAliensWeb.Compat.DebugFlags.BrainBoss)
 		{
 			// DEBUG (?brainboss): skip Level 3's whole wave sequence and drop straight into the
@@ -267,11 +275,22 @@ internal class Level3 : GameScene
 		waitEvent.OnFinished += speedup;
 		// 1 = the dense maze (most tower-like), 0 = tall sparse pillars, 3 = big diagonal slabs.
 		int[] variations = new int[3] { 1, 0, 3 };
+		// Cycle the alien-base FLOOR through all six variants as the sections scroll, so the tower fog
+		// (which tracks the live floor colour via oracle.AlienBaseFloorColor) can be watched changing
+		// without playing the whole level. Same handlers the real Level 3 uses; the initial floor is
+		// SetAlienBase (set in Populate), then one swap per section.
+		GameEvent.GameEventMessage[] floorSwaps = { swapBG1, swapBG2, swapBG3, swapBG4, swapBG5 };
+		int section = 0;
 		for (int cycle = 0; cycle < 2; cycle++)
 		{
 			for (int i = 0; i < variations.Length; i++)
 			{
 				Walls walls = new Walls(base.Game, variations[i]);
+				if (section < floorSwaps.Length)
+				{
+					walls.OnFinished += floorSwaps[section];
+				}
+				section++;
 				eventList.AddEvent(walls, halting: true);
 				eventList.SetLastEventAsCheckPoint();
 				eventList.AddHalt();
@@ -281,6 +300,40 @@ internal class Level3 : GameScene
 		eventList.AddEvent(victoryEvent, halting: true);
 		eventList.AddHalt();
 		victoryEvent.OnFinished += Victory;
+	}
+
+	// DEBUG (?wallpoptest): chain ten SMALL (~2-screen) wall sections (poptest0..9.txt), each a
+	// distinct pattern, halting so they play strictly one after another. Section 0 runs at normal
+	// speed; the instant it ends (section 1 loads at the top) the scroll drops to ~10% via
+	// popTestSlow, so every later section's ENTRY is slow and unmistakable -- making it obvious
+	// whether the "pop" tracks a block's screen POSITION (a geometry/cull effect) or is a one-off
+	// load/cache hitch (which would happen once, not on every slow entry).
+	private void PopulateWallPopTest()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		waitEvent.OnFinished += speedup;   // section 0 at normal speed
+		for (int i = 0; i < 10; i++)
+		{
+			Walls walls = new Walls(base.Game, "poptest" + i + ".txt");
+			if (i == 0)
+			{
+				walls.OnFinished += popTestSlow;   // drop to 10% as section 1 enters
+			}
+			eventList.AddEvent(walls, halting: true);
+			eventList.SetLastEventAsCheckPoint();
+			eventList.AddHalt();
+		}
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
+	}
+
+	private void popTestSlow(GameEvent sender)
+	{
+		// 10% of the normal wall-section speed (speedup uses 4.3 x difficulty).
+		Background.SetSpeed(new Vector2(0f, 0.43f * Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty)) / 16.666666f);
 	}
 
 	private void returnlives(GameEvent sender)

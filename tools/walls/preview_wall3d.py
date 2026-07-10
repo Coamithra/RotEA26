@@ -33,8 +33,8 @@ NEAR_FRAC = 0.9
 BANDS_NOTE = "bands only quantise the bottom dissolve; geometry, UV and fog are exact here"
 
 SIDE_DARK = 0.7
-FOG_AMOUNT = 0.1
-FOG_COLOR = np.array([158.0, 199.0, 242.0])
+FOG_AMOUNT = 0.55
+FOG_COLOR = np.array([46.0, 125.0, 201.0])
 DISSOLVE = 0.18
 FACE_LIGHT = 0.35
 FACE_ANGLE = 140.0

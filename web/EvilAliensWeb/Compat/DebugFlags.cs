@@ -357,6 +357,18 @@ namespace EvilAliensWeb.Compat
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
 		public static bool WallsOnly { get; private set; }
 
+		// TEMP diagnostic (?walltrace): Wall.Draw logs, per wall instance, the first frame its top
+		// faces appear vs the first frame its shafts appear (with Position.Y), plus a coarse sample of
+		// (posY, topFaces, shaftQuads) as it enters -- to pin down the reported "top slides in before
+		// its pillar" at a segment start. Out of Active; remove once diagnosed.
+		public static bool WallTrace { get; private set; }
+
+		// TEMP diagnostic (?wallpoptest): boot Level3 into a chain of ten SMALL (~2-screen) wall
+		// sections from Content/Levels/poptest0..9.txt, and drop the scroll speed to ~10% once the
+		// SECOND section loads, so the entry "pop" is slow and unmistakable and it's obvious whether
+		// it tracks position (geometry) or a one-off load/cache hitch. See Level3.PopulateWallPopTest.
+		public static bool WallPopTest { get; private set; }
+
 		// Laser showcase scene (Compat/LazerShowcaseScene.cs): the chargeup swarm + a full-grown
 		// beam side by side on the starfield, ANIMATING (unlike the frozen ?harness/?bulletshot),
 		// so the tendrils / chargeup / caps can be watched while tuning. Opt in with ?lazershot;
@@ -804,6 +816,12 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "wallsonly":
 					WallsOnly = IsOn(val);
+					break;
+				case "walltrace":
+					WallTrace = IsOn(val);
+					break;
+				case "wallpoptest":
+					WallPopTest = IsOn(val);
 					break;
 				case "wall3dbands":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var w3b) && w3b >= 1 && w3b <= 64)

@@ -1076,9 +1076,29 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   `Walls.wall_OnDeath` -> `Terminate()`, i.e. the level's NEXT EVENT**, by the ~154 design px of extra
   scroll (~0.6s at Level 3's `4.3/16.667` px/ms wall-section speed). Intended: the section isn't over until
   its towers have gone.
+  **Spawning is ADVANCED above the top edge (`Wall.EntryLead`) -- the mirror image.** The flat-era spawn
+  (`Position.Y = -rowH*height`) only hides the TOP faces; a block's projected base leads its cap by
+  `VanishY*(1/depth - 1)` (~154.5px) of scroll, so a grid with blocks in its bottom row(s) materialised
+  its towers ~100-155px INTO the screen on the spawn frame (the "towers pop in as the section scrolls in"
+  bug -- only bottom-row-occupied grids, hence "sometimes"; variation 3's lone corner block was the
+  reliable single-pillar repro). `Setup`/`SetupFromFile` now spawn `EntryLead()` higher, so towers enter
+  base-first through the edge; 0 with `?walltowers=0`, so the flat path spawns exactly as the original.
+  Entry and exit are now symmetric (~0.6s each way at walls-section scroll).
+  **Wall grid files load via `TitleContainer.OpenStream` (`Wall.OpenLevelGrid`, `Content/levels/...`),
+  never `new StreamReader(path)`** -- a plain file read hits the WASM in-memory FS, which never contains
+  wwwroot content (it's HTTP-only), so it throws on web. Consequence fixed in passing: variation 2
+  (`level3.txt`, used by **OwnLevel**) had silently fallen back to its hard-coded 5x19 grid since the
+  port began; it now renders the real committed `Content/levels/level3.txt`.
+  **Entry diagnostics:** `?walltrace` logs each wall's spawn / first-shaft / first-top-face (posY +
+  quad counts) and flags any block whose shaft starts or stops drawing while fully mid-screen
+  (`POP IN`/`POP OUT` -- scroll only moves geometry through the edges, so any hit means a cull/spawn
+  assumption broke). `?level=Level3&wallpoptest` chains ten SMALL grid-file sections
+  (`Content/levels/poptest0..9.txt`, `Level3.PopulateWallPopTest`) and drops the scroll to ~10% once the
+  second loads, so every entry is slow and unmistakable. Both are opt-in and OUT of `DebugFlags.Active`.
   **The haze is REAL DISTANCE FOG** (`BasicEffect.FogEnabled`, keyed on eye distance `e/d`; `?wallfog`
-  baked **0.1**, because a LERP bites far harder than the old multiplicative tint did at the same
-  number), which is
+  baked **0.55**, fogging toward the measured FLOOR colour RGB(46,125,201) -- fog LERPS, so the old
+  bright `DefaultFogColor` overshot and LIT the base up; the floor colour is darker than the shaft so
+  the base recedes into it), which is
   something only real geometry can have: a sprite `Color` tint MULTIPLIES, so the slice path could only
   ever scale the wall texture down -- never paint it UP to a haze colour -- and had to lean on a bright
   `DefaultFogColor` plus the alpha dissolve to sell the fade. Fog LERPS toward the colour, so the base

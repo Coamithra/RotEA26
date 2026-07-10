@@ -48,23 +48,25 @@ internal class Wall : AlienDrawableGameComponent
 	// ~8 design px at a screen corner for lift 0.02. Keep it small, and check with ?hitboxes.
 	internal const float DefaultTopLift = 0f;
 
-	// How far the shaft is fogged at its base (1 = fully the haze colour, 0 = fog off). Dialed to a
-	// light 0.1: real fog LERPS, so it bites far harder than the old multiplicative tint did at the
-	// same number -- a full 1 washes the towers out to the haze colour well before the base.
-	internal const float DefaultFog = 0.1f;
+	// How far the shaft is fogged at its base (1 = fully the floor colour, 0 = fog off). Now that the
+	// haze colour IS the floor (a mid, saturated blue below the shaft's brightness, not the old
+	// near-white that lit the base UP), a strong fade darkens the base into the floor as intended.
+	internal const float DefaultFog = 0.55f;
 
-	// The haze colour a shaft dissolves into at its base.
+	// FALLBACK haze colour. In play the shaft actually fogs toward the LIVE floor colour
+	// (`oracle.AlienBaseFloorColor`, which tracks the five Level-3 floor switches); this is only used
+	// for the first floor and off-level (e.g. the harness). It is the initial floor: 756 plus its two
+	// additive 2331-v5 fog layers, measured RGB(46,125,201).
 	//
-	// This is now REAL DISTANCE FOG (BasicEffect.FogEnabled), not a tint, and that changes what the
-	// colour means. A sprite Color tint MULTIPLIES, so the slice path could only ever darken or
-	// scale the wall texture -- it could never paint a slice up TO a haze colour, which is why it
-	// needed a high-value blue-white sitting ABOVE DefaultSideDark and leaned on the alpha dissolve
-	// to sell the fade. Fog LERPS toward this colour, so the shaft genuinely converges on it.
-	//
-	// The alien-base floor composites bright blue (756 plus its two additive 2331-v5 layers averages
-	// RGB(46,125,199)), so the shaft brightens and desaturates as it descends and then alpha-
-	// dissolves into that floor.
-	private static readonly Color DefaultFogColor = new Color(158, 199, 242);
+	// This is now REAL DISTANCE FOG (BasicEffect.FogEnabled), not a tint, and that inverts what the
+	// colour has to be. A sprite Color tint MULTIPLIES -- it can only ever scale the wall texture DOWN,
+	// never paint it up to a colour -- so the slice path needed a high-value blue-white (158,199,242)
+	// sitting ABOVE DefaultSideDark just to lift the base toward the haze, and leaned on the alpha
+	// dissolve to finish the fade. Fog LERPS, so that same bright colour now overshoots the other way
+	// and makes the base BRIGHTER than the shaft (the "bottom lightens, looks off" bug). Fogging toward
+	// the real floor colour instead -- darker and more saturated than the shaft's lit mid-body -- makes
+	// the base recede into the floor it melts into, which is what a shaft dropping into shadow does.
+	private static readonly Color DefaultFogColor = new Color(46, 125, 201);
 
 	// Brightness of the shaft at its cap (1 = as bright as the top face). Sides are darker than the
 	// lit top, as they would be under a top-down light. Dialed up from the slice path's 0.55 now that
@@ -163,6 +165,18 @@ internal class Wall : AlienDrawableGameComponent
 
 	private bool[,] blocks;
 
+	// TEMP (?walltrace) per-instance diagnostic state; see DebugFlags.WallTrace.
+	private static int traceIdCounter;
+	private int traceId = -1;
+	private int traceFrame;
+	private bool traceLoggedShaft;
+	private bool traceLoggedTop;
+	private int traceShaftQuads;
+
+	// TEMP (?walltrace): last frame's visible-block set, for the mid-screen pop detector.
+	// Non-null only while tracing (allocated in Setup/SetupFromFile).
+	private System.Collections.Generic.HashSet<int> traceShaftPrev;
+
 	private Texture2D line;
 
 	private CollisionLevelMap collisionMap;
@@ -219,6 +233,14 @@ internal class Wall : AlienDrawableGameComponent
 		//IL_027e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0283: Unknown result type (might be due to invalid IL or missing references)
 		collisionMap = null;
+		traceId = -1;
+		traceFrame = 0;
+		traceLoggedShaft = false;
+		traceLoggedTop = false;
+		traceShaftQuads = 0;
+		// Empty (not null) so anything visible on the very first frame logs as a POP IN.
+		traceShaftPrev = EvilAliensWeb.Compat.DebugFlags.WallTrace
+			? new System.Collections.Generic.HashSet<int>() : null;
 		switch (variation)
 		{
 		case 0:
@@ -830,7 +852,7 @@ internal class Wall : AlienDrawableGameComponent
 			{
 				List<string> list = new List<string>();
 				int num;
-				using (StreamReader streamReader = new StreamReader(General.Path + "Levels/level3.txt"))
+				using (StreamReader streamReader = OpenLevelGrid("level3.txt"))
 				{
 					string text = streamReader.ReadLine();
 					num = Convert.ToInt32(text.Remove(0, 6));
@@ -1106,10 +1128,83 @@ internal class Wall : AlienDrawableGameComponent
 		}
 		scale = 800f / (float)(texture.Width * width);
 		float num3 = (float)texture.Height * scale;
-		base.Position = new Vector2(0f, (0f - num3) * (float)height);
+		base.Position = new Vector2(0f, (0f - num3) * (float)height - EntryLead());
 		base.Direction = (float)Math.PI / 2f;
 		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 		base.Speed = (backgroundSpeed).Length() * 1f;
+	}
+
+	// How far ABOVE the flat spawn point (-rowH*height, bottom row's top face at the screen edge)
+	// the wall must start so NOTHING is visible on its first frame. A block's projected base leads
+	// its cap by VanishY*(1/depth - 1) px of scroll -- the same geometry that defers DeathY past
+	// 600 on the way out -- so a grid with blocks in its bottom row would otherwise materialise its
+	// shafts ~150px INTO the screen at spawn (the "towers pop in as the section starts" bug;
+	// grids with empty bottom rows entered smoothly, which is why it only happened sometimes).
+	// 0 with the towers off, so ?walltowers=0 spawns exactly as the flat original.
+	private static float EntryLead()
+	{
+		if (!EvilAliensWeb.Compat.DebugFlags.WallTowers)
+		{
+			return 0f;
+		}
+		float depth = MathHelper.Clamp(EvilAliensWeb.Compat.DebugFlags.WallDepth ?? DefaultDepth, 0.05f, 1f);
+		return VanishY * (1f / depth - 1f);
+	}
+
+	// Bundled level grids live in wwwroot/Content/levels (lowercase under Content/, the live-host
+	// case-sensitivity rule). A plain new StreamReader(path) reads the WASM in-memory FS, which
+	// never contains wwwroot content (it's only served over HTTP) -- TitleContainer.OpenStream is
+	// the web-safe read, same as LandedOffsets/BrainBossOverlays.
+	private static StreamReader OpenLevelGrid(string file)
+	{
+		return new StreamReader(TitleContainer.OpenStream(General.Path + "levels/" + file));
+	}
+
+	// Debug (?wallpoptest): build a wall from an arbitrary grid file under Content/levels, same
+	// format as level3.txt (width=N header, X/space rows, an `end` line). Used by
+	// Level3.PopulateWallPopTest to chain several SMALL sections so the entry "pop" can be watched
+	// in isolation. No difficulty halving (the poptest grids are already sized for ~2 screens).
+	public void SetupFromFile(string relPath)
+	{
+		collisionMap = null;
+		traceId = -1;
+		traceFrame = 0;
+		traceLoggedShaft = false;
+		traceLoggedTop = false;
+		traceShaftQuads = 0;
+		// Empty (not null) so anything visible on the very first frame logs as a POP IN.
+		traceShaftPrev = EvilAliensWeb.Compat.DebugFlags.WallTrace
+			? new System.Collections.Generic.HashSet<int>() : null;
+		System.Collections.Generic.List<string> list = new System.Collections.Generic.List<string>();
+		int num;
+		using (StreamReader streamReader = OpenLevelGrid(relPath))
+		{
+			string text = streamReader.ReadLine();
+			num = Convert.ToInt32(text.Remove(0, 6));
+			while (true)
+			{
+				text = streamReader.ReadLine();
+				if (text != null && !text.Contains("end"))
+				{
+					list.Add(text);
+					continue;
+				}
+				break;
+			}
+		}
+		blocks = new bool[list.Count, num];
+		for (int i = 0; i < list.Count; i++)
+		{
+			for (int j = 0; j < num; j++)
+			{
+				blocks[i, j] = j < list[i].Length && list[i][j] != ' ';
+			}
+		}
+		scale = 800f / (float)(texture.Width * width);
+		float rowH = (float)texture.Height * scale;
+		base.Position = new Vector2(0f, (0f - rowH) * (float)height - EntryLead());
+		base.Direction = (float)Math.PI / 2f;
+		base.Speed = oracle.BackgroundSpeed.Length();
 	}
 
 	public override void Initialize()
@@ -1223,7 +1318,10 @@ internal class Wall : AlienDrawableGameComponent
 		float sideDark = EvilAliensWeb.Compat.DebugFlags.WallSideDark ?? DefaultSideDark;
 		float faceLight = EvilAliensWeb.Compat.DebugFlags.WallFaceLight ?? DefaultFaceLight;
 		float faceAngle = MathHelper.ToRadians(EvilAliensWeb.Compat.DebugFlags.WallFaceAngle ?? DefaultFaceAngle);
-		Color fogColorFlag = EvilAliensWeb.Compat.DebugFlags.WallFogColor ?? DefaultFogColor;
+		// Haze colour: an explicit ?wallfogcolor wins; otherwise the LIVE alien-base floor colour, so a
+		// shaft's base recedes into whatever floor is currently scrolling under it (it switches five
+		// times across Level 3); DefaultFogColor is only the fallback for the first floor / off-level.
+		Color fogColorFlag = EvilAliensWeb.Compat.DebugFlags.WallFogColor ?? oracle.AlienBaseFloorColor ?? DefaultFogColor;
 		int bands = EvilAliensWeb.Compat.DebugFlags.Wall3DBands ?? DefaultBands;
 		float blockW = (float)texture.Width * scale;
 		float blockH = (float)texture.Height * scale;
@@ -1246,8 +1344,13 @@ internal class Wall : AlienDrawableGameComponent
 				}
 			}
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.WallTrace)
+		{
+			TraceShaftSetDiff(depth, topD, blockH);
+		}
 		if (towerOrder.Count == 0)
 		{
+			traceShaftQuads = 0;
 			return 0;
 		}
 		int w = width;
@@ -1326,6 +1429,7 @@ internal class Wall : AlienDrawableGameComponent
 		}
 		if (quads == 0)
 		{
+			traceShaftQuads = 0;
 			return towerOrder.Count;
 		}
 
@@ -1363,9 +1467,55 @@ internal class Wall : AlienDrawableGameComponent
 		// The wrapper owns the shared BasicEffect + the batch, and hands the device back after the
 		// one buffered draw. BlendMode is AlphaBlend here (set at the top of Draw) -> straight alpha.
 		// Fog touches rgb only, so the bottom dissolve carried in vertex alpha survives it.
+		traceShaftQuads = quads;
 		spriteBatch.DrawGeometry3D(texture, towerVerts, nv, towerIndices, quads * 2, view, projection,
 			fogOn, fogColorFlag.ToVector3(), fogStart, fogEnd);
 		return towerOrder.Count;
+	}
+
+	// TEMP (?walltrace): the mid-screen pop detector. The wall only ever scrolls, so a block's
+	// shaft should START drawing while it straddles a screen edge and STOP the same way -- a
+	// visible-set transition whose whole shaft interval is well inside the screen is a POP the eye
+	// can see, and means a cull/spawn assumption is broken. Compares this frame's row-culled block
+	// set against last frame's and logs any mid-screen transition with the exact geometry.
+	private void TraceShaftSetDiff(float depth, float topD, float blockH)
+	{
+		var cur = new System.Collections.Generic.HashSet<int>(towerOrder);
+		if (traceShaftPrev != null)
+		{
+			foreach (int packed in cur)
+			{
+				if (!traceShaftPrev.Contains(packed))
+				{
+					TraceShaftTransition("POP IN", packed, depth, topD, blockH);
+				}
+			}
+			foreach (int packed in traceShaftPrev)
+			{
+				if (!cur.Contains(packed))
+				{
+					TraceShaftTransition("POP OUT", packed, depth, topD, blockH);
+				}
+			}
+		}
+		traceShaftPrev = cur;
+	}
+
+	private void TraceShaftTransition(string kind, int packed, float depth, float topD, float blockH)
+	{
+		int i = packed / width;
+		int j = packed % width;
+		float topY = blockH * (float)i + base.Position.Y;
+		float baseY = VanishY + (topY - VanishY) * depth;
+		float capY = (topD == 1f) ? topY : VanishY + (topY - VanishY) * topD;
+		float lo = Math.Min(capY, baseY);
+		float hi = Math.Max(capY + blockH * topD, baseY + blockH * depth);
+		// Entering/leaving through an edge is the normal, smooth case -- only log when the whole
+		// shaft interval is comfortably inside the screen at the moment it (dis)appears.
+		if (lo > 30f && hi < 570f)
+		{
+			System.Console.WriteLine($"[walltrace] wall #{traceId} {kind} block r{i} c{j} at frame {traceFrame} posY={base.Position.Y:F0} shaftY=[{lo:F0}..{hi:F0}]");
+		}
 	}
 
 	// The painter's key: how far a block's CENTRE is from the vanishing point, squared. Certified
@@ -1529,6 +1679,7 @@ internal class Wall : AlienDrawableGameComponent
 		// texture.Width keeps the line's on-screen length pinned to the (resolution-independent) block
 		// size at any wall-sheet resolution.
 		float lineScale = scale * (float)texture.Width / (float)line.Width;
+		int traceTopFaces = 0;
 		for (int i = 0; i < height; i++)
 		{
 			if (!((float)texture.Height * scale * (float)i + base.Position.Y > (float)(-texture.Height) * scale) || !((float)texture.Height * scale * (float)i + base.Position.Y <= 600f))
@@ -1539,6 +1690,7 @@ internal class Wall : AlienDrawableGameComponent
 			{
 				if (blocks[i, j])
 				{
+					traceTopFaces++;
 					Vector2 val = default(Vector2);
 					val.X = (float)texture.Width * scale * (float)j;
 					val.Y = (float)texture.Height * scale * (float)i;
@@ -1578,6 +1730,33 @@ internal class Wall : AlienDrawableGameComponent
 						spriteBatch.Draw(line, centre, -(float)Math.PI / 2f, capLineScale, center: true, val4);
 					}
 				}
+			}
+		}
+
+		// TEMP (?walltrace): log the first frame this wall's top faces appear vs the first frame its
+		// shafts appear, plus a coarse per-entry sample -- to settle the "top slides in before its
+		// pillar" report with numbers rather than reasoning.
+		if (EvilAliensWeb.Compat.DebugFlags.WallTrace)
+		{
+			if (traceId < 0)
+			{
+				traceId = traceIdCounter++;
+				System.Console.WriteLine($"[walltrace] wall #{traceId} spawned at posY={base.Position.Y:F0} (h={height} w={width})");
+			}
+			traceFrame++;
+			if (!traceLoggedTop && traceTopFaces > 0)
+			{
+				traceLoggedTop = true;
+				System.Console.WriteLine($"[walltrace] wall #{traceId} FIRST TOP FACE at frame {traceFrame} posY={base.Position.Y:F0} (topFaces={traceTopFaces}, shaftQuads={traceShaftQuads})");
+			}
+			if (!traceLoggedShaft && traceShaftQuads > 0)
+			{
+				traceLoggedShaft = true;
+				System.Console.WriteLine($"[walltrace] wall #{traceId} FIRST SHAFT at frame {traceFrame} posY={base.Position.Y:F0} (topFaces={traceTopFaces}, shaftQuads={traceShaftQuads})");
+			}
+			if (traceFrame <= 40 && traceFrame % 8 == 0)
+			{
+				System.Console.WriteLine($"[walltrace] wall #{traceId} f{traceFrame} posY={base.Position.Y:F0} top={traceTopFaces} shaft={traceShaftQuads}");
 			}
 		}
 	}

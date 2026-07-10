@@ -372,21 +372,32 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   (`MousePointer`) now does: `Compat/CursorInterop` → `window.eaCursor.set(mode)` in `index.html` picks
   `menu` (plain arrow — all menus + the intro is OFF there), `hidden` (cursor:none while the scale+rotate
   intro SPRITE plays at the START of a keyboard level), or `reticle` (the aiming reticle IS the OS cursor
-  via `cursor:url(reticle.png)` — ZERO-LAG, no trailing sprite; `HWMouse=true` opts back to the plain
+  via `cursor:url(reticle/<px>.png)` — ZERO-LAG, no trailing sprite; `HWMouse=true` opts back to the plain
   arrow). Driven off `MousePointer.Visible` (GameScene sets it, incl. Tutorial; MenuScene forces it off).
-  **Both reticle images are DRAWN by `tools/cursor/build_cursor.py`, not resampled** — it emits the CSS
-  cursor `wwwroot/reticle.png` (48px, hotspot 24,24) AND the intro sprite `Content/gfx/cursor2.png` (192px
-  = the intro's 4x start size, so its largest frame is 1:1). The old tool tried to upscale the original
-  26px `cursor2.png` with `Image.thumbnail`, which only ever SHRINKS — so the shipped cursor was 26px of
-  art floating in a 48px canvas and the OS cursor came out ~half the size the intro ended at (the "reticle
-  looks small since we upscale the game" bug). **Invariant: in both images the crosshair bars run edge to
-  edge (alpha bbox == full canvas)** — `MousePointer.CssHandoffScale()` sizes the sprite as
-  `CssCursorPx / windowPerDesign / texture.Width`, so padding would shrink it below the cursor, and the
-  hotspot is the image centre. That formula makes the intro land on exactly `CssCursorPx` on-screen px at
-  every window size and is texture-resolution-independent, so re-authoring either image bigger needs no
-  code change — only `CURSOR_PX` must stay in sync with `MousePointer.CssCursorPx` + index.html's hotspot.
-  Verify OFFLINE (an OS cursor never appears in a canvas screenshot): check the two PNGs' bboxes and
-  compare `reticle.png` against `cursor2.png` downscaled to 48px. Fullscreen:
+  **The reticle SIZE-TRACKS THE WINDOW via a LADDER of cursor images.** A CSS cursor is a fixed pixel size
+  and cannot be scaled, but the game letterbox-upscales 800x600 design space to the window — so ONE fixed
+  cursor is correctly sized at exactly one window size and reads tiny on a big monitor. So
+  `tools/cursor/build_cursor.py` emits `wwwroot/reticle/<px>.png` for `SIZES = range(24, 97, 8)` and
+  `MousePointer.ChooseCursorPx()` picks the rung nearest `ReticleDesignPx (30) * windowPerDesign`, clamped
+  to [24,96] (browsers ignore a cursor image past ~128px). `CursorInterop.SetReticle(px)` →
+  `eaCursor.set('reticle', px)` builds `url(reticle/<px>.png) px/2 px/2, crosshair`. `Update` re-picks
+  every tick while handed off, so a **window resize swaps the rung**. Tune by eye with
+  **`?reticlesize=<designpx>`** (`DebugFlags.ReticleSize`; null => the baked 30, so a shipped build is
+  unchanged; kept OUT of `Active`), then bake into `MousePointer.DefaultReticleDesignPx`.
+  **Every image is DRAWN, never resampled** — the reticle is four axis-aligned bars, so each rung plus the
+  intro sprite `Content/gfx/cursor2.png` (384px = 4x the largest rung, i.e. the intro's start size) is
+  rasterised at its native resolution. (The old tool tried to upscale the original 26px `cursor2.png` with
+  `Image.thumbnail`, which only ever SHRINKS — so the shipped `reticle.png` was 26px of art floating in a
+  48px canvas and the OS cursor came out ~half the size the intro ended at. That was the "reticle looks
+  small since we upscale the game" bug.) **Invariant: in every image the bars run edge to edge (alpha bbox
+  == full canvas)** — `MousePointer.CssHandoffScale()` sizes the intro sprite as
+  `ChooseCursorPx() / windowPerDesign / texture.Width`, so padding would shrink it below the cursor, and
+  the hotspot is the image centre. Deriving the end scale from the SAME `ChooseCursorPx` is what makes the
+  sprite→cursor handoff never pop at any window size, and it's texture-resolution-independent (re-author
+  any image bigger with no code change; only the ladder's step/min/max need stay in sync with the tool's
+  `SIZES`). Verify OFFLINE — an OS cursor never appears in a canvas screenshot: check each PNG's bbox, and
+  simulate `ChooseCursorPx`/`CssHandoffScale` across window sizes (the intro's on-screen size must equal
+  the chosen rung exactly). Fullscreen:
   the browser reserves Esc to exit and it can't be preventDefault'd, but the same Esc ALSO reaches KNI and
   stepped back a menu — so `index.html`'s `fullscreenchange`→exit calls `eaSuppressEsc` →
   `DebugInput.SuppressEsc`/`EscSuppressActive`, which masks the raw Esc in `InputHandler` for a short

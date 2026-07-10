@@ -1391,7 +1391,12 @@
             if (!/[?&]wallsonly\b/i.test(q) && !/[?&]walltune\b/i.test(q)) { return; }
 
             // Seed the sliders from any ?wall* flags already on the URL, else the in-game baked
-            // defaults (see the Default* consts in Game/EvilAliens/Wall.cs).
+            // defaults. These literals MIRROR the Default* consts in Game/EvilAliens/Wall.cs, and
+            // are pushed into the game immediately -- which turns each null override ("use the
+            // baked default") into an explicit value. So if you re-bake a Default* const there,
+            // update the matching literal here too, or a ?wallsonly / ?walltune boot renders with
+            // the stale number while a normal boot uses the new one. (Same duplication as the
+            // eaLazer / eaSpider panels.)
             function num(name, def)
             {
                 var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);

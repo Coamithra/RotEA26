@@ -25,6 +25,10 @@ internal class Wall : AlienDrawableGameComponent
 	// Shafts are drawn as stacked sprite slices (GTA1 voxel-slice style), NOT real 3D quads --
 	// per-quad DrawUserIndexedPrimitives forces a batch flush and is brutal on WebGL/WASM (the
 	// Quad.cs lesson). Everything below stays inside the one existing SpriteBatch.
+	//
+	// The Default* values below are MIRRORED as literals by the eaWalls slider panel in
+	// wwwroot/index.html (it seeds its sliders from them, then pushes them in). Re-bake one here
+	// and update the panel's literal too, or ?wallsonly / ?walltune will render the stale value.
 	private const float VanishX = 400f;
 
 	private const float VanishY = 300f;
@@ -1181,13 +1185,14 @@ internal class Wall : AlienDrawableGameComponent
 		// the wall's scroll speed (Wall.Update sets Speed = |oracle.BackgroundSpeed|, unmodified),
 		// so scaling it by `speed` yields exactly the screen motion of a background layer with
 		// that scrollspeedmodifier -- no persistent scroll state needed.
-		float tile = (float)fog.Width;
-		float phaseY = MyMath.Mod(base.Position.Y * speed, tile);
+		float tileX = (float)fog.Width;
+		float tileY = (float)fog.Height;
+		float phaseY = MyMath.Mod(base.Position.Y * speed, tileY);
 		Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
-		for (float y = phaseY - tile; y < 600f; y += tile)
+		for (float y = phaseY - tileY; y < 600f; y += tileY)
 		{
-			for (float x = 0f; x < 800f; x += tile)
+			for (float x = 0f; x < 800f; x += tileX)
 			{
 				spriteBatch.Draw(fog, new Vector2(x, y), 0f, 1f, center: false, tint);
 			}

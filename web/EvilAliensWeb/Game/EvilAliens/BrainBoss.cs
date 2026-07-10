@@ -338,7 +338,7 @@ internal class BrainBoss : KillableAlien
 				bloodExplosion5.Setup(base.Position, 7f, 3f, 0f, base.Direction);
 				collection.Add((GameComponent)(object)bloodExplosion5);
 				state = BossState.smallwaitafterasplosion;
-				stateTimer.Duration = 700f;
+				stateTimer.Duration = 300f;   // a really quick fadeout (see the state below)
 				stateTimer.Reset();
 				stateTimer.Start();
 				aura.Free();
@@ -346,7 +346,13 @@ internal class BrainBoss : KillableAlien
 			break;
 		}
 		case BossState.smallwaitafterasplosion:
-			scale = MyMath.PowerCurve(0f, 1f, 0.5f, stateTimer.Normalized);
+			// Quick ALPHA fadeout, not a scale-down. Brain + cables are ONE sprite now (were
+			// two), so shrinking toward 0 bares the sprite's hard rectangular edges; fading
+			// alpha dissolves cleanly. `color` is red from the killing hit (RGB kept, only A
+			// driven); the overlays draw with this same `color`, so they fade in lockstep, and
+			// `scale` keeps pulsating (set above the switch). Brief and buried under the
+			// death explosions anyway.
+			color = new Color(color.R, color.G, color.B, (byte)MathHelper.Clamp((1f - stateTimer.Normalized) * 255f, 0f, 255f));
 			if (stateTimer.Finished)
 			{
 				Die();

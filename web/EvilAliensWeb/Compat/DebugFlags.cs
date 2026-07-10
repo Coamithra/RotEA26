@@ -317,6 +317,25 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WallWispSpeed { get; private set; }
 
+		// Spike (Trello a66fc73e, plans/spike-wall3d.md): draw the tower SIDE FACES as real 3D
+		// geometry in one batched DrawUserIndexedPrimitives instead of the stacked sprite slices.
+		//   ?wall3d              opt in. Default off, so a shipped build keeps the slice path.
+		//   ?wall3dbands=<n>     vertical strips a side face is tessellated into (default 4). The
+		//                        fog lerp + the bottom dissolve are per-vertex colour, so the bands
+		//                        are what resolve their curvature; 1 gives a straight linear fade.
+		// Kept OUT of Active -- a pure render-path toggle, like MetalScore / SlowmoTrail.
+		public static bool Wall3D { get; private set; }
+
+		public static int? Wall3DBands { get; private set; }
+
+		// Runtime toggle for the 3D tower pass (Compat/DebugInput.Wall3d -> eaWall3d() in
+		// index.html). Wall.Draw re-reads it every frame, so the two paths can be A/B'd on the
+		// SAME frozen frame -- which is the only way to diff them, since the wall scrolls.
+		internal static void SetWall3D(bool on)
+		{
+			Wall3D = on;
+		}
+
 		// Runtime setter for the live wall-tower slider panel (Compat/DebugInput.SetWalls ->
 		// eaWalls() in index.html, shown on ?level=Level3&wallsonly / a bare ?walltune). Wall.Draw
 		// re-reads every knob each frame, so a drag re-projects the towers on the next Draw. Same
@@ -777,6 +796,15 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "wallsonly":
 					WallsOnly = IsOn(val);
+					break;
+				case "wall3d":
+					Wall3D = IsOn(val);
+					break;
+				case "wall3dbands":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var w3b) && w3b >= 1 && w3b <= 64)
+					{
+						Wall3DBands = w3b;
+					}
 					break;
 				case "walldepth":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wd) && wd > 0f && wd < 1f)

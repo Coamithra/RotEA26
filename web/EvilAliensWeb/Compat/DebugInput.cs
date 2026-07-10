@@ -152,6 +152,18 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
+		// JS bridge for the ?wall3d spike (eaWall3d in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugWall3d', on). Swaps the Level-3 tower
+		// shafts between the sprite-slice path and the batched 3D pass at runtime. Live
+		// toggling is what makes the two comparable: freeze the scroll with eaHitstop(20000),
+		// then flip this and diff gl.readPixels -- the top faces must come back identical.
+		[JSInvokable("debugWall3d")]
+		public static void Wall3d(bool on)
+		{
+			DebugFlags.SetWall3D(on);
+			Console.WriteLine("[debug] eaWall3d " + (on ? "ON" : "OFF"));
+		}
+
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
 		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull

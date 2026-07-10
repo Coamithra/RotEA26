@@ -133,6 +133,15 @@
             catch (e) { console.warn('[debug] eaHitboxes failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: swap the Level-3 tower shafts between the sprite-slice path and the batched 3D
+        // pass (the ?wall3d spike). eaWall3d() / eaWall3d(true) for 3D, eaWall3d(false) for slices.
+        // Toggling live is how the two are compared: eaHitstop(20000) to freeze the scroll, then
+        // flip this and diff gl.readPixels -- the top faces must be identical either way.
+        window.eaWall3d = (on) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugWall3d', on !== false); }
+            catch (e) { console.warn('[debug] eaWall3d failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
         // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
         // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>

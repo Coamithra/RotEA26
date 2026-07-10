@@ -41,6 +41,20 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// it. Loaded in LoadContent; null => DrawMetalString degrades to a plain DrawString.
 	private Effect metalEffect;
 
+	// The one 3D effect (see DrawGeometry3D — the Level-3 tower shafts). Owned here for the same
+	// reason metalEffect is: this class is the single choke point that owns the sprite batch and
+	// every shared Effect, so a call site never constructs (and re-links) its own. That matters
+	// here: constructing a BasicEffect re-reads and re-links its precompiled shader, and Level 3
+	// spawns a fresh Wall per section, so a per-caller effect would pay that on every section.
+	// Created once in LoadContent, disposed in UnloadContent; null => DrawGeometry3D no-ops, the
+	// same graceful degrade metalEffect gets on a partial deploy.
+	//
+	// BasicEffect is real on BlazorGL — KNI embeds Resources.BasicEffect.fxo in the platform
+	// assembly — and TextureEnabled + VertexColorEnabled IS a textured + vertex-colour shader, so
+	// no bespoke .fx (and no hand-written vertex shader, which this project has never needed) has
+	// to be compiled for it.
+	private BasicEffect basicEffect;
+
 	// Cached metal.fx EffectParameter handles for the params that VARY per call (Time / the two
 	// glyph-band insets / the used-subrect UV). The invariant params (GradTop/Mid/Bot, Glint*,
 	// Sweep*) are identical for every call and are set ONCE in LoadContent, so SetMetalParams
@@ -258,6 +272,46 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
 		spriteBatch.Draw(texture, dest, color);
 		spriteBatch.End();
+	}
+
+	// Draw indexed 3D geometry through the shared BasicEffect, in ONE buffered call, inside the
+	// scene the sprites are drawing into (the Level-3 tower shafts — Wall.DrawTowerShafts3D).
+	//
+	// This is NOT the Quad.cs mistake. That class's comment describes the ORIGINAL beam pushing
+	// three textured quads per laser via DrawUserIndexedPrimitives, each forcing a leading
+	// SpriteBatch flush — a batching pathology, not a verdict on 3D throughput. BlazorGL creates
+	// and destroys a transient vertex + index buffer per CALL, so the overhead is per-call, not
+	// per-vertex: one call for a whole wall is exactly the shape that path wants.
+	//
+	// `verts`/`indices` may be grow-only scratch arrays larger than the used range; only
+	// `vertexCount` vertices and `primitiveCount` triangles are drawn. `view`/`projection` are the
+	// caller's camera (World stays identity). Honours the current BlendMode. Depth testing is OFF
+	// (sceneTarget has no depth attachment) and culling is OFF, so the caller must submit only the
+	// faces it wants, back-to-front — see the painter's-order argument in Wall.DrawTowerShafts3D.
+	//
+	// Nothing is restored by hand afterwards: the wrapper's next _beginDrawing() calls
+	// SpriteBatch.Begin, which re-applies blend / depth / rasterizer / sampler state itself.
+	public void DrawGeometry3D(Texture2D texture, VertexPositionColorTexture[] verts, int vertexCount,
+		int[] indices, int primitiveCount, Matrix view, Matrix projection)
+	{
+		if (basicEffect == null || vertexCount < 3 || primitiveCount < 1)
+		{
+			return;
+		}
+		Flush();
+		GraphicsDevice gd = base.GraphicsDevice;
+		basicEffect.View = view;
+		basicEffect.Projection = projection;
+		basicEffect.Texture = texture;
+		gd.BlendState = ToBlendState(blendmode);
+		gd.DepthStencilState = DepthStencilState.None;
+		gd.RasterizerState = RasterizerState.CullNone;
+		gd.SamplerStates[0] = SamplerState.LinearClamp;
+		foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
+		{
+			pass.Apply();
+			gd.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, verts, 0, vertexCount, indices, 0, primitiveCount);
+		}
 	}
 
 	// Begin flattening a group of overlapping sprites into the shared offscreen RT. `designRect` is
@@ -1160,6 +1214,23 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			mpPadBot = metalEffect.Parameters["PadFracBot"];
 			mpUvExtent = metalEffect.Parameters["UvExtent"];
 		}
+		// The shared 3D effect (DrawGeometry3D). Same create-once / degrade-to-null contract as
+		// metalEffect above; World never changes, and View/Projection are set per call.
+		try
+		{
+			basicEffect = new BasicEffect(ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice)
+			{
+				TextureEnabled = true,
+				VertexColorEnabled = true,
+				LightingEnabled = false,
+				World = Matrix.Identity,
+			};
+		}
+		catch (System.Exception ex)
+		{
+			basicEffect = null;
+			System.Console.WriteLine("[basic3d] effect create failed: " + ex);
+		}
 		effectHandler.LoadGraphicsContent(loadAllContent: true);
 	}
 
@@ -1186,6 +1257,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		if (groupRT != null && !((GraphicsResource)groupRT).IsDisposed)
 		{
 			((GraphicsResource)groupRT).Dispose();
+		}
+		if (basicEffect != null && !((GraphicsResource)basicEffect).IsDisposed)
+		{
+			((GraphicsResource)basicEffect).Dispose();
+			basicEffect = null;
 		}
 		spriteBatch.Dispose();
 		base.UnloadContent();

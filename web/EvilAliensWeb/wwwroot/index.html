@@ -764,7 +764,7 @@
         // this via MusicInterop (eaMusic.play/stop/setRate). SFX stay on KNI.
         window.eaMusic = (function ()
         {
-            var ctx = null, master = null;
+            var ctx = null, master = null, muffle = null;
             var manifest = null, manifestPromise = null;
             var started = false;     // AudioContext unlocked by a user gesture?
             var pending = null;      // track requested before unlock
@@ -772,14 +772,33 @@
             var token = 0;           // newer play() supersedes in-flight loads
             var curRate = 1;
 
+            // Pause "underwater" muffle knobs. The whole music bus runs through a
+            // lowpass filter that's wide open in play (inaudible) and clamps down to
+            // MUFFLE_ON_HZ while the game is paused, plus a master duck — so the BGM
+            // goes quiet + muddy, then springs back on resume (setMuffle below).
+            var BASE_MASTER = 0.55;
+            var MUFFLE_OPEN_HZ = 20000;   // effectively no filtering
+            var MUFFLE_ON_HZ = 320;       // muddy/submerged cutoff when paused
+            var MUFFLE_DUCK = 0.5;        // master gain multiplier while paused
+            var MUFFLE_RAMP = 0.3;        // setTargetAtTime time constant (seconds)
+
             function ensureCtx()
             {
                 if (ctx) return;
                 var AC = window.AudioContext || window.webkitAudioContext;
                 ctx = new AC();
                 master = ctx.createGain();
-                master.gain.value = 0.55;
-                master.connect(ctx.destination);
+                master.gain.value = BASE_MASTER;
+                // Lowpass on the master bus for the pause muffle. Open by default so a
+                // non-paused game is bit-identical to the pre-filter bus; setMuffle()
+                // rides its cutoff + the master duck. Q 0.7 = a gentle rolloff (no
+                // resonant peak), which reads as "submerged" rather than "telephone".
+                muffle = ctx.createBiquadFilter();
+                muffle.type = "lowpass";
+                muffle.frequency.value = MUFFLE_OPEN_HZ;
+                muffle.Q.value = 0.7;
+                master.connect(muffle);
+                muffle.connect(ctx.destination);
             }
 
             function loadManifest()
@@ -920,6 +939,20 @@
                 // is up so its audio isn't fighting the menu music (Stage 14).
                 pause: function () { if (ctx && started) { try { ctx.suspend(); } catch (e) { } } },
                 resume: function () { if (ctx && started) { try { ctx.resume(); } catch (e) { } } },
+                // Pause "underwater" muffle: ramp the master lowpass cutoff down (muddy)
+                // and duck the master gain while the game is paused; both spring back on
+                // resume. Independent of pause()/setRate() (filter vs suspend vs
+                // playbackRate), so the trailer suspend and the BrainBoss rate sweep are
+                // unaffected. No-op before audio unlocks (a pause can't precede gameplay).
+                setMuffle: function (on)
+                {
+                    if (!ctx || !muffle) return;
+                    var t = ctx.currentTime;
+                    muffle.frequency.cancelScheduledValues(t);
+                    muffle.frequency.setTargetAtTime(on ? MUFFLE_ON_HZ : MUFFLE_OPEN_HZ, t, MUFFLE_RAMP);
+                    master.gain.cancelScheduledValues(t);
+                    master.gain.setTargetAtTime(on ? BASE_MASTER * MUFFLE_DUCK : BASE_MASTER, t, MUFFLE_RAMP);
+                },
                 setRate: function (rate)
                 {
                     // `rate` is already the AudioBufferSourceNode.playbackRate: the C#

@@ -371,6 +371,14 @@ public class SoundManager : ISoundManagerService
 		MusicInterop.Stop();
 	}
 
+	// Pause "underwater" muffle: mutes+muddies the BGM while the game is paused
+	// (a lowpass + duck on the JS music bus), restored on resume. GameScene drives
+	// it on pause-enter / every resume path.
+	public void SetPauseMuffle(bool on)
+	{
+		MusicInterop.SetPauseMuffle(on);
+	}
+
 	public void Update(GameTime gameTime)
 	{
 		// Reap finished one-shots so their WebAudio nodes don't pile up.

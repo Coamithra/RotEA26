@@ -38,6 +38,14 @@ namespace EvilAliensWeb.Compat
             _js?.InvokeVoid("eaMusic.stop");
         }
 
+        // Pause "underwater" muffle: the JS layer runs the music bus through a lowpass
+        // that clamps down + ducks while the game is paused, springing back on resume.
+        // GameScene calls this on pause-enter (true) and every resume/exit path (false).
+        public static void SetPauseMuffle(bool on)
+        {
+            _js?.InvokeVoid("eaMusic.setMuffle", on);
+        }
+
         // `rate` is the game's XACT "Pitch" variable (~50 = normal). The authored RPC
         // preset (alienssfx.xgs: one curve, var "Pitch" -> RpcParameter Pitch) maps
         // Pitch 0..100 linearly to -1200..+1200 cents, so the faithful playback rate is

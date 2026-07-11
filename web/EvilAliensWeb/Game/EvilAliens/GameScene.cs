@@ -215,6 +215,9 @@ internal abstract class GameScene : Scene
 		pausestopper.Start();
 		pausestopper.Reset();
 		_state = GameState.Nothing;
+		// Leaving to the main menu — clear the pause muffle so the menu music isn't
+		// left ducked/muddy (this path never goes through pausedScene_OnExit).
+		base.SoundManager.SetPauseMuffle(on: false);
 		Terminate(FinishedMode.exit);
 	}
 
@@ -457,6 +460,7 @@ internal abstract class GameScene : Scene
 		Collection.Pop();
 		Collection.Remove((GameComponent)(object)darkener);
 		sender.RemoveInstantly();
+		base.SoundManager.SetPauseMuffle(on: false);
 	}
 
 	private void pausedScene_ExitSelected(MenuSub1 sender)
@@ -613,6 +617,10 @@ internal abstract class GameScene : Scene
 			pausedScene.Setup(controlDevice);
 			pausedScene.Show();
 			exitConfirmationMenu.Setup(controlDevice);
+			// Duck + muffle the BGM ("underwater" feel) while paused; every resume/exit
+			// path below clears it. Sub-menus (Instructions / Controller Settings) return
+			// to pausedScene, so they stay muffled — the game is still paused.
+			base.SoundManager.SetPauseMuffle(on: true);
 			return;
 		}
 		Settings.GetInstance().Update(gameTime);
@@ -668,6 +676,7 @@ internal abstract class GameScene : Scene
 		Collection.Remove((GameComponent)(object)darkener);
 		Collection.Pop();
 		sender.RemoveInstantly();
+		base.SoundManager.SetPauseMuffle(on: false);
 	}
 
 	private void AddPlayer(ControlDevice controlDevice, bool spawnPlayer)

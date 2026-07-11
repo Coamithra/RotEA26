@@ -2339,6 +2339,186 @@
             };
         })();
     </script>
+
+    <!-- eaTexViewer: the control panel for the ?texviewer per-sprite texture-format viewer
+         (Compat/TexViewerScene.cs). The SCENE renders the PNG (RAW) vs .dds (DXT) comparison
+         through the real GPU pipeline; this panel is the clickable UI the Trello card asked for
+         — flip, per-sprite DXT/RAW/PNG pick, cycle all images, and a Save button that writes the
+         decision into tools/textures/textures.config (via the dev-only POST /api/texdecide on
+         web/DevServer). TexViewerScene.PushPanel calls eaTexViewer.show(json) on every state
+         change; the panel pokes DebugInput.SetTexViewer (debugSetTexViewer) back with commands.
+         Built outside #app; a boot without ?texviewer never calls show(), so the DOM stays
+         byte-identical. -->
+    <script>
+        window.eaTexViewer = (function ()
+        {
+            var el = null, st = null, statusEl = null;
+
+            function cmd(c)
+            {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugSetTexViewer', c); }
+                catch (e) { console.warn('[texviewer] cmd failed: ' + e.message); }
+            }
+
+            function build()
+            {
+                var css = document.createElement("style");
+                css.textContent =
+                    "#ea-texv{position:fixed;top:10px;right:10px;z-index:99999;width:264px;" +
+                    "font:12px/1.4 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                    "background:rgba(10,8,20,.86);border:1px solid rgba(150,180,220,.35);" +
+                    "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                    "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                    "#ea-texv h4{margin:0 0 6px;font-size:12px;font-weight:600;color:#b8d4ff;cursor:pointer}" +
+                    "#ea-texv h4::after{content:' \\25B4';opacity:.6}" +
+                    "#ea-texv.min h4::after{content:' \\25BE'}" +
+                    "#ea-texv.min .bd{display:none}" +
+                    "#ea-texv .nm{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#9ffcd0;" +
+                    "word-break:break-all;margin-bottom:2px}" +
+                    "#ea-texv .meta{font-size:10.5px;color:#a8a4c0;margin-bottom:7px}" +
+                    "#ea-texv .rowb{display:flex;gap:5px;margin:6px 0}" +
+                    "#ea-texv button{flex:1;height:26px;border-radius:5px;border:1px solid rgba(150,180,220,.45);" +
+                    "background:rgba(60,70,120,.55);color:#e8e8f0;font:600 11px/1 system-ui;cursor:pointer;padding:0}" +
+                    "#ea-texv button:hover{background:rgba(90,110,190,.7)}" +
+                    "#ea-texv button:active{background:rgba(123,150,255,.85)}" +
+                    "#ea-texv button.on{background:rgba(123,150,255,.8);border-color:#9fc0ff}" +
+                    "#ea-texv .lab{font-size:10.5px;color:#8a86a0;margin:6px 0 2px}" +
+                    "#ea-texv .picks label{display:inline-flex;align-items:center;gap:3px;margin-right:9px;cursor:pointer}" +
+                    "#ea-texv .grid{display:flex;gap:6px;align-items:center;margin-top:5px;font-size:11px}" +
+                    "#ea-texv .grid input{width:38px;background:rgba(255,255,255,.08);border:1px solid rgba(150,180,220,.4);" +
+                    "color:#e8e8f0;border-radius:4px;padding:2px 4px}" +
+                    "#ea-texv .save{width:100%;height:28px;margin-top:8px;font:700 12px/1 system-ui;" +
+                    "background:rgba(60,140,90,.7);border-color:rgba(120,220,150,.5)}" +
+                    "#ea-texv .save:hover{background:rgba(80,180,110,.85)}" +
+                    "#ea-texv .status{margin-top:6px;font-size:10.5px;color:#ffd98f;min-height:13px;" +
+                    "font-family:ui-monospace,Consolas,monospace;word-break:break-all}" +
+                    "#ea-texv .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+                document.head.appendChild(css);
+
+                el = document.createElement("div");
+                el.id = "ea-texv";
+                el.innerHTML =
+                    "<h4 id='tv-title'>Texture format viewer</h4>" +
+                    "<div class='bd'>" +
+                    "<div class='nm' id='tv-nm'></div>" +
+                    "<div class='meta' id='tv-meta'></div>" +
+                    "<div class='rowb'><button id='tv-prev'>&larr; Prev</button>" +
+                    "<button id='tv-next'>Next &rarr;</button></div>" +
+                    "<div class='rowb'><button id='tv-flip'>Flip RAW/DXT</button>" +
+                    "<button id='tv-mode'>Split</button></div>" +
+                    "<div class='rowb'><button id='tv-zout'>&minus; Zoom</button>" +
+                    "<button id='tv-fit'>Fit</button><button id='tv-zin'>Zoom +</button></div>" +
+                    "<div class='lab'>Format decision</div>" +
+                    "<div class='picks'>" +
+                    "<label><input type='radio' name='tv-pick' value='0'>DXT</label>" +
+                    "<label><input type='radio' name='tv-pick' value='1'>RAW</label>" +
+                    "<label><input type='radio' name='tv-pick' value='2'>PNG</label></div>" +
+                    "<div class='grid' id='tv-grid'>DXT grid: cols <input id='tv-cols' type='number' min='1'>" +
+                    "rows <input id='tv-rows' type='number' min='1'></div>" +
+                    "<button class='save' id='tv-save'>Save to textures.config</button>" +
+                    "<div class='status' id='tv-status'></div>" +
+                    "<div class='hint'>Flip (or Enter) to A/B RAW vs DXT; Split shows RAW|DXT. " +
+                    "Pick a format and Save writes the line — then run " +
+                    "<code>python tools/textures/build_textures.py</code>.</div></div>";
+                document.body.appendChild(el);
+                statusEl = el.querySelector("#tv-status");
+
+                el.querySelector("#tv-title").addEventListener("click", function () { el.classList.toggle("min"); });
+                el.querySelector("#tv-prev").addEventListener("click", function () { cmd("prev"); });
+                el.querySelector("#tv-next").addEventListener("click", function () { cmd("next"); });
+                el.querySelector("#tv-flip").addEventListener("click", function () { cmd("flip"); });
+                el.querySelector("#tv-mode").addEventListener("click", function ()
+                {
+                    cmd("mode:" + (st && st.mode === 1 ? 0 : 1));
+                });
+                el.querySelector("#tv-zin").addEventListener("click", function ()
+                {
+                    if (st) { cmd("zoom:" + (st.zoom * 1.25).toFixed(3)); }
+                });
+                el.querySelector("#tv-zout").addEventListener("click", function ()
+                {
+                    if (st) { cmd("zoom:" + (st.zoom * 0.8).toFixed(3)); }
+                });
+                el.querySelector("#tv-fit").addEventListener("click", function () { cmd("fit"); });
+                el.querySelectorAll("input[name='tv-pick']").forEach(function (r)
+                {
+                    r.addEventListener("change", function ()
+                    {
+                        if (st) { st.pick = +r.value; cmd("pick:" + r.value); render(); }
+                    });
+                });
+                el.querySelector("#tv-save").addEventListener("click", save);
+            }
+
+            function save()
+            {
+                if (!st) { return; }
+                var fmt = st.pick === 0 ? "dxt" : (st.pick === 1 ? "raw" : "png");
+                var cols = Math.max(1, parseInt(el.querySelector("#tv-cols").value, 10) || 1);
+                var rows = Math.max(1, parseInt(el.querySelector("#tv-rows").value, 10) || 1);
+                statusEl.textContent = "saving…";
+                fetch("api/texdecide", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ asset: st.asset, format: fmt, cols: cols, rows: rows })
+                }).then(function (r) { return r.json(); }).then(function (j)
+                {
+                    if (j.ok)
+                    {
+                        st.current = fmt;
+                        statusEl.style.color = "#9ffcd0";
+                        statusEl.textContent = fmt === "png" ? "saved: removed (png default)" : ("saved: " + j.line);
+                        render();
+                    }
+                    else
+                    {
+                        statusEl.style.color = "#ff9f8f";
+                        statusEl.textContent = "error: " + (j.error || "unknown");
+                    }
+                }).catch(function (e)
+                {
+                    statusEl.style.color = "#ff9f8f";
+                    statusEl.textContent = "save failed (" + e.message + "). Serve via web/DevServer.";
+                });
+            }
+
+            function render()
+            {
+                el.querySelector("#tv-nm").textContent = (st.index + 1) + " / " + st.count + "  " + st.asset;
+                var pngKB = st.pngKB, ddsKB = st.ddsKB, rawKB = st.rawKB;
+                el.querySelector("#tv-meta").innerHTML =
+                    st.w + "&times;" + st.h + " &nbsp; png " + pngKB + "KB &nbsp; dds " + ddsKB +
+                    "KB &nbsp; raw " + rawKB + "KB<br>config: <b>" + st.current + "</b>" +
+                    (st.hasDds ? "" : " &nbsp;<span style='color:#ff9f8f'>(no DXT preview)</span>");
+                el.querySelector("#tv-flip").textContent = st.mode === 1
+                    ? "Split: RAW|DXT" : (st.view === 1 ? "Showing DXT" : "Showing RAW");
+                el.querySelector("#tv-flip").classList.toggle("on", st.mode !== 1 && st.view === 1);
+                el.querySelector("#tv-mode").textContent = st.mode === 1 ? "Flip mode" : "Split mode";
+                el.querySelector("#tv-mode").classList.toggle("on", st.mode === 1);
+                el.querySelectorAll("input[name='tv-pick']").forEach(function (r)
+                {
+                    r.checked = (+r.value === st.pick);
+                });
+                el.querySelector("#tv-grid").style.display = st.pick === 0 ? "flex" : "none";
+                el.querySelector("#tv-cols").value = st.cols;
+                el.querySelector("#tv-rows").value = st.rows;
+                statusEl.style.color = "#ffd98f";
+            }
+
+            return {
+                // Called from TexViewerScene (C#) on every state change with a JSON blob.
+                show: function (json)
+                {
+                    try { st = JSON.parse(json); } catch (e) { return; }
+                    if (!st || !st.count) { if (el) { el.style.display = "none"; } return; }
+                    if (!el) { build(); }
+                    render();
+                    el.style.display = "block";
+                },
+                hide: function () { if (el) { el.style.display = "none"; } }
+            };
+        })();
+    </script>
 </body>
 
 </html>

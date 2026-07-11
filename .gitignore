@@ -122,3 +122,8 @@ tools/brainanim/_*
 
 # Wall-tower 3D spike: regenerated preview render (tools/walls/preview_wall3d.py).
 tools/walls/_*.png
+
+# ---- Texture-format viewer previews (tools/textures/build_texviewer.py) --------
+# The ?texviewer scene compares each PNG against a throwaway BC3 preview built here.
+# Local dev only; production ships the real siblings from build_textures.py.
+web/EvilAliensWeb/wwwroot/Content/texviewer/

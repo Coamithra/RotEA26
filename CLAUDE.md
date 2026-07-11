@@ -1063,6 +1063,25 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   It's OFFLINE (texconv is Windows-only); CI just ships the committed outputs (like `tools/shaders`,
   `tools/audio`). Per-sprite dxt-vs-raw choices are pending the art rescale (Trello: "Revisit per-sprite
   texture format").
+- **Per-sprite DXT-vs-RAW format viewer — `?texviewer` (`Compat/TexViewerScene.cs`) + the eaTexViewer
+  panel + `tools/textures/build_texviewer.py`.** The tool for MAKING the per-sprite format decisions the
+  bullet above defers: boot `?texviewer` and it flips each sprite's RAW (PNG-decoded, lossless — == what
+  an `.rtex` ships) against its DXT (BC3) version, BOTH drawn through the REAL GPU pipeline (the DXT view
+  uploads a `.dds` to a BC-compressed texture, the same ANGLE→D3D11 block decode the shipped `.dds` hits
+  in play), so what you scrutinise is exactly what would ship. Flip (Enter / panel), SPLIT mode
+  (RAW|DXT with a divider), zoom (point-sampled, so BC blocks are crisp) + drag-pan; the **eaTexViewer**
+  HTML panel (`index.html`, outside `#app`, C#-driven via `TexViewerInterop.Show` like eaWcTune) cycles
+  all 161 Content PNGs, picks DXT/RAW/PNG (with editable cols/rows for DXT), and **Save writes the
+  `textures.config` line** via a dev-only `POST /api/texdecide` on `web/DevServer` (the WASM sandbox
+  can't write disk; DevServer is never shipped to Pages, so this is local-dev only — serve via DevServer
+  or Save 404s). After saving decisions, run `python tools/textures/build_textures.py` to regenerate the
+  real siblings. **The DXT previews are BUILT OFFLINE by `tools/textures/build_texviewer.py`** into
+  `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — a throwaway
+  comparison set kept SEPARATE from the shipped siblings so an undecided sprite is never auto-loaded by
+  WebContentManager); re-run it after adding/rescaling art (`--only <glob>` / `--dry-run` /
+  `--manifest-only`). It reuses `build_textures.py`'s mult-of-4 pitch-preserving crop + needs the same
+  `texconv.exe`. `?texviewer` is IN `DebugFlags.Active` (it hijacks boot like `?castbrain`). See
+  `plans/texviewer.md`.
 - **Animated Braineroid sprite (the lvl-1 brain enemy) — `tools/textures/build_brain_sheet.py`.** The
   `Braineroid` (huge/medium/small, `Game/EvilAliens/Braineroid.cs`) uses an animated cyborg-brain sheet
   built from an AnimGen export (81 magenta-backdrop frames). The builder chroma-keys the magenta to

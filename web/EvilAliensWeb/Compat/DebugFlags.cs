@@ -618,6 +618,14 @@ namespace EvilAliensWeb.Compat
 
 		public static float? CastBrainFps { get; private set; }
 
+		// Texture-format viewer (?texviewer): boot straight into TexViewerScene, which flips each
+		// sprite's RAW (PNG-decoded) vs DXT (BC3) version through the real GPU pipeline so a
+		// per-sprite dxt/raw/png decision can be made and saved to tools/textures/textures.config
+		// (see plans/texviewer.md + the Trello card). Needs the previews built once by
+		// tools/textures/build_texviewer.py. Like ?castbrain it hijacks boot => SkipSplash +
+		// AutoStart, and it's IN Active (below) since it takes over the whole boot.
+		public static bool TexViewer { get; private set; }
+
 		// Webcam "I Made This!" difficulty tuning knobs (WebcamLevel). The webcam challenge
 		// now has a per-difficulty tuning table (hearts / kills-to-win / saucer cap / saucer
 		// speed / plasma speed, Easy..Inzane); these knobs A/B those numbers live so the feel
@@ -1379,6 +1387,14 @@ namespace EvilAliensWeb.Compat
 						AutoStart = true;
 					}
 					break;
+				case "texviewer":
+					TexViewer = IsOn(val);
+					if (TexViewer)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
 				case "castbrainscale":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbs) && cbs > 0f)
 					{
@@ -1532,7 +1548,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || WallsOnly || BrainBoss || TutorialTraining;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

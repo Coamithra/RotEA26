@@ -1254,7 +1254,10 @@ public class Game1 : Game
 	// appears while a warm is in flight, which is inherently a loading moment.
 	private void DrawLevelWarmIndicator(GameTime gameTime)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		// Straight-alpha discipline: base.Draw leaves the wrapper's BlendMode wherever the
+		// last component set it, and the partial-alpha breathe/dots need NonPremultiplied.
+		// The setter only flushes on an actual change, so this is a no-op in the common case.
+		spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 		float t = (float)gameTime.TotalGameTime.TotalSeconds;
 		// Whole-word breathe: ~0.9 Hz sine, alpha 0.45..0.85.
 		float breathe = 0.65f + 0.2f * (float)Math.Sin(t * 5.6f);

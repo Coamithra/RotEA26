@@ -603,12 +603,13 @@ public class Background : Scene
 		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
-		if (XFade.Active)
+		if (XFade.Active && rendertarget != null)
 		{
 			// Normalized counts DOWN (1 -> 0, fraction of the fade REMAINING), so
 			// 1 - Normalized ramps 0 -> 1: the clean background copy progressively
 			// COVERS the objects (enemies/bullets/dead ship) — they dissolve out into
-			// the untouched background.
+			// the untouched background. (rendertarget is populated by Draw, which runs
+			// first this frame; the null guard is belt-and-braces for that ordering.)
 			float num = 1f - XFade.Normalized;
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 			// Stage 10: render-sized RT -> 1:1 identity composite (DrawPresent).
@@ -631,12 +632,12 @@ public class Background : Scene
 			base.SpriteBatch.Flush();
 			EnsureRenderTarget();
 			base.GraphicsDevice.SetRenderTarget(0, rendertarget);
-			// The XBLIG RT was Bgr565 (no alpha), so the background copy always
-			// composited as an OPAQUE image at the tint's alpha. The web port's RGBA8
-			// RT would otherwise inherit the additive starfield's patchy per-pixel
-			// alpha and the DrawForeground straight-alpha composite would light up /
-			// unevenly cover the scene. Clearing to opaque black keeps the RT alpha at
-			// 1 everywhere (NonPremultiplied/Additive draws preserve a full dst alpha).
+			// Reset the target to opaque black each frame: it's a PreserveContents RT, so
+			// without this the additive starfield accumulates over last frame's pixels and
+			// lights up. RGB is fully redrawn below; the alpha is sealed to 1 before the
+			// target is composited (see SealAlpha) so the DrawForeground overlay — which
+			// the XBLIG's alpha-less Bgr565 RT let cover by tint alpha alone — covers
+			// uniformly instead of inheriting the veil/cloud draws' eroded alpha.
 			base.GraphicsDevice.Clear(Color.Black);
 		}
 		if (starfield != null)
@@ -695,6 +696,11 @@ public class Background : Scene
 		if (XFade.Active)
 		{
 			base.SpriteBatch.Flush();
+			// The background just captured includes partial-alpha veil/cloud draws that
+			// erode this RGBA8 target's alpha below 1. Seal it opaque before it's reused
+			// as the DrawForeground dissolve overlay, so that overlay covers the objects
+			// uniformly by its own tint alpha (matching the alpha-less Bgr565 original).
+			base.SpriteBatch.SealAlpha(blank, RenderScale.Width, RenderScale.Height);
 			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
 			// Stage 10: render-sized RT -> 1:1 identity composite (DrawPresent).

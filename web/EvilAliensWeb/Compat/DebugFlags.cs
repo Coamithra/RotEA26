@@ -245,14 +245,15 @@ namespace EvilAliensWeb.Compat
 		public static bool Hitstop { get; private set; }
 
 		// Route the in-game score / "Player X — Press Start" text through the chrome-sheen
-		// effect (metal.fx) instead of the plain flattened drop-shadow draw. OFF by default
-		// (card 37c4ccca reversed the Stage-13 chrome-on-score default: metal.fx's dark
-		// mid-band gradient spans only ~1-2px on the tiny HUD glyphs, so the score/combo
-		// digits read crunchy/jaggy — live A/B confirmed; menus keep their chrome, they're
-		// big glyphs on a different path). ?metalscore / =1 re-enables the chrome to A/B.
-		// Does NOT alter the boot path — purely a render look, so it is deliberately left
-		// OUT of `Active` (a clean boot stays "no debug flags").
-		public static bool MetalScore { get; private set; } = false;
+		// effect (metal.fx) instead of the plain flattened drop-shadow draw. ON by default
+		// (card 16dad393 restored the Stage-13 chrome-on-score default that card 37c4ccca had
+		// turned off — the user asked for the chrome sheen back, including the score's
+		// event-driven glint sweep on a leading-digit rollover). The chrome darkens the
+		// mid-band, so the metal path draws a touch more solid (0.7 vs the plain 0.55). Set
+		// ?metalscore=0 to A/B the plain flatten. Does NOT alter the boot path — purely a
+		// render look, so it is deliberately left OUT of `Active` (a clean boot stays "no
+		// debug flags").
+		public static bool MetalScore { get; private set; } = true;
 
 		// Draw every live collidable's collision shape over the frame, colour-coded by kind
 		// (box -> rectangle, circle -> ring, line -> segment) so a sprite whose DRAW is offset

@@ -589,7 +589,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   Per-glyph capture-box / vertical-align / bearing tweaks live in **`tools/font/overrides.json`**,
   authored with the live editor (`tools/font/editor/serve.py`, after `--emit-editor`) and baked in on
   `--commit`; `tools/font/_diag.py` prints per-glyph baseline offsets.
-- **In-game score / "Player X — Press Start" text = ONE flattened sprite, plain by default (chrome via ?metalscore)
+- **In-game score / "Player X — Press Start" text = ONE flattened sprite, chrome-sheened by default (plain via ?metalscore=0)
   (`SpriteBatchWrapper.DrawShadowString`).** `ScoreVisualiser.DrawStr` no longer draws the
   drop shadow and the text as two separate translucent `DrawString`s (the old "shadow bleeds
   THROUGH the text" bug — both were at the same partial alpha, so the 2px-offset shadow showed
@@ -597,10 +597,11 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   at FULL opacity into the shared grow-only text RT (`metalRT`, via the extracted `EnsureTextRT`,
   same plumbing as Stage-13 `DrawMetalString`) and composites the whole element ONCE at the
   target alpha — so shadow+text fade as a single sprite, no bleed-through. The chrome sheen
-  (`metal.fx`) is now OFF by default (`DebugFlags.MetalScore`, default false -- card 37c4ccca: the
-  chrome's dark mid-band spans only ~1-2px on the tiny HUD glyphs and reads crunchy/jaggy;
-  **`?metalscore`** re-enables it to A/B; menus keep their chrome -- they go through
-  `DrawMetalString`/`Cached`, not gated by this flag); when enabled the metal path uses a touch more
+  (`metal.fx`) is ON by default (`DebugFlags.MetalScore`, default true -- card 16dad393 restored the
+  Stage-13 chrome-on-score that card 37c4ccca had turned off; the user asked for the sheen back,
+  including the score's event-driven glint sweep on a leading-digit rollover). **`?metalscore=0`**
+  A/Bs the plain flatten; menus keep their chrome regardless -- they go through
+  `DrawMetalString`/`Cached`, not gated by this flag. The metal path uses a touch more
   opacity (0.7 vs the plain 0.55) since the sheen darkens the mid-band. **The flatten RT is
   PREMULTIPLIED** (`PremultiplyOver` rasterise -> One/InvSrcAlpha composite, same card) -- the
   deliberate premult-INTERMEDIATE exception to the straight-alpha rule: stacking two straight-alpha

@@ -900,10 +900,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// premultiplied; this is the deliberate premult-intermediate exception, NOT the straight-content
 	// trap CLAUDE.md warns about) with an (a,a,a,a) tint: rgb and coverage scale together, so the
 	// element fades as one sprite. metal.fx returns float4(rgb, mask) * color, so the same tint
-	// carries through the chrome path too (its gradient is a linear multiply — premult-safe; only the
-	// additive glint isn't mask-multiplied, so a mid-sweep streak can faintly show in the padded box —
-	// minor, and only during the ~1s glint sweep; chrome is on by default now, so it ships, but is
-	// unobtrusive enough to accept). boxH + shadowOffset.Y feed the
+	// carries through the chrome path too (its gradient is a linear multiply — premult-safe; the
+	// additive glint is multiplied by the glyph mask in metal.fx, so under this premultiplied One
+	// blend it stays confined to the letters and can't paint the transparent padding — see the
+	// `* mask` in metal.fx's glint line). boxH + shadowOffset.Y feed the
 	// asymmetric glyph-band insets (the drop shadow extends the bottom) so the chrome gradient lands
 	// on the letters, not on the shadow overshoot.
 	private void CompositeShadowText(RenderTarget2D rt, int usedW, int usedH, float boxH, Vector2 shadowOffset, Vector2 position, float alpha, bool metal, float glintTime, float rs)

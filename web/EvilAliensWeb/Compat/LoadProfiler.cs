@@ -203,13 +203,34 @@ namespace EvilAliensWeb.Compat
             try { cm = ServiceHelper.Get<IContentManagerService>().ContentManager; }
             catch { return; }
 
+            // ManifestAssets returns a fresh list (a copy of the keys), so pruning _byLevel in the
+            // catch below can't invalidate this loop.
             foreach (string id in ManifestAssets(level))
             {
                 try { cm.Load<Texture2D>(id); }      // cache-deduped against the code list
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[loadprofile] manifest entry '{id}' for {level} failed: {ex.Message}");
+                    PruneLearnedEntry(level, id);
                 }
+            }
+        }
+
+        // Self-heal the localStorage-learned set: when an entry no longer loads (its asset was
+        // deleted since it was recorded — e.g. 756-v1-side after the wall-tower rewrite), drop it
+        // and re-persist, so it stops being retried (and log-spamming) every load. Debug-only, since
+        // only ?loadlog records/applies the learned set. A SHIPPED (committed manifest) entry that
+        // fails is a real gap to fix in the file, not to hide, so those are left to surface.
+        private static void PruneLearnedEntry(string level, string id)
+        {
+            if (!Recording)
+                return;
+            if (Shipped().TryGetValue(level, out var shippedIds) && shippedIds.Contains(id))
+                return;
+            if (_byLevel.TryGetValue(level, out var lvl) && lvl.Remove(id))
+            {
+                Console.WriteLine($"[loadprofile] dropped stale learned entry '{id}' for {level} (asset no longer loads)");
+                Persist();
             }
         }
 

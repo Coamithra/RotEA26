@@ -1231,9 +1231,53 @@ public class Game1 : Game
 			spriteBatchWrapper.Draw(blackPixel, new Rectangle((safeZone).Right, 0, 800, 600), Color.Black);
 			spriteBatchWrapper.Flush();
 		}
+		// Card 02a96ff6: while the pre-launch level warm decodes textures one-per-tick
+		// (pendingLevelLaunch != null — see WarmThenLaunch/PumpLevelWarm), the menu holds
+		// its fade at full black with no progress feedback. Draw a subtle "loading" pulse
+		// on top so the warm doesn't read as a frozen frame. Design-space via the wrapper,
+		// like the overlays above; ends the instant the launch fires (queue drained).
+		if (pendingLevelLaunch != null)
+		{
+			DrawLevelWarmIndicator(gameTime);
+			spriteBatchWrapper.Flush();
+		}
 		if (wantExit)
 		{
 			base.GraphicsDevice.Clear(Color.Black);
+		}
+	}
+
+	// Subtle loading indicator shown during the pre-launch level warm (see the call site
+	// in DrawInner). A breathing "LOADING" in the menu font over a row of three marching
+	// pulse dots (blackPixel squares), centred low on the 800x600 design frame. Pure
+	// Draw-time cosmetic keyed off gameTime — no state, no content, no debug flag: it only
+	// appears while a warm is in flight, which is inherently a loading moment.
+	private void DrawLevelWarmIndicator(GameTime gameTime)
+	{
+		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+		float t = (float)gameTime.TotalGameTime.TotalSeconds;
+		// Whole-word breathe: ~0.9 Hz sine, alpha 0.45..0.85.
+		float breathe = 0.65f + 0.2f * (float)Math.Sin(t * 5.6f);
+		string label = "LOADING";
+		Vector2 wordPos = new Vector2(400f, 520f);
+		// Faint drop shadow so the word stays legible on any warm frame (menu fade is
+		// black, but ?level= direct boots may not be), then the word itself.
+		spriteBatchWrapper.DrawString(label, wordPos + new Vector2(2f, 2f), new Color(0f, 0f, 0f, breathe * 0.6f), 0f, centered: true, 0.5f, SpriteEffects.None, 0f);
+		spriteBatchWrapper.DrawString(label, wordPos, new Color(1f, 1f, 1f, breathe), 0f, centered: true, 0.5f, SpriteEffects.None, 0f);
+		// Three marching dots: each fades in a phase-shifted wave so the row reads as a
+		// left-to-right sweep. Fixed positions (drawn as squares) => no layout jitter.
+		const int dotCount = 3;
+		const float dotSize = 7f;
+		const float dotSpacing = 24f;
+		float rowY = 552f;
+		float startX = 400f - dotSpacing * (dotCount - 1) / 2f;
+		for (int i = 0; i < dotCount; i++)
+		{
+			float phase = t * 4.2f - i * 0.9f;
+			float a = 0.2f + 0.6f * (0.5f + 0.5f * (float)Math.Sin(phase));
+			float cx = startX + i * dotSpacing;
+			Rectangle dot = new Rectangle((int)(cx - dotSize / 2f), (int)(rowY - dotSize / 2f), (int)dotSize, (int)dotSize);
+			spriteBatchWrapper.Draw(blackPixel, dot, new Color(1f, 1f, 1f, a));
 		}
 	}
 

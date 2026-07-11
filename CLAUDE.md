@@ -1493,6 +1493,12 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   level under `?loadlog` -- warm + residual -- is expected). A level with NO manifest entries
   launches synchronously (the old behaviour, self-healing); a still-hitching level is a manifest
   DATA gap -- fix by playing it with `?loadlog` + `eaPreloadExport()`, not by code.
+  **A subtle loading indicator shows while the warm runs (card 02a96ff6):** `Game1.DrawLevelWarmIndicator`
+  draws a breathing "LOADING" (menu font) over a row of three marching pulse dots (`blackPixel` squares),
+  centred low on the 800x600 design frame, in `DrawInner` gated on `pendingLevelLaunch != null` -- so the
+  held-black fade no longer reads as a frozen frame. Pure Draw-time cosmetic keyed off `gameTime` (no state,
+  no content, no debug flag); it appears only while a warm is in flight and vanishes the instant the launch
+  fires. It's on the same overlay seam as the `?hitboxes`/HideSafeArea draws (design-space via the wrapper).
 
 ## Don'ts
 - Don't commit `bin/`/`obj/` or the raw 52 MB Xbox package (all `.gitignore`d).

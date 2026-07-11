@@ -252,6 +252,13 @@
       chrome, at the live animation phases) has a frozen reference grid at
       <a href="./?textshot" style="color:#93e6db">./?textshot</a> — one screenshot judges the text
       rendering; <b>Esc</b> to exit.</p>
+
+    <p class="hint">Not a sprite: the <b>texture-format viewer</b> at
+      <a href="./?texviewer" style="color:#93e6db">./?texviewer</a> flips each sprite's RAW vs DXT
+      (compressed) version through the real pipeline so you can pick <b>dxt/raw/png</b> per sprite and
+      <b>Save</b> the choice into <code>tools/textures/textures.config</code>. Build the previews first
+      with <code>python tools/textures/build_texviewer.py</code>, and serve via <code>web/DevServer</code>
+      (Save needs its write endpoint). <b>Enter</b> flips, <b>Esc</b> exits.</p>
   </div>
 
 <script>

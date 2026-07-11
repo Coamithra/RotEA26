@@ -303,6 +303,17 @@ namespace EvilAliensWeb.Compat
 			DebugFlags.ClearWebcamTuneOverride();
 		}
 
+		// JS bridge for the ?texviewer control panel (eaTexViewer in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugSetTexViewer', cmd). Enqueues a panel
+		// command ("next"/"prev"/"flip:1"/"mode:1"/"pick:0"/"zoom:2.5"/"fit") that
+		// TexViewerScene drains each Update. Save is done JS-side (POST /api/texdecide),
+		// so it never routes through here.
+		[JSInvokable("debugSetTexViewer")]
+		public static void SetTexViewer(string cmd)
+		{
+			TexViewerInterop.Post(cmd);
+		}
+
 		// JS bridge (eaSuppressEsc in index.html), fired from a fullscreenchange listener when
 		// the browser LEAVES fullscreen. Opens the Esc-swallow window so the Esc that exited
 		// fullscreen doesn't also step back a menu. Idempotent -- re-fires just refresh it.

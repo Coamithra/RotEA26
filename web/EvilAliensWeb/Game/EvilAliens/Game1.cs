@@ -66,6 +66,11 @@ public class Game1 : Game
 	// launched from startScreen_OnFinished instead of the menu when DebugFlags.Bulletshot is set.
 	private EvilAliensWeb.Compat.BulletShowcaseScene bulletShowcaseScene;
 
+	// Debug (?texviewer): the per-sprite DXT-vs-RAW texture-format viewer. Like harnessScene it's
+	// constructed + wired below, and startScreen_OnFinished routes into it (instead of the menu)
+	// when DebugFlags.TexViewer is set.
+	private EvilAliensWeb.Compat.TexViewerScene texViewerScene;
+
 	// Web-port laser showcase (?lazershot): a LIVE (animating) stage — chargeup swarm + a
 	// full-grown beam on the starfield — for tuning the laser FX. Created in Initialize,
 	// launched from startScreen_OnFinished instead of the menu when DebugFlags.Lazershot is set.
@@ -359,6 +364,8 @@ public class Game1 : Game
 		harnessScene.OnExitToMenu = harnessScene_OnExitToMenu;
 		bulletShowcaseScene = new EvilAliensWeb.Compat.BulletShowcaseScene((Game)(object)this);
 		bulletShowcaseScene.OnExitToMenu = bulletShowcaseScene_OnExitToMenu;
+		texViewerScene = new EvilAliensWeb.Compat.TexViewerScene((Game)(object)this);
+		texViewerScene.OnExitToMenu = texViewerScene_OnExitToMenu;
 		lazerShowcaseScene = new EvilAliensWeb.Compat.LazerShowcaseScene((Game)(object)this);
 		lazerShowcaseScene.OnExitToMenu = lazerShowcaseScene_OnExitToMenu;
 		textShowcaseScene = new EvilAliensWeb.Compat.TextShowcaseScene((Game)(object)this);
@@ -423,6 +430,12 @@ public class Game1 : Game
 		else if (DebugFlags.CastShow)
 		{
 			collectionHelper.Add((GameComponent)(object)harnessScene);
+		}
+		// Debug (?texviewer): bypass the menu and boot straight into the texture-format viewer.
+		// menuScene is still wired above, so Esc drops back via texViewerScene_OnExitToMenu.
+		else if (DebugFlags.TexViewer)
+		{
+			collectionHelper.Add((GameComponent)(object)texViewerScene);
 		}
 		// Debug (?bulletshot): bypass the menu and boot straight into the bullet showcase.
 		// menuScene is still wired above, so Esc drops back via bulletShowcaseScene_OnExitToMenu.
@@ -874,6 +887,13 @@ public class Game1 : Game
 	{
 		bulletShowcaseScene.Teardown();
 		collectionHelper.Remove((GameComponent)(object)bulletShowcaseScene);
+		collectionHelper.Add((GameComponent)(object)menuScene);
+	}
+
+	private void texViewerScene_OnExitToMenu()
+	{
+		texViewerScene.Teardown();
+		collectionHelper.Remove((GameComponent)(object)texViewerScene);
 		collectionHelper.Add((GameComponent)(object)menuScene);
 	}
 

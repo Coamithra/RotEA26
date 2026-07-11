@@ -961,6 +961,7 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   same flattened shadow+text treatment as the score, so no shadow bleed-through; don't revert it
   to a raw `DrawString`. Verify with `?level=Tutorial&invuln` (real Chrome); the whole tutorial
   self-runs on the timeout ceilings, so an unattended boot exercises every beat.
+- **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second
   frame hitch (measured: `spider_sheet2` 5033 ms; a whole Level2 preload ~28 s). Two tools attack this:

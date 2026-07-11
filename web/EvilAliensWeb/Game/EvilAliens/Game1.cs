@@ -155,6 +155,15 @@ public class Game1 : Game
 
 	private Effect holoSim;
 
+	// Cached holosim.fx params (avoid per-frame string-keyed Parameters[] lookups, same
+	// convention as SpriteBatchWrapper.SetMetalParams; null-conditional sets degrade
+	// gracefully if a compiled variant ever drops one).
+	private EffectParameter hsIntensity;
+
+	private EffectParameter hsBurst;
+
+	private EffectParameter hsTime;
+
 	// Incremental menu warm: the heavy menu PNG decodes that used to block LoadContent
 	// are queued (QueueMenuWarm) and drained one-per-Update-tick during the splash /
 	// Press-Start idle time (PumpWarmQueue), with a synchronous drain (DrainWarmQueue)
@@ -517,6 +526,9 @@ public class Game1 : Game
 		try
 		{
 			holoSim = base.Content.Load<Effect>("Content/GFX/Effects/holosim");
+			hsIntensity = holoSim.Parameters["Intensity"];
+			hsBurst = holoSim.Parameters["Burst"];
+			hsTime = holoSim.Parameters["Time"];
 		}
 		catch (Exception ex)
 		{
@@ -1223,13 +1235,15 @@ public class Game1 : Game
 				((GraphicsResource)holoRT).Dispose();
 			}
 			PresentationParameters hpp = base.GraphicsDevice.PresentationParameters;
+			// DiscardContents (unlike slowmoTrail's PreserveContents): the RT is fully
+			// overwritten by an opaque full-rect draw every time it's bound.
 			holoRT = new RenderTarget2D(base.GraphicsDevice, RenderScale.Width, RenderScale.Height, false,
-				hpp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+				hpp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.DiscardContents);
 		}
 		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);
-		holoSim.Parameters["Intensity"].SetValue(HoloSim.Intensity);
-		holoSim.Parameters["Burst"].SetValue(HoloSim.Burst);
-		holoSim.Parameters["Time"].SetValue(HoloSim.Time);
+		hsIntensity?.SetValue(HoloSim.Intensity);
+		hsBurst?.SetValue(HoloSim.Burst);
+		hsTime?.SetValue(HoloSim.Time);
 		base.GraphicsDevice.SetRenderTarget(holoRT);
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, holoSim);
 		spriteBatch.Draw((Texture2D)(object)sceneTarget, full, Color.White);

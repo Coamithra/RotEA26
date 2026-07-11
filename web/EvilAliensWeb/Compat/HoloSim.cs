@@ -62,15 +62,21 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// Fire a channel-surf glitch spike (strength 1 = full activate/terminate pop;
-		// ~0.3-0.4 suits the background's small Jump() hiccups).
+		// ~0.3-0.4 suits the background's small Jump() hiccups). A weaker burst never
+		// truncates a stronger one still playing — the random Jump() hiccup must not
+		// stomp the hero Activating/Terminating spike mid-flight.
 		public static void FireBurst(float strength = 1f)
 		{
+			if (burstLeft > 0f && strength < burstStrength)
+			{
+				return;
+			}
 			burstLeft = BurstSeconds;
 			burstStrength = strength;
 		}
 
-		// Advance envelopes on RAW (unscaled) time from Game1.Update, so the filter keeps
-		// living through hit-stop/slowmo like the other Draw-time cosmetics.
+		// Advance envelopes on RAW (unscaled) Draw time from Game1.ApplyHoloSim, so the
+		// filter keeps living through hit-stop/slowmo like the other Draw-time cosmetics.
 		public static void Update(float dtSeconds)
 		{
 			time += dtSeconds;

@@ -6,7 +6,7 @@ Card: `4aab0629` — Improve the tutorial · Worktree: `wt3` · Dev port: `5283`
 - [x] Create + claim the card (Backlog -> In Progress) — no existing tutorial card, created 4aab0629
 - [x] Pull latest main
 - [x] Create worktree wt3 + branch feature/tutorial-improvements, push -u
-- [ ] Read the card / firm up scope with the user
+- [x] Read the card / firm up scope with the user (pacing punch-up + holodeck visuals + banner polish)
 
 ## Phase 2: Research
 - [x] Read the tutorial code (TutorialLevel / TutorialMessage(Event) / GameEventList / spawners)
@@ -34,7 +34,7 @@ Card: `4aab0629` — Improve the tutorial · Worktree: `wt3` · Dev port: `5283`
 
 ## Phase 3: Design
 - [x] Draft approach (file-by-file) in this tracker
-- [ ] Align with the user before writing code
+- [x] Align with the user before writing code (approved; banner polish added to scope)
 
 ### Design (proposed)
 **A. Pacing (`TutorialLevel.cs`)**
@@ -51,18 +51,18 @@ Card: `4aab0629` — Improve the tutorial · Worktree: `wt3` · Dev port: `5283`
 - Debug knobs `?holofilter=` etc (null => baked defaults), verify via `?level=Tutorial`.
 
 ## Phase 4: Implement
-- [ ] Make the changes
-- [ ] Update CLAUDE.md if a new flag/convention is introduced
+- [x] Make the changes (TutorialLevel pacing + WaitForPickupEvent + holosim.fx/HoloSim/ApplyHoloSim + banner DrawShadowStringCached + ?holofilter/?holoburst flags)
+- [x] Update CLAUDE.md (new tutorial punch-up bullet)
 
 ## Phase 5: Verify
-- [ ] dotnet build -c Debug clean
-- [ ] Run on :5283, verify in real Chrome (claude-in-chrome), zero console exceptions
-- [ ] Spot-check the diff
-- [ ] Flag anything needing manual testing
+- [x] dotnet build -c Debug clean
+- [x] Run on :5283, verify in real Chrome — full unattended run to Victory (~2min), beats on script (instrumented timestamps), burst + scanlines + banner confirmed visually, zero console exceptions
+- [x] Spot-check the diff
+- [x] Flag anything needing manual testing (feel-check by the user; filter intensity tunable via ?holofilter=)
 
 ## Phase 6: Review & Ship
-- [ ] Commit + push
-- [ ] /review, fix findings
+- [x] Commit + push
+- [x] /review, fix findings (6 findings, all fixed: CLAUDE.md bullet header restored, HoloSim comment + burst-stomp guard, holoRT DiscardContents, cached effect params, tracker truthed up)
 - [ ] Pull main into branch, re-build
 - [ ] PR + self-merge, pull main at root
 - [ ] Remove worktree wt3 + branches

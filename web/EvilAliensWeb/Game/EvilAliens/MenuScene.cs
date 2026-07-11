@@ -1143,7 +1143,7 @@ internal class MenuScene : Scene
 			base.SpriteBatch.Draw(vignette, new Rectangle(0, 0, 800, 600), Color.White);
 			DrawHudDecor();
 		}
-		bool flag2 = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane;
+		bool flag2 = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.WebcamAliens].difficulty >= Settings.DifficultyLevel.Inzane;
 		foreach (Star star in stars)
 		{
 			star.Draw(flag2);
@@ -1152,7 +1152,7 @@ internal class MenuScene : Scene
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Insane);
 		}
-		if (Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Hard)
+		if (Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Hard && Achievements.GetInstance().Data[Levels.WebcamAliens].difficulty >= Settings.DifficultyLevel.Hard)
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Challenges);
 		}

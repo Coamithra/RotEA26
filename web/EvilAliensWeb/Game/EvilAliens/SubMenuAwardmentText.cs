@@ -43,7 +43,7 @@ internal class SubMenuAwardmentText : MenuSub1
 			awardmentExplanation = "Defeat the Alien Overmind.\nRequires HARD mode.";
 			break;
 		case Awardment.Challenges:
-			awardmentExplanation = "Complete all seven challenges on HARD mode";
+			awardmentExplanation = "Complete all eight challenges on HARD mode";
 			break;
 		case Awardment.Coop:
 			awardmentExplanation = "Connect four ships in cooperative play";

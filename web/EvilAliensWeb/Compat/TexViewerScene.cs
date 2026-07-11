@@ -406,11 +406,22 @@ namespace EvilAliensWeb.Compat
 
         private void DrawImages(int vw, int vh)
         {
-            Rec r = assets[index];
-            float fit = Math.Min((float)vw / r.W, (float)vh / r.H) * 0.92f;
+            // Sample BOTH textures from a common top-left region so identical texels map to
+            // identical dest pixels. build_texviewer crops each .dds to a mult-of-4 (dropping only
+            // the never-sampled edge px), so ddsTex is usually a few px smaller than pngTex; using
+            // each texture's own full size would scale RAW vs DXT slightly differently and drift the
+            // flip A/B toward the far edges — fatal for a pixel-scrutiny tool.
+            int cw = Math.Max(1, pngTex.Width);
+            int ch = Math.Max(1, pngTex.Height);
+            if (ddsTex != null)
+            {
+                cw = Math.Max(1, Math.Min(cw, ddsTex.Width));
+                ch = Math.Max(1, Math.Min(ch, ddsTex.Height));
+            }
+            float fit = Math.Min((float)vw / cw, (float)vh / ch) * 0.92f;
             float s = fit * zoom;
-            int dw = Math.Max(1, (int)(r.W * s));
-            int dh = Math.Max(1, (int)(r.H * s));
+            int dw = Math.Max(1, (int)(cw * s));
+            int dh = Math.Max(1, (int)(ch * s));
             int cx = vw / 2 + (int)pan.X;
             int cy = vh / 2 + (int)pan.Y;
             var dest = new Rectangle(cx - dw / 2, cy - dh / 2, dw, dh);
@@ -418,12 +429,12 @@ namespace EvilAliensWeb.Compat
             raw.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied, SamplerState.PointClamp, null, null, null, Matrix.Identity);
             if (mode == 1 && ddsTex != null)
             {
-                // Split: left = RAW (png), right = DXT (dds), divider at texture column splitFrac.
-                int splitTexX = (int)(r.W * splitFrac);
+                // Split: left = RAW (png), right = DXT (dds), divider at common column splitFrac.
+                int splitTexX = (int)(cw * splitFrac);
                 int splitDestX = dest.X + (int)(dw * splitFrac);
-                var lSrc = new Rectangle(0, 0, splitTexX, r.H);
+                var lSrc = new Rectangle(0, 0, splitTexX, ch);
                 var lDst = new Rectangle(dest.X, dest.Y, splitDestX - dest.X, dh);
-                var rSrc = new Rectangle(splitTexX, 0, r.W - splitTexX, r.H);
+                var rSrc = new Rectangle(splitTexX, 0, cw - splitTexX, ch);
                 var rDst = new Rectangle(splitDestX, dest.Y, dest.Right - splitDestX, dh);
                 if (lSrc.Width > 0) raw.Draw(pngTex, lDst, lSrc, Color.White);
                 if (rSrc.Width > 0) raw.Draw(ddsTex, rDst, rSrc, Color.White);
@@ -432,7 +443,7 @@ namespace EvilAliensWeb.Compat
             else
             {
                 Texture2D t = (showDxt && ddsTex != null) ? ddsTex : pngTex;
-                raw.Draw(t, dest, new Rectangle(0, 0, t.Width, t.Height), Color.White);
+                raw.Draw(t, dest, new Rectangle(0, 0, cw, ch), Color.White);
             }
             raw.End();
         }

@@ -61,6 +61,10 @@ app.MapPost("/api/texdecide", async (HttpContext ctx) =>
     string fmt = req.Format.Trim().ToLowerInvariant();
     if (fmt != "dxt" && fmt != "raw" && fmt != "png")
         return Results.BadRequest(new { ok = false, error = "format must be dxt|raw|png" });
+    // The asset is written verbatim into textures.config, so keep it a single well-formed key —
+    // reject anything with whitespace/newlines (which would inject extra config lines) or odd chars.
+    if (!System.Text.RegularExpressions.Regex.IsMatch(asset, "^[a-z0-9/_.-]+$"))
+        return Results.BadRequest(new { ok = false, error = "asset must match [a-z0-9/_.-]+" });
 
     string cfg = FindTexturesConfig(app.Environment.ContentRootPath);
     if (cfg == null)

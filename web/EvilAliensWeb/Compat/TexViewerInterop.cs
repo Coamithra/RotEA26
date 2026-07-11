@@ -22,8 +22,8 @@ namespace EvilAliensWeb.Compat
     {
         private static IJSInProcessRuntime _js;
 
-        // Panel -> scene commands ("next", "prev", "flip:1", "pick:0", "zoom:2.5",
-        // "diff:1", "fit"). Blazor WASM is single-threaded, so a plain Queue is safe;
+        // Panel -> scene commands ("next", "prev", "flip:1", "mode:1", "pick:0", "zoom:2.5",
+        // "fit"). Blazor WASM is single-threaded, so a plain Queue is safe;
         // the scene drains it fully each Update so nothing is dropped between frames.
         private static readonly Queue<string> commands = new Queue<string>();
 

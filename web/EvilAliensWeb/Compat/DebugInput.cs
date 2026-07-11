@@ -305,7 +305,7 @@ namespace EvilAliensWeb.Compat
 
 		// JS bridge for the ?texviewer control panel (eaTexViewer in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugSetTexViewer', cmd). Enqueues a panel
-		// command ("next"/"prev"/"flip:1"/"pick:0"/"zoom:2.5"/"diff:1"/"fit") that
+		// command ("next"/"prev"/"flip:1"/"mode:1"/"pick:0"/"zoom:2.5"/"fit") that
 		// TexViewerScene drains each Update. Save is done JS-side (POST /api/texdecide),
 		// so it never routes through here.
 		[JSInvokable("debugSetTexViewer")]

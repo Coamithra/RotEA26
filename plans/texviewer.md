@@ -37,12 +37,12 @@ loads BOTH textures directly (bypassing WebContentManager's sibling preference):
 
 Draws ONE of them (flip A/B) at a shared pan/zoom with POINT sampling so pixels are scrutinised 1:1,
 over a checkerboard (alpha visible). HUD: name, dims, png/dds/raw sizes, decode-cost note, current
-pick. `+ difference view` (abs diff ×N). Cycles all assets. Esc → menu (like the harness).
+pick. FLIP + SPLIT (RAW|DXT divider) modes. Cycles all assets. Esc → menu (like the harness).
 
 ### 3. `eaTexViewer` HTML panel (`wwwroot/index.html`, outside `#app`)
 Only built when `?texviewer`. Clickable controls (the "button to select" the user asked for):
 prev/next + asset name/dims, **A/B flip** (+ hold-to-compare), **format radios DXT / RAW / PNG** with
-live file sizes + savings, **zoom** slider, **diff** toggle, and a **Save** button. Drives
+live file sizes + savings, **zoom** buttons, a **Split** toggle, and a **Save** button. Drives
 `DebugInput.SetTexViewer(...)` → the scene. Save → `POST /api/texdecide`.
 
 ### 4. `web/DevServer/Program.cs` — `POST /api/texdecide` (dev-only)

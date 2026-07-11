@@ -37,6 +37,10 @@ internal class OwnLevel : GameScene
 		contentManager.Load<Texture2D>("GFX/Base/756-v4");
 		contentManager.Load<Texture2D>("GFX/Base/756-v6");
 		contentManager.Load<Texture2D>("GFX/Base/756-v8");
+		// Warm the tower BasicEffect GL program on the loading screen — OwnLevel spawns Walls too. See
+		// Level3.PreloadGraphicalContent for the full why (Trello 3e81fdcd); idempotent across the tower
+		// scenes, so it only compiles once per session.
+		SpriteBatch.WarmGeometry3D();
 	}
 
 	protected override void PopulateEventList()

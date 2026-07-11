@@ -55,6 +55,22 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// to be compiled for it.
 	private BasicEffect basicEffect;
 
+	// One-time GL program warm-up for the 3D path (WarmGeometry3D). BlazorGL/ANGLE defers the
+	// driver-side compile+link of a shader program to its FIRST draw, and Chrome then caches the
+	// binary — so the very first DrawGeometry3D of a session (the first Level-3 wall) paid a
+	// ~120ms one-off stall mid-gameplay (Trello 3e81fdcd), which no texture preload could cover
+	// because it is the BasicEffect program, not an asset. Forced once from the tower scenes'
+	// PreloadGraphicalContent (Level3/Demo3/OwnLevel), the same loading-screen phase (watchdog-suppressed)
+	// as the throwaway enemy spawns that prewarm the JIT.
+	private bool geom3dWarmed;
+
+	// Throwaway 1x1 texture + render target for the warm draw. The target is bound around the draw so
+	// the program compiles even when the caller runs OUTSIDE a Draw (the preload is Update-phase, so no
+	// scene target is bound and a bare draw could hit an incomplete framebuffer and be dropped).
+	private Texture2D warmPixel;
+
+	private RenderTarget2D warmTarget;
+
 	// Cached metal.fx EffectParameter handles for the params that VARY per call (Time / the two
 	// glyph-band insets / the used-subrect UV). The invariant params (GradTop/Mid/Bot, Glint*,
 	// Sweep*) are identical for every call and are set ONCE in LoadContent, so SetMetalParams
@@ -324,6 +340,61 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			pass.Apply();
 			gd.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, verts, 0, vertexCount, indices, 0, primitiveCount);
+		}
+	}
+
+	// Force the BasicEffect GL program to compile+link NOW, by running one zero-area (so it paints
+	// nothing) DrawGeometry3D through the exact same path the towers use. ANGLE defers a program's
+	// driver compile to its first draw and Chrome caches the result, so without this the first
+	// Level-3 wall of a fresh (cold-cache) session stalled ~120ms mid-play (Trello 3e81fdcd) — the
+	// one first-use cost no asset preload could warm, since it is the program, not a texture.
+	//
+	// Called once per session from the tower scenes' PreloadGraphicalContent (Level3/Demo3/OwnLevel),
+	// alongside the off-screen throwaway enemy spawns that prewarm the JIT — same loading-screen phase,
+	// where the hitch watchdog is suppressed. That phase is Update-time, so no scene target is bound; the warm binds
+	// its own 1x1 target so the draw hits a COMPLETE framebuffer and the compile actually happens
+	// (a draw against an incomplete FBO is silently dropped), then restores the previous binding.
+	// Idempotent, and a no-op until the effect exists (the same degrade-to-null contract DrawGeometry3D
+	// has), so a partial deploy stays safe.
+	public void WarmGeometry3D()
+	{
+		if (geom3dWarmed || basicEffect == null)
+		{
+			return;
+		}
+		geom3dWarmed = true;
+		if (warmPixel == null)
+		{
+			warmPixel = new Texture2D(base.GraphicsDevice, 1, 1);
+			warmPixel.SetData(new Color[1] { Color.White });
+		}
+		if (warmTarget == null)
+		{
+			warmTarget = new RenderTarget2D(base.GraphicsDevice, 1, 1);
+		}
+		// Three coincident, fully-transparent verts: a zero-area triangle rasterises no fragments,
+		// so it never touches the bound target, yet the draw call still triggers the program compile.
+		Vector3 o = Vector3.Zero;
+		Color clear = new Color(0, 0, 0, 0);
+		VertexPositionColorTexture[] verts =
+		{
+			new VertexPositionColorTexture(o, clear, Vector2.Zero),
+			new VertexPositionColorTexture(o, clear, Vector2.Zero),
+			new VertexPositionColorTexture(o, clear, Vector2.Zero)
+		};
+		int[] indices = { 0, 1, 2 };
+		RenderTargetBinding[] prevTargets = base.GraphicsDevice.GetRenderTargets();
+		base.GraphicsDevice.SetRenderTarget(0, warmTarget);
+		DrawGeometry3D(warmPixel, verts, 3, indices, 1, Matrix.Identity, Matrix.Identity);
+		// Restore whatever was bound on entry (usually nothing during preload; Game1.Draw rebinds the
+		// scene target next frame regardless, but restore so a Draw-phase caller stays correct too).
+		if (prevTargets != null && prevTargets.Length > 0)
+		{
+			base.GraphicsDevice.SetRenderTargets(prevTargets);
+		}
+		else
+		{
+			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 		}
 	}
 
@@ -1275,6 +1346,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		{
 			((GraphicsResource)basicEffect).Dispose();
 			basicEffect = null;
+		}
+		if (warmPixel != null && !((GraphicsResource)warmPixel).IsDisposed)
+		{
+			((GraphicsResource)warmPixel).Dispose();
+			warmPixel = null;
+		}
+		if (warmTarget != null && !((GraphicsResource)warmTarget).IsDisposed)
+		{
+			((GraphicsResource)warmTarget).Dispose();
+			warmTarget = null;
 		}
 		spriteBatch.Dispose();
 		base.UnloadContent();

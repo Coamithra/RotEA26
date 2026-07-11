@@ -57,6 +57,13 @@ internal class Level3 : GameScene
 		contentManager.Load<Texture2D>("GFX/Base/756-v4");
 		contentManager.Load<Texture2D>("GFX/Base/756-v6");
 		contentManager.Load<Texture2D>("GFX/Base/756-v8");
+		// The GPU analogue of the throwaway enemy spawns below (and in GameScene): compile+link the
+		// Level-3 tower BasicEffect's GL program now, on the loading screen, instead of at the first
+		// wall. ANGLE defers that compile to a program's first draw and Chrome caches it, so the first
+		// DrawGeometry3D of a cold session otherwise stalled ~120ms mid-play (Trello 3e81fdcd) — the one
+		// first-use cost no texture preload covers, since it is the program, not an asset. Idempotent, so
+		// the tower scenes (Level3/Demo3/OwnLevel) that each warm it only pay the compile once.
+		SpriteBatch.WarmGeometry3D();
 		preloadBattleSkull = BattleSkull.NewBattleSkull(Collection, base.Game);
 		preloadBattleSkull.Setup(new Vector2(-1000f, -1000f));
 		Collection.Add((GameComponent)(object)preloadBattleSkull);

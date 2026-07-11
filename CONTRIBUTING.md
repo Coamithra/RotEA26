@@ -225,9 +225,17 @@ XNA `.fx`/XACT formats, browser GL/ANGLE→D3D11 texture rules).
 There are **no unit tests** — verification is build-clean + visual + console-error-free. Don't ask
 the user to check manually; verify and share proof.
 
+**Booting the actual game to test a change is almost NEVER the right call.** "Visual verification"
+means driving the purpose-built tool that isolates your change -- sprite harness, scrub/showcase
+scene, freeze flag, isolation sim, live slider panel (the step-16 bullets route you) -- NOT playing
+the game and hoping to catch the change on screen. If no tool covers your change, building one
+(behind a URL flag) is part of the card. The full-game boot comes LAST, as a smoke check that it
+still boots with the change in and zero console errors -- it is not where you discover whether the
+change works.
+
 15. **Build clean** — `cd web/EvilAliensWeb && dotnet build -c Debug` must succeed. **A clean build
     does NOT mean it runs** — WASM runtime errors only appear in the browser console.
-16. **Run and look** — `dotnet run -c Debug --urls http://localhost:528<k>` (your slot's port; the
+16. **Run, and point Chrome at the TOOL that isolates your change -- not at gameplay** — `dotnet run -c Debug --urls http://localhost:528<k>` (your slot's port; the
     root checkout uses `5280`), then verify in a **real foreground Chrome tab via the claude-in-chrome
     MCP** — `navigate` to YOUR port, NOT `preview_screenshot` (the built-in renderer wedges when its
     tab is backgrounded and the rAF loop pauses). Flow: serve → in Chrome `navigate` to

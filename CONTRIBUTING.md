@@ -185,7 +185,11 @@ XNA `.fx`/XACT formats, browser GL/ANGLE→D3D11 texture rules).
       a Release publish round-trip) — see Phase 5.
     - **Out of scope**: what you're explicitly *not* doing.
 11. **Check for reusable patterns** — Prefer existing conventions: the debug-flag seam
-    (`Compat/DebugFlags.cs`), the sprite harness (`Compat/HarnessRegistry.cs`), `eaPress`/`eaHold`
+    (`Compat/DebugFlags.cs`), the sprite harness (`Compat/HarnessRegistry.cs`), the scrub/showcase
+    test-scene pattern for animated visuals (`Compat/TextShowcaseScene.cs`/`?textshot`,
+    `Compat/LazerShowcaseScene.cs`/`?lazershot`, `?spiderphase=` freeze-and-scrub -- if the card
+    touches a fade/transition/timed effect, plan which scene or freeze flag will prove it),
+    `eaPress`/`eaHold`
     automation input, the `DrawStringScaled` font path, the outside-`#app` pattern for new HUD/overlay
     buttons. Don't reinvent a shim that already exists in `Compat/`.
 12. **Align with the user** — Present the plan, get approval before writing code.
@@ -232,6 +236,13 @@ the user to check manually; verify and share proof.
     - **Drawing change?** Use the **sprite harness** — don't chase a moving enemy.
       `…:528<k>/?harness=<Obj>&frame=<n>` boots frozen onto a space background, drawn by the real
       pipeline, so a screenshot is pixel-reliable. Picker at `wwwroot/harness.html`.
+    - **Animated / transient visual (a fade, transition, death FX, glint, pulse)?** Don't try to
+      time a live screenshot -- it can't be done (a death fade lasts ~half a second and you can't
+      aim the shutter). Add or extend a bespoke scrub/showcase scene or freeze flag that PARKS the
+      effect at any chosen phase (the `?textshot` / `?lazershot` / `?spiderphase=` /
+      `?wcmothershipfreeze=` pattern; see CLAUDE.md's "Testing DYNAMIC behaviour" bullet), then
+      screenshot the parked frame at exactly the phase of interest. Building the flag/scene IS the
+      verification step, not extra scope.
     - **Booting deep into the game?** Use the debug flags: `?menu`, `?level=<Name>`, `?invuln`,
       `?unlockall`, `?noattract` (combine with `&`).
     - **Graphics/texture change? DO AN AGGRESSIVE CACHE BUST** — DevTools → Network → "Disable
@@ -323,6 +334,7 @@ Stop any dev servers you started, and close any Chrome tabs you opened for verif
 | Category | Key concerns |
 |----------|-------------|
 | **Drawing / sprites / shaders** | Verify with the **sprite harness** (`?harness=<Obj>&frame=<n>`), never a screenshot of a moving enemy. Straight alpha → `NonPremultiplied` (not `AlphaBlend`). Re-run `tools/shaders/build_shaders.py` after a `.fx`; don't hand-edit `.mgfxo`. Aggressive cache-bust for texture edits. |
+| **Fades / transitions / timed FX** | Never try to time a live screenshot of a transient effect. Build/extend a scrub or showcase scene (phase slider / freeze flag: the `?textshot`, `?lazershot`, `?spiderphase=`, `?wcmothershipfreeze=` pattern) and capture the parked frame. Behaviour/feel curves: sim the data instead. See CLAUDE.md "Testing DYNAMIC behaviour". |
 | **Audio** | Replace, don't port XACT. Re-run `tools/audio/build_audio.py` after changing banks/renders; SFX/speech on KNI `SoundEffect`, music via the WebAudio `eaMusic` layer for loop points. Don't hand-edit the `.wav`/`.ogg`/`music.json` outputs. |
 | **Font / text** | `menufont` atlas is **3× supersampled** — never route it through stock `DrawString`; use `SpriteBatchWrapper.DrawStringScaled`. Re-run `tools/font/build_revenge_font.py` after a sheet; per-glyph tweaks live in `overrides.json`. |
 | **Textures / load stutter** | PNG decode (StbImageSharp, main thread) is the hitch. Precompile hot sprites with `tools/textures/build_textures.py` → `.dds`/`.rtex` (loader prefers `.dds` → `.rtex` → `.png`). DXT dims must be a mult-of-4 or ANGLE→D3D11 draws black. |

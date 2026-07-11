@@ -34,6 +34,13 @@ Braineroids|gfx/sprites/brainanimated
 Braineroids|gfx/sprites/brainanimatedglow
 InsaneBossI|gfx/sprites/brainanimated
 InsaneBossI|gfx/sprites/brainanimatedglow
+# Level3's BrainBoss spawns Braineroids (StuffToSpawn.brainz) once the fight is underway,
+# and Level3 has NO other Braineroid wave -- so nothing warms the ~4.6 MB brainanimated .dds
+# until the first brainz spawn ~26s into the fight, a big cold GPU upload = the "huge hitch
+# when the boss enters". InsaneBossI (the challenge cut of this exact boss) already warms it;
+# Level3 was simply missed. Warm it on Level3's loading screen like every other brain scene.
+Level3|gfx/sprites/brainanimated
+Level3|gfx/sprites/brainanimatedglow
 TeamChallenge|gfx/sprites/brainanimated
 TeamChallenge|gfx/sprites/brainanimatedglow
 Demo1|gfx/sprites/brainanimated

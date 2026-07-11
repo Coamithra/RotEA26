@@ -121,6 +121,20 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   an asset change not showing up, OR a wrong on-screen SIZE (stale-dimensioned texture drawn at the
   new scale -- exactly the "earth is small" bug). Production (GitHub Pages) self-heals via ETag
   revalidation; this is mainly a local-iteration trap.
+  **Better: serve via the `eaweb-fresh` dev host (port 5290) while iterating and this whole class
+  of bug is GONE.** The stock `dotnet run` / `eaweb` (port 5280) blazor-devserver leaves
+  `index.html`, `Content/**` (textures AND `.mgfxo` SHADERS), and `wwwroot/*.js` with NO
+  `Cache-Control` header, so the browser heuristically caches them and serves stale copies after a
+  rebuild -- the "I keep hitting long-fixed bugs" trap (a stale re-compiled `.mgfxo` shader was one
+  real case; a stale texture the earth bug above). The `_framework/*` C# code is already no-cache,
+  so it was never the culprit. `web/DevServer/` is a tiny dev-only ASP.NET Core static host
+  (referenced from `.claude/launch.json` as `eaweb-fresh`) that stamps `Cache-Control: no-store` on
+  EVERY response, so nothing is ever cached locally. It force-loads the referenced WASM client's
+  static web assets (`UseStaticWebAssets`, else Production-mode `dotnet run` 404s them) and sets
+  `ServeUnknownFileTypes=true` (else the game's custom `.mgfxo`/`.dds`/`.rtex`/`.dat` extensions
+  404 and crash boot). Same `?flag` URLs, just port 5290. NOT used by CI/Pages -- deploy publishes
+  `web/EvilAliensWeb` directly, and `eaweb`/the worktree servers are unchanged (they still hit the
+  cache trap, so prefer `eaweb-fresh` for asset/shader/index.html iteration).
 - **Debug boot shortcuts (opt-in via URL query — use these instead of fighting the splash/
   press-start/menu when testing).** Parsed once at boot in `Compat/DebugFlags.cs` (wired via
   `wwwroot/index.html` `getDebugQuery` → `Pages/Index.razor.cs`). No query = normal boot, so

@@ -76,6 +76,10 @@ internal class Demo3 : GameScene
 		contentManager.Load<Texture2D>("GFX/Base/756-v4");
 		contentManager.Load<Texture2D>("GFX/Base/756-v6");
 		contentManager.Load<Texture2D>("GFX/Base/756-v8");
+		// Warm the tower BasicEffect GL program on the loading screen — this attract demo spawns Walls
+		// too, so it can be the first tower scene of a session. See Level3.PreloadGraphicalContent for
+		// the full why (Trello 3e81fdcd); idempotent, so it only compiles once across the tower scenes.
+		SpriteBatch.WarmGeometry3D();
 	}
 
 	public override void Update(GameTime gameTime)

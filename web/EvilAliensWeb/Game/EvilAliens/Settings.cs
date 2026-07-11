@@ -28,13 +28,17 @@ public class Settings : Savable
 
 	public bool PlayMusic = true;
 
-	// Web default (false): the aiming reticle IS the OS cursor during gameplay (card 51276dcd).
-	// In a keyboard-controlled level MousePointer plays a one-shot scale+rotate intro (the OS
-	// cursor hidden while the reticle SPRITE animates), then hands off to the CSS reticle cursor
-	// (canvas.style.cursor: url(reticle/<px>.png)) so aiming is zero-lag -- no game-loop sprite
-	// trailing the mouse. true => the plain OS arrow instead (no reticle, no intro). Menus always
-	// use the plain arrow. See MousePointer / Compat/CursorInterop / eaCursor in index.html.
-	public bool HWMouse = false;
+	// The aiming reticle's RENDER MODE (card 51276dcd). There is ALWAYS a reticle in a
+	// keyboard-controlled level, and it always plays the one-shot scale+rotate intro; HWMouse
+	// only chooses HOW it's drawn afterwards:
+	//   true  (default) -> HARDWARE: the reticle IS the OS cursor (canvas.style.cursor:
+	//                      url(reticle/<px>.png)) -- zero-lag, no game-loop sprite trailing.
+	//   false           -> SOFTWARE: the reticle is a SPRITE drawn in-game every frame following
+	//                      the mouse (the original 2008 look), with the OS pointer hidden over
+	//                      the canvas so there's no double cursor.
+	// Menus always use the plain OS arrow. The "Hardware Mouse" Options toggle flips this.
+	// See MousePointer / Compat/CursorInterop / eaCursor in index.html.
+	public bool HWMouse = true;
 
 	public bool VSync = true;
 

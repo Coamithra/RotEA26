@@ -287,6 +287,11 @@ internal class MenuScene : Scene
 		// the player's camera image, so it's off by default). See General.ScreenshotEnabled.
 		optionsMenu.AddEntry("Webcam Screenshots: " + boolToGameString(Settings.GetInstance().WebcamScreenshot));
 		optionsMenu.AddEntryEvent(optionsMenu_WebcamScreenshotSelected);
+		// Reticle render mode: On = the reticle IS the OS cursor (zero-lag hardware); Off = the
+		// reticle is a sprite drawn in-game following the mouse. There's a reticle either way.
+		// See MousePointer / Settings.HWMouse. (Handler: optionsMenu_HWMouseSelected.)
+		optionsMenu.AddEntry("Hardware Mouse: " + boolToGameString(Settings.GetInstance().HWMouse));
+		optionsMenu.AddEntryEvent(optionsMenu_HWMouseSelected);
 		if (GraphicsAdapter.DefaultAdapter.IsWideScreen)
 		{
 			optionsMenu.AddEntry("Stretch Screen: " + boolToGameString(Settings.GetInstance().Stretch));

@@ -6,15 +6,20 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
-// Aiming cursor (card 51276dcd). Two modes, chosen off DrawableGameComponent.Visible:
-//   Visible == false  -> "menu": the normal OS arrow (canvas cursor), NO drawn sprite,
-//                        no intro animation. Menus and non-aiming scenes.
-//   Visible == true   -> "gameplay": play a one-shot scale+rotate intro that introduces
-//                        the pointer -> reticle change (OS cursor HIDDEN while the reticle
-//                        sprite animates), then hand the pointer off to the CSS reticle
-//                        cursor (canvas.style.cursor: url(reticle/<px>.png)) so it is ZERO-LAG
-//                        for the rest of the level (no game-loop sprite trailing the mouse).
-//                        Exactly one pointer is visible at all times.
+// Aiming cursor (card 51276dcd). There is ALWAYS a reticle during gameplay and the same
+// scale+rotate intro plays; the Settings.HWMouse option only chooses HOW the reticle is drawn:
+//   Visible == false             -> "menu": the normal OS arrow (canvas cursor), no sprite,
+//                                    no intro. Menus and non-aiming scenes.
+//   Visible == true, HWMouse==true  -> HARDWARE reticle: after the intro, hand the pointer to
+//                                    the CSS cursor (canvas.style.cursor: url(reticle/<px>.png))
+//                                    so it is ZERO-LAG for the rest of the level (no game-loop
+//                                    sprite trailing the mouse).
+//   Visible == true, HWMouse==false -> SOFTWARE reticle: draw the reticle SPRITE in-game every
+//                                    frame following the mouse (the original 2008 behaviour),
+//                                    with the OS pointer HIDDEN over the canvas so there is no
+//                                    double cursor.
+// Either way the intro (OS pointer hidden while the sprite spins) runs first, and exactly one
+// pointer is visible at all times.
 // (KNI's BlazorGL never applies Game.IsMouseVisible to the DOM -- its _isMouseHidden flag is
 //  dead and Mouse.PlatformSetCursor throws -- so the OS cursor is owned entirely via
 //  CursorInterop -> eaCursor CSS; no more Game.IsMouseVisible toggling here.)
@@ -28,14 +33,15 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 
 	private Timer showtimer;
 
-	// True once the gameplay intro has finished and we've handed the pointer to the CSS
-	// reticle cursor (or immediately, in HWMouse mode). While true we draw NOTHING -- the OS
-	// cursor is the reticle. Reset to false each time the gameplay intro (re)starts.
-	private bool reticleHandedOff;
+	// The cursor mode last pushed to JS (Compat/CursorInterop -> eaCursor), guarding redundant
+	// JSInterop so Update can reconcile every frame cheaply. "menu" = OS arrow (menus);
+	// "hidden" = OS pointer hidden (the intro spin, AND the in-game software reticle); "reticle"
+	// = the CSS hardware reticle cursor (HWMouse mode), sized reticlePx. null until first push.
+	private string cursorState;
 
-	// The cursor-ladder size (window px) currently pushed to JS, or 0 for "none pushed".
-	// Re-checked every Update while handed off so a window resize re-picks the bucket.
-	private int cursorPx;
+	// The cursor-ladder rung (window px) currently pushed, valid while cursorState == "reticle".
+	// Re-checked every Update so a window resize re-picks the bucket.
+	private int reticlePx;
 
 	// Set from JS (canvas pointerenter/leave, see wwwroot/index.html). While the intro sprite
 	// animates we don't draw it off-canvas (cursor:none only applies over the canvas, so the
@@ -73,32 +79,41 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 	// Menus / non-aiming scenes: plain OS arrow, no sprite, no intro.
 	private void EnterMenu()
 	{
-		reticleHandedOff = false;
-		cursorPx = 0;
 		showtimer.Stop();
 		showtimer.Reset();
-		CursorInterop.Set("menu");
+		PushCursor("menu", 0);
 	}
 
-	// Start of a keyboard/mouse level: kick off the reticle intro spin, or (HWMouse) skip
-	// straight to the plain OS arrow.
+	// Start of a keyboard/mouse level: kick off the reticle intro spin. Both rendering modes
+	// (HWMouse hardware cursor vs in-game software sprite) play the same intro -- there is
+	// ALWAYS a reticle; HWMouse only chooses HOW it's drawn afterwards (see Update/Draw). During
+	// the intro the OS pointer is hidden so the spinning sprite is the only pointer.
 	private void EnterGameplay()
 	{
-		if (Settings.GetInstance().HWMouse)
-		{
-			// Player opted for the plain OS arrow -- no reticle, no intro.
-			reticleHandedOff = true;
-			cursorPx = 0;
-			showtimer.Stop();
-			showtimer.Reset();
-			CursorInterop.Set("menu");
-			return;
-		}
-		reticleHandedOff = false;
-		cursorPx = 0;
 		showtimer.Reset();
 		showtimer.Start();
-		CursorInterop.Set("hidden");
+		PushCursor("hidden", 0);
+	}
+
+	// Push a cursor mode to JS, skipping the interop when it already matches -- so Update can
+	// call this every frame cheaply. mode: "menu" (OS arrow) | "hidden" (cursor:none) |
+	// "reticle" (the CSS reticle image at rung `px`).
+	private void PushCursor(string mode, int px)
+	{
+		if (cursorState == mode && (mode != "reticle" || reticlePx == px))
+		{
+			return;
+		}
+		cursorState = mode;
+		if (mode == "reticle")
+		{
+			reticlePx = px;
+			CursorInterop.SetReticle(px);
+		}
+		else
+		{
+			CursorInterop.Set(mode);
+		}
 	}
 
 	public override void Initialize()
@@ -130,8 +145,14 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00f3: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
-		// Post-intro (or HWMouse): the OS/CSS cursor IS the reticle -- draw nothing.
-		if (reticleHandedOff)
+		// Menus / non-aiming scenes: the OS arrow is the pointer, nothing to draw.
+		if (!base.Visible)
+		{
+			return;
+		}
+		// Post-intro HARDWARE mode (HWMouse): the CSS cursor IS the reticle -- draw nothing. In
+		// SOFTWARE mode (HWMouse=false) we keep drawing the sprite every frame below.
+		if (!showtimer.Active && Settings.GetInstance().HWMouse)
 		{
 			return;
 		}
@@ -145,11 +166,10 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 		Vector2 mousePosition = input.MousePosition;
 		mousePosition.X = MathHelper.Clamp(input.MousePosition.X, 0f, 800f);
 		mousePosition.Y = MathHelper.Clamp(input.MousePosition.Y, 0f, 600f);
-		// Land the intro EXACTLY on the CSS cursor's on-screen size so the sprite -> OS-cursor
-		// handoff doesn't pop. The cursor is whichever ladder rung ChooseCursorPx lands on (a
-		// fixed window-px image) while the sprite draws at (texture px x design scale x
-		// window-per-design), so the end scale is window-size-dependent; recomputed per frame
-		// (cheap) so a mid-intro resize is tracked, exactly as the handed-off cursor is.
+		// Steady sprite size == the CSS reticle rung's on-screen size, so (hardware mode) the
+		// intro -> OS-cursor handoff doesn't pop, and (software mode) the in-game sprite matches
+		// what the hardware reticle would look like. The end scale is window-size-dependent;
+		// recomputed per frame (cheap) so a mid-level resize is tracked either way.
 		float endScale = CssHandoffScale();
 		if (showtimer.Active)
 		{
@@ -216,18 +236,25 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 	public override void Update(GameTime gameTime)
 	{
 		showtimer.Update(gameTime);
-		// Intro just finished: hand the pointer to the zero-lag CSS reticle cursor and stop
-		// drawing the sprite. Once handed off, keep re-checking the ladder so a window resize
-		// (or a ?reticlesize= tweak) re-picks the rung -- the cursor is a fixed-px image, so
-		// it can only track the letterbox by swapping to a different one.
-		if (base.Visible && !Settings.GetInstance().HWMouse && !showtimer.Active)
+		if (base.Visible)
 		{
-			int px = ChooseCursorPx(WindowPerDesign());
-			if (!reticleHandedOff || px != cursorPx)
+			if (showtimer.Active)
 			{
-				reticleHandedOff = true;
-				cursorPx = px;
-				CursorInterop.SetReticle(px);
+				// Intro spin (both modes): OS pointer hidden, the sprite IS the pointer.
+				PushCursor("hidden", 0);
+			}
+			else if (Settings.GetInstance().HWMouse)
+			{
+				// Hardware mode: the OS cursor IS the reticle. Keep re-checking the ladder so a
+				// window resize (or a ?reticlesize= tweak) re-picks the rung -- the cursor is a
+				// fixed-px image, so it can only track the letterbox by swapping to another.
+				PushCursor("reticle", ChooseCursorPx(WindowPerDesign()));
+			}
+			else
+			{
+				// Software mode: draw the reticle in-game (see Draw) and keep the OS pointer
+				// hidden over the canvas so there's no double cursor.
+				PushCursor("hidden", 0);
 			}
 		}
 		base.Update(gameTime);

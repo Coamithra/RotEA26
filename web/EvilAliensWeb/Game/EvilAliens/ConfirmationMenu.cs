@@ -14,6 +14,10 @@ internal class ConfirmationMenu : MenuSub1
 
 	private string text;
 
+	// Max design-space width (of 800) the prompt may occupy before it's scaled down to fit,
+	// leaving a ~20px margin each side.
+	private const float MaxTextWidth = 760f;
+
 	public ConfirmationMenu(Game game, string text)
 		: base(game)
 	{
@@ -67,8 +71,14 @@ internal class ConfirmationMenu : MenuSub1
 		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.DrawMenu(gameTime, yoffset + 75f);
-		Vector2 val = font.MeasureString(text) / 2f + new Vector2(0f, 60f);
-		base.SpriteBatch.DrawMetalString(font, text, new Vector2(400f, 300f), Color.AliceBlue, 0f, val, 1f);
+		Vector2 size = font.MeasureString(text);
+		// The prompt is drawn as one centred line; a long message (e.g. "Are you sure you want
+		// to exit this game session?") is wider than the 800px design space and runs off both
+		// edges. Shrink it to fit within a small margin. Scaling around the centred origin keeps
+		// it centred; scale <= 1 so short prompts are unaffected.
+		float scale = (size.X > MaxTextWidth) ? MaxTextWidth / size.X : 1f;
+		Vector2 val = size / 2f + new Vector2(0f, 60f);
+		base.SpriteBatch.DrawMetalString(font, text, new Vector2(400f, 300f), Color.AliceBlue, 0f, val, scale);
 	}
 
 	public override void Draw(GameTime gameTime)

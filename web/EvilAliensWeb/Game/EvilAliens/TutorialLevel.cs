@@ -132,12 +132,17 @@ internal class TutorialLevel : GameScene
 	// tutorial moves exactly as fast as the player does, with the timeout as the ceiling.
 	// The gate terminates the message + the wave with it (LinkWith), so a fast pickup
 	// clears the lesson cleanly; the short trailing wait is a breather between lessons.
+	// LessonMinShowSeconds keeps the banner up long enough to finish typing + be read even
+	// when the player grabs the powerup instantly (the "text cut off after a few letters"
+	// bug on the later lessons, where the player already knows to grab on sight).
+	private const float LessonMinShowSeconds = 2.75f;
+
 	private void powerupLesson(string text, Powerup.PowerupType type, float timeoutSeconds)
 	{
 		TutorialMessageEvent msg = message(text, 5f, isCheckpoint: true, halting: false);
 		BonusUFOSpawner wave = new BonusUFOSpawner(base.Game, 4f, 1.5f, type);
 		eventList.AddEvent(wave, halting: false);
-		WaitForPickupEvent grab = new WaitForPickupEvent(base.Game, type, timeoutSeconds);
+		WaitForPickupEvent grab = new WaitForPickupEvent(base.Game, type, timeoutSeconds, LessonMinShowSeconds);
 		grab.LinkWith(msg);
 		grab.LinkWith(wave);
 		eventList.AddEvent(grab);

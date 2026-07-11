@@ -69,6 +69,10 @@ public class TutorialMessage : DrawableGameComponent, IComponentWatcher
 		}
 	}
 
+	// Cache slot for the flattened banner sprite (DrawShadowStringCached); the score HUD
+	// owns keys 0..15 (player*4+role), so the banner lives well clear of them.
+	private const int BannerCacheKey = 100;
+
 	public override void Draw(GameTime gameTime)
 	{
 		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
@@ -85,7 +89,11 @@ public class TutorialMessage : DrawableGameComponent, IComponentWatcher
 		Vector2 val = font.MeasureString(text) * 0.9f;
 		val /= 2f;
 		val.Y = 0f;
-		spriteBatch.DrawString(font, displayingText, new Vector2(400f, 85f) - val, Color.White, 0f, Vector2.Zero, 0.9f, (SpriteEffects)0, 0f);
+		// Flattened shadow+text (same treatment the score/pops got — no shadow bleed-through),
+		// in the holodeck's cyan so the banner reads as part of the simulation's UI. Cached by
+		// slot: the rasterise re-runs only when the typewriter adds a letter.
+		spriteBatch.DrawShadowStringCached(BannerCacheKey, displayingText, new Vector2(400f, 85f) - val, 0.9f,
+			new Color(0f, 0.16f, 0.24f), new Color(0.78f, 0.96f, 1f), new Vector2(2f, 2f), 0.95f, metal: false, 0f);
 	}
 
 	public void OnComponentRemoved(GameComponentCollectionEventArgs e)

@@ -1,4 +1,5 @@
 using System;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
@@ -57,70 +58,103 @@ internal class TutorialLevel : GameScene
 	// constructor at boot, long before any player is added, so a build-time read is always false.
 	private bool UsingGamepad => oracle.DeviceIsPlaying(ControlDevice.PadOne) || oracle.DeviceIsPlaying(ControlDevice.PadTwo) || oracle.DeviceIsPlaying(ControlDevice.PadThree) || oracle.DeviceIsPlaying(ControlDevice.PadFour);
 
+	// Pacing philosophy (card 4aab0629): the old list was strictly SERIAL — every line of
+	// text halted the queue for its full 6.5s before anything moved, so each powerup lesson
+	// was ~16-20s of mostly reading. Now text and action land on the SAME beat (non-halting
+	// messages over halting spawners), the fixed 9.5s post-wave waits are replaced by
+	// advance-on-pickup (WaitForPickupEvent, timeout fallback), and the "channel surf"
+	// holo-sim bursts (Compat/HoloSim) punctuate the simulation booting up / shutting down.
+	// One layout rule: two TutorialMessages draw at the same spot, so overlap is only ever
+	// text-with-action, never text-with-text — a lesson's message is LinkWith'd to its
+	// pickup gate so a fast pickup clears the banner before the next lesson's text.
 	protected override void PopulateEventList()
 	{
-		wait(4f);
-		message("Welcome to the Trial Simulation Chamber");
-		message("Activating Tutorial Mode...");
-		wait(1f);
+		wait(2f);
+		message("Welcome to the Trial Simulation Chamber", 4.5f);
+		burst(1f);
+		message("Activating Tutorial Mode...", 3f);
 		messageByDevice("Use Left Stick to Move", "Use WASD or Arrow Keys to Move", isCheckpoint: true);
 		MessageEvent messageEvent = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 2.5f);
 		messageEvent.SetupAsWarning(-(float)Math.PI / 2f);
 		messageEvent.OnFinished += messageEvent_OnFinished;
 		eventList.AddEvent(messageEvent, halting: true);
 		eventList.AddHalt();
-		wait(6f);
-		messageByDevice("Use Right Stick to Fire", "Aim with the Mouse, hold Left Click to Fire", isCheckpoint: true);
+		wait(4f);
+		// Fire prompt + the practice UFO on the same beat; the prompt clears the moment
+		// the kill lands so a fast kill can't leave it overlapping the next message.
+		TutorialMessageEvent firePrompt = messageByDevice("Use Right Stick to Fire", "Aim with the Mouse, hold Left Click to Fire", isCheckpoint: true, halting: false);
 		SingleEnemySpawner gameEvent = new SingleEnemySpawner(base.Game);
+		gameEvent.LinkWith(firePrompt);
 		eventList.AddEvent(gameEvent);
 		eventList.AddHalt();
 		wait(1f);
-		message("Enhancements:", isCheckpoint: true);
-		message("Pick up B's for a bomb");
-		messageByDevice("Press Left or Right Trigger to activate a\nbomb", "Right Click to activate a bomb");
-		message("You can carry up to 3 bombs");
-		bonusWave(Powerup.PowerupType.Blast);
-		wait(9.5f);
-		message("Pick up O's for a protective shield");
-		bonusWave(Powerup.PowerupType.Option);
-		wait(9.5f);
-		message("Pick up R's to increase range");
-		bonusWave(Powerup.PowerupType.Range);
-		wait(9.5f);
-		message("Pick up F's to increase rate of fire");
-		bonusWave(Powerup.PowerupType.FirePower);
-		wait(9.5f);
-		WaitEvent waitEvent = new WaitEvent(base.Game, 3f);
+		powerupLesson("Pick up B's for a bomb", Powerup.PowerupType.Blast, 10f);
+		messageByDevice("Press Left or Right Trigger to activate a\nbomb (you can carry 3)", "Right Click to activate a bomb (you can\ncarry 3)");
+		powerupLesson("Pick up O's for a protective shield", Powerup.PowerupType.Option, 9f);
+		powerupLesson("Pick up R's to increase range", Powerup.PowerupType.Range, 9f);
+		powerupLesson("Pick up F's to increase rate of fire", Powerup.PowerupType.FirePower, 9f);
+		WaitEvent waitEvent = new WaitEvent(base.Game, 2f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += displayEnhancement;
 		eventList.SetLastEventAsCheckPoint();
-		message("Your last Enhancement is stored under your\nscore", 7f);
-		message("The number next to it displays its current\nPower Level", 8.5f);
-		wait(3f);
-		waitEvent = new WaitEvent(base.Game, 3f);
+		message("Your last Enhancement is stored under your\nscore", 5.5f);
+		message("The number next to it displays its current\nPower Level", 6f);
+		wait(1.5f);
+		waitEvent = new WaitEvent(base.Game, 2f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += displayPowerbar;
-		message("Power up your Enhancement by filling the\nPower Bar");
-		message("The Power Bar can be filled by shooting\nenemies");
-		message("High combos fill the Power Bar faster");
-		wait(3f);
+		message("Power up your Enhancement by filling the\nPower Bar", 5.5f);
+		message("The Power Bar can be filled by shooting\nenemies", 5.5f);
+		message("High combos fill the Power Bar faster", 5.5f);
+		wait(1.5f);
 		waitEvent = new WaitEvent(base.Game, 0.01f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += spawnPunchingBag;
 		PowerUpTrainingEvent gameEvent2 = new PowerUpTrainingEvent(base.Game);
 		eventList.AddEvent(gameEvent2);
 		eventList.AddHalt();
-		wait(6f);
+		wait(3f);
 		waitEvent = new WaitEvent(base.Game, 0.01f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += killboss;
-		wait(3f);
-		message("Well Done");
-		message("Terminating Tutorial...");
+		wait(1.5f);
+		message("Well Done", 4f);
+		burst(1f);
+		message("Terminating Tutorial...", 3f);
 		UnlockEvent unlockEvent = new UnlockEvent(base.Game, "Evil Aliens Classic", Unlockables.Items.ClassicAliens, AnimatedMessage.UnlockType.challenge, level);
 		eventList.AddEvent(unlockEvent, halting: true);
 		unlockEvent.OnFinished += end;
 		eventList.AddHalt();
+	}
+
+	// One powerup lesson beat: the message types out WHILE its powerup-carrying bonus UFOs
+	// stream in (both non-halting), and the queue waits only on the pickup gate — the
+	// tutorial moves exactly as fast as the player does, with the timeout as the ceiling.
+	// The gate terminates the message + the wave with it (LinkWith), so a fast pickup
+	// clears the lesson cleanly; the short trailing wait is a breather between lessons.
+	private void powerupLesson(string text, Powerup.PowerupType type, float timeoutSeconds)
+	{
+		TutorialMessageEvent msg = message(text, 5f, isCheckpoint: true, halting: false);
+		BonusUFOSpawner wave = new BonusUFOSpawner(base.Game, 4f, 1.5f, type);
+		eventList.AddEvent(wave, halting: false);
+		WaitForPickupEvent grab = new WaitForPickupEvent(base.Game, type, timeoutSeconds);
+		grab.LinkWith(msg);
+		grab.LinkWith(wave);
+		eventList.AddEvent(grab);
+		eventList.AddHalt();
+		wait(1.2f);
+	}
+
+	// Fire a holo-sim "channel surf" glitch spike (Compat/HoloSim) when the queue reaches
+	// this point. Non-halting, so it lands on the same beat as whatever follows it.
+	private void burst(float strength)
+	{
+		WaitEvent waitEvent = new WaitEvent(base.Game, 0.01f);
+		waitEvent.OnFinished += delegate
+		{
+			HoloSim.FireBurst(strength);
+		};
+		eventList.AddEvent(waitEvent, halting: false);
 	}
 
 	private void killboss(GameEvent sender)
@@ -160,13 +194,6 @@ internal class TutorialLevel : GameScene
 		score.EnableCombos();
 	}
 
-	private void bonusWave(Powerup.PowerupType powerup)
-	{
-		BonusUFOSpawner gameEvent = new BonusUFOSpawner(base.Game, 4f, 1.5f, powerup);
-		eventList.AddEvent(gameEvent);
-		eventList.AddHalt();
-	}
-
 	private void messageEvent_OnFinished(GameEvent sender)
 	{
 		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
@@ -175,45 +202,63 @@ internal class TutorialLevel : GameScene
 		Collection.Add((GameComponent)(object)asteroid);
 	}
 
-	private void message(string message, bool isCheckpoint)
+	private TutorialMessageEvent message(string message, bool isCheckpoint)
 	{
-		this.message(message, 6.5f, isCheckpoint);
+		return this.message(message, 6.5f, isCheckpoint);
 	}
 
-	private void message(string message)
+	private TutorialMessageEvent message(string message)
 	{
-		this.message(message, 6.5f);
+		return this.message(message, 6.5f);
 	}
 
-	private void message(string message, float time)
+	private TutorialMessageEvent message(string message, float time)
 	{
-		this.message(message, time, isCheckpoint: false);
+		return this.message(message, time, isCheckpoint: false);
 	}
 
-	private void message(string message, float time, bool isCheckpoint)
+	// Core message add. halting (the default) shows the text alone: the queue waits out its
+	// lifetime plus a 0.6s beat. halting:false lets the following event(s) run on the SAME
+	// beat (text over action) — the caller owns sequencing and should LinkWith the message
+	// to whatever ends the beat so banners can never stack (they share one screen position).
+	private TutorialMessageEvent message(string message, float time, bool isCheckpoint, bool halting = true)
 	{
 		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, time, message);
-		eventList.AddEvent(gameEvent);
-		eventList.AddHalt();
+		eventList.AddEvent(gameEvent, halting);
+		if (halting)
+		{
+			eventList.AddHalt();
+		}
 		if (isCheckpoint)
 		{
 			eventList.SetLastEventAsCheckPoint();
 		}
-		wait(0.6f);
+		if (halting)
+		{
+			wait(0.6f);
+		}
+		return gameEvent;
 	}
 
 	// Device-dependent prompt: picks gamepadText vs mkText when the message is actually
 	// shown (see UsingGamepad — must be resolved at display time, not list-build time).
-	private void messageByDevice(string gamepadText, string mkText, bool isCheckpoint = false)
+	private TutorialMessageEvent messageByDevice(string gamepadText, string mkText, bool isCheckpoint = false, bool halting = true)
 	{
 		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, 6.5f, () => UsingGamepad ? gamepadText : mkText);
-		eventList.AddEvent(gameEvent);
-		eventList.AddHalt();
+		eventList.AddEvent(gameEvent, halting);
+		if (halting)
+		{
+			eventList.AddHalt();
+		}
 		if (isCheckpoint)
 		{
 			eventList.SetLastEventAsCheckPoint();
 		}
-		wait(0.6f);
+		if (halting)
+		{
+			wait(0.6f);
+		}
+		return gameEvent;
 	}
 
 	private void wait(float time)
@@ -230,9 +275,14 @@ internal class TutorialLevel : GameScene
 	public override void Update(GameTime gameTime)
 	{
 		base.Update(gameTime);
+		// Keep the fullscreen holo-sim filter alive (it fades out on its own the moment
+		// the tutorial stops poking — any exit path included; see Compat/HoloSim).
+		HoloSim.Poke();
 		if (RandomHelper.RandomFromAverage(0.2f, gameTime))
 		{
 			Background.Jump();
+			// The background's glitch-slip and a small screen-glitch spike land together.
+			HoloSim.FireBurst(0.35f);
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
 		{

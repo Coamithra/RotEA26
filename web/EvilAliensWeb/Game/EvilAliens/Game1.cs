@@ -146,6 +146,15 @@ public class Game1 : Game
 
 	private float slowmoTrailMix;
 
+	// Tutorial holo-sim fullscreen filter (Compat/HoloSim + holosim.fx): scanlines + edge
+	// cyan cast + channel-surf glitch bursts while the trial-simulation runs. Applied in
+	// ApplyHoloSim on the same seam as the slowmo trail; ping-pongs through this RT (a
+	// SpriteBatch effect pass can't read and write sceneTarget at once). Lazily created on
+	// first use; recreated on resize (same lifecycle as slowmoTrail).
+	private RenderTarget2D holoRT;
+
+	private Effect holoSim;
+
 	// Incremental menu warm: the heavy menu PNG decodes that used to block LoadContent
 	// are queued (QueueMenuWarm) and drained one-per-Update-tick during the splash /
 	// Press-Start idle time (PumpWarmQueue), with a synchronous drain (DrainWarmQueue)
@@ -503,6 +512,16 @@ public class Game1 : Game
 		{
 			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
 			gamma = null;
+		}
+		// Tutorial holo-sim filter; null on failure = filter silently off, game unaffected.
+		try
+		{
+			holoSim = base.Content.Load<Effect>("Content/GFX/Effects/holosim");
+		}
+		catch (Exception ex)
+		{
+			System.Console.WriteLine("[holosim] effect load failed: " + ex);
+			holoSim = null;
 		}
 		QueueMenuWarm();
 		QueueIdleWarm();
@@ -1030,6 +1049,10 @@ public class Game1 : Game
 		// the present block immediately switches off below.
 		ApplySlowmoTrail(gameTime);
 
+		// Tutorial holo-sim filter: same seam, runs after the trail so the ghosts get
+		// scanlined too. Leaves the render target on sceneTarget like the trail does.
+		ApplyHoloSim(gameTime);
+
 		// Present the scene target to the real (window-sized) back buffer, letterboxed.
 		Xna3GraphicsDeviceCompat.BaseRenderTarget = null;
 		base.GraphicsDevice.SetRenderTarget((RenderTarget2D)null);
@@ -1170,6 +1193,50 @@ public class Game1 : Game
 		base.GraphicsDevice.SetRenderTarget(sceneTarget);
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
 		spriteBatch.Draw((Texture2D)(object)slowmoTrail, full, new Color(1f, 1f, 1f, k));
+		spriteBatch.End();
+	}
+
+	// Tutorial "trial simulation" fullscreen filter (Compat/HoloSim + holosim.fx): while the
+	// tutorial pokes HoloSim alive, run sceneTarget through the filter shader into holoRT and
+	// copy it back — a SpriteBatch effect pass can't sample the target it renders to, hence
+	// the ping-pong. Two opaque full-frame blits, only while the filter is visible; every
+	// other scene skips at the first branch. Envelopes advance on RAW Draw time (cosmetic —
+	// keeps shimmering through hit-stop, like the metal sheen).
+	private void ApplyHoloSim(GameTime gameTime)
+	{
+		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+		if (dt <= 0f)
+		{
+			dt = 1f / 60f;
+		}
+		HoloSim.Update(dt);
+		if (!HoloSim.Visible || holoSim == null)
+		{
+			return;
+		}
+		if (holoRT == null || ((GraphicsResource)holoRT).IsDisposed
+			|| ((Texture2D)holoRT).Width != RenderScale.Width
+			|| ((Texture2D)holoRT).Height != RenderScale.Height)
+		{
+			if (holoRT != null && !((GraphicsResource)holoRT).IsDisposed)
+			{
+				((GraphicsResource)holoRT).Dispose();
+			}
+			PresentationParameters hpp = base.GraphicsDevice.PresentationParameters;
+			holoRT = new RenderTarget2D(base.GraphicsDevice, RenderScale.Width, RenderScale.Height, false,
+				hpp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+		}
+		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);
+		holoSim.Parameters["Intensity"].SetValue(HoloSim.Intensity);
+		holoSim.Parameters["Burst"].SetValue(HoloSim.Burst);
+		holoSim.Parameters["Time"].SetValue(HoloSim.Time);
+		base.GraphicsDevice.SetRenderTarget(holoRT);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, holoSim);
+		spriteBatch.Draw((Texture2D)(object)sceneTarget, full, Color.White);
+		spriteBatch.End();
+		base.GraphicsDevice.SetRenderTarget(sceneTarget);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque);
+		spriteBatch.Draw((Texture2D)(object)holoRT, full, Color.White);
 		spriteBatch.End();
 	}
 

@@ -932,7 +932,35 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   instant no ships are alive). A new full-frame post-process should follow this same place in `Draw`
   (operate on `sceneTarget`, leave RT on it for the present block) and use the raw `spriteBatch`
   (identity), not `spriteBatchWrapper` (which applies `RenderScale.Matrix`).
-- **Texture loads: PNG decode is the stutter; precompile hot sprites to DXT/raw (an offline asset
+- **Tutorial punch-up (card 4aab0629): paced-by-the-player event list + a fullscreen "holo-sim"
+  filter (`Compat/HoloSim.cs` + `tools/shaders/src/holosim.fx` + `Game1.ApplyHoloSim`).** Two
+  halves. (1) **PACING** -- `TutorialLevel.PopulateEventList` no longer runs strictly serial:
+  text and action land on the SAME beat (a non-halting `message(..., halting: false)` over a
+  halting spawner -- `GameEventList` always supported concurrency; the tutorial just never used
+  it), and each powerup lesson's fixed 9.5s wait is replaced by **advance-on-pickup**
+  (`Game/EvilAliens/WaitForPickupEvent.cs`: subscribes `PlayerShip.OnCollectPowerup` with a
+  -=/+= per tick so ship recycling can't drop it; base lifetime = timeout ceiling, so a passive
+  player still progresses -- a full unattended run finishes in ~2min). **Layout rule: two
+  `TutorialMessage` banners draw at the same spot, so overlap is only ever text-with-ACTION,
+  never text-with-text** -- a lesson's message is `LinkWith`'d to its pickup gate (and the fire
+  prompt to its practice-UFO spawner) so the gate ending clears the banner before the next text.
+  (2) **VISUALS** -- the holodeck gets a fullscreen sim filter: subtle scanlines + an edge-heavy
+  cyan cast + interlace shimmer always-on, and a hard "channel surf" glitch spike (row jitter /
+  static / contrast crunch, the `channelflip.fx` recipe) on "Activating/Terminating Tutorial..."
+  (`TutorialLevel.burst()`) and small on each `Background.Jump()` hiccup so the grid slip and the
+  screen glitch land together. Plumbing: `holosim.fx` (pixel-shader-only, compiled by
+  `build_shaders.py` like every standalone `.fx`) applied in `Game1.ApplyHoloSim` right after
+  `ApplySlowmoTrail` (ping-pongs `sceneTarget` -> `holoRT` -> back; a SpriteBatch effect pass
+  can't read its own target). **Lifecycle is POKE-driven, not scene-wired:** `TutorialLevel.Update`
+  calls `HoloSim.Poke()` every tick and the eased mix fades out the moment poking stops -- any
+  exit path (victory / quit / game over) turns it off with no lifecycle plumbing. Every other
+  scene skips at one branch; a non-tutorial boot is byte-identical. Tune with `?holofilter=<f>`
+  (0 disables, null => baked) / `?holoburst=<f>` (spike scale) -- pure render looks, kept OUT of
+  `DebugFlags.Active` like `?slowmotrail`. The tutorial BANNER (`TutorialMessage.Draw`) also
+  routes through `DrawShadowStringCached` (slot 100; score HUD owns 0..15) in holo-cyan -- the
+  same flattened shadow+text treatment as the score, so no shadow bleed-through; don't revert it
+  to a raw `DrawString`. Verify with `?level=Tutorial&invuln` (real Chrome); the whole tutorial
+  self-runs on the timeout ceilings, so an unattended boot exercises every beat.
   build step).** `Texture2D.FromStream` decodes PNGs via **StbImageSharp — managed, on the WASM main
   thread, interpreted (no AOT)** — so a cold multi-megapixel sheet is a multi-hundred-ms to multi-second
   frame hitch (measured: `spider_sheet2` 5033 ms; a whole Level2 preload ~28 s). Two tools attack this:

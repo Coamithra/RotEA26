@@ -41,6 +41,21 @@ cd web/EvilAliensWeb
 dotnet build -c Debug
 dotnet run -c Debug --urls http://localhost:5280     # then open the URL
 ```
+- **GENERAL RULE: booting the actual game to test a change is almost NEVER the right call.** The
+  running game is the worst test rig in this repo -- slow to reach the code under test, everything
+  moves, the moment of interest can't be timed, and a live screenshot of it proves almost nothing.
+  Nearly every kind of change has (or deserves) a purpose-built verification tool, all behind URL
+  flags so a shipped build is unchanged:
+  - how something DRAWS -> the **sprite harness** (`?harness=<Obj>`, next bullet);
+  - a time-varying VISUAL (fade, transition, death FX, glint, pulse) -> a **scrub/showcase scene
+    or freeze flag** (the `?textshot` / `?lazershot` / `?spiderphase=` pattern, bullet after);
+  - BEHAVIOUR / timing / feel over time -> an **isolation sim**; read the data, not a frame;
+  - tuning values -> the matching **live slider panel** (`?wctune`, `?lazershot`, `eaWalls`, ...).
+  If no tool covers the change, BUILD one -- that is part of the fix, not extra scope. Boot the
+  real game for exactly two reasons: (a) the FINAL smoke check -- it boots, the change is in, zero
+  console errors -- AFTER a tool already proved the change works; (b) the change is to the
+  boot/menu/scene-flow itself, and even then use the fast-boot flags (`?menu`, `?level=`,
+  `?spiderboss`, ...) to land as close as possible to the thing under test.
 - **Debugging how an ENEMY/OBJECT draws (a sprite, frame, blend, tint, scale)? STOP — do NOT
   boot the game and try to screenshot a moving target.** Use the **sprite harness**:
   `…:5280/?harness=<Obj>&frame=<n>` boots straight to that object, frozen, on a space

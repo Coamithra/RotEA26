@@ -204,6 +204,22 @@ namespace EvilAliensWeb.Compat
 				(float)tendrilSpeed);
 		}
 
+		// JS bridge for the live holo-sim tuner slider panel (eaHolo in wwwroot/index.html, shown on
+		// ?level=Tutorial / ?level=ClassicAliens / a bare ?holotune): DotNet.invokeMethod('EvilAliensWeb',
+		// 'debugSetHolo', green, greenPulse, burst, staticRate, filter). Overrides the simulator
+		// filter knobs in real time — same effect as the ?hologreen/?hologreenpulse/?holoburst/
+		// ?holostaticrate/?holofilter URL flags, just live (HoloSim reads them every frame).
+		[JSInvokable("debugSetHolo")]
+		public static void SetHolo(double green, double greenPulse, double burst, double staticRate, double filter)
+		{
+			DebugFlags.SetHoloOverride(
+				(float)green,
+				(float)greenPulse,
+				(float)burst,
+				(float)staticRate,
+				(float)filter);
+		}
+
 		// JS bridge for the live connector-tuner slider panel (eaConnector in wwwroot/index.html, shown
 		// on ?level=TeamChallenge / a bare ?connectortune): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetConnector', boltCount, arcRate, jitter, pulse, glow). Overrides the ShipConnector

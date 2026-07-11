@@ -1,3 +1,4 @@
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
@@ -57,9 +58,13 @@ internal class ClassicAliens : GameScene
 	public override void Update(GameTime gameTime)
 	{
 		base.Update(gameTime);
-		if (RandomHelper.RandomFromAverage(0.2f, gameTime))
+		// Same holo-sim treatment as the Tutorial — this challenge shares the
+		// trial-simulation fiction (see Compat/HoloSim; poke-driven, fades on exit).
+		HoloSim.Poke();
+		if (RandomHelper.RandomFromAverage(HoloSim.HiccupRate, gameTime))
 		{
 			Background.Jump();
+			HoloSim.FireBurst(0.35f);
 		}
 	}
 
@@ -77,9 +82,22 @@ internal class ClassicAliens : GameScene
 		eventList.AddHalt();
 	}
 
+	// Holo-sim "channel surf" spike on the same beat as the following event (mirrors
+	// TutorialLevel.burst).
+	private void burst(float strength)
+	{
+		WaitEvent waitEvent = new WaitEvent(base.Game, 0.01f);
+		waitEvent.OnFinished += delegate
+		{
+			HoloSim.FireBurst(strength);
+		};
+		eventList.AddEvent(waitEvent, halting: false);
+	}
+
 	protected override void PopulateEventList()
 	{
 		showMessage("Welcome to the Trial Simulation Chamber", 6.5f, isCheckpoint: false);
+		burst(1f);
 		showMessage("Activating Training Mode...", 6.5f, isCheckpoint: false);
 		WaitEvent gameEvent = new WaitEvent(base.Game, 0.01f);
 		eventList.AddEvent(gameEvent);
@@ -137,6 +155,7 @@ internal class ClassicAliens : GameScene
 		eventList.AddHalt();
 		eventList.MakeConditional(classicBossSpawner, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		showMessage("Well Done", 6.5f, isCheckpoint: false);
+		burst(1f);
 		showMessage("Terminating Training...", 6.5f, isCheckpoint: false);
 		waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent);

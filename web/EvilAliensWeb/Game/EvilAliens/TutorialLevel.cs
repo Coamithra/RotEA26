@@ -278,7 +278,7 @@ internal class TutorialLevel : GameScene
 		// Keep the fullscreen holo-sim filter alive (it fades out on its own the moment
 		// the tutorial stops poking — any exit path included; see Compat/HoloSim).
 		HoloSim.Poke();
-		if (RandomHelper.RandomFromAverage(0.2f, gameTime))
+		if (RandomHelper.RandomFromAverage(HoloSim.HiccupRate, gameTime))
 		{
 			Background.Jump();
 			// The background's glitch-slip and a small screen-glitch spike land together.

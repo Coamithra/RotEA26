@@ -160,6 +160,8 @@ public class Game1 : Game
 	// gracefully if a compiled variant ever drops one).
 	private EffectParameter hsIntensity;
 
+	private EffectParameter hsGreen;
+
 	private EffectParameter hsBurst;
 
 	private EffectParameter hsTime;
@@ -527,6 +529,7 @@ public class Game1 : Game
 		{
 			holoSim = base.Content.Load<Effect>("Content/GFX/Effects/holosim");
 			hsIntensity = holoSim.Parameters["Intensity"];
+			hsGreen = holoSim.Parameters["Green"];
 			hsBurst = holoSim.Parameters["Burst"];
 			hsTime = holoSim.Parameters["Time"];
 		}
@@ -1242,6 +1245,7 @@ public class Game1 : Game
 		}
 		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);
 		hsIntensity?.SetValue(HoloSim.Intensity);
+		hsGreen?.SetValue(HoloSim.Green);
 		hsBurst?.SetValue(HoloSim.Burst);
 		hsTime?.SetValue(HoloSim.Time);
 		base.GraphicsDevice.SetRenderTarget(holoRT);

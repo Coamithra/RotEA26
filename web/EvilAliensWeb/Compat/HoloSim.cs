@@ -18,8 +18,27 @@ namespace EvilAliensWeb.Compat
 	public static class HoloSim
 	{
 		// Baseline filter strength while the simulation runs; the shader's own constants
-		// keep the look subtle at 1. ?holofilter=<f> scales it (0 disables).
+		// keep the look subtle at 1. ?holofilter=<f> scales it (0 disables the WHOLE
+		// filter, green pull included — the kill switch).
 		public const float DefaultIntensity = 1f;
+
+		// Classic monochrome phosphor-green pull (0 = true colour, 1 = full green
+		// terminal) and its slow pulse: the pull breathes between full and
+		// (1 - pulse-depth) x full, so at depth 1 the frame swings all the way back to
+		// true colour. ?hologreen= / ?hologreenpulse= override; live via the eaHolo panel.
+		// Values dialed by eye via the eaHolo panel (card 2382b514).
+		public const float DefaultGreenPull = 0.45f;
+		public const float DefaultGreenPulse = 0.6f;
+		private const float GreenPulseHz = 0.12f;
+
+		// Baseline scale on the channel-surf glitch spikes (the full-strength 0.30-grain
+		// burst read too harsh — dialed way down; ?holoburst= overrides).
+		public const float DefaultBurstScale = 0.1f;
+
+		// Average rate (per second) of the random simulation "hiccups" — the small
+		// Background.Jump() + FireBurst pairs the simulator levels roll each tick.
+		// ?holostaticrate= overrides (the panel shows it per minute).
+		public const float DefaultHiccupRate = 0.167f;
 
 		// Burst envelope length. Attack is a snap (the spike IS the pop); decay eases out.
 		private const float BurstSeconds = 0.9f;
@@ -30,13 +49,25 @@ namespace EvilAliensWeb.Compat
 		private static float burstStrength = 1f;
 		private static float time;           // raw accumulated seconds, rolls the shader noise
 
-		// True while the filter has any visible contribution (Game1 skips the pass otherwise).
-		public static bool Visible => mix > 0.004f && EffectiveIntensity > 0f;
+		// True while the filter has any visible contribution (Game1 skips the pass
+		// otherwise). ?holofilter=0 kills everything, green included.
+		public static bool Visible => mix > 0.004f && (DebugFlags.HoloFilter ?? 1f) > 0f;
 
 		public static float Time => time;
 
-		// Shader params, pre-scaled by the eased mix + the ?holofilter / ?holoburst knobs.
-		public static float Intensity => mix * EffectiveIntensity;
+		// Shader params, pre-scaled by the eased mix + the ?holo* knobs.
+		public static float Intensity => mix * DefaultIntensity * (DebugFlags.HoloFilter ?? 1f);
+
+		public static float Green
+		{
+			get
+			{
+				float pull = DebugFlags.HoloGreen ?? DefaultGreenPull;
+				float depth = DebugFlags.HoloGreenPulse ?? DefaultGreenPulse;
+				float wave = 0.5f + 0.5f * (float)Math.Sin(time * GreenPulseHz * 2.0 * Math.PI);
+				return mix * pull * (1f - depth * wave);
+			}
+		}
 
 		public static float Burst
 		{
@@ -49,11 +80,12 @@ namespace EvilAliensWeb.Compat
 				float p = burstLeft / BurstSeconds;
 				// sin easing: fast rise at the tail end of p~1, smooth fall to 0.
 				float env = (float)Math.Sin(p * Math.PI * 0.5);
-				return mix * env * burstStrength * (DebugFlags.HoloBurst ?? 1f);
+				return mix * env * burstStrength * (DebugFlags.HoloBurst ?? DefaultBurstScale);
 			}
 		}
 
-		private static float EffectiveIntensity => DefaultIntensity * (DebugFlags.HoloFilter ?? 1f);
+		// The simulator levels' random hiccup frequency (RandomFromAverage rate).
+		public static float HiccupRate => DebugFlags.HoloStaticRate ?? DefaultHiccupRate;
 
 		// Keep the filter alive this frame. Call every Update tick while the sim runs.
 		public static void Poke()

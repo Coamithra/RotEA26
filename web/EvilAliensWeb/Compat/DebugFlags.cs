@@ -40,11 +40,16 @@ namespace EvilAliensWeb.Compat
 	//                  with ?slowmotraildecay=<0..0.99> (ghost persistence) and
 	//                  ?slowmotrailstrength=<0..1> (how strongly trails mix over the live frame).
 	//                  See it on demand without grinding a 1up: console eaSlowmo() in a level.
-	//   ?holofilter=<f> scale the tutorial's fullscreen holo-sim filter (scanlines + edge
-	//                  cyan cast; Compat/HoloSim + holosim.fx): 0 = off, 1 = default, up to ~2
-	//                  to exaggerate while tuning. ?holoburst=<f> scales the channel-surf glitch
-	//                  spikes (activate/terminate + holodeck Jump() hiccups) independently.
-	//                  Pure render look — like MetalScore/SlowmoTrail, kept OUT of `Active`.
+	//   ?holofilter=<f> scale the simulator levels' (Tutorial + ClassicAliens) fullscreen
+	//                  holo-sim filter (scanlines + edge cyan cast; Compat/HoloSim + holosim.fx):
+	//                  0 = the WHOLE filter off (green included), 1 = default, up to ~2.
+	//                  Companions: ?holoburst=<f> scales the channel-surf glitch spikes
+	//                  (activate/terminate + holodeck Jump() hiccups); ?hologreen=<0..1> the
+	//                  monochrome phosphor-green pull; ?hologreenpulse=<0..1> the slow
+	//                  green<->true-colour pulse depth; ?holostaticrate=<per-sec> how often the
+	//                  random hiccup glitches fire. LIVE PANEL: eaHolo sliders auto-show on
+	//                  ?level=Tutorial / ?level=ClassicAliens / a bare ?holotune.
+	//                  Pure render looks — like MetalScore/SlowmoTrail, all kept OUT of `Active`.
 	//   ?bulletshot    BULLET SHOWCASE: boot straight onto a frozen reference tableau --
 	//                  the player ship + a UFO cluster + both bullet types on the starfield,
 	//                  drawn by the real pipeline. A composed cousin of ?harness, built for
@@ -193,13 +198,38 @@ namespace EvilAliensWeb.Compat
 		public static float? SlowmoTrailStrength { get; private set; }
 
 		// Scale on the tutorial's fullscreen holo-sim filter (Compat/HoloSim + holosim.fx):
-		// 0 disables, null => the baked HoloSim.DefaultIntensity. ?holofilter=
-		// A pure render look, kept OUT of `Active` like SlowmoTrail.
+		// 0 disables the whole filter (green pull included), null => the baked
+		// HoloSim.DefaultIntensity. ?holofilter=
+		// A pure render look, kept OUT of `Active` like SlowmoTrail (all ?holo* are).
 		public static float? HoloFilter { get; private set; }
 
 		// Scale on the holo-sim's channel-surf glitch spikes (activate/terminate + the
-		// holodeck Jump() hiccups). null => 1. ?holoburst=
+		// holodeck Jump() hiccups). null => HoloSim.DefaultBurstScale. ?holoburst=
 		public static float? HoloBurst { get; private set; }
+
+		// Monochrome phosphor-green pull (0 = true colour, 1 = full green terminal).
+		// null => HoloSim.DefaultGreenPull. ?hologreen=
+		public static float? HoloGreen { get; private set; }
+
+		// Depth of the slow green<->true-colour pulse (0 = steady green, 1 = swings all
+		// the way back to true colour). null => HoloSim.DefaultGreenPulse. ?hologreenpulse=
+		public static float? HoloGreenPulse { get; private set; }
+
+		// Average rate (per SECOND) of the simulator levels' random glitch hiccups
+		// (Background.Jump + small burst). null => HoloSim.DefaultHiccupRate. ?holostaticrate=
+		public static float? HoloStaticRate { get; private set; }
+
+		// JS bridge for the live holo-sim tuner panel (eaHolo in wwwroot/index.html, shown on
+		// ?level=Tutorial / ?level=ClassicAliens / a bare ?holotune): overrides the five knobs
+		// in real time — HoloSim reads them every frame, so a slider drag retints the next frame.
+		internal static void SetHoloOverride(float? green, float? greenPulse, float? burst, float? staticRate, float? filter)
+		{
+			HoloGreen = green;
+			HoloGreenPulse = greenPulse;
+			HoloBurst = burst;
+			HoloStaticRate = staticRate;
+			HoloFilter = filter;
+		}
 
 		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
 		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
@@ -894,6 +924,24 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hb))
 					{
 						HoloBurst = (hb < 0f) ? 0f : (hb > 2f) ? 2f : hb;
+					}
+					break;
+				case "hologreen":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hg))
+					{
+						HoloGreen = (hg < 0f) ? 0f : (hg > 1f) ? 1f : hg;
+					}
+					break;
+				case "hologreenpulse":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hgp))
+					{
+						HoloGreenPulse = (hgp < 0f) ? 0f : (hgp > 1f) ? 1f : hgp;
+					}
+					break;
+				case "holostaticrate":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hsr))
+					{
+						HoloStaticRate = (hsr < 0f) ? 0f : (hsr > 1f) ? 1f : hsr;
 					}
 					break;
 				case "blastactive":

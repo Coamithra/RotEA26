@@ -160,6 +160,23 @@
             catch (e) { console.warn('[debug] eaLazer failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the holo-sim filter knobs (the Tutorial / ClassicAliens simulator look).
+        // Drives Compat/DebugInput.SetHolo so the slider panel below (and the console) can retune
+        // the filter without a page reload. Console: eaHolo(0.45, 0.6, 0.1, 0.167, 1) — green pull,
+        // green pulse depth, glitch/static strength, hiccup rate per SECOND, filter intensity.
+        // Same effect as the ?hologreen/?hologreenpulse/?holoburst/?holostaticrate/?holofilter flags.
+        window.eaHolo = (green, greenPulse, burst, staticRate, filter) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetHolo',
+                    green === undefined ? 0.45 : Number(green) || 0,
+                    greenPulse === undefined ? 0.6 : Number(greenPulse) || 0,
+                    burst === undefined ? 0.1 : Number(burst) || 0,
+                    staticRate === undefined ? 0.167 : Number(staticRate) || 0,
+                    filter === undefined ? 1 : Number(filter) || 0);
+            }
+            catch (e) { console.warn('[debug] eaHolo failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives
         // Compat/DebugInput.SetConnector so the slider panel below (and the console) can retune the
         // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1) — main bolt
@@ -1599,6 +1616,128 @@
                 }
                 catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
             }, 250);
+        })();
+    </script>
+
+    <!-- Live holo-sim filter tuner (card 2382b514). The simulator-look knobs (green pull/pulse,
+         glitch strength/rate, intensity) were URL-flag only; this overlay drives
+         Compat/DebugInput.SetHolo (via debugSetHolo) so they can be DRAGGED in real time over the
+         running Tutorial / Evil Aliens Classic. Built outside #app so it survives Blazor's mount,
+         and only created on a simulator page (?level=Tutorial, ?level=ClassicAliens, or a bare
+         ?holotune) — a normal boot gets no extra DOM and stays byte-identical. Top-right, same
+         chrome as the eaLazer/eaWalls panels. -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&](level=tutorial|level=classicaliens|holotune)\b/i.test(q)) { return; }
+
+            // Seed the sliders from any ?holo* flags already on the URL, else the baked defaults.
+            // These literals MIRROR HoloSim's Default* consts (DefaultGreenPull 0.45 /
+            // DefaultGreenPulse 0.6 / DefaultBurstScale 0.1 / DefaultHiccupRate 0.167 /
+            // DefaultIntensity 1) — same duplication caveat as the eaLazer/eaWalls panels:
+            // re-bake there => update here.
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                green: num("hologreen", 0.45),
+                pulse: num("hologreenpulse", 0.6),
+                burst: num("holoburst", 0.1),
+                rate: num("holostaticrate", 0.167),
+                filter: num("holofilter", 1)
+            };
+
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetHolo',
+                        st.green, st.pulse, st.burst, st.rate, st.filter);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-holo{position:fixed;top:10px;right:10px;z-index:99999;width:260px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(140,220,170,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-holo h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#b8ffd4}" +
+                "#ea-holo .row{margin:7px 0}" +
+                "#ea-holo label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-holo .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-holo input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fdc9a}" +
+                "#ea-holo .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(140,220,170,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-holo .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-holo";
+            el.innerHTML =
+                "<h4>Holo-sim tuner &mdash; trial chamber</h4>" +
+                "<div class='row'><label>Green pull<span class='v' id='eh-vg'></span></label>" +
+                "<input type='range' id='eh-green' min='0' max='1' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Green pulse depth<span class='v' id='eh-vp'></span></label>" +
+                "<input type='range' id='eh-pulse' min='0' max='1' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Glitch strength<span class='v' id='eh-vb'></span></label>" +
+                "<input type='range' id='eh-burst' min='0' max='2' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Glitch rate (/min)<span class='v' id='eh-vr'></span></label>" +
+                "<input type='range' id='eh-rate' min='0' max='30' step='0.5' autocomplete='off'></div>" +
+                "<div class='row'><label>Filter intensity<span class='v' id='eh-vf'></span></label>" +
+                "<input type='range' id='eh-filter' min='0' max='2' step='0.05' autocomplete='off'></div>" +
+                "<div class='out' id='eh-out' title='Click to copy'></div>" +
+                "<div class='hint'>Drag to retune live (glitches fire on the next hiccup/beat — " +
+                "wait a moment to judge rate/strength). Click the orange line to copy, then paste " +
+                "to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var ehGreen = el.querySelector("#eh-green"), ehPulse = el.querySelector("#eh-pulse"),
+                ehBurst = el.querySelector("#eh-burst"), ehRate = el.querySelector("#eh-rate"),
+                ehFilter = el.querySelector("#eh-filter"), ehOut = el.querySelector("#eh-out"),
+                vg = el.querySelector("#eh-vg"), vp = el.querySelector("#eh-vp"),
+                vb = el.querySelector("#eh-vb"), vr = el.querySelector("#eh-vr"),
+                vf = el.querySelector("#eh-vf");
+
+            function render()
+            {
+                ehGreen.value = st.green; ehPulse.value = st.pulse; ehBurst.value = st.burst;
+                ehRate.value = Math.round(st.rate * 60 * 2) / 2; ehFilter.value = st.filter;
+                vg.textContent = st.green; vp.textContent = st.pulse; vb.textContent = st.burst;
+                vr.textContent = (st.rate * 60).toFixed(1); vf.textContent = st.filter;
+                ehOut.textContent = "hologreen=" + st.green + " hologreenpulse=" + st.pulse +
+                    " holoburst=" + st.burst + " holostaticrate=" + (Math.round(st.rate * 1000) / 1000) +
+                    " holofilter=" + st.filter;
+            }
+
+            function changed() { render(); push(); }
+
+            ehGreen.addEventListener("input", function () { st.green = +ehGreen.value; changed(); });
+            ehPulse.addEventListener("input", function () { st.pulse = +ehPulse.value; changed(); });
+            ehBurst.addEventListener("input", function () { st.burst = +ehBurst.value; changed(); });
+            ehRate.addEventListener("input", function () { st.rate = +ehRate.value / 60; changed(); });
+            ehFilter.addEventListener("input", function () { st.filter = +ehFilter.value; changed(); });
+            ehOut.addEventListener("click", function ()
+            {
+                var t = ehOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = ehOut.style.color; ehOut.style.color = "#9ffcd0";
+                setTimeout(function () { ehOut.style.color = old; }, 250);
+            });
+
+            render();
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
         })();
     </script>
 

@@ -139,6 +139,17 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		AlphaDestinationBlend = Blend.InverseSourceAlpha,
 	};
 
+	// Writes ONLY the alpha channel (RGB masked out), overwriting it with the source —
+	// used by SealAlpha to force a render target opaque without touching its colour.
+	private static readonly BlendState WriteAlphaOne = new BlendState
+	{
+		ColorWriteChannels = ColorWriteChannels.Alpha,
+		ColorSourceBlend = Blend.One,
+		ColorDestinationBlend = Blend.Zero,
+		AlphaSourceBlend = Blend.One,
+		AlphaDestinationBlend = Blend.Zero,
+	};
+
 	// Glint-sweep timing fed to metal.fx (Time mod SweepPeriod in [0, Period*Active] = one
 	// crossing). Public so an event-driven caller (the score, which sweeps on a digit
 	// rollover rather than the continuous menu marquee clock) can compute the matching
@@ -272,6 +283,21 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Flush();
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
 		spriteBatch.Draw(texture, position, (Rectangle?)null, color, 0f, origin, scale, (SpriteEffects)0, 0f);
+		spriteBatch.End();
+	}
+
+	// Force the whole current render target's ALPHA channel to 1, leaving RGB untouched, by
+	// drawing `whitePixel` over a `width`x`height` region (RENDER space, identity transform).
+	// The death cross-fade snapshots the background into an RGBA8 target and later composites
+	// it over the scene with straight alpha as the dissolve overlay; the partial-alpha veil /
+	// cloud draws inside that snapshot leave its alpha < 1, which would make the overlay
+	// under-cover (a residual ghost of the faded objects). Sealing alpha to 1 makes the target
+	// behave like the alpha-less Bgr565 original — the overlay covers by its tint alpha alone.
+	public void SealAlpha(Texture2D whitePixel, int width, int height)
+	{
+		Flush();
+		spriteBatch.Begin(SpriteSortMode.Deferred, WriteAlphaOne, null, null, null, null, Matrix.Identity);
+		spriteBatch.Draw(whitePixel, new Rectangle(0, 0, width, height), Color.White);
 		spriteBatch.End();
 	}
 

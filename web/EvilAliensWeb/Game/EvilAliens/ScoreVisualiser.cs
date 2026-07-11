@@ -702,10 +702,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 		// Flatten shadow+text into ONE semi-transparent sprite so the translucent shadow no
 		// longer shows through the translucent text where they overlap. DebugFlags.MetalScore
-		// (chrome-sheen, OFF by default since card 37c4ccca — metal.fx's dark mid-band spans
-		// only ~1-2px on these tiny HUD glyphs and reads crunchy/jaggy; ?metalscore re-enables
-		// the chrome to A/B) routes it through metal.fx. The chrome darkens the mid-band, so the
-		// metal score reads a touch more solid (0.7) than the plain flatten (0.55) to compensate.
+		// (chrome-sheen, ON by default — restored by card 16dad393; ?metalscore=0 A/Bs the plain
+		// flatten) routes it through metal.fx. The chrome darkens the mid-band, so the metal
+		// score reads a touch more solid (0.7) than the plain flatten (0.55) to compensate.
 		bool metal = DebugFlags.MetalScore;
 		float opacity = alpha * (metal ? 0.7f : 0.55f);
 		spriteBatch.DrawShadowStringCached(cacheKey, str, position, scale, shadowColor, textColor, new Vector2(2f, 2f), opacity, metal, glintTime);

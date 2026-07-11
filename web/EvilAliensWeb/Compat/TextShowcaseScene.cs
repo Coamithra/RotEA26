@@ -103,8 +103,9 @@ namespace EvilAliensWeb.Compat
             ScoreColours(Color.Blue, out Color shadowBlue, out Color textBlue);
 
             // --- Score / combo HUD rows: exact DrawStr values (scale 0.9 / 0.6 / 1.0; plain
-            // opacity = alpha*0.55, chrome = alpha*0.7; shadow offset (2,2)). Plain row = the
-            // shipped default (MetalScore false); chrome row = the ?metalscore look, parked glint.
+            // opacity = alpha*0.55, chrome = alpha*0.7; shadow offset (2,2)). Chrome row = the
+            // shipped default (MetalScore true, restored by card 16dad393); plain row = the
+            // ?metalscore=0 look, parked glint.
             Label("score plain (shipped: scale 0.9, a 0.55)", new Vector2(30f, 46f));
             base.SpriteBatch.DrawShadowString("1234560", new Vector2(30f, 62f), 0.9f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.55f, metal: false, ParkedGlint);
             Label("combo plain (Combo! 0.6 / 20x 1.0)", new Vector2(300f, 46f));

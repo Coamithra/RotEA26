@@ -605,6 +605,10 @@ public class Background : Scene
 		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
 		if (XFade.Active)
 		{
+			// Normalized counts DOWN (1 -> 0, fraction of the fade REMAINING), so
+			// 1 - Normalized ramps 0 -> 1: the clean background copy progressively
+			// COVERS the objects (enemies/bullets/dead ship) — they dissolve out into
+			// the untouched background.
 			float num = 1f - XFade.Normalized;
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 			// Stage 10: render-sized RT -> 1:1 identity composite (DrawPresent).
@@ -627,6 +631,13 @@ public class Background : Scene
 			base.SpriteBatch.Flush();
 			EnsureRenderTarget();
 			base.GraphicsDevice.SetRenderTarget(0, rendertarget);
+			// The XBLIG RT was Bgr565 (no alpha), so the background copy always
+			// composited as an OPAQUE image at the tint's alpha. The web port's RGBA8
+			// RT would otherwise inherit the additive starfield's patchy per-pixel
+			// alpha and the DrawForeground straight-alpha composite would light up /
+			// unevenly cover the scene. Clearing to opaque black keeps the RT alpha at
+			// 1 everywhere (NonPremultiplied/Additive draws preserve a full dst alpha).
+			base.GraphicsDevice.Clear(Color.Black);
 		}
 		if (starfield != null)
 		{

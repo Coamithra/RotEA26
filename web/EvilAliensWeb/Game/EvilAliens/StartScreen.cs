@@ -79,8 +79,9 @@ public class StartScreen : Scene
 			{
 				num4 = 0;
 			}
-			// Web/PC port: keyboard Enter starts the game as the local player (index 0).
-			else if (base.InputHandler.Pressed(MyKeys.Enter))
+			// Web/PC port: keyboard Enter -- or a left mouse click / touch tap (Mouse1) --
+			// starts the game as the local player (index 0).
+			else if (base.InputHandler.Pressed(MyKeys.Enter) || base.InputHandler.Pressed(MyKeys.Mouse1))
 			{
 				num4 = 0;
 			}

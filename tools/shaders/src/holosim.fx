@@ -4,19 +4,23 @@
 // gamma present blit (the ApplySlowmoTrail seam). Pixel shader only: KNI's
 // SpriteBatch supplies the vertex transform (same as gamma.fx).
 //
-// Two intensity drivers, both already eased/scaled on the C# side (Compat/HoloSim):
+// Three intensity drivers, all already eased/scaled on the C# side (Compat/HoloSim):
 //   Intensity  the always-on baseline while the simulation runs — scanlines, a cool
 //              cyan cast that strengthens toward the screen edges (vignette-shaped,
 //              so the play area stays true-colour), and a faint interlace shimmer.
+//   Green      pull toward classic monochrome phosphor green (0 = true colour,
+//              1 = a full green terminal). The slow green<->colour PULSE is computed
+//              on the C# side (HoloSim owns Time) and baked into this value.
 //   Burst      the "channel surf" spike (row jitter + static + contrast crunch +
-//              hard scanlines), fired on Activating/Terminating Tutorial and on the
-//              holodeck's Jump() glitch hiccups. 0 outside a burst.
+//              hard scanlines), fired on Activating/Terminating the simulation and
+//              on the holodeck's Jump() glitch hiccups. 0 outside a burst.
 // Time (seconds) rolls the noise/scanlines. The distortion recipe follows
 // channelflip.fx (same hash + row-jitter idea) so the two read as one effect family.
 //
 // ps_3_0 like channelflip: the hash/branchless mix exceeds ps_2_0's budget.
 
 float Intensity;
+float Green;
 float Burst;
 float Time;
 
@@ -50,16 +54,21 @@ float4 PixelShaderFunction(float4 color : COLOR0, float2 texCoord : TEXCOORD0) :
     float3 holo = luma * float3(0.55, 1.0, 0.95);
     c.rgb = lerp(c.rgb, holo, edge * 0.45 * Intensity + 0.20 * Burst);
 
+    // Classic monochrome phosphor-green pull, full-screen (the ~8% lift keeps the
+    // green terminal reading punchy rather than dim). Pulse already baked into Green.
+    c.rgb = lerp(c.rgb, luma * 1.08 * float3(0.25, 1.0, 0.4), Green);
+
     // Scanlines (subtle darkening baseline, harder in a burst) + a faint interlace
     // shimmer so the projection never sits perfectly still.
     float scan = 0.5 + 0.5 * sin((texCoord.y * 600.0 - Time * 14.0) * PI);
-    c.rgb *= 1.0 - scan * (0.10 * Intensity + 0.22 * Burst);
+    c.rgb *= 1.0 - scan * (0.10 * Intensity + 0.18 * Burst);
     c.rgb *= 1.0 + 0.015 * Intensity * sin(Time * 37.0 + texCoord.y * 600.0 * PI);
 
-    // Static grain + contrast crunch, burst only.
+    // Static grain + contrast crunch, burst only. (Grain 0.20: the original 0.30
+    // read too harsh — and the whole burst is scaled by the ?holoburst knob.)
     float n = hash21(texCoord * float2(640.0, 480.0) + frac(Time) * 97.0);
-    c.rgb += (n - 0.5) * 0.30 * Burst;
-    c.rgb = saturate((c.rgb - 0.5) * (1.0 + 0.45 * Burst) + 0.5);
+    c.rgb += (n - 0.5) * 0.20 * Burst;
+    c.rgb = saturate((c.rgb - 0.5) * (1.0 + 0.40 * Burst) + 0.5);
 
     return c * color;
 }

@@ -959,12 +959,15 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   same Jump()-paired hiccup bursts, and its "Activating/Terminating Training..." messages get the
   channel-surf spike, since it shares the trial-sim fiction. **Monochrome phosphor-green pull**:
   the shader's `Green` param pulls the whole frame toward a classic green terminal
-  (`HoloSim.DefaultGreenPull` 0.6), breathing back toward true colour on a slow pulse
-  (`DefaultGreenPulse` 0.4 depth, ~0.18Hz -- computed C#-side in `HoloSim.Green`, the shader
-  just gets the final value). Tune with `?holofilter=<f>` (0 = the WHOLE filter off, green
-  included) / `?holoburst=<f>` (glitch-spike scale) / `?hologreen=` / `?hologreenpulse=` /
-  `?holostaticrate=` (random-hiccup rate per second, `HoloSim.HiccupRate` -- both simulator
-  levels roll it) -- pure render looks, all kept OUT of `DebugFlags.Active` like `?slowmotrail`.
+  (`HoloSim.DefaultGreenPull` 0.45), breathing back toward true colour on a slow pulse
+  (`DefaultGreenPulse` 0.6 depth, ~0.12Hz -- computed C#-side in `HoloSim.Green`, the shader
+  just gets the final value). The glitch spikes ship dialed way down (`DefaultBurstScale` 0.1 --
+  the full-strength burst read too harsh) at ~10 hiccups/min (`DefaultHiccupRate` 0.167/s); all
+  user-dialed via the panel (card 2382b514). Tune with `?holofilter=<f>` (0 = the WHOLE filter
+  off, green included) / `?holoburst=<f>` (glitch-spike scale) / `?hologreen=` /
+  `?hologreenpulse=` / `?holostaticrate=` (random-hiccup rate per second, `HoloSim.HiccupRate`
+  -- both simulator levels roll it) -- pure render looks, all kept OUT of `DebugFlags.Active`
+  like `?slowmotrail`.
   **LIVE SLIDER PANEL (`eaHolo`)**: auto-shows on `?level=Tutorial` / `?level=ClassicAliens` / a
   bare `?holotune` (index.html, outside `#app`, eaLazer pattern) -- green pull / pulse depth /
   glitch strength / glitch rate per min / intensity, driving `DebugInput.SetHolo` -> 

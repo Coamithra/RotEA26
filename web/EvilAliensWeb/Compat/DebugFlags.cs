@@ -204,7 +204,7 @@ namespace EvilAliensWeb.Compat
 		public static float? HoloFilter { get; private set; }
 
 		// Scale on the holo-sim's channel-surf glitch spikes (activate/terminate + the
-		// holodeck Jump() hiccups). null => 1. ?holoburst=
+		// holodeck Jump() hiccups). null => HoloSim.DefaultBurstScale. ?holoburst=
 		public static float? HoloBurst { get; private set; }
 
 		// Monochrome phosphor-green pull (0 = true colour, 1 = full green terminal).

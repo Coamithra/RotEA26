@@ -26,14 +26,19 @@ namespace EvilAliensWeb.Compat
 		// terminal) and its slow pulse: the pull breathes between full and
 		// (1 - pulse-depth) x full, so at depth 1 the frame swings all the way back to
 		// true colour. ?hologreen= / ?hologreenpulse= override; live via the eaHolo panel.
-		public const float DefaultGreenPull = 0.6f;
-		public const float DefaultGreenPulse = 0.4f;
-		private const float GreenPulseHz = 0.18f;
+		// Values dialed by eye via the eaHolo panel (card 2382b514).
+		public const float DefaultGreenPull = 0.45f;
+		public const float DefaultGreenPulse = 0.6f;
+		private const float GreenPulseHz = 0.12f;
+
+		// Baseline scale on the channel-surf glitch spikes (the full-strength 0.30-grain
+		// burst read too harsh — dialed way down; ?holoburst= overrides).
+		public const float DefaultBurstScale = 0.1f;
 
 		// Average rate (per second) of the random simulation "hiccups" — the small
 		// Background.Jump() + FireBurst pairs the simulator levels roll each tick.
 		// ?holostaticrate= overrides (the panel shows it per minute).
-		public const float DefaultHiccupRate = 0.12f;
+		public const float DefaultHiccupRate = 0.167f;
 
 		// Burst envelope length. Attack is a snap (the spike IS the pop); decay eases out.
 		private const float BurstSeconds = 0.9f;
@@ -75,7 +80,7 @@ namespace EvilAliensWeb.Compat
 				float p = burstLeft / BurstSeconds;
 				// sin easing: fast rise at the tail end of p~1, smooth fall to 0.
 				float env = (float)Math.Sin(p * Math.PI * 0.5);
-				return mix * env * burstStrength * (DebugFlags.HoloBurst ?? 1f);
+				return mix * env * burstStrength * (DebugFlags.HoloBurst ?? DefaultBurstScale);
 			}
 		}
 

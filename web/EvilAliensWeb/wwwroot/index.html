@@ -162,16 +162,16 @@
 
         // Debug: live-set the holo-sim filter knobs (the Tutorial / ClassicAliens simulator look).
         // Drives Compat/DebugInput.SetHolo so the slider panel below (and the console) can retune
-        // the filter without a page reload. Console: eaHolo(0.6, 0.4, 1, 0.12, 1) — green pull,
+        // the filter without a page reload. Console: eaHolo(0.45, 0.6, 0.1, 0.167, 1) — green pull,
         // green pulse depth, glitch/static strength, hiccup rate per SECOND, filter intensity.
         // Same effect as the ?hologreen/?hologreenpulse/?holoburst/?holostaticrate/?holofilter flags.
         window.eaHolo = (green, greenPulse, burst, staticRate, filter) => {
             try {
                 DotNet.invokeMethod('EvilAliensWeb', 'debugSetHolo',
-                    green === undefined ? 0.6 : Number(green) || 0,
-                    greenPulse === undefined ? 0.4 : Number(greenPulse) || 0,
-                    burst === undefined ? 1 : Number(burst) || 0,
-                    staticRate === undefined ? 0.12 : Number(staticRate) || 0,
+                    green === undefined ? 0.45 : Number(green) || 0,
+                    greenPulse === undefined ? 0.6 : Number(greenPulse) || 0,
+                    burst === undefined ? 0.1 : Number(burst) || 0,
+                    staticRate === undefined ? 0.167 : Number(staticRate) || 0,
                     filter === undefined ? 1 : Number(filter) || 0);
             }
             catch (e) { console.warn('[debug] eaHolo failed (game not booted yet?): ' + e.message); }
@@ -1633,19 +1633,20 @@
             if (!/[?&](level=tutorial|level=classicaliens|holotune)\b/i.test(q)) { return; }
 
             // Seed the sliders from any ?holo* flags already on the URL, else the baked defaults.
-            // These literals MIRROR HoloSim's Default* consts (DefaultGreenPull 0.6 /
-            // DefaultGreenPulse 0.4 / burst x1 / DefaultHiccupRate 0.12 / DefaultIntensity 1) —
-            // same duplication caveat as the eaLazer/eaWalls panels: re-bake there => update here.
+            // These literals MIRROR HoloSim's Default* consts (DefaultGreenPull 0.45 /
+            // DefaultGreenPulse 0.6 / DefaultBurstScale 0.1 / DefaultHiccupRate 0.167 /
+            // DefaultIntensity 1) — same duplication caveat as the eaLazer/eaWalls panels:
+            // re-bake there => update here.
             function num(name, def)
             {
                 var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
                 return m ? parseFloat(m[1]) : def;
             }
             var st = {
-                green: num("hologreen", 0.6),
-                pulse: num("hologreenpulse", 0.4),
-                burst: num("holoburst", 1),
-                rate: num("holostaticrate", 0.12),
+                green: num("hologreen", 0.45),
+                pulse: num("hologreenpulse", 0.6),
+                burst: num("holoburst", 0.1),
+                rate: num("holostaticrate", 0.167),
                 filter: num("holofilter", 1)
             };
 

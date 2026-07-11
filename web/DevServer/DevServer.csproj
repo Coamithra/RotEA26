@@ -9,7 +9,9 @@
        (The `_framework/*` code files are already no-cache, so C# was never the problem.)
 
        It is NEVER used by CI / GitHub Pages — deploy.yml publishes web/EvilAliensWeb directly.
-       Run it via the `eaweb-fresh` launch config (dotnet run on this project, web/DevServer). -->
+       This IS the default dev host now: `eaweb` (5280), `eaweb-fresh` (5290) and every worktree
+       launch config run this project (see .claude/launch.json), so serving is cache-proof by
+       default. -->
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>

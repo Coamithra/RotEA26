@@ -106,7 +106,7 @@ namespace EvilAliensWeb.Compat
             // opacity = alpha*0.55, chrome = alpha*0.7; shadow offset (2,2)). Chrome row = the
             // shipped default (MetalScore true, restored by card 16dad393); plain row = the
             // ?metalscore=0 look, parked glint.
-            Label("score plain (shipped: scale 0.9, a 0.55)", new Vector2(30f, 46f));
+            Label("score plain (?metalscore=0: scale 0.9, a 0.55)", new Vector2(30f, 46f));
             base.SpriteBatch.DrawShadowString("1234560", new Vector2(30f, 62f), 0.9f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.55f, metal: false, ParkedGlint);
             Label("combo plain (Combo! 0.6 / 20x 1.0)", new Vector2(300f, 46f));
             base.SpriteBatch.DrawShadowString("Combo!", new Vector2(300f, 62f), 0.6f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.55f, metal: false, ParkedGlint);
@@ -114,7 +114,7 @@ namespace EvilAliensWeb.Compat
             Label("Press Start plain (a 0.6*0.55)", new Vector2(560f, 46f));
             base.SpriteBatch.DrawShadowString("Press Start", new Vector2(560f, 62f), 0.9f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.6f * 0.55f, metal: false, ParkedGlint);
 
-            Label("score chrome (?metalscore: a 0.7, parked glint)", new Vector2(30f, 116f));
+            Label("score chrome (shipped: a 0.7, parked glint)", new Vector2(30f, 116f));
             base.SpriteBatch.DrawShadowString("1234560", new Vector2(30f, 132f), 0.9f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);
             Label("combo chrome", new Vector2(420f, 116f));
             base.SpriteBatch.DrawShadowString("Combo!", new Vector2(420f, 132f), 0.6f, shadowBlue, textBlue, new Vector2(2f, 2f), 0.7f, metal: true, ParkedGlint);

@@ -59,7 +59,13 @@ float4 PixelShaderFunction(float4 color : COLOR0, float2 tc : TEXCOORD0) : COLOR
     float phase = frac(Time / SweepPeriod) / max(1e-3, SweepActive);
     float gu    = local.x * 0.88 + (1.0 - local.y) * 0.12;      // slight diagonal lean
     float glint = smoothstep(GlintWidth, 0.0, abs(gu - phase)) * step(phase, 1.0);
-    metalRGB += glint * GlintStrength;                          // alpha below masks it
+    metalRGB += glint * GlintStrength * mask;                   // * mask: confine the additive
+                                                                // glint to glyph coverage. The
+                                                                // composite is premultiplied
+                                                                // (One/InvSrcAlpha), so an unmasked
+                                                                // additive term paints the empty
+                                                                // padding too — a hard diagonal bar
+                                                                // over the sky around small HUD text.
 
     return float4(metalRGB, mask) * color;
 }

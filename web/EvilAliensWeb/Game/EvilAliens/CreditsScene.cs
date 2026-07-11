@@ -294,7 +294,8 @@ internal class CreditsScene : Scene
 		lines.Add("ADDITIONAL GRAPHICS:");
 		lines.Add("Sam Altman");
 		lines.Add("Demis Hassabis");
-		lines.Add("Andromeda photo: Adam Evans (CC BY 2.0)");
+		lines.Add("Andromeda photo: Adam Evans");
+		lines.Add("(CC BY 2.0)");
 		lines.Add("");
 		lines.Add("PLAYTESTING: ");
 		lines.Add("Rucky Brunsman");

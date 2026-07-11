@@ -69,6 +69,14 @@ internal class TutorialLevel : GameScene
 	// pickup gate so a fast pickup clears the banner before the next lesson's text.
 	protected override void PopulateEventList()
 	{
+		if (EvilAliensWeb.Compat.DebugFlags.TutorialTraining)
+		{
+			// DEBUG (?tutorialtraining): skip the whole tutorial and drop straight into the final
+			// power-up training beat (eye boss + PowerUpTrainingEvent), so the R-banner timing bug
+			// can be reproduced in seconds instead of playing through every lesson.
+			PopulatePowerUpTrainingOnly();
+			return;
+		}
 		wait(2f);
 		message("Welcome to the Trial Simulation Chamber", 4.5f);
 		burst(1f);
@@ -119,6 +127,42 @@ internal class TutorialLevel : GameScene
 		waitEvent.OnFinished += killboss;
 		wait(1.5f);
 		message("Well Done", 4f);
+		burst(1f);
+		message("Terminating Tutorial...", 3f);
+		UnlockEvent unlockEvent = new UnlockEvent(base.Game, "Evil Aliens Classic", Unlockables.Items.ClassicAliens, AnimatedMessage.UnlockType.challenge, level);
+		eventList.AddEvent(unlockEvent, halting: true);
+		unlockEvent.OnFinished += end;
+		eventList.AddHalt();
+	}
+
+	// DEBUG fast-boot (?tutorialtraining): just the tutorial's FINAL beat. Mirrors the tail of
+	// PopulateEventList — reveal the enhancement + power-bar HUD, spawn the eye "punching bag"
+	// boss (spawnPunchingBag, which also enables combos) and the PowerUpTrainingEvent (every
+	// powerup streams in, a banner explains each powered-up effect), then killboss -> Well Done
+	// -> unlock -> Victory. The reading-only interstitial messages are dropped so the boss +
+	// training (where the R-banner bug lives) is reached in a couple of seconds.
+	private void PopulatePowerUpTrainingOnly()
+	{
+		wait(0.5f);
+		WaitEvent hud = new WaitEvent(base.Game, 0.01f);
+		eventList.AddEvent(hud);
+		hud.OnFinished += displayEnhancement;
+		hud = new WaitEvent(base.Game, 0.01f);
+		eventList.AddEvent(hud);
+		hud.OnFinished += displayPowerbar;
+		message("Power up your Enhancements by shooting\nthe target", 3f);
+		WaitEvent bag = new WaitEvent(base.Game, 0.01f);
+		eventList.AddEvent(bag);
+		bag.OnFinished += spawnPunchingBag;
+		PowerUpTrainingEvent training = new PowerUpTrainingEvent(base.Game);
+		eventList.AddEvent(training);
+		eventList.AddHalt();
+		wait(2f);
+		WaitEvent kill = new WaitEvent(base.Game, 0.01f);
+		eventList.AddEvent(kill);
+		kill.OnFinished += killboss;
+		wait(1f);
+		message("Well Done", 3f);
 		burst(1f);
 		message("Terminating Tutorial...", 3f);
 		UnlockEvent unlockEvent = new UnlockEvent(base.Game, "Evil Aliens Classic", Unlockables.Items.ClassicAliens, AnimatedMessage.UnlockType.challenge, level);

@@ -590,6 +590,15 @@ namespace EvilAliensWeb.Compat
 		// A pure test shortcut, like ?spiderboss. See Level2.PopulateEventList / PopulateSpidersOnly.
 		public static bool Spiders { get; private set; }
 
+		// Fast-boot the Tutorial straight to its FINAL power-up training beat (skips the whole
+		// welcome/move/fire/lesson sequence): the eye "punching bag" boss + the PowerUpTrainingEvent
+		// where every powerup streams in and a banner explains its powered-up effect. Built to
+		// reproduce the R-banner timing bug (the last powerup, powered up almost instantly while the
+		// player is mid-combo on the boss, used to rip its banner away before it finished appearing)
+		// in seconds instead of playing the whole tutorial. Pair with ?level=Tutorial (+ ?invuln).
+		// See TutorialLevel.PopulatePowerUpTrainingOnly.
+		public static bool TutorialTraining { get; private set; }
+
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
 		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
@@ -1351,6 +1360,9 @@ namespace EvilAliensWeb.Compat
 				case "spiders":
 					Spiders = IsOn(val);
 					break;
+				case "tutorialtraining":
+					TutorialTraining = IsOn(val);
+					break;
 				case "castbrain":
 					CastBrain = IsOn(val);
 					if (CastBrain)
@@ -1520,7 +1532,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || WallsOnly || BrainBoss;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || WallsOnly || BrainBoss || TutorialTraining;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1532,6 +1544,7 @@ namespace EvilAliensWeb.Compat
 							// so "why is this level not playing normally" needs an answer in the log.
 							+ (WallsOnly ? " wallsonly" : "")
 							+ (BrainBoss ? " brainboss" : "")
+							+ (TutorialTraining ? " tutorialtraining" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

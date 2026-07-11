@@ -52,8 +52,12 @@ internal class PowerUpTrainingEvent : GameEvent
 
 	private void powerupCollected(Powerup.PowerupType powerupType)
 	{
+		// Start the show-timer the instant a powerup's banner appears. Update() won't end the
+		// beat while this is still running (see below), so the LAST banner — usually R, which the
+		// player powers up almost immediately since they're mid-combo on the boss when they grab
+		// it — can't be ripped away before it has finished appearing and been read.
 		messageShowTime.Reset();
-		messageShowTime.Stop();
+		messageShowTime.Start();
 		if (message != null)
 		{
 			collectionHelper.Remove((GameComponent)(object)message);
@@ -84,6 +88,27 @@ internal class PowerUpTrainingEvent : GameEvent
 		base.Update(gameTime);
 		timer.Update(gameTime);
 		messageShowTime.Update(gameTime);
+		bool flag = true;
+		foreach (PlayerShip ship in Oracle.GetShips())
+		{
+			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.FirePower, ship.Owner) >= 1;
+			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.Range, ship.Owner) >= 1;
+			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.Option, ship.Owner) >= 1;
+			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.Blast, ship.Owner) >= 1;
+		}
+		if (flag)
+		{
+			// Every powerup is now powered up. But hold the beat open until the current banner has
+			// had its full show time — otherwise the final banner (usually R, powered up almost the
+			// instant it's grabbed because the player is mid-combo on the boss) is torn away before
+			// its typewriter even finishes. Once no banner is pending, or the last one has shown
+			// long enough, end. Stop spawning more powerups in the meantime.
+			if (message == null || messageShowTime.Finished)
+			{
+				Terminate();
+			}
+			return;
+		}
 		if (timer.Finished)
 		{
 			timer.Duration = 7000f;
@@ -107,18 +132,6 @@ internal class PowerUpTrainingEvent : GameEvent
 				currentType = Powerup.PowerupType.Blast;
 				break;
 			}
-		}
-		bool flag = true;
-		foreach (PlayerShip ship in Oracle.GetShips())
-		{
-			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.FirePower, ship.Owner) >= 1;
-			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.Range, ship.Owner) >= 1;
-			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.Option, ship.Owner) >= 1;
-			flag &= ServiceHelper.Get<IScoreService>().Score.GetPowerupLevel(Powerup.PowerupType.Blast, ship.Owner) >= 1;
-		}
-		if (flag)
-		{
-			Terminate();
 		}
 	}
 }

@@ -51,7 +51,9 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
   tuning curve over time)? DO NOT verify it with the real game + Chrome screenshots.** Motion and
   over-time change are almost impossible to catch in a static frame — you can't time the capture to
   the right instant, and a boss's attack pattern, an easing curve, or a spawn rhythm looks identical
-  across frames. Screenshots prove *drawing*, never *behaviour*. Instead, one of:
+  across frames. Screenshots prove *static* drawing, never *behaviour* -- and "appearance" that
+  CHANGES over time (a fade, a transition, a death sequence, a glint/pulse) counts as BEHAVIOUR for
+  this rule, not drawing: it has the same untimeable-capture problem. Instead, one of:
   1. **Simulate it in isolation and inspect the DATA, not a picture (preferred).** Stub the game
      (no Blazor/WASM boot needed), construct just the object, and tick its `Update` in a plain loop
      with a fixed reasonable `deltaTime`, recording the quantity of interest (position, velocity,
@@ -62,12 +64,27 @@ dotnet run -c Debug --urls http://localhost:5280     # then open the URL
      the test drives the SAME math live play does. A throwaway console/xunit harness or a Python
      re-implementation of the curve is fine; the goal is a signal you can *read*, not a frame you
      have to *time*.
-  2. **If you genuinely must see it in the real game, build a BREAK/PAUSE** so the game freezes at
+  2. **Time-varying APPEARANCE (a fade, transition, glint, pulse, death sequence)? Build or extend
+     a bespoke SCRUB/SHOWCASE test scene** that parks the effect at any chosen phase -- a slider,
+     a `?<x>phase=` freeze flag, or a slow loop -- so a screenshot can be taken at leisure at
+     EXACTLY the phase of interest (e.g. fade level 0.5), instead of trying to time a live capture
+     of a fast one-shot effect. This is the repo's established pattern; copy an exemplar:
+     `?textshot` (`Compat/TextShowcaseScene.cs` -- frozen text/alpha/animation phases), `?lazershot`
+     (`Compat/LazerShowcaseScene.cs` + live sliders), `?harness=blast` (loops the whole lifecycle,
+     `?blastloop=` sets sweep speed), `?spiderphase=<0..1>` (freeze + scrub a movement cycle),
+     `?wcmothershipfreeze=<ms>` (halt a choreography mid-phase). A "fade-out-on-player-death" fix,
+     for example, wants a scene/flag that pins the fade at an arbitrary alpha -- NOT booting the
+     game, forcing a death, and hoping the shutter catches the ~half-second fade. Building the
+     scene/flag is not extra work; it is the verification, and it stays behind a URL flag so a
+     shipped build is unchanged.
+  3. **If you genuinely must see it in the real game, build a BREAK/PAUSE** so the game freezes at
      the exact moment worth capturing (e.g. a debug flag that halts `Update` on a condition — first
      shot fired, apex of the arc, Nth spawn — using the existing `DebugFlags` seam), THEN screenshot
      the frozen frame. Never chase a moving target hoping the shutter lands right.
-  Reach for (1) FIRST for any change to how something MOVES or CHANGES OVER TIME; screenshots are
-  for drawing/appearance only.
+  Reach for (1) FIRST when the question is how something MOVES/BEHAVES (read the numbers), and (2)
+  FIRST when the question is how an animated visual LOOKS (park it, then screenshot). A raw live
+  screenshot is only ever valid for STATIC appearance; anything time-varying needs a parked or
+  scrubbed frame via (2)/(3) -- never a timed capture of the running game.
 - **A clean `dotnet build` does NOT mean it runs.** WASM runtime errors only appear in the
   **browser console** — always verify visually *and* read the console. Use the preview tools
   against the `eaweb` config in `.claude/launch.json` (`preview_start` → `preview_screenshot`

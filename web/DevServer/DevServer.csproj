@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- LOCAL-DEV ONLY. This project exists for exactly one reason: to serve the Blazor WASM
+       game with `Cache-Control: no-store` on EVERY response, so edits to index.html, the
+       wwwroot JS (webcam.js, etc.) and Content/* assets are never served stale while
+       iterating. The stock `blazor-devserver` (what `dotnet run` on the client uses) leaves
+       those files with NO Cache-Control header, so the browser heuristically caches them —
+       that's the "I keep loading a cached old version and hitting long-fixed bugs" trap.
+       (The `_framework/*` code files are already no-cache, so C# was never the problem.)
+
+       It is NEVER used by CI / GitHub Pages — deploy.yml publishes web/EvilAliensWeb directly.
+       Run it via the `eaweb-fresh` launch config (dotnet run on this project, web/DevServer). -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>EvilAliensWeb.DevServer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Hosted model: referencing the WASM client stages its wwwroot + _framework so
+         UseBlazorFrameworkFiles()/UseStaticFiles() can serve them live. -->
+    <ProjectReference Include="..\EvilAliensWeb\EvilAliensWeb.csproj" />
+  </ItemGroup>
+
+</Project>

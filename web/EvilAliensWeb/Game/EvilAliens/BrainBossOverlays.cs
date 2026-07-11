@@ -48,6 +48,7 @@ internal sealed class BrainBossOverlays
     private sealed class Overlay
     {
         public Texture2D Tex;
+        public string Name;
         public int Cols, Rows, Frames, Sep;
         public float Fps;
         public float TexCenterX, TexCenterY, TexW, TexH;
@@ -61,8 +62,12 @@ internal sealed class BrainBossOverlays
         public float Clock;   // seconds of real (draw) time
         // > 0 => triggered: rest on frame 0, play one cycle every ~this many seconds.
         public float TriggerAvgSeconds;
+        // true (gate:"spawn") => rest on frame 0 unless the boss is actively spawning enemies;
+        // while spawning it loops, and when spawning stops it finishes the current cycle then
+        // rests. The "exhaust" pods only fire when the boss is venting a wave.
+        public bool SpawnGated;
         public float CycleSeconds;   // length of one full playthrough at Fps
-        public bool Playing;         // triggered patches only
+        public bool Playing;         // triggered / spawn-gated patches only
     }
 
     private readonly List<Overlay> _overlays = new List<Overlay>();
@@ -94,9 +99,12 @@ internal sealed class BrainBossOverlays
             using var r = new StreamReader(s);
             json = r.ReadToEnd();
         }
-        catch
+        catch (Exception ex)
         {
-            return;   // no manifest -> no overlays (static boss). Fine.
+            // The manifest not loading (e.g. a stale-cache 404 on the freshly-added file) is a REAL
+            // bug in dev, not a benign "static boss" fallback — surface it loudly so it can't hide.
+            FailLoud("manifest load failed (" + ManifestPath + ")", ex);
+            return;   // Release only: degrade to the static boss rather than crash the boss fight.
         }
         try
         {
@@ -109,8 +117,19 @@ internal sealed class BrainBossOverlays
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[brainoverlays] parse failed, drawing static boss: " + ex.Message);
+            FailLoud("manifest parse failed", ex);
         }
+    }
+
+    // Fail fast in Debug (the locally-played build) so a missing/broken asset is impossible to
+    // miss; log + degrade to the static boss only in Release, so a stray 404 can never hard-crash
+    // a player's final-boss fight on Pages.
+    private static void FailLoud(string what, Exception ex)
+    {
+        Console.WriteLine("[brainoverlays] " + what + ": " + ex.Message);
+#if DEBUG
+        throw new InvalidOperationException("[brainoverlays] " + what, ex);
+#endif
     }
 
     private void TryAdd(ContentManager content, JsonElement e)
@@ -126,7 +145,7 @@ internal sealed class BrainBossOverlays
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[brainoverlays] sheet load failed (" + sheetEl.GetString() + "): " + ex.Message);
+            FailLoud("sheet load failed (" + sheetEl.GetString() + ")", ex);
             return;
         }
         int cols = GetInt(e, "cols", 1);
@@ -134,6 +153,10 @@ internal sealed class BrainBossOverlays
         var ov = new Overlay
         {
             Tex = tex,
+            Name = e.TryGetProperty("name", out JsonElement nm) && nm.ValueKind == JsonValueKind.String
+                ? nm.GetString() : null,
+            SpawnGated = e.TryGetProperty("gate", out JsonElement g) && g.ValueKind == JsonValueKind.String
+                && string.Equals(g.GetString(), "spawn", StringComparison.OrdinalIgnoreCase),
             Cols = Math.Max(1, cols),
             Rows = Math.Max(1, rows),
             Frames = Math.Max(1, GetInt(e, "frames", cols * rows)),
@@ -151,10 +174,13 @@ internal sealed class BrainBossOverlays
             TriggerAvgSeconds = Math.Max(0f, GetFloat(e, "triggerAvgSeconds", 0f)),
         };
         ov.CycleSeconds = CycleLength(ov);
-        // A patch that can't animate (one frame / no fps) has nothing to trigger; leaving
-        // it "triggered" would just roll dice every frame to show frame 0 either way.
+        // A patch that can't animate (one frame / no fps) has nothing to trigger or gate; leaving
+        // it "triggered"/"gated" would just roll/hold on frame 0 either way.
         if (ov.CycleSeconds <= 0f)
+        {
             ov.TriggerAvgSeconds = 0f;
+            ov.SpawnGated = false;
+        }
         _overlays.Add(ov);
     }
 
@@ -171,7 +197,7 @@ internal sealed class BrainBossOverlays
     /// boss's live `color` so the patches redden in lockstep with the base sprite.
     /// </summary>
     public void Draw(SpriteBatchWrapper sb, Vector2 position, float drawScale,
-                     int bossTexW, int bossTexH, Color tint, GameTime gameTime)
+                     int bossTexW, int bossTexH, Color tint, GameTime gameTime, bool spawnActive)
     {
         if (_overlays.Count == 0)
             return;
@@ -185,7 +211,7 @@ internal sealed class BrainBossOverlays
         SpriteBlendMode savedBlend = sb.BlendMode;
         foreach (Overlay ov in _overlays)
         {
-            AdvanceClock(ov, dt, gameTime);
+            AdvanceClock(ov, dt, gameTime, spawnActive);
             FramePair(ov, out int f0, out int f1, out float frac);
             Rectangle r0 = CellRect(ov, f0);
             Rectangle r1 = CellRect(ov, f1);
@@ -221,8 +247,27 @@ internal sealed class BrainBossOverlays
     // (frame 0 = the untouched crop) and rolls RandomHelper's chance-per-tick each frame;
     // when it fires, one full cycle plays out and the clock snaps back to rest. The roll
     // is skipped mid-cycle, so the average gap between animations is TriggerAvgSeconds.
-    private static void AdvanceClock(Overlay ov, float dt, GameTime gameTime)
+    private static void AdvanceClock(Overlay ov, float dt, GameTime gameTime, bool spawnActive)
     {
+        // Spawn-gated (the exhaust pods): loop while the boss is venting a wave; when it stops,
+        // finish the current cycle then rest at frame 0 (a clean power-down, no mid-flicker cut).
+        if (ov.SpawnGated)
+        {
+            if (!ov.Playing)
+            {
+                if (!spawnActive)
+                    return;             // idle: hold at frame 0
+                ov.Playing = true;
+            }
+            ov.Clock += dt;
+            if (ov.Clock >= ov.CycleSeconds)
+            {
+                if (spawnActive)
+                    ov.Clock -= ov.CycleSeconds;   // keep looping
+                else { ov.Clock = 0f; ov.Playing = false; }   // powered down
+            }
+            return;
+        }
         if (ov.TriggerAvgSeconds <= 0f)
         {
             ov.Clock += dt;

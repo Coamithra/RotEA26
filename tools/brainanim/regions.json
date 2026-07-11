@@ -14,6 +14,7 @@
       "seed": 40021,
       "kind": "mech",
       "fps": 11,
+      "gate": "spawn",
       "prompt": "Static locked-off shot of a cluster of glowing blue sci-fi mechanical ports and lenses on dark metal. Nothing moves except the light: the glow flickers and pulses, indicator LEDs blink, tiny electrical arcs crackle across the ports, energy hums through the machinery. The metal housing itself stays completely rigid -- it does not shift, breathe or resize. Locked static tripod camera, no camera movement, no zoom, no pan, the frame edges stay perfectly still. Cinematic biomechanical detail."
     },
     {

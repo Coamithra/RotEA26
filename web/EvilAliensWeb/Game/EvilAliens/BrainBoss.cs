@@ -173,9 +173,10 @@ internal class BrainBoss : KillableAlien
 		aura = BrainAura.NewAura(collection, base.Game);
 		aura.Setup(this);
 		collection.Add((GameComponent)(object)aura);
-		// Restart overlay playback at phase 0 on a recycled boss (overlays are created in
-		// LoadContent, which base.Initialize() above has already run on first spawn).
-		overlays?.Reset();
+		// Restart overlay playback at phase 0 on a recycled boss. overlays is created in
+		// LoadContent, which base.Initialize() above has already run on first spawn — so a null
+		// here is a real lifecycle bug and SHOULD NullRef rather than be swallowed by `?.`.
+		overlays.Reset();
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -183,8 +184,13 @@ internal class BrainBoss : KillableAlien
 		base.Draw(gameTime);
 		// Live animated patches on top of the static brain. `color` is the base sprite's
 		// live tint (reddens on low HP) so the overlays redden in lockstep; DrawScale +
-		// Position glue them to the boss so they pulse and move with it.
-		overlays?.Draw(spriteBatch, base.Position, DrawScale, texture.Width, texture.Height, color, gameTime);
+		// Position glue them to the boss so they pulse and move with it. The last arg gates
+		// the "exhaust" pods (gate:"spawn") so they only vent while the boss is actively
+		// spawning a wave (BossState.spawnstuff), calm otherwise. The sprite harness freezes
+		// Update (state stays `entry`), so force it on there to keep the pods inspectable.
+		bool spawnActive = state == BossState.spawnstuff
+			|| EvilAliensWeb.Compat.DebugFlags.Harness != null;
+		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.Width, texture.Height, color, gameTime, spawnActive);
 	}
 
 	public override void Update(GameTime gameTime)

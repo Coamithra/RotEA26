@@ -39,10 +39,10 @@ EFF   STATUS   SPRITE (texture)                              NATIVE  ONSCR  NOTE
 2.40  TODO     sprites/spiderdebris1/2/3                    136/258/219   =nat  SpiderBoss debris, scale 1
 2.40  lowpri   sprites/bulletgood, bulletevil                    16     16  tiny projectiles; cheap to bump but low impact
 2.40  lowpri   sprites/connector (ShipConnector)                180    180  2-player ship link
-2.40  lowpri   marsbg/mars1-6, marshills                       1000   1000  Mars parallax layers; bg
+2.40  lowpri   marsbg/marshills1-3, marsloop1-12               1000   1000  Mars parallax + HD floor loop; bg
 2.40  lowpri   marsbg/clouds-background, -foreground2          1024   1024  Mars cloud parallax; bg
 2.40  lowpri   base/756* , base/2331-v5 (alien base)            512    512  base interior + walls; bg
-2.40  TODO     splash/uglysplash22, splash/ealogo               800    800  native-800 fullscreen; regen at >=1440 wide instead of upscale
+2.40  TODO     splash/uglysplash22                              800    800  native-800 fullscreen; regen at >=1440 wide instead of upscale
 2.40  lowpri   preview/poster                                   800    800  upsell screen
 2.40  lowpri   credits/mars_joost                               800    800  credits backdrop
 2.40  lowpri   hud/barlit, barunlit2, barlitedge             116/20   ~116  power/gamma bars (GammaMenu, PowerupData)

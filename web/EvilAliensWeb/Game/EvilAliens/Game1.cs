@@ -377,6 +377,9 @@ public class Game1 : Game
 		awardmentBlade = new AwardmentBlade((Game)(object)this);
 		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)awardmentBlade);
 		ServiceHelper.Add((IAwardmentBladeService)awardmentBlade);
+		// Online co-op (?net=host / ?net=join): open the loopback session. Start() is a
+		// no-op when no ?net flag was parsed, so a plain boot constructs nothing net-side.
+		EvilAliensWeb.Compat.Net.NetSession.Start((Game)(object)this);
 		base.Initialize();
 	}
 
@@ -981,6 +984,10 @@ public class Game1 : Game
 			base.Update(gameTime);
 			collectionHelper.Update();
 			collisionHandler.DetectCollisions();
+			// Online co-op: drain received messages + send the ~30Hz ship stream ON the game
+			// tick (never from JS callbacks). Placed before the level-warm early-return so
+			// heartbeats keep flowing while a launch is warming. A single branch when inactive.
+			EvilAliensWeb.Compat.Net.NetSession.Update();
 			// A pending level launch takes warm priority (and excludes the other
 			// queues that tick, so a tick never pays two decodes).
 			if (pendingLevelLaunch != null)

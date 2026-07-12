@@ -837,6 +837,28 @@ namespace EvilAliensWeb.Compat
 			SpiderPhase = phase;
 		}
 
+		// Online co-op (Stage 11, plans/stage11-online-coop.md). ?net=host / ?net=join opts a
+		// session into the co-op net layer (Compat/Net/NetSession); no ?net flag = None = the
+		// net layer is never constructed, so a plain boot is byte-identical single-player (the
+		// hard invariant). ?room=<name> picks the loopback room -- BroadcastChannel name
+		// "eanet-<room>" -- so parallel test pairs don't cross-talk (default "dev").
+		public static NetRole NetRole { get; private set; } = NetRole.None;
+
+		public static string NetRoom { get; private set; } = "dev";
+
+		// ?netlog: verbose per-message net logging (every spawn/death/blast event). The
+		// 5-second "[net] ..." metrics summary is always on while a session is active.
+		public static bool NetLog { get; private set; }
+
+		// ?aiplayer: force the LOCAL player's ship onto the existing PlayerShip AI branch
+		// (ControlDevice.AI / DoAIMove/DoAIFire -- the attract-demo behaviour) at level start,
+		// so two net tabs can drive themselves unattended (the user-specified 11.1 testing
+		// strategy: under distributed authority the wire carries ship STATE, so an AI-driven
+		// ship replicates byte-identically to a human one). The controller itself stays
+		// Keyboard/pad -- only the Update branch is forced -- so joins, pause and the net
+		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
+		public static bool AIPlayer { get; private set; }
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -1356,6 +1378,49 @@ namespace EvilAliensWeb.Compat
 						SpiderBossHp = sbhp;
 					}
 					break;
+				case "net":
+					if (!string.IsNullOrEmpty(val))
+					{
+						switch (val.Trim().ToLowerInvariant())
+						{
+						case "host":
+							NetRole = NetRole.Host;
+							break;
+						case "join":
+						case "client":
+							NetRole = NetRole.Join;
+							break;
+						default:
+							Console.WriteLine("[net] unknown ?net= value '" + val + "' (use host or join)");
+							break;
+						}
+					}
+					break;
+				case "room":
+				case "netroom":
+					if (!string.IsNullOrEmpty(val))
+					{
+						// Sanitize to a safe channel-name fragment (alnum + dash, lowercase).
+						string room = "";
+						foreach (char c in val.Trim().ToLowerInvariant())
+						{
+							if (char.IsLetterOrDigit(c) || c == '-')
+							{
+								room += c;
+							}
+						}
+						if (room.Length > 0)
+						{
+							NetRoom = room.Length > 32 ? room.Substring(0, 32) : room;
+						}
+					}
+					break;
+				case "netlog":
+					NetLog = IsOn(val);
+					break;
+				case "aiplayer":
+					AIPlayer = IsOn(val);
+					break;
 				case "spiderboss":
 					SpiderBoss = IsOn(val);
 					break;
@@ -1548,7 +1613,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1561,6 +1626,8 @@ namespace EvilAliensWeb.Compat
 							+ (WallsOnly ? " wallsonly" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
+							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
+							+ (AIPlayer ? " aiplayer" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

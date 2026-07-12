@@ -360,7 +360,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			asplodeOnNextFrame = false;
 		}
-		if (!isTutorial && controller != ControlDevice.AI && Settings.GetInstance().CurrentDifficulty >= Settings.DifficultyLevel.Hard)
+		if (!isTutorial && controller != ControlDevice.AI && controller != ControlDevice.Remote && Settings.GetInstance().CurrentDifficulty >= Settings.DifficultyLevel.Hard)
 		{
 			pacifistTimer.Update(gameTime);
 		}
@@ -386,7 +386,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			else
 			{
 				Vector2 direction = Vector2.Zero;
-				switch (controller)
+				switch (EffectiveController())
 				{
 				case ControlDevice.PadOne:
 				case ControlDevice.PadTwo:
@@ -465,6 +465,12 @@ public class PlayerShip : AlienDrawableGameComponent
 					DoAIFire(gameTime, baddies);
 					break;
 				}
+				case ControlDevice.Remote:
+					// Online co-op (Stage 11): the OTHER peer's ship. Position comes from the
+					// interpolation buffer (~100ms behind), shots are re-fired locally from the
+					// replicated firing state; direction stays Zero so the Move below is a no-op.
+					EvilAliensWeb.Compat.Net.NetSession.DriveRemoteShip(this, gameTime);
+					break;
 				}
 				Move(direction, gameTime);
 			}
@@ -510,7 +516,80 @@ public class PlayerShip : AlienDrawableGameComponent
 			blast.Setup(base.Position, Score.GetPowerupLevel(Powerup.PowerupType.Blast, player), player);
 			collection.Add((GameComponent)(object)blast);
 			sound.PlayCue("blast");
+			// Online co-op: bombs are discrete, so they ride the reliable event lane (the
+			// ship stream carries continuous state only). No-op unless a net session is up.
+			EvilAliensWeb.Compat.Net.NetSession.OnLocalBlast(this, base.Position, Score.GetPowerupLevel(Powerup.PowerupType.Blast, player));
 		}
+	}
+
+	// ---- Online co-op (Stage 11) seams -- see Compat/Net/NetSession ----------------------
+
+	// ?aiplayer forces the LOCAL ship onto the AI branch at level start (unattended two-tab
+	// soak tests). The controller field itself stays what it was (Keyboard/pad), so joins,
+	// pause and "which ship do we stream" logic are untouched; Remote puppets are exempt.
+	private ControlDevice EffectiveController()
+	{
+		if (EvilAliensWeb.Compat.DebugFlags.AIPlayer && controller != ControlDevice.Remote)
+		{
+			return ControlDevice.AI;
+		}
+		return controller;
+	}
+
+	// Last tick this ship INTENDED to fire (FireAt is called every tick while the trigger is
+	// held, its internal shoottimer does the cadence gating) and the aim it fired along --
+	// exactly the "fire state" the ship stream carries.
+	internal long NetLastFireMs { get; private set; }
+
+	internal float NetLastFireAim { get; private set; }
+
+	internal Vector2 NetVelocity => SpeedVector;
+
+	internal int NetShotsPerSec => shotspersec;
+
+	internal float NetBulletLife => bulletlifetime;
+
+	// Applied every tick to a ControlDevice.Remote puppet: interpolated position (speed
+	// zeroed -- the buffer is the sole motion source), replicated fire loadout, and shots
+	// re-fired through the real FireAt path so remote bullets are built like local ones.
+	internal void NetApplyRemoteState(Vector2 pos, float aim, bool firing, int shotsPerSec, float bulletLife)
+	{
+		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
+		base.Position = pos;
+		Speed = 0f;
+		int shots = Math.Clamp(shotsPerSec, 1, 18);
+		if (shots != shotspersec)
+		{
+			shotspersec = shots;
+			shoottimer.Duration = 1000f / (float)shotspersec;
+		}
+		bulletlifetime = MathHelper.Clamp(bulletLife, 450f, 1500f);
+		if (firing)
+		{
+			FireAt(aim);
+		}
+		else if (shoottimer.Finished)
+		{
+			shoottimer.Stop();
+			shoottimer.Reset();
+		}
+	}
+
+	// Remote peer used a bomb (reliable EvBlast event): spawn it here at the puppet, WITHOUT
+	// the local Score bomb-count gate -- the owner already spent the bomb on its side.
+	internal void NetDoBlast(int level)
+	{
+		blast = Blast.NewBlast(collection, base.Game);
+		blast.Setup(base.Position, level, player);
+		collection.Add((GameComponent)(object)blast);
+		sound.PlayCue("blast");
+	}
+
+	// Re-apply an oracle hue after Setup already ran (the join side swaps slot hues once the
+	// handshake settles, so the host ship is white and the join ship purple on BOTH screens).
+	internal void NetApplyHue(float newHue)
+	{
+		hue = newHue;
 	}
 
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
@@ -1303,6 +1382,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	private void FireAt(float direction)
 	{
 		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
+		// Net seam: record the fire INTENT (called every tick while the trigger is held,
+		// before the cadence gate below) -- this is what the co-op ship stream replicates.
+		NetLastFireMs = Environment.TickCount64;
+		NetLastFireAim = direction;
 		pacifistTimer.Reset();
 		pacifistTimer.Start();
 		if (shoottimer.Finished | !shoottimer.Active)
@@ -1421,7 +1504,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			// DebugFlags.Invuln (?invuln) is a session-only runtime override -- it must NEVER
 			// write into Settings.Invulnerability (that would persist into the save; see Game1's
 			// startScreen_OnFinished comment for the history of that bug).
-			else if (!Settings.GetInstance().Invulnerability && !DebugFlags.Invuln)
+			// A Remote puppet never takes damage locally: under distributed authority its OWNER
+			// decides when it was hit (you never die to something you dodged on your screen) --
+			// its death arrives via the ship stream's alive flag instead (Compat/Net/NetSession).
+			else if (!Settings.GetInstance().Invulnerability && !DebugFlags.Invuln && controller != ControlDevice.Remote)
 			{
 				if (other is Wall)
 				{
@@ -1445,7 +1531,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			base.Position = new Vector2(base.Position.X, ((Floorbottom)other).Bottom - ((CollisionBox)GetCollisionType()).Height / 2f);
 		}
-		if (other is Powerup && !((Powerup)other).taken)
+		// A Remote puppet can't grab powerups: pickups are CLAIMS under distributed authority
+		// (replicated as events in card 11.3) -- letting the puppet take one here would steal
+		// it from the local player's world with no way to reconcile.
+		if (other is Powerup && !((Powerup)other).taken && controller != ControlDevice.Remote)
 		{
 			currentPower = ((Powerup)other).type;
 			Score.SetPowerup(currentPower, player);

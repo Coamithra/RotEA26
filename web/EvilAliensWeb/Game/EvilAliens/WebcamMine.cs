@@ -63,7 +63,7 @@ internal class WebcamMine : AlienDrawableGameComponent
 	// Design-space radius used for the mask hit test (0 until Initialize/LoadAnimation runs —
 	// ComponentBin.Add defers Initialize to end-of-tick, so the level may hit-test a mine one
 	// tick before it has a texture; 0 radius simply never hits).
-	public float HitRadius => (texture == null || columns == 0) ? 0f : (float)texture.Width / (float)columns * DrawScale * 0.42f;
+	public float HitRadius => (texture == null || columns == 0) ? 0f : (float)texture.LogicalWidth() / (float)columns * DrawScale * 0.42f;
 
 	public WebcamMine(Game game)
 		: base(game)

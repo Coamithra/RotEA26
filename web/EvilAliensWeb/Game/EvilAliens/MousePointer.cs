@@ -230,7 +230,7 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 	private float CssHandoffScale()
 	{
 		float windowPerDesign = WindowPerDesign();
-		return ChooseCursorPx(windowPerDesign) / windowPerDesign / texture.Width;
+		return ChooseCursorPx(windowPerDesign) / windowPerDesign / texture.LogicalWidth();
 	}
 
 	public override void Update(GameTime gameTime)

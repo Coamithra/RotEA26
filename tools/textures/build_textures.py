@@ -11,11 +11,12 @@ a cold multi-megapixel PNG is a multi-hundred-ms to multi-second frame hitch):
   dxt  -> <name>.dds   BC3/DXT5 block-compressed. Lossy, ~2.4x the PNG on disk,
           tiny in VRAM, zero decode. Needs texconv.exe (DirectXTex). Chrome/ANGLE
           maps to D3D11, which requires block textures be multiples of 4, so the
-          sheet is cropped to the largest mult-of-4 that PRESERVES the integer cell
-          pitch floor(W/cols) x floor(H/rows) -- only the never-sampled edge pixels
-          (beyond cols*cellW / rows*cellH) are dropped, so frame rects are unchanged.
-          If no mult-of-4 exists in that window the image is padded up instead and a
-          warning is printed (the pitch shifts; prefer raw for that sheet).
+          image is PADDED up to a mult-of-4 (transparent, bottom/right only, so the
+          content keeps its top-left pixel coords). The original ("logical") size is
+          stamped into the .dds header's reserved dwords; WebContentManager reads it
+          back (see TextureDims.cs) and every consumer uses the LOGICAL size for
+          pixel-space math + clamps whole-texture draws to it, so the pad is never
+          sampled and nothing shifts. cols/rows are no longer needed for the build.
 
   raw  -> <name>.rtex  Uncompressed straight-alpha RGBA8 with a 16-byte header.
           Lossless, large on disk, zero decode, NO dimension constraint. For sheets
@@ -55,6 +56,27 @@ RTEX_MAGIC = b"RTEX"
 RTEX_VERSION = 1
 RTEX_FMT_RGBA8 = 0  # straight (non-premultiplied) alpha, matching the unpacked content
 
+# BC3 blocks are 4x4 and Chrome/ANGLE->D3D11 rejects a block texture whose W or H isn't a
+# multiple of 4 (renders black). So every dxt sibling is PADDED up to a mult-of-4 (transparent,
+# bottom/right only, so the original content keeps its exact top-left pixel coords). The original
+# ("logical") size is stamped into the DDS header's unused reserved1 dwords; WebContentManager
+# reads it back and every consumer (frame slicing, source rects, whole-texture draws) uses the
+# LOGICAL size, so the padded strip is never sampled and nothing shifts. See TextureDims.cs.
+DDS_LOGICAL_MAGIC = b"LOGD"   # written at reserved1[2] to flag that reserved1[0..1] carry (w,h)
+
+
+def pad4(x):
+    return ((x + 3) // 4) * 4
+
+
+def poke_dds_logical(path, w, h):
+    """Stamp the logical (pre-pad) size into the DDS header's reserved1[0..2] dwords.
+    dwWidth/dwHeight (offsets 16/12) keep the PADDED size the GPU uploads; reserved1 starts at
+    file offset 32 and is otherwise unused by texconv, so [0]=w [1]=h [2]=magic is safe."""
+    with open(path, "r+b") as f:
+        f.seek(32)
+        f.write(struct.pack("<II", w, h) + DDS_LOGICAL_MAGIC)
+
 
 def fail(msg) -> NoReturn:
     print("ERROR: " + msg, file=sys.stderr)
@@ -68,7 +90,9 @@ def src_png(asset):
 
 
 def mult4_preserving_pitch(total, divs):
-    """Largest multiple of 4 in [divs*cell, total] keeping floor(total/divs)==floor(v/divs).
+    """NOTE: build_dxt no longer calls this (it pad4()s instead); kept because build_texviewer.py
+    still imports it to size its preview crops. Largest multiple of 4 in [divs*cell, total] keeping
+    floor(total/divs)==floor(v/divs).
 
     Returns (target, padded). target<=total => crop the unused edge; target>total =>
     pad up (pitch changes; caller warns)."""
@@ -81,7 +105,7 @@ def mult4_preserving_pitch(total, divs):
     return ((total + 3) // 4) * 4, True
 
 
-def build_dxt(asset, cols, rows, dry):
+def build_dxt(asset, dry, pad_extra=0):
     from PIL import Image
     png = src_png(asset)
     if not os.path.isfile(png):
@@ -91,25 +115,24 @@ def build_dxt(asset, cols, rows, dry):
              "https://github.com/microsoft/DirectXTex/releases/latest/download/texconv.exe")
     im = Image.open(png).convert("RGBA")
     w, h = im.size
-    tw, tw_pad = mult4_preserving_pitch(w, cols)
-    th, th_pad = mult4_preserving_pitch(h, rows)
-    note = ""
-    if tw_pad or th_pad:
-        note = "  WARNING: padded (no pitch-preserving mult-of-4) -> frame pitch shifts; consider raw"
+    # Pad up to a mult-of-4 (never crop). pad_extra (>0 only in --padtest) grossly over-pads so
+    # any code that still reads the PADDED size instead of the logical size shows an obvious
+    # artifact. Content stays at (0,0); the logical (w,h) is stamped into the .dds for the runtime.
+    tw = pad4(w + pad_extra)
+    th = pad4(h + pad_extra)
+    padded = (tw != w or th != h)
     base = os.path.basename(asset)
     out_dds = os.path.join(os.path.dirname(png), base + ".dds")
-    print(f"  dxt  {asset}  {w}x{h} ({cols}x{rows}) -> {tw}x{th}  "
-          f"cell {tw // cols}x{th // rows}{note}")
+    note = f"  (logical {w}x{h}, +{pad_extra}px test-pad)" if pad_extra else (
+        f"  (logical {w}x{h})" if padded else "")
+    print(f"  dxt  {asset}  {w}x{h} -> {tw}x{th}{note}")
     if dry:
         return
     os.makedirs(SCRATCH, exist_ok=True)
     tmp = os.path.join(SCRATCH, base + ".png")
-    if tw <= w and th <= h:
-        im.crop((0, 0, tw, th)).save(tmp)               # crop unused edge
-    else:
-        canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-        canvas.paste(im, (0, 0))                         # pad bottom/right, transparent
-        canvas.save(tmp)
+    canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+    canvas.paste(im, (0, 0))                              # pad bottom/right, transparent
+    canvas.save(tmp)
     r = subprocess.run([TEXCONV, "-nologo", "-y", "-m", "1", "-f", "BC3_UNORM",
                         "-o", os.path.dirname(png), tmp],
                        capture_output=True, text=True)
@@ -127,6 +150,8 @@ def build_dxt(asset, cols, rows, dry):
             os.remove(out_dds)
         os.replace(produced, out_dds)
     os.remove(tmp)
+    if padded:
+        poke_dds_logical(out_dds, w, h)   # stamp logical (pre-pad) size for the runtime
     print(f"       wrote {os.path.relpath(out_dds, REPO)}  ({os.path.getsize(out_dds)//1024} KB)")
 
 
@@ -158,6 +183,9 @@ def parse_config(path):
             parts = line.split()
             asset, fmt = parts[0], parts[1].lower()
             if fmt == "dxt":
+                # Optional trailing "cols rows" are parsed but now IGNORED by the build (pad4 no
+                # longer needs the grid — the game owns frame layout via its own AnimationData).
+                # Still accepted so existing config lines and the ?texviewer Save path don't error.
                 cols = int(parts[2]) if len(parts) > 2 else 1
                 rows = int(parts[3]) if len(parts) > 3 else 1
                 entries.append(("dxt", asset, cols, rows))
@@ -221,6 +249,10 @@ def main():
     ap.add_argument("--manifest-only", action="store_true",
                     help="regenerate Compat/PrecompiledTextures.cs only; skip the texture builds "
                          "(no texconv/Pillow needed)")
+    ap.add_argument("--padtest", type=int, default=0, metavar="PX",
+                    help="TEST MODE: over-pad every dxt by ~PX px (still rounded to mult-of-4) so "
+                         "any code path that uses the padded size instead of the logical size shows "
+                         "an obvious PX-sized artifact. Ship builds use 0 (minimal mult-of-4 pad).")
     args = ap.parse_args()
 
     entries = parse_config(args.config)
@@ -233,9 +265,12 @@ def main():
     if args.manifest_only:
         print("done.")
         return
+    if args.padtest:
+        print(f"  [padtest] over-padding every dxt by ~{args.padtest}px to surface any "
+              f"padded-vs-logical size bug")
     for e in entries:
         if e[0] == "dxt":
-            build_dxt(e[1], e[2], e[3], args.dry_run)
+            build_dxt(e[1], args.dry_run, args.padtest)
         else:
             build_raw(e[1], args.dry_run)
     print("done.")

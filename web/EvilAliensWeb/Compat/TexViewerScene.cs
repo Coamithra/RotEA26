@@ -66,7 +66,13 @@ namespace EvilAliensWeb.Compat
         private Vector2 pan;         // render-px offset from centre
 
         private bool dragging;
+        private bool draggingSplit;   // drag is sweeping the split divider (not panning)
         private Vector2 lastMouse;
+        // Last drawn image rect in RENDER space (set each frame by DrawImages) so HandlePan can
+        // map a design-space mouse x onto the split divider without recomputing the fit.
+        private float lastImgX;
+        private float lastImgW;
+        private const float SplitGrabDesignPx = 14f;   // grab radius each side of the divider
         private bool panelDirty = true;
         private bool loadFailed;
         private string fatal;
@@ -123,7 +129,11 @@ namespace EvilAliensWeb.Compat
                     RawKB = e.GetProperty("rawBytes").GetInt32() / 1024,
                     Current = e.GetProperty("current").GetString(),
                 };
-                r.Pick = r.Current == "dxt" ? 0 : (r.Current == "raw" ? 1 : 2);
+                // Default the pending pick to DXT for UNDECIDED sprites (Current == "png" == absent
+                // from textures.config) so the pass is dxt-by-default and you only click for the PNG
+                // exceptions. Explicit raw/dxt config picks are preserved (raw stays a "look here"
+                // flag). 0=dxt 1=raw 2=png.
+                r.Pick = r.Current == "raw" ? 1 : 0;
                 assets.Add(r);
             }
         }
@@ -267,17 +277,46 @@ namespace EvilAliensWeb.Compat
             {
                 dragging = true;
                 lastMouse = m;
+                // In split mode, a press that lands on the gold divider sweeps it; anywhere else pans
+                // (so you can still reposition the image after zooming in). Once grabbed, the sweep
+                // continues regardless of distance for the rest of the drag.
+                draggingSplit = mode == 1 && ddsTex != null && NearSplit(m.X);
+                if (draggingSplit) SetSplitFromMouse(m.X);
             }
             else if (down)
             {
-                Vector2 dDesign = m - lastMouse;
-                pan += dDesign * RenderScale.Scale;   // design delta -> render px
-                lastMouse = m;
+                if (draggingSplit)
+                {
+                    SetSplitFromMouse(m.X);
+                }
+                else
+                {
+                    Vector2 dDesign = m - lastMouse;
+                    pan += dDesign * RenderScale.Scale;   // design delta -> render px
+                    lastMouse = m;
+                }
             }
             else
             {
                 dragging = false;
+                draggingSplit = false;
             }
+        }
+
+        // True if design-space x is within the grab radius of the split divider's on-screen column.
+        private bool NearSplit(float designX)
+        {
+            if (lastImgW <= 0f) return false;
+            float dividerDesignX = (lastImgX + lastImgW * splitFrac) / RenderScale.Scale;
+            return Math.Abs(designX - dividerDesignX) <= SplitGrabDesignPx;
+        }
+
+        // Snap the split fraction so the divider tracks the design-space cursor x.
+        private void SetSplitFromMouse(float designX)
+        {
+            if (lastImgW <= 0f) return;
+            float f = (designX * RenderScale.Scale - lastImgX) / lastImgW;
+            splitFrac = MathHelper.Clamp(f, 0f, 1f);
         }
 
         private void HandleCommand(string cmd)
@@ -425,6 +464,9 @@ namespace EvilAliensWeb.Compat
             int cx = vw / 2 + (int)pan.X;
             int cy = vh / 2 + (int)pan.Y;
             var dest = new Rectangle(cx - dw / 2, cy - dh / 2, dw, dh);
+            // Cache for HandlePan's divider hit-test / sweep (render space).
+            lastImgX = dest.X;
+            lastImgW = dw;
 
             raw.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied, SamplerState.PointClamp, null, null, null, Matrix.Identity);
             if (mode == 1 && ddsTex != null)
@@ -471,7 +513,7 @@ namespace EvilAliensWeb.Compat
                 0f, centered: false, 0.45f, (SpriteEffects)0, 0f);
             if (loadNote.Length > 0)
                 base.SpriteBatch.DrawString(loadNote, new Vector2(16f, 82f), new Color(1f, 0.6f, 0.5f, 0.9f), 0f, centered: false, 0.4f, (SpriteEffects)0, 0f);
-            base.SpriteBatch.DrawString("<-/->: prev/next   Enter: flip   Up/Down: zoom   drag: pan   RMB: fit   Esc: menu",
+            base.SpriteBatch.DrawString("<-/->: prev/next   Enter: flip   Up/Down: zoom   drag: pan  (split: drag gold line to sweep)   RMB: fit   Esc: menu",
                 new Vector2(16f, 576f), new Color(Color.White, 0.5f), 0f, centered: false, 0.4f, (SpriteEffects)0, 0f);
         }
     }

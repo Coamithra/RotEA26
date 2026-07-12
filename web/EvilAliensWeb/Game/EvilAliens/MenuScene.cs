@@ -1034,7 +1034,7 @@ internal class MenuScene : Scene
 		ringDrift = 0f;
 		ringDriftVel = 0f;
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
-		currentBackdropSize = MathHelper.Max(800f / (float)backdrop.Width, 600f / (float)backdrop.Height);
+		currentBackdropSize = MathHelper.Max(800f / (float)backdrop.LogicalWidth(), 600f / (float)backdrop.LogicalHeight());
 		originalBackdropSize = currentBackdropSize;
 		if (!hidemainmenu)
 		{
@@ -1319,7 +1319,7 @@ internal class MenuScene : Scene
 	{
 		// Reticle centre is eased toward the active menu by UpdateRingCentre (it re-centres
 		// with an overshoot when you enter/leave a submenu).
-		base.SpriteBatch.Draw(hudring, ringCentre, ringAngle + ringDrift, 580f / (float)hudring.Height, center: true, new Color(124, 186, 152, 175));
+		base.SpriteBatch.Draw(hudring, ringCentre, ringAngle + ringDrift, 580f / (float)hudring.LogicalHeight(), center: true, new Color(124, 186, 152, 175));
 		Color bc = new Color(132, 188, 152, 180);
 		int inset = 20, arm = 56, th = 3, R = 800, B = 600;
 		Bracket(inset, inset, arm, th, bc, 1, 1);
@@ -1357,10 +1357,10 @@ internal class MenuScene : Scene
 		float num = 0.5f;
 		float num2 = 0.8f;
 		float num3 = (General.SafeZone).Left;
-		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.Height * num, font.MeasureString("yo").Y * num2);
-		float num5 = num3 + (float)AButton.Width * num + font.MeasureString(" ").X * num2;
+		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num, font.MeasureString("yo").Y * num2);
+		float num5 = num3 + (float)AButton.LogicalWidth() * num + font.MeasureString(" ").X * num2;
 		float num6 = (float)(General.SafeZone).Right - font.MeasureString("select").X * num2;
-		float num7 = num6 - (float)BButton.Width * num - font.MeasureString(" ").X * num2;
+		float num7 = num6 - (float)BButton.LogicalWidth() * num - font.MeasureString(" ").X * num2;
 		base.SpriteBatch.Draw(BButton, new Vector2(num3, num4), 0f, num, center: false, Color.White);
 		base.SpriteBatch.DrawString("back", new Vector2(num5, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
 		base.SpriteBatch.Draw(AButton, new Vector2(num7, num4), 0f, num, center: false, Color.White);

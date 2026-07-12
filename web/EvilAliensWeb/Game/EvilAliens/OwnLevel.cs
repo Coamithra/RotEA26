@@ -29,7 +29,7 @@ internal class OwnLevel : GameScene
 		contentManager.Load<Texture2D>("GFX/Sprites/deathstarsheet2");
 		contentManager.Load<Texture2D>("GFX/Sprites/explosionpurple");
 		contentManager.Load<Texture2D>("GFX/Sprites/faceofdeathspritesheet");
-		contentManager.Load<Texture2D>("GFX/Base/black line lalalal");
+		contentManager.Load<Texture2D>("GFX/Base/black_line_lalalal");
 		contentManager.Load<Texture2D>("GFX/Base/756-v1");
 		contentManager.Load<Texture2D>("GFX/Base/756");
 		contentManager.Load<Texture2D>("GFX/Base/756-v5");

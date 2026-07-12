@@ -35,6 +35,7 @@ using System.Text.Json;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -226,6 +227,8 @@ internal sealed class BrainBossOverlays
             if (ov.Interpolate && frac > 0.0001f && f1 != f0)
             {
                 sb.interpolateEffect.Enable();
+                // UV-space offset -> normalise by the ACTUAL (padded) texture size (interpolate.fx
+                // adds it to SpriteBatch texcoords, which are pixel/paddedSize); the rects are logical.
                 sb.interpolateEffect.Offset = new Vector2(r1.Left - r0.Left, r1.Top - r0.Top)
                     / new Vector2(ov.Tex.Width, ov.Tex.Height);
                 sb.interpolateEffect.Delta = frac;

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -156,21 +157,21 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		{
 			float num5 = MathHelper.SmoothStep(0f, 1f, 1f - bladeTimer.Normalized);
 			float num6 = MathHelper.SmoothStep(0.5f, 1f, 1f - bladeTimer.Normalized);
-			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num6, num5) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
+			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num6, num5) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.LogicalWidth()), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
 			break;
 		}
 		case State.Show:
 		{
 			float num3 = 1f;
 			float num4 = 1f;
-			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num4, num3) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
+			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num4, num3) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.LogicalWidth()), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
 			// Card 1ec619b3: a long awardment name ("I Don't Get The Spider Boss") can overflow
 			// the blade's frame art at the fixed scale -- shrink to fit the frame's own design
 			// width (never scale up). The box width is derived the same way the frame draw above
 			// removes its supersample factor, so this tracks the art if it's ever re-authored.
 			string title = "Awardment Unlocked!";
 			string awardmentName = awardmentStrings[(int)currentlyDisplaying];
-			float boxWidth = (float)blade.Width / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width);
+			float boxWidth = (float)blade.LogicalWidth() / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.LogicalWidth());
 			float maxTextWidth = boxWidth * BladeTextWidthFraction;
 			float titleScale = TextFit.FitScale(font.MeasureString(title).X, num4 * 0.8f, maxTextWidth);
 			float nameScale = TextFit.FitScale(font.MeasureString(awardmentName).X, num4, maxTextWidth);
@@ -182,7 +183,7 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		{
 			float num = MathHelper.SmoothStep(1f, 0f, 1f - bladeTimer.Normalized);
 			float num2 = MathHelper.SmoothStep(1f, 0.5f, 1f - bladeTimer.Normalized);
-			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num2, num) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.Width), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
+			batch.Draw(blade, new Vector2(400f, 450f), 0f, new Vector2(num2, num) / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/awardmentblade", blade.LogicalWidth()), center: true, new Color(new Vector4(1f, 1f, 1f, 0.65f)));
 			break;
 		}
 		}

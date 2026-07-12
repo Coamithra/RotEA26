@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -224,7 +225,7 @@ public class Quad
 	private void DrawBeam(SpriteBatchWrapper sb, Texture2D tex, Vector2 center, float rotation, float acrossPx, float alongPx, Color color)
 	{
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		Vector2 scale = new Vector2(acrossPx / (float)tex.Width, alongPx / (float)tex.Height);
+		Vector2 scale = new Vector2(acrossPx / (float)tex.LogicalWidth(), alongPx / (float)tex.LogicalHeight());
 		sb.Draw(tex, center, rotation, scale, center: true, color);
 	}
 
@@ -237,8 +238,8 @@ public class Quad
 	// 0 = flat "chopped" ends, the A/B baseline.
 	private void DrawCapsuleBeam(SpriteBatchWrapper sb, Texture2D tex, Vector2 bodyCenter, Vector2 tip, Vector2 tail, float rotation, float acrossPx, float alongPx, float capLen, Color color)
 	{
-		int texW = tex.Width;
-		int texH = tex.Height;
+		int texW = tex.LogicalWidth();
+		int texH = tex.LogicalHeight();
 		float sx = acrossPx / (float)texW;
 		// middle: a 2px band through the texture centre, stretched to the body length
 		sb.Draw(tex, new Rectangle(0, texH / 2 - 1, texW, 2), bodyCenter, rotation, new Vector2(sx, alongPx / 2f), new Vector2(texW / 2f, 1f), color);
@@ -259,7 +260,7 @@ public class Quad
 	private void DrawFlare(SpriteBatchWrapper sb, Vector2 center, float diameterPx, Color color)
 	{
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		float s = diameterPx / (float)glow.Width;
+		float s = diameterPx / (float)glow.LogicalWidth();
 		sb.Draw(glow, center, 0f, new Vector2(s, s), center: true, color);
 	}
 

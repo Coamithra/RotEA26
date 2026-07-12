@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Media;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -114,12 +115,12 @@ internal class TrailerScene : Scene
 			Rectangle source = default(Rectangle);
 			if (GraphicsAdapter.DefaultAdapter.IsWideScreen)
 			{
-				(source) = new Rectangle(0, 0, videoTexture.Width, videoTexture.Height);
+				(source) = new Rectangle(0, 0, videoTexture.LogicalWidth(), videoTexture.LogicalHeight());
 			}
 			else
 			{
-				int num = (int)(4f * (float)videoTexture.Height / 3f);
-				(source) = new Rectangle((videoTexture.Width - num) / 2, 0, num, videoTexture.Height);
+				int num = (int)(4f * (float)videoTexture.LogicalHeight() / 3f);
+				(source) = new Rectangle((videoTexture.LogicalWidth() - num) / 2, 0, num, videoTexture.LogicalHeight());
 			}
 			base.SpriteBatch.Draw(videoTexture, source, new Rectangle(0, 0, 800, 600), Color.White);
 			break;

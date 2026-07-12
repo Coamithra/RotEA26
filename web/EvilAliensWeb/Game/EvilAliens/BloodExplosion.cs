@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -143,11 +144,11 @@ internal class BloodExplosion : AlienDrawableGameComponent
 				Color val = new Color(new Vector4(1f, 1f, 1f, num));
 				if (green)
 				{
-					spriteBatch.Draw(greenblood, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.Width), center: true, val);
+					spriteBatch.Draw(greenblood, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth()), center: true, val);
 				}
 				else
 				{
-					spriteBatch.Draw(texture, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.Width), center: true, val);
+					spriteBatch.Draw(texture, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth()), center: true, val);
 				}
 			}
 		}
@@ -158,7 +159,7 @@ internal class BloodExplosion : AlienDrawableGameComponent
 			{
 				float num = 4f * bloodExplosionData2.normalizedLifetime * (1f - bloodExplosionData2.normalizedLifetime);
 				Color val = new Color(new Vector4(1f, 1f, 1f, num));
-				spriteBatch.Draw(goo, base.Position + bloodExplosionData2.position, bloodExplosionData2.rotation, bloodExplosionData2.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.Width), center: true, val);
+				spriteBatch.Draw(goo, base.Position + bloodExplosionData2.position, bloodExplosionData2.rotation, bloodExplosionData2.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth()), center: true, val);
 			}
 		}
 	}

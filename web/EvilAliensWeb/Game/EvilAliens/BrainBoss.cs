@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.GamerServices;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -159,7 +160,7 @@ internal class BrainBoss : KillableAlien
 		}
 		Vector2 position = default(Vector2);
 		position.X = 400f;
-		position.Y = (0f - (float)texture.Height / textureScale) / 2f;
+		position.Y = (0f - (float)texture.LogicalHeight() / textureScale) / 2f;
 		base.Position = position;
 		pulsetimer.Duration = 1600f;
 		stateTimer.Duration = 6234f;
@@ -190,7 +191,7 @@ internal class BrainBoss : KillableAlien
 		// Update (state stays `entry`), so force it on there to keep the pods inspectable.
 		bool spawnActive = state == BossState.spawnstuff
 			|| EvilAliensWeb.Compat.DebugFlags.Harness != null;
-		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.Width, texture.Height, color, gameTime, spawnActive);
+		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.LogicalWidth(), texture.LogicalHeight(), color, gameTime, spawnActive);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -367,7 +368,7 @@ internal class BrainBoss : KillableAlien
 			break;
 		case BossState.entry:
 		{
-			float num5 = MathHelper.SmoothStep(100f, (0f - (float)texture.Height / textureScale) / 2f, stateTimer.Normalized);
+			float num5 = MathHelper.SmoothStep(100f, (0f - (float)texture.LogicalHeight() / textureScale) / 2f, stateTimer.Normalized);
 			base.Position = new Vector2(base.Position.X, num5);
 			if (stateTimer.Finished)
 			{

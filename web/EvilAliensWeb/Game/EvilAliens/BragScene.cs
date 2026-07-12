@@ -4,6 +4,7 @@ using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.GamerServices;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -321,10 +322,10 @@ public class BragScene : Scene
 		float num = 0.5f;
 		float num2 = 0.8f;
 		float num3 = (General.SafeZone).Left;
-		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.Height * num, font.MeasureString("yo").Y * num2);
-		float num5 = num3 + (float)AButton.Width * num + font.MeasureString(" ").X * num2;
+		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num, font.MeasureString("yo").Y * num2);
+		float num5 = num3 + (float)AButton.LogicalWidth() * num + font.MeasureString(" ").X * num2;
 		float num6 = (float)(General.SafeZone).Right - font.MeasureString(A).X * num2;
-		float num7 = num6 - (float)BButton.Width * num - font.MeasureString(" ").X * num2;
+		float num7 = num6 - (float)BButton.LogicalWidth() * num - font.MeasureString(" ").X * num2;
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		spriteBatchWrapper.Draw(BButton, new Vector2(num3, num4), 0f, num, center: false, Color.White);
 		spriteBatchWrapper.DrawString(B, new Vector2(num5, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);

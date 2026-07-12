@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -176,8 +177,8 @@ internal class Spider : KillableAlien
 		// on-screen size matches the old static jump body, with the jump tumble (rotation). The
 		// fake flapping wings are gone -- the animation carries the motion now.
 		int cols = 6, rows = 4, sep = 1;
-		int cellW = (spiderJump.Width - (cols - 1) * sep) / cols;
-		int cellH = (spiderJump.Height - (rows - 1) * sep) / rows;
+		int cellW = (spiderJump.LogicalWidth() - (cols - 1) * sep) / cols;
+		int cellH = (spiderJump.LogicalHeight() - (rows - 1) * sep) / rows;
 		float fJump = SuperSampleFactor("GFX/Sprites/spiderjump", cellW);
 		int frame = (int)(gameTime.TotalGameTime.TotalMilliseconds / 55f) % (cols * rows);
 		Rectangle src = new Rectangle(frame % cols * (cellW + sep), frame / cols * (cellH + sep), cellW, cellH);

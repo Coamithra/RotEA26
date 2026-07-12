@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -272,7 +273,7 @@ internal class Braineroid : KillableAlien
 		// whole 20-frame (5x4) sheet, so divide by columns for one frame and use DrawScale (not
 		// raw scale) to account for the supersample factor — otherwise brains wrap/despawn
 		// hundreds of px off-screen and the Braineroids minigame never clears a wave.
-		float num = (float)(texture.Width / columns) * DrawScale / 2f;
+		float num = (float)(texture.LogicalWidth() / columns) * DrawScale / 2f;
 		if (!wrapping)
 		{
 			if ((base.Position.X > 800f + num) & (base.DirectionalVector.X > 0f))

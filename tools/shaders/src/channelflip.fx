@@ -40,6 +40,11 @@ float Progress;
 float Time;
 float Fade;       // 0..1 splash fade (becomes the straight output alpha)
 float4 NewRect;   // xy = uv offset of the incoming image, zw = uv scale
+// logical/padded per axis for each image: content fills tc in [0,ContentScale]; the rest is the
+// transparent mult-of-4 pad a .dds carries. Normalise all [0,1] frame math onto the content and
+// map each sample back through its own scale so a padded splash doesn't skew the effect. (1,1) = none.
+float2 ContentScale;    // OUTGOING image (OldSampler / s0)
+float2 NewContentScale; // INCOMING image (NewSampler)
 
 static const float PI = 3.14159265;
 
@@ -69,27 +74,30 @@ float4 PixelShaderFunction(float4 color : COLOR0, float2 texCoord : TEXCOORD0) :
     // Crossfade weight: 0 = old, 1 = new, centred on mid-transition.
     float mixw = smoothstep(0.28, 0.72, p);
 
-    float2 uv = texCoord;
-    float2 duv = distortUV(uv, g);
+    // Content-normalised frame space [0,1]: the outgoing image content fills texCoord
+    // [0,ContentScale], so divide it out and do ALL frame math (skew, scanlines, static, letterbox)
+    // in fuv — landing on the content, not the padded texture edge.
+    float2 fuv = texCoord / ContentScale;
+    float2 duv = distortUV(fuv, g);
 
-    // Outgoing image (distorted by the same turbulence).
-    float4 oldC = tex2D(OldSampler, duv);
+    // Outgoing image: map the distorted frame uv back into the old texture's padded UV.
+    float4 oldC = tex2D(OldSampler, duv * ContentScale);
 
-    // Incoming image: remap the distorted uv into its letterboxed sub-rect; black
-    // outside it (pillar/letterbox bars).
+    // Incoming image: frame uv -> its letterboxed sub-rect [0,1] (NewRect is in frame space), then
+    // into the NEW texture's padded UV via NewContentScale; black outside the rect (letterbox bars).
     float2 nuv = (duv - NewRect.xy) / NewRect.zw;
     float inside = step(0.0, nuv.x) * step(nuv.x, 1.0) * step(0.0, nuv.y) * step(nuv.y, 1.0);
-    float4 newC = tex2D(NewSampler, nuv) * inside;
+    float4 newC = tex2D(NewSampler, nuv * NewContentScale) * inside;
 
     // Crossfade old -> new.
     float4 col = lerp(oldC, newC, mixw);
 
     // Scanlines (bright lines added back ~ color-dodge).
-    float scan = 0.5 + 0.5 * sin((uv.y * 600.0 + Time * 60.0) * PI * 0.5);
+    float scan = 0.5 + 0.5 * sin((fuv.y * 600.0 + Time * 60.0) * PI * 0.5);
     col.rgb += scan * 0.10 * g;
 
     // Static grain.
-    float n = hash21(uv * float2(640.0, 480.0) + frac(Time) * 97.0);
+    float n = hash21(fuv * float2(640.0, 480.0) + frac(Time) * 97.0);
     col.rgb += (n - 0.5) * 0.32 * g;
 
     // Contrast boost during the glitch.
@@ -102,6 +110,9 @@ float4 PixelShaderFunction(float4 color : COLOR0, float2 texCoord : TEXCOORD0) :
     float4 o = saturate(col) * color;
     o.rgb *= Fade;
     o.a = Fade;
+    // Kill everything past the content (fuv > 1 = the padded strip): scanlines/static would
+    // otherwise light up the transparent pad. No-op when unpadded (content fills fuv [0,1]).
+    o *= step(fuv.x, 1.0) * step(fuv.y, 1.0);
     return o;
 }
 

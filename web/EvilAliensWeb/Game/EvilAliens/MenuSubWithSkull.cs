@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -89,7 +90,7 @@ internal class MenuSubWithSkull : MenuSub1
 
 		// AspectFit the 2.5:1 logo, undistorted, into a horizontally-centred 540x210 slot
 		// near the top of the 800x600 design surface; pulse/wobble pivot about its centre.
-		float fit = Math.Min(540f / (float)title.Width, 210f / (float)title.Height);
+		float fit = Math.Min(540f / (float)title.LogicalWidth(), 210f / (float)title.LogicalHeight());
 		Vector2 titleCentre = new Vector2(400f, 135f + bob);
 		base.SpriteBatch.Draw(title, titleCentre, wobble, fit * pulse, center: true, Color.White);
 
@@ -176,7 +177,7 @@ internal class MenuSubWithSkull : MenuSub1
 				float bob = 3f * (0.5f + 0.5f * (float)Math.Sin(TwoPi * 1.4f * t));
 				float ptrH = frameH * 0.62f;
 				Vector2 ptrPos = new Vector2(cx - frameW / 2f - 26f - bob, curY);
-				base.SpriteBatch.Draw(pointer, ptrPos, 0f, ptrH / pointer.Height, center: true, MenuTheme.FrameSelected);
+				base.SpriteBatch.Draw(pointer, ptrPos, 0f, ptrH / pointer.LogicalHeight(), center: true, MenuTheme.FrameSelected);
 			}
 
 			curY += font.LineSpacing;
@@ -328,9 +329,9 @@ internal class MenuSubWithSkull : MenuSub1
 			float fThick = thickness + 1.3f;
 			Vector2 fpos = a - dir * ext - perp * (fThick / 2f);
 			Color fcol = MenuTheme.WithAlpha(color, (int)(color.A * 0.4f));
-			base.SpriteBatch.Draw(blank, fpos, ang, new Vector2(fullLen / blank.Width, fThick / blank.Height), center: false, fcol);
+			base.SpriteBatch.Draw(blank, fpos, ang, new Vector2(fullLen / blank.LogicalWidth(), fThick / blank.LogicalHeight()), center: false, fcol);
 		}
 		Vector2 pos = a - dir * ext - perp * (thickness / 2f);
-		base.SpriteBatch.Draw(blank, pos, ang, new Vector2(fullLen / blank.Width, thickness / blank.Height), center: false, color);
+		base.SpriteBatch.Draw(blank, pos, ang, new Vector2(fullLen / blank.LogicalWidth(), thickness / blank.LogicalHeight()), center: false, color);
 	}
 }

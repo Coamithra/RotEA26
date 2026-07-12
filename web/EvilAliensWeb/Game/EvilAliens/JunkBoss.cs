@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.GamerServices;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -181,7 +182,7 @@ internal class JunkBoss : KillableAlien
 		// body collision radius from the idle CELL via DrawScale (texture.Width is the whole
 		// sheet now); matches the old on-screen size. Not recomputed for the bigger attract cell
 		// so the lightning halo never inflates the hitbox.
-		r = DrawScale * (float)(texture.Width / columns) / 2f;
+		r = DrawScale * (float)(texture.LogicalWidth() / columns) / 2f;
 		base.Initialize();
 		children = 0;
 		lazertimer.Start();

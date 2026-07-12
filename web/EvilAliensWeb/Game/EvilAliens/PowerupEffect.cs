@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -86,8 +87,8 @@ internal class PowerupEffect : AlienDrawableGameComponent
 			{
 				float num = 4f * powerupEffectData.normalizedLifetime * (1f - powerupEffectData.normalizedLifetime);
 				Color val = new Color(new Vector4(1f, 1f, 1f, num));
-				int fw = (texture.Width - (columns - 1) * separatingspace) / columns;
-				int fh = (texture.Height - (rows - 1) * separatingspace) / rows;
+				int fw = (texture.LogicalWidth() - (columns - 1) * separatingspace) / columns;
+				int fh = (texture.LogicalHeight() - (rows - 1) * separatingspace) / rows;
 				spriteBatch.Draw(texture, new Rectangle(0, 0, fw, fh), base.Position + powerupEffectData.position, powerupEffectData.rotation, powerupEffectData.scale / textureScale, center: true, val);
 			}
 		}

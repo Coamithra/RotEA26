@@ -4,6 +4,7 @@ using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -174,7 +175,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		columns = animationData.columns;
 		fps = animationData.fps;
 		separatingspace = animationData.separatingspace;
-		int frameWidth = columns > 0 ? (texture.Width - (columns - 1) * separatingspace) / columns : texture.Width;
+		int frameWidth = columns > 0 ? (texture.LogicalWidth() - (columns - 1) * separatingspace) / columns : texture.LogicalWidth();
 		textureScale = AlienDrawableGameComponent.SuperSampleFactor(texturename, frameWidth);
 		color = Color.White;
 	}
@@ -787,8 +788,8 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		int row = frame / columns;
 		int col = frame % columns;
-		int frameWidth = (texture.Width - (columns - 1) * separatingspace) / columns;
-		int frameHeight = (texture.Height - (rows - 1) * separatingspace) / rows;
+		int frameWidth = (texture.LogicalWidth() - (columns - 1) * separatingspace) / columns;
+		int frameHeight = (texture.LogicalHeight() - (rows - 1) * separatingspace) / rows;
 		return new Rectangle(col * (frameWidth + separatingspace), row * (frameHeight + separatingspace), frameWidth, frameHeight);
 	}
 
@@ -809,6 +810,8 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		Rectangle rect = FrameRect(frame);
 		Rectangle nextRect = FrameRect(nextFrame);
 		spriteBatch.interpolateEffect.Enable();
+		// UV-space offset -> normalise by the ACTUAL (padded) texture size (SpriteBatch texcoords are
+		// pixel/paddedSize); rect/nextRect are logical pixel-space frame rects (correct).
 		spriteBatch.interpolateEffect.Offset = new Vector2((nextRect).Left - (rect).Left, (nextRect).Top - (rect).Top) / new Vector2((float)texture.Width, (float)texture.Height);
 		spriteBatch.interpolateEffect.Delta = delta;
 		spriteBatch.fadeEffect.Enable();
@@ -941,9 +944,9 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 					int num2 = (int)curframe;
 					int num3 = num2 / columns;
 					int num4 = num2 % columns;
-					int num5 = texture.Width - (columns - 1) * separatingspace;
+					int num5 = texture.LogicalWidth() - (columns - 1) * separatingspace;
 					num5 /= columns;
-					int num6 = texture.Height - (rows - 1) * separatingspace;
+					int num6 = texture.LogicalHeight() - (rows - 1) * separatingspace;
 					num6 /= rows;
 					Rectangle source = default(Rectangle);
 					(source) = new Rectangle(num4 * (num5 + separatingspace), num3 * (num6 + separatingspace), num5, num6);
@@ -957,12 +960,12 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		}
 		float num7 = 0.5f;
 		float num8 = 0.8f;
-		float num9 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.Height * num7, font.MeasureString("yo").Y * num8);
+		float num9 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num7, font.MeasureString("yo").Y * num8);
 		spriteBatch.DrawString("CAST", new Vector2(400f, 50f), Color.AliceBlue, 0f, font.MeasureString("CAST") / 2f, 1.2f, (SpriteEffects)0, 0f);
 		spriteBatch.DrawString(alienname, new Vector2(400f, 100f), Color.AliceBlue, 0f, font.MeasureString(alienname) / 2f, 1f, (SpriteEffects)0, 0f);
 		spriteBatch.DrawString(alientext, new Vector2(400f, 375f), Color.AliceBlue, 0f, font.MeasureString(alientext) / 2f, 0.7f, (SpriteEffects)0, 0f);
 		float num10 = (float)(General.SafeZone).Right - font.MeasureString("next").X * num8;
-		float num11 = num10 - (float)AButton.Width * num7 - font.MeasureString(" ").X * num8;
+		float num11 = num10 - (float)AButton.LogicalWidth() * num7 - font.MeasureString(" ").X * num8;
 		spriteBatch.Draw(AButton, new Vector2(num11, num9), 0f, num7, center: false, Color.White);
 		spriteBatch.DrawString("next", new Vector2(num10, num9), Color.AliceBlue, 0f, centered: false, num8, (SpriteEffects)0, 1f);
 	}

@@ -68,7 +68,7 @@ internal class Demo3 : GameScene
 		contentManager.Load<Texture2D>("GFX/Sprites/ufosheet");
 		contentManager.Load<Texture2D>("GFX/Sprites/mediumship");
 		contentManager.Load<Texture2D>("GFX/Sprites/smallship");
-		contentManager.Load<Texture2D>("GFX/Base/black line lalalal");
+		contentManager.Load<Texture2D>("GFX/Base/black_line_lalalal");
 		contentManager.Load<Texture2D>("GFX/Base/756-v1");
 		contentManager.Load<Texture2D>("GFX/Base/756");
 		contentManager.Load<Texture2D>("GFX/Base/756-v5");

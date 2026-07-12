@@ -36,9 +36,7 @@ internal sealed class DriftingStars : IDisposable
     private const float FieldW = 800f + 2f * Margin;
     private const float FieldH = 600f + 2f * Margin;
 
-    private Texture2D[] sprites;
-    private SpriteBatch batch;
-    private GraphicsDevice gd;
+    private Texture2D[] sprites;   // drawn through SpriteBatchWrapper.BeginCustom (no private batch)
     private Star[] stars;
     private float clockMs;
 
@@ -59,8 +57,6 @@ internal sealed class DriftingStars : IDisposable
 
     public void LoadContent(ContentManager content, GraphicsDevice graphicsDevice)
     {
-        gd = graphicsDevice;
-        batch = new SpriteBatch(gd);
         sprites = new Texture2D[spriteCount];
         for (int i = 0; i < spriteCount; i++)
             sprites[i] = content.Load<Texture2D>($"GFX/Game/space/star{i:00}");
@@ -106,12 +102,12 @@ internal sealed class DriftingStars : IDisposable
         }
     }
 
-    public void Draw()
+    public void Draw(SpriteBatchWrapper sb)
     {
         if (sprites == null) return;
         float s = RenderScale.Scale;
-        batch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearClamp,
-            DepthStencilState.None, RasterizerState.CullNone, null, Matrix.Identity);
+        // Render-space additive batch through the wrapper (was a private SpriteBatch); no effect.
+        sb.BeginCustom(BlendState.Additive, null);
         for (int i = 0; i < count; i++)
         {
             ref Star st = ref stars[i];
@@ -120,18 +116,17 @@ internal sealed class DriftingStars : IDisposable
             float tw = (1f - st.depth) + st.depth * (0.5f + 0.5f * (float)Math.Sin(st.phase + st.rate * clockMs));
             float a = MathHelper.Clamp(Brightness * st.baseBright * tw, 0f, 1f);
             Texture2D tex = sprites[st.tex];
-            Vector2 origin = new Vector2(tex.Width * 0.5f, tex.Height * 0.5f);
-            batch.Draw(tex, rpos, null, new Color(new Vector4(1f, 1f, 1f, a)), 0f, origin,
-                st.scale * s, SpriteEffects.None, 0f);
+            Vector2 origin = new Vector2(tex.LogicalWidth() * 0.5f, tex.LogicalHeight() * 0.5f);
+            sb.DrawCustom(tex, rpos, new Color(new Vector4(1f, 1f, 1f, a)), 0f, origin,
+                st.scale * s, SpriteEffects.None);
         }
-        batch.End();
+        sb.EndCustom();
     }
 
     public void Dispose()
     {
-        // sprite textures are ContentManager-cached/shared — only the SpriteBatch is ours.
-        batch?.Dispose();
-        batch = null;
+        // sprite textures are ContentManager-cached/shared, and the batch is now the shared
+        // wrapper's — nothing owned to release.
         sprites = null;
         stars = null;
     }

@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -56,7 +57,7 @@ internal class WebcamPlasma : AlienDrawableGameComponent
 	}
 
 	// Tracks the visible disc (same 0.32-of-width factor as PlasmaBall).
-	public float HitRadius => (float)texture.Width * 0.32f * DrawScale;
+	public float HitRadius => (float)texture.LogicalWidth() * 0.32f * DrawScale;
 
 	public WebcamPlasma(Game game)
 		: base(game)

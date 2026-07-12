@@ -2417,7 +2417,7 @@
                     "rows <input id='tv-rows' type='number' min='1'></div>" +
                     "<button class='save' id='tv-save'>Save to textures.config</button>" +
                     "<div class='status' id='tv-status'></div>" +
-                    "<div class='hint'>Flip (or Enter) to A/B RAW vs DXT; Split shows RAW|DXT. " +
+                    "<div class='hint'>Flip (or Enter) to A/B RAW vs DXT; Split shows RAW|DXT &mdash; drag the gold line to sweep. " +
                     "Pick a format and Save writes the line — then run " +
                     "<code>python tools/textures/build_textures.py</code>.</div></div>";
                 document.body.appendChild(el);
@@ -2469,6 +2469,7 @@
                         statusEl.style.color = "#9ffcd0";
                         statusEl.textContent = fmt === "png" ? "saved: removed (png default)" : ("saved: " + j.line);
                         render();
+                        cmd("next");   // auto-advance so each decision is a single click
                     }
                     else
                     {
@@ -2493,7 +2494,10 @@
                 el.querySelector("#tv-flip").textContent = st.mode === 1
                     ? "Split: RAW|DXT" : (st.view === 1 ? "Showing DXT" : "Showing RAW");
                 el.querySelector("#tv-flip").classList.toggle("on", st.mode !== 1 && st.view === 1);
-                el.querySelector("#tv-mode").textContent = st.mode === 1 ? "Flip mode" : "Split mode";
+                // Label with the CURRENT mode (like the "Showing RAW/DXT" sibling), so the "on"
+                // highlight and the text agree — a highlighted button reads as the active mode,
+                // not the destination. Clicking still toggles to the other mode.
+                el.querySelector("#tv-mode").textContent = st.mode === 1 ? "Split mode" : "Flip mode";
                 el.querySelector("#tv-mode").classList.toggle("on", st.mode === 1);
                 el.querySelectorAll("input[name='tv-pick']").forEach(function (r)
                 {

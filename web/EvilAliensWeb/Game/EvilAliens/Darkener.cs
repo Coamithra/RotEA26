@@ -2,6 +2,7 @@ using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -82,10 +83,10 @@ public class Darkener : DrawableGameComponent
 		float num = 0.5f;
 		float num2 = 0.8f;
 		float num3 = (General.SafeZone).Left;
-		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.Height * num, font.MeasureString("yo").Y * num2);
-		float num5 = num3 + (float)AButton.Width * num + font.MeasureString(" ").X * num2;
+		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num, font.MeasureString("yo").Y * num2);
+		float num5 = num3 + (float)AButton.LogicalWidth() * num + font.MeasureString(" ").X * num2;
 		float num6 = (float)(General.SafeZone).Right - font.MeasureString(buttonTipA).X * num2;
-		float num7 = num6 - (float)BButton.Width * num - font.MeasureString(" ").X * num2;
+		float num7 = num6 - (float)BButton.LogicalWidth() * num - font.MeasureString(" ").X * num2;
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		if (buttonTipB != "")
 		{

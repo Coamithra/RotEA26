@@ -101,6 +101,40 @@
             catch (e) { console.warn('[debug] eaPress failed (game not booted yet?): ' + e.message); }
         };
 
+        // Online co-op dev transport (?net=host / ?net=join): a BroadcastChannel between two
+        // local tabs -- zero network, dev-only. JS owns the platform object (this channel),
+        // C# sees only Compat/Net/NetInterop (the webcam.js pattern); card 11.4 adds a
+        // webrtc.js implementation behind the same INetTransport seam. The channel is only
+        // constructed when the game calls eaNet.open (i.e. a ?net boot) -- a normal boot
+        // creates nothing here. Messages are {from, kind, b64, rel}; own messages are
+        // filtered by the per-tab random id (BroadcastChannel already never echoes to the
+        // posting channel object, the id guards against exotic embedder setups).
+        window.eaNet = (() => {
+            let ch = null;
+            const myId = Math.random().toString(36).slice(2, 10);
+            const bye = () => { try { if (ch) ch.postMessage({ from: myId, kind: 'bye' }); } catch (e) { } };
+            return {
+                open(room) {
+                    if (ch) return;
+                    ch = new BroadcastChannel('eanet-' + room);
+                    ch.onmessage = (ev) => {
+                        const m = ev.data;
+                        if (!m || m.from === myId) return;
+                        try {
+                            if (m.kind === 'bye') DotNet.invokeMethod('EvilAliensWeb', 'netPeerBye', String(m.from));
+                            else if (m.kind === 'data') DotNet.invokeMethod('EvilAliensWeb', 'netData', String(m.b64), !!m.rel, String(m.from));
+                        } catch (e) { console.warn('[net] rx dispatch failed: ' + e.message); }
+                    };
+                    // Best-effort clean leave on tab close/navigate; the C# side also has a
+                    // stream timeout for silent drops.
+                    window.addEventListener('pagehide', bye);
+                    console.log('[net] eaNet open room=' + room + ' id=' + myId);
+                },
+                send(b64, rel) { if (ch) ch.postMessage({ from: myId, kind: 'data', b64: b64, rel: !!rel }); },
+                close() { if (ch) { bye(); window.removeEventListener('pagehide', bye); ch.close(); ch = null; } }
+            };
+        })();
+
         // QA/demo: trigger the cinematic slow-motion (ghost-trail) effect on demand, as if a
         // 1up powerup was fully charged. Only does anything inside a level with a live ship.
         // Console: eaSlowmo() for the default 12s, or eaSlowmo(6) for a custom duration.

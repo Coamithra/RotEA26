@@ -484,6 +484,69 @@ and aims at its `Centroid`. Headless QA: fake a player via
   (NonPremultiplied). The sparse webcam level never hits the >30-entity trigger, so `WebcamLevel`
   calls `GameScene.ForceSnapshot()` on the first kill.
 
+### Online co-op (net layer, Stage 11 -- design `plans/stage11-online-coop.md`)
+
+Distributed-authority state replication (NOT lockstep): each peer owns its own ship
+completely (input read untouched, zero added latency); the wire carries ship STATE, never
+inputs; the other peer's ship is an interpolated puppet. Code lives in `Compat/Net/`.
+Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback);
+world authority (11.3), script/reset replication (11.4-era) and WebRTC (11.4/11.5 cards)
+build on these seams.
+
+- **Flags:** `?net=host` / `?net=join` opt a session in (in `Active`); `?room=<name>` picks
+  the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
+  must use distinct rooms); `?netlog` = verbose per-event logging; `?aiplayer` forces the
+  LOCAL ship onto the existing AI branch (`PlayerShip.EffectiveController`) for unattended
+  soak tests. **No `?net` flag = the net layer is never constructed -- a plain boot is
+  byte-identical single-player. Hard invariant; keep it.**
+- **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
+  (unreliable-class -- consumers must tolerate drops/reorder) + a RELIABLE lane (ordered,
+  guaranteed), `OnData`/`OnPeerBye` events. Impl #1 `BroadcastChannelTransport` ->
+  `NetInterop` ([JSInvokable] shim, the WebcamInterop pattern) -> `eaNet` in `index.html`
+  (channel only constructed when opened). **Card 11.4 drops a `webrtc.js` + WebRtcTransport
+  behind this same interface** (unreliable+unordered DataChannel for the stream lane,
+  reliable channel for events); nothing above the interface may assume loopback reliability.
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type):** the 3 layers --
+  `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive|firing
+  flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (type RESERVED, stubbed until
+  11.3), `MsgEvent` envelope with a monotone ushort seq (EvSpawn netId+typeHash / EvDeath
+  netId / EvBlast pos+level) + `MsgHello`/`MsgWelcome` handshake (protocol version byte;
+  both sides Hello until paired, opposite role replies Welcome). Peer loss = JS `pagehide`
+  bye OR a 3s stream timeout; the ship stream doubles as the heartbeat (sent even with no
+  live ship, alive=false).
+- **NetIds (`Compat/Net/NetIdRegistry`):** host-side, on the ComponentBin seam
+  (`Game.Components` ComponentAdded/Removed -- the same events Oracle uses, fired when a
+  component actually enters/leaves the world). Replicable set = Oracle.GetBaddies' enemy
+  types (minus Explosion; cosmetics never cross the wire) + Powerup. Emits spawn/death
+  events; replays the live set to a late-joining peer. 11.1 clients only BOOKKEEP the ids
+  (ordering metrics); 11.3 keys client puppets + world snapshots off them.
+- **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
+  `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
+  own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case
+  Remote -> `NetSession.DriveRemoteShip`: position sampled from `ShipStateBuffer`
+  ~100 ms behind the newest sample (velocity-extrapolated max 250 ms on underrun), speed
+  zeroed; shots re-fired locally through the real `FireAt` path from the replicated firing
+  state; bombs arrive as EvBlast -> `NetDoBlast` (no local bomb-count gate). Remote ships
+  take NO local damage (owner decides its own hits; death arrives as the alive-flag edge ->
+  local explosion FX, slot stays reserved for respawn) and CANNOT take powerups (claims are
+  11.3 events). Hues: the join side swaps slot hues on connect so host=white / join=purple
+  on BOTH screens. The puppet's render clock advances on REAL time (never turbo/slowmo/
+  hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
+- **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable
+  `[net] role=... pops=... extrap=... ordViol=...` line every 5s. Healthy: buf ~100ms,
+  extrap ~0, pops 0 (pop = a step no ship could physically make: > 2x MaxSpeed x realDt
+  + 3px), drop/dup/ordViol/seqGap 0. **Two-tab test recipe:** the tabs must BOTH be visible
+  (a backgrounded tab's rAF drops to ~1Hz and its peer times out / crawls) -- use two Chrome
+  WINDOWS side by side:
+  `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
+  themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
+- **11.1 known limits (by design -- next cards):** both peers still run INDEPENDENT worlds
+  (each sees its own enemies; host world authority = 11.3); score/lives/powerup claims not
+  synced (11.3); pause + checkpoint-reset/level-flow not replicated (11.4); a local
+  all-ships-dead reset purges + respawns the puppet via the normal GameScene flow, but a
+  dead local player will NOT respawn while the puppet lives (LoseLife triggers on
+  AllShipsDead) -- shared-fate death/reset is 11.4's card; roster is exactly two peers.
+
 ### Audio runtime (`SoundManager` / `eaMusic`)
 
 - SFX/speech play on KNI `SoundEffect` (`SoundManager.Play()` returns a `SoundEffectInstance`);

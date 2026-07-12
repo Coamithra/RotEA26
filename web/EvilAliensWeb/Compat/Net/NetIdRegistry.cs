@@ -64,7 +64,8 @@ namespace EvilAliensWeb.Compat.Net
 
         private static ushort AllocId()
         {
-            // Wrapping counter, skipping 0 and ids still live (65k concurrent is unreachable here).
+            // Wrapping counter, skipping ids still live (65k concurrent is unreachable here).
+            // `next` starts at 1 and re-wraps to 1, so an allocated id is never 0.
             ushort id;
             do
             {
@@ -74,7 +75,7 @@ namespace EvilAliensWeb.Compat.Net
                     next = 1;
                 }
             }
-            while (id == 0 || !inUse.Add(id));
+            while (!inUse.Add(id));
             return id;
         }
 

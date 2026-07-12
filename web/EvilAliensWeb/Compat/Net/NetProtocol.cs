@@ -32,7 +32,9 @@ namespace EvilAliensWeb.Compat.Net
         // [type][flags][shotsPerSec][bulletLife/10][seq:2][senderMs:4][posX:4][posY:4]
         // [velX:4][velY:4][aim:4] = 31 bytes. Velocity is design px per MILLISECOND (the
         // component system's native unit, see AlienDrawableGameComponent.Update).
-        public static byte[] EncodeShipState(ushort seq, float senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, bool firing, int shotsPerSec, float bulletLife)
+        // senderMs is SESSION-RELATIVE (uint ms since the sender's NetSession.Start) --
+        // an absolute machine-uptime tick in float32 loses ms precision within hours.
+        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, bool firing, int shotsPerSec, float bulletLife)
         {
             byte[] b = new byte[31];
             b[0] = MsgShipState;
@@ -40,7 +42,7 @@ namespace EvilAliensWeb.Compat.Net
             b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[3] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 4, seq);
-            WriteF32(b, 6, senderMs);
+            WriteU32(b, 6, senderMs);
             WriteF32(b, 10, pos.X);
             WriteF32(b, 14, pos.Y);
             WriteF32(b, 18, vel.X);
@@ -62,7 +64,7 @@ namespace EvilAliensWeb.Compat.Net
             shotsPerSec = b[2];
             bulletLife = b[3] * 10f;
             seq = ReadU16(b, 4);
-            sample.T = ReadF32(b, 6);
+            sample.T = ReadU32(b, 6);
             sample.Pos = new Vector2(ReadF32(b, 10), ReadF32(b, 14));
             sample.Vel = new Vector2(ReadF32(b, 18), ReadF32(b, 22));
             sample.Aim = ReadF32(b, 26);
@@ -173,12 +175,13 @@ namespace EvilAliensWeb.Compat.Net
         }
     }
 
-    // One received ship-stream sample. T is the SENDER's millisecond clock -- the
-    // interpolation render clock is derived from it (newest - delay), so peers' clocks
-    // never need to agree, only each sender's needs to be monotonic.
+    // One received ship-stream sample. T is the SENDER's session-relative millisecond
+    // clock -- the interpolation render clock is derived from it (newest - delay), so
+    // peers' clocks never need to agree, only each sender's needs to be monotonic.
+    // Double so long sessions never lose ms precision in the buffer math.
     public struct ShipSample
     {
-        public float T;
+        public double T;
         public Vector2 Pos;
         public Vector2 Vel; // design px per ms
         public float Aim;

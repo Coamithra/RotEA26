@@ -49,6 +49,7 @@ namespace EvilAliensWeb.Compat.Net
         private static readonly Queue<(byte[] data, bool reliable)> rxQueue = new Queue<(byte[], bool)>();
 
         // handshake / heartbeat
+        private static long sessionStartAt;
         private static long lastHelloTx;
         private static long lastRxStreamAt;
 
@@ -102,7 +103,8 @@ namespace EvilAliensWeb.Compat.Net
                 NetIdRegistry.Enable(g);
             }
             Active = true;
-            lastMetricsAt = NowMs;
+            sessionStartAt = NowMs;
+            lastMetricsAt = sessionStartAt;
             Console.WriteLine("[net] session start role=" + (isHost ? "host" : "join")
                 + " room=" + DebugFlags.NetRoom + " protocol=v" + ProtocolVersion
                 + " transport=BroadcastChannel");
@@ -175,7 +177,7 @@ namespace EvilAliensWeb.Compat.Net
                 lastTxPos = pos;
                 lastTxAim = aim;
             }
-            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, now, pos, vel, aim, alive, firing, shots, bulletLife));
+            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, firing, shots, bulletLife));
             metrics.StreamTx++;
         }
 
@@ -341,7 +343,13 @@ namespace EvilAliensWeb.Compat.Net
             PeerUp = false;
             Console.WriteLine("[net] peer lost (" + reason + ")");
             remoteAlive = false;
-            ManagePuppet(); // remove the puppet now (with the death FX)
+            if (puppet != null)
+            {
+                // Remove the puppet NOW (with the death FX) -- ManagePuppet won't, it
+                // early-returns while the peer is down. 11.4 owns the real leave flow
+                // ("any player leaves -> the match ends").
+                ExplodePuppet();
+            }
             buffer.Clear();
             renderMs = double.NaN;
             hasLastPuppetPos = false;
@@ -367,8 +375,9 @@ namespace EvilAliensWeb.Compat.Net
             if (haveRxSeq && (ushort)(seq - lastRxSeq) != 1)
             {
                 // Loopback delivers in order; count anything else so the WebRTC transport
-                // (11.4) gets loss/reorder visibility for free.
-                metrics.StreamDropped++;
+                // (11.4) gets loss/reorder visibility for free. Distinct from StreamDropped
+                // (the buffer's authoritative sample-refused count) so neither double-counts.
+                metrics.StreamSeqGaps++;
             }
             lastRxSeq = seq;
             haveRxSeq = true;
@@ -578,7 +587,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return; // hold the spawn pose until the first sample lands
             }
-            Vector2 pos = buffer.Sample((float)renderMs, out bool extrapolated);
+            Vector2 pos = buffer.Sample(renderMs, out bool extrapolated);
             if (extrapolated)
             {
                 metrics.Extrapolations++;

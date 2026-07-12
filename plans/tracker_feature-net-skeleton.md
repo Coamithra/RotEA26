@@ -37,10 +37,10 @@
       "remote ship joined slot=1", zero console errors. (Backgrounded-tab rAF ~1Hz means
       the tabs must be in two visible windows -- documented in web CLAUDE.md.)
 - [x] Plain boot: normal splash -> Press Start -> menu, zero [net] lines, zero errors
-- [ ] Diff spot-check (no lowercase content/, no BlendState.AlphaBlend, no codegen rerun)
+- [x] Diff spot-check (no lowercase content/, no BlendState.AlphaBlend, no codegen rerun)
 
 ## Phase 6: Review & Ship
-- [ ] Commit + push
+- [x] Commit + push
 - [ ] /review + fix findings
 - [ ] Pull main, re-verify
 - [ ] PR create + merge, fast-forward main

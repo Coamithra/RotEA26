@@ -13,6 +13,7 @@ namespace EvilAliensWeb.Compat.Net
         public long StreamTx;
         public long StreamRx;
         public long StreamDropped;      // out-of-order / duplicate samples the buffer refused
+        public long StreamSeqGaps;      // stream sequence didn't advance by exactly 1 (loss/reorder)
 
         // interpolation health
         public long InterpSamples;      // puppet frames rendered from a bracketing pair
@@ -31,9 +32,9 @@ namespace EvilAliensWeb.Compat.Net
         public string Report(bool isHost, bool peerUp, int liveIds)
         {
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} txStream={2} rxStream={3} drop={4} buf={5:0}ms interp={6} extrap={7} pops={8} maxPop={9:0.0}px evTx={10} evRx={11} dup={12} ordViol={13} seqGap={14} liveIds={15}",
+                "[net] role={0} peer={1} txStream={2} rxStream={3} drop={4} sgap={5} buf={6:0}ms interp={7} extrap={8} pops={9} maxPop={10:0.0}px evTx={11} evRx={12} dup={13} ordViol={14} seqGap={15} liveIds={16}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
-                StreamTx, StreamRx, StreamDropped,
+                StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
                 BufferDepthMs, InterpSamples, Extrapolations, CorrectionPops, MaxPopPx,
                 EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds);
         }

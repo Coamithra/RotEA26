@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -35,7 +36,7 @@ internal class PlasmaBall : AlienDrawableGameComponent
 			// texture.Width is the DOWNSCALED redraw (plasmaball2: 523px vs design 697); DrawScale
 			// removes the supersample factor so the hitbox tracks the visible disc, not the raw PNG
 			// (matches Draw's DrawScale — the Blast/Braineroid supersample bug class, inverted).
-			c.Radius = (float)texture.Width * 0.32f * DrawScale;
+			c.Radius = (float)texture.LogicalWidth() * 0.32f * DrawScale;
 			return c;
 		}
 	}

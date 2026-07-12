@@ -69,9 +69,7 @@ internal sealed class ProceduralStarfield : IDisposable
     private readonly float parallax;
 
     private Texture2D[] tiles;
-    private Effect window;
-    private SpriteBatch batch;
-    private GraphicsDevice gd;
+    private Effect window;   // drawn through SpriteBatchWrapper.BeginCustom (no private SpriteBatch)
 
     // Scroll position in DESIGN units; advanced by Advance(). Accumulated UNBOUNDED as double
     // and never wrapped: the per-cell pattern (Pick/Hash) is not periodic, so wrapping the
@@ -109,8 +107,6 @@ internal sealed class ProceduralStarfield : IDisposable
 
     public void LoadContent(ContentManager content, GraphicsDevice graphicsDevice)
     {
-        gd = graphicsDevice;
-        batch = new SpriteBatch(gd);
         window = content.Load<Effect>("GFX/Effects/starwindow");
         tiles = new Texture2D[tileCount];
         for (int i = 0; i < tileCount; i++)
@@ -140,7 +136,7 @@ internal sealed class ProceduralStarfield : IDisposable
         scrollDesignY -= (double)designDelta.Y * parallax;
     }
 
-    public void Draw()
+    public void Draw(SpriteBatchWrapper sb)
     {
         if (tiles == null) return;
         float scale = RenderScale.Scale;
@@ -168,23 +164,25 @@ internal sealed class ProceduralStarfield : IDisposable
         // contribution scales linearly with Brightness (not squared).
         Vector4 tv = tint.ToVector4();
         Color drawColor = new Color(new Vector4(tv.X, tv.Y, tv.Z, tv.W * Brightness));
-        batch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearClamp,
-            DepthStencilState.None, RasterizerState.CullNone, window, Matrix.Identity);
+        // Render-space additive batch through the wrapper (was a private SpriteBatch). BeginCustom
+        // stamps the starwindow shader's ContentScale per tile from its logical/padded ratio, so the
+        // crossfade ramps at the CONTENT edge even when a tile is padded (else the tiles seam).
+        sb.BeginCustom(BlendState.Additive, window);
         for (int cy = cy0; cy <= cy1; cy++)
         {
             for (int cx = cx0; cx <= cx1; cx++)
             {
                 Pick(cx, cy, out int idx, out SpriteEffects fx);
                 Texture2D tex = tiles[idx];
-                float sTex = tileRW / tex.Width; // uniform: tile aspect == texture aspect
+                float sTex = tileRW / tex.LogicalWidth(); // uniform: tile aspect == texture aspect
                 // running-bond: odd rows are nudged half a pitch to the right.
                 float rowShift = (brick && (cy & 1) != 0) ? pitchRX * 0.5f : 0f;
                 Vector2 center = new Vector2(cx * pitchRX + rowShift - scrollR.X, cy * pitchRY - scrollR.Y);
-                Vector2 origin = new Vector2(tex.Width * 0.5f, tex.Height * 0.5f);
-                batch.Draw(tex, center, null, drawColor, 0f, origin, sTex, fx, 0f);
+                Vector2 origin = new Vector2(tex.LogicalWidth() * 0.5f, tex.LogicalHeight() * 0.5f);
+                sb.DrawCustom(tex, center, drawColor, 0f, origin, sTex, fx);
             }
         }
-        batch.End();
+        sb.EndCustom();
     }
 
     // Deterministic per-cell choice of (texture index, mirror), avoiding a direct
@@ -229,10 +227,8 @@ internal sealed class ProceduralStarfield : IDisposable
 
     public void Dispose()
     {
-        // textures + effect are ContentManager-cached/shared — do NOT dispose them;
-        // only the SpriteBatch is ours.
-        batch?.Dispose();
-        batch = null;
+        // textures + effect are ContentManager-cached/shared — do NOT dispose them; and the batch
+        // is now the shared wrapper's, not ours. Nothing owned to release.
         tiles = null;
     }
 }

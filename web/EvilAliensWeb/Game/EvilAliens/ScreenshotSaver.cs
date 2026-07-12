@@ -147,6 +147,8 @@ public class ScreenshotSaver
 				pendingOverlay = null;
 			}
 			Texture2D texture = val.GetTexture();
+			// Render target (never padded): GetData reads the FULL mip, so size the buffer by the
+			// ACTUAL Width*Height (LogicalWidth/Height would under-size it for a padded texture).
 			uint[] array = new uint[texture.Width * texture.Height];
 			texture.GetData<uint>(array);
 			if (Storage.StorageEnabled)

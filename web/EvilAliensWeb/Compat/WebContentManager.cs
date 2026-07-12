@@ -203,6 +203,17 @@ namespace EvilAliensWeb.Compat
                 const int headerLen = 128; // legacy DDS_HEADER; we never emit the DX10 extension
                 var tex = new Texture2D(GraphicsDevice, width, height, false, fmt);
                 tex.SetData(0, null, data, headerLen, data.Length - headerLen);
+                // build_textures.py pads dxt siblings up to a mult-of-4 and stamps the logical
+                // (pre-pad) size into reserved1[0..2] (offsets 32/36 = w/h, 40 = "LOGD" marker).
+                // Register it so every consumer uses the logical size, not the padded upload size.
+                if (data.Length >= 44 && data[40] == (byte)'L' && data[41] == (byte)'O'
+                    && data[42] == (byte)'G' && data[43] == (byte)'D')
+                {
+                    int lw = BitConverter.ToInt32(data, 32);
+                    int lh = BitConverter.ToInt32(data, 36);
+                    if (lw > 0 && lh > 0 && lw <= width && lh <= height)
+                        TextureDims.Register(tex, lw, lh);
+                }
                 return tex;
             }
             catch (Exception ex)

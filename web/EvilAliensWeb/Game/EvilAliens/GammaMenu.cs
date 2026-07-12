@@ -2,6 +2,7 @@ using System;
 using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -115,8 +116,8 @@ public class GammaMenu : Scene
 		base.Draw(gameTime);
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
 		base.SpriteBatch.Draw(starfield, starfieldPos);
-		base.SpriteBatch.Draw(starfield, starfieldPos - new Vector2(0f, (float)starfield.Height));
-		base.SpriteBatch.Draw(starfield, starfieldPos + new Vector2(0f, (float)starfield.Height));
+		base.SpriteBatch.Draw(starfield, starfieldPos - new Vector2(0f, (float)starfield.LogicalHeight()));
+		base.SpriteBatch.Draw(starfield, starfieldPos + new Vector2(0f, (float)starfield.LogicalHeight()));
 		float num = font.LineSpacing;
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		string text = "Modify Gamma until";
@@ -134,9 +135,9 @@ public class GammaMenu : Scene
 		int num2 = (int)curframe;
 		int num3 = num2 / ufoAnimation.columns;
 		int num4 = num2 % ufoAnimation.columns;
-		int num5 = ufo.Width - (ufoAnimation.columns - 1) * ufoAnimation.separatingspace;
+		int num5 = ufo.LogicalWidth() - (ufoAnimation.columns - 1) * ufoAnimation.separatingspace;
 		num5 /= ufoAnimation.columns;
-		int num6 = ufo.Height - (ufoAnimation.rows - 1) * ufoAnimation.separatingspace;
+		int num6 = ufo.LogicalHeight() - (ufoAnimation.rows - 1) * ufoAnimation.separatingspace;
 		num6 /= ufoAnimation.rows;
 		Rectangle source = default(Rectangle);
 		(source) = new Rectangle(num4 * (num5 + ufoAnimation.separatingspace), num3 * (num6 + ufoAnimation.separatingspace), num5, num6);
@@ -190,7 +191,7 @@ public class GammaMenu : Scene
 		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
 		float num = 1f;
 		Vector2 val = default(Vector2);
-		(val) = new Vector2((float)(415 - barUnlit.Width / 2), 205f);
+		(val) = new Vector2((float)(415 - barUnlit.LogicalWidth() / 2), 205f);
 		Vector2 val2 = val;
 		Vector2 val3 = default(Vector2);
 		(val3) = new Vector2(-16f, 13f);
@@ -202,7 +203,7 @@ public class GammaMenu : Scene
 		if (num3 > 0f)
 		{
 			float num4 = (float)Math.Round(21f + 75f * num3);
-			base.SpriteBatch.Draw(barLit, new Rectangle(0, 0, (int)num4, barLit.Height), val + val3, 0f, 1f, center: false, new Color(aliceBlue, num2));
+			base.SpriteBatch.Draw(barLit, new Rectangle(0, 0, (int)num4, barLit.LogicalHeight()), val + val3, 0f, 1f, center: false, new Color(aliceBlue, num2));
 			base.SpriteBatch.Draw(barEdge, val + val3 + new Vector2(num4, 0f), 0f, Vector2.One, center: false, new Color(aliceBlue, num2));
 		}
 	}
@@ -215,7 +216,7 @@ public class GammaMenu : Scene
 		if (starfieldPos.Y > 600f)
 		{
 			ref Vector2 reference2 = ref starfieldPos;
-			reference2.Y -= (float)starfield.Height;
+			reference2.Y -= (float)starfield.LogicalHeight();
 		}
 		bool flag = false;
 		for (int i = 0; i < 4; i++)

@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -122,7 +123,7 @@ internal class WebcamZap : AlienDrawableGameComponent
 
 	private void DrawBloom(float diameter, Color color)
 	{
-		float s = diameter / (float)bloom.Width;
+		float s = diameter / (float)bloom.LogicalWidth();
 		spriteBatch.Draw(bloom, base.Position, 0f, new Vector2(s, s), center: true, color);
 	}
 
@@ -161,7 +162,7 @@ internal class WebcamZap : AlienDrawableGameComponent
 			return;
 		}
 		float rot = (float)Math.Atan2(0f - d.X, d.Y);
-		Vector2 scale = new Vector2(thickness / (float)strip.Width, len / (float)strip.Height);
+		Vector2 scale = new Vector2(thickness / (float)strip.LogicalWidth(), len / (float)strip.LogicalHeight());
 		spriteBatch.Draw(strip, (p0 + p1) * 0.5f, rot, scale, center: true, color);
 	}
 }

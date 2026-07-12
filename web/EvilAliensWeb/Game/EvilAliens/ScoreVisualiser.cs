@@ -538,8 +538,8 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 		for (int j = 0; j < lives; j++)
 		{
-			int fw = (playersheet.Width - 7) / 8;
-			int fh = (playersheet.Height - 3) / 4;
+			int fw = (playersheet.LogicalWidth() - 7) / 8;
+			int fh = (playersheet.LogicalHeight() - 3) / 4;
 			spriteBatch.Draw(playersheet, new Rectangle(0, 0, fw, fh), livePosition(j), 0f, 0.5f * 48f / (float)fw, center: true, new Color(new Vector4(1f, 1f, 1f, 0.5f)));
 		}
 		if (explosion.Active)
@@ -551,8 +551,8 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			float num = MathHelper.SmoothStep(0f, 1f, phototimer.Normalized);
 			Color color2 = default(Color);
 			(color2) = new Color(new Vector4((snapshotcolor).ToVector3(), num));
-			float photoSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/photocamera", photocamera.Width);
-			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.Height / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
+			float photoSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/photocamera", photocamera.LogicalWidth());
+			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.LogicalHeight() / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 	}
@@ -645,10 +645,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				DrawStr(i * 4 + 2, scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 		}
-		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/bombicon", bomb.Width);
+		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/bombicon", bomb.LogicalWidth());
 		for (int j = 0; j < scores[i].bombs; j++)
 		{
-			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.Width / bombSsf * j), 45f), 0f, 1f / bombSsf, center: false, Color.White);
+			spriteBatch.Draw(bomb, startpos + new Vector2((float)(30 + bomb.LogicalWidth() / bombSsf * j), 45f), 0f, 1f / bombSsf, center: false, Color.White);
 		}
 	}
 

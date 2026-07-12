@@ -1,6 +1,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -232,7 +233,7 @@ internal class LazerGenerator : AlienDrawableGameComponent
 	// One additive radial glow of the well texture, centred at the convergence point.
 	private void DrawGlow(float diameter, Color color)
 	{
-		float s = diameter / (float)wellTex.Width;
+		float s = diameter / (float)wellTex.LogicalWidth();
 		spriteBatch.Draw(wellTex, base.Position, 0f, s, center: true, color);
 	}
 

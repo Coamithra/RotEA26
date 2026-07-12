@@ -25,10 +25,11 @@ OUTDIR = os.path.join(os.path.dirname(__file__), "..", "..",
                       "web", "EvilAliensWeb", "wwwroot", "Content", "gfx", "help")
 PREVIEW = os.path.join(os.path.dirname(__file__), "preview")
 
-# source -> destination filename (note the SPACE; load string is "GFX/Help/Controls ...")
+# source -> destination filename (load string is "GFX/Help/Controls_..."; underscores, no
+# spaces — the loader lowercases the key and textures.config is whitespace-delimited)
 JOBS = {
-    "new keyboardhelp.png":   "controls keyboard.png",
-    "new controllerhelp.png": "controls joypad.png",
+    "new keyboardhelp.png":   "controls_keyboard.png",
+    "new controllerhelp.png": "controls_joypad.png",
 }
 
 # --- tunables ---

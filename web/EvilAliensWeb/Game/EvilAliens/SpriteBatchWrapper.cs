@@ -282,8 +282,42 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	{
 		Flush();
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
-		spriteBatch.Draw(texture, position, (Rectangle?)null, color, 0f, origin, scale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, 0f, origin, scale, (SpriteEffects)0, 0f);
 		spriteBatch.End();
+	}
+
+	// A batch of sprites drawn through a CUSTOM effect + blend in RENDER space (identity matrix,
+	// LinearClamp) — the path the background field renderers (ProceduralStarfield, DriftingStars)
+	// use instead of owning a private SpriteBatch. Flush any open wrapper batch first; the caller
+	// pairs BeginCustom / EndCustom with only DrawCustom between (no other wrapper Draw in between).
+	//
+	// Centralises ContentScale: DrawCustom stamps `effect`'s ContentScale from each texture's
+	// logical/padded ratio, so any content-extent shader (e.g. starwindow) gets padding-awareness
+	// for free — the padded mult-of-4 strip a .dds carries never skews a UV. Null-conditional, so a
+	// shader without that parameter is unaffected; `effect` may be null (plain additive sprites).
+	// (Deferred reads the param at End(), so ContentScale is per-BATCH — fine for a same-size tile
+	// grid; a future mixed-size effect batch would need a per-texture flush.)
+	private Effect customEffect;
+	public void BeginCustom(BlendState blend, Effect effect)
+	{
+		Flush();
+		customEffect = effect;
+		spriteBatch.Begin(SpriteSortMode.Deferred, blend, SamplerState.LinearClamp,
+			DepthStencilState.None, RasterizerState.CullNone, effect, Matrix.Identity);
+	}
+
+	public void DrawCustom(Texture2D texture, Vector2 position, Color color, float rotation,
+		Vector2 origin, float scale, SpriteEffects effects)
+	{
+		customEffect?.Parameters["ContentScale"]?.SetValue(new Vector2(
+			(float)texture.LogicalWidth() / texture.Width, (float)texture.LogicalHeight() / texture.Height));
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, rotation, origin, scale, effects, 0f);
+	}
+
+	public void EndCustom()
+	{
+		spriteBatch.End();
+		customEffect = null;
 	}
 
 	// Force the whole current render target's ALPHA channel to 1, leaving RGB untouched, by
@@ -523,6 +557,11 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Vector2 br = Vector2.Transform(new Vector2((float)designRect.Right, (float)designRect.Bottom), RenderScale.Matrix);
 		Rectangle renderDest = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
 		configure?.Invoke(effect, renderDest);
+		// Central ContentScale (logical/padded) for the drawn texture — same convention as
+		// DrawCustom, so a content-extent shader (channelflip) maps its [0,1] frame math onto the
+		// CONTENT rather than the padded texture edge. Null-conditional => free for shaders without it.
+		effect.Parameters["ContentScale"]?.SetValue(new Vector2(
+			(float)texture.LogicalWidth() / texture.Width, (float)texture.LogicalHeight() / texture.Height));
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, effect, RenderScale.Matrix);
 		spriteBatch.Draw(texture, designRect, Color.White);
 		spriteBatch.End();
@@ -1074,7 +1113,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, Color.White);
+		// Clamp to the logical region so a padded dxt texture never draws its pad (which reads BLACK
+		// under Opaque blend, not transparent). No-op for unpadded textures (LogicalBounds == full).
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), Color.White,
+			0f, Vector2.Zero, 1f, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, Color color)
@@ -1082,7 +1124,9 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, color);
+		// Clamp to logical (see above): the pad is black under Opaque; no-op when unpadded.
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color,
+			0f, Vector2.Zero, 1f, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, Vector2 scale, bool center)
@@ -1096,14 +1140,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
-			(zero) = new Vector2((float)(texture.Width / 2), (float)(texture.Height / 2));
+			// LOGICAL centre: a padded dxt texture's real content is the top-left logical WxH; the
+			// mult-of-4 pad hangs off the bottom/right (transparent), so centre on the logical size.
+			(zero) = new Vector2((float)(texture.LogicalWidth() / 2), (float)(texture.LogicalHeight() / 2));
 		}
 		else
 		{
 			zero = Vector2.Zero;
 		}
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, Color.White, 0f, zero, scale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), Color.White, 0f, zero, scale, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, bool center, Color color, SpriteEffects spriteEffects)
@@ -1117,14 +1163,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
-			(zero) = new Vector2((float)(texture.Width / 2), (float)(texture.Height / 2));
+			// LOGICAL centre: a padded dxt texture's real content is the top-left logical WxH; the
+			// mult-of-4 pad hangs off the bottom/right (transparent), so centre on the logical size.
+			(zero) = new Vector2((float)(texture.LogicalWidth() / 2), (float)(texture.LogicalHeight() / 2));
 		}
 		else
 		{
 			zero = Vector2.Zero;
 		}
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, color, rotation, zero, scale, spriteEffects, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, rotation, zero, scale, spriteEffects, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, Vector2 offset, Color color, SpriteEffects spriteEffects)
@@ -1134,7 +1182,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, color, rotation, offset, scale, spriteEffects, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, rotation, offset, scale, spriteEffects, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, bool center)
@@ -1147,14 +1195,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
-			(zero) = new Vector2((float)(texture.Width / 2), (float)(texture.Height / 2));
+			// LOGICAL centre: a padded dxt texture's real content is the top-left logical WxH; the
+			// mult-of-4 pad hangs off the bottom/right (transparent), so centre on the logical size.
+			(zero) = new Vector2((float)(texture.LogicalWidth() / 2), (float)(texture.LogicalHeight() / 2));
 		}
 		else
 		{
 			zero = Vector2.Zero;
 		}
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, Color.White, rotation, zero, scale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), Color.White, rotation, zero, scale, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, Vector2 offset)
@@ -1163,7 +1213,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, Color.White, rotation, offset, scale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), Color.White, rotation, offset, scale, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, bool center, Color color)
@@ -1176,14 +1226,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
-			(zero) = new Vector2((float)(texture.Width / 2), (float)(texture.Height / 2));
+			// LOGICAL centre: a padded dxt texture's real content is the top-left logical WxH; the
+			// mult-of-4 pad hangs off the bottom/right (transparent), so centre on the logical size.
+			(zero) = new Vector2((float)(texture.LogicalWidth() / 2), (float)(texture.LogicalHeight() / 2));
 		}
 		else
 		{
 			zero = Vector2.Zero;
 		}
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, color, rotation, zero, scale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, rotation, zero, scale, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, Vector2 scale, bool center, Color color)
@@ -1197,14 +1249,16 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
-			(zero) = new Vector2((float)(texture.Width / 2), (float)(texture.Height / 2));
+			// LOGICAL centre: a padded dxt texture's real content is the top-left logical WxH; the
+			// mult-of-4 pad hangs off the bottom/right (transparent), so centre on the logical size.
+			(zero) = new Vector2((float)(texture.LogicalWidth() / 2), (float)(texture.LogicalHeight() / 2));
 		}
 		else
 		{
 			zero = Vector2.Zero;
 		}
 		_beginDrawing();
-		spriteBatch.Draw(texture, position, (Rectangle?)null, color, rotation, zero, scale, (SpriteEffects)0, 0f);
+		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, rotation, zero, scale, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Rectangle source, Vector2 position, float rotation, float scale, bool center, Color color)
@@ -1294,7 +1348,9 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
 		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
-		spriteBatch.Draw(texture, dest, color);
+		// Whole texture scaled to fill dest: clamp the source to the logical region so a padded dxt
+		// texture doesn't shrink its content into part of dest (leaving a transparent pad margin).
+		spriteBatch.Draw(texture, dest, (Rectangle?)texture.LogicalBounds(), color);
 	}
 
 	protected override void LoadContent()

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;   // LogicalWidth/LogicalHeight — padded-dxt-safe texture dimensions
 
 namespace EvilAliens;
 
@@ -403,10 +404,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			collisionBox = new CollisionBox();
 		}
-		float num = texture.Width;
+		float num = texture.LogicalWidth();
 		num -= (float)((columns - 1) * separatingspace);
 		num /= (float)columns;
-		float num2 = texture.Height;
+		float num2 = texture.LogicalHeight();
 		num2 -= (float)((rows - 1) * separatingspace);
 		num2 /= (float)rows;
 		collisionBox.TopLeft = new Vector2((0f - num * DrawScale) / 2f, (0f - num2 * DrawScale) / 2f) * 0.6f;
@@ -426,7 +427,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		separatingspace = animationData.separatingspace;
 		FirstFrame = animationData.FirstFrame;
 		LastFrame = (animationData.LastFrame > 0) ? animationData.LastFrame : rows * columns;
-		textureScale = SuperSampleFactor(texturename, texture.Width / columns);
+		textureScale = SuperSampleFactor(texturename, texture.LogicalWidth() / columns);
 		curframe = FirstFrame;
 		color = Color.White;
 	}
@@ -573,9 +574,9 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
 		int num = framenr / columns;
 		int num2 = framenr % columns;
-		int num3 = texture.Width - (columns - 1) * separatingspace;
+		int num3 = texture.LogicalWidth() - (columns - 1) * separatingspace;
 		num3 /= columns;
-		int num4 = texture.Height - (rows - 1) * separatingspace;
+		int num4 = texture.LogicalHeight() - (rows - 1) * separatingspace;
 		num4 /= rows;
 		Rectangle result = default(Rectangle);
 		(result) = new Rectangle(num2 * (num3 + separatingspace), num * (num4 + separatingspace), num3, num4);
@@ -639,6 +640,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		case 0:
 		case 1:
 			spriteBatch.interpolateEffect.Enable();
+			// UV-SPACE offset: interpolate.fx adds this to the texcoords SpriteBatch generates, which
+			// are the frame-rect pixels divided by the ACTUAL (padded) texture size. So the frame->frame
+			// delta must be normalised by the padded Width/Height here, NOT the logical size — the frame
+			// RECTS above are logical pixel-space (correct), but this ratio lives in padded UV space.
 			spriteBatch.interpolateEffect.Offset = new Vector2((float)((frameRectangle2).Left - (frameRectangle).Left), (float)((frameRectangle2).Top - (frameRectangle).Top)) / new Vector2((float)texture.Width, (float)texture.Height);
 			spriteBatch.interpolateEffect.Delta = num2;
 			spriteBatch.fadeEffect.Enable();

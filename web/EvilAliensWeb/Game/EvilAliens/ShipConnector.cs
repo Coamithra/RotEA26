@@ -418,7 +418,7 @@ internal class ShipConnector : AlienDrawableGameComponent
 			return;
 		}
 		float rot = (float)Math.Atan2(0f - d.X, d.Y);
-		Vector2 scale = new Vector2(thickness / (float)lineTex.Width, len / (float)lineTex.Height);
+		Vector2 scale = new Vector2(thickness / (float)lineTex.LogicalWidth(), len / (float)lineTex.LogicalHeight());
 		spriteBatch.Draw(lineTex, (p0 + p1) * 0.5f, rot, scale, center: true, color);
 	}
 
@@ -455,7 +455,7 @@ internal class ShipConnector : AlienDrawableGameComponent
 	private void DrawGlow(Vector2 center, float diameterPx, Color color)
 	{
 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		float s = diameterPx / (float)glowTex.Width;
+		float s = diameterPx / (float)glowTex.LogicalWidth();
 		spriteBatch.Draw(glowTex, center, 0f, new Vector2(s, s), center: true, color);
 	}
 

@@ -21,12 +21,17 @@
 sampler TextureSampler : register(s0);
 
 float2 Feather;   // UV ramp width per axis: (overlapX/tileW, overlapY/tileH)
+float2 ContentScale; // logical/padded per axis: the tile CONTENT fills tc in [0,ContentScale]; the rest
+                  // is the transparent mult-of-4 pad a dxt sibling carries. Normalise tc by this so
+                  // the crossfade window ramps to 0 at the CONTENT edge, not the padded texture edge
+                  // (else the feather lands in the pad and the tile seams). (1,1) => unpadded, no-op.
 
 float4 PixelShaderFunction(float4 color : COLOR0, float2 tc : TEXCOORD0) : COLOR0
 {
     float4 t = tex2D(TextureSampler, tc);
-    float wx = smoothstep(0.0, Feather.x, tc.x) * smoothstep(0.0, Feather.x, 1.0 - tc.x);
-    float wy = smoothstep(0.0, Feather.y, tc.y) * smoothstep(0.0, Feather.y, 1.0 - tc.y);
+    float2 n = tc / ContentScale;   // content-normalised [0,1] (pad region -> n > 1 -> window 0)
+    float wx = smoothstep(0.0, Feather.x, n.x) * smoothstep(0.0, Feather.x, 1.0 - n.x);
+    float wy = smoothstep(0.0, Feather.y, n.y) * smoothstep(0.0, Feather.y, 1.0 - n.y);
     float w = wx * wy;
     return float4(t.rgb * color.rgb, w * color.a);
 }

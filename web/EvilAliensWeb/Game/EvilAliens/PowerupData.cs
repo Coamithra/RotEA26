@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -308,17 +309,17 @@ public class PowerupData : DrawableGameComponent
 				num3 = animationTimer.TimeLeft / num4;
 			}
 			float num5 = (float)Math.Round(96.0);
-			batch.Draw(barLit, new Rectangle(0, 0, (int)num5, barLit.Height), position + val2, 0f, 1f, center: false, new Color(val3, fade));
+			batch.Draw(barLit, new Rectangle(0, 0, (int)num5, barLit.LogicalHeight()), position + val2, 0f, 1f, center: false, new Color(val3, fade));
 			batch.Draw(barEdge, position + val2 + new Vector2(num5, 0f), 0f, Vector2.One, center: false, new Color(val3, fade));
 			batch.BlendMode = (SpriteBlendMode)2;
-			batch.Draw(barLit, new Rectangle(0, 0, (int)num5, barLit.Height), position + val2, 0f, 1f, center: false, new Color(val3, num3 * fade));
+			batch.Draw(barLit, new Rectangle(0, 0, (int)num5, barLit.LogicalHeight()), position + val2, 0f, 1f, center: false, new Color(val3, num3 * fade));
 			batch.Draw(barEdge, position + val2 + new Vector2(num5, 0f), 0f, Vector2.One, center: false, new Color(val3, num3 * fade));
 			batch.BlendMode = (SpriteBlendMode)1;
 		}
 		else if (displayedprogress > 0f)
 		{
 			float num6 = (float)Math.Round(21f + 75f * displayedprogress);
-			batch.Draw(barLit, new Rectangle(0, 0, (int)num6, barLit.Height), position + val2, 0f, 1f, center: false, new Color(val3, fade));
+			batch.Draw(barLit, new Rectangle(0, 0, (int)num6, barLit.LogicalHeight()), position + val2, 0f, 1f, center: false, new Color(val3, fade));
 			batch.Draw(barEdge, position + val2 + new Vector2(num6, 0f), 0f, Vector2.One, center: false, new Color(val3, fade));
 		}
 	}

@@ -1,5 +1,6 @@
 using System;
 using Microsoft.Xna.Framework;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -124,7 +125,7 @@ internal class Ball : AlienDrawableGameComponent
 		// physics/collision radius must match the on-screen size, so use DrawScale (= scale /
 		// textureScale) against the texel width -- like the small asteroids' retrieveBoundsFromTexture.
 		// (Raw `scale * texture.Width` would scale the hitbox by the supersample factor.)
-		r = DrawScale * (float)(texture.Width / 2);
+		r = DrawScale * (float)(texture.LogicalWidth() / 2);
 		state = BallState.startup;
 		base.Position = new Vector2(RandomHelper.RandomNextFloat(0f, 800f), RandomHelper.RandomNextFloat(0f - r, -600f - ybuffer));
 		base.Direction = (float)Math.PI / 2f + RandomHelper.RandomNextFloat(-(float)Math.PI / 12f, (float)Math.PI / 12f);

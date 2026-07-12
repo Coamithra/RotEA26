@@ -267,7 +267,7 @@ internal class SplashScene : Scene
 	private static Vector4 FitRect(Texture2D tex)
 	{
 		float frame = 800f / 600f;
-		float a = (float)tex.Width / (float)tex.Height;
+		float a = (float)tex.LogicalWidth() / (float)tex.LogicalHeight();
 		if (a >= frame)
 		{
 			float vS = frame / a;
@@ -409,6 +409,12 @@ internal class SplashScene : Scene
 							eff.Parameters["Fade"].SetValue(1f);
 							eff.Parameters["NewRect"].SetValue(nrect);
 							eff.Parameters["NewTexture"].SetValue(newTex);
+							// Incoming image's content extent (logical/padded) so the shader samples its
+							// content, not the pad. (The OUTGOING image's ContentScale is set centrally by
+							// DrawEffect.) Null-conditional: no-op if the shader lacks the param.
+							eff.Parameters["NewContentScale"]?.SetValue(new Vector2(
+								(float)newTex.LogicalWidth() / newTex.Width,
+								(float)newTex.LogicalHeight() / newTex.Height));
 						});
 				}
 			}

@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -42,7 +43,7 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 			// the visible disc (the "active bigger than the sprite suggests" half of the bug).
 			// DrawScale divides the supersample back out, restoring the intended 0.8x-of-visible
 			// radius regardless of the sheet's texel resolution.
-			c.Radius = (float)texture.Width * 0.5f * HitRadiusFactor * DrawScale;
+			c.Radius = (float)texture.LogicalWidth() * 0.5f * HitRadiusFactor * DrawScale;
 			return c;
 		}
 	}

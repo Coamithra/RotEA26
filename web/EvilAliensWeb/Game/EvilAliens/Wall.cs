@@ -4,6 +4,7 @@ using System.IO;
 using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -206,7 +207,7 @@ internal class Wall : AlienDrawableGameComponent
 	protected override void LoadContent()
 	{
 		base.LoadContent();
-		line = content.Load<Texture2D>("GFX/Base/black line lalalal");
+		line = content.Load<Texture2D>("GFX/Base/black_line_lalalal");
 		fog = content.Load<Texture2D>("GFX/Base/2331-v5");
 	}
 
@@ -1126,8 +1127,8 @@ internal class Wall : AlienDrawableGameComponent
 			}
 			blocks = array;
 		}
-		scale = 800f / (float)(texture.Width * width);
-		float num3 = (float)texture.Height * scale;
+		scale = 800f / (float)(texture.LogicalWidth() * width);
+		float num3 = (float)texture.LogicalHeight() * scale;
 		base.Position = new Vector2(0f, (0f - num3) * (float)height - EntryLead());
 		base.Direction = (float)Math.PI / 2f;
 		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
@@ -1200,8 +1201,8 @@ internal class Wall : AlienDrawableGameComponent
 				blocks[i, j] = j < list[i].Length && list[i][j] != ' ';
 			}
 		}
-		scale = 800f / (float)(texture.Width * width);
-		float rowH = (float)texture.Height * scale;
+		scale = 800f / (float)(texture.LogicalWidth() * width);
+		float rowH = (float)texture.LogicalHeight() * scale;
 		base.Position = new Vector2(0f, (0f - rowH) * (float)height - EntryLead());
 		base.Direction = (float)Math.PI / 2f;
 		base.Speed = oracle.BackgroundSpeed.Length();
@@ -1323,8 +1324,8 @@ internal class Wall : AlienDrawableGameComponent
 		// times across Level 3); DefaultFogColor is only the fallback for the first floor / off-level.
 		Color fogColorFlag = EvilAliensWeb.Compat.DebugFlags.WallFogColor ?? oracle.AlienBaseFloorColor ?? DefaultFogColor;
 		int bands = EvilAliensWeb.Compat.DebugFlags.Wall3DBands ?? DefaultBands;
-		float blockW = (float)texture.Width * scale;
-		float blockH = (float)texture.Height * scale;
+		float blockW = (float)texture.LogicalWidth() * scale;
+		float blockH = (float)texture.LogicalHeight() * scale;
 
 		// Collect the visible blocks, then painter-sort them FAR-from-VP first so nearer-VP
 		// towers paint over the ones leaning across them.
@@ -1370,8 +1371,8 @@ internal class Wall : AlienDrawableGameComponent
 		// no notion of which wall it belongs to. Real geometry knows: each quad IS one wall, so its
 		// shade is just its vertex colour.
 		Vector4 face = FaceFactors(faceLight, faceAngle);
-		int cw = texture.Width / 8;
-		int ch = texture.Height / 8;
+		int cw = texture.LogicalWidth() / 8;
+		int ch = texture.LogicalHeight() / 8;
 
 		int nv = 0;
 		int quads = 0;
@@ -1386,6 +1387,9 @@ internal class Wall : AlienDrawableGameComponent
 			// The block's own cell of the seamless 8x8 sheet. NO half-texel inset: neighbouring
 			// cells ARE the correct continuation (block (i,j) samples cell (j%8, i%8)), so insetting
 			// would pull each face away from its neighbour's and re-open the seam it means to avoid.
+			// UV denominators are the ACTUAL (padded) texture size: cw/ch above are the logical
+			// content cell (content stays top-left), but these are GPU texcoords, so a content pixel
+			// x maps to UV x/paddedW. (No pad in ship — 756-v1 is mult-of-4 — but correct under pad.)
 			float u0 = (float)(j % 8 * cw) / (float)texture.Width;
 			float u1 = (float)((j % 8 + 1) * cw) / (float)texture.Width;
 			float v0 = (float)(i % 8 * ch) / (float)texture.Height;
@@ -1603,8 +1607,8 @@ internal class Wall : AlienDrawableGameComponent
 		// the wall's scroll speed (Wall.Update sets Speed = |oracle.BackgroundSpeed|, unmodified),
 		// so scaling it by `speed` yields exactly the screen motion of a background layer with
 		// that scrollspeedmodifier -- no persistent scroll state needed.
-		float tileX = (float)fog.Width;
-		float tileY = (float)fog.Height;
+		float tileX = (float)fog.LogicalWidth();
+		float tileY = (float)fog.LogicalHeight();
 		float phaseY = MyMath.Mod(base.Position.Y * speed, tileY);
 		Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
@@ -1666,7 +1670,7 @@ internal class Wall : AlienDrawableGameComponent
 		Vector2 val2 = default(Vector2);
 		Color val3 = default(Color);
 		Color val4 = default(Color);
-		// Edge-line draw scale (card a54cc13a): `line` ("black line lalalal") is a SEPARATE, fixed-
+		// Edge-line draw scale (card a54cc13a): `line` ("black_line_lalalal") is a SEPARATE, fixed-
 		// resolution texture -- a thin line inset near the right edge of its own square canvas, not
 		// part of the 8x8 wall sheet -- drawn `center:true` at each wall block's centre so it reaches
 		// out to the block's true edge. The on-screen block size is `texture.Width * scale` regardless
@@ -1678,11 +1682,11 @@ internal class Wall : AlienDrawableGameComponent
 		// distance to the block edge -- reading as "too close to the centre". Deriving it from
 		// texture.Width keeps the line's on-screen length pinned to the (resolution-independent) block
 		// size at any wall-sheet resolution.
-		float lineScale = scale * (float)texture.Width / (float)line.Width;
+		float lineScale = scale * (float)texture.LogicalWidth() / (float)line.LogicalWidth();
 		int traceTopFaces = 0;
 		for (int i = 0; i < height; i++)
 		{
-			if (!((float)texture.Height * scale * (float)i + base.Position.Y > (float)(-texture.Height) * scale) || !((float)texture.Height * scale * (float)i + base.Position.Y <= 600f))
+			if (!((float)texture.LogicalHeight() * scale * (float)i + base.Position.Y > (float)(-texture.LogicalHeight()) * scale) || !((float)texture.LogicalHeight() * scale * (float)i + base.Position.Y <= 600f))
 			{
 				continue;
 			}
@@ -1692,8 +1696,8 @@ internal class Wall : AlienDrawableGameComponent
 				{
 					traceTopFaces++;
 					Vector2 val = default(Vector2);
-					val.X = (float)texture.Width * scale * (float)j;
-					val.Y = (float)texture.Height * scale * (float)i;
+					val.X = (float)texture.LogicalWidth() * scale * (float)j;
+					val.Y = (float)texture.LogicalHeight() * scale * (float)i;
 					int num = 0;
 					int num2 = j % 8;
 					num = i % 8;
@@ -1702,8 +1706,8 @@ internal class Wall : AlienDrawableGameComponent
 					// exactly as its shaft's topmost slice does. Collision is unaffected -- it
 					// reads `blocks` + Position, never these draw positions.
 					Vector2 topLeft = val + base.Position;
-					spriteBatch.Draw(texture, new Rectangle(num2 * texture.Width / 8, num * texture.Height / 8, texture.Width / 8, texture.Height / 8), lifted ? Project(topLeft, topD) : topLeft, 0f, scale * 8f * topD, center: false);
-					(val2) = new Vector2((float)texture.Width * scale / 2f);
+					spriteBatch.Draw(texture, new Rectangle(num2 * texture.LogicalWidth() / 8, num * texture.LogicalHeight() / 8, texture.LogicalWidth() / 8, texture.LogicalHeight() / 8), lifted ? Project(topLeft, topD) : topLeft, 0f, scale * 8f * topD, center: false);
+					(val2) = new Vector2((float)texture.LogicalWidth() * scale / 2f);
 					val += val2;
 					(val3) = new Color(new Vector4(0f, 0f, 0f, 0.6f));
 					(val4) = new Color(new Vector4(1f, 1f, 1f, 0.3f));

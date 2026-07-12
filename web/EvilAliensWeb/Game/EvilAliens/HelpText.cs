@@ -99,8 +99,8 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		// localContent textures every showing: a no-op cache hit while nothing was
 		// unloaded, a fresh decode after Unload() — otherwise a demo's second attract
 		// cycle draws disposed textures.
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls Joypad");
+		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 	}
 
 	public void SetDisplay(Displays display)
@@ -111,8 +111,8 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 	protected override void LoadContent()
 	{
 		base.LoadContent();
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls Joypad");
+		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 		blankTexture = content.Load<Texture2D>("GFX/Menu/blank");
 		powerupbubble = content.Load<Texture2D>("GFX/Sprites/powerupbw");
 		font = content.Load<SpriteFont>("GFX/Menu/menufont");
@@ -218,18 +218,18 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 			switch (currentlyDisplaying)
 			{
 			case Displays.Keyboard:
-				spriteBatch.Draw(keyboardlayout, Vector2.Zero, 0f, 800f / (float)keyboardlayout.Width, center: false, new Color(new Vector4(1f, 1f, 1f, visibility)));
+				spriteBatch.Draw(keyboardlayout, Vector2.Zero, 0f, 800f / (float)keyboardlayout.LogicalWidth(), center: false, new Color(new Vector4(1f, 1f, 1f, visibility)));
 				spriteBatch.Flush();
 				break;
 			case Displays.Gamepad:
-				spriteBatch.Draw(controllerlayout, Vector2.Zero, 0f, 800f / (float)controllerlayout.Width, center: false, new Color(new Vector4(1f, 1f, 1f, visibility)));
+				spriteBatch.Draw(controllerlayout, Vector2.Zero, 0f, 800f / (float)controllerlayout.LogicalWidth(), center: false, new Color(new Vector4(1f, 1f, 1f, visibility)));
 				spriteBatch.Flush();
 				break;
 			case Displays.Powerups:
 			{
 				Color color2 = default(Color);
 				(color2) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
-				spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.Width), center: true, color2);
+				spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
 				spriteBatch.Flush();
 				string text2 = "Enhancements";
 				spriteBatch.DrawString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f, (SpriteEffects)0, 0f);

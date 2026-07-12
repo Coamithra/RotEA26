@@ -53,8 +53,8 @@ internal class InstructionsMenu : DrawableGameComponent
 		// localContent textures. Re-load them every showing: a no-op cache hit while
 		// nothing was unloaded, a fresh decode after Unload() — otherwise the second
 		// pause -> Instructions draws disposed textures.
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls Joypad");
+		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 	}
 
 	protected override void LoadContent()
@@ -63,8 +63,8 @@ internal class InstructionsMenu : DrawableGameComponent
 		input = ServiceHelper.Get<IInputHandlerService>().InputHandler;
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		spriteBatch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls Joypad");
+		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 		blankTexture = contentManager.Load<Texture2D>("GFX/Menu/blank");
 		powerupbubble = contentManager.Load<Texture2D>("GFX/Sprites/powerupbw");
 		font = contentManager.Load<SpriteFont>("GFX/Menu/menufont");
@@ -122,7 +122,7 @@ internal class InstructionsMenu : DrawableGameComponent
 		}
 		// Web port (Stage 9): the Xbox build skipped Displays.Keyboard here so the
 		// controls screen only ever showed the joypad. On the web the keyboard IS the
-		// primary input, so show "Controls (Keyboard)" (Controls Keyboard.png) too.
+		// primary input, so show "Controls (Keyboard)" (Controls_Keyboard.png) too.
 		if (currentlyDisplaying == HelpText.Displays.Lead)
 		{
 			displayNext();
@@ -172,18 +172,18 @@ internal class InstructionsMenu : DrawableGameComponent
 		switch (currentlyDisplaying)
 		{
 		case HelpText.Displays.Keyboard:
-			spriteBatch.Draw(keyboardlayout, Vector2.Zero, 0f, 800f / (float)keyboardlayout.Width, center: false, new Color(new Vector4(1f, 1f, 1f, 1f)));
+			spriteBatch.Draw(keyboardlayout, Vector2.Zero, 0f, 800f / (float)keyboardlayout.LogicalWidth(), center: false, new Color(new Vector4(1f, 1f, 1f, 1f)));
 			spriteBatch.Flush();
 			break;
 		case HelpText.Displays.Gamepad:
-			spriteBatch.Draw(controllerlayout, Vector2.Zero, 0f, 800f / (float)controllerlayout.Width, center: false, new Color(new Vector4(1f, 1f, 1f, 1f)));
+			spriteBatch.Draw(controllerlayout, Vector2.Zero, 0f, 800f / (float)controllerlayout.LogicalWidth(), center: false, new Color(new Vector4(1f, 1f, 1f, 1f)));
 			spriteBatch.Flush();
 			break;
 		case HelpText.Displays.Powerups:
 		{
 			Color color2 = default(Color);
 			(color2) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
-			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.Width), center: true, color2);
+			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
 			spriteBatch.Flush();
 			string text2 = "Enhancements";
 			spriteBatch.DrawMetalString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f);

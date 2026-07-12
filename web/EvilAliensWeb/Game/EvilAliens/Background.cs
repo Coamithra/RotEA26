@@ -240,7 +240,7 @@ public class Background : Scene
 			showdoodad = true;
 			doodadscale = 0.45f;
 			doodadscrollspeed = new Vector2(1f, 1f);
-			doodadPos = new Vector2(620f, (float)(-doodad.Height) * doodadscale / 2f);
+			doodadPos = new Vector2(620f, (float)(-doodad.LogicalHeight()) * doodadscale / 2f);
 			doodadcolor = Color.White;
 			doodadblendmode = (SpriteBlendMode)1;
 			// Milder than the hero earth (small corner planet): slow the stars to ~25%.
@@ -289,11 +289,11 @@ public class Background : Scene
 			doodadEnterFromTop = scrollspeed.Y > 0f;
 			if (scrollspeed.Y > 0f)
 			{
-				doodadPos = new Vector2(400f, (float)(-doodad.Height) * doodadscale / 2f);
+				doodadPos = new Vector2(400f, (float)(-doodad.LogicalHeight()) * doodadscale / 2f);
 			}
 			else
 			{
-				doodadPos = new Vector2(400f, 600f + (float)doodad.Height * doodadscale / 2f);
+				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
 		}
 	}
@@ -321,17 +321,17 @@ public class Background : Scene
 			// build_nebula.py output) stays the same size on screen -- more texels = crisper
 			// at high-res windows, not bigger. 840 preserves the original 840px@scale-1 look.
 			const float AndromedaDesignWidth = 840f;
-			doodadscale = AndromedaDesignWidth / (float)doodad.Width;
+			doodadscale = AndromedaDesignWidth / (float)doodad.LogicalWidth();
 			doodadscrollspeed = new Vector2(1f, 1f);
 			// A distant galaxy, not a planet — no star slowdown (also clears a prior earth's value).
 			doodadStarSlowdown = 1f;
 			if (scrollspeed.Y > 0f)
 			{
-				doodadPos = new Vector2(400f, (float)(-doodad.Height) * doodadscale / 2f);
+				doodadPos = new Vector2(400f, (float)(-doodad.LogicalHeight()) * doodadscale / 2f);
 			}
 			else
 			{
-				doodadPos = new Vector2(400f, 600f + (float)doodad.Height * doodadscale / 2f);
+				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
 		}
 	}
@@ -379,11 +379,11 @@ public class Background : Scene
 		if (showdoodad)
 		{
 			doodadPos += doodadscrollspeed * scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
-			if (scrollspeed.Y > 0f && ((doodadPos.Y > 600f + (float)doodad.Height * doodadscale / 2f) | (doodadPos.X > 800f + (float)doodad.Width * doodadscale / 2f)))
+			if (scrollspeed.Y > 0f && ((doodadPos.Y > 600f + (float)doodad.LogicalHeight() * doodadscale / 2f) | (doodadPos.X > 800f + (float)doodad.LogicalWidth() * doodadscale / 2f)))
 			{
 				showdoodad = false;
 			}
-			if (scrollspeed.Y < 0f && ((doodadPos.Y < (float)(-doodad.Height) * doodadscale / 2f) | (doodadPos.X > 800f + (float)doodad.Width * doodadscale / 2f)))
+			if (scrollspeed.Y < 0f && ((doodadPos.Y < (float)(-doodad.LogicalHeight()) * doodadscale / 2f) | (doodadPos.X > 800f + (float)doodad.LogicalWidth() * doodadscale / 2f)))
 			{
 				showdoodad = false;
 			}
@@ -489,7 +489,7 @@ public class Background : Scene
 		{
 			return 1f;
 		}
-		float halfH = (float)doodad.Height * doodadscale * 0.5f;
+		float halfH = (float)doodad.LogicalHeight() * doodadscale * 0.5f;
 		// enter/exit edges of the doodad centre across the screen, by crossing direction.
 		float enter = doodadEnterFromTop ? (0f - halfH) : (600f + halfH);
 		float exit = doodadEnterFromTop ? (600f + halfH) : (0f - halfH);
@@ -642,18 +642,17 @@ public class Background : Scene
 		}
 		if (starfield != null)
 		{
-			// Render-space, additive, custom-window batch — flush the wrapper's
-			// design-space batch first so the two SpriteBatches don't overlap.
-			base.SpriteBatch.Flush();
+			// Render-space, additive, custom-window batch — now through the wrapper (BeginCustom
+			// flushes the open design-space batch itself, so no manual Flush needed here).
 			starfield.Brightness = DebugToggles.Active ? DebugToggles.StarfieldBrightness : 1f;
-			starfield.Draw();
+			starfield.Draw(base.SpriteBatch);
 		}
-		// Near drifting stars ON TOP of the far nebula (its own additive SpriteBatch, so no
-		// flush needed). Drawn before the doodad/planet so the planet still occludes them.
+		// Near drifting stars ON TOP of the far nebula (its own render-space additive wrapper batch).
+		// Drawn before the doodad/planet so the planet still occludes them.
 		if (nearStars != null)
 		{
 			nearStars.Brightness = DebugToggles.Active ? DebugToggles.StarfieldBrightness : 1f;
-			nearStars.Draw();
+			nearStars.Draw(base.SpriteBatch);
 		}
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
@@ -1275,11 +1274,11 @@ public class Background : Scene
 			doodadStarSlowdown = 1f;
 			if (scrollspeed.Y > 0f)
 			{
-				doodadPos = new Vector2(400f, (float)(-doodad.Height) * doodadscale / 2f);
+				doodadPos = new Vector2(400f, (float)(-doodad.LogicalHeight()) * doodadscale / 2f);
 			}
 			else
 			{
-				doodadPos = new Vector2(400f, 600f + (float)doodad.Height * doodadscale / 2f);
+				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
 		}
 	}

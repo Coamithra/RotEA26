@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -224,7 +225,7 @@ internal class FlyingSpider : KillableAlien
 		// both wings on the body in DESIGN space relative to its centre (Position) -- the old
 		// texel-space offset assumed cell texels == screen px, which the supersampled rear-up
 		// sheet blows far out of place.
-		float wf = SuperSampleFactor("GFX/Sprites/wing1", wing.Width);
+		float wf = SuperSampleFactor("GFX/Sprites/wing1", wing.LogicalWidth());
 		int wingIdx = (int)curframe - FirstFrame;
 		if (wingIdx < 0) wingIdx = 0;
 		else if (wingIdx >= WingAnchors.Length) wingIdx = WingAnchors.Length - 1;

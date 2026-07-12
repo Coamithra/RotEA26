@@ -39,6 +39,26 @@ generate much of the art/audio referenced here.
   the WASM main thread is the stutter — a cold multi-MP sheet is hundreds of ms). Shaders load via
   `new Effect(gd, bytes)` from offline-compiled `.mgfxo`; effects apply via
   `SpriteBatch.Begin(effect)` (XNA 4.0 model), not `effect.Begin()`.
+- **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
+  BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
+  multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
+  (transparent, bottom/right only — content keeps its top-left coords) and stamps the original
+  ("logical") size into the DDS header's reserved dwords (offsets 32/36 + `"LOGD"` marker).
+  `WebContentManager.TryLoadDds` reads it back and registers it in a `ConditionalWeakTable`; the
+  extension methods **`Texture2D.LogicalWidth()/LogicalHeight()/LogicalBounds()`** return it (and
+  fall through to real `.Width/.Height` for unpadded png/rtex/render targets — a safe no-op). **The
+  rule:** PIXEL-space math (frame-rect slicing, cell size, origin, draw scale, aspect, supersample,
+  hitbox) → **logical**; NORMALISED UV/texcoord math the GPU samples (shader UV offsets like
+  `interpolate.fx`'s frame delta, per-vertex UVs in `Wall.DrawTowerShafts3D`, a shader feather
+  window) → **actual padded** size. Whole-texture draws MUST clamp their source to `LogicalBounds()`
+  (the wrapper's `Draw` overloads do — else the transparent pad reads BLACK under Opaque blend, e.g.
+  the menu frame lines / `GammaMenu` tiling). RenderTargets are never padded. A content-extent
+  shader (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
+  `[0,1]` frame math in `tc/ContentScale`; the `SpriteBatchWrapper` sets it centrally in
+  `BeginCustom`/`DrawCustom` (the render-space custom-effect batch that `ProceduralStarfield`/
+  `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`. **Test harness:**
+  `build_textures.py --padtest <px>` grossly over-pads every `.dds` so any missed padded-vs-logical
+  site shows an obvious ~px artifact in play; ship with `--padtest 0` (minimal mult-of-4 pad).
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
@@ -354,7 +374,7 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
 - **Animated Braineroid (`Braineroid.cs`):** 20-frame 5×4 sheet `brainanimated` (built by
   `tools/textures/build_brain_sheet.py`) drawn through the interpolation shader
   (`interpolationOptions = always`; fps 0.4 → ~50s loop reads smooth) + an additive blue glow
-  behind it (raw format — DXT would band; the sheet itself is DXT). Registered in
+  behind it (PNG — DXT would band the smooth gradient; the sheet itself is DXT). Registered in
   `AlienDrawableGameComponent.DesignFrameWidth` at 100 (on-screen size = 100×scale regardless of
   cell px). GOTCHAS: the off-screen wrap margin must use `texture.Width/columns * DrawScale` (ONE
   frame, not the whole row — else brains drift far off and the Braineroids minigame never clears);

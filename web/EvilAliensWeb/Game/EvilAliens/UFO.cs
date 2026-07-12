@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -312,7 +313,7 @@ public class UFO : KillableAlien
 			spriteBatch.BlendMode = (SpriteBlendMode)1;
 			// landed stills are drawn directly (not via DrawScale), so undo any supersample
 			// factor here; 1 for not-yet-upscaled stills (Smallship_landed / Mediumship_landed)
-			float landedScale = scale / SuperSampleFactor(stationarySpriteName, stationarySprite.Width);
+			float landedScale = scale / SuperSampleFactor(stationarySpriteName, stationarySprite.LogicalWidth());
 			// landedTuning.Landed plants the still (its "feet") relative to the flying anchor.
 			spriteBatch.Draw(stationarySprite, base.Position + landedTuning.Landed, 0f, landedScale, center: true);
 		}

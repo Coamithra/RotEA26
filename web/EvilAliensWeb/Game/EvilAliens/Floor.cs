@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -149,7 +150,7 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 			item.x = collisionBox.Left + (collisionBox.Right - collisionBox.Left) / 2f;
 			item.height = (560f - collisionBox.Bottom) / 310f;
 			item.height = MathHelper.Clamp(1f - item.height, 0f, 1f);
-			item.size = (collisionBox.Right - collisionBox.Left) / ((float)shadowimage.Width * 0.7f);
+			item.size = (collisionBox.Right - collisionBox.Left) / ((float)shadowimage.LogicalWidth() * 0.7f);
 			// Per-caster shadow tuning (identity for all but a tuned landed Mars UFO).
 			if (other is AlienDrawableGameComponent adgc)
 			{

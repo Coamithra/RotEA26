@@ -129,7 +129,7 @@ internal class WebcamUfo : AlienDrawableGameComponent
 	// 0 until Initialize has run: ComponentBin.Add defers Initialize (and thus
 	// LoadAnimation) to the end of the tick, so the level's hit test can see this
 	// saucer one tick before it has a texture — 0 radius simply never hits.
-	public float HitRadius => (texture == null || columns == 0) ? 0f : (float)texture.Width / (float)columns * DrawScale * 0.42f;
+	public float HitRadius => (texture == null || columns == 0) ? 0f : (float)texture.LogicalWidth() / (float)columns * DrawScale * 0.42f;
 
 	public bool IsFleeing => state == UfoState.flee;
 

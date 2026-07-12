@@ -35,32 +35,98 @@
 - [x] NetTypeRegistry + INetTypeDescriptor contract + worked example (UFO)
 - [x] NetIdRegistry: live list + id lookups + kill notes + spawn-state replay
 - [x] NetPuppets: client puppet map + driver component (DR, lerp-correct, freeze,
-      timers tick), spawn/death/claim application
-- [x] NetSession: snapshot scheduler (host ~16.7Hz), claims, score sync, metrics
+      timers tick), spawn/death/claim application + snapshot self-heal resurrect
+- [x] NetSession: snapshot scheduler (host ~16.7Hz), claims, score sync, metrics,
+      host-relative wire-slot translation (TranslateSlot)
 - [x] Game seams: CollisionHandler puppet-collidable, ComponentBin add-gate +
       Pop guard, GameScene client suppression, KillableAlien NetKill/notes,
       AlienDrawableGameComponent internal accessors, PlayerShip powerup claim hook
 - [x] FARM OUT ~20 per-type descriptors to parallel Opus agents (batches A-D)
-- [x] Review + integrate descriptor batches
-- [x] Docs: web CLAUDE.md net section update
+- [x] Review + integrate descriptor batches (all 21 types; builds clean)
+- [x] Docs: web CLAUDE.md net section update (drafted; re-check before ship)
 
-## Phase 5: Verify
-- [x] Clean Debug build
-- [x] Two Chrome WINDOWS gate: host `?level=Level1&net=host&aiplayer&invuln&room=<r>`
-      + join same with `net=join`; same wave visible both sides
-- [x] Client kills honored (enemy dies both sides, client score/combo local + host ledger)
-- [x] Powerup collection replicates (first claim wins, both honored inside RTT)
-- [x] Double-claim test: focus-fire one enemy -> both peers credited, enemy dies once
-- [x] Metrics lines healthy both sides (pops self-heal, no ordViol), zero console errors
-- [x] Plain no-flag boot byte-identical (no net construction; smoke check)
+## Phase 5: Verify -- IN PROGRESS (see "Session 1 verification state" below)
+- [x] Clean Debug build (all descriptors in)
+- [~] Two-window gate: infrastructure PROVEN end-to-end on the pre-descriptor build
+      (see below); the post-descriptor + post-fix run NOT yet done
+- [ ] Client kills honored on host (clKill > 0) -- blocked on the re-run
+- [ ] Powerup collection replicates
+- [ ] Double-claim test (clPaid > 0 while enemy dies once)
+- [ ] Metrics healthy both sides, zero console errors
+- [ ] Plain no-flag boot smoke check
 
-## Phase 6: Review & Ship
-- [x] Commit + push
-- [x] /review + fix all findings
-- [x] Pull main, re-verify
-- [x] PR + self-merge, fast-forward main
-- [x] Remove worktree + branch
+## Phase 6: Review & Ship -- NOT STARTED
+- [ ] Commit + push (WIP commits exist; see below)
+- [ ] /review + fix all findings
+- [ ] Pull main, re-verify
+- [ ] PR + self-merge, fast-forward main
+- [ ] Remove worktree + branch
 - [ ] Delete tracker; card -> Done + summary comment; follow-up cards
+
+---
+
+## Session 1 verification state (2026-07-13, handoff)
+
+What RAN and what it proved (two-window BroadcastChannel loopback, rooms g1-g3):
+- Two Chrome WINDOWS are REQUIRED: two tabs in one window throttle the hidden tab
+  to ~1Hz (the setTimeout fallback is not enough) -> mutual 3s peer timeout.
+  WORKING RECIPE: host tab in the MCP tab group; inject a button whose pointerdown
+  handler window.open()s the join URL as a popup window, then click it via
+  claude-in-chrome `computer` (a trusted click carries user activation; a plain
+  javascript_tool window.open is popup-blocked). Read the popup's console by
+  wrapping p.console FROM the host tab (same origin) into a window._joinLog array.
+  Clicks sometimes don't register right after a (re)load -- screenshot, re-click
+  the button center, verify via the button label flipping to OK.
+- On the PRE-descriptor build (UFO-only puppets): session start v2 both sides,
+  peer up, ship streams healthy (0 drops/gaps/pops), snapTx ~16.7Hz, snapshots
+  applied (snapEnt >> snapUnk), UFO puppets live on the join side, killer-
+  attributed EvDeaths applied, claims flowing client->host (clTx == clRx), ZERO
+  console errors/exceptions on either side over ~10 min of AI-vs-AI Level1.
+  Also confirmed the sim-split: host liveIds tracked the wave; the join world had
+  no real enemies (only puppets); the level script stayed host-only.
+- Two REAL BUGS found from those metrics, FIXED in the WIP commit:
+  1. Echo-claims: puppet removal is DEFERRED a tick (ComponentBin deathList), so
+     the applyingRemoteDeath bool missed the removal seam and every host-initiated
+     death echoed back as a claim (killer=None -> clKill/clPaid stayed 0). Fix:
+     `remoteDeaths` HashSet membership consumed at the removal seam (NetPuppets).
+  2. Slot numbering: each side seats its LOCAL ship in slot 0, so client claims
+     credited the wrong slot and EvScoreSync was cross-wired. Fix:
+     NetSession.TranslateSlot (wire slots are host-relative; the join side swaps
+     0<->1) applied at SendClaim tx, EvDeath rx, EvScoreSync rx.
+
+NOT yet verified (the remaining gate, all on the current full build):
+1. Fresh-room two-window run: expect join liveIds ~= host liveIds (all 21 types
+   now puppet), snapUnk low and flat, dup ~0, pupPops ~0.
+2. Client kill honored: host clKill > 0; enemy dies both sides with FX + score.
+3. Powerup pickup claim (bonus UFO drop): collected one side -> despawns both;
+   overlapping pickups inside the RTT window both keep it.
+4. Double-claim: both AIs focus-fire -> host clPaid > 0 (that metric IS the
+   proof) while the enemy dies once.
+5. Zero console errors both sides on the FULL build -- the 20 new descriptors'
+   CreatePuppet/ApplyStateExtra paths have NEVER run in a browser yet.
+6. Plain no-flag boot smoke check (net never constructed).
+7. THEN Phase 6: /review + fix, pull main, re-verify, PR self-merge, worktree +
+   branch cleanup, tracker deletion, card aa58cde3 -> Done + summary comment,
+   follow-up cards.
+
+Known issues / notes for the next session:
+- An orphaned popup window (rooms g2/g3 rigs) may still be open on the desktop
+  showing an error page -- close manually if present.
+- The wt5 dev server must run DETACHED (tracked background tasks were being
+  stopped externally): powershell Start-Process -FilePath dotnet -ArgumentList
+  'run','--project','web/DevServer','-c','Debug','--urls','http://localhost:5285'
+  -WorkingDirectory <wt5>. Kill via the PID listening on 5285 when done.
+- Braineroid pulsate caveat (batch B): the host encoder samples comp.scale on the
+  game tick; if Braineroid applies pulsate inside Draw (restore-after), puppet
+  brains won't breathe -- check during the gate run; if steady, encode the
+  effective (pulsated) scale or add a state extra.
+- SweepUFO/MarsBoss puppets don't show the LazerGenerator charge-up glow (child
+  component not replicated; the fired beam replicates as Lazer) -- follow-up card.
+- AI friends are disabled in ALL net sessions (their ships aren't replicated) --
+  a deviation from the design doc's "host runs AI friends"; follow-up card.
+- Follow-up card candidates: types outside the 11.1 replicable set (PlasmaBall,
+  paratroopers, SpiderBoss, BrainBoss, FakeBoss, SpiderHelperMothership);
+  LazerGenerator charge-glow replication; AI-friend ship replication.
 
 ---
 

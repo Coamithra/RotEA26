@@ -51,6 +51,11 @@ internal class FlyingSpider : KillableAlien
 
 	private float startheight;
 
+	// Net puppet only: forces Initialize's random grey-tint pick (foreground spiders only;
+	// background ones are overridden to the fog colour) onto the host's choice. null in normal
+	// play => the random pick. See NetForceColor.
+	private byte? netForcedColorIndex;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -135,7 +140,8 @@ internal class FlyingSpider : KillableAlien
 		base.Direction = (float)Math.PI;
 		base.MaxSpeed = base.Speed;
 		rotation = RandomHelper.RandomNextFloat(-(float)Math.PI / 32f, (float)Math.PI / 32f);
-		switch (RandomHelper.Random.Next(3))
+		int colorPick = netForcedColorIndex ?? RandomHelper.Random.Next(3);
+		switch (colorPick)
 		{
 		case 0:
 			color = Color.DarkGray;
@@ -307,5 +313,36 @@ internal class FlyingSpider : KillableAlien
 			}
 			sound.PlayCue("small head asplode");
 		}
+	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/FlyingSpiderDescriptor) ---
+	// Client puppets run Enabled=false. isbackground (the Setup bool) picks the WHOLE look:
+	// fog alpha + smaller scale + DrawOrder + Collides=false + the group-flatten Draw path, so
+	// it is pinned as a construction arg. Wing flap (flaptimer, ticked by NetTickTimers) + the
+	// vertical bob (carried by base pos) + curframe self-animate, so there is no continuous
+	// state extra. Foreground spiders take a random grey tint, forced via netForcedColorIndex.
+
+	internal bool NetIsBackground => isbackground;
+
+	internal byte NetColorIndex
+	{
+		get
+		{
+			if (color == Color.White)
+			{
+				return 1;
+			}
+			if (color == Color.DimGray)
+			{
+				return 2;
+			}
+			return 0; // DarkGray (Initialize's case 0)
+		}
+	}
+
+	// Set BEFORE bin.Add triggers Initialize (which reads it); null => the random pick.
+	internal void NetForceColor(byte idx)
+	{
+		netForcedColorIndex = idx;
 	}
 }

@@ -50,6 +50,12 @@ namespace EvilAliensWeb.Compat.Net
         private static readonly Dictionary<ushort, byte> paidLedger = new Dictionary<ushort, byte>();
         private static readonly Queue<ushort> paidOrder = new Queue<ushort>();
 
+        // Recently locally-removed ids: a snapshot entry for one of these is a death whose
+        // claim/death event is still in flight, NOT a missed spawn -- don't resurrect it.
+        private const float RecentRemovalWindowMs = 3000f;
+        private static readonly Dictionary<ushort, long> recentlyRemoved = new Dictionary<ushort, long>();
+        private static readonly Queue<ushort> recentlyRemovedOrder = new Queue<ushort>();
+
         private static Game game;
         private static ComponentBin bin;
         private static ScoreVisualiser score;
@@ -57,7 +63,11 @@ namespace EvilAliensWeb.Compat.Net
         private static Bullet scratchKiller; // cast-safe IAlienKiller agent for NetKill
         private static bool enabled;
         private static bool constructing;    // lets puppet adds through the client add-gate
-        private static bool applyingRemoteDeath;
+
+        // Puppets whose death WE applied from a host EvDeath. Component removal is deferred
+        // a tick (ComponentBin deathList), so a bool flag can't bridge to the removal seam --
+        // membership here is what stops a host-initiated death echoing back as a claim.
+        private static readonly HashSet<GameComponent> remoteDeaths = new HashSet<GameComponent>();
 
         public static int LiveCount => byId.Count;
 
@@ -136,16 +146,48 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
-        public static bool OnSnapshotEntry(ushort netId, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped)
+        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped)
         {
             popped = false;
-            if (!enabled || !byId.TryGetValue(netId, out PuppetInfo info))
+            if (!enabled)
             {
+                return false;
+            }
+            if (!byId.TryGetValue(netId, out PuppetInfo info))
+            {
+                // Self-heal: an id we never built (spawn raced the stream / a local purge
+                // dropped the world while the host's lives on) is reconstructed from the
+                // snapshot itself -- default construction extras, so a variant may look
+                // generic until nothing (spawn extras only pick cosmetics). An id that died
+                // HERE moments ago is a claim still in flight: leave it dead.
+                if (!IsRecentlyRemoved(netId))
+                {
+                    OnSpawn(netId, typeIdx, state, buf, extraOff, 0);
+                }
                 return false;
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(info.TypeIdx);
             popped = ApplySnapshotState(info, state, desc, buf, extraOff, extraLen, isSpawn: false);
             return true;
+        }
+
+        private static bool IsRecentlyRemoved(ushort netId)
+        {
+            return recentlyRemoved.TryGetValue(netId, out long at)
+                && Environment.TickCount64 - at < RecentRemovalWindowMs;
+        }
+
+        private static void MarkRemoved(ushort netId)
+        {
+            if (!recentlyRemoved.ContainsKey(netId))
+            {
+                recentlyRemovedOrder.Enqueue(netId);
+                while (recentlyRemovedOrder.Count > LedgerCap)
+                {
+                    recentlyRemoved.Remove(recentlyRemovedOrder.Dequeue());
+                }
+            }
+            recentlyRemoved[netId] = Environment.TickCount64;
         }
 
         private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn)
@@ -196,41 +238,34 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (byId.TryGetValue(netId, out PuppetInfo info))
             {
-                applyingRemoteDeath = true;
-                try
+                AlienDrawableGameComponent comp = info.Comp;
+                remoteDeaths.Add((GameComponent)(object)comp); // never echo this back as a claim
+                if (killerSlot != NetProtocol.KillerNone && comp is KillableAlien killable)
                 {
-                    AlienDrawableGameComponent comp = info.Comp;
-                    if (killerSlot != NetProtocol.KillerNone && comp is KillableAlien killable)
+                    MarkPaid(netId, killerSlot); // NetKill's AwardScore pays the slot
+                    killable.NetKill(KillerAgent(killerSlot, comp.Position), isComboGenerator: true);
+                    if (!comp.IsDead)
                     {
-                        MarkPaid(netId, killerSlot); // NetKill's AwardScore pays the slot
-                        killable.NetKill(KillerAgent(killerSlot, comp.Position), isComboGenerator: true);
-                        if (!comp.IsDead)
-                        {
-                            bin.Remove((GameComponent)(object)comp); // dead-guarded NetKill no-op
-                        }
-                    }
-                    else if (killerSlot != NetProtocol.KillerNone)
-                    {
-                        // Non-killable replicable (Asteroid/EvilBullet/...): approximate the
-                        // death look with a generic burst + credit the killer.
-                        MarkPaid(netId, killerSlot);
-                        if (points > 0)
-                        {
-                            score.AddScore(points, true, comp.Position, killerSlot);
-                        }
-                        Explosion explosion = Explosion.NewExplosion(bin, game);
-                        explosion.Setup(comp.Position, 1.2f, 1f, 0f, 0f);
-                        bin.Add((GameComponent)(object)explosion);
-                        bin.Remove((GameComponent)(object)comp);
-                    }
-                    else
-                    {
-                        bin.Remove((GameComponent)(object)comp); // plain despawn / fly-off
+                        bin.Remove((GameComponent)(object)comp); // dead-guarded NetKill no-op
                     }
                 }
-                finally
+                else if (killerSlot != NetProtocol.KillerNone)
                 {
-                    applyingRemoteDeath = false;
+                    // Non-killable replicable (Asteroid/EvilBullet/...): approximate the
+                    // death look with a generic burst + credit the killer.
+                    MarkPaid(netId, killerSlot);
+                    if (points > 0)
+                    {
+                        score.AddScore(points, true, comp.Position, killerSlot);
+                    }
+                    Explosion explosion = Explosion.NewExplosion(bin, game);
+                    explosion.Setup(comp.Position, 1.2f, 1f, 0f, 0f);
+                    bin.Add((GameComponent)(object)explosion);
+                    bin.Remove((GameComponent)(object)comp);
+                }
+                else
+                {
+                    bin.Remove((GameComponent)(object)comp); // plain despawn / fly-off
                 }
                 return;
             }
@@ -260,10 +295,11 @@ namespace EvilAliensWeb.Compat.Net
                 byId.Remove(netId);
                 live.Remove(info);
             }
+            MarkRemoved(netId);
             var comp = (AlienDrawableGameComponent)(object)gc;
             // Claim only GAMEPLAY deaths (Die() ran => IsDead), never scene teardown purges,
-            // and never removals we ourselves made while applying a host death event.
-            if (applyingRemoteDeath || !comp.IsDead)
+            // and never deaths we ourselves applied from a host EvDeath (echo guard).
+            if (remoteDeaths.Remove(gc) || !comp.IsDead)
             {
                 return;
             }

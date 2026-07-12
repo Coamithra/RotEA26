@@ -329,6 +329,19 @@ namespace EvilAliensWeb.Compat.Net
             return NetProtocol.KillerNone;
         }
 
+        // Wire player slots are HOST-relative (0 = host ship, 1 = join ship), but each side
+        // numbers its LOCAL ship slot 0 (the join peer's oracle seats its own player first and
+        // the remote puppet second) -- so the JOIN side swaps 0<->1 at the wire boundary, in
+        // both directions. Host-side and KillerNone/AI slots pass through untouched.
+        private static byte TranslateSlot(byte slot)
+        {
+            if (isHost || slot > 1)
+            {
+                return slot;
+            }
+            return (byte)(1 - slot);
+        }
+
         // ---- host NetIdRegistry -> wire ---------------------------------------------------
 
         internal static void OnHostSpawn(NetIdRegistry.Entry e)
@@ -475,6 +488,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
+            killerSlot = TranslateSlot(killerSlot); // wire slots are host-relative
             transport.SendReliable(NetProtocol.EncodeClaimEvent(txEventSeq++, netId, killerSlot));
             metrics.EventsTx++;
             metrics.ClaimsTx++;
@@ -647,12 +661,12 @@ namespace EvilAliensWeb.Compat.Net
             int off = NetProtocol.SnapshotHeaderBytes;
             for (int i = 0; i < count; i++)
             {
-                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out _, out NetBaseState state, out int extraOff, out int extraLen))
+                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
                 {
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, state, data, extraOff, extraLen, out bool popped))
+                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped))
                 {
                     if (popped)
                     {
@@ -707,7 +721,7 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
-                byte killer = data[6];
+                byte killer = TranslateSlot(data[6]); // wire slots are host-relative
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
                 ushort points = NetProtocol.ReadU16(data, 15);
                 NetPuppets.OnRemoteDeath(id, killer, pos, points);
@@ -733,8 +747,9 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 score.Lives = (sbyte)data[4];
-                score.NetAdoptScore(0, NetProtocol.ReadF32(data, 5));
-                score.NetAdoptScore(1, NetProtocol.ReadF32(data, 9));
+                // Wire order is host-relative: score0 = the host's ship = OUR slot 1, etc.
+                score.NetAdoptScore(TranslateSlot(0), NetProtocol.ReadF32(data, 5));
+                score.NetAdoptScore(TranslateSlot(1), NetProtocol.ReadF32(data, 9));
                 break;
             }
             case NetProtocol.EvBlast:

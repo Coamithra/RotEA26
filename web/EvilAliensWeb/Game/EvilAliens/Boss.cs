@@ -165,4 +165,19 @@ internal class Boss : KillableAlien
 		sound.PlayCue("expl2");
 		AwardScoreToAll(isComboGenerator);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
+	// Update alternates `texture` between the two 16-frame mothership halves each animation cycle
+	// (a 32-frame loop). A frozen puppet never runs Update, so the host replicates which half is
+	// showing and the client swaps to match; the base curframe drives the 16 frames within it.
+	internal bool NetSecondHalf => texture == secondHalfOfSpritesheet;
+
+	internal void NetSetSpritesheetHalf(bool second)
+	{
+		if (firstHalfOfSpritesheet == null || secondHalfOfSpritesheet == null)
+		{
+			return;
+		}
+		texture = second ? secondHalfOfSpritesheet : firstHalfOfSpritesheet;
+	}
 }

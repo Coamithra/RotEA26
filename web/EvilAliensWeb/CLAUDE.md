@@ -489,9 +489,10 @@ and aims at its `Centroid`. Headless QA: fake a player via
 Distributed-authority state replication (NOT lockstep): each peer owns its own ship
 completely (input read untouched, zero added latency); the wire carries ship STATE, never
 inputs; the other peer's ship is an interpolated puppet. Code lives in `Compat/Net/`.
-Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback);
-world authority (11.3), script/reset replication (11.4-era) and WebRTC (11.4/11.5 cards)
-build on these seams.
+Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback)
+and card 11.2 (host world authority: client enemy puppets, world snapshots, generous
+claims, score sync); script/reset replication and WebRTC (later cards) build on these
+seams.
 
 - **Flags:** `?net=host` / `?net=join` opt a session in (in `Active`); `?room=<name>` picks
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
@@ -516,10 +517,62 @@ build on these seams.
   live ship, alive=false).
 - **NetIds (`Compat/Net/NetIdRegistry`):** host-side, on the ComponentBin seam
   (`Game.Components` ComponentAdded/Removed -- the same events Oracle uses, fired when a
-  component actually enters/leaves the world). Replicable set = Oracle.GetBaddies' enemy
-  types (minus Explosion; cosmetics never cross the wire) + Powerup. Emits spawn/death
-  events; replays the live set to a late-joining peer. 11.1 clients only BOOKKEEP the ids
-  (ordering metrics); 11.3 keys client puppets + world snapshots off them.
+  component actually enters/leaves the world). Replicable set = the `NetTypeRegistry`
+  descriptor table (Oracle.GetBaddies' enemy types minus Explosion -- cosmetics never
+  cross the wire -- plus Powerup). Emits spawn/death events; replays the live set to a
+  late-joining peer; tracks per-entity OBSERVED velocity (position deltas between an
+  entity's snapshot turns -- Speed/Direction lies for enemies that move Position directly).
+- **World authority (card 11.2): the host runs the real sim, a join peer mirrors it.**
+  Client sim-split at two choke points: `GameScene.UpdateNormal` skips `eventList.Update`
+  (spawners/the level script only act in GameEvent.Update) and `ComponentBin.Add` swallows
+  any replicable-type add not made by the puppet layer (KilledBy side effects: asteroid
+  splits, bonus powerup drops, stray spawns) into the recycle pool -- the host's
+  authoritative copy replicates in instead. AI-friend auto-join is off in any net session
+  (friend ships aren't replicated yet). Initial background/music are local; mid-level
+  script beats (messages, music switches, boss-phase choreography) do NOT replicate yet --
+  that is the next card.
+- **Client enemies = NetPuppets (`Compat/Net/NetPuppets`):** real game objects built by
+  their own `New*+Setup` factories (the harness-proven path) on `EvSpawn`, then FROZEN --
+  `Enabled=false` for life (gameplay Update/AI never runs; `ComponentBin.Pop` is patched to
+  not thaw them on unpause) while Draw renders normally and a `CollisionHandler.IsActive`
+  seam keeps them hit-testable by the local player's bullets. One `NetPuppetDriver`
+  (UpdateOrder -1000, disabled by pause like everything else -- which also freezes puppet
+  collisions) dead-reckons `Position += vel*dt`, advances `curframe` at the type's own fps,
+  blends snapshot corrections over ~150ms (error > 100px snaps + counts a `pupPops`
+  metric), lerps scale, ticks each puppet's `timers` (hit-blink decay), re-applies hp.
+- **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
+  round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
+  Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
+  px/ms, rotation, curframe x64, scale x256, hp) + per-type state extras. A snapshot entry
+  for an unknown id self-heals: it REBUILDS the puppet from the snapshot (default spawn
+  extras) unless that id died locally < 3s ago (claim in flight).
+- **Per-type descriptors (`Compat/Net/NetTypeRegistry` + `Compat/Net/Descriptors/`):**
+  the wire typeIdx IS the registry order -- append-only, never reorder. A descriptor owns
+  (a) puppet CONSTRUCTION: spawn extras pin every random/caller-chosen look (e.g. UFO's
+  random small-sheet pick, Powerup's random type); (b) STATE extras: the fields a frozen
+  Draw reads that the base block doesn't carry (sheet swaps, phases, landed stills). Types
+  needing neither are explicit base-only descriptors with a justification. Private fields
+  are reached via small `internal Net*` accessors at the bottom of the game type itself
+  (see UFO.cs). Contract + author rules: NetTypeRegistry.cs header; worked example:
+  UfoDescriptor.cs.
+- **GENEROUS at-least-once claims -- no arbitration, no rejection path.** Kills: local
+  hit-testing runs the REAL per-type death on whichever peer observed it (explosion,
+  sound, score, combo paid locally); the client's removal seam sends `EvClaim(netId,
+  killerSlot)` for every gameplay death (`IsDead` distinguishes `Die()` from teardown
+  purges). Host on a claim: entity alive -> real kill via `KillableAlien.NetKill` with a
+  scratch-Bullet killer carrying the claimant's slot (authoritative children spawn there
+  and replicate); already dead -> pay the claimant once from a bounded recent-death
+  record. Host broadcasts `EvDeath(netId, killerSlot, pos, points)` for every replicable
+  removal (killerSlot from the `NetSession.NoteKill` hook in KillableAlien.HitBy);
+  client: live puppet + killer -> local NetKill (FX + credit), no killer -> silent
+  despawn, already dead -> pay the killer once. Per-(netId, slot) paid ledgers both sides
+  = every distinct claimant credited, nobody credited twice. Powerups are the same claim
+  shape: the real PlayerShip pickup runs instantly on the collector (a
+  `NetSession.NotePowerupTaken` hook attributes it), first claim despawns the entity,
+  overlapping collectors inside the RTT window BOTH keep it.
+- **Score/lives:** immediate local generous crediting + host-authoritative `EvScoreSync`
+  at 1Hz -- the client adopts `max(local, host)` per slot (monotone within a life; combo
+  multiplier divergence self-corrects upward) and lives verbatim.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
   own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case
@@ -533,19 +586,25 @@ build on these seams.
   on BOTH screens. The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
 - **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable
-  `[net] role=... pops=... extrap=... ordViol=...` line every 5s. Healthy: buf ~100ms,
+  `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,
   extrap ~0, pops 0 (pop = a step no ship could physically make: > 2x MaxSpeed x realDt
-  + 3px), drop/dup/ordViol/seqGap 0. **Two-tab test recipe:** the tabs must BOTH be visible
-  (a backgrounded tab's rAF drops to ~1Hz and its peer times out / crawls) -- use two Chrome
-  WINDOWS side by side:
+  + 3px), drop/dup/ordViol/seqGap 0; on the world side, host `snapTx` climbing, client
+  `snapRx/snapEnt` climbing with `snapUnk` small and non-climbing at steady state,
+  `pupPops` near 0, and the claim counters telling the kill story (`clTx` client-side ~=
+  `clRx` host-side; `clKill` = claims that settled a live enemy, `clPaid` = generous
+  payouts for already-dead enemies -- a nonzero `clPaid` IS the double-claim proof).
+  **Two-tab test recipe:** the tabs must BOTH be visible (a backgrounded tab's rAF drops
+  to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
-- **11.1 known limits (by design -- next cards):** both peers still run INDEPENDENT worlds
-  (each sees its own enemies; host world authority = 11.3); score/lives/powerup claims not
-  synced (11.3); pause + checkpoint-reset/level-flow not replicated (11.4); a local
-  all-ships-dead reset purges + respawns the puppet via the normal GameScene flow, but a
-  dead local player will NOT respawn while the puppet lives (LoseLife triggers on
-  AllShipsDead) -- shared-fate death/reset is 11.4's card; roster is exactly two peers.
+- **Known limits (by design -- next cards):** mid-level script beats (messages, music
+  switches, background changes, boss-phase choreography, victory/game-over) don't
+  replicate; pause + checkpoint-reset/shared-fate death not replicated (a client-side
+  reset purge empties its world; puppets self-rebuild from snapshots after ~3s); AI
+  friends disabled in net sessions (ships not replicated); a dead local player will NOT
+  respawn while the remote puppet lives (LoseLife triggers on AllShipsDead); roster is
+  exactly two peers. Boss puppets are best-effort (the harness caveat): deep
+  Update-reached attack poses may diverge until their state extras grow.
 
 ### Audio runtime (`SoundManager` / `eaMusic`)
 

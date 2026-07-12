@@ -421,4 +421,32 @@ internal class Braineroid : KillableAlien
 		bonus = Powerup.NewPowerup(collection, base.Game);
 		bonus.Setup(Vector2.Zero);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/BraineroidDescriptor) ----
+	// Client puppets run Enabled=false (gameplay Update never ticks). Draw reads: size (via the
+	// scale/DrawOrder Initialize picks), pulsate (carried by the base-state scale + client lerp),
+	// curframe (base state + NetAdvanceFrame), and the bonus colorize hue (below). size is a
+	// construction arg; the bonus is a spawn+state extra like UFO's.
+
+	internal BrainSize NetSize => size;
+
+	internal bool NetHasBonus => hasbonus;
+
+	internal byte NetBonusType => (byte)(hasbonus ? bonus.type : Powerup.PowerupType.Blast);
+
+	// Puppet-side bonus attach for the colorize look: mirrors MakeBonus but forces the host's
+	// type so both screens tint the brain identically. Adds nothing to the world (as MakeBonus).
+	internal void NetMakeBonus(Powerup.PowerupType t)
+	{
+		hasbonus = true;
+		bonus = Powerup.NewPowerup(collection, base.Game);
+		bonus.Setup(Vector2.Zero);
+		bonus.MakeType(t);
+	}
+
+	internal void NetClearBonus()
+	{
+		hasbonus = false;
+		bonus = null;
+	}
 }

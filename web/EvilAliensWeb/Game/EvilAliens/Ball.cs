@@ -370,4 +370,32 @@ internal class Ball : AlienDrawableGameComponent
 		}
 		base.CollidesWith(other);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
+	// The ctor picks one of AsteroidSmall1..4 at RANDOM; the client puppet must be forced onto the
+	// host's pick or the same netId ball is a different rock on each screen.
+	internal int NetAsteroidVariant
+	{
+		get
+		{
+			if (texturename != null && texturename.Length > 0)
+			{
+				char last = texturename[texturename.Length - 1];
+				if (last >= '1' && last <= '4')
+				{
+					return last - '0';
+				}
+			}
+			return 1;
+		}
+	}
+
+	internal void NetForceAsteroidVariant(int variant)
+	{
+		if (variant < 1 || variant > 4 || variant == NetAsteroidVariant)
+		{
+			return;
+		}
+		LoadAnimation(new AnimationData("GFX/Sprites/AsteroidSmall" + variant));
+	}
 }

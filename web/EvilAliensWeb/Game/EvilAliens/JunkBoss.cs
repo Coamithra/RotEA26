@@ -490,4 +490,24 @@ internal class JunkBoss : KillableAlien
 			suckeffect = null;
 		}
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
+	// The eye's Draw-visible sheet: the idle on/off loop vs the spin+lightning attract sheet. A
+	// frozen puppet never runs UpdateEyeAnim, so the host replicates which sheet is currently
+	// loaded (`eyeAttracting`) and the client swaps to match; the base curframe (driver-advanced)
+	// animates within it. r (the collision radius) is intentionally NOT recomputed on the swap,
+	// exactly like real play.
+	internal bool NetEyeAttracting => eyeAttracting;
+
+	internal void NetSetEyeAttract(bool attract)
+	{
+		if (attract == eyeAttracting)
+		{
+			return;
+		}
+		LoadAnimation(attract ? EyeAttract : EyeIdle);
+		eyeAttracting = attract;
+		eyeFinishing = false;
+		eyePrevFrame = 0f;
+	}
 }

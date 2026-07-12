@@ -221,4 +221,22 @@ internal class BattleSkull : KillableAlien
 		collection.Add((GameComponent)(object)explosion);
 		sound.PlayCue("expl2");
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
+	// The body animation runs off `animationProgress` (its own 20fps clock, NOT the component
+	// curframe), advanced only in Update -- frozen on a puppet. The host replicates the current
+	// frame so the client's alienboss sprite still animates. The HP-driven hue (Draw's colorize
+	// RangeTarget) needs no seam: initial HP is a fixed 25 (scaleWithDifficulty:false), so the
+	// replicated absolute Hp reproduces HitPointsNormalized exactly on both peers.
+	internal int NetAnimFrame
+	{
+		get
+		{
+			return (int)animationProgress;
+		}
+		set
+		{
+			animationProgress = value;
+		}
+	}
 }

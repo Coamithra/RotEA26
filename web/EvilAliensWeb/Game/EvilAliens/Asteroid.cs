@@ -155,4 +155,47 @@ internal class Asteroid : AlienDrawableGameComponent
 	{
 		return scale > 1f;
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/AsteroidDescriptor) ------
+	// The LOOK is fixed at Setup: reallyBig picks the hi-res large_asteroid (scale 3), else one
+	// of four AsteroidSmall{1..4} sheets at RANDOM (scale 0.45); SetBackground then greys + sinks
+	// the belt-decoration copies. Position/rotation/scale ride the base state; only the SHEET
+	// pick and the grey/DrawOrder background flag can't be reconstructed from it. Asteroid has no
+	// HP and never splits, so there is no damage/state visual to replicate.
+
+	internal bool NetReallyBig => texturename == "GFX/Sprites/large_asteroid";
+
+	// 0..3 for AsteroidSmall1..4 (the trailing digit); 0 when big / unrecognised.
+	internal int NetSmallSheetIndex
+	{
+		get
+		{
+			if (texturename != null && texturename.StartsWith("GFX/Sprites/AsteroidSmall"))
+			{
+				int n = texturename[texturename.Length - 1] - '1';
+				if (n >= 0 && n <= 3)
+				{
+					return n;
+				}
+			}
+			return 0;
+		}
+	}
+
+	// SetBackground is the only site that drops DrawOrder to 1 -- a reliable belt-decoration marker.
+	internal bool NetIsBackground => base.DrawOrder == 1;
+
+	// Client puppet: force the host's exact sheet pick (Setup re-randomises the small variant).
+	internal void NetForceSheet(bool reallyBig, int smallIndex)
+	{
+		if (reallyBig)
+		{
+			LoadAnimation(new AnimationData("GFX/Sprites/large_asteroid"));
+		}
+		else
+		{
+			int n = (smallIndex >= 0 && smallIndex <= 3) ? smallIndex : 0;
+			LoadAnimation(new AnimationData("GFX/Sprites/AsteroidSmall" + (n + 1)));
+		}
+	}
 }

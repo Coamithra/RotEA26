@@ -46,6 +46,10 @@ internal class Spider : KillableAlien
 
 	private Texture2D spiderJump;
 
+	// Net puppet only: forces Initialize's random grey-tint pick onto the host's choice (null in
+	// normal play => the random pick, so a plain boot is unchanged). See NetForceColor.
+	private byte? netForcedColorIndex;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -135,7 +139,8 @@ internal class Spider : KillableAlien
 		// lock-step. The count-back preset in Update OVERRIDES this on the first tick to line the
 		// launch beat up with jumpXposition; this is only the pre-preset value.
 		curframe = RandomHelper.RandomNextFloat(0f, (float)(rows * columns));
-		switch (RandomHelper.Random.Next(3))
+		int colorPick = netForcedColorIndex ?? RandomHelper.Random.Next(3);
+		switch (colorPick)
 		{
 		case 0:
 			color = Color.DarkGray;
@@ -431,5 +436,45 @@ internal class Spider : KillableAlien
 	private static float WrapFrame(float f, float total)
 	{
 		return ((f % total) + total) % total;
+	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/SpiderDescriptor) --------
+	// Client puppets run Enabled=false. Draw picks the grounded rear-up sheet vs the airborne
+	// spiderjump sheet PURELY on hasJumped (the arc itself rides base pos + rotation; the
+	// airborne frame self-drives off wall-clock), so the one continuous state bit is hasJumped.
+	// The grey tint Initialize randomises is a spawn-time pick, forced via netForcedColorIndex.
+
+	internal byte NetColorIndex
+	{
+		get
+		{
+			if (color == Color.White)
+			{
+				return 1;
+			}
+			if (color == Color.DimGray)
+			{
+				return 2;
+			}
+			return 0; // DarkGray (Initialize's case 0)
+		}
+	}
+
+	// Set BEFORE bin.Add triggers Initialize (which reads it); null => the random pick.
+	internal void NetForceColor(byte idx)
+	{
+		netForcedColorIndex = idx;
+	}
+
+	internal bool NetAirborne
+	{
+		get
+		{
+			return hasJumped;
+		}
+		set
+		{
+			hasJumped = value;
+		}
 	}
 }

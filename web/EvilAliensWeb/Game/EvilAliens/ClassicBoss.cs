@@ -225,4 +225,21 @@ internal class ClassicBoss : KillableAlien
 		sound.PlayCue("expl2");
 		collection.Purge<EvilBullet>();
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
+	// The body animation runs off `animationProgress` (its own 20fps clock, NOT the component
+	// curframe), advanced only in Update -- frozen on a puppet. The host replicates the current
+	// frame so the client's alienboss sprite still animates. (scale + color redden arrive in the
+	// base state: Scale, and Hp -> NetApplyHp.)
+	internal int NetAnimFrame
+	{
+		get
+		{
+			return (int)animationProgress;
+		}
+		set
+		{
+			animationProgress = value;
+		}
+	}
 }

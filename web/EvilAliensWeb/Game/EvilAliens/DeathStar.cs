@@ -115,4 +115,11 @@ internal class DeathStar : KillableAlien
 		collection.Add((GameComponent)(object)explosion);
 		sound.PlayCue("expl1");
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DeathStarDescriptor) -----
+	// Draw is just base.Draw (no charge/attack visuals), so the frozen puppet needs nothing
+	// beyond the base fields + curframe animation. behaviour only steers Update's wall-bounce
+	// (which never runs on a puppet) -- pinned purely for construction fidelity.
+
+	internal EnemyBehaviour NetBehaviour => behaviour;
 }

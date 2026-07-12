@@ -182,6 +182,10 @@ internal class Wall : AlienDrawableGameComponent
 
 	private CollisionLevelMap collisionMap;
 
+	// The grid variation passed to Setup, retained so a co-op client puppet can rebuild the
+	// exact same grid (Compat/Net, card 11.2). -1 until Setup runs / for the debug file path.
+	private int netVariation = -1;
+
 	private int width => blocks.GetLength(1);
 
 	private int height => blocks.GetLength(0);
@@ -233,6 +237,7 @@ internal class Wall : AlienDrawableGameComponent
 		//IL_0262: Unknown result type (might be due to invalid IL or missing references)
 		//IL_027e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0283: Unknown result type (might be due to invalid IL or missing references)
+		netVariation = variation;
 		collisionMap = null;
 		traceId = -1;
 		traceFrame = 0;
@@ -1806,4 +1811,10 @@ internal class Wall : AlienDrawableGameComponent
 	{
 		base.CollidesWith(other);
 	}
+
+	// ---- Online co-op replication seam (Compat/Net, card 11.2) ---------------------------
+	// The grid variation is the only caller-chosen construction input; everything else the
+	// frozen Draw + CollisionLevelMap need follows from base.Position (the driver-scrolled
+	// offset) plus the reconstructed grid.
+	internal int NetVariation => netVariation;
 }

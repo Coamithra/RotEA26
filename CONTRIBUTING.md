@@ -1,353 +1,99 @@
-# Contributing: Tackling a Trello Card
+# Contributing — RotEA26 specifics
 
-Step-by-step workflow for picking up and completing any card from the **local** Trello board
-`RotEA26 — Evil Aliens Web Port` (board id `10989a3d`). The board is offline/file-backed (NOT
-trello.com) — every command needs `--backend local --board 10989a3d`. Columns and their list ids:
-**`Backlog` `79158996`** · **`In Progress` `3b43cba3`** · **`Done` `9c204b80`**.
+**Follow the generic runbook at `~/.claude/CONTRIBUTING.md`
+(`C:\Users\coami\.claude\CONTRIBUTING.md`) end to end** (quick-ship flow, tracker doc, worktree rules, Phases 1–7, merge-conflict rules).
+This file is only what's specific to this repo: the substitutions for the global doc's
+placeholders, plus the local verification gate and deploy behaviour. Where they differ, this
+file wins.
 
-Global prefs still apply: `rtk`-prefix git/gh commands, `python` (not `python3`), and the
-`edit_unicode.py` helper for any edit touching `→`/`—`/curly-quotes.
+## Substitutions
 
----
+| Global placeholder | Here |
+|---|---|
+| Default branch | `main` |
+| Trello backend / board | **always** `--backend local --board 10989a3d` (offline file-backed board, NOT trello.com) |
+| Columns (list ids) | `Backlog` `79158996` → `In Progress` `3b43cba3` → `Done` `9c204b80` |
+| Branch prefixes | `fix/` `feature/` `refactor/` `docs/` (note: `feature/`, not `feat/`) |
+| Tracker doc | `plans/tracker_<branch>.md` (delete after shipping; `plans/plan.md` is the archived staged plan and STAYS) |
+| Worktree layout | fixed slots `.claude/worktrees/wt1`..`wt8` (gitignored) |
+| Plan detail | cards are pointers; long-form per-stage detail is in the archived `plans/plan.md` |
 
-## Quick ship (no card / small change)
-
-Not every change is a Trello card. For a quick fix or doc tweak that doesn't warrant the full
-runbook below, the default ship flow is **PR + auto self-merge** off `main`:
+Board commands, copy-paste ready:
 
 ```
-rtk git checkout -b <prefix>/<short-name>      # off main
-rtk git add <files> && rtk git commit -m "..." # only the files you touched
-rtk git push -u origin <branch>
-rtk gh pr create --fill                         # PR record + URL, no clicking
-rtk gh pr merge --merge                         # self-merge (see note); use --merge, not --squash
-rtk git checkout main && rtk git pull origin main
+trello --backend local --board 10989a3d grab --from 79158996 --to 3b43cba3   # claim top Backlog card
+trello --backend local --board 10989a3d card ls 79158996                     # view Backlog
+trello --backend local --board 10989a3d card move <card_id> <listId>
+trello --backend local --board 10989a3d comment add <card_id> "<text>"       # real newlines, not \n
+trello --backend local --board 10989a3d card add 79158996 "<title>" "<desc>" # follow-up card
 ```
 
-**No approval needed.** `main` on `Coamithra/RotEA26` is unprotected (solo repo), so GitHub
-disabling "Approve" on your own PR is irrelevant — a required review only applies under a
-branch-protection rule, and this repo has none. Don't stop to ask the user to approve. (If the user
-says "just merge / direct", skip the PR and push straight to `main`.)
+`--from`/`--to` are REQUIRED on this board (the CLI's `To Do`/`Doing` defaults don't exist here).
+On the local backend `grab` is **truly atomic** (store lock) — the global doc's claim-comment
+handshake is never needed here.
 
-**Deploying is MANUAL.** `.github/workflows/deploy.yml` runs `dotnet publish -c Release` in CI and
-publishes to GitHub Pages (https://coamithra.github.io/RotEA26/), but it only fires on
-`workflow_dispatch` — pushing/merging to `main` no longer auto-deploys. When you want to ship, run it
-from the Actions tab or `rtk gh workflow run "Deploy to GitHub Pages"`. There are no unit tests gating
-this — **your visual + console verification (Phase 5) IS the gate.** If the change touches
-publish/trim config, do the local Release check in
-Phase 5 *before* you push, because trimming breakage only surfaces at runtime in the browser.
+## Worktrees & dev servers
 
----
+- **Per-worktree bootstrap: none.** `bin/`/`obj/` regenerate on the first `dotnet build` (slow —
+  WASM workload restore; expected). No `.env`, no package install.
+- **One dev PORT per slot: `5280 + k`** (wt1 = 5281 … wt8 = 5288; the root checkout is 5280).
+  Slots **wt1/wt2 have provisioned launch configs** (`eaweb-wt1`/`eaweb-wt2` in
+  `.claude/launch.json`) usable via `preview_start`; for wt3+ run the server yourself:
+  ```
+  dotnet run --project .claude/worktrees/wt<k>/web/DevServer -c Debug --urls http://localhost:528<k>
+  ```
+  Either way, **serve through the worktree's own `web/DevServer`** — never raw `dotnet run` on the
+  WASM client (the stale-asset cache trap, see root `CLAUDE.md`). Verify by pointing Chrome at
+  *your slot's* port; a bare `preview_start`/`eaweb` serves the ROOT checkout and you'd be driving
+  the wrong code.
+- **Never edit `.claude/launch.json`** — it's shared; concurrent per-card edits cause port
+  collisions and lost-update races between parallel agents.
+- **Kill your dev server before `git worktree remove`** — besides the Windows directory lock (see
+  global doc), a stale server squats the slot's port and blocks the next agent who claims it.
 
-## Before You Start: Create a Tracker Doc
+## Verification gate (Phase 5)
 
-**This is mandatory.** Before doing anything else, create a file `plans/tracker_<branch>.md` (create
-the `plans/` directory if needed) with every step from this runbook as a checkbox list. Example:
+**There are no unit tests — the gate is: clean Debug build + tool-driven visual verification +
+zero console exceptions in real Chrome.** Don't ask the user to check manually; verify and share
+proof.
 
-```markdown
-# Tracker: fix/some-bug
+- The *how* lives in root `CLAUDE.md` → "Verification — the rules": drive the purpose-built tool
+  that isolates the change (sprite harness / scrub-showcase scene / isolation sim / slider panel —
+  building one is part of the card if none exists), boot the real game only as the final smoke
+  check, never time a live screenshot of anything that moves, verify in foreground Chrome via
+  claude-in-chrome (not `preview_screenshot`), script input with `eaPress(...)`.
+- **A clean build does NOT mean it runs** — WASM runtime errors only appear in the browser
+  console. Zero console exceptions is the bar.
+- **Touched the csproj / anything reflection-loaded (save types, KNI factories)?** Do a LOCAL
+  Release publish + saves round-trip in real Chrome **before pushing** — trimming breakage only
+  shows at runtime (root `CLAUDE.md` → "Publish trimming").
+- **Diff spot-check specials for this repo:** a stray lowercase `content/` path, an accidental
+  `BlendState.AlphaBlend`, a re-run of the `Game/`-generating codegen, a hand-edited pipeline
+  output.
 
-## Phase 1: Pick Up the Card
-- [ ] Claim the top card (move Backlog -> In Progress), before anything else
-- [ ] Pull latest main
-- [ ] Read the card (description, linked plan stage)
-- [ ] Create worktree (slot wt<k>) + branch
+## Ship & deploy (Phase 6)
 
-## Phase 2: Research
-- [ ] Read the referenced code
-- [ ] Trace the call/draw chain
-...
-```
+- **Merging does NOT deploy.** `.github/workflows/deploy.yml` fires on `workflow_dispatch` only.
+  When ready to ship: `rtk gh workflow run "Deploy to GitHub Pages"`, confirm green with
+  `rtk gh run list`, and for anything content/path-sensitive **spot-check the LIVE URL**
+  (https://coamithra.github.io/RotEA26/) — content paths are case-sensitive there, localhost
+  isn't.
+- **Docs are split** — when a change adds a convention/flag/gotcha, update the right file:
+  root `CLAUDE.md` (workflow/cross-cutting), `web/EvilAliensWeb/CLAUDE.md` (game/engine features),
+  `tools/CLAUDE.md` (asset pipelines).
 
-Check off each step as you complete it — it's your source of truth if context is lost. Delete the
-tracker file after the card ships. (`plans/plan.md` is the archived staged plan and stays; the
-tracker is per-card scratch.)
+## Per-card-type routing
 
----
+Read the matching doc section *before* designing (each has known gotchas):
 
-## Worktree Quick Reference
-
-**All card work happens in an isolated git worktree** under `.claude/worktrees/` (gitignored at the
-repo root). This is a one-dev repo, but agents run **many at a time in parallel** (max plan), so the
-worktree is what keeps them from clobbering each other's files and `main`. The root checkout stays on
-`main` — never switch it to a feature branch.
-
-| Command | What it does |
-|---------|-------------|
-| `rtk git worktree add .claude/worktrees/wt<k> -b <branch> main` | Worktree in slot `wt<k>` + branch off main |
-| `rtk git worktree list` | Show active worktrees (which branch is in which slot) |
-| `rtk git worktree remove .claude/worktrees/wt<k>` | Remove a worktree (clean up) |
-| `rtk git worktree prune` | Clean stale references |
-
-**Key rules:**
-- **Slot naming (mandatory):** worktree folders are fixed slots `wt1`..`wt8`, NOT branch names. Pick
-  the lowest slot not shown in `git worktree list`. If `git worktree add` fails because the directory
-  already exists, another agent grabbed that slot in the same instant — take the next one. Branch
-  names stay fully descriptive; the slot is only the folder.
-- **One dev PORT per slot.** Only the root `eaweb` config (`http://localhost:5280`, in
-  `.claude/launch.json`) is provisioned, and it serves the **root checkout**. From a worktree, run the
-  server yourself on the per-slot port `5280 + k` (wt1 = 5281 … wt8 = 5288):
-  `dotnet run -c Debug --urls http://localhost:528<k>`. Verify by pointing claude-in-chrome's
-  `navigate` at *that* port — NOT `preview_start`, which would launch the root `eaweb`/5280 config and
-  leave you driving the wrong checkout. **Never edit `.claude/launch.json`** — concurrent per-card
-  edits to that shared file cause port collisions and lost-update races between agents.
-- **`bin/`/`obj/` are gitignored** and regenerate on the first `dotnet build` in a new worktree — no
-  install step (unlike an npm project). That first build is slow (WASM workload restore); expected.
-- **Kill your dev server before `git worktree remove`.** On Windows a running server — or the Bash
-  tool's own cwd sitting inside the worktree — holds the directory lock and the remove fails with
-  "Permission denied": `cd` back to the repo root, kill the server, then retry. `git worktree remove
-  --force` still unregisters it from git even when the physical folder can't be deleted, and a stale
-  server squatting a slot's port blocks the next agent who claims that slot.
-
----
-
-## Phase 1: Pick Up the Card
-
-> **The board is local and single-user — claiming is just a move.** Unlike a shared remote board,
-> there's no claim-comment race to win here.
->
-> **When the user's pickup request is VAGUE -- "grab the top ticket", "grab a random ticket", "grab a
-> card", "grab me something", "pick up the next one" -- reach for the atomic `grab` command.** It claims
-> the top card of Backlog and moves it to In Progress in ONE locked step, returning the card it got you
-> (`--json` for the full dict). `--from`/`--to` are REQUIRED on this board (the CLI's "To Do"/"Doing"
-> defaults don't exist here); exit 1 means Backlog is empty. On the local backend `grab` is **truly
-> atomic** (store lock), so any number of parallel agents can grab at once and no two ever get the same
-> card -- the comment-handshake fallback below is obsolete here:
->
-> ```
-> trello --backend local --board 10989a3d grab --from 79158996 --to 3b43cba3
-> trello --backend local --board 10989a3d grab --from 79158996 --to 3b43cba3 --json   # full card dict
-> ```
->
-> **When you've already picked a SPECIFIC card**, view the top of Backlog and move it to In Progress:
->
-> ```
-> trello --backend local --board 10989a3d card ls 79158996      # Backlog (top card = next)
-> trello --backend local --board 10989a3d card move <card_id> 3b43cba3   # -> In Progress
-> ```
->
-> Do the move *before* reading the card or pulling main, so the board reflects what's being worked.
-> _(Only relevant on the `trello` backend -- local `grab` is atomic, so you never need this here.)_ If
-> several agents are genuinely running in tandem on the same column, fall back to the comment
-> handshake: post `trello --backend local --board 10989a3d comment add <card_id> "I am doing this now
-> — claim <id>"`, wait ~10–30s, re-read `--json comment ls <card_id>`, and the earliest claim wins
-> (back off and take the next card otherwise). For a single picked card, skip the handshake.
-
-1. **Claim the top Backlog card (do this first)** — move it to In Progress, as above.
-2. **Pull latest main** — `rtk git pull origin main` so you start from the newest code.
-3. **Read the card** — Read the card description, then any linked detail in the archived
-   `plans/plan.md` (the per-stage source of truth; the card is a pointer/summary). Keep the card
-   description in sync if the work changes its scope.
-4. **Create the worktree and branch (mandatory — all work happens here)** — Branch off `main` into the
-   lowest free slot, with a descriptive prefix:
-    - Bugs: `fix/<short-name>` (e.g. `fix/premult-alpha-fades`)
-    - Features: `feature/<short-name>` (e.g. `feature/metal-font-sheen`)
-    - Refactoring: `refactor/<short-name>`
-    - Docs / plans only: `docs/<short-name>`
-    ```
-    rtk git worktree add .claude/worktrees/wt<k> -b <branch> main   # lowest free slot
-    cd .claude/worktrees/wt<k>
-    rtk git push -u origin <branch>
-    ```
-    **All subsequent work happens inside `.claude/worktrees/wt<k>/`** (run the dev server on port
-    `528<k>`). The root checkout stays on `main`.
-
-## Phase 2: Research
-
-Dig into the problem before proposing solutions. Use `/research` for anything needing external
-context (KNI/MonoGame API quirks, XNA 3.x→4.0 differences, Blazor WASM/WebGL behaviour, the original
-XNA `.fx`/XACT formats, browser GL/ANGLE→D3D11 texture rules).
-
-5. **Read the referenced code** — Cards and `plans/plan.md` cite specific files. Read them —
-   descriptions drift. The ported game lives in `web/EvilAliensWeb/Game/`; the Xbox/XNA shims in
-   `web/EvilAliensWeb/Compat/`; the host page + JS glue in `web/EvilAliensWeb/wwwroot/`;
-   decompiled reference (read-only) in `src_decompiled/`; asset-deriving scripts in `tools/`.
-6. **Trace the call / draw chain** — For bugs, trace how the code is invoked. For a *drawing* bug,
-   trace the path through `SpriteBatchWrapper` → `RenderScale` → blend mapping → bloom/gamma. For a
-   feature, trace the existing system it plugs into.
-7. **Identify the blast radius** — Does it touch the unified presenter / `RenderScale` (Stage 10)?
-   The blend mapping (straight alpha → `NonPremultiplied`)? A `tools/*` asset pipeline
-   (shaders / audio / font / textures)? Content paths (**case-sensitive on the live Linux host** —
-   capital `Content/`, lowercase under it)? Publish/trim config in the csproj? Each has a known
-   gotcha documented in `CLAUDE.md` — re-read the relevant bullet before changing it.
-8. **Research unknowns** — `/research` for KNI internals, MGFX shader compilation, WebAudio loop
-   points, StbImageSharp decode cost, DXT/`texconv` block-size rules, etc.
-9. **Summarize findings** — Brief writeup: root cause (bugs), design options (features), or risk
-   areas (refactors). Feeds the design phase.
-
-## Phase 3: Design
-
-10. **Draft the approach** — Update or add a note under `plans/` (or in the tracker). Include:
-    - **Context**: what the card is about and why it matters.
-    - **Design**: file-by-file changes; whether `Game/` or `Compat/` is the right home; any
-      `tools/*` source (`.fx`, audio banks, font sheets, `textures.config`) that must be re-run.
-    - **Verification**: which URL/flag proves it (a `?harness=<Obj>` view, a `?level=<Name>` boot,
-      a Release publish round-trip) — see Phase 5.
-    - **Out of scope**: what you're explicitly *not* doing.
-11. **Check for reusable patterns** — Prefer existing conventions: the debug-flag seam
-    (`Compat/DebugFlags.cs`), the sprite harness (`Compat/HarnessRegistry.cs`), the scrub/showcase
-    test-scene pattern for animated visuals (`Compat/TextShowcaseScene.cs`/`?textshot`,
-    `Compat/LazerShowcaseScene.cs`/`?lazershot`, `?spiderphase=` freeze-and-scrub -- if the card
-    touches a fade/transition/timed effect, plan which scene or freeze flag will prove it),
-    `eaPress`/`eaHold`
-    automation input, the `DrawStringScaled` font path, the outside-`#app` pattern for new HUD/overlay
-    buttons. Don't reinvent a shim that already exists in `Compat/`.
-12. **Align with the user** — Present the plan, get approval before writing code.
-
-## Phase 4: Implement
-
-13. **Make the changes** — Edit files per the approved plan. Follow project conventions:
-    - **C# / .NET 8 / KNI** (engine = `nkast.Xna.Framework.*`, API is XNA **4.0**). The game was
-      XNA **3.x** — mind the gap (`SpriteBatch.Begin(effect)`, not `effect.Begin()`; `SpriteBlendMode`
-      maps to `BlendState`).
-    - **`Game/` is GENERATED** from `src_decompiled/` by `tools/*.py`. **Edit `Game/` directly; do
-      NOT re-run those scripts** — they'd clobber your hand edits by regenerating from scratch.
-    - **Asset pipelines ARE meant to be re-run** after you change their *source*: shaders
-      (`tools/shaders/build_shaders.py` after a `.fx`), audio (`tools/audio/build_audio.py` after a
-      bank/render), font (`tools/font/build_revenge_font.py` after a sheet), textures
-      (`tools/textures/build_textures.py` after a source PNG / `textures.config`). Don't hand-edit
-      their outputs (`.mgfxo`, `.wav`/`.ogg`, `menufont.fnt(.png)`, `.dds`/`.rtex`).
-    - **Straight (non-premultiplied) alpha** — use `BlendState.NonPremultiplied`, never
-      `BlendState.AlphaBlend` (KNI's premultiplied trap). Straight tints like `new Color(1,1,1,a)`
-      are correct as written; don't premultiply tints or exports.
-    - **Content requests use a capital `Content/` root, lowercase under it** — case-sensitive on the
-      live host. Never reintroduce a lowercase `content/` path.
-    - **Culture-invariant** (`InvariantGlobalization=true`) — don't add culture-dependent
-      parse/format, even in Debug.
-    - **Comments**: default to none; add only when the *why* is non-obvious. Match the surrounding
-      code's density and idiom.
-14. **Document new conventions** — Update `CLAUDE.md` if the change introduces a new shim, debug
-    flag, harness entry, asset-pipeline step, or modifies a documented contract. `CLAUDE.md` is the
-    source of truth for *how to work in the repo*.
-
-## Phase 5: Verify
-
-There are **no unit tests** — verification is build-clean + visual + console-error-free. Don't ask
-the user to check manually; verify and share proof.
-
-**Booting the actual game to test a change is almost NEVER the right call.** "Visual verification"
-means driving the purpose-built tool that isolates your change -- sprite harness, scrub/showcase
-scene, freeze flag, isolation sim, live slider panel (the step-16 bullets route you) -- NOT playing
-the game and hoping to catch the change on screen. If no tool covers your change, building one
-(behind a URL flag) is part of the card. The full-game boot comes LAST, as a smoke check that it
-still boots with the change in and zero console errors -- it is not where you discover whether the
-change works.
-
-15. **Build clean** — `cd web/EvilAliensWeb && dotnet build -c Debug` must succeed. **A clean build
-    does NOT mean it runs** — WASM runtime errors only appear in the browser console.
-16. **Run, and point Chrome at the TOOL that isolates your change -- not at gameplay** — `dotnet run -c Debug --urls http://localhost:528<k>` (your slot's port; the
-    root checkout uses `5280`), then verify in a **real foreground Chrome tab via the claude-in-chrome
-    MCP** — `navigate` to YOUR port, NOT `preview_screenshot` (the built-in renderer wedges when its
-    tab is backgrounded and the rAF loop pauses). Flow: serve → in Chrome `navigate` to
-    `http://localhost:528<k>` → `wait` ~10s for WASM → screenshot + `read_console_messages`.
-    **Zero console exceptions is the bar.**
-    - **Drawing change?** Use the **sprite harness** — don't chase a moving enemy.
-      `…:528<k>/?harness=<Obj>&frame=<n>` boots frozen onto a space background, drawn by the real
-      pipeline, so a screenshot is pixel-reliable. Picker at `wwwroot/harness.html`.
-    - **Animated / transient visual (a fade, transition, death FX, glint, pulse)?** Don't try to
-      time a live screenshot -- it can't be done (a death fade lasts ~half a second and you can't
-      aim the shutter). Add or extend a bespoke scrub/showcase scene or freeze flag that PARKS the
-      effect at any chosen phase (the `?textshot` / `?lazershot` / `?spiderphase=` /
-      `?wcmothershipfreeze=` pattern; see CLAUDE.md's "Testing DYNAMIC behaviour" bullet), then
-      screenshot the parked frame at exactly the phase of interest. Building the flag/scene IS the
-      verification step, not extra scope.
-    - **Booting deep into the game?** Use the debug flags: `?menu`, `?level=<Name>`, `?invuln`,
-      `?unlockall`, `?noattract` (combine with `&`).
-    - **Graphics/texture change? DO AN AGGRESSIVE CACHE BUST** — DevTools → Network → "Disable
-      cache" then reload, or right-click reload → "Empty Cache and Hard Reload". A plain (even
-      Ctrl+Shift+R) reload serves the STALE asset because textures load late, after the
-      hard-reload bypass window closes. Symptom: an edit "doesn't take effect" or draws at the
-      wrong size.
-    - **For scripted input** use `eaPress('Enter')` / `eaPress('Left', 30)` / `eaHold(key, down)` —
-      synthetic `KeyboardEvent`s do NOT work with KNI's WASM keyboard interop.
-17. **Trim / publish changes — verify a LOCAL Release publish before pushing.** If you touched the
-    csproj (`PublishTrimmed`/`TrimMode`/`InvariantGlobalization`/`TrimmerRootAssembly`) or anything
-    reflection-loaded (save types, KNI factories): `dotnet publish -c Release`, serve the published
-    `wwwroot` at localhost root, open in real Chrome, and confirm it boots AND saves round-trip
-    (settings/unlockables persist across reload). Trimming breakage only shows at runtime — a green
-    build is not enough. (`TrimMode=partial`, not full — full white-screens.)
-18. **Spot-check the diff** — Read it once more for typos, a stray lowercase `content/`, an
-    accidental `BlendState.AlphaBlend`, a re-run of a `Game/`-generating script, dead code.
-19. **Flag what needs manual testing** — Leave a note for anything you couldn't fully verify (e.g.
-    "verify on the LIVE Pages URL, not just locally — content paths are case-sensitive there",
-    "needs a real click to trigger fullscreen; automation can't").
-
-## Phase 6: Review & Ship
-
-20. **Commit** — Descriptive message in the project's style (imperative, single-line subject; body
-    explains *why*). `rtk git add <files> && rtk git commit -m "..."` (only files you touched), then
-    `rtk git push` to the feature branch.
-21. **Peer review** — Run `/review` (spawns a fresh agent against the branch diff vs `main` with no
-    prior context). Fix every finding before proceeding — even minor ones — unless a fix is a major
-    undertaking, in which case track it as a follow-up card.
-22. **Pull main into the branch** — `rtk git pull origin main` to pick up anything that landed.
-    Resolve conflicts using the rules below.
-
-### Merge Conflict Rules
-
-22.1. **Default to main's version.** If a conflict is in code you didn't intentionally change, accept
-main's side — someone else fixed a bug or added a feature; don't silently revert it.
-22.2. **Assume incoming changes are important.** Treat every conflict as "main has a critical fix"
-until you've read the diff and confirmed otherwise.
-22.3. **Only keep your side for lines you specifically wrote.** If you and main both changed a
-function, read both, merge surgically — keep their fix, layer your change on top.
-22.4. **If the merge is messy, restart from main.** A clean re-apply of your change beats a botched
-merge.
-22.5. **Re-read the final result.** After resolving, read every conflicted file in full — don't just
-trust the markers.
-
-23. **Re-build (and re-verify if behaviour changed)** — `dotnet build -c Debug` after the merge; if
-    the merge touched runtime behaviour, re-do the relevant Phase 5 check.
-24. **Return to the root checkout** — `cd` back to the repo root (where `main` lives) for the
-    remaining steps.
-25. **Open a PR and self-merge** — `rtk gh pr create --fill` then `rtk gh pr merge --merge` (real
-    merge commit, not `--squash`, so the branch's commits stay reachable and step 26's
-    `git branch -d` works), then `rtk git pull origin main` to fast-forward the root checkout.
-    **No approval needed** (unprotected solo repo). **Merging does NOT deploy** — when you're ready to
-    ship, trigger the deploy by hand (`rtk gh workflow run "Deploy to GitHub Pages"` or the Actions
-    tab), confirm the Pages run goes green (`rtk gh run list`) and, for anything content/path-sensitive,
-    **spot-check the LIVE URL** (https://coamithra.github.io/RotEA26/), not just localhost.
-26. **Clean up the worktree and branch** — kill your dev server FIRST (it holds the directory lock and
-    squats the slot's port):
-    ```
-    rtk git worktree remove .claude/worktrees/wt<k>
-    rtk git worktree prune
-    rtk git branch -d <branch>
-    rtk git push origin --delete <branch>
-    ```
-27. **Delete the tracker file** — `rtk git rm plans/tracker_<branch>.md && rtk git commit -m "..." &&
-    rtk git push`. (Leave `plans/plan.md` — it's the archived staged plan, not per-card scratch.)
-28. **Move the card to Done** — `trello --backend local --board 10989a3d card move <card_id> 9c204b80`.
-29. **Comment on the card** — `trello --backend local --board 10989a3d comment add <card_id>
-    "<summary>"`. Include: what changed, which files, what it fixes/adds, the commit hash(es), and
-    what needs manual testing. Real newlines, not `\n` escapes.
-30. **Create follow-up cards** — If review/implementation/testing surfaced out-of-scope issues,
-    add Backlog cards (`trello --backend local --board 10989a3d card add 79158996 "<title>"
-    "<desc>"`). Reference the original so there's a trail — don't let follow-up work disappear into
-    commit messages.
-31. **Write an overview for the user** — Final step: a concise handoff — what changed (the
-    user-facing behaviour delta, not a file dump), which files were touched, anything still needing
-    manual testing or follow-up, the commit hash(es), the merged branch, and that it's live on
-    Pages. This is how the user picks the session up cold.
-
-## Phase 7: Clean up
-
-Stop any dev servers you started, and close any Chrome tabs you opened for verification
-(claude-in-chrome) — close the tab(s) and let the empty MCP tab group auto-remove. :)
-
----
-
-## Quick Reference: Card Categories
-
-| Category | Key concerns |
-|----------|-------------|
-| **Drawing / sprites / shaders** | Verify with the **sprite harness** (`?harness=<Obj>&frame=<n>`), never a screenshot of a moving enemy. Straight alpha → `NonPremultiplied` (not `AlphaBlend`). Re-run `tools/shaders/build_shaders.py` after a `.fx`; don't hand-edit `.mgfxo`. Aggressive cache-bust for texture edits. |
-| **Fades / transitions / timed FX** | Never try to time a live screenshot of a transient effect. Build/extend a scrub or showcase scene (phase slider / freeze flag: the `?textshot`, `?lazershot`, `?spiderphase=`, `?wcmothershipfreeze=` pattern) and capture the parked frame. Behaviour/feel curves: sim the data instead. See CLAUDE.md "Testing DYNAMIC behaviour". |
-| **Audio** | Replace, don't port XACT. Re-run `tools/audio/build_audio.py` after changing banks/renders; SFX/speech on KNI `SoundEffect`, music via the WebAudio `eaMusic` layer for loop points. Don't hand-edit the `.wav`/`.ogg`/`music.json` outputs. |
-| **Font / text** | `menufont` atlas is **3× supersampled** — never route it through stock `DrawString`; use `SpriteBatchWrapper.DrawStringScaled`. Re-run `tools/font/build_revenge_font.py` after a sheet; per-glyph tweaks live in `overrides.json`. |
-| **Textures / load stutter** | PNG decode (StbImageSharp, main thread) is the hitch. Precompile hot sprites with `tools/textures/build_textures.py` → `.dds`/`.rtex` (loader prefers `.dds` → `.rtex` → `.png`). DXT dims must be a mult-of-4 or ANGLE→D3D11 draws black. |
-| **Resolution / present** | Stage-10 unified presenter — one offscreen `sceneTarget` sized to the window's 4:3 letterbox, scaled to `RenderScale`. Don't re-pin `PreferredBackBuffer`. Full-screen overlays use `(0,0,800,600)` design coords. |
-| **Saves / persistence** | `StorageStub.PersistentSave` mirrors to localStorage via `SaveInterop`/`eaSave`. Save types are reflection-loaded — **any csproj trim change must be Release-published and round-trip-tested locally** before pushing. |
-| **Content paths / hosting** | Case-sensitive on the live Linux host: capital `Content/`, lowercase under it. Verify new assets/scenes on the LIVE Pages URL, not just locally. CI keeps `<base href="/">` for dev and flips it to `/RotEA26/`. |
-| **Generated `Game/` code** | `Game/` is derived by `tools/*.py` from `src_decompiled/`. Edit `Game/` directly; **never re-run those scripts** against it. `#if WINDOWS` code was stripped from the Xbox build — recreate PC behaviour, don't hunt for it. |
-| **Meridian decoy / Exit** | The "boss key" launcher is the SEPARATE private `meridian` repo, not this tree. This repo keeps only the tiny `eaQuit` handoff in `wwwroot/index.html`. Edit the decoy in the meridian repo. |
+| Card touches | Read first |
+|---|---|
+| Drawing / sprites / shaders / textures | root `CLAUDE.md` verification rules + `web/…/CLAUDE.md` (harness, straight alpha) + `tools/CLAUDE.md` (shaders, textures) |
+| Fades / transitions / timed FX / feel | root `CLAUDE.md` "Verification" (scrub scenes, isolation sims) |
+| Audio / music | `web/…/CLAUDE.md` "Audio runtime" + `tools/CLAUDE.md` "Audio" |
+| Text / font | `web/…/CLAUDE.md` "Rendering / text" |
+| Input / menus / overlays | `web/…/CLAUDE.md` "Input" (outside-`#app` pattern, `eaPress`) |
+| Resolution / present / post-FX | `web/…/CLAUDE.md` "Architecture" + "Feel / post FX" |
+| Saves / trim / hosting | root `CLAUDE.md` gotchas (trim, case-sensitivity) + `web/…/CLAUDE.md` (saves) |
+| Generated `Game/` code | root `CLAUDE.md` gotchas (Xbox build, codegen) |
+| Exit / "boss key" launcher | root `CLAUDE.md` "Related repos" — edit the separate `meridian` repo, not this tree |

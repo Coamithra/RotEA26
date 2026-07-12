@@ -308,7 +308,22 @@ internal class MenuSubWithSkull : MenuSub1
 	// showed (worst on the 6px selected glow: a ~1.8px blob at each of the 8 corners).
 	private const float Miter135 = 0.20710678f;
 
-	// A line segment a->b of the given thickness, drawn from the 10x10 white `blank`
+	// A source rect one texel INSIDE `blank`'s logical bounds. `blank` is a padded dxt
+	// (transparent mult-of-4 pad on the bottom/right), and a whole-texture draw clamped to
+	// LogicalBounds still lets LINEAR filtering sample across the logical edge into the
+	// transparent pad — a half-texel bleed. On a normal sprite that's an invisible fringe,
+	// but DrawLine stretches this 10x10 sprite ~50x into each frame edge, so the bleed
+	// becomes a visible fade running along the stroke (the "errant fading" on the selected
+	// frame). blank is uniform white, so sampling a 1px-inset interior stretches identically
+	// with zero pad bleed at any pad size (incl. --padtest 0's minimal mult-of-4 pad).
+	private Rectangle InteriorFill(Texture2D t)
+	{
+		int w = Math.Max(1, t.LogicalWidth() - 2);
+		int h = Math.Max(1, t.LogicalHeight() - 2);
+		return new Rectangle(1, 1, w, h);
+	}
+
+	// A line segment a->b of the given thickness, drawn from the white `blank`
 	// stretched + rotated, offset half a stroke so the path is centred on the line.
 	// `feather` lays a slightly wider, dim pass under the crisp core so the aliased 45
 	// chamfer diagonals get a soft 1px fringe (cheap AA — the menu RT has no MSAA).
@@ -323,15 +338,18 @@ internal class MenuSubWithSkull : MenuSub1
 		float ext = thickness * Miter135;
 		Vector2 perp = new Vector2(-dir.Y, dir.X);
 		float fullLen = len + 2f * ext;
+		// Sample blank's interior (not its LogicalBounds edge) so the stretch never bleeds
+		// the transparent pad along the stroke; blank is uniform, so this is pixel-identical.
+		Rectangle src = InteriorFill(blank);
 		if (feather)
 		{
 			// One soft, ~1px-wider underlay at reduced alpha — feathers the long edges.
 			float fThick = thickness + 1.3f;
 			Vector2 fpos = a - dir * ext - perp * (fThick / 2f);
 			Color fcol = MenuTheme.WithAlpha(color, (int)(color.A * 0.4f));
-			base.SpriteBatch.Draw(blank, fpos, ang, new Vector2(fullLen / blank.LogicalWidth(), fThick / blank.LogicalHeight()), center: false, fcol);
+			base.SpriteBatch.Draw(blank, src, fpos, ang, new Vector2(fullLen / src.Width, fThick / src.Height), Vector2.Zero, fcol);
 		}
 		Vector2 pos = a - dir * ext - perp * (thickness / 2f);
-		base.SpriteBatch.Draw(blank, pos, ang, new Vector2(fullLen / blank.LogicalWidth(), thickness / blank.LogicalHeight()), center: false, color);
+		base.SpriteBatch.Draw(blank, src, pos, ang, new Vector2(fullLen / src.Width, thickness / src.Height), Vector2.Zero, color);
 	}
 }

@@ -338,6 +338,17 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		scores[player].SetScore(scores[player].score + num);
 	}
 
+	// Online co-op (card 11.2): adopt the host's authoritative score for a slot. Only ever
+	// raises -- the client keeps its immediate generous local credits and the 1Hz sync
+	// trues the tally up without ever visibly rolling a score backwards mid-life.
+	internal void NetAdoptScore(int player, float hostScore)
+	{
+		if (player >= 0 && player < scores.Count && hostScore > scores[player].score)
+		{
+			scores[player].SetScore(hostScore);
+		}
+	}
+
 	private void increasecombo(int player)
 	{
 		if (combosenabled)

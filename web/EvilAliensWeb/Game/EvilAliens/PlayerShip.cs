@@ -1542,6 +1542,9 @@ public class PlayerShip : AlienDrawableGameComponent
 			DoSpecial(pickup: true);
 			sound.PlayCue("powerup");
 			((Powerup)other).taken = true;
+			// Online co-op: pickups are generous claims -- note WHO took it so the removal
+			// seam can claim it (client) / attribute it (host). No-op without a session.
+			EvilAliensWeb.Compat.Net.NetSession.NotePowerupTaken((Powerup)other, player);
 			if (this.OnCollectPowerup != null)
 			{
 				this.OnCollectPowerup(currentPower);

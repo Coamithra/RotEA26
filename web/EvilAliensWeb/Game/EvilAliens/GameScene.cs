@@ -805,12 +805,19 @@ internal abstract class GameScene : Scene
 			checkScreenShot();
 		}
 		AIJoinTimer.Update(gameTime);
-		if (AIJoinTimer.Finished && AllowAIFriends && oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
+		// Online co-op: AI friend ships aren't replicated yet (their slots would fire
+		// invisible bullets on the other peer), so no auto-join in any net session.
+		if (AIJoinTimer.Finished && AllowAIFriends && !EvilAliensWeb.Compat.Net.NetSession.Active && oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
 		{
 			AddPlayer(ControlDevice.AI, spawnPlayerNormally);
 		}
 		CheckPlayerJoins(spawnPlayerNormally);
-		eventList.Update(gameTime);
+		// Online co-op (card 11.2): the world is HOST-authoritative. A join peer never runs
+		// the level script/spawners -- enemies arrive as replicated NetPuppets instead.
+		if (!EvilAliensWeb.Compat.Net.NetSession.SuppressLevelScript)
+		{
+			eventList.Update(gameTime);
+		}
 		if (oracle.AllShipsDead & spawnPlayerNormally)
 		{
 			LoseLife();

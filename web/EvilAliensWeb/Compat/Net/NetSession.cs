@@ -5,11 +5,19 @@ using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
 {
-    // Stage 11.1 co-op session orchestrator (design: plans/stage11-online-coop.md).
+    // Stage 11 co-op session orchestrator (design: plans/stage11-online-coop.md).
     // Distributed authority: each peer owns its OWN ship completely -- local input is read
     // untouched with zero added latency; the wire carries ship STATE (never inputs); the
     // other peer's ship is an interpolated puppet ~InterpDelayMs behind, whose shots spawn
     // locally from its replicated firing state.
+    //
+    // Card 11.2 adds WORLD authority: the host runs the real sim (spawners, level script,
+    // enemy AI, score/lives); a join peer suppresses those (GameScene skips its event list,
+    // ComponentBin swallows stray replicable spawns) and mirrors the world as frozen
+    // NetPuppets driven by ~16.7Hz round-robin world snapshots. Kills and powerups are
+    // GENEROUS at-least-once claims: every claimant is credited (once per (entity, slot)
+    // per side), the first claim settles the entity, nothing is ever rejected. Score/lives
+    // true up from the host's 1Hz EvScoreSync.
     //
     // Lifecycle: Game1.Initialize calls Start() iff ?net=host/join was parsed (a plain boot
     // never constructs anything here -- Active stays false and Update() is a single branch);
@@ -17,15 +25,17 @@ namespace EvilAliensWeb.Compat.Net
     // by the transport's JS-driven callbacks and drained ON the game tick, so game state is
     // only ever mutated inside the normal update.
     //
-    // 11.1 limits (by design, see the card): both peers run independent worlds (host world
-    // authority = 11.3), score/lives/pause/checkpoint-reset are not synced (11.3/11.4), and
-    // the roster is exactly two peers.
+    // Remaining gaps (by design, later cards): level-script beats (messages/music/boss
+    // phases), pause + checkpoint-reset/shared-fate death, tether; WebRTC transport; the
+    // roster is exactly two peers.
     public static class NetSession
     {
-        public const byte ProtocolVersion = 1;
+        public const byte ProtocolVersion = 2;
         public const float InterpDelayMs = 100f;
 
-        private const long StreamIntervalMs = 33;    // ~30 Hz
+        private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
+        private const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
+        private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
         private const long PeerTimeoutMs = 3000;
         private const long MetricsIntervalMs = 5000;
@@ -36,14 +46,41 @@ namespace EvilAliensWeb.Compat.Net
         private const float ShipMaxSpeedPxPerMs = 0.33f;
         private const float PopSlackPx = 3f;
 
+        private const int SnapshotMaxEntries = 16;   // <= ~500B/packet within extras budget
+        private const int SnapshotScratchBytes = 2 + SnapshotMaxEntries * 64;
+        private const int ExtraScratchBytes = 64;
+        private const int DeathRecordCap = 512;
+
         public static bool Active { get; private set; }
         public static bool PeerUp { get; private set; }
+
+        public static bool IsHost => Active && isHost;
+        public static bool IsClient => Active && !isHost;
+
+        // Client sim-split: the join peer never runs the level script / spawners (GameScene
+        // checks this before eventList.Update) and never lets game code add replicable
+        // types to the world (ComponentBin.Add checks SuppressWorldSpawn).
+        public static bool SuppressLevelScript => IsClient;
+
+        public static bool SuppressWorldSpawn(GameComponent component)
+        {
+            return IsClient && !NetPuppets.Constructing && NetTypeRegistry.IsReplicable(component);
+        }
+
+        // ComponentBin.Pop must not thaw a frozen puppet back into a live AI.
+        public static bool IsFrozenPuppet(GameComponent component)
+        {
+            return IsClient && NetPuppets.IsPuppet(component);
+        }
+
+        internal static Game SessionGame => game;
 
         private static bool isHost;
         private static Game game;
         private static Oracle oracle;
         private static ComponentBin bin;
         private static SoundManager sound;
+        private static ScoreVisualiser score;
         private static INetTransport transport;
 
         private static readonly Queue<(byte[] data, bool reliable)> rxQueue = new Queue<(byte[], bool)>();
@@ -57,10 +94,15 @@ namespace EvilAliensWeb.Compat.Net
         private static ushort txSeq;
         private static ushort txEventSeq;
         private static long lastStreamTx;
+        private static long lastSnapshotTx;
+        private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
+        private static int snapshotCursor;
+        private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
+        private static readonly byte[] extraScratch = new byte[ExtraScratchBytes];
 
-        // rx / puppet
+        // rx / remote-ship puppet
         private static readonly ShipStateBuffer buffer = new ShipStateBuffer();
         private static ushort lastRxSeq;
         private static bool haveRxSeq;
@@ -74,9 +116,25 @@ namespace EvilAliensWeb.Compat.Net
         private static Vector2 lastPuppetPos;
         private static bool hasLastPuppetPos;
 
-        // reliable-event bookkeeping (client-side ordering assertions)
-        private static readonly HashSet<ushort> rxLiveIds = new HashSet<ushort>();
+        // reliable-event bookkeeping
         private static int lastRxEventSeq = -1;
+
+        // Kill attribution: who landed the killing blow, recorded just before the per-type
+        // death cascades into removal (KillableAlien.HitBy / claim handling), consumed at
+        // the removal seam on either side.
+        private static readonly Dictionary<AlienDrawableGameComponent, byte> killNotes = new Dictionary<AlienDrawableGameComponent, byte>();
+
+        // Host: recently-dead replicables so late/overlapping claims still pay generously,
+        // exactly once per (entity, slot). Bounded FIFO.
+        private struct DeathRecord
+        {
+            public Vector2 Pos;
+            public ushort Points;
+            public byte PaidMask;
+        }
+
+        private static readonly Dictionary<ushort, DeathRecord> recentDeaths = new Dictionary<ushort, DeathRecord>();
+        private static readonly Queue<ushort> recentDeathOrder = new Queue<ushort>();
 
         private static readonly NetMetrics metrics = new NetMetrics();
         private static long lastMetricsAt;
@@ -93,6 +151,7 @@ namespace EvilAliensWeb.Compat.Net
             oracle = ServiceHelper.Get<IOracleService>().Oracle;
             bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
             sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
+            score = ServiceHelper.Get<IScoreService>().Score;
             isHost = DebugFlags.NetRole == NetRole.Host;
             transport = new BroadcastChannelTransport();
             transport.OnData += (data, reliable, from) => rxQueue.Enqueue((data, reliable));
@@ -101,6 +160,10 @@ namespace EvilAliensWeb.Compat.Net
             if (isHost)
             {
                 NetIdRegistry.Enable(g);
+            }
+            else
+            {
+                NetPuppets.Enable(g);
             }
             Active = true;
             sessionStartAt = NowMs;
@@ -137,16 +200,27 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     PeerLost("timeout");
                 }
-                else if (now - lastStreamTx >= StreamIntervalMs)
+                else
                 {
-                    SendShipState(now);
+                    if (now - lastStreamTx >= StreamIntervalMs)
+                    {
+                        SendShipState(now);
+                    }
+                    if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
+                    {
+                        SendWorldSnapshot(now);
+                    }
+                    if (isHost && now - lastScoreSyncTx >= ScoreSyncIntervalMs)
+                    {
+                        SendScoreSync(now);
+                    }
                 }
             }
             ManagePuppet();
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
                 lastMetricsAt = now;
-                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : rxLiveIds.Count));
+                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount));
             }
         }
 
@@ -208,33 +282,205 @@ namespace EvilAliensWeb.Compat.Net
             metrics.EventsTx++;
         }
 
-        // ---- host NetIdRegistry -> wire ---------------------------------------------------
+        // ---- kill attribution notes ---------------------------------------------------------
 
-        internal static void OnHostSpawn(ushort netId, string typeName)
+        // Recorded by KillableAlien.HitBy at the killing blow (both sides run it: the host
+        // through its real sim, the client on its frozen puppets via local hit-testing).
+        public static void NoteKill(AlienDrawableGameComponent comp, ICollidable killer)
         {
-            if (!Active || !PeerUp)
+            if (!Active || !NetTypeRegistry.IsReplicable((GameComponent)(object)comp))
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, netId, NetProtocol.TypeHash(typeName)));
-            metrics.EventsTx++;
-            if (DebugFlags.NetLog)
+            int slot = killer is IAlienKiller k ? k.Player() : -1;
+            NoteKillSlot(comp, slot >= 0 && slot < 8 ? (byte)slot : NetProtocol.KillerNone);
+        }
+
+        internal static void NoteKillSlot(AlienDrawableGameComponent comp, byte slot)
+        {
+            if (!Active)
             {
-                Console.WriteLine("[net] tx spawn id=" + netId + " type=" + typeName);
+                return;
+            }
+            if (killNotes.Count > 64)
+            {
+                killNotes.Clear(); // leak guard; notes are consumed at removal within a tick
+            }
+            killNotes[comp] = slot;
+        }
+
+        // Powerup pickups are claims too: the collecting side records WHO took it before
+        // Powerup.Die() cascades into removal.
+        public static void NotePowerupTaken(Powerup powerup, int playerSlot)
+        {
+            if (Active && playerSlot >= 0 && playerSlot < 8)
+            {
+                NoteKillSlot(powerup, (byte)playerSlot);
             }
         }
 
-        internal static void OnHostDeath(ushort netId)
+        internal static byte TakeKillNote(AlienDrawableGameComponent comp)
+        {
+            if (killNotes.TryGetValue(comp, out byte slot))
+            {
+                killNotes.Remove(comp);
+                return slot;
+            }
+            return NetProtocol.KillerNone;
+        }
+
+        // ---- host NetIdRegistry -> wire ---------------------------------------------------
+
+        internal static void OnHostSpawn(NetIdRegistry.Entry e)
         {
             if (!Active || !PeerUp)
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, netId));
+            NetBaseState state = CaptureBaseState(e, NowMs);
+            int extraLen = e.Descriptor.EncodeSpawnExtra(e.Comp, extraScratch, 0);
+            transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, e.Id, e.TypeIdx, state, extraScratch, extraLen));
             metrics.EventsTx++;
             if (DebugFlags.NetLog)
             {
-                Console.WriteLine("[net] tx death id=" + netId);
+                Console.WriteLine("[net] tx spawn id=" + e.Id + " type=" + e.Comp.GetType().Name);
+            }
+        }
+
+        internal static void OnHostDeath(NetIdRegistry.Entry e)
+        {
+            if (!Active)
+            {
+                return;
+            }
+            byte killer = TakeKillNote(e.Comp);
+            Vector2 pos = e.Comp.Position;
+            ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
+            RecordDeath(e.Id, pos, points, killer);
+            if (!PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos, points));
+            metrics.EventsTx++;
+            if (DebugFlags.NetLog)
+            {
+                Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer);
+            }
+        }
+
+        private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot)
+        {
+            DeathRecord rec = new DeathRecord
+            {
+                Pos = pos,
+                Points = points,
+                PaidMask = (byte)(killerSlot < 8 ? 1 << killerSlot : 0),
+            };
+            if (!recentDeaths.ContainsKey(id))
+            {
+                recentDeathOrder.Enqueue(id);
+                while (recentDeathOrder.Count > DeathRecordCap)
+                {
+                    recentDeaths.Remove(recentDeathOrder.Dequeue());
+                }
+            }
+            recentDeaths[id] = rec;
+        }
+
+        // ---- host world snapshot ------------------------------------------------------------
+
+        private static void SendWorldSnapshot(long now)
+        {
+            lastSnapshotTx = now;
+            List<NetIdRegistry.Entry> live = NetIdRegistry.Live;
+            if (live.Count == 0)
+            {
+                return;
+            }
+            int count = Math.Min(SnapshotMaxEntries, live.Count);
+            int off = NetProtocol.SnapshotHeaderBytes;
+            int written = 0;
+            if (snapshotCursor >= live.Count)
+            {
+                snapshotCursor = 0;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                NetIdRegistry.Entry e = live[snapshotCursor % live.Count];
+                snapshotCursor = (snapshotCursor + 1) % live.Count;
+                NetBaseState state = CaptureBaseState(e, now);
+                int extraLen = e.Descriptor.EncodeStateExtra(e.Comp, extraScratch, 0);
+                if (off + NetProtocol.SnapshotEntryBaseBytes + extraLen > snapshotScratch.Length)
+                {
+                    break;
+                }
+                NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, state, extraScratch, extraLen);
+                written++;
+            }
+            if (written == 0)
+            {
+                return;
+            }
+            snapshotScratch[0] = NetProtocol.MsgWorldSnapshot;
+            snapshotScratch[1] = (byte)written;
+            byte[] packet = new byte[off];
+            Array.Copy(snapshotScratch, packet, off);
+            transport.SendStream(packet);
+            metrics.SnapTx++;
+        }
+
+        private static NetBaseState CaptureBaseState(NetIdRegistry.Entry e, long now)
+        {
+            AlienDrawableGameComponent c = e.Comp;
+            Vector2 pos = c.Position;
+            // Observed velocity: differentiate real positions between this entity's snapshot
+            // turns -- robust for enemies that move Position directly (arcs, easing) where
+            // Speed/Direction would lie. First observation falls back to SpeedVector.
+            Vector2 vel = c.NetSpeedVector;
+            if (e.HasLastPos && now > e.LastPosMs)
+            {
+                vel = (pos - e.LastPos) / (now - e.LastPosMs);
+            }
+            e.LastPos = pos;
+            e.LastPosMs = now;
+            e.HasLastPos = true;
+            return new NetBaseState
+            {
+                Pos = pos,
+                Vel = vel,
+                Rotation = c.rotation,
+                CurFrame = c.curframe,
+                Scale = c.scale,
+                Hp = c is KillableAlien k ? k.NetHitPoints : 0,
+            };
+        }
+
+        // ---- host score sync ------------------------------------------------------------------
+
+        private static void SendScoreSync(long now)
+        {
+            lastScoreSyncTx = now;
+            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, score.Lives, score.PointScore(0), score.PointScore(1)));
+            metrics.EventsTx++;
+        }
+
+        // ---- client claims ----------------------------------------------------------------------
+
+        // Fired by NetPuppets at the removal seam for every gameplay death it observed
+        // locally (its own bullets, the re-fired remote bullets, blasts, pickups).
+        internal static void SendClaim(ushort netId, byte killerSlot)
+        {
+            if (!Active || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeClaimEvent(txEventSeq++, netId, killerSlot));
+            metrics.EventsTx++;
+            metrics.ClaimsTx++;
+            if (DebugFlags.NetLog)
+            {
+                Console.WriteLine("[net] tx claim id=" + netId + " killer=" + killerSlot);
             }
         }
 
@@ -264,7 +510,7 @@ namespace EvilAliensWeb.Compat.Net
                     HandleEvent(data);
                     break;
                 case NetProtocol.MsgWorldSnapshot:
-                    // Reserved -- card 11.3 (host world authority).
+                    HandleWorldSnapshot(data);
                     break;
                 }
             }
@@ -307,8 +553,8 @@ namespace EvilAliensWeb.Compat.Net
             Console.WriteLine("[net] peer connected (" + (isHost ? "join" : "host") + " side is up)");
             if (isHost)
             {
-                // Late joiner: replay the live NetId set so its ordering bookkeeping starts
-                // from the truth instead of a death-before-spawn storm.
+                // Late joiner: replay the live NetId set so it can construct the already-
+                // alive world instead of starting from a death-before-spawn storm.
                 NetIdRegistry.ReplayLive();
             }
             else
@@ -354,7 +600,6 @@ namespace EvilAliensWeb.Compat.Net
             renderMs = double.NaN;
             hasLastPuppetPos = false;
             haveRxSeq = false;
-            rxLiveIds.Clear();
             lastRxEventSeq = -1;
         }
 
@@ -390,6 +635,39 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        private static void HandleWorldSnapshot(byte[] data)
+        {
+            if (isHost || data.Length < NetProtocol.SnapshotHeaderBytes)
+            {
+                return;
+            }
+            lastRxStreamAt = NowMs;
+            metrics.SnapRx++;
+            int count = data[1];
+            int off = NetProtocol.SnapshotHeaderBytes;
+            for (int i = 0; i < count; i++)
+            {
+                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out _, out NetBaseState state, out int extraOff, out int extraLen))
+                {
+                    break;
+                }
+                metrics.SnapEntriesRx++;
+                if (NetPuppets.OnSnapshotEntry(netId, state, data, extraOff, extraLen, out bool popped))
+                {
+                    if (popped)
+                    {
+                        metrics.PuppetPops++;
+                    }
+                }
+                else
+                {
+                    // Not spawned yet (stream outran the reliable lane) or died locally with
+                    // the claim still in flight -- both self-heal; just count it.
+                    metrics.SnapUnknownIds++;
+                }
+            }
+        }
+
         private static void HandleEvent(byte[] data)
         {
             if (data.Length < 4)
@@ -408,36 +686,55 @@ namespace EvilAliensWeb.Compat.Net
             {
             case NetProtocol.EvSpawn:
             {
-                if (data.Length < 10)
+                if (isHost || !NetProtocol.TryDecodeSpawnEvent(data, out ushort id, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
                 {
                     return;
                 }
-                ushort id = NetProtocol.ReadU16(data, 4);
-                if (!rxLiveIds.Add(id))
+                if (!NetPuppets.OnSpawn(id, typeIdx, state, data, extraOff, extraLen))
                 {
                     metrics.DupSpawns++;
                 }
                 if (DebugFlags.NetLog)
                 {
-                    Console.WriteLine("[net] rx spawn id=" + id + " typeHash=" + NetProtocol.ReadU32(data, 6).ToString("x8"));
+                    Console.WriteLine("[net] rx spawn id=" + id + " typeIdx=" + typeIdx);
                 }
                 break;
             }
             case NetProtocol.EvDeath:
             {
-                if (data.Length < 6)
+                if (isHost || data.Length < 17)
                 {
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
-                if (!rxLiveIds.Remove(id))
-                {
-                    metrics.OrderViolations++;
-                }
+                byte killer = data[6];
+                Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
+                ushort points = NetProtocol.ReadU16(data, 15);
+                NetPuppets.OnRemoteDeath(id, killer, pos, points);
                 if (DebugFlags.NetLog)
                 {
-                    Console.WriteLine("[net] rx death id=" + id);
+                    Console.WriteLine("[net] rx death id=" + id + " killer=" + killer);
                 }
+                break;
+            }
+            case NetProtocol.EvClaim:
+            {
+                if (!isHost || data.Length < 7)
+                {
+                    return;
+                }
+                HandleClaim(NetProtocol.ReadU16(data, 4), data[6]);
+                break;
+            }
+            case NetProtocol.EvScoreSync:
+            {
+                if (isHost || data.Length < 13)
+                {
+                    return;
+                }
+                score.Lives = (sbyte)data[4];
+                score.NetAdoptScore(0, NetProtocol.ReadF32(data, 5));
+                score.NetAdoptScore(1, NetProtocol.ReadF32(data, 9));
                 break;
             }
             case NetProtocol.EvBlast:
@@ -457,7 +754,74 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // ---- remote puppet lifecycle -------------------------------------------------------
+        // GENEROUS at-least-once claim honoring (host). Alive -> the real per-type death
+        // path credited to the claimant (authoritative children spawn here and replicate).
+        // Already dead -> pay the claimant once from the death record. Never rejected.
+        private static void HandleClaim(ushort netId, byte killerSlot)
+        {
+            metrics.ClaimsRx++;
+            if (NetIdRegistry.TryGetById(netId, out NetIdRegistry.Entry e) && !e.Comp.IsDead)
+            {
+                if (killerSlot != NetProtocol.KillerNone)
+                {
+                    NoteKillSlot(e.Comp, killerSlot); // attribution for the death broadcast
+                }
+                if (e.Comp is KillableAlien killable && killerSlot != NetProtocol.KillerNone)
+                {
+                    killable.NetKill(NetPuppets.KillerAgent(killerSlot, e.Comp.Position), isComboGenerator: true);
+                    if (!e.Comp.IsDead)
+                    {
+                        bin.Remove((GameComponent)(object)e.Comp);
+                    }
+                }
+                else
+                {
+                    // Non-killable replicable (EvilBullet swept by a blast, Powerup pickup,
+                    // Asteroid...): settle it directly, pay any claimant its points.
+                    if (e.Comp is Powerup p)
+                    {
+                        p.taken = true;
+                    }
+                    else if (killerSlot != NetProtocol.KillerNone)
+                    {
+                        if (e.Comp.NetPointValue > 0f)
+                        {
+                            score.AddScore(e.Comp.NetPointValue, true, e.Comp.Position, killerSlot);
+                        }
+                        Explosion explosion = Explosion.NewExplosion(bin, game);
+                        explosion.Setup(e.Comp.Position, 1.2f, 1f, 0f, 0f);
+                        bin.Add((GameComponent)(object)explosion);
+                    }
+                    bin.Remove((GameComponent)(object)e.Comp);
+                }
+                metrics.ClaimsHonored++;
+                if (DebugFlags.NetLog)
+                {
+                    Console.WriteLine("[net] claim honored (live kill) id=" + netId + " slot=" + killerSlot);
+                }
+                return;
+            }
+            // Already dead here: still pay the claimant, once.
+            if (killerSlot != NetProtocol.KillerNone && recentDeaths.TryGetValue(netId, out DeathRecord rec))
+            {
+                if (killerSlot < 8 && (rec.PaidMask & (1 << killerSlot)) == 0)
+                {
+                    rec.PaidMask |= (byte)(1 << killerSlot);
+                    recentDeaths[netId] = rec;
+                    if (rec.Points > 0)
+                    {
+                        score.AddScore(rec.Points, true, rec.Pos, killerSlot);
+                    }
+                    metrics.ClaimsPaidDead++;
+                    if (DebugFlags.NetLog)
+                    {
+                        Console.WriteLine("[net] claim honored (already dead, paid) id=" + netId + " slot=" + killerSlot);
+                    }
+                }
+            }
+        }
+
+        // ---- remote-ship puppet lifecycle ---------------------------------------------------
 
         private static void ManagePuppet()
         {

@@ -1,0 +1,486 @@
+# CLAUDE.md — web/EvilAliensWeb (the game + compat code)
+
+Architecture and per-feature notes for the ported game. The root `CLAUDE.md` has workflow,
+build/run, and the verification rules; `tools/CLAUDE.md` has the offline asset pipelines that
+generate much of the art/audio referenced here.
+
+## Architecture
+
+- **Game loop is JS-driven:** `wwwroot/index.html` (`initRenderJS`/`tickJS`) →
+  `Pages/Index.razor.cs` `TickDotNet()` → `new EvilAliens.Game1()`. `ContentTestGame.cs` /
+  `SpikeGame.cs` are dead harnesses, safe to delete.
+- **Resolution = a unified presenter, not a pinned back buffer.** KNI's BlazorGL forces the back
+  buffer to the browser window size (rewrites `PreferredBackBuffer` on resize — don't reintroduce a
+  pinned one). `Game1.Draw` renders the whole frame into one offscreen `sceneTarget` sized to the
+  window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it scaled+letterboxed;
+  the game's `SetRenderTarget(0, null)` calls redirect there via
+  `Xna3GraphicsDeviceCompat.BaseRenderTarget`. Gamma applies on the present blit; 800x600-design
+  draws scale up via `RenderScale.Matrix` at the `SpriteBatchWrapper` Begin choke; bloom + offscreen
+  targets are `RenderScale`-sized and recreated on resize. Hi-res art (menu title, splash) draws
+  straight into this one scene — no separate overlay pass. A render-sized offscreen target
+  composited back uses `SpriteBatchWrapper.DrawPresent` (identity); full-screen overlays use
+  `(0,0,800,600)` design coords, never the viewport.
+- **Shims in `Compat/` fake the Xbox APIs.** GamerServices = no-ops (full game unlocked,
+  `SignedInGamers` empty so per-gamer loops do nothing — the XBLIG sign-in gate itself is gone, the
+  PC keyboard path was recreated incl. the `#if WINDOWS`-stripped keyboard-read block in
+  `InputHandler.Update()`). Storage = WASM in-memory FS mirrored to the browser (`StorageStub`'s
+  `PersistentSave` + `Compat/SaveInterop.cs` + `eaSave` in `index.html`). `ResolveBackBuffer` and
+  the `SpriteBlendMode`→`BlendState` mapping are real.
+- **Saves: small XML in localStorage; screenshot `.dat` blobs in IndexedDB.** The `eaSave` JS
+  facade (`index.html`) routes by extension: `.dat` → `eaSaveBlob` (IndexedDB
+  `eaweb_save/screenshots`), else localStorage. IndexedDB is async but the game reads saves
+  synchronously, so `eaSaveBlob.preload()` (awaited by `initRenderJS` before the first tick, raced
+  vs a 3s timeout) pulls every blob into memory; it also one-time-migrates old localStorage `.dat`s
+  (deleted only after the IDB commit). IDB unavailable → `.dat` falls back to localStorage.
+  **Keep the routing in JS — don't make C# talk to IndexedDB directly.**
+- **Content loading (`WebContentManager`):** paths must be capital-`Content/` root, lowercase under
+  it (case-sensitive on Pages — see root CLAUDE.md). `LoadTexture` prefers **`.dds` → `.rtex` →
+  `.png`** (precompiled GPU-ready siblings from `tools/textures/`; PNG decode via StbImageSharp on
+  the WASM main thread is the stutter — a cold multi-MP sheet is hundreds of ms). Shaders load via
+  `new Effect(gd, bytes)` from offline-compiled `.mgfxo`; effects apply via
+  `SpriteBatch.Begin(effect)` (XNA 4.0 model), not `effect.Begin()`.
+- **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
+  flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
+  back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
+  by all builds; release never writes). An **always-on frame-hitch watchdog** logs `[hitch] <ms>ms
+  frame in <level>` for any tick > 120ms (not gated by `?loadlog`), skipping preload + boot warm-up.
+  A still-hitching level is a manifest DATA gap — fix by playing with `?loadlog` +
+  `eaPreloadExport()`, not by code.
+- **Level launches are gated by a pre-launch manifest warm.** `Game1.WarmThenLaunch` (every launch
+  path incl. attract demos and `?level=`) decodes the level's manifest textures ONE per tick
+  (`PumpLevelWarm`) before the scene is Added, so the browser paints between decodes (no "page
+  unresponsive"). The menu is frozen during the warm (`menuScene.Enabled=false`; `ComponentBin.Add`
+  re-enables) and a Draw-time "LOADING" indicator (`DrawLevelWarmIndicator`, keyed off
+  `pendingLevelLaunch != null`) shows meanwhile. The warm is bracketed `BeginPreload`/`EndPreload`
+  (two preload summary lines per level under `?loadlog` is expected). No manifest entries → the old
+  synchronous launch.
+- **Menu art is warmed during the splash** (`Game1.QueueMenuWarm` enqueues; `PumpWarmQueue` drains
+  one decode per Update tick; `DrainWarmQueue()` at `startScreen_OnFinished` finishes synchronously
+  if the player mashes past the splash — the menu is always fully warm before first shown). A
+  second LOW-priority queue (`QueueIdleWarm`) warms the space-background tile set (loaded
+  synchronously in `Background.SetSpace()` before any preload bracket can catch it); it drains only
+  after the menu queue and `DrainWarmQueue` never touches it. Put menu-critical art in
+  `QueueMenuWarm`, pre-level art in `QueueIdleWarm`. Menus share ONE content manager
+  (`Scene.Content` == `Game1.content`), which is why warming works. `BragScene.WouldShow()` routes
+  credits → menu directly on web (no signed-in gamer).
+
+## Debug flags & tuning conventions
+
+- All URL flags parse once at boot in `Compat/DebugFlags.cs` (wired via `index.html`
+  `getDebugQuery` → `Pages/Index.razor.cs`). **No query = normal boot; tuning overrides are null =>
+  the baked `Default*` consts, so a shipped build is byte-identical.** When the user settles on
+  values, bake them into the consts and keep the flag as an A/B override.
+- `DebugFlags.Active` (the `[debug] flags active` console line) lists only flags that hijack
+  boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
+  (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
+- **Live slider panels** are HTML built in `index.html` OUTSIDE `#app`, only constructed on their
+  trigger page (a normal boot has no extra DOM). Pattern: `window.eaXxx(...)` →
+  `Compat/DebugInput.SetXxx` ([JSInvokable]) → `DebugFlags.SetXxxOverride`, read every Draw/tick;
+  an orange readout prints the bake-ready query string. Existing panels: `eaLazer` (`?lazershot`),
+  `eaHue` (`?harness=battleskull`), `eaWalls` (`?wallsonly`/`?walltune`), `eaSpider`
+  (`?harness=spiderjump`/`?level=Level2&spiders`/`?spidertune`), `eaHolo`
+  (`?level=Tutorial`/`ClassicAliens`/`?holotune`), `eaConnector`
+  (`?level=TeamChallenge`/`?harness=connector`/`?connectortune`), `eaWcTune` (`?wctune`),
+  `eaTexViewer` (`?texviewer`). GOTCHA: range inputs need `autocomplete='off'` or Chrome's form
+  restoration re-seeds them post-load and desyncs from the defaults.
+- Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
+  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`.
+
+## Input
+
+- **Real keyboard works** — KNI maps `event.keyCode` directly, so Enter/arrows/WASD/Esc are correct
+  for users. **Synthetic JS `KeyboardEvent`s do NOT work** (KNI's WASM interop throws on the faked
+  `keyCode` and can leave a key stuck). When driving the browser, use real OS keys
+  (claude-in-chrome `computer` `key`), click-to-focus the canvas first — or better:
+- **For automated/headless input use `eaPress(...)`.** `InputHandler` polls once per tick, so a
+  scripted keydown+keyup between ticks is dropped. `eaPress('Enter')` (tap) / `eaPress('Left', 30)`
+  (hold ~30 ticks) injects a per-key tick counter drained inside the tick. Keys:
+  Up/Down/Left/Right/Enter/Esc/Mouse1/Generic_Start (+ w/a/s/d, start/select→Enter, back→Esc,
+  fire→Mouse1). Rapid repeats of the SAME key collapse — space distinct taps by a tick.
+  **Touch/mobile** uses the same seam: `eaHold(key, down)` → `DebugInput.Hold` holds until
+  released; both drained by `DebugInput.Consume`. Driving fullscreen via automation fails
+  (synthetic clicks carry no `navigator.userActivation`) — harness limit, not a bug.
+- **Menus are mouse-selectable + clickable.** Each `DrawMenu` records the design-space box of every
+  entry it draws via `MenuSub1.RecordEntryHit(index, centre, w, h)` (locked/undrawn entries
+  skipped); `MenuSub1.HandleMouse()` (gated on the `normal` state) maps the cursor to hover-select
+  and `MyKeys.Mouse1` to select+invoke, either resetting the attract idle timeout. **A new
+  `DrawMenu` override must call `RecordEntryHit` per entry or its menu won't be clickable.** The
+  level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: the
+  `GammaMenu`/`ScreenResizeMenu` sliders and `PlayerSettingsMenu`.
+- **Aiming cursor / reticle:** KNI never applies `IsMouseVisible` to the DOM, so C# owns
+  `canvas.style.cursor` via `Compat/CursorInterop` → `eaCursor.set(mode)`: `menu` (arrow),
+  `hidden` (during the level-start intro sprite), `reticle` (the reticle IS the OS cursor via
+  `cursor:url(reticle/<px>.png)` — zero-lag; `HWMouse=true` opts back to the arrow). Driven off
+  `MousePointer.Visible`. The reticle **size-tracks the window via a ladder of cursor images**
+  (`wwwroot/reticle/<px>.png`, 24..96 step 8, built by `tools/cursor/build_cursor.py`):
+  `MousePointer.ChooseCursorPx()` picks the rung nearest `ReticleDesignPx (30) * windowPerDesign`,
+  re-picked every tick so a resize swaps rungs. **Invariant: every image's bars run edge to edge
+  (alpha bbox == full canvas)** — `CssHandoffScale()` sizes the intro sprite from the SAME
+  `ChooseCursorPx`, which is what makes the sprite→cursor handoff never pop. Tune with
+  `?reticlesize=<designpx>`, bake into `MousePointer.DefaultReticleDesignPx`. Verify OFFLINE (an OS
+  cursor never appears in a canvas screenshot): check PNG bboxes + simulate
+  `ChooseCursorPx`/`CssHandoffScale` across window sizes.
+- **Fullscreen:** DOM Fullscreen API via `Compat/FullscreenInterop.cs` → `window.eaFullscreen`
+  (KNI's `IsFullScreen` is a no-op on BlazorGL); the in-menu option routes through it. The
+  browser-reserved fullscreen-exit Esc also reaches KNI, so `fullscreenchange`→exit calls
+  `eaSuppressEsc` → `DebugInput.SuppressEsc`, masking the raw Esc briefly. **F11** is a dedicated
+  toggle. The corner fullscreen button + touch overlay (D-pad/FIRE/BACK, touch devices only) live in
+  `index.html` **outside `#app`** so they survive Blazor's mount — any new HUD/overlay button
+  follows the same pattern.
+
+## Rendering / text
+
+- **Alpha is STRAIGHT everywhere** (see root CLAUDE.md: `AlphaBlend` → `BlendState.NonPremultiplied`,
+  never `BlendState.AlphaBlend`). Two deliberate premultiplied-INTERMEDIATE exceptions, both
+  "flatten translucent stacks into an RT, composite once": the text flatten and the group flatten
+  below. Straight tints like `new Color(1,1,1,a)` are correct as written.
+- **The custom font atlas is SUPERSAMPLED (3×) — never route `menufont` through stock
+  `SpriteBatch.DrawString`.** `Cropping`/kerning/`LineSpacing` stay design-size (so raw
+  `font.MeasureString` in ~40 layout sites is unchanged) while `BoundsInTexture` is 3×;
+  `SpriteBatchWrapper.DrawStringScaled` (all four `DrawString` overloads) draws each glyph at
+  `Cropping.Size / BoundsInTexture.Size`. Reverting to stock renders glyphs 3× too big. Builder +
+  per-glyph overrides: `tools/font/` (see tools/CLAUDE.md).
+- **Score / floating-text = ONE flattened sprite (`SpriteBatchWrapper.DrawShadowString`).** Two
+  translucent shadow+text `DrawString`s bleed the shadow through the glyphs; `DrawShadowString`
+  rasterises shadow-then-text at full opacity into the shared grow-only `metalRT`
+  (**premultiplied**: `PremultiplyOver` rasterise → One/InvSrcAlpha composite — stacking two
+  straight layers hard-edges the AA) and composites once at the target alpha. Don't revert
+  `ScoreVisualiser.DrawStr` or the `FloatingText` "pop" type to two `DrawString`s. Chrome sheen
+  (`metal.fx`) is ON for the score by default (`?metalscore=0` A/Bs plain; menus keep chrome
+  regardless). **The score's glint sweep is EVENT-DRIVEN**: each player's score sweeps once when
+  its leading digit rolls over (`ScoreInfo.UpdateGlint`; skips reset-to-0 and checkpoint restores);
+  combo + "Press Start" prompts keep static chrome (`ParkedGlint`); menus keep the periodic
+  `MetalTime` marquee. Sweep length = `SpriteBatchWrapper.MetalSweepDuration`.
+- **Menu chrome rows are CACHED — don't revert to per-frame `DrawMetalString`.**
+  `MenuSub1.DrawMenu`/`MenuSubWithSkull.DrawRows` use `DrawMetalStringCached` (plain-text raster is
+  time-independent, content-addressed on `(text,tint)`; only the metal.fx composite runs per frame
+  so the glint still sweeps). `DrawShadowStringCached` is the slot-keyed variant (score HUD owns
+  slots 0..15; the tutorial banner uses 100). The skull frame FILL is likewise one cached mask
+  texture (`EnsureFillMask`) drawn as one tinted quad per row.
+- **Group-flatten for translucent multi-part sprites** (`SpriteBatchWrapper.BeginGroupFlatten`/
+  `EndGroupFlatten`): overlapping straight-alpha sprites at partial alpha double-brighten; bracket
+  their draws to flatten opaque into a shared RT (premultiplied capture), composite once at group
+  alpha. Used by the background-fog `FlyingSpider` (body+wings fade as one silhouette).
+- **Verify flattened-text changes with `?textshot`** (`Compat/TextShowcaseScene.cs` — frozen
+  score/combo/pop rows, plain + chrome, live animation phases), not live screenshots.
+
+## Feel / post FX
+
+- **Juice (`Compat/Juice.cs`): screen shake + hit-stop.** Shake is the trauma model
+  (`Juice.AddTrauma` from explosions/blasts/player death; strength = trauma², decays ~0.7s, max
+  7px/1° — deliberately halved from the first pass, full shake impacted gameplay). Applied at the
+  PRESENT BLIT only — no gameplay coordinate, collision, or mouse mapping is touched. An explosion
+  series can opt out per instance (`Explosion.Setup(..., noShake: true)` — the L3 BattleSkull death
+  does, so only its finale shakes). Hit-stop folds into `Game1.Update`'s time scale as
+  `Juice.TimeScale` while REAL time keeps ticking Juice/shake/input; the per-kill micro-stop +
+  boss-kill stop are **OFF by default** (read as stutter; `?hitstop=1` re-enables); player death
+  keeps its 180ms stop. GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs before
+  the time scale) or it freezes and never thaws. Draw-time cosmetics keep animating during a freeze
+  by design. `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
+- **Slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up slowmo adds an accumulation-
+  buffer motion blur on the composited+bloomed `sceneTarget` before the gamma blit:
+  `trail = trail*decay + scene*(1-decay)`, mixed back with an eased `slowmoTrailMix` (~0.25s); the
+  first slowmo frame seeds the trail (no dark flash). Static pixels converge to the input — no
+  blow-out. Defaults decay 0.88 / strength 0.8, ON; `?slowmotrail=0` / `?slowmotraildecay=` /
+  `?slowmotrailstrength=`; QA with console `eaSlowmo()` (no-op unless a ship is alive). **A new
+  full-frame post-process goes in this same spot in `Draw`** (operate on `sceneTarget`, leave RT on
+  it) and uses the raw `spriteBatch` (identity), not `spriteBatchWrapper`.
+- **Tutorial/Classic "holo-sim" filter (`Compat/HoloSim.cs` + `tools/shaders/src/holosim.fx`).**
+  Fullscreen scanlines + cyan edge cast + phosphor-green pull (breathing on a slow pulse) + hard
+  "channel surf" glitch spikes on Activating/Terminating messages and `Background.Jump()` hiccups.
+  Applied in `Game1.ApplyHoloSim` right after `ApplySlowmoTrail` (ping-pongs `sceneTarget` →
+  `holoRT` → back — a SpriteBatch effect pass can't read its own target). **Lifecycle is
+  POKE-driven:** `TutorialLevel.Update` / `ClassicAliens.Update` call `HoloSim.Poke()` every tick;
+  the mix fades out when poking stops, so any exit path turns it off with no plumbing. Shipped
+  values are dialed way down (`DefaultBurstScale` 0.1, ~10 hiccups/min). Flags: `?holofilter=` (0 =
+  whole filter off) / `?holoburst=` / `?hologreen=` / `?hologreenpulse=` / `?holostaticrate=`;
+  `eaHolo` panel. The tutorial's pacing: text + action land on the same beat (non-halting
+  `message(..., halting:false)` over a halting spawner), powerup lessons advance-on-pickup
+  (`WaitForPickupEvent`, timeout ceiling so a passive player still progresses — a full unattended
+  run finishes ~2min). Layout rule: two `TutorialMessage` banners share one spot, so overlap is
+  only ever text-with-ACTION — `LinkWith` each message to its gate.
+
+## Sprite harness (details)
+
+`?harness=<Obj>` boots one object frozen on a space background, drawn by its own `Draw()` through
+the real pipeline (see root CLAUDE.md for when to use it). Code: `Compat/HarnessScene.cs` +
+`Compat/HarnessRegistry.cs` (name→factory; **add an object in ONE line** — call its `New*`+`Setup`).
+Human picker `wwwroot/harness.html` — keep its list in sync with the registry. Companion flags:
+`?frame=` `?play` `?bg=space|spaceclassic|holodeck|mars|base|basedark` `?pos=x,y` `?objscale=`
+(alias `?size`) `?rot=` `?fps=` (with `?play`; set low to watch the interpolation shader tween).
+Parked objects with CIRCULAR hitboxes get their real collision ring drawn (green) — sprite-vs-hitbox
+size mismatches (the supersample bug class: a rescaled sheet whose hand-rolled radius forgot
+`DrawScale`) are visible by eye; box hitboxes show no ring. Caveat: objects whose Draw depends on
+Update-reached state show their spawned/idle pose — bosses are best-effort. Special modes:
+`?harness=eyeattract` forces the JunkBoss attract sheet (`HarnessForceAttract`; try `&play&fps=2` to
+prove the `interpolate.fx` frame-interpolation shader tweens); `?harness=blast` loops the blast
+lifecycle (`?blastloop=` sweep speed);
+`?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
+ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
+plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase (bullets).
+`?castbrain` boots the end-credits Cast screen (its own mode).
+
+## Feature notes
+
+- **Bomb blast (`Blast.cs`):** lifecycle math is `ApplyLifecycle(p)` (shared by live `Update` and
+  the harness scrubber). Fade = `SmoothStep(1,0,p)`; collision tied to it (`Collides = fade >=
+  ActiveAlpha` 0.5); hitbox radius uses `DrawScale` (supersample divided out) at
+  `DefaultHitRadiusFactor` 0.8-of-visible. `?blastactive=`/`?blasthit=` override live;
+  `?harness=blast` overlays the ring (green = damaging) + readout.
+- **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
+  (baked `DefaultSizeFactor` 0.85) scales sprite AND box hitbox together; `?flyspiderscale=`.
+- **Laser FX (`Quad.cs` beam + `LazerGenerator` chargeup):** chargeup is a windup animation
+  (per-particle scale ramps 1→`DefaultPeakChargeScale` 4) + a layered "energy well" orb (stacked
+  additive `lazerglow`: blue halo → cyan-white → white-hot core — the same recipe the ship
+  connector reuses); callers pass the real windup via `SetWindup(seconds, loop)`. Beam ends are
+  domed with glow+core caps (`DefaultCapScale` 1.0). Tendrils spawn stochastically
+  (`DefaultArcRate` 2/s on `Quad`'s private FX RNG — can't desync co-op), live 0.25..0.5s, drift
+  along the beam clamped to its span (`DefaultTendrilSpeed` 30). Tune with **`?lazershot`**
+  (`Compat/LazerShowcaseScene.cs` + the `eaLazer` panel); flags `?lazerchargescale= ?lazercapscale=
+  ?lazerarcs= ?lazertendrilspeed= ?lazerarclife=`. Straight-alpha additive tints — do NOT
+  premultiply.
+- **Ship-connector docking lightning (`ShipConnector.cs`):** breathing base sprite + fractal
+  lightning bolts + crackle tendrils + a churning energy-well orb per ship (decorrelated phases).
+  Self-contained reimplementation of the Quad techniques (own FX RNG, static scratch buffers). FX
+  advance on RAW Draw time (`fxTime += dt` in `Draw`) so they crackle through hit-stop — nothing in
+  `Update`. Flags `?connectorbolts= ?connectorarcs= ?connectorjitter= ?connectorpulse=
+  ?connectorglow=`; `eaConnector` panel; **verify with `?harness=connector`** (TeamChallenge
+  auto-pauses on focus loss, a moving target the harness sidesteps).
+- **BattleSkull colorize tuner (`Compat/HarnessColorize.cs`):** `BattleSkull.Draw` hue-remaps the
+  alienboss sprite via `colorizeEffect.RangeTarget = (-10, 10, HitPointsNormalized*100)`; the
+  harness overrides band+target from `?huestart= ?hueend= ?huetarget= ?huecycle ?hueloop=` (only
+  while `?harness=battleskull` is up — play is byte-identical) + the `eaHue` live panel. Settled
+  values get written back into `BattleSkull.Draw`'s hard-coded `Vector3`.
+- **Mars jumping spider (`Spider.cs`) — jump is ANIMATION-DRIVEN and the dialing is done/baked.**
+  A grounded spider launches when its unwrapped frame accumulator (`animAcc`) crosses the jump
+  beat; a one-time "count back" presets the entry frame from the real scroll so the beat coincides
+  with a (random) launch X: `entryFrame = jumpBeatFrame - fps*(dist/scroll)`. Baked:
+  `DefaultJumpFrame` 5, `LandFrame` 42, `GroundY` 485; shadow (37,4)×0.95 + air offset (14,1) live
+  as `DebugFlags` defaults (the air offset connects the airborne `spiderjump` sheet's differing
+  anchor to the ground frames). `?spider*` knobs (`?spiderjumpframe= ?spiderlandframe= ?spiderjumpx=
+  ?spidershadowx/y/scale= ?spiderloop= ?spiderphase=`) apply to live play AND the
+  `?harness=spiderjump` viz (`Spider.HarnessApplyPhase` = the deterministic cycle sim;
+  `?spiderphase=` freezes for a screenshot); `eaSpider` panel; watch live with
+  `?level=Level2&spiders&invuln`. The harness shadow goes through the real `Floor.ShadowScalars` /
+  `DrawShadowScalars` so the preview is byte-identical to the in-game cast.
+- **Landed Mars-UFO placement offsets (`Compat/LandedOffsets.cs` + `Content/data/landed_offsets.json`
+  + author tool `wwwroot/landed-editor.html`):** per parked-still sprite: `landed` (draw nudge),
+  `takeoff` (one-time Position shift at lift-off), `shadow`/`shadowSize` (via the generic
+  `AlienDrawableGameComponent.ShadowOffset`/`ShadowSize` fields that `Floor.CollidesWith` reads —
+  one shadow, no double-draw). Identity/missing = original behaviour. Consumers: `UFO`
+  (`SetStationary`/`Draw`/lift-off/`Setup` reset) and `StationaryBoss`. The JSON is read late via
+  `TitleContainer`, so when iterating in-game bust the cache
+  (`fetch('Content/data/landed_offsets.json',{cache:'reload'})`). Re-export from the tool; don't
+  hand-edit.
+- **Hitbox overlay (`Compat/HitboxOverlay.cs`):** `?hitboxes` or console `eaHitboxes()` draws every
+  live collidable's shape over the game — box/multibox cyan, circle green, line orange; active
+  bright, inactive dim. Hooked in `Game1.DrawInner` after game+bloom (un-bloomed, on top). Built to
+  see draw-offset-vs-hitbox mismatches (e.g. the landed UFOs). Out of `DebugFlags.Active`.
+- **SpiderBoss "helper mothership" (`SpiderHelperMothership.cs`):** the spider boss is only hurt by
+  a `Lazer`, so after a difficulty-scaled un-damaged idle (counted from first landing;
+  `SpiderBoss.EffectiveHelperIdleMs`, Easy ~6s → Inzane ~37s) a mothership eases in top-centre
+  (quad ease-out to rest; leave = quad ease-in; speed difficulty-scaled), winds up a
+  `LazerGenerator` swarm (`SpiderHelperWindupSeconds` 2.5), fires a `Lazer`, leaves. On Easy/Medium
+  it AIMS at a standing boss (`SpiderBoss.GetAimPoint()`); flying or Hard+ = straight down. It's
+  "fake killable" (enormous HP, blink + `fakeHits` redden); `Bullet.cs` lists it so bullets stop on
+  it but do NOT sustain combo (immortal = combo farm). Trigger lives in `SpiderBoss.Update`
+  (`helpTimer`, one helper at a time). Flags: `?spiderhelperidle= ?spiderhelperhovery=
+  ?spiderhelperspeed= ?spiderhelperwindup= ?spiderhelperenterpower= ?spiderhelperfire=
+  ?spiderhelperlead=`; `?harness=spiderhelper` (`?pos=400,10` for the in-game framing); fast boot
+  `?level=Level2&spiderboss&invuln&spiderhelperidle=3`.
+  **Perfectly-vertical lazers are SAFE — don't reintroduce a tilt.** The old
+  `FillCollisionMatrixLine` DDA hung 100%-CPU on exactly-vertical lines (per-step X delta below the
+  float32 ULP so the exit condition never advanced); every DDA loop is now bounded by a
+  `maxLineSteps` cap, so the helper fires exactly `PiOver2` and no near-axis-aligned lazer can hang
+  the game.
+- **Level-3 walls are real 3D towers (`Wall.DrawTowerShafts3D`; design docs
+  `plans/walls-3d-towers.md` + `plans/spike-wall3d.md`).** Each block extrudes downward to the
+  ground; gameplay plane + `CollisionLevelMap` stay the flat tops (byte-identical). Key invariants:
+  - Base projection factor **0.66 is NOT a taste knob** — it equals the alien-base ground layer's
+    `scrollspeedmodifier`, which is what glues tower bases to the scrolling floor. Change it and
+    the bases slide.
+  - Side faces are genuine 3D geometry in ONE batched `DrawUserIndexedPrimitives` via a shared
+    `BasicEffect` (`SpriteBatchWrapper.DrawGeometry3D`) — BlazorGL's cost is per-CALL, not
+    per-vertex (~0.4 ms/tick over flat). Real 3D (not pre-projected quads) so the GPU perspective
+    divide gives correct UVs; the camera reproduces `Wall.Project()` exactly
+    (`tools/walls/preview_wall3d.py` asserts it).
+  - **No depth buffer, provably:** occlusion about the VP is acyclic for equal-height shafts, so a
+    CPU painter's sort by VP distance is exact — certified by `tools/walls/verify_tower_order.py`
+    over the real grids (it also rejects two plausible wrong sort keys). Tops draw last.
+  - Face emission: only outer edges (`isfree`) AND eye-facing. **UV orientation kills seams on both
+    axes** — along-edge must follow the axis the edge runs along, down-the-shaft must start at the
+    cell edge the wall hangs from (reverses west vs east). NO half-texel inset (adjacent atlas
+    cells are the correct continuation).
+  - Lifetime: `Wall.DeathY` defers unload past the bottom edge (a base leads/trails its cap by
+    ~154px, so dying at y>600 popped visible towers — this also delays the level's next event
+    ~0.6s, intended); `Wall.EntryLead` spawns higher so towers enter base-first (bottom-row grids
+    used to pop in). Both collapse to the flat values with `?walltowers=0`.
+  - Grid files load via `TitleContainer.OpenStream` (`Wall.OpenLevelGrid`) — **never
+    `new StreamReader(path)`** (WASM FS has no wwwroot content; it throws on web).
+  - Haze = real `BasicEffect` distance fog toward the measured floor colour (baked `?wallfog` 0.55,
+    RGB(46,125,201)); per-face shading = flat vertex colour (`?wallfacelight` 0.35,
+    `?wallfaceangle` 140). The old sprite-slice path's `FaceShadeEffect`/`756-v1-side.png`/
+    `build_wall_side.py` are deleted — preserved in commit `906f344` if ever wanted. Fog wisps
+    (additive `2331-v5`) tile by position, never a drifting source rect (null samplerState =
+    LinearClamp — an out-of-bounds window clamps).
+  - Flags: `?walltowers=0` (exact flat look) · `?walldepth= ?wallfog= ?wallfogcolor= ?wallsidedark=
+    ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps= ?wallwispspeed=` ·
+    fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
+    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
+    COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check
+    `?hitboxes`).
+  - **Verify drawing OFFLINE** (`tools/walls/preview_wall3d.py` contact sheet) — the wall scrolls
+    and a backgrounded tab's canvas is black. **Measure frame cost with the tab FOCUSED** (Chrome
+    throttles background tabs; FPS alone is vsync-capped). `eaWallPerf(true)` + the panel's stats
+    readout give fps / frame ms / tower-pass ms.
+  - The wall texture `GFX/Base/756-v1` is sampled as an 8×8 wrapping grid — it must tile seamlessly
+    on all four edges and keep dims a multiple of 8; upscaling flow lives in `tools/walls/`
+    (see tools/CLAUDE.md). Fixed in passing: variation 2 (OwnLevel) now loads the real
+    `Content/levels/level3.txt` instead of silently falling back to a hard-coded grid.
+- **BrainBoss animated overlay patches (`BrainBossOverlays.cs` + `Content/data/brainoverlays.json`):**
+  selected regions of the huge static boss sprite are AI-animated offline (`tools/brainanim/`, see
+  tools/CLAUDE.md) and composited back as feathered sprite-sheet patches. The game reads ONLY the
+  manifest (`TitleContainer`+`JsonDocument`; missing/bad → static boss). `Draw` (after `base.Draw`)
+  pins each patch to its brain-texel crop so it tracks Position/DrawScale/pulse, tints by the
+  boss's live `color` (reddens on low HP; the death fade is an alpha fade of `color`, so overlays
+  dissolve in lockstep), ping-pongs, and rides the frame-interpolation shader unless
+  `interpolate:false` (the eye reads better stepped). **Invariant: never animate the top of the
+  sprite** — texture rows < ~373 are above the screen at the boss's draw position; every region box
+  has `ty0 >= ~400`. A region with `triggerAvgSeconds` rests on frame 0 (== the untouched crop) and
+  plays one cycle on a `RandomFromAverage` roll (the eye uses 15s); omit for a continuous loop
+  (pods). The roll consumes the shared RNG at frame rate — fine now, switch to a private FX RNG if
+  lockstep ever matters. Verify: `tools/brainanim/preview_ingame.py` (offline contact sheet + gif)
+  or `?harness=brainboss`. Shipped overlays: `eye_reveal`, `pods_flicker` (`lens_right` dropped).
+- **Animated Braineroid (`Braineroid.cs`):** 20-frame 5×4 sheet `brainanimated` (built by
+  `tools/textures/build_brain_sheet.py`) drawn through the interpolation shader
+  (`interpolationOptions = always`; fps 0.4 → ~50s loop reads smooth) + an additive blue glow
+  behind it (raw format — DXT would band; the sheet itself is DXT). Registered in
+  `AlienDrawableGameComponent.DesignFrameWidth` at 100 (on-screen size = 100×scale regardless of
+  cell px). GOTCHAS: the off-screen wrap margin must use `texture.Width/columns * DrawScale` (ONE
+  frame, not the whole row — else brains drift far off and the Braineroids minigame never clears);
+  `Initialize` sets `pulsate = 1f` because the harness freezes Update (0 would draw scale-0
+  invisible). Each instance randomizes start frame + pulse phases.
+  The end-credits Cast "Brain Spawn" (`CastDisplayer.braineroid`) draws the same sheet by hand (no
+  interpolation, `DefaultBrainFps` 10, `DefaultBrainScale` 1.7) + glow via `DrawBrainGlow`; tune
+  via `?castbrain&castbrainscale=&castbrainfps=`, bake into the `DefaultBrain*` consts.
+- **Earth fly-by (Level 1):** the hero earth texture is a vertical strip cropped to what shows —
+  **invariant: `Background.QueueEarth`/`QueueEarthSim` set `doodadscrollspeed.X = 0`; don't
+  re-enable X drift or the cut sides show.** `WaitForDoodadEvent` (polls `Background.DoodadActive`)
+  gates the asteroid belt until the earth leaves. What sells the fly-by is freezing the STARS, not
+  speeding the earth: `Background.DoodadStarSlowdownFactor()` pulls `scrollspeedmodifier` to 0.082
+  while it crosses (wall-clock ramps ~1.2s in / ~1.6s out). The asteroid BELT gets the same depth
+  cue via a second factor (`BeltStarSlowdownFactor` 0.37, `EngageBeltSlowdown`/`Disengage...` from
+  `Level1.spawner_OnFinished` / `AsteroidSpawner.OnFinished`; Demo1 wired identically). The two
+  factors combine by `MathHelper.Min`, not multiplication (Demo1 can overlap them).
+  `Background.Reset()` clears belt state on level entry; don't add a checkpoint inside the belt.
+  The `AsteroidChase`/`SpaceDodge` warp scroll is deliberately out of scope.
+- **Andromeda fly-by:** straight-alpha (NOT additive — the enum value 1 is AlphaBlend);
+  `QueueAndromeda` pins the footprint via `doodadscale = AndromedaDesignWidth(840)/doodad.Width`,
+  so higher-res art drops in with no code change (builder: `tools/nebula/`).
+- **Mars far-hills:** three parallax layers `marshills1/2/3` with own `scrollspeedmodifier`s
+  (0.33/0.53/0.85 — `hillScrolls` in `Background.SetMars`); textures are procedural
+  (`tools/mars/build_marshills.py` + live editor). Only ~design y 405..450 is ever visible above
+  the `marsloop` ground.
+- **Trailers = an embedded YouTube overlay, NOT ported video.** The old `TrailerScene`
+  (`Content.Load<Video>`) is DEAD — constructed but never added; don't re-wire it or reintroduce
+  any `VFX/*` load (VC-1 `.wmv` can't play in a browser). Options → Trailers calls
+  `Compat/TrailerInterop.Play(youtubeId)` → `window.eaTrailer(id)` (outside `#app`):
+  youtube-nocookie iframe + Back button, pauses/resumes `eaMusic` (AudioContext suspend/resume),
+  refocuses the canvas on close. Ids live in `MenuScene.trailerMenu_*Selected`.
+- **Splash channel-swap SFX:** the "I made this!" splash channel-flips the old meme into the
+  revenged image (`channelflip.fx`); `SplashScene.Update` fires `PlayCue("channelswap")` once when
+  the glitch starts (gated on `variantPicked`, one-shot via `flipSoundPlayed`). Autoplay caveat: the
+  splash runs before any user gesture, so on a cold first load the burst may be silently dropped
+  (suspended AudioContext) — **don't add a click-to-start gate to "fix" it**; the project boots
+  straight through by design. The cue's owner is `tools/audio/pick_channelswap.py` (see
+  tools/CLAUDE.md).
+
+### Webcam challenge "I Made This!" (`Levels.WebcamAliens`)
+
+The player's segmented camera image is the ship. **JS owns everything camera** (`wwwroot/webcam.js`:
+setup dialog, getUserMedia, the mirrored person overlay canvas outside `#app`); **C# owns everything
+gameplay** (`Compat/WebcamInterop.cs` + `WebcamLevel.cs`/`WebcamUfo.cs`/`WebcamPlasma.cs`/
+`WebcamMothership.cs`/`WebcamMine.cs`/`WebcamZap.cs`). Collision surface = a 40×30 person-mask
+occupancy grid in design space pushed ~30Hz from JS; the scene hit-tests against it (`HitCircle`)
+and aims at its `Centroid`. Headless QA: fake a player via
+`DotNet.invokeMethod('EvilAliensWeb','webcamMask', b64Grid, coverage)`.
+
+- **GOTCHA — MediaPipe MUST stay in the worker (`webcam-worker.js`):** its Emscripten loader
+  assigns the global `Module`, which Blazor's Mono runtime also uses — importing tasks-vision on
+  the main thread kills the .NET runtime ("_malloc is not a function", reproduced). The ~10 MB
+  runtime+model under `wwwroot/lib/mediapipe/` lazy-loads when the level starts; failure → a
+  fixed-oval "simple mode". Vendored tasks-vision is 0.10.14 (0.10.35 exists; mechanical bump is a
+  follow-up).
+- **The mask is REFINED in the worker — don't strip it:** adaptive temporal EMA (delta-weighted) +
+  a band-limited joint bilateral filter on edge pixels guided by the camera RGB (the Meet-style
+  pipeline); both the visual alpha AND the occupancy grid come from the refined confidence. Knobs
+  are consts at the top of `webcam-worker.js`. The overlay canvas backing store is device-pixel
+  sized (capped 1280 wide).
+- **A `Levels` enum member must only ever be APPENDED** (XmlSerializer keys on enum names);
+  `Achievements.checkData` backfills missing level keys instead of wiping progress.
+- **Per-difficulty tuning:** `WebcamLevel.Tunings[]` (Easy..Inzane) holds hearts, kills-to-win, max
+  saucers, saucer/plasma speed ×, and ABSOLUTE cadence ms (`SpawnIntervalMs`, `ArmDelayMs` = the
+  fire-rate lever since each saucer fires once per arm cycle, `ChargeTimeMs`), ±15% jittered
+  (`CadenceJitter`) — no `DifficultyModifier` divisor, no within-run ramp. Plus `MaxMines` /
+  `MineSpawnMs` / `MineLifeMs` / `MothershipMs`. Music via `SoundManager.ClassicForDifficulty()`.
+  Live-tune with **`?wctune`** (the `eaWcTune` stepper panel — overrides are ABSOLUTE final values;
+  "Reset to tier defaults" re-seeds from the resolved row; the orange readout prints the
+  bake-ready `Tunings[]` row) or the URL flags `?wcdiff= ?wchearts= ?wckills= ?wcsaucers=
+  ?wcsaucerspeed= ?wcplasmaspeed= ?wcspawn= ?wcarm= ?wccharge= ?wcminemax= ?wcminespawn=
+  ?wcminelife= ?wcmothership=`.
+- **Saucer behaviour:** plant-and-shoot (full stop → blink-charge → fire → accelerate away) and
+  PERSISTENT (retreat ~50px past an edge, `ReturnToField()` off-screen after `ReturnDelayMs` 900 /
+  `?wcreturndelay=`; only a player swat despawns). On-screen guards: wander containment is
+  authoritative (avoidance steer first, edge-bounce last, `OffScreen(0)` watchdog); arming only
+  starts ≥ `ArmInset` 60px inside every edge (a shot can never originate off-screen); fly-around
+  avoidance orbits the player's mask via `WebcamInterop.AvoidanceVector` (`?wcavoid=`). Plasma aims
+  at the mask centroid, locked at fire; on reaching the player it pops into a `WebcamZap` electric
+  zap (not an explosion). Player-hit plays `hit_boss`. Hearts are top-centre.
+- **Hazards (both `Collides=false`, mask-hit-tested, spawn only while `PlayerVisible`):**
+  `WebcamMothership` slides in, winds up a `LazerGenerator` swarm, fires a beam that BISECTS the
+  screen (a `Quad` drawn directly; fixed tier-independent sweep), holds, slides out — cannot be
+  harmed. Orientations: VerticalDown (parks over centre/left-third/right-third, telegraphing the
+  beam) or HorizontalFromLeft/Right (~33% down); `PickBisectOrientation` ~60/40. The mothershipB
+  art is re-centred via `SpriteArtOffset` so the beam lines up with the visual hull. **The whole
+  choreography is a pure function of elapsed ms (`WebcamMothership.PoseAt`)** — verify movement as
+  DATA via `tools/sim/webcam_mothership_sim.py`; `?wcmothershipfreeze=<ms>` parks it for an
+  appearance screenshot; `?wcmothershipdir=` forces orientation. The beam sweeps mines (mercy pop,
+  `DestroyByLaser`) and saucers (full kill credit via the shared `KillSaucer`).
+  `WebcamMine` reuses the DeathStar sprite, wanders exactly like `WebcamUfo` (flows AROUND the
+  player — no homing); touching it costs a life + a beefy blue burst; lives `MineLifeMs` then
+  flies off and despawns.
+- **Bad-collision LEEWAY:** hazards that HURT (plasma/beam/mine) only land after the mask steadily
+  overlaps for `HitLeewayMs` ~100 (`?wchitleeway=`) — per-hazard `ContactMs` accumulators in the
+  three bad tests, reset the instant contact breaks (framerate-independent). **Killing saucers is
+  deliberately NOT leewayed** (the player wants those hits). Verify the timing as data, not
+  screenshots.
+- **Level-select screenshots** now cover ALL carousel challenges (not just Level1/2/3). Capture on
+  level EXIT (`GameScene.checkScreenShot` → `takeScreenShot` → `ScreenshotSaver.SaveScreenShot`
+  writes `<Level>.dat`); `SubMenuLevelChoice` shows it, else the bundled art. **WebcamAliens is
+  opt-in** (`Settings.WebcamScreenshot`, default false — the shot contains the camera image; an
+  Options toggle). The webcam shot composites the JS overlay back in: `GameScene` fires
+  `OnScreenshotResolved` at the snapshot instant → `ScreenshotSaver.CaptureWebcamOverlay` pulls the
+  overlay RGBA from JS (`eaWebcam.overlayPixels`) into a `pendingOverlay` drawn over the frame
+  (NonPremultiplied). The sparse webcam level never hits the >30-entity trigger, so `WebcamLevel`
+  calls `GameScene.ForceSnapshot()` on the first kill.
+
+### Audio runtime (`SoundManager` / `eaMusic`)
+
+- SFX/speech play on KNI `SoundEffect` (`SoundManager.Play()` returns a `SoundEffectInstance`);
+  **music** is a WebAudio layer (`index.html` `eaMusic` via `Compat/MusicInterop.cs`) for seamless
+  loop points, with the authored 2.5s crossfade (`MUSIC_FADE`).
+- **XACT mix metadata is faithfully applied:** per-cue volume from the authored byte via the
+  MonoGame logistic `SoundManager.VolToLinear` (byte 90 ≈ −12 dB; `_cfg` lists only deviating
+  cues); no cross-bus trims (category gains are unity); instance limits are per-CATEGORY (SFX = 32
+  concurrent FailToPlay, Speech unlimited, Music one-at-a-time); a subtle 5%-vol/~0.35-semi
+  humanize is a deliberate embellishment (the bank authored none); the one RPC preset is the
+  BrainBoss/Level3 music-rate sweep — `MusicInterop.SetRate` applies `2^((Pitch-50)/50)`. No
+  DSP/reverb was ever authored.
+- **`classic` ships in two difficulty-gated cuts:** `SoundManager.ClassicForDifficulty()` picks the
+  Japanese-vocal `Songs.Classic` on Hard+ (an earned reward), else `Songs.ClassicClean`. The
+  difficulty-selected challenges call the helper; the Tutorial forces clean (it locks difficulty
+  for gameplay); TeamChallenge locks the menu-chosen difficulty and routes through the helper.
+- **`Songs.LastSignal`** (`lastsignal.ogg`) is the end-of-level text-crawl theme in `CreditsScene`
+  (played at rate 1.0). It replaced the bank's `sjaakslow` cue — both that cue and its ogg are
+  gone; **don't reintroduce them.**
+- Pipelines (bank cracking, loop points, external cues): `tools/audio/` — see tools/CLAUDE.md.

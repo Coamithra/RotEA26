@@ -740,6 +740,58 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 	}
 
+	// ---- Online co-op replication seams (Compat/Net, card 11.2) --------------------------
+	// Client puppets run with Enabled=false (gameplay Update never ticks); the NetPuppet
+	// driver moves them through these instead. Host snapshot encode reads them.
+
+	internal Vector2 NetSpeedVector
+	{
+		get
+		{
+			return SpeedVector;
+		}
+		set
+		{
+			SpeedVector = value;
+		}
+	}
+
+	internal float NetPointValue => PointValue;
+
+	// Advance the sheet animation exactly like Update does (same wrap math), on real dt.
+	internal void NetAdvanceFrame(float dtSeconds)
+	{
+		float span = ActiveLastFrame - FirstFrame;
+		if (span <= 0f)
+		{
+			span = 1f;
+		}
+		curframe += fps * dtSeconds;
+		curframe = FirstFrame + ((curframe - FirstFrame) % span + span) % span;
+	}
+
+	// Snap the animation to a replicated frame, wrapped into the active range (the host may
+	// run a different FirstFrame/LastFrame window mid-transition; never index off the sheet).
+	internal void NetSetFrame(float frame)
+	{
+		float span = ActiveLastFrame - FirstFrame;
+		if (span <= 0f)
+		{
+			span = 1f;
+		}
+		curframe = FirstFrame + ((frame - FirstFrame) % span + span) % span;
+	}
+
+	// A frozen puppet's timers still need to run: KillableAlien's hit-blink decay, cosmetic
+	// pulse timers, etc. all live in `timers` and are only ever ticked from Update.
+	internal void NetTickTimers(GameTime gameTime)
+	{
+		foreach (Timer timer in timers)
+		{
+			timer.Update(gameTime);
+		}
+	}
+
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)
 	{
 	}

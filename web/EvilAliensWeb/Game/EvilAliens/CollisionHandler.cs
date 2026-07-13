@@ -75,6 +75,18 @@ public class CollisionHandler
 		}
 	}
 
+	// Online co-op (card 11.2): a client-side NetPuppet is deliberately Enabled=false (its
+	// gameplay Update must never run) but must stay hit-testable by the local player's own
+	// bullets -- that's what client-owned kill claims ARE. The override only answers true
+	// while the puppet driver itself is enabled, so a paused stack (ComponentBin.Push)
+	// still freezes every collision exactly like single-player. A plain boot never has
+	// puppets, so this is byte-identical behaviour outside a net session.
+	private static bool IsActive(ICollidable collidable)
+	{
+		GameComponent gc = (GameComponent)collidable;
+		return gc.Enabled || EvilAliensWeb.Compat.Net.NetPuppets.CollidableOverride(gc);
+	}
+
 	public void DetectCollisions()
 	{
 		//IL_00f6: Unknown result type (might be due to invalid IL or missing references)
@@ -126,7 +138,7 @@ public class CollisionHandler
 			// at most one per level) keep the original all-pairs scan with both callbacks.
 			foreach (ICollidable collidable2 in collidables)
 			{
-				if ((((GameComponent)collidable2).Enabled & ((GameComponent)collidable).Enabled) && collidable2 != collidable && collidable.DetectCollision(collidable2))
+				if ((IsActive(collidable2) & IsActive(collidable)) && collidable2 != collidable && collidable.DetectCollision(collidable2))
 				{
 					collidable2.CollidesWith(collidable);
 					collidable.CollidesWith(collidable2);
@@ -148,7 +160,7 @@ public class CollisionHandler
 			}
 			foreach (ICollidable collider in colliders)
 			{
-				if (((GameComponent)collidables[m]).Enabled && ((GameComponent)collider).Enabled && collidables[m].DetectCollision(collider))
+				if (IsActive(collidables[m]) && IsActive(collider) && collidables[m].DetectCollision(collider))
 				{
 					collidables[m].CollidesWith(collider);
 				}

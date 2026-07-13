@@ -391,4 +391,29 @@ internal class MarsBoss : KillableAlien
 		sound.PlayCue("expl2");
 		AwardScoreToAll(combo: false);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net, card 11.2) --------------------------
+	// The entry BossPosition only steers the Update-only entry path (inert on a frozen puppet)
+	// but is replicated for a faithful reconstruction. The 4x4 sheet ALTERNATES between the
+	// mothershipA/mothershipB halves each animation wrap in Update; that A/B choice is the one
+	// bit of Draw state the base fields (curframe/Hp) don't carry, so it is streamed.
+
+	internal byte NetBossPosition => (byte)bossPosition;
+
+	internal bool NetSecondHalf => texture == secondHalfOfSpritesheet;
+
+	internal void NetSetSpritesheetHalf(bool second)
+	{
+		if (second)
+		{
+			if (secondHalfOfSpritesheet != null)
+			{
+				texture = secondHalfOfSpritesheet;
+			}
+		}
+		else if (firstHalfOfSpritesheet != null)
+		{
+			texture = firstHalfOfSpritesheet;
+		}
+	}
 }

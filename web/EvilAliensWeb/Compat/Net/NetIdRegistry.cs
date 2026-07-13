@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using EvilAliens;
 using Microsoft.Xna.Framework;
@@ -8,18 +9,36 @@ namespace EvilAliensWeb.Compat.Net
     // ushort id when it actually enters Game.Components (adds are deferred through the bin's
     // birthList, so hooking the collection's own events -- the same seam Oracle uses -- sees
     // exactly the live world) and frees it when it leaves. Spawn/death are forwarded to
-    // NetSession as reliable events.
+    // NetSession as reliable events; the live list is what the world-snapshot scheduler
+    // round-robins over (card 11.2).
     //
-    // Card 11.1 scope: the ids only exercise the event lane + client-side ordering metrics.
-    // Card 11.3 keys the world snapshot + client puppet construction off these same ids.
-    public static class NetIdRegistry
+    // The replication set is NetTypeRegistry's descriptor table (11.1's Oracle.GetBaddies
+    // enemy types minus Explosion, plus Powerup -- cosmetics never cross the wire).
+    internal static class NetIdRegistry
     {
-        private static readonly Dictionary<GameComponent, ushort> ids = new Dictionary<GameComponent, ushort>();
-        private static readonly HashSet<ushort> inUse = new HashSet<ushort>();
+        internal sealed class Entry
+        {
+            public AlienDrawableGameComponent Comp;
+            public ushort Id;
+            public byte TypeIdx;
+            public INetTypeDescriptor Descriptor;
+            // Observed-velocity tracking for the snapshot's base state: many enemies move
+            // Position directly (arcs, easing) rather than via Speed/Direction, so the
+            // encoder differentiates real positions between the entity's snapshot turns.
+            public Vector2 LastPos;
+            public long LastPosMs;
+            public bool HasLastPos;
+        }
+
+        private static readonly Dictionary<GameComponent, Entry> entries = new Dictionary<GameComponent, Entry>();
+        private static readonly Dictionary<ushort, Entry> byId = new Dictionary<ushort, Entry>();
+        private static readonly List<Entry> liveList = new List<Entry>(); // round-robin order
         private static ushort next = 1;
         private static bool enabled;
 
-        public static int LiveCount => ids.Count;
+        public static int LiveCount => liveList.Count;
+
+        public static IReadOnlyList<Entry> Live => liveList;
 
         public static void Enable(Game game)
         {
@@ -32,33 +51,48 @@ namespace EvilAliensWeb.Compat.Net
             game.Components.ComponentRemoved += Components_ComponentRemoved;
         }
 
-        // Replay the full live set (used when a peer connects mid-world so its ordering
-        // bookkeeping starts from the truth, not from a death-before-spawn storm).
+        public static bool TryGetById(ushort id, out Entry entry)
+        {
+            return byId.TryGetValue(id, out entry);
+        }
+
+        // Replay the full live set (used when a peer connects mid-world so it can build the
+        // already-alive puppets instead of starting from a death-before-spawn storm).
         internal static void ReplayLive()
         {
-            foreach (KeyValuePair<GameComponent, ushort> kv in ids)
+            foreach (Entry e in liveList)
             {
-                NetSession.OnHostSpawn(kv.Value, kv.Key.GetType().Name);
+                NetSession.OnHostSpawn(e);
             }
         }
 
         private static void Components_ComponentAdded(object src, GameComponentCollectionEventArgs args)
         {
-            if (args.GameComponent is GameComponent gc && IsReplicable(gc) && !ids.ContainsKey(gc))
+            if (args.GameComponent is GameComponent gc && !entries.ContainsKey(gc)
+                && gc is AlienDrawableGameComponent comp && NetTypeRegistry.TryGet(gc, out byte typeIdx, out INetTypeDescriptor desc))
             {
-                ushort id = AllocId();
-                ids[gc] = id;
-                NetSession.OnHostSpawn(id, gc.GetType().Name);
+                Entry e = new Entry
+                {
+                    Comp = comp,
+                    Id = AllocId(),
+                    TypeIdx = typeIdx,
+                    Descriptor = desc,
+                };
+                entries[gc] = e;
+                byId[e.Id] = e;
+                liveList.Add(e);
+                NetSession.OnHostSpawn(e);
             }
         }
 
         private static void Components_ComponentRemoved(object src, GameComponentCollectionEventArgs args)
         {
-            if (args.GameComponent is GameComponent gc && ids.TryGetValue(gc, out ushort id))
+            if (args.GameComponent is GameComponent gc && entries.TryGetValue(gc, out Entry e))
             {
-                ids.Remove(gc);
-                inUse.Remove(id);
-                NetSession.OnHostDeath(id);
+                entries.Remove(gc);
+                byId.Remove(e.Id);
+                liveList.Remove(e);
+                NetSession.OnHostDeath(e);
             }
         }
 
@@ -75,20 +109,8 @@ namespace EvilAliensWeb.Compat.Net
                     next = 1;
                 }
             }
-            while (!inUse.Add(id));
+            while (byId.ContainsKey(id));
             return id;
-        }
-
-        // The replication set: Oracle.GetBaddies' enemy types (minus Explosion -- cosmetics
-        // never cross the wire, they spawn locally from events) plus Powerups.
-        private static bool IsReplicable(GameComponent val)
-        {
-            return val is EvilBullet || val is UFO || val is Asteroid || val is Braineroid
-                || val is JunkBoss || val is Ball || val is Boss || val is Spider
-                || val is StationaryBoss || val is MarsBoss || val is EvilSkull || val is Lazer
-                || val is ClassicBoss || val is DeathStar || val is Wall || val is BattleSkull
-                || val is FlyingSpider || val is StarMine || val is SweepUFO || val is PunchingBag
-                || val is Powerup;
         }
     }
 }

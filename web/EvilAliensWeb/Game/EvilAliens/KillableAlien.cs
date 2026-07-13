@@ -167,8 +167,56 @@ public abstract class KillableAlien : AlienDrawableGameComponent
 			// of screen shake (boss kills a longer stop + real shake). Rate-limited inside
 			// Juice so a bomb-cleared wave reads as one impact, not a stutter.
 			EvilAliensWeb.Compat.Juice.KillPunch(isboss);
+			// Online co-op: record WHO landed the killing blow before the death cascades into
+			// component removal — the removal seam turns the note into a kill claim (client)
+			// or an attributed death event (host). A single branch when no session is up.
+			EvilAliensWeb.Compat.Net.NetSession.NoteKill(this, other);
 			KilledBy(other, isComboGenerator);
 			dead = true;
 		}
+	}
+
+	// ---- Online co-op replication seams (Compat/Net, card 11.2) --------------------------
+
+	internal int NetHitPoints => hitpoints;
+
+	// Apply a replicated hp value to a frozen client puppet. Only ever lowers (local hits
+	// already landed must not be resurrected by an older snapshot) and floors at 1 — deaths
+	// arrive exclusively as events/local kills, never by snapshot. Recomputes the colorize
+	// redden exactly like HitBy so damage tint tracks.
+	internal void NetApplyHp(int hp)
+	{
+		if (dead || hitpoints <= 0)
+		{
+			return;
+		}
+		hp = (int)MathHelper.Max(hp, 1f);
+		if (hp >= hitpoints)
+		{
+			return;
+		}
+		hitpoints = hp;
+		if (colorize)
+		{
+			float num = (float)hitpoints / ((float)initialhitpoints / 3f);
+			color = new Color(new Vector3(1f, num, num));
+		}
+	}
+
+	// Forced kill through the REAL per-type death path (explosion FX, sounds, AwardScore to
+	// the killer's slot, authoritative child spawns, Die). Used by NetSession for honored
+	// kill claims (host) and attributed remote deaths (client). Bypasses the hittimer gate —
+	// a claim is already a confirmed kill.
+	internal void NetKill(ICollidable killer, bool isComboGenerator)
+	{
+		if (dead || IsDead)
+		{
+			return;
+		}
+		hitpoints = 0;
+		WasHit = true;
+		EvilAliensWeb.Compat.Juice.KillPunch(isboss);
+		KilledBy(killer, isComboGenerator);
+		dead = true;
 	}
 }

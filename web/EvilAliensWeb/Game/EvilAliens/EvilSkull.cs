@@ -530,4 +530,75 @@ internal class EvilSkull : KillableAlien
 		collection.Add((GameComponent)(object)explosion);
 		sound.PlayCue("expl1");
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/EvilSkullDescriptor) -----
+	// Client puppets run Enabled=false. behaviour picks the fade setup in Setup; the bonus
+	// colorize hue is a spawn+state extra (like UFO). The fade phase MUST be replicated: Draw
+	// derives its alpha from the fade timers and PlayerShip gates collision on !Fading, but the
+	// puppet's Update never runs to START the fade-out, so the host drives it via NetSetFadePhase
+	// (NetTickTimers then advances the timers, so alpha animates and Fading resolves).
+
+	internal EnemyBehaviour NetBehaviour => behaviour;
+
+	internal bool NetHasBonus => hasbonus;
+
+	internal byte NetBonusType => (byte)(hasbonus ? bonus.type : Powerup.PowerupType.Blast);
+
+	// 2 = fading out (near despawn), 1 = fading in, 0 = opaque. (== the Fading source terms.)
+	internal byte NetFadePhase
+	{
+		get
+		{
+			if (fadeouttimer.Active | fadeouttimer.Finished)
+			{
+				return 2;
+			}
+			if (fadeintimer.Active)
+			{
+				return 1;
+			}
+			return 0;
+		}
+	}
+
+	// Drive the frozen puppet's fade timers to the host's phase. Only the START edges need
+	// replicating; NetTickTimers advances the running timer for the alpha ramp.
+	internal void NetSetFadePhase(byte phase)
+	{
+		if (phase == 2)
+		{
+			fadeintimer.Stop();
+			if (!(fadeouttimer.Active | fadeouttimer.Finished))
+			{
+				fadeouttimer.Reset();
+				fadeouttimer.Start();
+			}
+		}
+		else if (phase == 0)
+		{
+			fadeintimer.Stop();
+			fadeouttimer.Stop();
+		}
+	}
+
+	// Clear the one-frame spawn guard on a puppet (its Update never runs to clear it) so a stray
+	// Wall/PlayerShip contact can't teleport it to a random respawn point.
+	internal void NetSettle()
+	{
+		justspawned = false;
+	}
+
+	internal void NetMakeBonus(Powerup.PowerupType t)
+	{
+		hasbonus = true;
+		bonus = Powerup.NewPowerup(collection, base.Game);
+		bonus.Setup(Vector2.Zero);
+		bonus.MakeType(t);
+	}
+
+	internal void NetClearBonus()
+	{
+		hasbonus = false;
+		bonus = null;
+	}
 }

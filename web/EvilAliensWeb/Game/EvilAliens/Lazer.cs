@@ -194,4 +194,32 @@ internal class Lazer : AlienDrawableGameComponent
 		}
 		freed = true;
 	}
+
+	// ---- Online co-op replication seams (Compat/Net, card 11.2) --------------------------
+	// A frozen client puppet never runs Update, so the beam's aim + growth are replicated each
+	// snapshot. The aim (base.Direction) MUST be re-asserted here: the puppet driver sets
+	// NetSpeedVector = observed velocity just before ApplyStateExtra, and SpeedVector's setter
+	// rewrites base.Direction from that (near-zero) velocity -- so the beam angle only survives
+	// because NetApplyBeam runs last and restores it.
+
+	internal float NetAngle => base.Direction;
+
+	internal float NetLen => len;
+
+	internal float NetLead => lead;
+
+	// Push the host's beam aim/length/lead into BOTH the collision line fields (Direction/len/
+	// lead, read by CollisionType) and the drawn Quad geometry, WITHOUT resetting the FX tendril
+	// pool (uses MoveTo/AimAt/SetLength/SetLead rather than SetProperties, which would ResetArcs
+	// every snapshot and kill the crackle). base.Position is the driver-dead-reckoned muzzle.
+	internal void NetApplyBeam(float angle, float length, float leadValue)
+	{
+		base.Direction = angle;
+		len = length;
+		lead = leadValue;
+		lazor.MoveTo(base.Position);
+		lazor.AimAt(angle);
+		lazor.SetLength(length);
+		lazor.SetLead(leadValue);
+	}
 }

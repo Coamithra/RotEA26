@@ -158,7 +158,9 @@ public class ComponentBin : IComponentBinService
 	{
 		foreach (GameComponent item in inactive.Dequeue())
 		{
-			item.Enabled = true;
+			// Online co-op (card 11.2): never thaw a frozen client puppet back into a live
+			// AI on unpause -- its Update must stay off for its whole life.
+			item.Enabled = !EvilAliensWeb.Compat.Net.NetSession.IsFrozenPuppet(item);
 			WatcherRemove(item);
 		}
 	}
@@ -331,6 +333,23 @@ public class ComponentBin : IComponentBinService
 
 	public void Add(GameComponent component)
 	{
+		// Online co-op (card 11.2): a JOIN peer's world is host-authoritative -- game code
+		// must never grow it. Any replicable-type add that is NOT the puppet layer's own
+		// (spawner strays after a pause tick, KilledBy side effects like asteroid splits or
+		// bonus powerup drops) is swallowed into the recycle pool; the host's authoritative
+		// copy replicates in as a puppet instead. Single branch outside a net session.
+		if (EvilAliensWeb.Compat.Net.NetSession.SuppressWorldSpawn(component)
+			&& !((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component)
+			&& !birthList.Contains(component))
+		{
+			deathList.Remove(component);
+			if (!idleList.Contains(component))
+			{
+				idleList.Add(component);
+				WatcherAdd(component);
+			}
+			return;
+		}
 		deathList.Remove(component);
 		if (!birthList.Contains(component))
 		{

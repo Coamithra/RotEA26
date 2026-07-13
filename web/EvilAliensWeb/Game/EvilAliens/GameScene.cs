@@ -145,7 +145,14 @@ internal abstract class GameScene : Scene
 	{
 		get
 		{
-			return _spawnplayernormally;
+			// Online co-op (card 11.2): a scripted no-ship phase (Level1's intro sets this
+			// false and hands the ship spawn to demo_OnFinished) lives in the level script,
+			// which never runs on a join peer -- without this override a client would never
+			// spawn its local ship (or LoseLife on wipe). The client's ship always uses the
+			// generic startup/respawn path; the intro choreography stays host-only.
+			// (WebcamLevel's permanent no-ship design is unaffected: its enemy types aren't
+			// replicable, so webcam co-op isn't a supported session in the first place.)
+			return _spawnplayernormally || EvilAliensWeb.Compat.Net.NetSession.IsClient;
 		}
 		set
 		{
@@ -805,12 +812,19 @@ internal abstract class GameScene : Scene
 			checkScreenShot();
 		}
 		AIJoinTimer.Update(gameTime);
-		if (AIJoinTimer.Finished && AllowAIFriends && oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
+		// Online co-op: AI friend ships aren't replicated yet (their slots would fire
+		// invisible bullets on the other peer), so no auto-join in any net session.
+		if (AIJoinTimer.Finished && AllowAIFriends && !EvilAliensWeb.Compat.Net.NetSession.Active && oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
 		{
 			AddPlayer(ControlDevice.AI, spawnPlayerNormally);
 		}
 		CheckPlayerJoins(spawnPlayerNormally);
-		eventList.Update(gameTime);
+		// Online co-op (card 11.2): the world is HOST-authoritative. A join peer never runs
+		// the level script/spawners -- enemies arrive as replicated NetPuppets instead.
+		if (!EvilAliensWeb.Compat.Net.NetSession.SuppressLevelScript)
+		{
+			eventList.Update(gameTime);
+		}
 		if (oracle.AllShipsDead & spawnPlayerNormally)
 		{
 			LoseLife();

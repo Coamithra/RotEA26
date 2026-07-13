@@ -751,4 +751,56 @@ public class UFO : KillableAlien
 		invincibilityTimer.Reset();
 		invincibilityTimer.Start();
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/UfoDescriptor) ----------
+
+	internal EnemyBehaviour NetBehaviour => behaviour;
+
+	internal bool NetHasBonus => hasbonus;
+
+	internal byte NetBonusType => (byte)(hasbonus ? bonus.type : Powerup.PowerupType.Blast);
+
+	internal bool NetStationary => stationary;
+
+	// MakeSmall picks one of two small sheets at RANDOM -- the client puppet must be forced
+	// onto the host's pick or the two screens show different saucers.
+	internal bool NetSmallUfoSheet => texturename == "GFX/Sprites/ufosheet";
+
+	internal void NetForceSmallSheet(bool ufoSheet)
+	{
+		if (IsBig || NetSmallUfoSheet == ufoSheet)
+		{
+			return;
+		}
+		if (ufoSheet)
+		{
+			LoadAnimation(new AnimationData("GFX/Sprites/ufosheet", 4, 8, 1, 25f));
+			stationarySpriteName = "GFX/Sprites/ufometpootjes";
+			base.DrawOrder = 19;
+		}
+		else
+		{
+			LoadAnimation(new AnimationData("GFX/Sprites/smallship", 8, 4, 1, 25f));
+			stationarySpriteName = "GFX/Sprites/Smallship_landed";
+			base.DrawOrder = 17;
+		}
+	}
+
+	// Puppet-side lift-off: the flying look without the gameplay impulses (the real
+	// trajectory arrives via snapshots).
+	internal void NetLiftOff()
+	{
+		if (stationary)
+		{
+			stationary = false;
+			base.ShadowOffset = Microsoft.Xna.Framework.Vector2.Zero;
+			base.ShadowSize = 1f;
+		}
+	}
+
+	internal void NetClearBonus()
+	{
+		hasbonus = false;
+		bonus = null;
+	}
 }

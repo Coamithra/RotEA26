@@ -123,6 +123,7 @@ namespace EvilAliensWeb.Compat.Net
         // death cascades into removal (KillableAlien.HitBy / claim handling), consumed at
         // the removal seam on either side.
         private static readonly Dictionary<AlienDrawableGameComponent, byte> killNotes = new Dictionary<AlienDrawableGameComponent, byte>();
+        private static readonly Queue<AlienDrawableGameComponent> killNoteOrder = new Queue<AlienDrawableGameComponent>();
 
         // Host: recently-dead replicables so late/overlapping claims still pay generously,
         // exactly once per (entity, slot). Bounded FIFO.
@@ -131,6 +132,7 @@ namespace EvilAliensWeb.Compat.Net
             public Vector2 Pos;
             public ushort Points;
             public byte PaidMask;
+            public bool OneUp; // extra-life powerup: a late claim must still AddLife (lives are host-authoritative)
         }
 
         private static readonly Dictionary<ushort, DeathRecord> recentDeaths = new Dictionary<ushort, DeathRecord>();
@@ -302,11 +304,22 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            if (killNotes.Count > 64)
+            // Leak guard: bounded FIFO (notes are normally consumed at removal within a
+            // tick). Evict oldest instead of clearing -- a wholesale clear would drop
+            // legitimate pending attributions in a dense wave.
+            while (killNoteOrder.Count > 0 && !killNotes.ContainsKey(killNoteOrder.Peek()))
             {
-                killNotes.Clear(); // leak guard; notes are consumed at removal within a tick
+                killNoteOrder.Dequeue(); // drain keys already consumed by TakeKillNote
+            }
+            if (!killNotes.ContainsKey(comp))
+            {
+                killNoteOrder.Enqueue(comp);
             }
             killNotes[comp] = slot;
+            while (killNotes.Count > 64 && killNoteOrder.Count > 0)
+            {
+                killNotes.Remove(killNoteOrder.Dequeue());
+            }
         }
 
         // Powerup pickups are claims too: the collecting side records WHO took it before
@@ -369,7 +382,7 @@ namespace EvilAliensWeb.Compat.Net
             byte killer = TakeKillNote(e.Comp);
             Vector2 pos = e.Comp.Position;
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
-            RecordDeath(e.Id, pos, points, killer);
+            RecordDeath(e.Id, pos, points, killer, e.Comp is Powerup pu && pu.type == Powerup.PowerupType.OneUp);
             if (!PeerUp)
             {
                 return;
@@ -382,13 +395,14 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot)
+        private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot, bool oneUp)
         {
             DeathRecord rec = new DeathRecord
             {
                 Pos = pos,
                 Points = points,
                 PaidMask = (byte)(killerSlot < 8 ? 1 << killerSlot : 0),
+                OneUp = oneUp,
             };
             if (!recentDeaths.ContainsKey(id))
             {
@@ -406,7 +420,7 @@ namespace EvilAliensWeb.Compat.Net
         private static void SendWorldSnapshot(long now)
         {
             lastSnapshotTx = now;
-            List<NetIdRegistry.Entry> live = NetIdRegistry.Live;
+            IReadOnlyList<NetIdRegistry.Entry> live = NetIdRegistry.Live;
             if (live.Count == 0)
             {
                 return;
@@ -421,13 +435,16 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < count; i++)
             {
                 NetIdRegistry.Entry e = live[snapshotCursor % live.Count];
-                snapshotCursor = (snapshotCursor + 1) % live.Count;
-                NetBaseState state = CaptureBaseState(e, now);
+                // Fit check BEFORE consuming the cursor slot or capturing state --
+                // CaptureBaseState advances the entity's observed-velocity baseline, so a
+                // skipped entry must not touch it (it leads the next packet instead).
                 int extraLen = e.Descriptor.EncodeStateExtra(e.Comp, extraScratch, 0);
                 if (off + NetProtocol.SnapshotEntryBaseBytes + extraLen > snapshotScratch.Length)
                 {
                     break;
                 }
+                snapshotCursor = (snapshotCursor + 1) % live.Count;
+                NetBaseState state = CaptureBaseState(e, now);
                 NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, state, extraScratch, extraLen);
                 written++;
             }
@@ -796,6 +813,13 @@ namespace EvilAliensWeb.Compat.Net
                     if (e.Comp is Powerup p)
                     {
                         p.taken = true;
+                        // Lives are host-authoritative (EvScoreSync sends them verbatim), so a
+                        // client-collected extra life must be applied HERE or the next sync
+                        // silently reverts it. Other powerup effects are per-ship on the collector.
+                        if (p.type == Powerup.PowerupType.OneUp && killerSlot != NetProtocol.KillerNone)
+                        {
+                            score.AddLife();
+                        }
                     }
                     else if (killerSlot != NetProtocol.KillerNone)
                     {
@@ -826,6 +850,10 @@ namespace EvilAliensWeb.Compat.Net
                     if (rec.Points > 0)
                     {
                         score.AddScore(rec.Points, true, rec.Pos, killerSlot);
+                    }
+                    if (rec.OneUp)
+                    {
+                        score.AddLife(); // overlapping collectors inside the RTT window each add one
                     }
                     metrics.ClaimsPaidDead++;
                     if (DebugFlags.NetLog)

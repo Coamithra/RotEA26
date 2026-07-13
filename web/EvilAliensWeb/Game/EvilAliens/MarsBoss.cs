@@ -400,9 +400,9 @@ internal class MarsBoss : KillableAlien
 
 	internal byte NetBossPosition => (byte)bossPosition;
 
-	internal bool NetSecondSheet => texture == secondHalfOfSpritesheet;
+	internal bool NetSecondHalf => texture == secondHalfOfSpritesheet;
 
-	internal void NetSetSheet(bool second)
+	internal void NetSetSpritesheetHalf(bool second)
 	{
 		if (second)
 		{

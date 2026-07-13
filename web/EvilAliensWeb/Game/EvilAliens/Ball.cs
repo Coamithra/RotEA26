@@ -374,6 +374,7 @@ internal class Ball : AlienDrawableGameComponent
 	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
 	// The ctor picks one of AsteroidSmall1..4 at RANDOM; the client puppet must be forced onto the
 	// host's pick or the same netId ball is a different rock on each screen.
+	// 1..4 = the asset's trailing digit (1-BASED -- unlike Asteroid.NetSmallSheetIndex's 0..3).
 	internal int NetAsteroidVariant
 	{
 		get

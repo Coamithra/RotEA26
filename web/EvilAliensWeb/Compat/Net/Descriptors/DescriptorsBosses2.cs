@@ -59,7 +59,7 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
             byte flags = 0;
-            if (C(c).NetSecondSheet)
+            if (C(c).NetSecondHalf)
             {
                 flags |= FlagSecondSheet;
             }
@@ -73,7 +73,7 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             {
                 return;
             }
-            C(c).NetSetSheet((buf[off] & FlagSecondSheet) != 0);
+            C(c).NetSetSpritesheetHalf((buf[off] & FlagSecondSheet) != 0);
         }
     }
 

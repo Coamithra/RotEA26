@@ -507,14 +507,15 @@ seams.
   (channel only constructed when opened). **Card 11.4 drops a `webrtc.js` + WebRtcTransport
   behind this same interface** (unreliable+unordered DataChannel for the stream lane,
   reliable channel for events); nothing above the interface may assume loopback reliability.
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type):** the 3 layers --
-  `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive|firing
-  flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (type RESERVED, stubbed until
-  11.3), `MsgEvent` envelope with a monotone ushort seq (EvSpawn netId+typeHash / EvDeath
-  netId / EvBlast pos+level) + `MsgHello`/`MsgWelcome` handshake (protocol version byte;
-  both sides Hello until paired, opposite role replies Welcome). Peer loss = JS `pagehide`
-  bye OR a 3s stream timeout; the ship stream doubles as the heartbeat (sent even with no
-  live ship, alive=false).
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v2):** the 3
+  layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
+  alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
+  World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
+  (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+points / EvBlast
+  pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
+  `MsgWelcome` handshake (protocol version byte; both sides Hello until paired, opposite
+  role replies Welcome). Peer loss = JS `pagehide` bye OR a 3s stream timeout; the ship
+  stream doubles as the heartbeat (sent even with no live ship, alive=false).
 - **NetIds (`Compat/Net/NetIdRegistry`):** host-side, on the ComponentBin seam
   (`Game.Components` ComponentAdded/Removed -- the same events Oracle uses, fired when a
   component actually enters/leaves the world). Replicable set = the `NetTypeRegistry`
@@ -585,8 +586,8 @@ seams.
   zeroed; shots re-fired locally through the real `FireAt` path from the replicated firing
   state; bombs arrive as EvBlast -> `NetDoBlast` (no local bomb-count gate). Remote ships
   take NO local damage (owner decides its own hits; death arrives as the alive-flag edge ->
-  local explosion FX, slot stays reserved for respawn) and CANNOT take powerups (claims are
-  11.3 events). Hues: the join side swaps slot hues on connect so host=white / join=purple
+  local explosion FX, slot stays reserved for respawn) and CANNOT take powerups locally --
+  the owning peer collects on its own screen and the pickup arrives as a claim. Hues: the join side swaps slot hues on connect so host=white / join=purple
   on BOTH screens. The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
 - **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable

@@ -7,17 +7,18 @@ namespace EvilAliensWeb.Compat.Net
     //   1. Ship stream (unreliable lane, ~30 Hz): MsgShipState -- each peer's own ship
     //      STATE (pos, velocity, last aim, fire/alive flags, fire-rate loadout). The wire
     //      carries state, never inputs.
-    //   2. World snapshot (host -> clients, unreliable lane): MsgWorldSnapshot -- type
-    //      RESERVED, encode/decode stubbed until card 11.3 (host world authority).
+    //   2. World snapshot (host -> clients, unreliable lane, ~16.7 Hz): MsgWorldSnapshot --
+    //      round-robin length-prefixed entries of the generic base block + per-type state
+    //      extras (card 11.2, host world authority).
     //   3. Events (reliable lane): MsgHello/MsgWelcome handshake, MsgEvent envelope with a
     //      monotonically increasing sequence (EvSpawn/EvDeath from the host's NetIdRegistry,
-    //      EvBlast from either peer).
+    //      EvBlast from either peer, EvClaim from clients, EvScoreSync from the host).
     public static class NetProtocol
     {
         public const byte MsgHello = 0x01;
         public const byte MsgWelcome = 0x02;
         public const byte MsgShipState = 0x10;
-        public const byte MsgWorldSnapshot = 0x20; // reserved -- card 11.3
+        public const byte MsgWorldSnapshot = 0x20;
         public const byte MsgEvent = 0x30;
 
         public const byte EvSpawn = 1;

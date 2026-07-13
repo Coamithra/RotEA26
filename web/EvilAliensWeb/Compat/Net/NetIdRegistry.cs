@@ -38,7 +38,7 @@ namespace EvilAliensWeb.Compat.Net
 
         public static int LiveCount => liveList.Count;
 
-        public static List<Entry> Live => liveList;
+        public static IReadOnlyList<Entry> Live => liveList;
 
         public static void Enable(Game game)
         {

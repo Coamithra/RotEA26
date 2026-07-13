@@ -123,6 +123,10 @@ namespace EvilAliensWeb.Compat.Net
                 comp = desc.CreatePuppet(bin, game, state, buf, off, len);
                 if (comp == null)
                 {
+                    // A descriptor may legitimately decline (e.g. a Ball with no JunkBoss).
+                    // Mark the id removed so the snapshot self-heal doesn't re-attempt
+                    // construction every 60ms turn -- it retries after the suppression window.
+                    MarkRemoved(netId);
                     return false;
                 }
                 bin.Add((GameComponent)(object)comp);
@@ -224,6 +228,9 @@ namespace EvilAliensWeb.Compat.Net
             {
                 killable.NetApplyHp(state.Hp);
             }
+            // ORDER MATTERS: state extras run LAST. The base writes above have per-type side
+            // effects (NetSpeedVector's setter rewrites Direction, which zeroes Lazer's beam
+            // angle) that an extra must be able to re-assert -- see Lazer.NetApplyBeam.
             desc?.ApplyStateExtra(comp, buf, extraOff, extraLen);
             return popped;
         }

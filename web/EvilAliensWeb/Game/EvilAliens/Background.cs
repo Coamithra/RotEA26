@@ -786,8 +786,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756");
 		backgroundImage.texturenames[0, 0] = "GFX/Base/756";
 		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.66f;
 		backgroundLayers.Add(backgroundImage);
 		backgroundImage = new BackgroundImage();
@@ -797,8 +797,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Base/2331-v5");
 		backgroundImage.texturenames[0, 0] = "GFX/Base/2331-v5";
 		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.52f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
@@ -809,8 +809,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Base/2331-v5");
 		backgroundImage.texturenames[0, 0] = "GFX/Base/2331-v5";
 		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.8f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
@@ -876,8 +876,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Game/Starfield2");
 		backgroundImage.texturenames[0, 0] = "GFX/Game/Starfield2";
 		backgroundImage.size = 1.5f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.5f;
 		backgroundLayers.Add(backgroundImage);
 		// simulated stars, near: additive cool glint
@@ -889,8 +889,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Game/Starfield2");
 		backgroundImage.texturenames[0, 0] = "GFX/Game/Starfield2";
 		backgroundImage.size = 2f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 1.2f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
@@ -903,8 +903,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Tutorial/grid3");
 		backgroundImage.texturenames[0, 0] = "GFX/Tutorial/grid3";
 		backgroundImage.size = 2.4f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.25f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
@@ -918,8 +918,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/Tutorial/grid3");
 		backgroundImage.texturenames[0, 0] = "GFX/Tutorial/grid3";
 		backgroundImage.size = 1.5f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.5f;
 		backgroundImage.blendMode = (SpriteBlendMode)2;
 		backgroundLayers.Add(backgroundImage);
@@ -991,8 +991,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/MarsBG/clouds-background");
 		backgroundImage.texturenames[0, 0] = "GFX/MarsBG/clouds-background";
 		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 0.3f;
 		backgroundLayers.Add(backgroundImage);
 		// Far hills: THREE parallax slices (far/mid/near ridge), one texture per
@@ -1011,8 +1011,8 @@ public class Background : Scene
 			backgroundImage.textures[0, 0] = Content.Load<Texture2D>(hillNames[hi]);
 			backgroundImage.texturenames[0, 0] = hillNames[hi];
 			backgroundImage.size = 1f;
-			backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-			backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+			backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+			backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 			backgroundImage.scrollspeedmodifier = hillScrolls[hi];
 			backgroundLayers.Add(backgroundImage);
 		}
@@ -1033,7 +1033,7 @@ public class Background : Scene
 		{
 			backgroundImage.texturenames[mi, 0] = "GFX/MarsBG/marsloop" + (mi + 1);
 			backgroundImage.textures[mi, 0] = Content.Load<Texture2D>(backgroundImage.texturenames[mi, 0]);
-			marsWidth += (float)backgroundImage.textures[mi, 0].Width;
+			marsWidth += (float)backgroundImage.textures[mi, 0].LogicalWidth();
 		}
 		backgroundImage.size = 1f / 3.238f;
 		backgroundImage.realsize.X = marsWidth * backgroundImage.size;
@@ -1048,8 +1048,8 @@ public class Background : Scene
 		backgroundImage.textures[0, 0] = Content.Load<Texture2D>("GFX/MarsBG/clouds-foreground2");
 		backgroundImage.texturenames[0, 0] = "GFX/MarsBG/clouds-foreground2";
 		backgroundImage.size = 1f;
-		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].Width * backgroundImage.size;
-		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].Height * backgroundImage.size;
+		backgroundImage.realsize.X = (float)backgroundImage.textures[0, 0].LogicalWidth() * backgroundImage.size;
+		backgroundImage.realsize.Y = (float)backgroundImage.textures[0, 0].LogicalHeight() * backgroundImage.size;
 		backgroundImage.scrollspeedmodifier = 2.5f;
 		foregroundLayers.Add(backgroundImage);
 		scrollspeedreset = new Vector2(-10f, 0f) / 16.666666f;

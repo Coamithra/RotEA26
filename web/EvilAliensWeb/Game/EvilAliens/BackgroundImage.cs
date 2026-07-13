@@ -2,6 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
@@ -190,6 +191,9 @@ internal class BackgroundImage
 		{
 			val = color;
 		}
+		// Tile placement is PIXEL-space: use each texture's LOGICAL (pre-pad) size, not the padded
+		// .Width/.Height, or a padded .dds advances/wraps ~pad px too far and leaves a transparent
+		// gap between tiles (the DXT mult-of-4 + --padtest canary; unpadded png is a no-op here).
 		Vector2 val2 = default(Vector2);
 		(val2) = new Vector2(0f, 0f);
 		for (int i = 0; i < array.GetLength(0); i++)
@@ -197,24 +201,24 @@ internal class BackgroundImage
 			val2.Y = 0f;
 			for (int j = 0; j < array.GetLength(1); j++)
 			{
-				if ((position.X + val2.X + (float)array[i, j].Width * size >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[i, j].Width * size >= 0f) & (position.Y + val2.Y < 600f))
+				if ((position.X + val2.X + (float)array[i, j].LogicalWidth() * size >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[i, j].LogicalWidth() * size >= 0f) & (position.Y + val2.Y < 600f))
 				{
 					spriteBatch.Draw(array[i, j], position + val2, 0f, size, center: false, val);
 				}
-				val2.Y += size * (float)array[i, j].Height;
+				val2.Y += size * (float)array[i, j].LogicalHeight();
 			}
 			if (mirrorY)
 			{
 				for (int num = array.GetLength(1) - 1; num >= 0; num--)
 				{
-					if ((position.X + val2.X + (float)array[i, num].Width * size >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[i, num].Width * size >= 0f) & (position.Y + val2.Y < 600f))
+					if ((position.X + val2.X + (float)array[i, num].LogicalWidth() * size >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[i, num].LogicalWidth() * size >= 0f) & (position.Y + val2.Y < 600f))
 					{
 						spriteBatch.Draw(array[i, num], position + val2, 0f, size, center: false, val, (SpriteEffects)256);
 					}
-					val2.Y += size * (float)array[i, num].Height;
+					val2.Y += size * (float)array[i, num].LogicalHeight();
 				}
 			}
-			val2.X += size * (float)array[i, 0].Width;
+			val2.X += size * (float)array[i, 0].LogicalWidth();
 		}
 		if (!mirrorX)
 		{
@@ -225,24 +229,24 @@ internal class BackgroundImage
 			val2.Y = 0f;
 			for (int k = 0; k < array.GetLength(1); k++)
 			{
-				if ((position.X + val2.X + (float)array[num2, k].Width >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[num2, k].Width >= 0f) & (position.Y + val2.Y < 600f))
+				if ((position.X + val2.X + (float)array[num2, k].LogicalWidth() >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[num2, k].LogicalWidth() >= 0f) & (position.Y + val2.Y < 600f))
 				{
 					spriteBatch.Draw(array[num2, k], position + val2, 0f, size, center: false, val, (SpriteEffects)1);
 				}
-				val2.Y += size * (float)array[num2, k].Height;
+				val2.Y += size * (float)array[num2, k].LogicalHeight();
 			}
 			if (mirrorY)
 			{
 				for (int num3 = array.GetLength(1) - 1; num3 >= 0; num3--)
 				{
-					if ((position.X + val2.X + (float)array[num2, num3].Width >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[num2, num3].Width >= 0f) & (position.Y + val2.Y < 600f))
+					if ((position.X + val2.X + (float)array[num2, num3].LogicalWidth() >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[num2, num3].LogicalWidth() >= 0f) & (position.Y + val2.Y < 600f))
 					{
 						spriteBatch.Draw(array[num2, num3], position + val2, 0f, size, center: false, val, (SpriteEffects)257);
 					}
-					val2.Y += size * (float)array[num2, num3].Height;
+					val2.Y += size * (float)array[num2, num3].LogicalHeight();
 				}
 			}
-			val2.X += size * (float)array[num2, 0].Width;
+			val2.X += size * (float)array[num2, 0].LogicalWidth();
 		}
 	}
 }

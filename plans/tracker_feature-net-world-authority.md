@@ -45,15 +45,41 @@
 - [x] Review + integrate descriptor batches (all 21 types; builds clean)
 - [x] Docs: web CLAUDE.md net section update (drafted; re-check before ship)
 
-## Phase 5: Verify -- IN PROGRESS (see "Session 1 verification state" below)
+## Phase 5: Verify -- DONE (session 2, 2026-07-13, room g5, full build + ship-spawn fix)
 - [x] Clean Debug build (all descriptors in)
-- [~] Two-window gate: infrastructure PROVEN end-to-end on the pre-descriptor build
-      (see below); the post-descriptor + post-fix run NOT yet done
-- [ ] Client kills honored on host (clKill > 0) -- blocked on the re-run
-- [ ] Powerup collection replicates
-- [ ] Double-claim test (clPaid > 0 while enemy dies once)
-- [ ] Metrics healthy both sides, zero console errors
-- [ ] Plain no-flag boot smoke check
+- [x] Two-window gate on the FULL build (post-descriptor + client ship-spawn fix)
+- [x] Client kills honored on host: clKill=77+ climbing; kills paid with FX/combo both sides
+- [x] Powerup collection replicates (join ship visibly carried an active powerup effect +
+      HUD badge -- only a real pickup produces those; claims flowed clTx==clRx)
+- [x] Double-claim: clPaid=15 on host (generous payouts for already-dead enemies)
+- [x] Metrics healthy both sides, zero console errors (details below)
+- [x] Plain no-flag boot smoke check ("no debug flags", no [net] lines, Press Start OK)
+
+### Session 2 findings (the re-run found and fixed ONE regression-class bug)
+- **BUG (fixed): a join peer NEVER spawned its local ship in Level1.** Level1's
+  `Initialize` sets `spawnPlayerNormally = false` and hands the ship spawn to the intro
+  script beat (`demo_OnFinished` -> SpawnAllPlayers + re-enable). The client sim-split
+  suppresses the level script, so that beat never fires on a join peer: no local ship ->
+  AI never fires -> zero claims, and the host never spawns the remote puppet either
+  (SpawnPuppet waits for FindLocalShip). Fix: `GameScene.spawnPlayerNormally`'s GETTER
+  returns true when `NetSession.IsClient` -- covers the 1300ms startup spawn,
+  CheckPlayerJoins' spawn arg and the AllShipsDead->LoseLife check uniformly; the intro
+  choreography stays host-only. (WebcamLevel's permanent no-ship design is out of scope:
+  webcam co-op isn't a supported session.)
+- Metric shapes observed on the healthy run (document, don't chase):
+  - `snapUnk` trickles up in proportion to kill churn (~1.5% of snapEnt): an in-flight
+    round-robin snapshot can still carry a freshly-dead id. Inherent; ids dead <3s are
+    not resurrected.
+  - `pupPops` bursts (~80 over a boss fight) during HOST slowmo/hit-stop: observed
+    velocity is wrong while host time is scaled, clients lerp-correct -- the designed
+    self-heal ("host slowmo makes clients lerp-correct").
+  - Ship-stream `pops` ~4 with maxPop ~120px on the host during heavy combat: the JOIN
+    side's hit-stop freezes its outgoing stream briefly; resume reads as a step. Benign.
+  - ~40% of claims are killer-less fly-off deaths (client copy Die()s off-screen, host
+    copy already dead, no payee) -- harmless no-ops by design.
+- Braineroid pulsate caveat RESOLVED: Update writes the pulsated value into `scale`
+  itself each tick and the host encoder samples that same field, so puppet brains
+  breathe via the base snapshot (at snapshot cadence, driver-lerped). No state extra.
 
 ## Phase 6: Review & Ship -- NOT STARTED
 - [ ] Commit + push (WIP commits exist; see below)

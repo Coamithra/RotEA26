@@ -528,9 +528,13 @@ seams.
   any replicable-type add not made by the puppet layer (KilledBy side effects: asteroid
   splits, bonus powerup drops, stray spawns) into the recycle pool -- the host's
   authoritative copy replicates in instead. AI-friend auto-join is off in any net session
-  (friend ships aren't replicated yet). Initial background/music are local; mid-level
-  script beats (messages, music switches, boss-phase choreography) do NOT replicate yet --
-  that is the next card.
+  (friend ships aren't replicated yet). Because the script never runs on a client,
+  `GameScene.spawnPlayerNormally` reads as true on a join peer -- a scripted no-ship phase
+  (Level1's intro hands the ship spawn to its `demo_OnFinished` beat) would otherwise
+  leave the client shipless forever; the client's ship always uses the generic
+  startup/respawn path and the intro choreography stays host-only. Initial
+  background/music are local; mid-level script beats (messages, music switches,
+  boss-phase choreography) do NOT replicate yet -- that is the next card.
 - **Client enemies = NetPuppets (`Compat/Net/NetPuppets`):** real game objects built by
   their own `New*+Setup` factories (the harness-proven path) on `EvSpawn`, then FROZEN --
   `Enabled=false` for life (gameplay Update/AI never runs; `ComponentBin.Pop` is patched to

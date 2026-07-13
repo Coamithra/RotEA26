@@ -134,6 +134,8 @@ def main():
     args = ap.parse_args()
     ok = scenario_table(sweep=args.sweep)
     if args.sweep:
+        # Sweep is an EYEBALL table only -- it always exits 0. Only the no-arg assert
+        # mode validates the shipped K row and gates on it.
         return 0
     if ok:
         print(f"\nOK: K={K}/ms MAX_PULL={MAX_PULL}px/ms REST={REST}px is overdamped up to "

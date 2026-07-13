@@ -346,10 +346,13 @@ namespace EvilAliensWeb.Compat.Net
             metrics.BeatsTx++;
         }
 
-        // song = -1 replicates a StopMusic.
+        // song = -1 replicates a StopMusic. Unlike the other beat hooks (whose primitives
+        // only scripts call), PlayMusic is also the MENU's -- gate on a live GameScene so
+        // a host navigating menus mid-session can't retune the client. Deliberately fired
+        // ABOVE the host's local mute check: a muted host still replicates script beats.
         public static void OnMusic(int song)
         {
-            if (!IsHost || !PeerUp)
+            if (!IsHost || !PeerUp || GameScene.NetActiveScene == null)
             {
                 return;
             }

@@ -122,6 +122,9 @@ internal class TeamChallenge : GameScene
 		// host-authoritative (LoseLife no-ops on a client and the EvReset mirrors it).
 		netLinkUp = false;
 		Collection.Remove((GameComponent)(object)connector);
+		// Removal is deferred a tick -- null now so a late EvTetherBreak in that window
+		// can't re-break the torn-down connector.
+		connector = null;
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
 			if (ship.Controller != ControlDevice.Remote)

@@ -78,6 +78,19 @@ internal class ShipConnector : AlienDrawableGameComponent
 	private Texture2D lineTex;  // GFX/Sprites/lazermiddle -- the thin glowing strip for bolt segments
 	private Texture2D glowTex;  // GFX/Sprites/lazerglow  -- the radial bloom for the orbs
 
+	// --- Online co-op tether (card 11.3) -------------------------------------------------
+	// Offline the connector RIGIDLY pins both ships at midpoint +/-39px (SetPosition in
+	// Update). Online that would fight the interpolation buffer driving the remote puppet
+	// and rubber-band the local ship to a ~100ms-stale anchor. Instead each peer applies a
+	// SOFT pull to its OWN ship only, toward the puppet's on-screen position: a FIRST-ORDER
+	// positional step (no velocity state -> cannot self-oscillate). The one instability
+	// channel is the mutual stale-anchor loop; constants are picked/validated by
+	// tools/sim/tether_sim.py (overdamped up to 300ms one-way + the interp delay).
+	// If it ever wobbles under a real transport: SOFTEN NetPullK, never stiffen.
+	private const float NetRestPx = 78f;         // 2 x the 39px docking separation
+	private const float NetPullK = 0.0018f;      // per ms: fraction of excess stretch recovered
+	private const float NetMaxPullPxPerMs = 0.22f; // clamp below ship MaxSpeed 0.33 -> you can always fight it
+
 	// Sprite-harness mode (?harness=connector). The real connector needs two live PlayerShips as
 	// endpoints; the frozen harness has none, so instead we derive the two orbs from this component's
 	// own Position/rotation (which HarnessScene drives) at a fixed half-gap. The FX still animate
@@ -506,6 +519,20 @@ internal class ShipConnector : AlienDrawableGameComponent
 			}
 			A = null;
 			B = null;
+			// An endpoint vanished under us -- make sure the peer's tether goes too
+			// (idempotent; usually its own endpoint edge already broke it).
+			EvilAliensWeb.Compat.Net.NetSession.OnTetherBreak();
+		}
+		else if (EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			// Base sprite between the two ON-SCREEN ships (staleness reads as elastic
+			// stretch); the soft pull only ever moves the ship WE own.
+			Vector2 position = A.Position;
+			Vector2 position2 = B.Position;
+			rotation = MyMath.VectorToAngle(position2 - position);
+			base.Position = position + (position2 - position) * 0.5f;
+			NetPullOwnShip(gameTime);
+			base.Update(gameTime);
 		}
 		else
 		{
@@ -519,6 +546,36 @@ internal class ShipConnector : AlienDrawableGameComponent
 		}
 	}
 
+	// First-order clamped pull on the locally-owned endpoint (see the Net* consts above).
+	private void NetPullOwnShip(GameTime gameTime)
+	{
+		PlayerShip own;
+		PlayerShip anchor;
+		if (A.Controller != ControlDevice.Remote)
+		{
+			own = A;
+			anchor = B;
+		}
+		else if (B.Controller != ControlDevice.Remote)
+		{
+			own = B;
+			anchor = A;
+		}
+		else
+		{
+			return;
+		}
+		float dtMs = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+		Vector2 d = anchor.Position - own.Position;
+		float dist = d.Length();
+		if (dist <= NetRestPx || dtMs <= 0f)
+		{
+			return;
+		}
+		float step = Math.Min(NetPullK * (dist - NetRestPx), NetMaxPullPxPerMs) * dtMs;
+		own.SetPosition(own.Position + d / dist * step);
+	}
+
 	public override void CollidesWith(ICollidable other)
 	{
 		base.CollidesWith(other);
@@ -526,9 +583,37 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public void TakeHit()
 	{
+		// Null-safe: a peer's EvTetherBreak can null A/B a tick before the ships'
+		// connectors lists clear, and a local hit can land in that window.
+		if (A == null && B == null)
+		{
+			return;
+		}
 		Die();
-		A.TemporaryInvulnerability();
-		B.TemporaryInvulnerability();
+		A?.TemporaryInvulnerability();
+		B?.TemporaryInvulnerability();
+		A = null;
+		B = null;
+		// Or-of-either-peer break: this side saw the hit; the peer breaks silently.
+		EvilAliensWeb.Compat.Net.NetSession.OnTetherBreak();
+	}
+
+	// The PEER broke the tether (EvTetherBreak): same break, no echo back.
+	internal void NetBreakSilently()
+	{
+		if (A == null && B == null)
+		{
+			return;
+		}
+		Die();
+		if (A != null)
+		{
+			A.TemporaryInvulnerability();
+		}
+		if (B != null)
+		{
+			B.TemporaryInvulnerability();
+		}
 		A = null;
 		B = null;
 	}

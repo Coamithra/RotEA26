@@ -87,6 +87,9 @@ internal class UnlockEvent : GameEvent
 			collectionHelper.Add((GameComponent)(object)message);
 			first = false;
 			game.Components.ComponentRemoved += Components_ComponentRemoved;
+			// Online co-op (card 11.3): script is host-only -- replicate the banner AND the
+			// grant (the join peer played the level too; its handler mirrors the side grants).
+			EvilAliensWeb.Compat.Net.NetSession.OnScriptUnlock((int)item, (int)unlockType, (int)speechText, text);
 		}
 	}
 

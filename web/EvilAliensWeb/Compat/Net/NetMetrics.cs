@@ -42,16 +42,26 @@ namespace EvilAliensWeb.Compat.Net
         public long ClaimsHonored;      // host: claim settled a live entity (real kill path)
         public long ClaimsPaidDead;     // host: already dead, claimant paid from the record
 
-        public string Report(bool isHost, bool peerUp, int liveIds)
+        // script beats + shared state machine (card 11.3)
+        public long BeatsTx;            // host: script-beat events sent (message/unlock/bg/music/checkpoint)
+        public long BeatsRx;            // client: script-beat events applied
+        public long Resets;             // EvReset sent (host) / applied (client)
+        public long Victories;          // EvVictory sent (host) / applied (client)
+        public long Pauses;             // EvPause on-edges sent + received
+        public long TetherBreaks;       // EvTetherBreak sent + received
+
+        public string Report(bool isHost, bool peerUp, int liveIds, bool localShip, bool remoteShip)
         {
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} txStream={2} rxStream={3} drop={4} sgap={5} buf={6:0}ms interp={7} extrap={8} pops={9} maxPop={10:0.0}px evTx={11} evRx={12} dup={13} ordViol={14} seqGap={15} liveIds={16} snapTx={17} snapRx={18} snapEnt={19} snapUnk={20} pupPops={21} clTx={22} clRx={23} clKill={24} clPaid={25}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
+                localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
                 BufferDepthMs, InterpSamples, Extrapolations, CorrectionPops, MaxPopPx,
                 EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds,
                 SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, PuppetPops,
-                ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead);
+                ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
+                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks);
         }
     }
 }

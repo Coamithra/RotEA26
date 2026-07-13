@@ -64,6 +64,9 @@ internal class MessageEvent : GameEvent
 			}
 			collectionHelper.Add((GameComponent)(object)animatedMessage);
 			displayed = true;
+			// Online co-op (card 11.3): the level script only runs on the host, so mirror
+			// this exact banner to the join peer as a reliable event.
+			EvilAliensWeb.Compat.Net.NetSession.OnScriptMessage(message, (int)speechText, (int)type, angle);
 		}
 		base.Update(gameTime);
 	}

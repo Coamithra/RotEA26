@@ -7,6 +7,15 @@ internal class TeamChallenge : GameScene
 {
 	private ShipConnector connector;
 
+	// Online co-op (card 11.3): the remote puppet ship may join a beat after our own ship
+	// spawns, so connector creation is deferred until both ships exist. Armed by OnReset
+	// (each life), cleared on creation. Shared-fate death checking only starts once the
+	// link existed this life (netLinkUp) -- otherwise the one-ship startup window would
+	// read as "partner died".
+	private bool netConnectorPending;
+
+	private bool netLinkUp;
+
 	public TeamChallenge(Game game)
 		: base(game, Levels.TeamChallenge)
 	{
@@ -15,9 +24,24 @@ internal class TeamChallenge : GameScene
 
 	private void TeamChallenge_OnReset()
 	{
+		if (EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			netConnectorPending = true;
+			netLinkUp = false;
+			return;
+		}
 		connector = ShipConnector.NewAlien(Collection, base.Game);
 		connector.Setup(oracle.GetShips()[0], oracle.GetShips()[1]);
 		Collection.Add((GameComponent)(object)connector);
+	}
+
+	// The peer broke the tether on its screen (or-of-either-peer, idempotent).
+	internal override void NetApplyTetherBreak()
+	{
+		if (connector != null)
+		{
+			connector.NetBreakSilently();
+		}
 	}
 
 	public override void OnComponentRemoved(GameComponentCollectionEventArgs e)
@@ -42,12 +66,25 @@ internal class TeamChallenge : GameScene
 		Settings.GetInstance().LockDifficulty();
 		oracle.ResetPlayers();
 		oracle.AddPlayer(ControlDevice.Keyboard);
-		oracle.AddPlayer(ControlDevice.PadOne);
+		// Online co-op: seat ONLY the local device -- the partner joins as
+		// ControlDevice.Remote through the net layer. Seating the offline PadOne here
+		// would (a) squat the slot the remote puppet needs and (b) trip the
+		// disconnected-gamepad force-pause every tick (GameScene.Update's PadConnected
+		// check) -- the card's "pause triggers are local devices only" gotcha.
+		if (!EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			oracle.AddPlayer(ControlDevice.PadOne);
+		}
 	}
 
 	protected override void UpdateNormal(GameTime gameTime)
 	{
 		base.UpdateNormal(gameTime);
+		if (EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			UpdateNormalNet();
+			return;
+		}
 		if (oracle.GetShips().Count >= 2)
 		{
 			return;
@@ -56,6 +93,44 @@ internal class TeamChallenge : GameScene
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
 			ship.Asplode();
+		}
+		LoseLife();
+	}
+
+	private void UpdateNormalNet()
+	{
+		if (netConnectorPending)
+		{
+			if (oracle.GetShips().Count >= 2)
+			{
+				netConnectorPending = false;
+				netLinkUp = true;
+				connector = ShipConnector.NewAlien(Collection, base.Game);
+				connector.Setup(oracle.GetShips()[0], oracle.GetShips()[1]);
+				Collection.Add((GameComponent)(object)connector);
+			}
+			return; // partner not up yet -- the one-ship window is not a death
+		}
+		if (!netLinkUp || oracle.GetShips().Count >= 2)
+		{
+			return;
+		}
+		// Shared fate: one ship died (local death or the remote's alive=false edge) ->
+		// both go. Asplode only the ships WE own (the partner's death display is its own
+		// peer's alive=false edge -- Asplode'ing the puppet would fire OnDeath machinery
+		// for a ship we don't control); the life decrement + reset broadcast are
+		// host-authoritative (LoseLife no-ops on a client and the EvReset mirrors it).
+		netLinkUp = false;
+		Collection.Remove((GameComponent)(object)connector);
+		// Removal is deferred a tick -- null now so a late EvTetherBreak in that window
+		// can't re-break the torn-down connector.
+		connector = null;
+		foreach (PlayerShip ship in oracle.GetShips())
+		{
+			if (ship.Controller != ControlDevice.Remote)
+			{
+				ship.Asplode();
+			}
 		}
 		LoseLife();
 	}

@@ -22,7 +22,12 @@ internal class Level1 : GameScene
 		base.Initialize();
 		Settings.GetInstance().UnlockDifficulty();
 		ApplyDifficultyPolicy();
-		base.spawnPlayerNormally = false;
+		// The intro demo owns the ship spawn (demo_OnFinished) -- but ?netscript replaces
+		// the event list (no demo), so the generic spawn path must stay on there.
+		if (!EvilAliensWeb.Compat.DebugFlags.NetScript)
+		{
+			base.spawnPlayerNormally = false;
+		}
 	}
 
 	private void resetlives(GameEvent sender)
@@ -60,6 +65,11 @@ internal class Level1 : GameScene
 	protected override void PopulateEventList()
 	{
 		//IL_02cf: Unknown result type (might be due to invalid IL or missing references)
+		if (EvilAliensWeb.Compat.DebugFlags.NetScript)
+		{
+			PopulateNetScriptTest();
+			return;
+		}
 		DevCommentEvent gameEvent = new DevCommentEvent(base.Game, DevCommentEvent.CommentVersion.level1_1);
 		eventList.AddEvent(gameEvent, halting: false);
 		// The hero earth is queued at player pop-in (demo_OnFinished), NOT here at level start,

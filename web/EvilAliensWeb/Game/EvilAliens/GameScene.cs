@@ -139,6 +139,19 @@ internal abstract class GameScene : Scene
 
 	private Game1.PostDrawEvent game1PostDrawEvent;
 
+	// ---- Online co-op (card 11.3) ------------------------------------------------------
+	// The scene NetSession reaches for replicated state transitions (reset/victory/
+	// checkpoint/background beats/pause). Set in Initialize, cleared in Terminate.
+	internal static GameScene NetActiveScene;
+
+	// True while OUR pause menu is up (drives EvPause + the overlap rules with a remote pause).
+	private bool netLocalPauseUp;
+
+	// True while WE pushed the collection for the remote peer's pause.
+	private bool netRemotePauseHeld;
+
+	private EvilAliensWeb.Compat.Net.NetPauseOverlay netPauseOverlay;
+
 	public Levels Level => level;
 
 	protected bool spawnPlayerNormally
@@ -225,6 +238,9 @@ internal abstract class GameScene : Scene
 		// Leaving to the main menu — clear the pause muffle so the menu music isn't
 		// left ducked/muddy (this path never goes through pausedScene_OnExit).
 		base.SoundManager.SetPauseMuffle(on: false);
+		// Online co-op: unfreeze the peer before we go (the real leave flow is card 11.4).
+		netLocalPauseUp = false;
+		EvilAliensWeb.Compat.Net.NetSession.OnLocalPause(on: false);
 		Terminate(FinishedMode.exit);
 	}
 
@@ -245,10 +261,20 @@ internal abstract class GameScene : Scene
 	private void eventList_OnCheckPointReached(GameEventList sender)
 	{
 		score.Save();
+		// Online co-op: the client saves the same baseline so a later reset's score.Load()
+		// restores identically (the script -- and so this callback -- is host-only).
+		EvilAliensWeb.Compat.Net.NetSession.OnCheckpoint();
 	}
 
 	protected void LoseLife()
 	{
+		// Online co-op (card 11.3): death/reset is host-authoritative -- ONE broadcast.
+		// A client never decides a reset itself; it mirrors the host's branch in
+		// NetApplyReset when the EvReset arrives.
+		if (EvilAliensWeb.Compat.Net.NetSession.IsClient)
+		{
+			return;
+		}
 		if (Settings.GetInstance().DirectRespawn)
 		{
 			Collection.Purge<PlayerShip>();
@@ -256,6 +282,7 @@ internal abstract class GameScene : Scene
 			_timer = TimeSpan.Zero;
 			_state = GameState.Resetting;
 			Settings.GetInstance().ResetDifficulty();
+			EvilAliensWeb.Compat.Net.NetSession.OnHostReset(EvilAliensWeb.Compat.Net.NetSession.ResetModeRespawn);
 			return;
 		}
 		xfading = false;
@@ -274,6 +301,135 @@ internal abstract class GameScene : Scene
 			{
 				score.RemoveLife();
 			}
+		}
+		EvilAliensWeb.Compat.Net.NetSession.OnHostReset(_state == GameState.GameOver
+			? EvilAliensWeb.Compat.Net.NetSession.ResetModeGameOver
+			: EvilAliensWeb.Compat.Net.NetSession.ResetModeReset);
+	}
+
+	// ---- Online co-op (card 11.3): replicated state-machine seams -----------------------
+
+	// Client-side mirror of the host's LoseLife branch (mode = NetSession.ResetMode*).
+	internal void NetApplyReset(byte mode)
+	{
+		Collection.Purge<PlayerShip>();
+		Collection.Purge<PlayerShipSummon>();
+		_timer = TimeSpan.Zero;
+		switch (mode)
+		{
+		case EvilAliensWeb.Compat.Net.NetSession.ResetModeRespawn:
+			_state = GameState.Resetting;
+			Settings.GetInstance().ResetDifficulty();
+			break;
+		case EvilAliensWeb.Compat.Net.NetSession.ResetModeGameOver:
+			defeatmessageshown = false;
+			_state = GameState.GameOver;
+			break;
+		default:
+			xfading = false;
+			_state = GameState.Resetting;
+			// Mirror the host's decrement for instant HUD feedback; the 1Hz EvScoreSync
+			// carries the authoritative value regardless.
+			if (score.Lives > 0 && !Settings.GetInstance().InfiniteLives)
+			{
+				score.RemoveLife();
+			}
+			break;
+		}
+	}
+
+	internal void NetApplyVictory()
+	{
+		if (_state == GameState.Normal)
+		{
+			Victory();
+		}
+	}
+
+	internal void NetApplyCheckpoint()
+	{
+		score.Save();
+	}
+
+	internal void NetApplyBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op, Vector2 v)
+	{
+		switch (op)
+		{
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed:
+			Background.SetSpeed(v);
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueEarth:
+			Background.QueueEarth();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueSmallEarth:
+			Background.QueueSmallEarth();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueAndromeda:
+			Background.QueueAndromeda();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.EngageBeltSlowdown:
+			Background.EngageBeltSlowdown();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.DisengageBeltSlowdown:
+			Background.DisengageBeltSlowdown();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2:
+			Background.SetAlienBase2();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3:
+			Background.SetAlienBase3();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4:
+			Background.SetAlienBase4();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5:
+			Background.SetAlienBase5();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6:
+			Background.SetAlienBase6();
+			break;
+		}
+	}
+
+	// TeamChallenge overrides this to break its tether on the peer's EvTetherBreak.
+	internal virtual void NetApplyTetherBreak()
+	{
+	}
+
+	// The REMOTE peer paused/resumed. Freeze/unfreeze our world like a local pause, but
+	// with a hint overlay instead of an interactive menu. Called from NetSession (which
+	// keeps ticking while the collection is pushed). Overlap rules: if OUR pause menu is
+	// up the world is already frozen -- just remember the flag (NetSession.RemotePaused);
+	// the local resume paths re-freeze if it is still set.
+	internal void NetSetRemotePaused(bool on)
+	{
+		if (on)
+		{
+			if (netRemotePauseHeld || netLocalPauseUp)
+			{
+				return;
+			}
+			netRemotePauseHeld = true;
+			Collection.Push();
+			if (netPauseOverlay == null)
+			{
+				netPauseOverlay = new EvilAliensWeb.Compat.Net.NetPauseOverlay(base.Game);
+			}
+			Collection.Add((GameComponent)(object)netPauseOverlay);
+			base.SoundManager.SetPauseMuffle(on: true);
+		}
+		else
+		{
+			if (!netRemotePauseHeld)
+			{
+				return;
+			}
+			netRemotePauseHeld = false;
+			Collection.Remove((GameComponent)(object)netPauseOverlay);
+			Collection.Pop();
+			base.SoundManager.SetPauseMuffle(on: false);
+			pausestopper.Start();
+			pausestopper.Reset();
 		}
 	}
 
@@ -371,6 +527,9 @@ internal abstract class GameScene : Scene
 		_state = GameState.Startup;
 		_timer = TimeSpan.Zero;
 		_cursor = ServiceHelper.Get<IMousePointerService>().MousePointer;
+		NetActiveScene = this;
+		netLocalPauseUp = false;
+		netRemotePauseHeld = false;
 		pausestopper.Reset();
 		pausestopper.Stop();
 		Background.Reset();
@@ -416,6 +575,12 @@ internal abstract class GameScene : Scene
 		GC.Collect();
 		PreloadGraphicalContent();
 		cheatwarningshown = false;
+		if (EvilAliensWeb.Compat.Net.NetSession.RemotePaused)
+		{
+			// The peer paused before this scene existed (level-load race / reconnect) --
+			// pick the freeze up now instead of missing the edge.
+			NetSetRemotePaused(on: true);
+		}
 	}
 
 	private void pausedScene_InstructionsSelected(MenuSub1 sender)
@@ -468,6 +633,19 @@ internal abstract class GameScene : Scene
 		Collection.Remove((GameComponent)(object)darkener);
 		sender.RemoveInstantly();
 		base.SoundManager.SetPauseMuffle(on: false);
+		NetLocalPauseReleased();
+	}
+
+	// Every local resume path funnels here: tell the peer, and if the REMOTE peer still
+	// holds a pause of its own, immediately re-freeze under the overlay instead.
+	private void NetLocalPauseReleased()
+	{
+		netLocalPauseUp = false;
+		EvilAliensWeb.Compat.Net.NetSession.OnLocalPause(on: false);
+		if (EvilAliensWeb.Compat.Net.NetSession.RemotePaused)
+		{
+			NetSetRemotePaused(on: true);
+		}
 	}
 
 	private void pausedScene_ExitSelected(MenuSub1 sender)
@@ -541,8 +719,59 @@ internal abstract class GameScene : Scene
 
 	protected abstract void PopulateEventList();
 
+	// ?netscript (card 11.3): a compressed ~60s event list firing every replicated
+	// script-beat type -- message, red warning, background ops, checkpoints, a music
+	// switch, victory -- so a two-tab net run verifies the whole beat surface in about a
+	// minute instead of a full-level soak. Levels opt in at the top of their
+	// PopulateEventList (Level1 does). UnlockEvent is deliberately absent: it would grant
+	// real profile unlocks as a test side effect; unlock replication rides the real run.
+	protected void PopulateNetScriptTest()
+	{
+		MessageEvent messageEvent = new MessageEvent(base.Game, "Net script test!", SoundManager.Texts.GetReady);
+		eventList.AddEvent(messageEvent, halting: false);
+		UfoSpawner ufoSpawner = new UfoSpawner(base.Game, 10f, 1.5f, big: false);
+		eventList.AddEvent(ufoSpawner, halting: true);
+		eventList.AddHalt();
+		eventList.SetLastEventAsCheckPoint();
+		WaitEvent waitEvent = new WaitEvent(base.Game, 2f);
+		waitEvent.OnFinished += delegate
+		{
+			Background.QueueAndromeda();
+			Background.SetSpeed(new Vector2(0f, 1f) / 16.666666f);
+		};
+		eventList.AddEvent(waitEvent, halting: true);
+		eventList.AddHalt();
+		messageEvent = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 2.5f);
+		messageEvent.SetupAsWarning(4.712389f);
+		eventList.AddEvent(messageEvent, halting: true);
+		eventList.AddHalt();
+		ufoSpawner = new UfoSpawner(base.Game, 8f, 2f, big: false);
+		eventList.AddEvent(ufoSpawner, halting: true);
+		eventList.AddHalt();
+		eventList.SetLastEventAsCheckPoint();
+		waitEvent = new WaitEvent(base.Game, 2f);
+		waitEvent.OnFinished += delegate
+		{
+			base.SoundManager.PlayMusic(Songs.Level3);
+		};
+		eventList.AddEvent(waitEvent, halting: true);
+		eventList.AddHalt();
+		messageEvent = new MessageEvent(base.Game);
+		eventList.AddEvent(messageEvent, halting: false);
+		waitEvent = new WaitEvent(base.Game, 3f);
+		waitEvent.OnFinished += delegate
+		{
+			Victory();
+		};
+		eventList.AddEvent(waitEvent, halting: true);
+		eventList.AddHalt();
+	}
+
 	protected void Victory()
 	{
+		// Online co-op: the script (and so the win trigger) is host-only -- broadcast it.
+		// No-op on a client (its Victory only ever runs FROM the event, via NetApplyVictory).
+		EvilAliensWeb.Compat.Net.NetSession.OnHostVictory();
 		_state = GameState.Victory;
 		if (!Settings.GetInstance().CheckForCheats())
 		{
@@ -628,6 +857,10 @@ internal abstract class GameScene : Scene
 			// path below clears it. Sub-menus (Instructions / Controller Settings) return
 			// to pausedScene, so they stay muffled — the game is still paused.
 			base.SoundManager.SetPauseMuffle(on: true);
+			// Online co-op: pause is a replicated event; the trigger above is local-device
+			// only by construction (local keyboard/pads -- ControlDevice.Remote is not a pad).
+			netLocalPauseUp = true;
+			EvilAliensWeb.Compat.Net.NetSession.OnLocalPause(on: true);
 			return;
 		}
 		Settings.GetInstance().Update(gameTime);
@@ -684,6 +917,7 @@ internal abstract class GameScene : Scene
 		Collection.Pop();
 		sender.RemoveInstantly();
 		base.SoundManager.SetPauseMuffle(on: false);
+		NetLocalPauseReleased();
 	}
 
 	private void AddPlayer(ControlDevice controlDevice, bool spawnPlayer)
@@ -833,6 +1067,10 @@ internal abstract class GameScene : Scene
 
 	protected void Terminate(FinishedMode mode)
 	{
+		if (NetActiveScene == this)
+		{
+			NetActiveScene = null;
+		}
 		Collection.Purge<AnimatedMessage>();
 		Collection.Purge<TutorialMessage>();
 		Collection.Purge<AlienDrawableGameComponent>();

@@ -25,12 +25,18 @@ namespace EvilAliensWeb.Compat.Net
     // by the transport's JS-driven callbacks and drained ON the game tick, so game state is
     // only ever mutated inside the normal update.
     //
-    // Remaining gaps (by design, later cards): level-script beats (messages/music/boss
-    // phases), pause + checkpoint-reset/shared-fate death, tether; WebRTC transport; the
+    // Card 11.3 adds the SHARED STATE MACHINE: level-script beats (messages, unlock
+    // banners, background ops, music switches, checkpoints) replicate as reliable events
+    // hooked at their side-effect primitives on the host; death/checkpoint reset, victory
+    // and pause replicate as GameScene state transitions (EvReset mirrors the host's
+    // LoseLife branch, EvPause freezes the peer's world without a menu); the TeamChallenge
+    // tether becomes a local soft pull with an or-of-either break event.
+    //
+    // Remaining gaps (by design, later cards): WebRTC transport; leave/drop UX; the
     // roster is exactly two peers.
     public static class NetSession
     {
-        public const byte ProtocolVersion = 2;
+        public const byte ProtocolVersion = 3;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -38,6 +44,13 @@ namespace EvilAliensWeb.Compat.Net
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
         private const long PeerTimeoutMs = 3000;
+        // While either side holds a PAUSE the stream-heartbeat is unreliable: the paused
+        // tab is usually backgrounded AND the pause muffle ducks its audio, which revokes
+        // Chrome's audio exemption from intensive timer throttling -- its ticks (and so its
+        // stream) arrive in ~1/min bursts. A pause is an explicit "here but frozen" state,
+        // so only a long backstop applies (recovers a peer that silently died mid-pause);
+        // a closed tab still departs instantly via the pagehide 'bye'.
+        private const long PausedPeerTimeoutMs = 120000;
         private const long MetricsIntervalMs = 5000;
         private const float FiringHoldMs = 150f;     // "still firing" window after the last FireAt intent
         private const float RenderClockSnapMs = 250f;
@@ -198,7 +211,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             else
             {
-                if (now - lastRxStreamAt > PeerTimeoutMs)
+                if (now - lastRxStreamAt > (RemotePaused || localPaused ? PausedPeerTimeoutMs : PeerTimeoutMs))
                 {
                     PeerLost("timeout");
                 }
@@ -222,7 +235,8 @@ namespace EvilAliensWeb.Compat.Net
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
                 lastMetricsAt = now;
-                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount));
+                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
+                    FindLocalShip() != null, puppet != null));
             }
         }
 
@@ -282,6 +296,143 @@ namespace EvilAliensWeb.Compat.Net
             }
             transport.SendReliable(NetProtocol.EncodeBlastEvent(txEventSeq++, pos, level));
             metrics.EventsTx++;
+        }
+
+        // ---- level-script beats + shared state machine (card 11.3) ---------------------------
+
+        // True while the OTHER peer holds a pause. GameScene's resume paths consult this so
+        // an overlapping local+remote pause only unfreezes when both are clear.
+        public static bool RemotePaused { get; private set; }
+
+        // True while OUR pause menu is up (set by OnLocalPause) -- widens the peer timeout
+        // symmetrically: our own throttled ticking must not misread the peer as gone.
+        private static bool localPaused;
+
+        // Host-side script beats, called from the side-effect PRIMITIVES themselves
+        // (MessageEvent / UnlockEvent / Background ops / SoundManager music / the checkpoint
+        // callback) -- every level, and any future boss code using the same primitives,
+        // replicates without per-level work. All no-ops unless an active host with a peer.
+
+        public static void OnScriptMessage(string text, int speech, int msgType, float angle)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeMessageEvent(txEventSeq++, (byte)msgType, (byte)speech, angle, text));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        public static void OnScriptUnlock(int item, int unlockType, int speech, string text)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeUnlockEvent(txEventSeq++, (byte)item, (byte)unlockType, (byte)speech, text));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        public static void OnBackgroundOp(NetBackgroundOp op, Vector2 v)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeBackgroundEvent(txEventSeq++, (byte)op, v));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        // song = -1 replicates a StopMusic. Unlike the other beat hooks (whose primitives
+        // only scripts call), PlayMusic is also the MENU's -- gate on a live GameScene so
+        // a host navigating menus mid-session can't retune the client. Deliberately fired
+        // ABOVE the host's local mute check: a muted host still replicates script beats.
+        public static void OnMusic(int song)
+        {
+            if (!IsHost || !PeerUp || GameScene.NetActiveScene == null)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvMusic, song < 0 ? NetProtocol.MusicStop : (byte)song));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        public static void OnCheckpoint()
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvCheckpoint));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        // The branch the host's LoseLife took, broadcast so the client mirrors the same
+        // state transition instead of deciding from its own (suppressed) death logic.
+        public const byte ResetModeRespawn = 0;  // DirectRespawn: in-place respawn
+        public const byte ResetModeReset = 1;    // full checkpoint reset (purge + replay)
+        public const byte ResetModeGameOver = 2; // lives exhausted
+
+        public static void OnHostReset(byte mode)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvReset, mode));
+            metrics.EventsTx++;
+            metrics.Resets++;
+            if (DebugFlags.NetLog)
+            {
+                Console.WriteLine("[net] tx reset mode=" + mode);
+            }
+        }
+
+        public static void OnHostVictory()
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvVictory));
+            metrics.EventsTx++;
+            metrics.Victories++;
+        }
+
+        // Either peer: local pause menu pushed / every resume path. The receiving side
+        // freezes its world with a hint overlay (no interactive menu -- you can't navigate
+        // the peer's menu for them).
+        public static void OnLocalPause(bool on)
+        {
+            localPaused = on && Active;
+            if (!Active || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvPause, (byte)(on ? 1 : 0)));
+            metrics.EventsTx++;
+            if (on)
+            {
+                metrics.Pauses++;
+            }
+        }
+
+        // Either peer: the TeamChallenge tether broke on this screen (enemy hit / endpoint
+        // died). Or-of-either-peer, idempotent -- the receiver breaks silently.
+        public static void OnTetherBreak()
+        {
+            if (!Active || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvTetherBreak));
+            metrics.EventsTx++;
+            metrics.TetherBreaks++;
         }
 
         // ---- kill attribution notes ---------------------------------------------------------
@@ -592,6 +743,12 @@ namespace EvilAliensWeb.Compat.Net
             {
                 ApplyJoinHues();
             }
+            if (localPaused)
+            {
+                // Re-announce a held pause across a reconnect so the peer re-freezes.
+                transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvPause, 1));
+                metrics.EventsTx++;
+            }
         }
 
         // Consistent ship colours across both screens: the host's ship is player-slot-0
@@ -632,6 +789,12 @@ namespace EvilAliensWeb.Compat.Net
             hasLastPuppetPos = false;
             haveRxSeq = false;
             lastRxEventSeq = -1;
+            if (RemotePaused)
+            {
+                // Never leave the world frozen by a peer that's gone.
+                RemotePaused = false;
+                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+            }
         }
 
         private static void HandleShipState(byte[] data)
@@ -781,6 +944,129 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     Console.WriteLine("[net] rx blast level=" + level);
                 }
+                break;
+            }
+            case NetProtocol.EvMessage:
+            {
+                if (isHost || !NetProtocol.TryDecodeMessageEvent(data, out byte msgType, out byte speech, out float angle, out string text))
+                {
+                    return;
+                }
+                AnimatedMessage msg = AnimatedMessage.NewAnimatedMessage(bin, game);
+                msg.Setup(text, (SoundManager.Texts)speech, (AnimatedMessage.MessageType)msgType);
+                if ((AnimatedMessage.MessageType)msgType == AnimatedMessage.MessageType.redwarning)
+                {
+                    msg.SetWarningDirection(angle);
+                }
+                bin.Add((GameComponent)(object)msg);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvUnlock:
+            {
+                if (isHost || !NetProtocol.TryDecodeUnlockEvent(data, out byte item, out byte unlockType, out byte speech, out string text))
+                {
+                    return;
+                }
+                // Generous: the join peer played the level too -- grant the same unlocks the
+                // host-side UnlockEvent granted (idempotent), then show the same banner.
+                Unlockables.Items unlockItem = (Unlockables.Items)item;
+                AnimatedMessage.UnlockType ut = (AnimatedMessage.UnlockType)unlockType;
+                Unlockables.GetInstance().Unlock(unlockItem);
+                if (unlockItem == Unlockables.Items.HarderDifficulties)
+                {
+                    Unlockables.GetInstance().Unlock(Unlockables.Items.InsaneDifficulty);
+                }
+                if (ut == AnimatedMessage.UnlockType.cheat)
+                {
+                    Unlockables.GetInstance().Unlock(Unlockables.Items.Cheats);
+                }
+                if (ut == AnimatedMessage.UnlockType.challenge)
+                {
+                    Unlockables.GetInstance().Unlock(Unlockables.Items.Challenges);
+                }
+                Unlockables.GetInstance().SaveThreaded();
+                AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
+                banner.Setup(text, (SoundManager.Texts)speech, AnimatedMessage.MessageType.unlocked);
+                banner.SetUnlockType(ut);
+                bin.Add((GameComponent)(object)banner);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvBackground:
+            {
+                if (isHost || data.Length < 13)
+                {
+                    return;
+                }
+                Vector2 v = new Vector2(NetProtocol.ReadF32(data, 5), NetProtocol.ReadF32(data, 9));
+                GameScene.NetActiveScene?.NetApplyBackgroundOp((NetBackgroundOp)data[4], v);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvMusic:
+            {
+                if (isHost || data.Length < 5)
+                {
+                    return;
+                }
+                sound.NetApplyMusic(data[4] == NetProtocol.MusicStop ? -1 : data[4]);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvCheckpoint:
+            {
+                if (isHost)
+                {
+                    return;
+                }
+                GameScene.NetActiveScene?.NetApplyCheckpoint();
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvReset:
+            {
+                if (isHost || data.Length < 5)
+                {
+                    return;
+                }
+                GameScene.NetActiveScene?.NetApplyReset(data[4]);
+                metrics.Resets++;
+                if (DebugFlags.NetLog)
+                {
+                    Console.WriteLine("[net] rx reset mode=" + data[4]);
+                }
+                break;
+            }
+            case NetProtocol.EvVictory:
+            {
+                if (isHost)
+                {
+                    return;
+                }
+                GameScene.NetActiveScene?.NetApplyVictory();
+                metrics.Victories++;
+                break;
+            }
+            case NetProtocol.EvPause:
+            {
+                if (data.Length < 5)
+                {
+                    return;
+                }
+                bool on = data[4] != 0;
+                RemotePaused = on;
+                GameScene.NetActiveScene?.NetSetRemotePaused(on);
+                if (on)
+                {
+                    metrics.Pauses++;
+                }
+                break;
+            }
+            case NetProtocol.EvTetherBreak:
+            {
+                GameScene.NetActiveScene?.NetApplyTetherBreak();
+                metrics.TetherBreaks++;
                 break;
             }
             }

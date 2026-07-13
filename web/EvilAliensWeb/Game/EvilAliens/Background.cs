@@ -209,6 +209,10 @@ public class Background : Scene
 		XFade.Stop();
 	}
 
+	// Online co-op (card 11.3): the mid-level Background ops the level scripts drive are
+	// replicated at these primitives (host-gated inside OnBackgroundOp), so a join peer --
+	// whose script never runs -- sees the same scenery beats. Initialize-time setters
+	// (SetSpace/SetMars/...) are not hooked: both peers run their own scene Initialize.
 	public void SetSpeed(Vector2 speed)
 	{
 		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
@@ -219,6 +223,7 @@ public class Background : Scene
 		scrollspeedinitial = scrollspeed;
 		scrollspeedchangetimer.Reset();
 		scrollspeedchangetimer.Start();
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed, speed);
 	}
 
 	public void QueueSmallEarth()
@@ -246,6 +251,7 @@ public class Background : Scene
 			// Milder than the hero earth (small corner planet): slow the stars to ~25%.
 			doodadStarSlowdown = 0.25f;
 			doodadEnterFromTop = true;
+			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueSmallEarth, Vector2.Zero);
 		}
 	}
 
@@ -295,6 +301,7 @@ public class Background : Scene
 			{
 				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
+			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueEarth, Vector2.Zero);
 		}
 	}
 
@@ -333,6 +340,7 @@ public class Background : Scene
 			{
 				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
+			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueAndromeda, Vector2.Zero);
 		}
 	}
 
@@ -558,6 +566,7 @@ public class Background : Scene
 	public void EngageBeltSlowdown()
 	{
 		beltSlowActive = true;
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.EngageBeltSlowdown, Vector2.Zero);
 	}
 
 	// Disengage the belt slowdown (Level 1 belt wave finished). Called from the AsteroidSpawner's
@@ -566,6 +575,7 @@ public class Background : Scene
 	public void DisengageBeltSlowdown()
 	{
 		beltSlowActive = false;
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.DisengageBeltSlowdown, Vector2.Zero);
 	}
 
 	// Step the belt slowdown envelope each frame: rise to full slow while engaged (BeltRampInMs),
@@ -722,6 +732,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v8");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v8";
 		backgroundLayers[0].StartSwitch();
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6, Vector2.Zero);
 	}
 
 	public void SetAlienBase5()
@@ -731,6 +742,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v6");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v6";
 		backgroundLayers[0].StartSwitch();
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5, Vector2.Zero);
 	}
 
 	public void SetAlienBase4()
@@ -740,6 +752,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v4");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v4";
 		backgroundLayers[0].StartSwitch();
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4, Vector2.Zero);
 	}
 
 	public void SetAlienBase3()
@@ -749,6 +762,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v3");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v3";
 		backgroundLayers[0].StartSwitch();
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3, Vector2.Zero);
 	}
 
 	public void SetAlienBase2()
@@ -758,6 +772,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v5");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v5";
 		backgroundLayers[0].StartSwitch();
+		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2, Vector2.Zero);
 	}
 
 	public void SetAlienBase()

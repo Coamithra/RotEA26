@@ -489,16 +489,19 @@ and aims at its `Centroid`. Headless QA: fake a player via
 Distributed-authority state replication (NOT lockstep): each peer owns its own ship
 completely (input read untouched, zero added latency); the wire carries ship STATE, never
 inputs; the other peer's ship is an interpolated puppet. Code lives in `Compat/Net/`.
-Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback)
-and card 11.2 (host world authority: client enemy puppets, world snapshots, generous
-claims, score sync); script/reset replication and WebRTC (later cards) build on these
-seams.
+Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback),
+card 11.2 (host world authority: client enemy puppets, world snapshots, generous claims,
+score sync) and card 11.3 (level-script beat replication, host-broadcast reset/victory,
+replicated pause, TeamChallenge soft tether); WebRTC (card 11.4) builds on these seams.
 
 - **Flags:** `?net=host` / `?net=join` opt a session in (in `Active`); `?room=<name>` picks
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
   must use distinct rooms); `?netlog` = verbose per-event logging; `?aiplayer` forces the
   LOCAL ship onto the existing AI branch (`PlayerShip.EffectiveController`) for unattended
-  soak tests. **No `?net` flag = the net layer is never constructed -- a plain boot is
+  soak tests; `?netscript` (pair with `?level=Level1`) replaces the level's event list with
+  a compressed ~60s script firing every replicated beat type (message, warning, background
+  ops, checkpoints, music switch, victory) -- the purpose-built two-tab verification for
+  script replication (`GameScene.PopulateNetScriptTest`). **No `?net` flag = the net layer is never constructed -- a plain boot is
   byte-identical single-player. Hard invariant; keep it.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
   (unreliable-class -- consumers must tolerate drops/reorder) + a RELIABLE lane (ordered,
@@ -514,8 +517,16 @@ seams.
   (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+points / EvBlast
   pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
   `MsgWelcome` handshake (protocol version byte; both sides Hello until paired, opposite
-  role replies Welcome). Peer loss = JS `pagehide` bye OR a 3s stream timeout; the ship
-  stream doubles as the heartbeat (sent even with no live ship, alive=false).
+  role replies Welcome). Card 11.3 bumps the protocol to v3 and adds the shared-state
+  events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
+  (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
+  Peer loss = JS `pagehide` bye OR a 3s stream timeout; the ship stream doubles as the
+  heartbeat (sent even with no live ship, alive=false). **While either side holds a pause
+  the timeout stretches to a 120s backstop** -- a paused tab is usually backgrounded AND
+  the pause muffle ducks its audio, which revokes Chrome's audio exemption from intensive
+  timer throttling, so its ticks arrive in ~1/min bursts; without the wide window the link
+  flaps and the designed peer-lost failsafe silently unfreezes the world. A held local
+  pause is re-announced on reconnect (`PeerConnected`).
 - **NetIds (`Compat/Net/NetIdRegistry`):** host-side, on the ComponentBin seam
   (`Game.Components` ComponentAdded/Removed -- the same events Oracle uses, fired when a
   component actually enters/leaves the world). Replicable set = the `NetTypeRegistry`
@@ -602,14 +613,53 @@ seams.
   to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
-- **Known limits (by design -- next cards):** mid-level script beats (messages, music
-  switches, background changes, boss-phase choreography, victory/game-over) don't
-  replicate; pause + checkpoint-reset/shared-fate death not replicated (a client-side
-  reset purge empties its world; puppets self-rebuild from snapshots after ~3s); AI
-  friends disabled in net sessions (ships not replicated); a dead local player will NOT
-  respawn while the remote puppet lives (LoseLife triggers on AllShipsDead); roster is
-  exactly two peers. Boss puppets are best-effort (the harness caveat): deep
-  Update-reached attack poses may diverge until their state extras grow.
+- **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
+  the level script only runs on the host, so its observable side effects are hooked where
+  they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
+  banner spawns (the unlock is also GRANTED on the join peer -- it played the level too),
+  the mid-level `Background` ops (`SetSpeed`/`Queue*`/belt slowdowns/`SetAlienBase2..6`;
+  the wire opcode enum `NetBackgroundOp` is APPEND-ONLY; Initialize-time setters are NOT
+  hooked -- both peers run their own scene Initialize), `SoundManager.PlayMusic/StopMusic`
+  (client applies via `NetApplyMusic`, deduped against the playing cue so the boot-time
+  track never restarts), and the checkpoint callback (client mirrors `score.Save()` so a
+  later reset restores the same baseline). Any future boss code calling these primitives
+  replicates for free. `CrossFade` is deliberately NOT hooked (it belongs to the reset
+  flow, which each side runs itself).
+- **Death/checkpoint reset + victory are host-authoritative broadcasts (card 11.3):**
+  `LoseLife` no-ops on a client; the host broadcasts the branch it took (EvReset:
+  respawn / reset / game over) and `GameScene.NetApplyReset` mirrors the exact state
+  transition -- the client then runs its own purge-and-replay flow while the host's
+  post-revert spawner replay rebuilds the puppets. `Victory()` broadcasts EvVictory (the
+  win trigger lives in the host-only script); the client runs its own `Victory()` from it,
+  achievements included. `GameScene.NetActiveScene` (static, set in Initialize / cleared
+  in Terminate) is how NetSession reaches the private state machine.
+- **Pause is a replicated event; the triggers stay local (card 11.3):** the local pause
+  push / every resume path sends EvPause on/off. The receiving side freezes via
+  `Collection.Push()` under a `NetPauseOverlay` ("OTHER PLAYER PAUSED") -- no interactive
+  menu. Overlaps resolve in `GameScene.NetSetRemotePaused` + `NetLocalPauseReleased`:
+  the world unfreezes only when BOTH sides are clear; a scene that Initializes while
+  `NetSession.RemotePaused` picks the freeze up at the end of Initialize (level-load
+  race). GOTCHA kept: net TeamChallenge seats ONLY the local device -- the offline
+  `AddPlayer(PadOne)` would trip the disconnected-gamepad force-pause every tick and
+  squat the remote slot.
+- **TeamChallenge tether online = a LOCAL first-order pull (card 11.3):** the rigid
+  midpoint +/-39px `SetPosition` pinning would fight the interpolation buffer, so in a net
+  session each peer softly pulls only its OWN ship toward the puppet's on-screen position
+  (`ShipConnector.NetPullOwnShip`; consts `NetRestPx` 78 / `NetPullK` 0.0018/ms /
+  `NetMaxPullPxPerMs` 0.22, picked by `tools/sim/tether_sim.py` -- first-order, no
+  velocity state, overdamped to 300ms one-way; if it ever wobbles SOFTEN K, never
+  stiffen; the clamp sits below ship MaxSpeed so players can always fight the pull).
+  Tether break is an or-of-either-peer idempotent event (local cause sends EvTetherBreak,
+  the receiver breaks silently via `NetBreakSilently`); shared-fate death asplodes only
+  locally-owned ships and defers the life/reset to the host. Connector creation waits for
+  BOTH ships (the puppet joins a beat late -- `netConnectorPending` in TeamChallenge).
+- **Known limits (by design -- next cards):** AI friends disabled in net sessions (ships
+  not replicated); a dead local player will NOT respawn while the remote puppet lives
+  (LoseLife triggers on AllShipsDead); roster is exactly two peers; DevCommentEvent
+  commentary is not replicated (profile-local setting). Boss puppets are best-effort
+  (the harness caveat): deep Update-reached attack poses may diverge until their state
+  extras grow. A one-time `pupPops` burst can appear during the FIRST wipe transition of
+  a session (transient, self-heals, cosmetic under the death FX -- follow-up card).
 
 ### Audio runtime (`SoundManager` / `eaMusic`)
 

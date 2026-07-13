@@ -356,6 +356,9 @@ public class SoundManager : ISoundManagerService
 
 	public void PlayMusic(Songs song)
 	{
+		// Online co-op (card 11.3): mid-level music switches come from the level script /
+		// boss code, which is host-only -- replicate the call (no-op unless active host).
+		EvilAliensWeb.Compat.Net.NetSession.OnMusic((int)song);
 		if (!Settings.GetInstance().PlayMusic)
 			return;
 		string cue = SongInstance.songFiles[(int)song];
@@ -367,8 +370,29 @@ public class SoundManager : ISoundManagerService
 
 	public void StopMusic()
 	{
+		EvilAliensWeb.Compat.Net.NetSession.OnMusic(-1);
 		_currentMusicCue = null;
 		MusicInterop.Stop();
+	}
+
+	// Client-side EvMusic handler (song < 0 = stop). Dedupe against the cue already
+	// playing: both peers start the level's initial track from their OWN Initialize, so
+	// the host's boot-time PlayMusic must not restart the client's copy mid-intro.
+	internal void NetApplyMusic(int song)
+	{
+		if (song < 0)
+		{
+			_currentMusicCue = null;
+			MusicInterop.Stop();
+			return;
+		}
+		if (!Settings.GetInstance().PlayMusic || song >= SongInstance.songFiles.Length)
+			return;
+		string cue = SongInstance.songFiles[song];
+		if (string.IsNullOrEmpty(cue) || cue == _currentMusicCue)
+			return;
+		_currentMusicCue = cue;
+		MusicInterop.Play(cue);
 	}
 
 	// Pause "underwater" muffle: mutes+muddies the BGM while the game is paused

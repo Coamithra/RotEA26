@@ -26,6 +26,17 @@ namespace EvilAliensWeb.Compat.Net
         public const byte EvBlast = 3;
         public const byte EvClaim = 4;
         public const byte EvScoreSync = 5;
+        // Card 11.3: level-script beats + shared state-machine transitions (host -> client
+        // unless noted). All ride the same reliable MsgEvent envelope.
+        public const byte EvMessage = 6;      // script AnimatedMessage (MessageEvent)
+        public const byte EvUnlock = 7;       // script unlock banner + grant (UnlockEvent)
+        public const byte EvBackground = 8;   // Background op (opcode + vec2 param)
+        public const byte EvMusic = 9;        // PlayMusic(song) / StopMusic (song = MusicStop)
+        public const byte EvCheckpoint = 10;  // level checkpoint reached -> client score.Save()
+        public const byte EvReset = 11;       // host LoseLife branch -> client mirrors it
+        public const byte EvVictory = 12;     // host Victory() -> client Victory()
+        public const byte EvPause = 13;       // either peer's local pause/resume (payload on/off)
+        public const byte EvTetherBreak = 14; // either peer broke the TeamChallenge tether
 
         public const byte ShipFlagAlive = 1 << 0;
         public const byte ShipFlagFiring = 1 << 1;
@@ -264,6 +275,99 @@ namespace EvilAliensWeb.Compat.Net
             off += BaseStateBytes;
         }
 
+        // ---- level-script beat events (card 11.3) -------------------------------------------
+
+        // EvMessage: [msgType:1][speech:1][angle:f32][textLen:1][utf8 text:N] -- the exact
+        // AnimatedMessage.Setup args the host-side MessageEvent spawned with (angle only
+        // meaningful for the redwarning type's direction arrow).
+        public static byte[] EncodeMessageEvent(ushort eventSeq, byte msgType, byte speech, float angle, string text)
+        {
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(text ?? "");
+            int textLen = Math.Min(utf8.Length, 255);
+            byte[] b = EventHeader(EvMessage, eventSeq, 7 + textLen);
+            b[4] = msgType;
+            b[5] = speech;
+            WriteF32(b, 6, angle);
+            b[10] = (byte)textLen;
+            Array.Copy(utf8, 0, b, 11, textLen);
+            return b;
+        }
+
+        public static bool TryDecodeMessageEvent(byte[] b, out byte msgType, out byte speech, out float angle, out string text)
+        {
+            msgType = 0;
+            speech = 0;
+            angle = 0f;
+            text = null;
+            if (b.Length < 11 || b.Length < 11 + b[10])
+            {
+                return false;
+            }
+            msgType = b[4];
+            speech = b[5];
+            angle = ReadF32(b, 6);
+            text = System.Text.Encoding.UTF8.GetString(b, 11, b[10]);
+            return true;
+        }
+
+        // EvUnlock: [item:1][unlockType:1][speech:1][textLen:1][utf8 text:N] -- banner + the
+        // unlock itself (generous: the join peer played the level too).
+        public static byte[] EncodeUnlockEvent(ushort eventSeq, byte item, byte unlockType, byte speech, string text)
+        {
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(text ?? "");
+            int textLen = Math.Min(utf8.Length, 255);
+            byte[] b = EventHeader(EvUnlock, eventSeq, 4 + textLen);
+            b[4] = item;
+            b[5] = unlockType;
+            b[6] = speech;
+            b[7] = (byte)textLen;
+            Array.Copy(utf8, 0, b, 8, textLen);
+            return b;
+        }
+
+        public static bool TryDecodeUnlockEvent(byte[] b, out byte item, out byte unlockType, out byte speech, out string text)
+        {
+            item = 0;
+            unlockType = 0;
+            speech = 0;
+            text = null;
+            if (b.Length < 8 || b.Length < 8 + b[7])
+            {
+                return false;
+            }
+            item = b[4];
+            unlockType = b[5];
+            speech = b[6];
+            text = System.Text.Encoding.UTF8.GetString(b, 8, b[7]);
+            return true;
+        }
+
+        // EvBackground: [op:1][x:f32][y:f32] (vec2 only used by the SetSpeed op).
+        public static byte[] EncodeBackgroundEvent(ushort eventSeq, byte op, Vector2 v)
+        {
+            byte[] b = EventHeader(EvBackground, eventSeq, 9);
+            b[4] = op;
+            WriteF32(b, 5, v.X);
+            WriteF32(b, 9, v.Y);
+            return b;
+        }
+
+        // EvMusic: [song:1] (MusicStop = StopMusic). EvCheckpoint/EvVictory/EvTetherBreak carry
+        // no payload; EvReset carries [mode:1]; EvPause carries [on:1] -- all use EncodeByteEvent.
+        public const byte MusicStop = 0xFF;
+
+        public static byte[] EncodeByteEvent(ushort eventSeq, byte eventType, byte value)
+        {
+            byte[] b = EventHeader(eventType, eventSeq, 1);
+            b[4] = value;
+            return b;
+        }
+
+        public static byte[] EncodeEmptyEvent(ushort eventSeq, byte eventType)
+        {
+            return EventHeader(eventType, eventSeq, 0);
+        }
+
         // EvBlast: [posX:4][posY:4][level]
         public static byte[] EncodeBlastEvent(ushort eventSeq, Vector2 pos, int level)
         {
@@ -324,6 +428,24 @@ namespace EvilAliensWeb.Compat.Net
         public float CurFrame;
         public float Scale;
         public int Hp; // 0 = not killable / unknown
+    }
+
+    // The Background side-effect primitives the level scripts drive mid-level (hooked in
+    // Background.cs; wire value = enum value). Initialize-time setters (SetSpace/SetMars/...)
+    // are NOT here -- both peers run their own scene Initialize. APPEND-ONLY.
+    public enum NetBackgroundOp : byte
+    {
+        SetSpeed = 0,
+        QueueEarth = 1,
+        QueueSmallEarth = 2,
+        QueueAndromeda = 3,
+        EngageBeltSlowdown = 4,
+        DisengageBeltSlowdown = 5,
+        SetAlienBase2 = 6,
+        SetAlienBase3 = 7,
+        SetAlienBase4 = 8,
+        SetAlienBase5 = 9,
+        SetAlienBase6 = 10,
     }
 
     public struct ShipSample

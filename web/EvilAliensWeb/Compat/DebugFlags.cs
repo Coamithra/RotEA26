@@ -859,6 +859,12 @@ namespace EvilAliensWeb.Compat
 		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
 		public static bool AIPlayer { get; private set; }
 
+		// ?netscript (card 11.3): replace the booted level's event list with a compressed
+		// ~60s script that fires every replicated beat type (message, warning, background
+		// ops, checkpoints, music switch, victory) -- the purpose-built two-tab
+		// verification for level-script replication. Pair with ?level=Level1&net=host/join.
+		public static bool NetScript { get; private set; }
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -1421,6 +1427,9 @@ namespace EvilAliensWeb.Compat
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
+				case "netscript":
+					NetScript = IsOn(val);
+					break;
 				case "spiderboss":
 					SpiderBoss = IsOn(val);
 					break;
@@ -1613,7 +1622,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer || NetScript;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1628,6 +1637,7 @@ namespace EvilAliensWeb.Compat
 							+ (TutorialTraining ? " tutorialtraining" : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
+						+ (NetScript ? " netscript" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

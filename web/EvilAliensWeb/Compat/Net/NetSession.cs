@@ -1046,7 +1046,8 @@ namespace EvilAliensWeb.Compat.Net
                 // (unless it's already in its victory/game-over wind-down) and surface a
                 // notice to the menus.
                 GameScene scene = GameScene.NetActiveScene;
-                Stop("peer lost: " + reason, "The other player disconnected\nMatch ended");
+                bool normalEnd = scene != null && scene.NetEndingNormally;
+                Stop("peer lost: " + reason, normalEnd ? null : "The other player disconnected\nMatch ended");
                 scene?.NetApplyPeerLeft();
                 return;
             }
@@ -1382,8 +1383,14 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvLeave:
             {
+                // A shared victory/game-over also lands here (whichever scene terminates
+                // first sends the leave) -- that's a normal end, not a walk-out; no notice.
                 GameScene scene = GameScene.NetActiveScene;
-                Stop("peer left the match", "The other player left\nMatch ended");
+                // (scene == null here = the lobby/warm phase -- a walk-out, notice shown;
+                // our OWN finished level can't reach this: its scene-down edge already
+                // stopped the session.)
+                bool normalEnd = scene != null && scene.NetEndingNormally;
+                Stop("peer left the match", normalEnd ? null : "The other player left\nMatch ended");
                 scene?.NetApplyPeerLeft();
                 break;
             }

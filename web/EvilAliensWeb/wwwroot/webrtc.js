@@ -150,7 +150,12 @@ window.eaRtc = (() => {
         try { ws = new WebSocket(url); }
         catch (e) { fail('signal'); return; }
         ws.onopen = onOpen;
-        ws.onmessage = onSignalMessage;
+        // Serialize the async handler: WS frames arrive in order, but each onmessage is
+        // async and awaits (setRemoteDescription etc.) -- unchained, a relayed ICE frame
+        // could run addIceCandidate before the offer's setRemoteDescription resolves and
+        // kill a viable pairing with InvalidStateError.
+        let chain = Promise.resolve();
+        ws.onmessage = (ev) => { chain = chain.then(() => onSignalMessage(ev)); };
         ws.onerror = () => { if (!connected) fail('signal'); };
         ws.onclose = () => { if (!connected && !finished) fail('signal'); };
     };
@@ -214,7 +219,7 @@ window.eaRtc = (() => {
                 const canvas = document.querySelector('#app canvas');
                 if (canvas) canvas.focus();
             };
-            joinBtn.onclick = () => { const c = input.value.trim().toUpperCase(); if (c.length >= 4) done(c); else input.focus(); };
+            joinBtn.onclick = () => { const c = input.value.trim().toUpperCase(); if (c.length === 5) done(c); else input.focus(); };
             cancelBtn.onclick = () => done('');
             wrap.addEventListener('keydown', (e) => {
                 e.stopPropagation();

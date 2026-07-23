@@ -926,9 +926,14 @@ internal abstract class GameScene : Scene
 	// down (the victory/game-over choreography finishes locally either way). Any local
 	// pause menu depth (pause / instructions / controller settings / exit confirmation)
 	// is unwound the same way exitConfirmationMenu_YesSelected does.
+	// True while the level is ending NORMALLY (shared victory / game-over wind-down):
+	// the peer's scene tearing down first is expected then, not a disconnect -- suppress
+	// the "player left" notice.
+	internal bool NetEndingNormally => _state == GameState.Victory || _state == GameState.GameOver;
+
 	internal void NetApplyPeerLeft()
 	{
-		if (_state == GameState.Victory || _state == GameState.GameOver)
+		if (NetEndingNormally)
 		{
 			return;
 		}

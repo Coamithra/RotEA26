@@ -40,6 +40,17 @@ jobs:
       - name: Fix base href for project page
         run: sed -i 's|<base href="/" />|<base href="/RotEA26/" />|' release/wwwroot/index.html
 
+      # Online co-op build fingerprint (card 11.4): peers must run the IDENTICAL published
+      # binary, so stamp a hash of blazor.boot.json (it lists every assembly's own hash)
+      # into eaBuildHash. NetSession's hello handshake compares it and rejects a
+      # stale-cached client with an "update required" notice. Dev builds keep 'dev'.
+      # NOTE: this must run BEFORE the 404.html copy so both files carry the stamp.
+      - name: Stamp build hash
+        run: |
+          HASH=$(sha256sum release/wwwroot/_framework/blazor.boot.json | cut -c1-16)
+          sed -i "s|window.eaBuildHash = 'dev'|window.eaBuildHash = '$HASH'|" release/wwwroot/index.html
+          grep -q "eaBuildHash = '$HASH'" release/wwwroot/index.html || { echo "build hash stamp failed"; exit 1; }
+
       # _framework/ has a leading underscore; Jekyll would drop it. Disable Jekyll.
       - name: Disable Jekyll
         run: touch release/wwwroot/.nojekyll

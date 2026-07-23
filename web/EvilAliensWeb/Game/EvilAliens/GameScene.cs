@@ -920,6 +920,34 @@ internal abstract class GameScene : Scene
 		NetLocalPauseReleased();
 	}
 
+	// Card 11.4: the peer left a menu-lobby match -- the match ends for both sides. Called
+	// by NetSession AFTER the session is stopped (so the remote-pause freeze is already
+	// released). Force-exit to the main menu unless the level is already winding itself
+	// down (the victory/game-over choreography finishes locally either way). Any local
+	// pause menu depth (pause / instructions / controller settings / exit confirmation)
+	// is unwound the same way exitConfirmationMenu_YesSelected does.
+	internal void NetApplyPeerLeft()
+	{
+		if (_state == GameState.Victory || _state == GameState.GameOver)
+		{
+			return;
+		}
+		if (netLocalPauseUp)
+		{
+			Collection.Pop();
+			Collection.Remove((GameComponent)(object)darkener);
+			pausedScene.RemoveInstantly();
+			exitConfirmationMenu.RemoveInstantly();
+			playerOptions.RemoveInstantly();
+			Collection.Remove((GameComponent)(object)instructionsMenu);
+			netLocalPauseUp = false;
+			pausestopper.Start();
+			pausestopper.Reset();
+			base.SoundManager.SetPauseMuffle(on: false);
+		}
+		Terminate(FinishedMode.exit);
+	}
+
 	private void AddPlayer(ControlDevice controlDevice, bool spawnPlayer)
 	{
 		oracle.AddPlayer(controlDevice);

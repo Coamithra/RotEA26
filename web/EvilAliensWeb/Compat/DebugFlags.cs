@@ -850,6 +850,21 @@ namespace EvilAliensWeb.Compat
 		// 5-second "[net] ..." metrics summary is always on while a session is active.
 		public static bool NetLog { get; private set; }
 
+		// Card 11.4 dev flags for the REAL transport without the menu flow: ?rtc makes a
+		// ?net=host/join boot use WebRtcTransport (signaling + real DataChannels) instead
+		// of the BroadcastChannel loopback; the host tab prints its room code to the
+		// console and the join tab passes it back via ?code=. ?signal= overrides the
+		// signaling server URL (a local `uvicorn main:app --port 8091` rig uses
+		// ?signal=ws://localhost:8091/ws). The menu-driven lobby always uses WebRTC and
+		// needs none of these.
+		public const string DefaultSignalUrl = "wss://notzelda.haraldmaassen.com/rotea/ws";
+
+		public static bool NetRtc { get; private set; }
+
+		public static string NetSignal { get; private set; } = DefaultSignalUrl;
+
+		public static string NetCode { get; private set; } = "";
+
 		// ?aiplayer: force the LOCAL player's ship onto the existing PlayerShip AI branch
 		// (ControlDevice.AI / DoAIMove/DoAIFire -- the attract-demo behaviour) at level start,
 		// so two net tabs can drive themselves unattended (the user-specified 11.1 testing
@@ -1423,6 +1438,21 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "netlog":
 					NetLog = IsOn(val);
+					break;
+				case "rtc":
+					NetRtc = IsOn(val);
+					break;
+				case "signal":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetSignal = val.Trim();
+					}
+					break;
+				case "code":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetCode = val.Trim().ToUpperInvariant();
+					}
 					break;
 				case "aiplayer":
 					AIPlayer = IsOn(val);

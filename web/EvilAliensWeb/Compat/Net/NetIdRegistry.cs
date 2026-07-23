@@ -51,6 +51,23 @@ namespace EvilAliensWeb.Compat.Net
             game.Components.ComponentRemoved += Components_ComponentRemoved;
         }
 
+        // Session teardown (card 11.4: menu sessions end when the match does). A later
+        // Enable starts fresh; `next` deliberately keeps counting so ids from a dead
+        // session never collide with a new one inside a peer's recent-death windows.
+        public static void Disable(Game game)
+        {
+            if (!enabled)
+            {
+                return;
+            }
+            enabled = false;
+            game.Components.ComponentAdded -= Components_ComponentAdded;
+            game.Components.ComponentRemoved -= Components_ComponentRemoved;
+            entries.Clear();
+            byId.Clear();
+            liveList.Clear();
+        }
+
         public static bool TryGetById(ushort id, out Entry entry)
         {
             return byId.TryGetValue(id, out entry);

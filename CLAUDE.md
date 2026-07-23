@@ -133,15 +133,36 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   casing mismatch passes locally and 404s on GitHub Pages (black screen). Verify new assets ON THE
   LIVE URL, not just locally.
 - **Hosting:** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI, rewrites
-  `<base href>` to `/RotEA26/`, adds `.nojekyll` + `404.html`, deploys via `actions/deploy-pages`
-  — triggered MANUALLY (`workflow_dispatch`). The dev build keeps `<base href="/" />`; don't
-  hard-code `/RotEA26/` in `index.html`.
+  `<base href>` to `/RotEA26/`, adds `.nojekyll` + `404.html`, stamps `window.eaBuildHash`
+  (online co-op's peers-run-identical-binary check — dev builds keep `'dev'`), deploys via
+  `actions/deploy-pages` — triggered MANUALLY (`workflow_dispatch`). The dev build keeps
+  `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
 - **Publish trimming:** `PublishTrimmed=true` + `TrimMode=partial` (NOT full — full strips the
   XmlSerializer save types + KNI's reflection factories → white screen);
   `InvariantGlobalization=true` (so even Debug is culture-invariant — no culture-dependent
   parse/format); `System.Private.Xml` pinned via `<TrimmerRootAssembly>`. **Verify any trim change
   with a LOCAL Release publish in real Chrome (saves round-trip) before pushing** — trimming
   breakage only shows at runtime in the browser.
+
+## Dedicated server hosting (Hetzner Cloud VPS — shared with NotZelda)
+
+The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
+
+- **Server:** Hetzner CX22, Ubuntu 24.04 — IP `46.225.218.207`
+- **SSH:** `ssh root@46.225.218.207`
+- **Code:** `/opt/<PROJECT_NAME>/` (this project's server code goes in `/opt/rotea/`; NotZelda
+  lives at `/opt/NotZelda/` on the same box — don't touch it)
+- **Ports already in use:** 8080 (NotZelda game server), 8081 (`notzelda-llama` llama-server),
+  80/443 (nginx), plus the fighting game's port — **check `ss -tlnp` for the live list before
+  claiming a port**; pick a free one for this project.
+- **Services:** manage via systemd — `systemctl restart <service>` / `journalctl -u <service> -f`.
+  Existing units: `notzelda`, `notzelda-llama`.
+- **nginx** serves static files / reverse-proxies; add a new server block or location for this
+  project rather than editing NotZelda's (or any other project's) config.
+- **Deploy:** `ssh` in, `cd /opt/<PROJECT_NAME> && git pull`, then restart the project's service.
+- **Shared box etiquette:** it's a small CPU-only VPS (2 vCPU / 4GB RAM) also running an LLM
+  server — keep resource usage modest and never stop/restart the `notzelda*` (or other
+  projects') services from this project.
 
 ## Related repos
 

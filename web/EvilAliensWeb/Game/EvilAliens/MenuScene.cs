@@ -134,6 +134,22 @@ internal class MenuScene : Scene
 
 	private SubMenuLevelChoice challengeSelector;
 
+	// Online co-op lobby state (card 11.4). netMode = the menu flow is inside the
+	// Online Co-op path (reroutes the shared selectors' exits, locks the launch to the
+	// session); netNoticeUp = the status panel is showing a session-ending notice
+	// ("player left", "update required") and waits for an acknowledge.
+	private MenuSub1 netMenu;
+
+	private NetStatusMenu netStatusMenu;
+
+	private MenuSub1 netPickMenu;
+
+	private bool netMode;
+
+	private bool netStatusShown;
+
+	private bool netNoticeUp;
+
 	private SubMenuLevelChoice levelSelector;
 
 	private SubMenuAwardments awardmentsMenu;
@@ -204,6 +220,10 @@ internal class MenuScene : Scene
 		mainMenu.AddEntryEvent(mainMenu_TutorialSelected);
 		mainMenu.AddEntry("Challenges", Unlockables.Items.Challenges);
 		mainMenu.AddEntryEvent(mainMenu_ChallengesSelected);
+		// Web-port addition (card 11.4), deliberately UNGATED: menu-driven online co-op
+		// (host shows a room code, friend enters it; see Compat/Net/NetLobby).
+		mainMenu.AddEntry("Online Co-op");
+		mainMenu.AddEntryEvent(mainMenu_OnlineSelected);
 		mainMenu.AddEntry("Awardments", Unlockables.Items.Awardments);
 		mainMenu.AddEntryEvent(mainMenu_AwardmentsSelected);
 		mainMenu.AddEntry("Cheats", Unlockables.Items.Cheats);
@@ -358,6 +378,29 @@ internal class MenuScene : Scene
 		trailerMenu.OnExit += trailerMenu_BackSelected;
 		trailerScene = new TrailerScene(base.Game);
 		trailerScene.OnFinished += trailerScene_OnFinished;
+		// Online co-op lobby (card 11.4): Host/Join submenu, the phase/status panel, and
+		// the post-connect Missions/Challenges picker (host side). The join side's code
+		// entry is an HTML overlay (eaRtc.promptCode) -- real text input, house pattern.
+		netMenu = new MenuSub1(base.Game);
+		netMenu.AddEntry("Host Game");
+		netMenu.AddEntryEvent(netMenu_HostSelected);
+		netMenu.AddEntry("Join Game");
+		netMenu.AddEntryEvent(netMenu_JoinSelected);
+		netMenu.AddEntry("Back");
+		netMenu.AddEntryEvent(netMenu_BackSelected);
+		netMenu.OnExit += netMenu_BackSelected;
+		netStatusMenu = new NetStatusMenu(base.Game, "");
+		netStatusMenu.AddEntry("Cancel");
+		netStatusMenu.AddEntryEvent(netStatus_CancelSelected);
+		netStatusMenu.OnExit += netStatus_CancelSelected;
+		netPickMenu = new MenuSub1(base.Game);
+		netPickMenu.AddEntry("Missions");
+		netPickMenu.AddEntryEvent(netPick_MissionsSelected);
+		netPickMenu.AddEntry("Challenges");
+		netPickMenu.AddEntryEvent(netPick_ChallengesSelected);
+		netPickMenu.AddEntry("Cancel");
+		netPickMenu.AddEntryEvent(netPick_CancelSelected);
+		netPickMenu.OnExit += netPick_CancelSelected;
 		base.DrawOrder = 1;
 	}
 
@@ -511,6 +554,18 @@ internal class MenuScene : Scene
 	{
 		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)sender.GetSelectedEntry);
 		Settings.GetInstance().SaveThreaded();
+		// Online co-op host: the pick is final here -- replicate it so the client
+		// mirrors the launch (locked level + difficulty). A session that died mid-pick
+		// aborts the launch; the NetUpdate notice poll redraws the flow.
+		if (netMode)
+		{
+			if (!EvilAliensWeb.Compat.Net.NetSession.IsHost || !EvilAliensWeb.Compat.Net.NetSession.PeerUp)
+			{
+				sender.Remove();
+				return;
+			}
+			EvilAliensWeb.Compat.Net.NetSession.SendLaunch(selectedLevel, (int)Settings.GetInstance().CurrentDifficulty);
+		}
 		fadestarted = timer;
 		currentFade = 0f;
 		state = MenuState.FadeToGame;
@@ -805,6 +860,14 @@ internal class MenuScene : Scene
 
 	private void challengeSelector_levelSelected(MenuSub1 sender)
 	{
+		// Online co-op excludes the webcam challenge (the camera IS the controller and
+		// the mask is wall-clock local -- see plans/stage11-online-coop.md). The entry
+		// stays visible; selecting it in a net lobby just doesn't respond (11.5 polish
+		// may add a proper message).
+		if (netMode && ((SubMenuLevelChoice)sender).GetSelectedLevel() == Levels.WebcamAliens)
+		{
+			return;
+		}
 		selectedLevel = ((SubMenuLevelChoice)sender).GetSelectedLevel();
 		difficultyCaller = sender;
 		if (General.IsTrial && selectedLevel != Levels.Level1)
@@ -822,13 +885,27 @@ internal class MenuScene : Scene
 
 	private void levelSelector_OnExit(MenuSub1 sender)
 	{
-		mainMenu.Show();
+		if (netMode)
+		{
+			netPickMenu.Show();
+		}
+		else
+		{
+			mainMenu.Show();
+		}
 		levelSelector.Remove();
 	}
 
 	private void challengeSelector_OnExit(MenuSub1 sender)
 	{
-		mainMenu.Show();
+		if (netMode)
+		{
+			netPickMenu.Show();
+		}
+		else
+		{
+			mainMenu.Show();
+		}
 		challengeSelector.Remove();
 	}
 
@@ -881,6 +958,195 @@ internal class MenuScene : Scene
 	{
 		mainMenu.Remove();
 		challengeSelector.Show();
+	}
+
+	// ---- Online co-op lobby (card 11.4) ------------------------------------------------
+
+	private void mainMenu_OnlineSelected(MenuSub1 sender)
+	{
+		netMode = true;
+		mainMenu.Remove();
+		netMenu.Show();
+	}
+
+	private void netMenu_HostSelected(MenuSub1 sender)
+	{
+		EvilAliensWeb.Compat.Net.NetLobby.HostGame(base.Game);
+		netMenu.Remove();
+		ShowNetStatus("Contacting server...");
+	}
+
+	private void netMenu_JoinSelected(MenuSub1 sender)
+	{
+		EvilAliensWeb.Compat.Net.NetLobby.JoinGame(base.Game);
+		netMenu.Remove();
+		ShowNetStatus("Enter the room code");
+	}
+
+	private void netMenu_BackSelected(MenuSub1 sender)
+	{
+		netMode = false;
+		netMenu.Remove();
+		mainMenu.Show();
+	}
+
+	private void netStatus_CancelSelected(MenuSub1 sender)
+	{
+		HideNetStatus();
+		if (netNoticeUp)
+		{
+			// Acknowledging a session-ending notice returns to the top (the lobby flow
+			// context is gone).
+			netNoticeUp = false;
+			netMode = false;
+			mainMenu.Show();
+			return;
+		}
+		EvilAliensWeb.Compat.Net.NetLobby.Cancel();
+		netMenu.Show();
+	}
+
+	private void netPick_MissionsSelected(MenuSub1 sender)
+	{
+		netPickMenu.Remove();
+		levelSelector.Show();
+	}
+
+	private void netPick_ChallengesSelected(MenuSub1 sender)
+	{
+		netPickMenu.Remove();
+		challengeSelector.Show();
+	}
+
+	private void netPick_CancelSelected(MenuSub1 sender)
+	{
+		EvilAliensWeb.Compat.Net.NetLobby.Cancel();
+		netPickMenu.Remove();
+		netMenu.Show();
+	}
+
+	private void ShowNetStatus(string text)
+	{
+		netStatusMenu.SetText(text);
+		if (!netStatusShown)
+		{
+			netStatusMenu.Show();
+			netStatusShown = true;
+		}
+	}
+
+	private void HideNetStatus()
+	{
+		if (netStatusShown)
+		{
+			netStatusMenu.RemoveInstantly();
+			netStatusShown = false;
+		}
+	}
+
+	// Best-effort close of every menu the net flow can have open (session died from
+	// under it). RemoveInstantly/Collection.Remove of a not-shown scene is a no-op.
+	private void CloseNetFlowMenus()
+	{
+		HideNetStatus();
+		netMenu.RemoveInstantly();
+		netPickMenu.RemoveInstantly();
+		levelSelector.RemoveInstantly();
+		challengeSelector.RemoveInstantly();
+		difficultyMenu.RemoveInstantly();
+		EvilAliensWeb.Compat.Net.WebRtcInterop.ClosePrompt();
+	}
+
+	// Per-tick lobby pump: drains the JS-side phase queue, keeps the status panel's text
+	// current, advances the host to the level pick on connect, mirrors the host's launch
+	// on the client, and surfaces session-ending notices from any point in the flow.
+	private void NetUpdate()
+	{
+		string notice = EvilAliensWeb.Compat.Net.NetSession.TakeMenuNotice();
+		if (notice != null)
+		{
+			if (netMode)
+			{
+				CloseNetFlowMenus();
+			}
+			else
+			{
+				mainMenu.RemoveInstantly(); // fresh menu re-entry after an in-level match end
+			}
+			EvilAliensWeb.Compat.Net.NetLobby.Cancel();
+			netMode = true; // the status panel is net-flow UI; cleared on acknowledge
+			netNoticeUp = true;
+			ShowNetStatus(notice);
+			return;
+		}
+		if (!netMode || netNoticeUp)
+		{
+			return;
+		}
+		EvilAliensWeb.Compat.Net.NetLobby.Tick();
+		if (EvilAliensWeb.Compat.Net.NetSession.TakePendingLaunch(out int level, out int difficulty))
+		{
+			NetLaunchMirror((Levels)level, difficulty);
+			return;
+		}
+		if (!netStatusShown)
+		{
+			return;
+		}
+		switch (EvilAliensWeb.Compat.Net.NetLobby.Phase)
+		{
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Contacting:
+			netStatusMenu.SetText("Contacting server...");
+			break;
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Hosting:
+			netStatusMenu.SetText("Room code:  " + EvilAliensWeb.Compat.Net.NetLobby.RoomCode
+				+ "\nTell your friend!\nWaiting for them to join...");
+			break;
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Prompting:
+			netStatusMenu.SetText("Enter the room code");
+			break;
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Connecting:
+			netStatusMenu.SetText("Connecting...");
+			break;
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Failed:
+			netStatusMenu.SetText(EvilAliensWeb.Compat.Net.NetLobby.FailText);
+			break;
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Connected:
+			// PeerUp = the v4 handshake (build hash + flags) settled too, not just ICE.
+			if (!EvilAliensWeb.Compat.Net.NetSession.PeerUp)
+			{
+				netStatusMenu.SetText("Connecting...");
+			}
+			else if (EvilAliensWeb.Compat.Net.NetLobby.IsHosting)
+			{
+				HideNetStatus();
+				netPickMenu.Show();
+			}
+			else
+			{
+				netStatusMenu.SetText("Connected!\nThe host is choosing a mission...");
+			}
+			break;
+		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Idle:
+			// The code-entry overlay was cancelled.
+			HideNetStatus();
+			netMenu.Show();
+			break;
+		}
+	}
+
+	// Client side of EvLaunch: mirror the host's pick through the exact same fade ->
+	// OnFinished -> warm -> launch path the local menus use.
+	private void NetLaunchMirror(Levels level, int difficulty)
+	{
+		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)difficulty);
+		selectedLevel = level;
+		starter = ControlDevice.Keyboard;
+		HideNetStatus();
+		fadestarted = timer;
+		currentFade = 0f;
+		state = MenuState.FadeToGame;
+		nextState = NextState.StartLevel;
 	}
 
 	private void mainMenu_AwardmentsSelected(MenuSub1 sender)
@@ -1384,6 +1650,7 @@ internal class MenuScene : Scene
 			RemovePreviewOption();
 		}
 		timer += gameTime.ElapsedGameTime;
+		NetUpdate();
 		UpdateRing(gameTime);
 		UpdateRingCentre(gameTime);
 		HandleStars(gameTime);

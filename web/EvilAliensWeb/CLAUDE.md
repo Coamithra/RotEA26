@@ -101,8 +101,9 @@ generate much of the art/audio referenced here.
   (`?harness=spiderjump`/`?level=Level2&spiders`/`?spidertune`), `eaHolo`
   (`?level=Tutorial`/`ClassicAliens`/`?holotune`), `eaConnector`
   (`?level=TeamChallenge`/`?harness=connector`/`?connectortune`), `eaWcTune` (`?wctune`),
-  `eaTexViewer` (`?texviewer`), `eaNetSim` (any `?net=` boot). GOTCHA: range inputs need `autocomplete='off'` or Chrome's form
-  restoration re-seeds them post-load and desyncs from the defaults.
+  `eaTexViewer` (`?texviewer`), `eaNetSim` (any `?net=` boot). GOTCHA: range inputs need
+  `autocomplete='off'` or Chrome's form restoration re-seeds them post-load and desyncs from the
+  defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`.
 
@@ -502,8 +503,8 @@ replicated pause, TeamChallenge soft tether); WebRTC (card 11.4) builds on these
   a compressed ~60s script firing every replicated beat type (message, warning, background
   ops, checkpoints, music switch, victory) -- the purpose-built two-tab verification for
   script replication (`GameScene.PopulateNetScriptTest`); `?netlag=<ms>` / `?netloss=<0-100>`
-  impair INBOUND traffic (see the impairment bullet below). **No `?net` flag = the net layer is never constructed -- a plain boot is
-  byte-identical single-player. Hard invariant; keep it.**
+  impair INBOUND traffic (see the impairment bullet below). **No `?net` flag = the net layer is
+  never constructed -- a plain boot is byte-identical single-player. Hard invariant; keep it.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
   (unreliable-class -- consumers must tolerate drops/reorder) + a RELIABLE lane (ordered,
   guaranteed), `OnData`/`OnPeerBye` events. Impl #1 `BroadcastChannelTransport` ->

@@ -41,7 +41,10 @@ sets its own knobs, so an asymmetric link (good host → bad client) is just two
 
 - Subscribes to `inner.OnData`; instead of re-raising immediately, stamps each packet with a
   release time and parks it in a lane queue.
-- **`Pump(long nowMs)`** drains everything due and re-raises `OnData` in release order. Called from
+- **`Pump(long nowMs)`** drains everything due and re-raises `OnData` in release order *within each
+  lane* (the reliable lane is drained first, so with equal lag a reliable event can land ahead of a
+  stream packet that arrived before it — real transports don't order across channels either).
+  Ties inside the stream lane break on arrival order. Called from
   the top of `NetSession.Update`, **before `DrainRx()`**, off the same `Environment.TickCount64`
   real-time clock the rest of the session cadence uses (so turbo / slow-mo / hit-stop never skew
   impairment, matching `StreamIntervalMs` and friends).

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
 {
@@ -35,9 +36,19 @@ namespace EvilAliensWeb.Compat.Net
             public byte[] Payload;
             public string From;
             public long ReleaseAt;
+            public long Arrival;
         }
 
-        private static readonly Comparison<Held> ByRelease = (a, b) => a.ReleaseAt.CompareTo(b.ReleaseAt);
+        // Arrival breaks ReleaseAt ties. List.Sort is an UNSTABLE introsort, and same-millisecond
+        // stream arrivals are the norm, not an edge case: NetSession sends MsgShipState and
+        // MsgWorldSnapshot on the stream lane in the same Update tick. Without the tiebreaker
+        // those get delivered in arbitrary (in practice reversed) order, fabricating seqGaps that
+        // look exactly like the network loss this tool exists to measure.
+        private static readonly Comparison<Held> ByRelease = (a, b) =>
+        {
+            int c = a.ReleaseAt.CompareTo(b.ReleaseAt);
+            return c != 0 ? c : a.Arrival.CompareTo(b.Arrival);
+        };
 
         private readonly INetTransport inner;
 
@@ -56,6 +67,7 @@ namespace EvilAliensWeb.Compat.Net
         // provably order-preserving here.
         private readonly Queue<Held> reliableHeld = new Queue<Held>();
         private long lastReliableRelease;
+        private long arrivalCounter;
 
         // Explicit settings for the self-test; null => read the live DebugFlags values.
         private readonly float? lagOverride;
@@ -66,11 +78,14 @@ namespace EvilAliensWeb.Compat.Net
 
         public int HeldCount => streamHeld.Count + reliableHeld.Count;
 
-        private float LagMs => Clamp(lagOverride ?? DebugFlags.NetLagMs, 0f, MaxLagMs);
+        // Public because the "[net]" line reports these: logging DebugFlags directly would be
+        // only accidentally correct, since the wrapper re-clamps and can be constructed with
+        // explicit overrides. A self-describing log has to quote what is actually in force.
+        public float LagMs => MathHelper.Clamp(lagOverride ?? DebugFlags.NetLagMs, 0f, MaxLagMs);
 
-        private float LossPct => Clamp(lossOverride ?? DebugFlags.NetLossPct, 0f, MaxLossPct);
+        public float LossPct => MathHelper.Clamp(lossOverride ?? DebugFlags.NetLossPct, 0f, MaxLossPct);
 
-        private float JitterMs => Clamp(jitterOverride ?? DebugFlags.NetJitterMs, 0f, MaxJitterMs);
+        public float JitterMs => MathHelper.Clamp(jitterOverride ?? DebugFlags.NetJitterMs, 0f, MaxJitterMs);
 
         public NetImpairment(INetTransport inner)
             : this(inner, null, null, null)
@@ -107,10 +122,17 @@ namespace EvilAliensWeb.Compat.Net
             inner.SendReliable(payload);
         }
 
+        // Full reset, not just a queue drain: card 11.5 adds a real disconnect/reconnect path,
+        // and a stale lastReliableRelease would pin every post-reconnect reliable packet to the
+        // old session's clock (releasing them all at once, or never).
         public void Close()
         {
             streamHeld.Clear();
             reliableHeld.Clear();
+            due.Clear();
+            lastReliableRelease = 0;
+            arrivalCounter = 0;
+            Dropped = 0;
             inner.Close();
         }
 
@@ -162,7 +184,7 @@ namespace EvilAliensWeb.Compat.Net
                 }
             }
 
-            Held held = new Held { Payload = payload, From = from, ReleaseAt = release };
+            Held held = new Held { Payload = payload, From = from, ReleaseAt = release, Arrival = arrivalCounter++ };
             if (reliable)
             {
                 if (held.ReleaseAt < lastReliableRelease)
@@ -190,33 +212,36 @@ namespace EvilAliensWeb.Compat.Net
                 OnData?.Invoke(h.Payload, true, h.From);
             }
 
+            // Forward scan, compacting survivors in place: `due` collects in ARRIVAL order (so
+            // the sort's tiebreaker has something meaningful to preserve) and the packets left
+            // behind keep their relative order too.
+            due.Clear();
             if (streamHeld.Count == 0)
             {
                 return;
             }
-            due.Clear();
-            for (int i = streamHeld.Count - 1; i >= 0; i--)
+            int keep = 0;
+            for (int i = 0; i < streamHeld.Count; i++)
             {
                 if (streamHeld[i].ReleaseAt <= now)
                 {
                     due.Add(streamHeld[i]);
-                    streamHeld.RemoveAt(i);
+                }
+                else
+                {
+                    streamHeld[keep++] = streamHeld[i];
                 }
             }
             if (due.Count == 0)
             {
                 return;
             }
+            streamHeld.RemoveRange(keep, streamHeld.Count - keep);
             due.Sort(ByRelease);
             for (int i = 0; i < due.Count; i++)
             {
                 OnData?.Invoke(due[i].Payload, false, due[i].From);
             }
-        }
-
-        private static float Clamp(float v, float lo, float hi)
-        {
-            return v < lo ? lo : (v > hi ? hi : v);
         }
 
         // ---- self-test -------------------------------------------------------------------
@@ -232,6 +257,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 packets = 200;
             }
+            // The seq rides in 2 bytes and 3 packets are injected per iteration, so past this
+            // the decode aliases an earlier slot and every delay/reorder number silently turns
+            // to garbage. Clamp rather than trust a console-supplied count.
+            if (packets > 20000)
+            {
+                packets = 20000;
+            }
             NetImpairment imp = new NetImpairment(null, lag, loss, jitter);
 
             List<int> streamOrder = new List<int>();
@@ -239,7 +271,7 @@ namespace EvilAliensWeb.Compat.Net
             List<long> streamDelay = new List<long>();
             List<long> reliableDelay = new List<long>();
             long virtualNow = 0;
-            long[] sentAt = new long[packets * 2];
+            long[] sentAt = new long[packets * 3];
 
             imp.OnData += (payload, reliable, from) =>
             {
@@ -248,16 +280,19 @@ namespace EvilAliensWeb.Compat.Net
                 (reliable ? reliableDelay : streamDelay).Add(virtualNow - sentAt[seq]);
             };
 
-            // One packet per lane every 33ms of virtual time (the real ship-stream cadence),
-            // pumped every 16ms (the real tick), then drained past the longest possible hold.
+            // Per iteration: TWO stream packets in the SAME virtual millisecond plus one
+            // reliable, then pumped on the real 16ms tick. The same-ms stream pair is
+            // deliberate -- it reproduces NetSession sending MsgShipState and MsgWorldSnapshot
+            // in one Update tick, which is the case that a ReleaseAt-only sort silently
+            // reversed. With jitter 0 the stream reorder count must be exactly 0.
             int seqNext = 0;
             for (int i = 0; i < packets; i++)
             {
-                for (int lane = 0; lane < 2; lane++)
+                for (int lane = 0; lane < 3; lane++)
                 {
                     byte[] p = new byte[] { (byte)(seqNext & 0xFF), (byte)(seqNext >> 8) };
                     sentAt[seqNext] = virtualNow;
-                    imp.Receive(p, lane == 1, "test", virtualNow);
+                    imp.Receive(p, lane == 2, "test", virtualNow);
                     seqNext++;
                 }
                 for (int step = 0; step < 2; step++)
@@ -277,14 +312,14 @@ namespace EvilAliensWeb.Compat.Net
                 imp.Pump(virtualNow);
             }
 
-            int streamSent = packets;
+            int streamSent = packets * 2;   // two stream packets per iteration, same millisecond
             int reliableSent = packets;
             return string.Format(CultureInfo.InvariantCulture,
-                "[netsim] test lag={0:0}ms loss={1:0}% jitter={2:0}ms n={3}/lane"
+                "[netsim] test lag={0:0}ms loss={1:0}% jitter={2:0}ms n={3}x2 stream / {3} reliable"
                 + " | stream: got={4} drop={5:0.0}% delay avg={6:0}ms min={7}ms max={8}ms reorder={9}"
                 + " | reliable: got={10} drop={11} delay avg={12:0}ms min={13}ms max={14}ms reorder={15}",
                 lag, loss, jitter, packets,
-                streamOrder.Count, 100.0 * (streamSent - streamOrder.Count) / streamSent,
+                streamOrder.Count, 100.0 * (streamSent - streamOrder.Count) / (double)streamSent,
                 Mean(streamDelay), Min(streamDelay), Max(streamDelay), Inversions(streamOrder),
                 reliableOrder.Count, reliableSent - reliableOrder.Count,
                 Mean(reliableDelay), Min(reliableDelay), Max(reliableDelay), Inversions(reliableOrder));

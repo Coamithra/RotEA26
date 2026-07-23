@@ -886,14 +886,11 @@ namespace EvilAliensWeb.Compat
 		// eaNetSim in index.html). The panel always sends the full three-knob state.
 		internal static void SetNetSimOverride(float lagMs, float lossPct, float jitterMs)
 		{
-			NetLagMs = Clamp(lagMs, 0f, Net.NetImpairment.MaxLagMs);
-			NetLossPct = Clamp(lossPct, 0f, Net.NetImpairment.MaxLossPct);
-			NetJitterMs = Clamp(jitterMs, 0f, Net.NetImpairment.MaxJitterMs);
-		}
-
-		private static float Clamp(float v, float lo, float hi)
-		{
-			return v < lo ? lo : (v > hi ? hi : v);
+			// float.IsNaN guards first: MathHelper.Clamp passes NaN straight through, and a NaN
+			// lag would cast to a garbage long release time inside NetImpairment.
+			NetLagMs = float.IsNaN(lagMs) ? 0f : MathHelper.Clamp(lagMs, 0f, Net.NetImpairment.MaxLagMs);
+			NetLossPct = float.IsNaN(lossPct) ? 0f : MathHelper.Clamp(lossPct, 0f, Net.NetImpairment.MaxLossPct);
+			NetJitterMs = float.IsNaN(jitterMs) ? 0f : MathHelper.Clamp(jitterMs, 0f, Net.NetImpairment.MaxJitterMs);
 		}
 
 		// True if any debug flag is active (i.e. the boot path was altered).
@@ -1464,13 +1461,13 @@ namespace EvilAliensWeb.Compat
 				case "netlag":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nlag) && nlag >= 0f)
 					{
-						NetLagMs = Clamp(nlag, 0f, Net.NetImpairment.MaxLagMs);
+						NetLagMs = MathHelper.Clamp(nlag, 0f, Net.NetImpairment.MaxLagMs);
 					}
 					break;
 				case "netloss":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nloss) && nloss >= 0f)
 					{
-						NetLossPct = Clamp(nloss, 0f, Net.NetImpairment.MaxLossPct);
+						NetLossPct = MathHelper.Clamp(nloss, 0f, Net.NetImpairment.MaxLossPct);
 					}
 					break;
 				case "spiderboss":

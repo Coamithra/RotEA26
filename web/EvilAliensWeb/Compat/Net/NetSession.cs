@@ -246,9 +246,9 @@ namespace EvilAliensWeb.Compat.Net
                 lastMetricsAt = now;
                 metrics.ImpDropped = impairment.Dropped;
                 metrics.ImpHeld = impairment.HeldCount;
-                metrics.ImpLagMs = DebugFlags.NetLagMs;
-                metrics.ImpLossPct = DebugFlags.NetLossPct;
-                metrics.ImpJitterMs = DebugFlags.NetJitterMs;
+                metrics.ImpLagMs = impairment.LagMs;
+                metrics.ImpLossPct = impairment.LossPct;
+                metrics.ImpJitterMs = impairment.JitterMs;
                 Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
                     FindLocalShip() != null, puppet != null));
             }

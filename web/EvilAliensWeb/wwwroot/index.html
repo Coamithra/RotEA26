@@ -2222,10 +2222,19 @@
                 var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
                 return m ? parseFloat(m[1]) : def;
             }
+            function clamp(v, lo, hi) { return isNaN(v) ? lo : Math.min(hi, Math.max(lo, v)); }
+
             // Seeded from ?netlag=/?netloss= if present. Jitter has no URL flag by design — it
             // is the knob that makes the stream lane actually REORDER, and it lives here next
             // to the other two rather than in a boot URL.
-            var st = { lag: num("netlag", 0), loss: num("netloss", 0), jitter: 0 };
+            // CLAMPED to the slider bounds on the way in: C# clamps to the same maxima, so an
+            // unclamped ?netlag=9999 would print "9999 ms" in the label and the copy line while
+            // 500 was actually in force — a readout that lies is worse than no readout.
+            var st = {
+                lag: clamp(num("netlag", 0), 0, 500),
+                loss: clamp(num("netloss", 0), 0, 100),
+                jitter: 0
+            };
 
             function push()
             {
@@ -2317,7 +2326,9 @@
             //   eaNetSim.test(120, 10, 30, 200) — run the impairment self-test on a virtual clock
             window.eaNetSim = function (lag, loss, jitter)
             {
-                st.lag = +lag || 0; st.loss = +loss || 0; st.jitter = +jitter || 0;
+                st.lag = clamp(+lag || 0, 0, 500);
+                st.loss = clamp(+loss || 0, 0, 100);
+                st.jitter = clamp(+jitter || 0, 0, 200);
                 render();
                 if (!push()) { console.warn('[netsim] game not booted yet'); }
             };
@@ -2339,9 +2350,22 @@
             };
 
             render();
+            // Retry until the .NET runtime is up — but BOUNDED. push() swallows every exception,
+            // so an unbounded retry would spin silently forever on a genuine SetNetSim failure
+            // instead of ever saying so. ~24s is far past a cold WASM boot.
             if (!push())
             {
-                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+                var tries = 0;
+                var iv = setInterval(function ()
+                {
+                    if (push()) { clearInterval(iv); return; }
+                    if (++tries >= 60)
+                    {
+                        clearInterval(iv);
+                        console.warn('[netsim] gave up pushing impairment settings after ' + tries
+                            + ' attempts — debugSetNetSim is failing, not just waiting for boot');
+                    }
+                }, 400);
             }
         })();
     </script>

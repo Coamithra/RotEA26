@@ -865,6 +865,37 @@ namespace EvilAliensWeb.Compat
 		// verification for level-script replication. Pair with ?level=Level1&net=host/join.
 		public static bool NetScript { get; private set; }
 
+		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
+		// INBOUND traffic by Compat/Net/NetImpairment so the drop-tolerance paths cards
+		// 11.1-11.3 built actually get exercised. ?netlag=<ms> (0-500) delays both lanes;
+		// ?netloss=<0-100> drops STREAM-lane packets only (the reliable lane is never dropped
+		// or reordered -- that contract is what everything above INetTransport assumes).
+		// 0/0 = the wrapper's inline pass-through, so an unimpaired net session behaves exactly
+		// as it did before. All three are live-settable from the eaNetSim panel.
+		public static float NetLagMs { get; private set; }
+
+		public static float NetLossPct { get; private set; }
+
+		// Jitter is deliberately PANEL-ONLY (no URL flag): +/- this many ms on each stream
+		// packet's release, which is the only way the stream lane ever actually REORDERS and so
+		// the only way ordViol/seqGap tolerance gets tested. The reliable lane's releases are
+		// clamped monotone, so jitter can never reorder it.
+		public static float NetJitterMs { get; private set; }
+
+		// Runtime setter for the live impairment panel (Compat/DebugInput.SetNetSim ->
+		// eaNetSim in index.html). The panel always sends the full three-knob state.
+		internal static void SetNetSimOverride(float lagMs, float lossPct, float jitterMs)
+		{
+			NetLagMs = Clamp(lagMs, 0f, Net.NetImpairment.MaxLagMs);
+			NetLossPct = Clamp(lossPct, 0f, Net.NetImpairment.MaxLossPct);
+			NetJitterMs = Clamp(jitterMs, 0f, Net.NetImpairment.MaxJitterMs);
+		}
+
+		private static float Clamp(float v, float lo, float hi)
+		{
+			return v < lo ? lo : (v > hi ? hi : v);
+		}
+
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
 
@@ -1429,6 +1460,18 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "netscript":
 					NetScript = IsOn(val);
+					break;
+				case "netlag":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nlag) && nlag >= 0f)
+					{
+						NetLagMs = Clamp(nlag, 0f, Net.NetImpairment.MaxLagMs);
+					}
+					break;
+				case "netloss":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nloss) && nloss >= 0f)
+					{
+						NetLossPct = Clamp(nloss, 0f, Net.NetImpairment.MaxLossPct);
+					}
 					break;
 				case "spiderboss":
 					SpiderBoss = IsOn(val);

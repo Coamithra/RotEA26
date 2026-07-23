@@ -2204,6 +2204,148 @@
         })();
     </script>
 
+    <!-- eaNetSim: live network-impairment panel (card 40334a8f). BroadcastChannelTransport
+         delivers both lanes reliably and in order, so every drop-tolerance path cards 11.1-11.3
+         built (interpolation underrun, the snapshot self-heal, the claim ledgers, the peer
+         timeout) had never actually executed. These knobs make packets go missing on demand.
+         Drives Compat/DebugInput.SetNetSim -> NetImpairment, which wraps the transport behind
+         INetTransport and so impairs the WebRTC transport (card 11.4) unchanged. Built outside
+         #app and only on a ?net boot — a normal boot gets no extra DOM and no extra globals. -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]net=(host|join|client)\b/i.test(q)) { return; }
+
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            // Seeded from ?netlag=/?netloss= if present. Jitter has no URL flag by design — it
+            // is the knob that makes the stream lane actually REORDER, and it lives here next
+            // to the other two rather than in a boot URL.
+            var st = { lag: num("netlag", 0), loss: num("netloss", 0), jitter: 0 };
+
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetNetSim', st.lag, st.loss, st.jitter);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-netsim{position:fixed;top:10px;right:10px;z-index:99999;width:262px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(10,8,20,.82);border:1px solid rgba(150,180,220,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-netsim h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#b8d8e8}" +
+                "#ea-netsim .row{margin:7px 0}" +
+                "#ea-netsim label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-netsim .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                "#ea-netsim input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fa8d0}" +
+                "#ea-netsim button{width:100%;margin-top:8px;padding:5px 8px;font:11px/1.2 inherit;" +
+                "color:#e8e8f0;background:rgba(110,150,200,.25);border:1px solid rgba(150,180,220,.4);" +
+                "border-radius:5px;cursor:pointer}" +
+                "#ea-netsim button:hover{background:rgba(110,150,200,.4)}" +
+                "#ea-netsim .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(150,180,220,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-netsim .res{margin-top:6px;font-family:ui-monospace,Consolas,monospace;" +
+                "font-size:10px;color:#9ffcd0;word-break:break-all;line-height:1.35}" +
+                "#ea-netsim .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-netsim";
+            el.innerHTML =
+                "<h4>Network impairment (inbound)</h4>" +
+                "<div class='row'><label>Lag<span class='v' id='ns-vlag'></span></label>" +
+                "<input type='range' id='ns-lag' min='0' max='500' step='5' autocomplete='off'></div>" +
+                "<div class='row'><label>Packet loss (stream lane)<span class='v' id='ns-vloss'></span></label>" +
+                "<input type='range' id='ns-loss' min='0' max='100' step='1' autocomplete='off'></div>" +
+                "<div class='row'><label>Jitter &plusmn; (session only)<span class='v' id='ns-vjit'></span></label>" +
+                "<input type='range' id='ns-jit' min='0' max='200' step='5' autocomplete='off'></div>" +
+                "<button id='ns-test'>Self-test (200 packets/lane)</button>" +
+                "<div class='res' id='ns-res'></div>" +
+                "<div class='out' id='ns-out' title='Click to copy'></div>" +
+                "<div class='hint'>Applies to INBOUND traffic only — the peer's link looks bad from " +
+                "here. The reliable lane is delayed but never dropped or reordered. Loss 100% starves " +
+                "the ship stream, so the 3s peer timeout fires: that is the simulated silent " +
+                "disconnect, not a bug. Watch the 5s [net] line: extrap/pops/sgap should climb and " +
+                "settle back at 0/0.</div>";
+            document.body.appendChild(el);
+
+            var elLag = el.querySelector("#ns-lag"), elLoss = el.querySelector("#ns-loss"),
+                elJit = el.querySelector("#ns-jit"), elOut = el.querySelector("#ns-out"),
+                elRes = el.querySelector("#ns-res"), elTest = el.querySelector("#ns-test"),
+                vlag = el.querySelector("#ns-vlag"), vloss = el.querySelector("#ns-vloss"),
+                vjit = el.querySelector("#ns-vjit");
+
+            function render()
+            {
+                elLag.value = st.lag; elLoss.value = st.loss; elJit.value = st.jitter;
+                vlag.textContent = st.lag + " ms";
+                vloss.textContent = st.loss + " %";
+                vjit.textContent = st.jitter + " ms";
+                // Jitter is omitted deliberately: there is no ?netjitter flag to bake it to.
+                elOut.textContent = "netlag=" + st.lag + " netloss=" + st.loss;
+            }
+
+            function changed() { render(); push(); }
+
+            elLag.addEventListener("input", function () { st.lag = +elLag.value; changed(); });
+            elLoss.addEventListener("input", function () { st.loss = +elLoss.value; changed(); });
+            elJit.addEventListener("input", function () { st.jitter = +elJit.value; changed(); });
+            elOut.addEventListener("click", function ()
+            {
+                var t = elOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                setTimeout(function () { elOut.style.color = old; }, 250);
+            });
+            elTest.addEventListener("click", function () { window.eaNetSim.test(st.lag, st.loss, st.jitter, 200); });
+
+            // Console entry points, defined only on a ?net boot (same gate as the panel):
+            //   eaNetSim(120, 10, 30)          — set lag ms / loss % / jitter ms live
+            //   eaNetSim.test(120, 10, 30, 200) — run the impairment self-test on a virtual clock
+            window.eaNetSim = function (lag, loss, jitter)
+            {
+                st.lag = +lag || 0; st.loss = +loss || 0; st.jitter = +jitter || 0;
+                render();
+                if (!push()) { console.warn('[netsim] game not booted yet'); }
+            };
+            window.eaNetSim.test = function (lag, loss, jitter, n)
+            {
+                try
+                {
+                    var line = DotNet.invokeMethod('EvilAliensWeb', 'debugNetSimTest',
+                        +lag || 0, +loss || 0, +jitter || 0, n || 200);
+                    console.log(line);
+                    elRes.textContent = line.replace(/^\[netsim\] /, "");
+                    return line;
+                }
+                catch (e)
+                {
+                    console.warn('[netsim] self-test failed (game not booted yet?): ' + e.message);
+                    elRes.textContent = "self-test: waiting for the runtime…";
+                }
+            };
+
+            render();
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
+    </script>
+
     <!-- eaWcTune: live stepper panel for the webcam challenge's difficulty knobs (?wctune,
          card 222beca4). The five WebcamLevel.Tunings[] values were URL-flag only
          (?wchearts= etc.), so every nudge meant a full reload + re-joining the camera.

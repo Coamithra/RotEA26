@@ -303,6 +303,29 @@ namespace EvilAliensWeb.Compat
 			DebugFlags.ClearWebcamTuneOverride();
 		}
 
+		// JS bridge for the live network-impairment panel (eaNetSim in wwwroot/index.html, shown
+		// on any ?net boot): DotNet.invokeMethod('EvilAliensWeb', 'debugSetNetSim', lagMs,
+		// lossPct, jitterMs). Overrides the artificial impairment applied to INBOUND net traffic
+		// in real time -- same effect as ?netlag=/?netloss=, just live, plus jitter which has no
+		// URL flag (panel-only by design: it is the knob that makes the stream lane actually
+		// REORDER, so it belongs next to the other two rather than in a boot URL).
+		[JSInvokable("debugSetNetSim")]
+		public static void SetNetSim(double lagMs, double lossPct, double jitterMs)
+		{
+			DebugFlags.SetNetSimOverride((float)lagMs, (float)lossPct, (float)jitterMs);
+		}
+
+		// Companion self-test (the panel's "Self-test" button / console eaNetSim.test(...)):
+		// runs N synthetic packets per lane through a real NetImpairment on a VIRTUAL clock and
+		// returns the measured delay / drop rate / per-lane reorder count as one line. This is
+		// the card's primary verification -- impairment is behaviour over time, so the repo rule
+		// is to read the data, not a frame.
+		[JSInvokable("debugNetSimTest")]
+		public static string NetSimTest(double lagMs, double lossPct, double jitterMs, int packets)
+		{
+			return Net.NetImpairment.SelfTest((float)lagMs, (float)lossPct, (float)jitterMs, packets);
+		}
+
 		// JS bridge for the ?texviewer control panel (eaTexViewer in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugSetTexViewer', cmd). Enqueues a panel
 		// command ("next"/"prev"/"flip:1"/"mode:1"/"pick:0"/"zoom:2.5"/"fit") that

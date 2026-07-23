@@ -95,6 +95,7 @@ namespace EvilAliensWeb.Compat.Net
         private static SoundManager sound;
         private static ScoreVisualiser score;
         private static INetTransport transport;
+        private static NetImpairment impairment;
 
         private static readonly Queue<(byte[] data, bool reliable)> rxQueue = new Queue<(byte[], bool)>();
 
@@ -168,7 +169,12 @@ namespace EvilAliensWeb.Compat.Net
             sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
             score = ServiceHelper.Get<IScoreService>().Score;
             isHost = DebugFlags.NetRole == NetRole.Host;
-            transport = new BroadcastChannelTransport();
+            // Impairment always wraps inside a net session (a plain boot never gets here, so
+            // the single-player invariant is untouched) -- the knobs are live-settable from
+            // eaNetSim, which needs the wrapper already in the chain. At 0/0 it forwards
+            // inline with no queue.
+            impairment = new NetImpairment(new BroadcastChannelTransport());
+            transport = impairment;
             transport.OnData += (data, reliable, from) => rxQueue.Enqueue((data, reliable));
             transport.OnPeerBye += from => PeerLost("bye");
             transport.Open(DebugFlags.NetRoom);
@@ -199,6 +205,9 @@ namespace EvilAliensWeb.Compat.Net
             long now = NowMs;
             realDtMs = lastUpdateAt == 0 ? 16f : MathHelper.Clamp(now - lastUpdateAt, 0f, 200f);
             lastUpdateAt = now;
+            // Release anything the impairment wrapper is holding BEFORE draining, so a
+            // delayed packet lands in rxQueue in time for this tick rather than the next.
+            impairment.Pump(now);
             DrainRx();
             AdvanceRenderClock();
             if (!PeerUp)
@@ -235,6 +244,11 @@ namespace EvilAliensWeb.Compat.Net
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
                 lastMetricsAt = now;
+                metrics.ImpDropped = impairment.Dropped;
+                metrics.ImpHeld = impairment.HeldCount;
+                metrics.ImpLagMs = DebugFlags.NetLagMs;
+                metrics.ImpLossPct = DebugFlags.NetLossPct;
+                metrics.ImpJitterMs = DebugFlags.NetJitterMs;
                 Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
                     FindLocalShip() != null, puppet != null));
             }

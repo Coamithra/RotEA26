@@ -1,0 +1,352 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+
+namespace EvilAliensWeb.Compat.Net
+{
+    // Dev-only artificial network impairment, decorating any INetTransport (card 40334a8f).
+    //
+    // WHY: BroadcastChannelTransport delivers both lanes reliably and in order (its own header
+    // says so), so every drop-tolerance path cards 11.1-11.3 built -- the ShipStateBuffer
+    // interpolation window, extrapolation on underrun, the snapshot "unknown id" puppet
+    // self-heal, the generous claim ledgers, the peer timeout -- has never actually executed.
+    // This makes packets go missing on demand, and does it BEHIND the interface so it impairs
+    // the WebRTC transport (card 11.4) identically with no changes.
+    //
+    // Impairment is RX-ONLY: delaying/dropping our own inbound is equivalent to the peer's
+    // outbound being bad, needs no protocol change, and makes an asymmetric link just two tabs
+    // with different settings. Tx forwards verbatim.
+    //
+    // Per-lane policy -- the STREAM lane takes delay + loss (+ optional jitter), the RELIABLE
+    // lane takes delay ONLY. Dropping or reordering the reliable lane would violate the
+    // INetTransport contract that everything above it is entitled to assume, so it would only
+    // ever manufacture fake bugs.
+    public sealed class NetImpairment : INetTransport
+    {
+        public const float MaxLagMs = 500f;
+        public const float MaxLossPct = 100f;
+        public const float MaxJitterMs = 200f;
+
+        public event Action<byte[], bool, string> OnData;
+        public event Action<string> OnPeerBye;
+
+        private struct Held
+        {
+            public byte[] Payload;
+            public string From;
+            public long ReleaseAt;
+        }
+
+        private static readonly Comparison<Held> ByRelease = (a, b) => a.ReleaseAt.CompareTo(b.ReleaseAt);
+
+        private readonly INetTransport inner;
+
+        // Private generator, never the shared game RNG -- the house rule for anything
+        // stochastic (see Quad / ShipConnector's private FX RNGs): a co-op session must not be
+        // able to desync because one peer turned a dev knob on.
+        private readonly Random rng = new Random();
+
+        // Jitter can make a later arrival come due BEFORE an earlier one, so the stream lane
+        // cannot be a head-first FIFO -- that would stall the early-due packet behind the head
+        // and silently turn jitter back into pure delay. Scanned for all due entries instead.
+        private readonly List<Held> streamHeld = new List<Held>();
+        private readonly List<Held> due = new List<Held>();
+
+        // Reliable release times are clamped monotone on the way in, so a plain FIFO is
+        // provably order-preserving here.
+        private readonly Queue<Held> reliableHeld = new Queue<Held>();
+        private long lastReliableRelease;
+
+        // Explicit settings for the self-test; null => read the live DebugFlags values.
+        private readonly float? lagOverride;
+        private readonly float? lossOverride;
+        private readonly float? jitterOverride;
+
+        public long Dropped { get; private set; }
+
+        public int HeldCount => streamHeld.Count + reliableHeld.Count;
+
+        private float LagMs => Clamp(lagOverride ?? DebugFlags.NetLagMs, 0f, MaxLagMs);
+
+        private float LossPct => Clamp(lossOverride ?? DebugFlags.NetLossPct, 0f, MaxLossPct);
+
+        private float JitterMs => Clamp(jitterOverride ?? DebugFlags.NetJitterMs, 0f, MaxJitterMs);
+
+        public NetImpairment(INetTransport inner)
+            : this(inner, null, null, null)
+        {
+        }
+
+        internal NetImpairment(INetTransport inner, float? lag, float? loss, float? jitter)
+        {
+            this.inner = inner;
+            lagOverride = lag;
+            lossOverride = loss;
+            jitterOverride = jitter;
+            if (inner != null)
+            {
+                inner.OnData += OnInnerData;
+                // Lifecycle, not traffic: a pagehide 'bye' is forwarded immediately. Parking it
+                // behind a 500ms queue would only muddy the disconnect path card 11.5 owns.
+                inner.OnPeerBye += from => OnPeerBye?.Invoke(from);
+            }
+        }
+
+        public void Open(string room)
+        {
+            inner.Open(room);
+        }
+
+        public void SendStream(byte[] payload)
+        {
+            inner.SendStream(payload);
+        }
+
+        public void SendReliable(byte[] payload)
+        {
+            inner.SendReliable(payload);
+        }
+
+        public void Close()
+        {
+            streamHeld.Clear();
+            reliableHeld.Clear();
+            inner.Close();
+        }
+
+        private void OnInnerData(byte[] payload, bool reliable, string from)
+        {
+            Receive(payload, reliable, from, Environment.TickCount64);
+        }
+
+        // Split out from the event handler so the self-test can drive a VIRTUAL clock -- a test
+        // that had to spend 500ms of real time per sample could never run enough of them.
+        internal void Receive(byte[] payload, bool reliable, string from, long now)
+        {
+            float lag = LagMs;
+            float loss = LossPct;
+            float jitter = JitterMs;
+
+            // Unimpaired fast path: forward inline, no queue, no allocation. Requires the
+            // queues to be EMPTY too -- turning the knobs down to 0 mid-session must still
+            // drain whatever is already parked rather than stranding it forever.
+            if (lag <= 0f && loss <= 0f && jitter <= 0f && streamHeld.Count == 0 && reliableHeld.Count == 0)
+            {
+                OnData?.Invoke(payload, reliable, from);
+                return;
+            }
+
+            if (!reliable && loss > 0f && rng.NextDouble() * 100.0 < loss)
+            {
+                Dropped++;
+                return;
+            }
+
+            // Loss-only impairment must not smuggle in latency: with no lag and no jitter the
+            // packet isn't being held for anything, so release it inline rather than parking it
+            // for the next Pump (which would silently add one tick, ~16ms, to every survivor and
+            // make "loss with no lag" impossible to isolate).
+            if (lag <= 0f && jitter <= 0f && streamHeld.Count == 0 && reliableHeld.Count == 0)
+            {
+                OnData?.Invoke(payload, reliable, from);
+                return;
+            }
+
+            long release = now + (long)lag;
+            if (!reliable && jitter > 0f)
+            {
+                release += (long)((rng.NextDouble() * 2.0 - 1.0) * jitter);
+                if (release < now)
+                {
+                    release = now;
+                }
+            }
+
+            Held held = new Held { Payload = payload, From = from, ReleaseAt = release };
+            if (reliable)
+            {
+                if (held.ReleaseAt < lastReliableRelease)
+                {
+                    held.ReleaseAt = lastReliableRelease;
+                }
+                lastReliableRelease = held.ReleaseAt;
+                reliableHeld.Enqueue(held);
+            }
+            else
+            {
+                streamHeld.Add(held);
+            }
+        }
+
+        // Called from the top of NetSession.Update, BEFORE DrainRx, on the same
+        // Environment.TickCount64 real-time clock as the rest of the session cadence (so
+        // turbo / slow-mo / hit-stop never skew impairment). Delay granularity is therefore one
+        // game tick, ~16ms -- a lag setting below that is indistinguishable from 0.
+        public void Pump(long now)
+        {
+            while (reliableHeld.Count > 0 && reliableHeld.Peek().ReleaseAt <= now)
+            {
+                Held h = reliableHeld.Dequeue();
+                OnData?.Invoke(h.Payload, true, h.From);
+            }
+
+            if (streamHeld.Count == 0)
+            {
+                return;
+            }
+            due.Clear();
+            for (int i = streamHeld.Count - 1; i >= 0; i--)
+            {
+                if (streamHeld[i].ReleaseAt <= now)
+                {
+                    due.Add(streamHeld[i]);
+                    streamHeld.RemoveAt(i);
+                }
+            }
+            if (due.Count == 0)
+            {
+                return;
+            }
+            due.Sort(ByRelease);
+            for (int i = 0; i < due.Count; i++)
+            {
+                OnData?.Invoke(due[i].Payload, false, due[i].From);
+            }
+        }
+
+        private static float Clamp(float v, float lo, float hi)
+        {
+            return v < lo ? lo : (v > hi ? hi : v);
+        }
+
+        // ---- self-test -------------------------------------------------------------------
+
+        // Drives N synthetic packets through a REAL NetImpairment on a virtual clock and reports
+        // measured delay / drop rate / ordering per lane. This is the card's primary
+        // verification: impairment is behaviour over time, so the repo rule says read the DATA,
+        // not a frame -- and testing the shipped C# in the real runtime beats a tools/sim python
+        // mirror that would drift out of sync with it.
+        internal static string SelfTest(float lag, float loss, float jitter, int packets)
+        {
+            if (packets < 1)
+            {
+                packets = 200;
+            }
+            NetImpairment imp = new NetImpairment(null, lag, loss, jitter);
+
+            List<int> streamOrder = new List<int>();
+            List<int> reliableOrder = new List<int>();
+            List<long> streamDelay = new List<long>();
+            List<long> reliableDelay = new List<long>();
+            long virtualNow = 0;
+            long[] sentAt = new long[packets * 2];
+
+            imp.OnData += (payload, reliable, from) =>
+            {
+                int seq = payload[0] | (payload[1] << 8);
+                (reliable ? reliableOrder : streamOrder).Add(seq);
+                (reliable ? reliableDelay : streamDelay).Add(virtualNow - sentAt[seq]);
+            };
+
+            // One packet per lane every 33ms of virtual time (the real ship-stream cadence),
+            // pumped every 16ms (the real tick), then drained past the longest possible hold.
+            int seqNext = 0;
+            for (int i = 0; i < packets; i++)
+            {
+                for (int lane = 0; lane < 2; lane++)
+                {
+                    byte[] p = new byte[] { (byte)(seqNext & 0xFF), (byte)(seqNext >> 8) };
+                    sentAt[seqNext] = virtualNow;
+                    imp.Receive(p, lane == 1, "test", virtualNow);
+                    seqNext++;
+                }
+                for (int step = 0; step < 2; step++)
+                {
+                    virtualNow += 16;
+                    imp.Pump(virtualNow);
+                }
+                virtualNow += 1;
+            }
+            // Drain the tail in real 16ms ticks, NOT one big jump: a single leap to
+            // now + maxLag would stamp every still-held packet with the whole leap as its
+            // measured delay, reporting a max of ~900ms for a 150ms setting. That is a
+            // measurement artifact and it hid the real numbers the first time this ran.
+            for (int guard = 0; imp.HeldCount > 0 && guard < 200; guard++)
+            {
+                virtualNow += 16;
+                imp.Pump(virtualNow);
+            }
+
+            int streamSent = packets;
+            int reliableSent = packets;
+            return string.Format(CultureInfo.InvariantCulture,
+                "[netsim] test lag={0:0}ms loss={1:0}% jitter={2:0}ms n={3}/lane"
+                + " | stream: got={4} drop={5:0.0}% delay avg={6:0}ms min={7}ms max={8}ms reorder={9}"
+                + " | reliable: got={10} drop={11} delay avg={12:0}ms min={13}ms max={14}ms reorder={15}",
+                lag, loss, jitter, packets,
+                streamOrder.Count, 100.0 * (streamSent - streamOrder.Count) / streamSent,
+                Mean(streamDelay), Min(streamDelay), Max(streamDelay), Inversions(streamOrder),
+                reliableOrder.Count, reliableSent - reliableOrder.Count,
+                Mean(reliableDelay), Min(reliableDelay), Max(reliableDelay), Inversions(reliableOrder));
+        }
+
+        private static double Mean(List<long> v)
+        {
+            if (v.Count == 0)
+            {
+                return 0.0;
+            }
+            double sum = 0.0;
+            for (int i = 0; i < v.Count; i++)
+            {
+                sum += v[i];
+            }
+            return sum / v.Count;
+        }
+
+        private static long Min(List<long> v)
+        {
+            if (v.Count == 0)
+            {
+                return 0;
+            }
+            long m = long.MaxValue;
+            for (int i = 0; i < v.Count; i++)
+            {
+                if (v[i] < m)
+                {
+                    m = v[i];
+                }
+            }
+            return m;
+        }
+
+        private static long Max(List<long> v)
+        {
+            long m = 0;
+            for (int i = 0; i < v.Count; i++)
+            {
+                if (v[i] > m)
+                {
+                    m = v[i];
+                }
+            }
+            return m;
+        }
+
+        // Adjacent out-of-order pairs in the delivered sequence. 0 on the reliable lane is the
+        // contract; nonzero on the stream lane under jitter is the whole point of jitter.
+        private static int Inversions(List<int> seq)
+        {
+            int n = 0;
+            for (int i = 1; i < seq.Count; i++)
+            {
+                if (seq[i] < seq[i - 1])
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+    }
+}

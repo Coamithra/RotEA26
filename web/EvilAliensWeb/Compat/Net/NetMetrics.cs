@@ -50,8 +50,24 @@ namespace EvilAliensWeb.Compat.Net
         public long Pauses;             // EvPause on-edges sent + received
         public long TetherBreaks;       // EvTetherBreak sent + received
 
+        // Artificial impairment (card 40334a8f). Reported so a captured "[net]" line from an
+        // impaired run is self-describing -- without the settings inline, a deliberately
+        // degraded log is indistinguishable from a genuinely broken one months later.
+        public long ImpDropped;         // stream packets the impairment wrapper dropped
+        public int ImpHeld;             // packets currently parked in its delay queues
+        public float ImpLagMs;          // settings in force at report time
+        public float ImpLossPct;
+        public float ImpJitterMs;
+
         public string Report(bool isHost, bool peerUp, int liveIds, bool localShip, bool remoteShip)
         {
+            // Impairment is off in the overwhelmingly common case; keep the line unchanged
+            // there rather than padding every log with five zeroes.
+            string imp = ImpLagMs > 0f || ImpLossPct > 0f || ImpJitterMs > 0f || ImpDropped > 0
+                ? string.Format(CultureInfo.InvariantCulture,
+                    " impLag={0:0}ms impLoss={1:0}% impJit={2:0}ms impDrop={3} impHeld={4}",
+                    ImpLagMs, ImpLossPct, ImpJitterMs, ImpDropped, ImpHeld)
+                : "";
             return string.Format(CultureInfo.InvariantCulture,
                 "[net] role={0} peer={1} localShip={2} remoteShip={3} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
@@ -61,7 +77,7 @@ namespace EvilAliensWeb.Compat.Net
                 EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds,
                 SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
-                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks);
+                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks) + imp;
         }
     }
 }

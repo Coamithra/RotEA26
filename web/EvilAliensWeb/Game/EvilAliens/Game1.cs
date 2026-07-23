@@ -933,6 +933,12 @@ public class Game1 : Game
 		Achievements.GetInstance().Update();
 		Unlockables.GetInstance().Update();
 		int num = Settings.GetInstance().Turbo;
+		if (EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			// Online co-op locks the sim pace: a turbo host would run its authoritative
+			// world faster than the client renders it (card 11.4 session descriptor).
+			num = 100;
+		}
 		if (Guide.IsVisible)
 		{
 			num = 0;

@@ -32,11 +32,20 @@ namespace EvilAliensWeb.Compat.Net
     // LoseLife branch, EvPause freezes the peer's world without a menu); the TeamChallenge
     // tether becomes a local soft pull with an or-of-either break event.
     //
-    // Remaining gaps (by design, later cards): WebRTC transport; leave/drop UX; the
-    // roster is exactly two peers.
+    // Remaining gaps (by design, card 11.5): TURN relay for restrictive NATs;
+    // reconnect/grace instead of instant match end; the roster is exactly two peers.
+    // Card 11.4 adds the REAL TRANSPORT + lobby flow: WebRtcTransport behind the same
+    // interface (menu lobby via NetLobby, or ?net=...&rtc for the URL dev rig), a v4
+    // handshake carrying a build hash (peers must run the identical published binary --
+    // stale-cached clients are REJECTED with an "update required" notice, not desynced)
+    // and a DebugFlags.Active bit (menu sessions refuse gameplay-hijacking flags), the
+    // menu-lobby launch flow (EvLaunch mirrors the host's level+difficulty pick, EvReady
+    // triggers a live-world replay once the client's scene is up), and match-end
+    // semantics for menu sessions: any player leaving (EvLeave / peer loss) ends the
+    // match for both -- Stop() tears the session down and the menus surface a notice.
     public static class NetSession
     {
-        public const byte ProtocolVersion = 3;
+        public const byte ProtocolVersion = 4;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -154,24 +163,63 @@ namespace EvilAliensWeb.Compat.Net
         private static readonly NetMetrics metrics = new NetMetrics();
         private static long lastMetricsAt;
 
+        // Card 11.4 session-flow state.
+        private static bool menuSession;      // started from the menu lobby (match-end semantics apply)
+        private static ulong localBuildHash;
+        private static bool rejectSent;
+        private static bool sceneWasUp;       // GameScene edge detection (EvReady / match end)
+        private static bool pendingLaunchHas;
+        private static byte pendingLaunchLevel;
+        private static byte pendingLaunchDifficulty;
+        private static bool peerByeQueued;
+
+        // A short user-facing notice for the menus ("PLAYER LEFT -- MATCH ENDED", "UPDATE
+        // REQUIRED..."). Set on session-ending events, consumed by MenuScene.
+        public static string MenuNotice { get; private set; }
+
         private static long NowMs => Environment.TickCount64;
 
+        // URL boot path (?net=host/join [&rtc]) -- called from Game1.Initialize; a plain
+        // boot (NetRole.None) constructs nothing.
         public static void Start(Game g)
         {
             if (Active || DebugFlags.NetRole == NetRole.None)
             {
                 return;
             }
+            INetTransport t = DebugFlags.NetRtc
+                ? (INetTransport)new WebRtcTransport(attachOnly: false)
+                : new BroadcastChannelTransport();
+            StartWith(g, DebugFlags.NetRole == NetRole.Host, t, DebugFlags.NetRoom, asMenuSession: false);
+        }
+
+        // Menu-lobby path (card 11.4) -- called by NetLobby once the DataChannels are up.
+        public static void StartMenuSession(Game g, bool host, INetTransport t, string room)
+        {
+            if (Active)
+            {
+                return;
+            }
+            StartWith(g, host, t, room, asMenuSession: true);
+        }
+
+        private static void StartWith(Game g, bool host, INetTransport t, string room, bool asMenuSession)
+        {
             game = g;
             oracle = ServiceHelper.Get<IOracleService>().Oracle;
             bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
             sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
             score = ServiceHelper.Get<IScoreService>().Score;
-            isHost = DebugFlags.NetRole == NetRole.Host;
-            transport = new BroadcastChannelTransport();
+            isHost = host;
+            menuSession = asMenuSession;
+            localBuildHash = NetProtocol.HashBuildString(WebRtcInterop.BuildHash());
+            transport = t;
             transport.OnData += (data, reliable, from) => rxQueue.Enqueue((data, reliable));
-            transport.OnPeerBye += from => PeerLost("bye");
-            transport.Open(DebugFlags.NetRoom);
+            // Queued, not applied inline: the bye fires from a JS callback, and the menu-
+            // session PeerLost now tears down the whole match (world mutation belongs on
+            // the game tick).
+            transport.OnPeerBye += from => peerByeQueued = true;
+            transport.Open(room);
             if (isHost)
             {
                 NetIdRegistry.Enable(g);
@@ -181,11 +229,112 @@ namespace EvilAliensWeb.Compat.Net
                 NetPuppets.Enable(g);
             }
             Active = true;
+            rejectSent = false;
+            sceneWasUp = GameScene.NetActiveScene != null;
+            pendingLaunchHas = false;
+            MenuNotice = null;
             sessionStartAt = NowMs;
             lastMetricsAt = sessionStartAt;
             Console.WriteLine("[net] session start role=" + (isHost ? "host" : "join")
-                + " room=" + DebugFlags.NetRoom + " protocol=v" + ProtocolVersion
-                + " transport=BroadcastChannel");
+                + " room=" + room + " protocol=v" + ProtocolVersion
+                + " transport=" + (t is BroadcastChannelTransport ? "BroadcastChannel" : "WebRTC")
+                + (menuSession ? " (menu lobby)" : ""));
+        }
+
+        // End the session entirely (card 11.4): match over, peer rejected, or lobby
+        // cancel. Closes the transport and resets every piece of per-session state so a
+        // fresh Start()/StartMenuSession() is clean. `notice` (optional) is surfaced to
+        // the menus via MenuNotice.
+        public static void Stop(string reason, string notice = null)
+        {
+            if (!Active)
+            {
+                return;
+            }
+            Console.WriteLine("[net] session stop (" + reason + ")");
+            Active = false;
+            PeerUp = false;
+            transport.Close();
+            transport = null;
+            if (isHost)
+            {
+                NetIdRegistry.Disable(game);
+            }
+            else
+            {
+                NetPuppets.Disable();
+            }
+            if (RemotePaused)
+            {
+                RemotePaused = false;
+                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+            }
+            localPaused = false;
+            rxQueue.Clear();
+            buffer.Clear();
+            renderMs = double.NaN;
+            hasLastPuppetPos = false;
+            haveRxSeq = false;
+            lastRxEventSeq = -1;
+            remoteAlive = false;
+            puppet = null;
+            txSeq = 0;
+            txEventSeq = 0;
+            lastStreamTx = 0;
+            lastSnapshotTx = 0;
+            lastScoreSyncTx = 0;
+            lastHelloTx = 0;
+            lastUpdateAt = 0;
+            killNotes.Clear();
+            killNoteOrder.Clear();
+            recentDeaths.Clear();
+            recentDeathOrder.Clear();
+            pendingLaunchHas = false;
+            peerByeQueued = false;
+            if (notice != null)
+            {
+                MenuNotice = notice;
+            }
+            if (menuSession)
+            {
+                menuSession = false;
+                NetLobby.OnSessionEnded();
+            }
+        }
+
+        // ---- menu-flow accessors (card 11.4) --------------------------------------------
+
+        public static string TakeMenuNotice()
+        {
+            string n = MenuNotice;
+            MenuNotice = null;
+            return n;
+        }
+
+        // Client side: the host picked a level in the lobby -- MenuScene polls this and
+        // mirrors the launch.
+        public static bool TakePendingLaunch(out int level, out int difficulty)
+        {
+            level = pendingLaunchLevel;
+            difficulty = pendingLaunchDifficulty;
+            if (!pendingLaunchHas)
+            {
+                return false;
+            }
+            pendingLaunchHas = false;
+            return true;
+        }
+
+        // Host side: called from the menu's difficulty pick just before the fade to game.
+        public static void SendLaunch(Levels level, int difficulty)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeLaunchEvent(txEventSeq++, (byte)level, (byte)difficulty));
+            metrics.EventsTx++;
+            Console.WriteLine("[net] tx launch level=" + level + " difficulty=" + difficulty);
         }
 
         // Ticked once per game tick from Game1.UpdateInner. Cadence runs on REAL time
@@ -200,13 +349,31 @@ namespace EvilAliensWeb.Compat.Net
             realDtMs = lastUpdateAt == 0 ? 16f : MathHelper.Clamp(now - lastUpdateAt, 0f, 200f);
             lastUpdateAt = now;
             DrainRx();
+            if (!Active)
+            {
+                return; // a drained event (EvLeave / reject) ended the session
+            }
+            if (peerByeQueued)
+            {
+                peerByeQueued = false;
+                PeerLost("bye");
+                if (!Active)
+                {
+                    return;
+                }
+            }
+            UpdateSceneEdges();
+            if (!Active)
+            {
+                return; // the local match ended (menu session) -- Stop() ran
+            }
             AdvanceRenderClock();
             if (!PeerUp)
             {
                 if (now - lastHelloTx >= HelloIntervalMs)
                 {
                     lastHelloTx = now;
-                    transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost));
+                    transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags()));
                 }
             }
             else
@@ -237,6 +404,42 @@ namespace EvilAliensWeb.Compat.Net
                 lastMetricsAt = now;
                 Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
                     FindLocalShip() != null, puppet != null));
+            }
+        }
+
+        private static byte LocalHelloFlags()
+        {
+            return DebugFlags.Active ? NetProtocol.HelloFlagDebugActive : (byte)0;
+        }
+
+        // GameScene lifecycle edges (card 11.4): the client announces its scene coming up
+        // (EvReady -> the host replays the live world into it, covering a client that
+        // finished its level warm after the host started spawning); a scene going DOWN in
+        // a menu session means the local match ended (quit, game over, victory credits) --
+        // one match per lobby, so tell the peer and wind the session down.
+        private static void UpdateSceneEdges()
+        {
+            bool sceneUp = GameScene.NetActiveScene != null;
+            if (sceneUp == sceneWasUp)
+            {
+                return;
+            }
+            sceneWasUp = sceneUp;
+            if (sceneUp)
+            {
+                if (!isHost && PeerUp)
+                {
+                    transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvReady));
+                    metrics.EventsTx++;
+                }
+            }
+            else if (menuSession)
+            {
+                if (PeerUp)
+                {
+                    transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvLeave));
+                }
+                Stop("match ended");
             }
         }
 
@@ -685,6 +888,9 @@ namespace EvilAliensWeb.Compat.Net
                 case NetProtocol.MsgWelcome:
                     HandleHello(data, welcomeBack: false);
                     break;
+                case NetProtocol.MsgReject:
+                    HandleReject(data);
+                    break;
                 case NetProtocol.MsgShipState:
                     HandleShipState(data);
                     break;
@@ -700,31 +906,88 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void HandleHello(byte[] data, bool welcomeBack)
         {
+            // A v3-or-older peer sends the short 3-byte hello -- caught by the length
+            // check and rejected as a version mismatch below (data[1] still carries its
+            // protocol version in every historical layout).
             if (data.Length < 3)
             {
                 return;
             }
             byte ver = data[1];
             bool peerIsHost = data[2] != 0;
-            if (ver != ProtocolVersion)
+            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags))
             {
-                Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion + " -- ignoring");
+                Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion);
+                SendRejectOnce(NetProtocol.RejectVersion);
                 return;
             }
             if (peerIsHost == isHost)
             {
                 Console.WriteLine("[net] WARNING: peer has the SAME role (" + (isHost ? "host" : "join")
-                    + ") in room '" + DebugFlags.NetRoom + "' -- one tab should use ?net="
-                    + (isHost ? "join" : "host"));
+                    + ") -- one side should be " + (isHost ? "join" : "host"));
+                return;
+            }
+            if (peerHash != localBuildHash)
+            {
+                // Different binaries would desync subtly (types, descriptors, sim code) --
+                // refuse loudly instead. The usual cause is a stale-cached client.
+                Console.WriteLine("[net] peer build hash mismatch -- rejecting (update required)");
+                SendRejectOnce(NetProtocol.RejectBuild);
+                return;
+            }
+            if (menuSession && ((peerFlags & NetProtocol.HelloFlagDebugActive) != 0 || DebugFlags.Active))
+            {
+                Console.WriteLine("[net] gameplay debug flags active in a menu session -- rejecting");
+                SendRejectOnce(NetProtocol.RejectFlags);
                 return;
             }
             if (welcomeBack)
             {
-                transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost));
+                transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags()));
             }
             if (!PeerUp)
             {
                 PeerConnected();
+            }
+        }
+
+        // Refuse the pairing: tell the peer why, then end our side too. Sent at most once
+        // (the peer's hello retries at 1 Hz until it processes the reject).
+        private static void SendRejectOnce(byte reason)
+        {
+            if (rejectSent)
+            {
+                Stop("pairing rejected");
+                return;
+            }
+            rejectSent = true;
+            transport.SendReliable(NetProtocol.EncodeReject(reason));
+            Stop("pairing rejected", RejectNotice(reason, weSentIt: true));
+        }
+
+        private static void HandleReject(byte[] data)
+        {
+            if (data.Length < 2)
+            {
+                return;
+            }
+            Console.WriteLine("[net] peer rejected the pairing (reason=" + data[1] + ")");
+            Stop("rejected by peer", RejectNotice(data[1], weSentIt: false));
+        }
+
+        private static string RejectNotice(byte reason, bool weSentIt)
+        {
+            switch (reason)
+            {
+            case NetProtocol.RejectVersion:
+            case NetProtocol.RejectBuild:
+                // Symmetric wording: ONE of the two builds is stale, and a reload fixes
+                // the stale side whichever it is.
+                return "Update required\nOne of you runs an outdated version\n(reload the page)";
+            case NetProtocol.RejectFlags:
+                return "Debug flags are active\nOnline co-op needs a clean boot (no ?flags)";
+            default:
+                return "Connection refused";
             }
         }
 
@@ -776,6 +1039,18 @@ namespace EvilAliensWeb.Compat.Net
             }
             PeerUp = false;
             Console.WriteLine("[net] peer lost (" + reason + ")");
+            if (menuSession)
+            {
+                // Card 11.4 match-end semantics: any player leaving ends the match --
+                // menu-lobby sessions have no reconnect flow. Force-exit a running level
+                // (unless it's already in its victory/game-over wind-down) and surface a
+                // notice to the menus.
+                GameScene scene = GameScene.NetActiveScene;
+                bool normalEnd = scene != null && scene.NetEndingNormally;
+                Stop("peer lost: " + reason, normalEnd ? null : "The other player disconnected\nMatch ended");
+                scene?.NetApplyPeerLeft();
+                return;
+            }
             remoteAlive = false;
             if (puppet != null)
             {
@@ -837,6 +1112,13 @@ namespace EvilAliensWeb.Compat.Net
             }
             lastRxStreamAt = NowMs;
             metrics.SnapRx++;
+            if (GameScene.NetActiveScene == null)
+            {
+                // Menu-lobby flow: the host may be in-level while we're still warming --
+                // don't build puppets into a menu world; EvReady triggers a replay once
+                // our scene is up. (Counts as heartbeat above either way.)
+                return;
+            }
             int count = data[1];
             int off = NetProtocol.SnapshotHeaderBytes;
             for (int i = 0; i < count; i++)
@@ -880,7 +1162,8 @@ namespace EvilAliensWeb.Compat.Net
             {
             case NetProtocol.EvSpawn:
             {
-                if (isHost || !NetProtocol.TryDecodeSpawnEvent(data, out ushort id, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
+                if (isHost || GameScene.NetActiveScene == null
+                    || !NetProtocol.TryDecodeSpawnEvent(data, out ushort id, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
                 {
                     return;
                 }
@@ -896,7 +1179,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvDeath:
             {
-                if (isHost || data.Length < 17)
+                if (isHost || data.Length < 17 || GameScene.NetActiveScene == null)
                 {
                     return;
                 }
@@ -922,7 +1205,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvScoreSync:
             {
-                if (isHost || data.Length < 13)
+                if (isHost || data.Length < 13 || GameScene.NetActiveScene == null)
                 {
                     return;
                 }
@@ -948,7 +1231,8 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvMessage:
             {
-                if (isHost || !NetProtocol.TryDecodeMessageEvent(data, out byte msgType, out byte speech, out float angle, out string text))
+                if (isHost || GameScene.NetActiveScene == null
+                    || !NetProtocol.TryDecodeMessageEvent(data, out byte msgType, out byte speech, out float angle, out string text))
                 {
                     return;
                 }
@@ -986,10 +1270,15 @@ namespace EvilAliensWeb.Compat.Net
                     Unlockables.GetInstance().Unlock(Unlockables.Items.Challenges);
                 }
                 Unlockables.GetInstance().SaveThreaded();
-                AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
-                banner.Setup(text, (SoundManager.Texts)speech, AnimatedMessage.MessageType.unlocked);
-                banner.SetUnlockType(ut);
-                bin.Add((GameComponent)(object)banner);
+                // The GRANT above always applies; the banner is world dressing -- skip it
+                // if our scene isn't up (menu-lobby warm race).
+                if (GameScene.NetActiveScene != null)
+                {
+                    AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
+                    banner.Setup(text, (SoundManager.Texts)speech, AnimatedMessage.MessageType.unlocked);
+                    banner.SetUnlockType(ut);
+                    bin.Add((GameComponent)(object)banner);
+                }
                 metrics.BeatsRx++;
                 break;
             }
@@ -1006,7 +1295,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvMusic:
             {
-                if (isHost || data.Length < 5)
+                if (isHost || data.Length < 5 || GameScene.NetActiveScene == null)
                 {
                     return;
                 }
@@ -1067,6 +1356,42 @@ namespace EvilAliensWeb.Compat.Net
             {
                 GameScene.NetActiveScene?.NetApplyTetherBreak();
                 metrics.TetherBreaks++;
+                break;
+            }
+            case NetProtocol.EvLaunch:
+            {
+                if (isHost || data.Length < 6)
+                {
+                    return;
+                }
+                pendingLaunchLevel = data[4];
+                pendingLaunchDifficulty = data[5];
+                pendingLaunchHas = true;
+                Console.WriteLine("[net] rx launch level=" + data[4] + " difficulty=" + data[5]);
+                break;
+            }
+            case NetProtocol.EvReady:
+            {
+                if (!isHost)
+                {
+                    return;
+                }
+                // The client's scene just came up (it may have out-warmed us): replay the
+                // live world so it isn't waiting on snapshot self-heals for spawn extras.
+                NetIdRegistry.ReplayLive();
+                break;
+            }
+            case NetProtocol.EvLeave:
+            {
+                // A shared victory/game-over also lands here (whichever scene terminates
+                // first sends the leave) -- that's a normal end, not a walk-out; no notice.
+                GameScene scene = GameScene.NetActiveScene;
+                // (scene == null here = the lobby/warm phase -- a walk-out, notice shown;
+                // our OWN finished level can't reach this: its scene-down edge already
+                // stopped the session.)
+                bool normalEnd = scene != null && scene.NetEndingNormally;
+                Stop("peer left the match", normalEnd ? null : "The other player left\nMatch ended");
+                scene?.NetApplyPeerLeft();
                 break;
             }
             }

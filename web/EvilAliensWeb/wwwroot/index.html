@@ -87,6 +87,13 @@
          MediaPipe segmentation payload under lib/mediapipe/ is lazy-loaded from
          inside webcam.js only when the level starts; this script itself is tiny. -->
     <script src="webcam.js"></script>
+    <!-- Online co-op WebRTC transport (card 11.4). Inert until eaRtc.host/join is called
+         from the menu (or a ?net=...&rtc boot) -- a plain boot touches no server.
+         eaBuildHash is stamped with a fingerprint of the published binary by deploy.yml
+         (sha256 of _framework/blazor.boot.json); 'dev' means a local build. Peers must
+         run the identical binary -- NetSession's hello handshake compares the hashes. -->
+    <script>window.eaBuildHash = 'dev';</script>
+    <script src="webrtc.js"></script>
 
     <script>
         // Web-port debug shortcuts: hand the URL query string to .NET at boot so

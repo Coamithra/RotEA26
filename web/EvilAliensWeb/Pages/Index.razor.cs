@@ -27,6 +27,7 @@ namespace EvilAliensWeb.Pages
                 EvilAliensWeb.Compat.WebcamInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.TexViewerInterop.Init(JsRuntime);
                 EvilAliensWeb.Compat.Net.NetInterop.Init(JsRuntime);
+                EvilAliensWeb.Compat.Net.WebRtcInterop.Init(JsRuntime);
 
                 // Parse the URL query (?menu / ?noattract / ?level=...) into DebugFlags
                 // BEFORE the render loop starts, so Game1 (created on the first tick) sees

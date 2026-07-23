@@ -90,6 +90,30 @@ namespace EvilAliensWeb.Compat.Net
             g.Components.ComponentRemoved += Components_ComponentRemoved;
         }
 
+        // Session teardown (card 11.4: menu sessions end when the match does). Live puppet
+        // components are left to the scene's own Terminate purge (they're ordinary world
+        // components); this only drops the driver + the id maps so nothing dangles into a
+        // later session.
+        public static void Disable()
+        {
+            if (!enabled)
+            {
+                return;
+            }
+            enabled = false;
+            game.Components.ComponentRemoved -= Components_ComponentRemoved;
+            game.Components.Remove(driver);
+            driver = null;
+            byId.Clear();
+            idByComp.Clear();
+            live.Clear();
+            paidLedger.Clear();
+            paidOrder.Clear();
+            recentlyRemoved.Clear();
+            recentlyRemovedOrder.Clear();
+            remoteDeaths.Clear();
+        }
+
         // CollisionHandler seam: a frozen puppet is still hit-testable -- but only while the
         // driver is enabled, so a paused stack (ComponentBin.Push disables the driver too)
         // keeps collisions frozen exactly like single-player.

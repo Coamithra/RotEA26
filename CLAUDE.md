@@ -225,7 +225,13 @@ The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
   Existing units: `notzelda`, `notzelda-llama`.
 - **nginx** serves static files / reverse-proxies; add a new server block or location for this
   project rather than editing NotZelda's (or any other project's) config.
-- **Deploy:** `ssh` in, `cd /opt/<PROJECT_NAME> && git pull`, then restart the project's service.
+- **Deploy:** `ssh` in, update `/opt/<PROJECT_NAME>`, then restart the project's service. **This
+  project's `/opt/rotea` is NOT a git checkout** — it is an scp'd copy of `server/signal/`, so
+  there is no `git pull` to run; follow `server/signal/README.md` -> "Updating an existing
+  deployment" (stage to `server.new`, run `test_signal.py` there, swap, `systemctl restart rotea`).
+  **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual Pages
+  `workflow_dispatch`); a networked client feature needs both, or the live site talks to a server
+  that does not speak its protocol.
 - **Shared box etiquette:** it's a small CPU-only VPS (2 vCPU / 4GB RAM) also running an LLM
   server — keep resource usage modest and never stop/restart the `notzelda*` (or other
   projects') services from this project.

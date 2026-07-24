@@ -82,7 +82,43 @@ cp /opt/rotea/server/rotea.service /etc/systemd/system/rotea.service
 nginx -t && systemctl reload nginx
 systemctl daemon-reload
 systemctl enable --now rotea
-curl https://notzelda.haraldmaassen.com/rotea/health   # {"ok":true,"rooms":0}
+curl https://notzelda.haraldmaassen.com/rotea/health
+# {"ok":true,"rooms":0,"listed":0,"browsers":0}
 ```
 
 Clients connect to `wss://notzelda.haraldmaassen.com/rotea/ws`.
+
+### Updating an existing deployment
+
+The box is already provisioned (unit installed, venv built, nginx `include`s
+`/etc/nginx/rotea-locations.conf`), so an update is files + restart — **no nginx
+or systemd work**. Stage and test *before* the live process is swapped, so a bad
+push never reaches the running service:
+
+```sh
+TS=$(date -u +%Y%m%d-%H%M%S)
+cp -a /opt/rotea/server /opt/rotea/server.bak-$TS       # rollback point
+# scp this directory's *.py + requirements.txt + README.md to /opt/rotea/server.new
+cd /opt/rotea/server.new && /opt/rotea/venv/bin/python test_signal.py   # ephemeral
+# port, in-process: does NOT disturb the live 8091. ABORT if not green.
+/opt/rotea/venv/bin/pip install -r /opt/rotea/server.new/requirements.txt
+curl -s https://notzelda.haraldmaassen.com/rotea/health  # wait for rooms:0 so no
+                                                         # pairing is dropped
+cd /opt/rotea && mv server server.old-$TS && mv server.new server
+systemctl restart rotea      # ONLY rotea -- never the notzelda* units
+```
+
+Roll back with `systemctl stop rotea && rm -rf /opt/rotea/server &&
+mv /opt/rotea/server.bak-$TS /opt/rotea/server && systemctl start rotea`.
+
+**A restart drops every in-flight signaling socket**, so peers mid-pairing must
+re-enter their code (already-connected peers are unaffected — WebRTC is P2P and
+the clients have hung up by then). Check `rooms` is 0 first.
+
+Copy files with LF endings: the Windows working tree is CRLF, which Python
+tolerates but leaves the box's copies differing from the repo blobs.
+
+Deploying the server does **not** publish the game — GitHub Pages is a separate
+manual `workflow_dispatch`. A client feature needs both, and the game browser's
+`browse` filters on build hash, so listers and browsers only see each other when
+they run the same published build.

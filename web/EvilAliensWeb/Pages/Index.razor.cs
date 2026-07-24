@@ -92,6 +92,11 @@ namespace EvilAliensWeb.Pages
                 // Same measurement, different consumer: the wall-tower cost meter (eaWalls panel).
                 // No-ops unless eaWallPerf turned it on.
                 EvilAliensWeb.Compat.WallProfiler.EndFrame(_tickSw.Elapsed.TotalMilliseconds);
+                // Third consumer: the dev-build FPS HUD's frame profiler. This is the TOTAL the
+                // per-phase sections are attributed against, so it must be the same stopwatch —
+                // a separately-timed total would leave an unexplained remainder.
+                // No-ops unless the HUD armed it.
+                EvilAliensWeb.Compat.FrameProfiler.EndFrame(_tickSw.Elapsed.TotalMilliseconds);
             }
         }
     }

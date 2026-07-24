@@ -85,7 +85,6 @@ internal class JunkBoss : KillableAlien
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 			c.Position = base.Position;
 			c.Radius = r;
 			return c;
@@ -95,7 +94,6 @@ internal class JunkBoss : KillableAlien
 	public JunkBoss(Game game)
 		: base(game)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(EyeIdle);
 		base.DrawOrder = 20;
 		lazertimer = new Timer(2500f, repeating: true);
@@ -153,11 +151,6 @@ internal class JunkBoss : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_00e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
 		if (!isbase)
 		{
 			GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
@@ -217,12 +210,6 @@ internal class JunkBoss : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 		base.Position += new Vector2(0f, ydrawingoffset);
 		base.Draw(gameTime);
 		base.Position -= new Vector2(0f, ydrawingoffset);
@@ -234,8 +221,6 @@ internal class JunkBoss : KillableAlien
 
 	private void SwapDir()
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
 		float num = 150f;
 		if (base.Position.X > 800f - num)
 		{
@@ -249,17 +234,6 @@ internal class JunkBoss : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0238: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_024b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0256: Unknown result type (might be due to invalid IL or missing references)
-		//IL_027d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0406: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0172: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0096: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0479: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ee: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		ydrawingoffset = (float)Math.Sin(gameTime.TotalGameTime.TotalSeconds * 6.0) * 3f;
 		if (!shoottimer.Active & retaliate)
@@ -439,10 +413,6 @@ internal class JunkBoss : KillableAlien
 
 	private void FireLazer()
 	{
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		if (lazertimer.Finished)
 		{
 			Lazer lazer = Lazer.NewLazer(collection, base.Game);

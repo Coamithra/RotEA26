@@ -225,8 +225,6 @@ internal class InsaneBossI : GameScene
 
 	private void halt(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-0.2f, 0f) / 16.666666f);
 	}
 

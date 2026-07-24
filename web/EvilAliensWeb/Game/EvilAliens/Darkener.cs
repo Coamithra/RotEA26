@@ -56,9 +56,6 @@ public class Darkener : DrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0049: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		_ = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
@@ -68,18 +65,6 @@ public class Darkener : DrawableGameComponent
 
 	private void drawButtons()
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0090: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0113: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0118: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0158: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0172: Unknown result type (might be due to invalid IL or missing references)
 		float num = 0.5f;
 		float num2 = 0.8f;
 		float num3 = (General.SafeZone).Left;

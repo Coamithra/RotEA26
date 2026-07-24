@@ -24,7 +24,6 @@ internal class BossSpawner : GameEvent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
 		if (!bossspawned)
 		{
 			boss = collectionHelper.Recycle<Boss>();

@@ -42,8 +42,10 @@ generate much of the art/audio referenced here.
 - **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
   BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
   multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
-  (transparent, bottom/right only — content keeps its top-left coords) and stamps the original
+  (bottom/right only — content keeps its top-left coords) and stamps the original
   ("logical") size into the DDS header's reserved dwords (offsets 32/36 + `"LOGD"` marker).
+  The pad is transparent EXCEPT its first 4 px, which replicate the logical edge — see the
+  edge-gutter bullet below; that gutter is load-bearing, don't "clean it up".
   `WebContentManager.TryLoadDds` reads it back and registers it in a `ConditionalWeakTable`; the
   extension methods **`Texture2D.LogicalWidth()/LogicalHeight()/LogicalBounds()`** return it (and
   fall through to real `.Width/.Height` for unpadded png/rtex/render targets — a safe no-op). **The
@@ -59,6 +61,25 @@ generate much of the art/audio referenced here.
   `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`. **Test harness:**
   `build_textures.py --padtest <px>` grossly over-pads every `.dds` so any missed padded-vs-logical
   site shows an obvious ~px artifact in play; ship with `--padtest 0` (minimal mult-of-4 pad).
+- **A clamped source rect does NOT stop the filter reaching the pad — hence the 4px edge gutter.**
+  `LinearClamp` clamps at the TEXTURE border, not at the source rect, so a destination pixel whose
+  centre lands in the last half texel bilinearly blends the last content texel with texel `[LW]`.
+  While that texel was transparent black, the final ~1px of every tile lost up to 50% of its RGB
+  **and alpha** — a hairline at every tile boundary, dark over the opaque Mars sky, bright where the
+  `marshills` silhouettes sit over it (Trello `4ddcd13f`; measured -64 luminance in the sky band).
+  `build_textures.py`'s `edge_gutter()` therefore replicates the logical edge into the first 4 px of
+  the pad (last column right, last row down, corner), which makes the filtered result identical to a
+  true clamp at **any** pad size, and keeps the sampled 4×4 BC3 blocks free of transparent-black
+  endpoints on non-mult-of-4 art (`marsloop*` are 1587/1588 wide). Only 4 px are filled so the
+  `--padtest` canary keeps its transparent hole. Guard: `tools/textures/check_pad_bleed.py` (asserts
+  the gutter matches the edge on every shipped `.dds`) — **re-run it after any `build_textures.py`
+  rebuild**. Watch for this any time a texture is TILED or stretched far past its native size.
+- **`?bgfreeze=<designX>`** stops every background/foreground layer scrolling and parks a tile
+  BOUNDARY of each at that design column (`Background.Update`). The Mars/alien-base layers scroll at
+  six different speeds, so a tiling/wrap/parallax artifact can only be inspected once it holds
+  still. Caveat: sub-pixel artifacts like the pad bleed vary in strength with where the boundary
+  falls relative to render-target pixel centres, so sweep the FRACTIONAL part to cover phases — one
+  frozen frame is one phase, not the worst case.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
@@ -106,7 +127,96 @@ generate much of the art/audio referenced here.
   defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
-  `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test).
+  `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
+  `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
+  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
+
+### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
+
+**The loop is rAF-driven, so a frame RATE readout is vsync-capped and near-useless for
+optimization**: at 100Hz a 2ms frame and a 9ms frame both read "100 fps". The HUD therefore
+reports the measured rate AND the numbers that keep moving under the cap -- frame COST in ms and
+`1000/tickMs` HEADROOM fps -- side by side, never conflated. (Same distinction `WallProfiler`
+draws for the tower pass; the two agree on the same fight.)
+
+- **Visible by default in every dev build, invisible in the published one**, keyed off
+  `window.eaBuildHash === 'dev'` (deploy.yml stamps a real fingerprint at publish). That covers
+  Debug AND a local Release publish with no `#if DEBUG`. When hidden, nothing is built, the tick
+  hook stays null and the GL prototypes are unpatched -- zero cost, not just invisible.
+- Compact by default (fps + headroom); click the mode tag to expand to the frame-time sparkline,
+  the per-section ms rows and the GL draw-call count. **The panel is `pointer-events:none`** except
+  that tag and the mode checkboxes -- it sits over a shoot-'em-up where Mouse1 anywhere on the
+  canvas fires, and a clickable panel would eat every shot aimed at that corner.
+- Sections (they sum to the tick; whatever is left shows as `other`): `update` (parent) with
+  `components`/`collision`/`net` sub-rows, `scene` (= `DrawInner`, all components incl. bloom),
+  `post` (slowmo trail + holo-sim), `present` (the letterbox gamma blit), **`swap`** (`EndDraw`).
+  **`swap` matters more than it sounds:** `Game.Tick` presents in `EndDraw`, OUTSIDE the `Draw`
+  override, and WebGL commands are queued -- so a GPU-bound frame's real cost lands there. Add a
+  section in one line: an enum member + `long t = FrameProfiler.Begin(); ... End(Section.X, t)`.
+- **GL draw calls are counted in JS** (`drawElements`/`drawArrays` prototypes are patched), not in
+  `SpriteBatchWrapper`: BlazorGL's cost is per-CALL, and JS sees every source at once (sprite
+  batches, bloom passes, the walls' 3D primitives) with no engine surgery. It is the most
+  actionable single number in this port -- watch it, not the sprite count.
+- **Headroom is CPU-derived and overstates a GPU-bound frame.** Two opt-in modes close that:
+  `?fpsuncapped` (HUD "uncap") drives the loop off a `MessageChannel` instead of rAF so the
+  MEASURED rate stops being vsync-gated (`setTimeout(0)` would not do -- it is clamped to ~4ms,
+  i.e. a fake 250fps ceiling); `?fpsgpu` (HUD "gpu sync") issues `gl.finish()` per tick so GPU
+  execution becomes a measurable wait. Cross-check: uncapped measured 233fps vs 241 derived
+  headroom on the menu, so the derived number is honest there.
+- **These flags are the one group NOT parsed in `DebugFlags.cs`** -- the HUD is JS-owned, so the
+  `eaFps` IIFE regex-reads `location.search` itself (the `eaWalls`/`eaSpider` panel precedent).
+  Nothing about them reaches C#, so they are inherently out of `DebugFlags.Active` and can never
+  make a co-op session reject a peer. `?fpshud` (force on, works on the live site) /
+  `?fpshud=full` (expanded) / `?nofps` (hide in a dev build) / `?fpsuncapped` / `?fpsgpu`.
+  `?fps=` is NOT this (that is the sprite harness' playback rate).
+- **Auto-suppressed on the screenshot-verification pages** (`?harness=`, `?textshot`,
+  `?bulletshot`, `?lazershot`, `?castbrain`, `?castshow`, `?texviewer`, `?gamebrowser`,
+  `?spiderphase=`, `?wcmothershipfreeze=`) -- those scenes draw their own readouts in the same
+  top-left corner, and this project verifies almost everything by screenshot, so relying on
+  someone remembering `?nofps` would put the HUD in every harness capture. `?fpshud` overrides.
+- `?fpsuncapped` / `?fpsgpu` are LOOP flags and apply with or without the panel (so
+  `?nofps&fpsuncapped` is a valid "measure, don't show me" boot).
+- **GOTCHA -- an unfocused window makes every rate reading garbage** and Chrome throttles it to a
+  rate the C#-side staleness test (mean interval > 100ms) does NOT catch: a focused menu read
+  2.5ms/frame, the same page unfocused read 22.8ms. `document.hidden || !document.hasFocus()` is
+  the authoritative signal, so BOTH the HUD and `eaFps.stats()` prefix an UNFOCUSED warning and the
+  HUD re-arms (dropping the poisoned samples) when focus returns.
+- **Verify the window maths as DATA with `eaFps.test(workMs, intervalMs, frames)`** -- it pushes a
+  synthetic series through the real accumulator and asserts the vsync trap itself: `work` ms every
+  `interval` ms must read `1000/interval` fps and `1000/work` headroom. A profiler that reported
+  the work rate as "fps" fails it loudly. (The `eaNetSim.test` idiom; a python mirror would drift.)
+
+## Component lifecycle (`ComponentBin`) — the spawn/death contract
+
+Card 02d9ad67 hardened the 2008 deferred birth/death lists. The contract every spawn/despawn
+site now lives under:
+
+- **Births are INSTANT.** `ComponentBin.Add` puts the component straight into `Game.Components`
+  (KNI journals the update/draw registrations, so it never Updates before the next tick, but it
+  IS immediately visible to collisions, `Oracle.Get*` scans and purges — there is no hidden
+  "pending spawn" world). **KNI runs `Initialize()` synchronously inside the Add**, so a call
+  site must fully configure the object (Setup/Make*/property writes) BEFORE `Add` —
+  `tools/audit_add_order.py` is the lint (run it after adding spawn sites; the repo is clean).
+  Event subscriptions (`OnDeath +=`) after Add are fine.
+- **Deaths stay QUEUED** (`Remove` → deathList) — instant removal would corrupt the collision
+  pass and change within-tick gameplay — but the list flushes TWICE per tick: the original
+  mid-tick point (after component updates, before collisions) AND `TopOfTickFlush` (before any
+  component updates), so a collision-phase kill never gets one more "zombie" Update (the
+  fires-from-the-grave / final-bullet-across-the-paused-screen bug class).
+- **`Purge<T>` arms a standing filter** until the next top-of-tick flush: any `Add` of a T in
+  that window (a component updating later the same tick, a kill side effect in that tick's
+  collision phase) is diverted to the recycle pool — a clear-all followed by a late same-tick
+  spawn now actually clears all. **Opt out with `Purge<T>(standing: false)` ONLY for a
+  clear-the-field-and-respawn-NOW purge** whose own call chain re-adds a T in the same tick
+  (sole current case: `GameScene.UpdateStartup`'s pre-spawn clear — the ships and Get Ready
+  banners follow in the same tick; the filter would eat them, which is exactly the no-ship
+  regression `?binlog` caught during development).
+- **Adds while the world is `Push`ed (paused) join the freeze**: an `AlienDrawableGameComponent`
+  added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
+  `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
+  the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
+- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds; `eaBinTest()` runs the
+  scripted scenario suite (`Compat/BinTest.cs`) against the live bin and prints PASS/FAIL.
 
 ## Input
 
@@ -251,6 +361,15 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   `?harness=blast` overlays the ring (green = damaging) + readout.
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
   (baked `DefaultSizeFactor` 0.85) scales sprite AND box hitbox together; `?flyspiderscale=`.
+  Fast-boot a dense endless swarm with **`?level=Level2&flyspiders`** (background variant, the only
+  user of the group-flatten RT round trip) or **`?flyspiders=fg`** (foreground, same sprites, NO
+  flatten) -- the A/B built for the frame profiler, since the real level only reaches this state
+  minutes in. Measured (frame profiler, focused): background 7.3ms/frame, scene 6.6ms, 98 GL calls,
+  137fps headroom vs foreground 2.8ms/frame, scene 2.1ms, 42 GL calls, 356fps headroom. **Read that
+  as indicative, not a clean per-spider flatten cost** -- background flying spiders have
+  `Collides=false` so they are never killed and accumulate, while foreground ones die on the ship;
+  the populations are not controlled. What the data does show is the mechanism: GL calls per frame
+  roughly double, which is exactly what a per-group RT round trip does on a per-CALL-cost backend.
 - **Laser FX (`Quad.cs` beam + `LazerGenerator` chargeup):** chargeup is a windup animation
   (per-particle scale ramps 1→`DefaultPeakChargeScale` 4) + a layered "energy well" orb (stacked
   additive `lazerglow`: blue halo → cyan-white → white-hot core — the same recipe the ship

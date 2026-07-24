@@ -67,12 +67,12 @@ namespace EvilAliensWeb.Compat
                 charge.Setup(ChargePos, 2f, 1f, 0f, 0f);
                 charge.SetWindup(2.5f, loop: true); // LOOP the 1->peak ramp + energy-well growth so it can be watched
                 charge.SetupSilent(); // AFTER Setup (which clears silent) + BEFORE Add (Initialize plays the SFX)
+                charge.Position = ChargePos;
+                charge.Visible = true; // the generator ctor defaults Visible=false; force-draw it here
                 // Add through the scene's ComponentBin (the in-game path) so it's actually TICKED
                 // each frame -- the swarm needs its Update to run (the particle alpha is 0 at birth
                 // and only rises as they age), so a non-updated generator draws nothing.
                 Collection.Add((GameComponent)(object)charge);
-                charge.Position = ChargePos;
-                charge.Visible = true; // the generator ctor defaults Visible=false; force-draw it here
 
                 // Full-grown beam: a raw Quad we drive ourselves (the game's Lazer grows/dissipates
                 // over its lifetime; here we want a stable beam that just sits and crackles). It's

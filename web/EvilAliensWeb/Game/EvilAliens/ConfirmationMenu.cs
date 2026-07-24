@@ -68,14 +68,6 @@ internal class ConfirmationMenu : MenuSub1
 
 	public override void DrawMenu(GameTime gameTime, float yoffset)
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0049: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.DrawMenu(gameTime, yoffset + 75f);
 		Vector2 size = font.MeasureString(text);
@@ -90,10 +82,6 @@ internal class ConfirmationMenu : MenuSub1
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen darken in 800x600 design space (scaled by RenderScale.Matrix).
 		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)128));
 		base.Draw(gameTime);

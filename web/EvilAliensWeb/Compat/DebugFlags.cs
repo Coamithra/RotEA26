@@ -182,6 +182,11 @@ namespace EvilAliensWeb.Compat
 		// (a shipped build never appends to the list). Does NOT alter the boot path.
 		public static bool LoadLog { get; private set; }
 
+		// ?binlog — ComponentBin lifecycle diagnostics (card 02d9ad67): logs adds diverted by
+		// the standing purge filter and world objects frozen by a pause-time add. Pure console
+		// output, no behaviour change; deliberately OUT of `Active`.
+		public static bool BinLog { get; private set; }
+
 		// Cinematic slow-motion motion-trail post-process (Game1.ApplySlowmoTrail). While the
 		// 1up-powerup slowmo is active, the scene is fed through a feedback buffer so moving
 		// objects smear into fading "ghost" trails (movie bullet-time look). ON by default;
@@ -590,6 +595,18 @@ namespace EvilAliensWeb.Compat
 		// A pure test shortcut, like ?spiderboss. See Level2.PopulateEventList / PopulateSpidersOnly.
 		public static bool Spiders { get; private set; }
 
+		// Fast-boot Level2 straight to a dense, endless FLYING-spider swarm (skips the whole level).
+		// Built for the frame profiler (card 22e655b5): the BACKGROUND flying spider is the only
+		// user of the group-flatten render-target round trip (SpriteBatchWrapper.BeginGroupFlatten),
+		// so measuring what that costs needs a steady swarm on screen -- which the real level only
+		// reaches minutes in. `?flyspiders=fg` runs the FOREGROUND variant instead (same sprites,
+		// no flatten): the A/B that separates the render-target cost from the drawing itself.
+		// Pair with ?level=Level2 (+ ?invuln). See Level2.PopulateFlyingSpidersOnly.
+		public static bool FlySpiders { get; private set; }
+
+		// Set by `?flyspiders=fg` only -- picks the non-flattened foreground variant for the A/B.
+		public static bool FlySpidersForeground { get; private set; }
+
 		// Fast-boot the Tutorial straight to its FINAL power-up training beat (skips the whole
 		// welcome/move/fire/lesson sequence): the eye "punching bag" boss + the PowerUpTrainingEvent
 		// where every powerup streams in and a banner explains its powered-up effect. Built to
@@ -837,6 +854,15 @@ namespace EvilAliensWeb.Compat
 			SpiderPhase = phase;
 		}
 
+		// ?bgfreeze=<designX> STOPS every background/foreground layer scrolling and parks a tile
+		// BOUNDARY of each one at design column <designX>. The Mars/alien-base layers scroll at six
+		// different speeds (0.3 / 0.33 / 0.53 / 0.85 / 1.0 / 2.5), so a live screenshot of a tiling
+		// artifact can never be reproduced and a before/after pair is meaningless -- the seam has
+		// moved. Frozen, every layer's seam stacks in one screen column and the shots are directly
+		// comparable. Built for the pad-bleed seams (Trello 4ddcd13f); reach for it for any tiling,
+		// wrap-period or parallax-alignment question. null => normal scrolling.
+		public static float? BgFreeze { get; private set; }
+
 		// Online co-op (Stage 11, plans/stage11-online-coop.md). ?net=host / ?net=join opts a
 		// session into the co-op net layer (Compat/Net/NetSession); no ?net flag = None = the
 		// net layer is never constructed, so a plain boot is byte-identical single-player (the
@@ -994,6 +1020,9 @@ namespace EvilAliensWeb.Compat
 				case "loadlog":
 				case "profileloads":
 					LoadLog = IsOn(val);
+					break;
+				case "binlog":
+					BinLog = IsOn(val);
 					break;
 				case "metalscore":
 					MetalScore = IsOn(val);
@@ -1564,6 +1593,25 @@ namespace EvilAliensWeb.Compat
 				case "spiders":
 					Spiders = IsOn(val);
 					break;
+				case "flyspiders":
+					// Value-carrying: `fg`/`foreground` picks the un-flattened foreground variant;
+					// `bg`/`background` and a bare ?flyspiders pick the group-flatten one under
+					// test. An unrecognised value is NOT silently ignored -- swallowing it would
+					// boot the whole of Level 2 with no hint why the fast-boot did nothing.
+					{
+						bool fg = string.Equals(val, "fg", StringComparison.OrdinalIgnoreCase)
+							|| string.Equals(val, "foreground", StringComparison.OrdinalIgnoreCase);
+						bool bg = string.Equals(val, "bg", StringComparison.OrdinalIgnoreCase)
+							|| string.Equals(val, "background", StringComparison.OrdinalIgnoreCase);
+						FlySpiders = IsOn(val) || fg || bg;
+						FlySpidersForeground = fg;
+						if (!FlySpiders)
+						{
+							Console.WriteLine("[debug] unknown ?flyspiders= value '" + val
+								+ "' (expected fg/bg or a bare ?flyspiders) -- ignored");
+						}
+					}
+					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);
 					break;
@@ -1662,6 +1710,11 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
 					break;
+				case "bgfreeze":
+					// A bare ?bgfreeze freezes with the boundaries at design x=400 (mid-screen).
+					BgFreeze = float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf)
+						? bgf : 400f;
+					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness
 						// with no value is meaningless (no object), so ignore it.
@@ -1744,7 +1797,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1757,6 +1810,7 @@ namespace EvilAliensWeb.Compat
 							+ (WallsOnly ? " wallsonly" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
+							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
 						+ (NetScript ? " netscript" : "")

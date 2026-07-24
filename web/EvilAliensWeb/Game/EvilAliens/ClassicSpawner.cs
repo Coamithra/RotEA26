@@ -38,9 +38,6 @@ public class ClassicSpawner : GameEvent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0112: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0181: Unknown result type (might be due to invalid IL or missing references)
 		startup.Update(gameTime);
 		perfecttimer.Update(gameTime);
 		if (perfecttimer.Finished)
@@ -105,7 +102,6 @@ public class ClassicSpawner : GameEvent
 
 	private void ufo_OnDeath(object sender)
 	{
-		//IL_00ac: Unknown result type (might be due to invalid IL or missing references)
 		perfectkilling++;
 		perfecttimer.Start();
 		perfecttimer.Reset();

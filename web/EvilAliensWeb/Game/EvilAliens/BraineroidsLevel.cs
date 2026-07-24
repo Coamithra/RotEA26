@@ -59,15 +59,14 @@ internal class BraineroidsLevel : GameScene
 
 	protected override void UpdateNormal(GameTime gameTime)
 	{
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
 		base.UpdateNormal(gameTime);
 		ufotimer.Update(gameTime);
 		if (ufotimer.Finished)
 		{
 			UFO uFO = UFO.NewUFO(Collection, base.Game);
 			uFO.Setup(new Vector2(RandomHelper.RandomNextFloat(0f, 800f), -40f), isBig: false, EnemyBehaviour.classic);
-			Collection.Add((GameComponent)(object)uFO);
 			uFO.SetAsBonus();
+			Collection.Add((GameComponent)(object)uFO);
 		}
 		if (fired && !Collection.ContainsType<Braineroid>())
 		{
@@ -78,13 +77,11 @@ internal class BraineroidsLevel : GameScene
 
 	private void wait_OnFinished(GameEvent sender)
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0144: Unknown result type (might be due to invalid IL or missing references)
 		fired = true;
 		UFO uFO = UFO.NewUFO(Collection, base.Game);
 		uFO.Setup(new Vector2(RandomHelper.RandomNextFloat(0f, 800f), -115f), isBig: true, EnemyBehaviour.classic);
-		Collection.Add((GameComponent)(object)uFO);
 		uFO.SetAsBonus();
+		Collection.Add((GameComponent)(object)uFO);
 		if (wave == (int)(8f * Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty)) + 1)
 		{
 			Victory();

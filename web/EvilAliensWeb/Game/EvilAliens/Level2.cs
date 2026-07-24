@@ -150,6 +150,18 @@ internal class Level2 : GameScene
 			PopulateSpidersOnly();
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.FlySpiders)
+		{
+			// DEBUG (?flyspiders): skip the level and run a dense continuous FLYING-spider swarm.
+			// Built for the frame profiler (card 22e655b5): the background variant is the only
+			// user of SpriteBatchWrapper.BeginGroupFlatten/EndGroupFlatten -- a per-swarm render
+			// target round trip -- so "is the group flatten expensive?" needs the swarm on screen
+			// and steady, which the real level only reaches minutes in. ?flyspiders=fg runs the
+			// FOREGROUND variant instead (identical sprites, NO flatten), which is the A/B that
+			// isolates the render-target cost from the drawing itself.
+			PopulateFlyingSpidersOnly();
+			return;
+		}
 		WaitEvent waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += resetlives;
 		StationaryWave(8f, 3f, 100f, 0f, 0f, 0f);
@@ -418,6 +430,20 @@ internal class Level2 : GameScene
 		eventList.AddEvent(stationarySpawner, halting: false);
 	}
 
+	// ?flyspiders — a dense, endless flying-spider swarm for profiling (see the call site).
+	// Rate 5.5/s is the level's own background wave rate; the swarm builds to a steady on-screen
+	// population in a few seconds and stays there, which is what a rolling frame-time window needs.
+	private void PopulateFlyingSpidersOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += resetlives;
+		waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += slowdown;
+		bool background = !EvilAliensWeb.Compat.DebugFlags.FlySpidersForeground;
+		FlyingSpiderEvent swarm = new FlyingSpiderEvent(base.Game, 0f, 5.5f, isbackground: background);
+		eventList.AddEvent(swarm, halting: false);
+	}
+
 	private void invuln(GameEvent sender)
 	{
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -428,8 +454,6 @@ internal class Level2 : GameScene
 
 	private void halt(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-0.2f, 0f) / 16.666666f);
 	}
 
@@ -503,23 +527,17 @@ internal class Level2 : GameScene
 
 	private void slowdown(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-3f, 0f) / 16.666666f);
 	}
 
 	private void slowDownBasedOnDifficulty(GameEvent sender)
 	{
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		float num = -1f + Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty) * -4f;
 		Background.SetSpeed(new Vector2(num, 0f) / 16.666666f);
 	}
 
 	private void speedup(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-10f, 0f) / 16.666666f);
 	}
 

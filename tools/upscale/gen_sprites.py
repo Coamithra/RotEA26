@@ -4,7 +4,7 @@ Procedurally generate the sprites that are better drawn than AI-upscaled:
     highlight (the originals are 16px blurry blobs; a generative redraw adds junk
     detail a clean glossy ball shouldn't have).
   - arrow : the Warning!/Danger! directional arrow (original 49x40: a wide short
-    triangular head + a rectangular shaft, drawn at AnimatedMessage.cs:285 rotating
+    triangular head + a rectangular shaft, drawn by AnimatedMessage rotating
     round screen-centre at scale 1, so it blurs when the presenter magnifies it).
     A crisp filled vector arrow at the same silhouette.
   - bombicon : the HUD bomb-count icon (next to the score), a red energy

@@ -74,15 +74,18 @@ internal class BackgroundImage
 	// A tile at (x,y) covers [x, x + tileW*scale) x [y, y + tileH*scale) in 800x600 design
 	// space, so it only needs drawing when that rect overlaps the screen. ONE predicate on
 	// purpose: this replaced four hand-maintained copies of the condition, and they had
-	// drifted apart (card 5216412d).
+	// drifted apart -- two measured the tile's WIDTH along Y, and the two mirrorX ones had
+	// lost the * size factor entirely, so at any size != 1 they culled against unscaled
+	// pixel extents (card 5216412d).
 	//
-	// NOTE: the body below is the SHIPPED expression, extracted VERBATIM so eaBgCull() can
-	// demonstrate the defect before the next commit fixes it -- the vertical term measures
-	// the tile's WIDTH, and the two mirrorX call sites pass scale 1f because they had lost
-	// their * size factor.
+	// Both slips cull tiles that are VISIBLE (a missing strip at the screen edge), not merely
+	// draw spare ones: measuring width along Y under-tests a TALL tile, and dropping * size
+	// under-tests any layer drawn bigger than its art. Neither could show on a shipped
+	// background -- nothing sets mirrorX/mirrorY and every live tile is square or wider than
+	// tall -- which is exactly why eaBgCull() reads the decisions as data.
 	internal static bool TileOnScreen(float x, float y, int tileW, int tileH, float scale)
 	{
-		return x + (float)tileW * scale >= 0f && x < 800f && y + (float)tileW * scale >= 0f && y < 600f;
+		return x + (float)tileW * scale >= 0f && x < 800f && y + (float)tileH * scale >= 0f && y < 600f;
 	}
 
 	private void NoteTile(bool drawn, float x, float y, Texture2D tile)
@@ -257,7 +260,7 @@ internal class BackgroundImage
 			offset.Y = 0f;
 			for (int k = 0; k < tiles.GetLength(1); k++)
 			{
-				bool mirrorColOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, k].LogicalWidth(), tiles[mirrorCol, k].LogicalHeight(), 1f);
+				bool mirrorColOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, k].LogicalWidth(), tiles[mirrorCol, k].LogicalHeight(), size);
 				NoteTile(mirrorColOnScreen, position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, k]);
 				if (mirrorColOnScreen && !CullTraceDryRun)
 				{
@@ -269,7 +272,7 @@ internal class BackgroundImage
 			{
 				for (int mirrorRow = tiles.GetLength(1) - 1; mirrorRow >= 0; mirrorRow--)
 				{
-					bool mirrorBothOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, mirrorRow].LogicalWidth(), tiles[mirrorCol, mirrorRow].LogicalHeight(), 1f);
+					bool mirrorBothOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, mirrorRow].LogicalWidth(), tiles[mirrorCol, mirrorRow].LogicalHeight(), size);
 					NoteTile(mirrorBothOnScreen, position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, mirrorRow]);
 					if (mirrorBothOnScreen && !CullTraceDryRun)
 					{

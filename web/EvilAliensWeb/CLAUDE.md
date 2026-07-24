@@ -86,7 +86,26 @@ generate much of the art/audio referenced here.
   six different speeds, so a tiling/wrap/parallax artifact can only be inspected once it holds
   still. Caveat: sub-pixel artifacts like the pad bleed vary in strength with where the boundary
   falls relative to render-target pixel centres, so sweep the FRACTIONAL part to cover phases — one
-  frozen frame is one phase, not the worst case.
+  frozen frame is one phase, not the worst case. GOTCHA: freezing every layer at the SAME design
+  column stacks layers that normally never coincide — at `?bgfreeze=0` the alien base's two
+  additive `2331-v5` fog layers land exactly on top of each other and the scene whites out. That is
+  the flag doing its job, not a blend/alpha regression; drop the flag to see the real look.
+- **The per-tile cull lives in ONE predicate, `BackgroundImage.TileOnScreen` (card 5216412d).** A
+  tile at `(x,y)` covers `[x, x+W*size) x [y, y+H*size)` and is drawn iff that overlaps 800x600.
+  It used to be four copy-pasted conditions and they had drifted: two measured the tile's WIDTH
+  along Y, and the two mirrorX ones had lost their `* size`. **Both slips cull tiles that are
+  VISIBLE** (a missing strip at the screen edge, not a spare tile) — a tall tile under-tests its
+  height, and a layer drawn bigger than its art under-tests both axes. Neither can show on a
+  shipped background (nothing sets `mirrorX`/`mirrorY`, and every live tile is square or wider than
+  tall), so **keep the predicate single** — a new call site must call it, never re-inline the
+  comparison. Sizes and shapes in play: `size` 1 / 1.5 / 2 / 2.4 / `1/3.238`; the Mars ground is the
+  only `[12,1]` grid and the only layer whose `realsize.Y` (600) is not its tile height, which is
+  what makes its Y term non-vacuous — for every `[1,1]` layer the Y term is trivially true.
+  **Verify with console `eaBgCull()`** (`Compat/BgCullTest.cs`): sweeps the real predicate for
+  soundness (a tile that intersects the screen is never culled), dry-runs whole scenario layers —
+  mirrored and TALL, shapes no shipped background uses — through the REAL `Draw`, then censuses the
+  live layers' per-frame `drawn` / `off-screen` counts. A screenshot cannot verify this cull at all,
+  since every shipping configuration errs invisibly; read the decisions as data instead.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
@@ -137,7 +156,8 @@ generate much of the art/audio referenced here.
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
-  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand).
+  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
+  `eaBgCull()` (the background tile-cull oracle — run from inside a level).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 

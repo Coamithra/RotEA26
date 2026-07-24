@@ -216,7 +216,14 @@ namespace EvilAliensWeb.Compat.Net
                 ship = new PlayerShip(game);
             }
             ship.Setup(slot, ch.Buffer.Newest.Pos, startup: false, invulnerable: false, 4.712389f);
-            bin.Add((GameComponent)(object)ship);
+            if (!bin.TryAdd((GameComponent)(object)ship))
+            {
+                // Same standing-Purge<PlayerShip> race as the primary remote ship in
+                // SpawnPuppet, and the one likelier to bite: couch players hit resets
+                // constantly, and a reset is exactly what arms the filter. Leave ch.Puppet
+                // clear so the caller's null check retries next tick (card 74403f83).
+                return;
+            }
             ch.Puppet = ship;
             Console.WriteLine("[net] friend ship joined slot=" + slot);
         }

@@ -141,6 +141,7 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             AlienDrawableGameComponent comp;
+            bool landed;
             constructing = true;
             try
             {
@@ -153,11 +154,22 @@ namespace EvilAliensWeb.Compat.Net
                     MarkRemoved(netId);
                     return false;
                 }
-                bin.Add((GameComponent)(object)comp);
+                landed = bin.TryAdd((GameComponent)(object)comp);
             }
             finally
             {
                 constructing = false;
+            }
+            if (!landed)
+            {
+                // The bin swallowed it. `Constructing` exempts us from the standing purge
+                // filter, so this should be unreachable -- but registering the id anyway is
+                // what turns a swallowed add into a permanent GHOST: never drawn, never
+                // collidable, and invisible to the self-heal below, which only rebuilds ids
+                // that are NOT in byId. Take the same path as a declining descriptor instead,
+                // so the id stays unknown and the next snapshot turn retries it (card 74403f83).
+                MarkRemoved(netId);
+                return false;
             }
             comp.Enabled = false; // frozen from the first tick (bin.Add force-enables)
             PuppetInfo info = new PuppetInfo

@@ -339,7 +339,17 @@ public class ComponentBin : IComponentBinService
 		// Standing purge filter: this type was cleared this tick — a late same-tick spawn
 		// (or a resurrect-by-Add of an instance the purge already queued dead) must not
 		// outlive the wipe. See pendingPurges / TopOfTickFlush.
-		if (IsPendingPurged(component))
+		//
+		// The puppet layer is EXEMPT, exactly as it is from SuppressWorldSpawn above (card
+		// 74403f83). Game1 drains the net rx AFTER base.Update in the same tick, so a purge
+		// armed by GameScene.UpdateWin/UpdateResetting (or by NetApplyReset, which purges from
+		// inside the drain itself) is still live when the host's authoritative spawns arrive —
+		// and a client that eats one diverges permanently, since NetPuppets registers the id
+		// either way and the snapshot self-heal only fires for ids it has never seen. Safe at
+		// scene teardown: EvSpawn and the snapshot path are both gated on
+		// GameScene.NetActiveScene, which Terminate nulls BEFORE its own purges, so the puppet
+		// layer is already switched off there and nothing can orphan into the next scene.
+		if (IsPendingPurged(component) && !EvilAliensWeb.Compat.Net.NetPuppets.Constructing)
 		{
 			if (!((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))
 			{
@@ -390,6 +400,19 @@ public class ComponentBin : IComponentBinService
 		{
 			component.Enabled = true;
 		}
+	}
+
+	// Add, then report whether the component actually landed in the world. The standing purge
+	// filter and the client add-gate both divert silently (that is the point — ordinary game
+	// code must not have to care), but a caller that ADOPTS what it just added does: the net
+	// layer's ship puppets keep a reference and gate their retry on it being null, so adopting
+	// a diverted ship strands that player for the rest of the session (card 74403f83).
+	// Returning false is the caller's cue to leave its reference clear and let the retry fire
+	// next tick, once TopOfTickFlush has expired the filter.
+	public bool TryAdd(GameComponent component)
+	{
+		Add(component);
+		return ((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component);
 	}
 
 	private void DivertToIdle(GameComponent component)

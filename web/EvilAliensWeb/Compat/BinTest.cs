@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using System.Text;
 using Microsoft.Xna.Framework;
@@ -100,10 +101,92 @@ internal static class BinTest
 		bin.Remove((GameComponent)(object)e);
 		bin.Update();
 
+		// 5. TryAdd reports whether the add actually LANDED (card 74403f83). This is the
+		// contract the net layer's two ship-puppet spawn sites branch on: they keep a
+		// reference to what they add and gate their retry on it being null, so adopting a
+		// component the filter diverted strands that player for the rest of the session.
+		bin.Purge<TestAlien>();
+		TestAlien f = new TestAlien(game);
+		Check("TryAdd reports a diverted add", !bin.TryAdd((GameComponent)(object)f));
+		bin.TopOfTickFlush();
+		TestAlien g = new TestAlien(game);
+		Check("TryAdd reports a landed add", bin.TryAdd((GameComponent)(object)g));
+		bin.Remove((GameComponent)(object)g);
+		bin.Update();
+
+		// 6. The puppet layer is EXEMPT from the standing purge filter (card 74403f83).
+		// Driven through the REAL NetPuppets.OnSpawn path, not a mirror: Enable() needs only
+		// a Game plus the ServiceHelper bin/score (both live from Game1.Initialize), so no
+		// transport and no paired session are required. Before the fix this scenario fails
+		// with the puppet registered but absent from the world — the silent ghost the card
+		// is about: never drawn, never collidable, and invisible to OnSnapshotEntry's
+		// self-heal, which only rebuilds ids it has NEVER seen.
+		if (Net.NetSession.Active || Net.NetPuppets.LiveCount > 0)
+		{
+			// A real co-op session owns the puppet layer; Enable/Disable here would tear it
+			// down mid-flight. Report rather than silently "passing" an unrun scenario.
+			sb.Append("SKIP net-puppet scenarios (a session is live)\n");
+		}
+		else
+		{
+			EvilBullet puppet = null;
+			try
+			{
+				Net.NetPuppets.Enable(game);
+				// Exactly what GameScene.UpdateResetting / UpdateWin arm, and what
+				// NetApplyReset arms from inside the rx drain itself.
+				bin.Purge<AlienDrawableGameComponent>();
+				Net.NetBaseState state = default(Net.NetBaseState);
+				state.Pos = new Vector2(-400f, -400f); // off-screen: never drawn, never collides
+				state.Scale = 1f;
+				// typeIdx 0 = EvilBulletDescriptor, the simplest replicable (no spawn extras).
+				bool built = Net.NetPuppets.OnSpawn(64001, 0, state, new byte[1], 0, 0);
+				foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
+				{
+					if (item is EvilBullet bullet)
+					{
+						puppet = bullet;
+					}
+				}
+				Check("puppet spawn reports success", built);
+				Check("puppet survives the standing purge filter", puppet != null);
+				// The invariant the ghost broke: the id registry must never hold a puppet
+				// that isn't in the world. (OnSpawn's own !landed guard is defence in depth
+				// against a future purge path — the exemption above makes it unreachable,
+				// so it is deliberately not asserted here.)
+				Check("registry agrees with the world",
+					Net.NetPuppets.LiveCount == (puppet != null ? 1 : 0));
+			}
+			catch (Exception ex)
+			{
+				Check("net-puppet scenarios ran (" + ex.GetType().Name + ": " + ex.Message + ")", ok: false);
+			}
+			finally
+			{
+				Net.NetPuppets.Disable();
+				// Disable() deliberately leaves live puppets to the scene's Terminate purge,
+				// but this suite has no scene — take the component out ourselves.
+				if (puppet != null)
+				{
+					bin.Remove((GameComponent)(object)puppet);
+					bin.Update();
+					bin.PruneIdle((GameComponent)(object)puppet);
+				}
+				// Expire the AlienDrawableGameComponent filter this scenario armed. A live
+				// game clears it on the next tick anyway, but the suite must hand the bin
+				// back exactly as it found it: TestAlien IS an AlienDrawableGameComponent, so
+				// a second back-to-back run would otherwise have its own scenario-1 add
+				// diverted and report a phantom failure.
+				bin.TopOfTickFlush();
+			}
+		}
+
 		// Leave no trace: every removed/diverted scratch component landed in the recycle
 		// pool (ComponentRemoved -> idleList, filter diverts -> idleList) — prune them so
 		// repeated runs don't accumulate pooled TestAliens (each is an IComponentWatcher,
 		// so they'd otherwise sit in the notify multiset forever).
+		bin.PruneIdle((GameComponent)(object)f);
+		bin.PruneIdle((GameComponent)(object)g);
 		bin.PruneIdle((GameComponent)(object)a);
 		bin.PruneIdle((GameComponent)(object)b);
 		bin.PruneIdle((GameComponent)(object)c);

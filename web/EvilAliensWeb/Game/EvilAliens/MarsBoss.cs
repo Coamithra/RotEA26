@@ -416,4 +416,37 @@ internal class MarsBoss : KillableAlien
 			texture = firstHalfOfSpritesheet;
 		}
 	}
+
+	// The charge-up `lazerGenerator` energy well is a child the host draws by hand (see Draw). On a
+	// JOIN peer this puppet is frozen, so the descriptor replicates the charge state and
+	// NetDriveExtras rebuilds a local silent copy into the same `lazerGenerator` field (Draw + the
+	// OnComponentRemoved Free() then cover it unchanged). See Compat/Net/NetChargeGlow.
+	private bool netCharging;
+
+	private Vector2 netChargeOffset;
+
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 2f;
+
+	internal bool NetCharging => lazerGenerator != null;
+
+	internal Vector2 NetChargeOffset => lazerGenerator != null ? lazerGenerator.Position - base.Position : Vector2.Zero;
+
+	internal float NetChargeWindup => lazerGenerator != null ? lazerGenerator.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => lazerGenerator != null ? lazerGenerator.NetSize : 2f;
+
+	internal void NetApplyCharge(bool charging, Vector2 offset, float windup, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windup;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
+	}
 }

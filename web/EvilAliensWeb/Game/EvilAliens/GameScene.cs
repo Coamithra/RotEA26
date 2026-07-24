@@ -1079,9 +1079,19 @@ internal abstract class GameScene : Scene
 			checkScreenShot();
 		}
 		AIJoinTimer.Update(gameTime);
-		// Online co-op: AI friend ships aren't replicated yet (their slots would fire
-		// invisible bullets on the other peer), so no auto-join in any net session.
-		if (AIJoinTimer.Finished && AllowAIFriends && !EvilAliensWeb.Compat.Net.NetSession.Active && oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
+		// Online co-op: the HOST runs AI "friend" ships (Mechanical Friends cheat) and streams
+		// each one to the client, which shows it as a ControlDevice.RemoteFriend puppet whose
+		// bullets re-fire locally (coverage-gaps follow-up -- see Compat/Net/NetSession.Friends).
+		// The client must NOT auto-join AI friends of its own (they'd be host-authoritative
+		// duplicates); its budget is filled by the host's replicated puppets instead.
+		// In a net session, only the HOST adds AI friends, and only AFTER the client's Remote ship
+		// has taken its slot: that pins the roster order (local, remote, then friends) so a friend's
+		// oracle slot is the same index on both peers (identity mapping in NetSession.Friends keeps
+		// per-slot score/lives sync consistent, and the client's high slots stay free for the puppets).
+		bool aiFriendsAllowedHere = !EvilAliensWeb.Compat.Net.NetSession.Active
+			|| (EvilAliensWeb.Compat.Net.NetSession.IsHost && oracle.DeviceIsPlaying(ControlDevice.Remote));
+		if (AIJoinTimer.Finished && AllowAIFriends && aiFriendsAllowedHere
+			&& oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
 		{
 			AddPlayer(ControlDevice.AI, spawnPlayerNormally);
 		}

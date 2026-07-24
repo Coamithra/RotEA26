@@ -501,7 +501,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
   must use distinct rooms); `?netlog` = verbose per-event logging; `?aiplayer` forces the
   LOCAL ship onto the existing AI branch (`PlayerShip.EffectiveController`) for unattended
-  soak tests; `?netscript` (pair with `?level=Level1`) replaces the level's event list with
+  soak tests; `?aifriends=<0-3>` (pair with a `?level=` boot) seeds `Settings.Friends` so the
+  host's Mechanical-Friends AI ships auto-join without the cheats menu -- the two-tab seam for
+  AI-friend replication (note the budget is `Friends+1` TOTAL ships incl. the remote, so with a
+  peer connected you need `aifriends>=2` to spawn any AI friend); `?netscript` (pair with `?level=Level1`) replaces the level's event list with
   a compressed ~60s script firing every replicated beat type (message, warning, background
   ops, checkpoints, music switch, victory) -- the purpose-built two-tab verification for
   script replication (`GameScene.PopulateNetScriptTest`). Card 11.4 adds `?rtc` (a
@@ -631,8 +634,9 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   (spawners/the level script only act in GameEvent.Update) and `ComponentBin.Add` swallows
   any replicable-type add not made by the puppet layer (KilledBy side effects: asteroid
   splits, bonus powerup drops, stray spawns) into the recycle pool -- the host's
-  authoritative copy replicates in instead. AI-friend auto-join is off in any net session
-  (friend ships aren't replicated yet). Because the script never runs on a client,
+  authoritative copy replicates in instead. AI-friend auto-join is HOST-ONLY in a net
+  session (the host runs the AI friends and streams them; the client shows them as
+  `ControlDevice.RemoteFriend` puppets -- see the AI-friend bullet below). Because the script never runs on a client,
   `GameScene.spawnPlayerNormally` reads as true on a join peer -- a scripted no-ship phase
   (Level1's intro hands the ship spawn to its `demo_OnFinished` beat) would otherwise
   leave the client shipless forever; the client's ship always uses the generic
@@ -752,15 +756,38 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   the receiver breaks silently via `NetBreakSilently`); shared-fate death asplodes only
   locally-owned ships and defers the life/reset to the host. Connector creation waits for
   BOTH ships (the puppet joins a beat late -- `netConnectorPending` in TeamChallenge).
-- **Known limits (by design -- next cards):** AI friends disabled in net sessions (ships
-  not replicated); a dead local player will NOT respawn while the remote puppet lives
-  (LoseLife triggers on AllShipsDead); roster is exactly two peers; DevCommentEvent
-  commentary is not replicated (profile-local setting). Boss puppets are best-effort
-  (the harness caveat): deep Update-reached attack poses may diverge until their state
-  extras grow. The time-scaling half of the old first-wipe `pupPops` burst is FIXED (the
-  puppet driver now dead-reckons on real time, above); if a residual first-wipe burst ever
-  shows, it's the reset/id-churn transition (purge + checkpoint replay), reproducible in the
-  headless two-peer net sim's reset scenario, not the puppet clock.
+- **World-authority coverage gaps (follow-up to card 11.2):** the replicable set was extended
+  to the enemy/boss types 11.2 left host-only -- PlasmaBall, the paratrooper family
+  (ParatrooperAlien/ParatrooperBrain/Parachute), FakeBoss, SpiderBoss, BrainBoss,
+  SpiderHelperMothership -- as `NetTypeRegistry` descriptors 21-28 (append-only;
+  `Compat/Net/Descriptors/DescriptorsCoverage.cs`). The enemy laser-CHARGE glow (a child
+  `LazerGenerator` the emitter draws by hand) now replicates too: rather than making
+  LazerGenerator itself replicable (it is also the player-summon glow), the SweepUFO / MarsBoss /
+  SpiderHelperMothership descriptors stream a tiny charge state and the puppet rebuilds a local,
+  silent copy into the emitter's own generator field (`AlienDrawableGameComponent.NetDriveExtras`
+  driver hook + `Compat/Net/NetChargeGlow`). The fired beam already replicated as its own `Lazer`.
+- **AI "friend" ships replicate (host-authoritative), follow-up to card 11.2:** the Mechanical
+  Friends cheat is re-enabled in net sessions -- but ONLY the host adds AI friends (it runs the
+  real AI, whose enemy kills already replicate), and only after the client's Remote ship has
+  taken its slot. The host streams each friend (`MsgFriendState`, slot-tagged) and the client
+  shows it as a `ControlDevice.RemoteFriend` puppet (`Compat/Net/NetSession.Friends.cs`): its own
+  per-slot jitter buffer/interpolation clock (a copy of the single-remote path, kept ISOLATED so
+  it can't regress it), IDENTITY slot mapping (the puppet lands in the host's slot so per-slot
+  score/lives sync lines up), bullets re-fired locally, death via a per-slot stream timeout. The
+  budget is `Settings.Friends + 1` TOTAL ships incl. the remote (so a 2-human session needs the
+  cheat >= 2 to spawn any AI friend). The whole path is dormant unless the cheat is on.
+  `ControlDevice.RemoteFriend` is APPEND-ONLY. (NOTE: the game-browser JIP attach path below is a
+  separate session and does not stream friends -- its listing stays refused while `Friends>0`.)
+- **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
+  remote puppet lives (LoseLife triggers on AllShipsDead); roster is exactly two peers;
+  DevCommentEvent commentary is not replicated (profile-local setting). Boss puppets are
+  best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
+  state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
+  play on the client -- an attributed remote death removes the puppet). The time-scaling half of
+  the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
+  above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
+  checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the
+  puppet clock.
 - **Public game browser + join-in-progress (card 2001fbd8, design `plans/net-game-browser.md`):**
   a running single-player game can be LISTED so strangers find + join it, with NO `NetSession`
   constructed until someone actually arrives.

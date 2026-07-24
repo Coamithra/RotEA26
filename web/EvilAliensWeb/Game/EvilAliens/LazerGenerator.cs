@@ -286,4 +286,14 @@ internal class LazerGenerator : AlienDrawableGameComponent
 	{
 		silent = true;
 	}
+
+	// ---- Online co-op replication seams (Compat/Net, coverage-gaps follow-up) ----------------
+	// This charge-swarm/energy-well is a CHILD component the emitter (SweepUFO/MarsBoss/
+	// SpiderHelperMothership) owns + draws by hand (Visible=false). On a JOIN peer the emitter is a
+	// frozen puppet whose Update never spawns it, so the puppet re-creates a local, silent copy and
+	// lets it self-animate (see NetChargeGlow). The host reads these to tell the client the live
+	// windup duration + swarm size so the client's copy ramps + spreads identically.
+	internal float NetWindupSeconds => windupSeconds;
+
+	internal float NetSize => size;
 }

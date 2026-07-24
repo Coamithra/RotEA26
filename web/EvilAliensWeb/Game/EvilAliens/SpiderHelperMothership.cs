@@ -563,4 +563,62 @@ internal class SpiderHelperMothership : KillableAlien
 		}
 		base.CollidesWith(other);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// Mirrors MarsBoss/Boss: the 4x4 mothershipB sheet ALTERNATES between the mothershipA/mothershipB
+	// halves each animation wrap in Update; that A/B choice is the one bit of Draw state the base
+	// fields (curframe/Hp) don't carry, so it is streamed. The HP-redden colorize rides the base Hp
+	// (NetApplyHp); initialhitpoints is difficulty-scaled but the client shares the session
+	// difficulty (TeamChallenge locks it), so the redden matches. The charge-swarm windup glow is a
+	// child LazerGenerator that replicates separately (see LazerGeneratorDescriptor); the fired Lazer
+	// is its own replicated entity.
+	internal bool NetSecondHalf => texture == secondHalfOfSpritesheet;
+
+	internal void NetSetSpritesheetHalf(bool second)
+	{
+		if (second)
+		{
+			if (secondHalfOfSpritesheet != null)
+			{
+				texture = secondHalfOfSpritesheet;
+			}
+		}
+		else if (firstHalfOfSpritesheet != null)
+		{
+			texture = firstHalfOfSpritesheet;
+		}
+	}
+
+	// The charge-swarm `windup` energy well is a child the host draws by hand (see Draw). On a JOIN
+	// peer this puppet is frozen, so the descriptor replicates the charge state and NetDriveExtras
+	// rebuilds a local silent copy into the same `windup` field (Draw + the OnComponentRemoved Free()
+	// then cover it unchanged). See Compat/Net/NetChargeGlow.
+	private bool netCharging;
+
+	private Vector2 netChargeOffset;
+
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 2f;
+
+	internal bool NetCharging => windup != null;
+
+	internal Vector2 NetChargeOffset => windup != null ? windup.Position - base.Position : Vector2.Zero;
+
+	internal float NetChargeWindup => windup != null ? windup.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => windup != null ? windup.NetSize : 2f;
+
+	internal void NetApplyCharge(bool charging, Vector2 offset, float windupSeconds, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windupSeconds;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref windup, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
+	}
 }

@@ -190,6 +190,7 @@ internal class BrainBoss : KillableAlien
 		// spawning a wave (BossState.spawnstuff), calm otherwise. The sprite harness freezes
 		// Update (state stays `entry`), so force it on there to keep the pods inspectable.
 		bool spawnActive = state == BossState.spawnstuff
+			|| netVenting
 			|| EvilAliensWeb.Compat.DebugFlags.Harness != null;
 		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.LogicalWidth(), texture.LogicalHeight(), color, gameTime, spawnActive);
 	}
@@ -614,5 +615,27 @@ internal class BrainBoss : KillableAlien
 		collection.Purge<Lazer>();
 		collection.Purge<PlasmaBall>();
 		sound.StopMusic();
+	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// The huge boss body is a single static frame tinted by `color` (reddens on low HP -- Colorize),
+	// so scale + the redden ride the base state (Scale, and Hp -> NetApplyHp; initialhitpoints is a
+	// fixed 1700 either side, so the redden matches exactly). The animated overlays + the BrainAura
+	// child both run off gameTime in Draw (not Update), so they animate correctly on a frozen puppet
+	// (the aura is respawned by the puppet's own Initialize). The one Draw ingredient a puppet can't
+	// reach is the "exhaust pods" vent gate, which the host keys off BossState.spawnstuff -- streamed
+	// here as a single bit so the pods vent on the client while the host is spawning a wave.
+	private bool netVenting;
+
+	internal bool NetVenting
+	{
+		get
+		{
+			return state == BossState.spawnstuff;
+		}
+		set
+		{
+			netVenting = value;
+		}
 	}
 }

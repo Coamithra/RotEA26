@@ -381,6 +381,9 @@ namespace EvilAliensWeb.Compat.Net
                     comp.scale = MathHelper.Lerp(comp.scale, info.TargetScale, MathHelper.Clamp(dtMs / 100f, 0f, 1f));
                 }
                 comp.NetTickTimers(realTime);
+                // Per-type child-component upkeep (e.g. an enemy's laser-charge glow) against the
+                // now-updated Position -- default no-op; overridden by the charging boss/UFO puppets.
+                comp.NetDriveExtras(realTime);
             }
         }
 

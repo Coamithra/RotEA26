@@ -918,4 +918,81 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		// boss's fresh helper ref.
 		helper = null;
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// SpiderBoss draws `currentAnimation` (one of four AnimatedSprites) at `animationProgress` (its
+	// own clock), with a horizontal flip + draw offset that depend on `state` -- all reached only by
+	// the frozen Update. So a puppet needs three things beyond the base fields: the state (for the
+	// Draw flip/offset AND the state-keyed collision box), which of the four sprites is current, and
+	// the animation frame. It draws Color.White (no HP redden), so the base Hp is unused here. The
+	// `dead` debris burst never crosses the wire -- an attributed remote death removes the puppet.
+	internal byte NetState
+	{
+		get
+		{
+			return (byte)state;
+		}
+		set
+		{
+			// Never adopt `dead` from the wire (a dead boss is removed, never snapshotted); clamp
+			// any stray value to a live state so the state-keyed CollisionType/Draw stay in range.
+			SpiderBossState s = (SpiderBossState)value;
+			if (s == SpiderBossState.dead)
+			{
+				s = SpiderBossState.standing;
+			}
+			state = s;
+		}
+	}
+
+	// 0 = fly, 1 = stand, 2 = jump, 3 = land. currentAnimation is not 1:1 with state (the sprite
+	// swaps lag the state transitions), so it is streamed independently. A null target sprite (before
+	// LoadContent) leaves the current pick untouched.
+	internal byte NetAnimIndex
+	{
+		get
+		{
+			if (currentAnimation == spiderStand)
+			{
+				return 1;
+			}
+			if (currentAnimation == spiderJump)
+			{
+				return 2;
+			}
+			if (currentAnimation == spiderLand)
+			{
+				return 3;
+			}
+			return 0;
+		}
+		set
+		{
+			AnimatedSprite target = value switch
+			{
+				1 => spiderStand,
+				2 => spiderJump,
+				3 => spiderLand,
+				_ => spiderFly,
+			};
+			if (target != null)
+			{
+				currentAnimation = target;
+			}
+		}
+	}
+
+	// (int)animationProgress; always < currentAnimation.Frames on the host (Update mods it), so the
+	// streamed byte is a valid index for whichever sprite NetAnimIndex just selected.
+	internal byte NetAnimFrame
+	{
+		get
+		{
+			return (byte)(int)animationProgress;
+		}
+		set
+		{
+			animationProgress = value;
+		}
+	}
 }

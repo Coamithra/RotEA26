@@ -138,6 +138,34 @@ public class Oracle : GameComponent, IOracleService
 		}
 	}
 
+	// Online co-op (coverage-gaps follow-up): seat a network-driven puppet in a SPECIFIC slot,
+	// so a client's AI-friend puppet lands in the SAME slot index the host runs it in (keeping
+	// per-slot score/lives attribution consistent). Returns false if the slot is out of range or
+	// already occupied -- the caller must never squat a live human/remote slot.
+	public bool AddPlayerAt(int slot, ControlDevice device)
+	{
+		if (slot < 0 || slot >= 4 || players[slot].isPlaying)
+		{
+			return false;
+		}
+		PlayerInfo info = players[slot];
+		info.isPlaying = true;
+		info.controller = device;
+		players[slot] = info;
+		return true;
+	}
+
+	// Release a slot seated by AddPlayerAt (the friend left / died); a no-op on a slot that is
+	// not playing or holds a different device, so it can never free a live human/remote slot.
+	public void RemovePlayerAt(int slot, ControlDevice device)
+	{
+		if (slot < 0 || slot >= 4 || !players[slot].isPlaying || players[slot].controller != device)
+		{
+			return;
+		}
+		players[slot].Reset();
+	}
+
 	// Release a SINGLE seated slot mid-level (card 2001fbd8): when a join-in-progress peer
 	// leaves, its Remote slot must be freed so the host reverts to single-player (Players == 1
 	// again, so NetListing re-lists + the empty-slot beacon returns). ResetPlayers can't be

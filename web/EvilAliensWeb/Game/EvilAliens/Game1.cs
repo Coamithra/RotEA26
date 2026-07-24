@@ -839,6 +839,12 @@ public class Game1 : Game
 			collectionHelper.ClearCache();
 			oracle.ResetPlayers();
 			oracle.AddPlayer(ControlDevice.Keyboard);
+			// ?aifriends=<n> verification seam: seed the Mechanical Friends cheat on a direct
+			// ?level= boot so AI helper ships auto-join (two-tab AI-friend replication testing).
+			if (EvilAliensWeb.Compat.DebugFlags.AiFriends > 0)
+			{
+				Settings.GetInstance().Friends = EvilAliensWeb.Compat.DebugFlags.AiFriends;
+			}
 			bragScene.StoreCompletionProgress();
 			AddLevelComponent(selectedLevel);
 		});

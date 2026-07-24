@@ -70,6 +70,8 @@ internal static class AiBench
 	private static double verdictMs;
 	private static int peakEventPos;
 
+	private static GameScene lastScene;
+
 	internal static bool Enabled => DebugFlags.AiBench;
 
 	internal static void Reset()
@@ -80,6 +82,8 @@ internal static class AiBench
 		verdict = null;
 		verdictMs = 0.0;
 		peakEventPos = 0;
+		headlessTotal = TimeSpan.Zero;
+		lastScene = null;
 	}
 
 	private static ShipRec Rec(PlayerShip ship)
@@ -143,12 +147,17 @@ internal static class AiBench
 			return;
 		}
 		ShipRec rec = Rec(ship);
-		if (runMs - rec.LastContactMs < ContactDebounceMs && rec.Contacts > 0)
-		{
-			return;
-		}
+		// Refresh the stamp on EVERY call, not only when one is counted: a collision re-fires
+		// every tick the boxes overlap, so stamping only on a count turns one sustained scrape
+		// into a fresh "contact" every ContactDebounceMs. The debounce has to mean "no new
+		// contact until 400ms after the overlap ENDS", or the headline metric of this whole card
+		// counts how LONG the ship leaned on a wall rather than how OFTEN it hit one.
+		bool fresh = runMs - rec.LastContactMs >= ContactDebounceMs || rec.Contacts == 0;
 		rec.LastContactMs = runMs;
-		rec.Contacts++;
+		if (fresh)
+		{
+			rec.Contacts++;
+		}
 	}
 
 	internal static void NoteDeath(PlayerShip ship)
@@ -191,9 +200,16 @@ internal static class AiBench
 			return;
 		}
 		runMs += gameTime.ElapsedGameTime.TotalMilliseconds;
-		GameScene scene = FindScene(game);
+		GameScene scene = CurrentScene();
 		if (scene != null)
 		{
+			// A soak that runs into a second level must not report the previous level's index
+			// against the new level's total.
+			if (!ReferenceEquals(scene, lastScene))
+			{
+				lastScene = scene;
+				peakEventPos = 0;
+			}
 			int pos = scene.BenchEventPos;
 			if (pos > peakEventPos)
 			{
@@ -217,16 +233,15 @@ internal static class AiBench
 		}
 	}
 
-	private static GameScene FindScene(Game game)
+	// The live GameScene, or null in a menu. Uses the static GameScene already maintains for
+	// the net layer rather than scanning Game.Components: this runs EVERY tick, and a boss fight
+	// can hold hundreds of components (blood explosions alone), so a per-tick O(n) scan here
+	// would make the bench itself a measurable part of what it is measuring.
+	// NetActiveScene is misleadingly named: GameScene.Initialize sets it unconditionally, not
+	// only in a net session, so it is simply "the live scene".
+	private static GameScene CurrentScene()
 	{
-		foreach (IGameComponent item in (Collection<IGameComponent>)(object)game.Components)
-		{
-			if (item is GameScene scene)
-			{
-				return scene;
-			}
-		}
-		return null;
+		return GameScene.NetActiveScene;
 	}
 
 	// ---- reporting -------------------------------------------------------------------------
@@ -367,8 +382,7 @@ internal static class AiBench
 			return "[aibench] off — boot with ?aibench (pair with ?aiplayer, e.g. "
 				+ "?level=Level3&wallsonly&aiplayer&invuln&aibench&aiff=8)";
 		}
-		Game game = ServiceHelper.Get<IComponentBinService>().ComponentBin.Game;
-		GameScene scene = FindScene(game);
+		GameScene scene = CurrentScene();
 		StringBuilder sb = new StringBuilder();
 		sb.Append("[aibench] ").Append(Line(scene)).Append('\n');
 		if (verdict != null)

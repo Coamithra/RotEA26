@@ -148,6 +148,62 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private const float BossStandoffMaxPx = 300f;
 
+	// The sweep band itself: the boss's collision box snaps to one of three ~187px lanes, so half
+	// a lane is the distance from its centre to the edge of the lethal third.
+	private const float SweepLaneHalfHeightPx = 94f;
+
+	// ...plus a buffer the AI wants beyond the band before it stops running.
+	private const float SweepLaneClearancePx = 210f;
+
+	// Must beat the station pull, a powerup detour and the edge pushes combined: the whole third
+	// of the screen is off limits while the boss is in play, and being in it is simply a death.
+	private const float SweepLaneAvoidStrength = 18f;
+
+	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
+	private const int SpiderBossLaserPlatforms = 2;
+
+	// A live beam kills along its whole length, so it earns a much wider berth than the 2008
+	// flat 150px -- with the same steep falloff, so the outer field is still cheap to cross.
+	private const float LazerAvoidRangePx = 260f;
+
+	private const float LazerAvoidStrength = 14f;
+
+	// Lateral push while a big UFO is winding up, to make its locked-at-fire aim stale.
+	private const float LazerDodgeStrength = 7f;
+
+	// Station-keeping "arrive" behaviour. Deadzone is generous because the exact station is
+	// arbitrary -- an idle ship parked 20px off is indistinguishable from one parked on the spot,
+	// and chasing the last few pixels is precisely what looked like fidgeting.
+	private const float SeekArriveDeadzonePx = 30f;
+
+	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
+	private const float SeekWeight = 0.8f;
+
+	// Clearance the AI wants beyond ANY threat's hull, before the size term below. Much larger
+	// than the 2008 flat 150 -- see ThreatFieldStrength for why a bigger field is not a bigger
+	// no-go zone.
+	public const float DefaultThreatFieldBasePx = 190f;
+
+	// Extra clearance per pixel of the threat's own half-extent. The spider boss gets a field
+	// several times a bullet's.
+	public const float DefaultThreatFieldSizeScale = 1.8f;
+
+	// Exponent of the (1-t)^p falloff. Higher = the field bites later and harder.
+	public const float DefaultThreatFieldFalloff = 3f;
+
+	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? DefaultThreatFieldBasePx;
+
+	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
+
+	private static float ThreatFieldFalloff => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldFalloff ?? DefaultThreatFieldFalloff;
+
+	// An impact this close, this centred, gets a steer strong enough to beat every other term.
+	private const float ThreatPanicMs = 260f;
+
+	private const float ThreatPanicMissFraction = 0.55f;
+
+	private const float ThreatPanicStrength = 16f;
+
 	// Below this (px/ms) a threat is not a "mover" and the plain radial repulsion models it
 	// better. The player ship's own MaxSpeed is 0.33 px/ms, so this is about a third of that.
 	private const float ThreatMinSpeed = 0.1f;
@@ -158,13 +214,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Even a far-off but dead-on collision course deserves some steer, or the AI would ignore
 	// everything until it was nearly too late.
 	private const float ThreatUrgencyFloor = 0.35f;
-
-	// An impact this close, this centred, gets a steer strong enough to beat every other term.
-	private const float ThreatPanicMs = 260f;
-
-	private const float ThreatPanicMissFraction = 0.55f;
-
-	private const float ThreatPanicStrength = 16f;
 
 	// Wall steering weights. These sit well above the generic steer terms (maxSteerStrength 4)
 	// on purpose: inside a wall the gap is the only survivable place to be, and a stray powerup
@@ -200,8 +249,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	private Vector2 aiSteer = Vector2.Zero;
 
 	private int aiGapColumn = -1;
-
-	private float aiGapCost;
 
 	public int Owner => player;
 
@@ -401,6 +448,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		Score.ResetPowerup(player);
 		invulnerabilityTimer.Reset();
 		shoottimer.Duration = 1000f / (float)shotspersec;
+		ResetAiState();
 		base.MaxSpeed = 0.33f;
 		base.Deceleration = 0.0047999998f;
 		base.Acceleration = 0.003f;
@@ -723,20 +771,79 @@ public class PlayerShip : AlienDrawableGameComponent
 			|| baddy is ClassicBoss || baddy is Boss || baddy is StationaryBoss || baddy is BattleSkull;
 	}
 
+	// Per-life AI state, cleared with everything else in Setup.
+	private void ResetAiState()
+	{
+		aiSteer = Vector2.Zero;
+		aiGapColumn = -1;
+	}
+
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = (float)Math.PI / 12f;
 		// Squared while the loop scans (it is compared against LengthSquared); the Math.Sqrt
 		// after the loop turns it into a real distance for the range test.
+		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
+		// big UFO fires one at the player, so the boss walks into any beam that crosses the
+		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
+		// a couple are deliberately spared -- the surplus is still cleared.
+		// This only pays off together with the laser dodging below: the beams the AI is inviting
+		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
+		bool spiderBossAlive = false;
+		bool bossSweeping = false;
+		UFO sparedUfo = null;
+		float sparedRoom = -1f;
+		foreach (AlienDrawableGameComponent scan in baddies)
+		{
+			if (scan is SpiderBoss && !scan.IsDead)
+			{
+				spiderBossAlive = true;
+				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
+			}
+			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
+			{
+				// Spare exactly ONE, and make it the one with the most room around it -- scored by
+				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
+				// the beam platform at arm's length is what makes this survivable: its beam still
+				// crosses the screen for the boss to walk into, but the AI is not standing next to
+				// the thing that is aiming at it.
+				float room = float.MaxValue;
+				foreach (PlayerShip ship in oracle.GetShips())
+				{
+					Vector2 toShip = scan.Position - ship.Position;
+					room = MathHelper.Min(room, (toShip).Length());
+				}
+				if (room > sparedRoom)
+				{
+					sparedRoom = room;
+					sparedUfo = (UFO)scan;
+				}
+			}
+		}
+		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
+		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
+		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
+		if (!spiderBossAlive || bossSweeping)
+		{
+			sparedUfo = null;
+		}
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent alienDrawableGameComponent = null;
+		// The priority bias decides WHICH target wins, but a discounted boss can win from well
+		// outside gun range (at bias 0.45 a boss 780px away outranks a UFO at 350px). Without a
+		// fallback the AI then fires at nothing at all while a killable target sits in range --
+		// inflating the very idle% the bias exists to reduce. So track the nearest genuinely
+		// reachable target alongside it.
+		float nearestInRangeSq = float.MaxValue;
+		AlienDrawableGameComponent inRangeTarget = null;
+		float gunRangeSq = (bulletlifetime * BulletRangePerMs) * (bulletlifetime * BulletRangePerMs);
 		// A level-halting boss is worth reaching past a lot of trash, so it competes on a
 		// DISCOUNTED distance rather than by raw proximity. Scored in the same squared space the
 		// loop compares in, hence the squared factor.
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy))
+			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{
@@ -748,10 +855,17 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					scoreSq *= priorityBiasSq;
 				}
-				if (scoreSq < nearestDist && baddy.Position.X > 0f && baddy.Position.X < 800f && baddy.Position.Y > 0f && baddy.Position.Y < 600f)
+				bool onScreen = baddy.Position.X > 0f && baddy.Position.X < 800f && baddy.Position.Y > 0f && baddy.Position.Y < 600f;
+				if (scoreSq < nearestDist && onScreen)
 				{
 					nearestDist = scoreSq;
 					alienDrawableGameComponent = baddy;
+				}
+				float trueDistSq = (toBaddy).LengthSquared();
+				if (onScreen && trueDistSq <= gunRangeSq && trueDistSq < nearestInRangeSq)
+				{
+					nearestInRangeSq = trueDistSq;
+					inRangeTarget = baddy;
 				}
 			}
 		}
@@ -761,13 +875,18 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			Vector2 toChosen = alienDrawableGameComponent.Position - base.Position;
 			nearestDist = (toChosen).Length();
+			if (nearestDist > bulletlifetime * BulletRangePerMs && inRangeTarget != null)
+			{
+				alienDrawableGameComponent = inRangeTarget;
+				nearestDist = (float)Math.Sqrt(nearestInRangeSq);
+			}
 		}
 		else
 		{
 			nearestDist = float.MaxValue;
 		}
 		bool fired = false;
-		if (nearestDist <= bulletlifetime * 0.78f)
+		if (nearestDist <= bulletlifetime * BulletRangePerMs)
 		{
 			fired = true;
 			if (alienDrawableGameComponent is JunkBoss)
@@ -885,12 +1004,64 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				position = baddy.Position;
 			}
+			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
+			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
+			// moving ACROSS the UFO's line of sight during the windup makes the locked aim stale.
+			// Standing still and reacting to the beam afterwards cannot work: it appears along its
+			// whole length at once.
+			if (baddy is UFO && ((UFO)baddy).IsBig && ((UFO)baddy).AiChargingLazer)
+			{
+				Vector2 fromUfo = base.Position - baddy.Position;
+				float range = (fromUfo).Length();
+				if (range > 1f)
+				{
+					// Perpendicular to the line of sight, on the side the ship is already drifting
+					// toward so the sidestep never fights its current momentum.
+					Vector2 across = new Vector2(0f - fromUfo.Y, fromUfo.X) / range;
+					if (Vector2.Dot(across, SpeedVector) < 0f)
+					{
+						across = -across;
+					}
+					direction += LazerDodgeStrength * across;
+				}
+			}
+			// Act on the boss's own telegraph. During the "Danger!" arrow the spider boss sits
+			// off-screen in the lane it is about to cross, so it is STATIONARY -- the movement
+			// prediction says nothing and the distance field is a screen away. Vacating the lane
+			// now is the whole point of the warning, and it is far cheaper than trying to escape
+			// a screen-wide sweep once it has started.
+			if (baddy is SpiderBoss && ((SpiderBoss)baddy).AiSweepIncoming)
+			{
+				float laneY = ((SpiderBoss)baddy).AiSweepLaneCentreY;
+				float offLane = base.Position.Y - laneY;
+				// The lane is a whole third of the screen and every pixel of it is lethal, so the
+				// push is FLAT across the band rather than tapering toward the middle -- a taper
+				// would leave the ship dawdling near the centre, which is the worst place to be.
+				// It only softens over the last stretch outside the band, to avoid a hard edge.
+				if (Math.Abs(offLane) < SweepLaneClearancePx)
+				{
+					// Flee DOWNWARD out of the lane unless the lane IS the bottom one. Which way
+					// to run is not symmetric: UFOs enter from the top, so the upper third is the
+					// busy half of the screen and running up out of the middle lane trades one
+					// hazard for another. Only the bottom lane forces the ship upward.
+					float away = (laneY > 400f) ? -1f : 1f;
+					float inBand = SweepLaneHalfHeightPx;
+					float urge = (Math.Abs(offLane) <= inBand)
+						? 1f
+						: 1f - (Math.Abs(offLane) - inBand) / MathHelper.Max(SweepLaneClearancePx - inBand, 1f);
+					direction += new Vector2(0f, away * SweepLaneAvoidStrength * urge);
+				}
+			}
 			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
 			// it is out of gun range (below). The 2008 code only ever did this for JunkBoss, so
 			// against any other boss the AI hovered at its default station and fired only when the
 			// boss happened to drift within range -- measured as 55% of ticks with a shootable
 			// target and no shot fired, against a BrainBoss parked at the top of the screen.
-			if (IsAiPriorityTarget(baddy) && IsAiShootable(baddy))
+			// Same on-screen predicate DoAIFire uses. BrainBoss eases in from a negative Y, and
+			// without this the ship is dragged toward a standoff point off the top of the screen
+			// during the entry -- while DoAIFire is still refusing to shoot at it.
+			if (IsAiPriorityTarget(baddy) && baddy.Position.X > 0f && baddy.Position.X < 800f
+				&& baddy.Position.Y > 0f && baddy.Position.Y < 600f)
 			{
 				Vector2 toBoss = baddy.Position - base.Position;
 				float bossDistSq = (toBoss).LengthSquared();
@@ -909,12 +1080,15 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
-				if (d <= steerRange)
+				// A live beam is instant death along its whole length, so it gets a far wider
+				// berth than the 2008 flat 150px -- with the same steep falloff the threat field
+				// uses, so the outer part of the field stays cheap enough to fly in and shoot.
+				if (d <= LazerAvoidRangePx)
 				{
-					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, d / steerRange);
+					float strength = ThreatFieldStrength(d / LazerAvoidRangePx, LazerAvoidStrength);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / steerRange);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / LazerAvoidRangePx);
 					}
 					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}
@@ -932,11 +1106,15 @@ public class PlayerShip : AlienDrawableGameComponent
 				// from something crossing the screen pushes the ship ALONG its path -- which is
 				// precisely the spider boss's screen-wide sweep, and why that fight read as "no
 				// idea what it's doing". See EvadeMovingThreat.
-				// This ADDS to the distance-based repulsion below rather than replacing it: the
-				// prediction is only as good as the assumption that both keep their present
-				// course, and letting it suppress the proximity term entirely means one wrong
-				// prediction leaves the ship with no avoidance at all.
-				EvadeMovingThreat(ref direction, baddy, dodgeAngle, minSteerStrength, maxSteerStrength);
+				// When it engages it REPLACES the radial push below rather than adding to it.
+				// Adding both was tried and measured much worse (4 -> 27 deaths on the spider boss):
+				// for something crossing the screen the radial term points ALONG its path, so
+				// keeping it around actively fights the evade it is supposed to back up. Anything
+				// slow, static, or not actually on a collision course falls through to the field.
+				if (EvadeMovingThreat(ref direction, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
+				{
+					continue;
+				}
 				float dist;
 				if (baddy.GetCollisionType() is CollisionBox)
 				{
@@ -959,12 +1137,18 @@ public class PlayerShip : AlienDrawableGameComponent
 					Vector2 toBaddy = base.Position - baddy.Position;
 					dist = (toBaddy).Length();
 				}
-				if (dist <= steerRange)
+				// Personal-space field, sized to the THREAT (card f4d1721f). The 2008 code gave
+				// everything the same flat 150px, which is nothing to something the size of the
+				// spider boss -- by the time it pushed at all the ship was already inside the
+				// hitbox. `dist` is edge distance, so this is clearance the AI wants BEYOND the
+				// thing's own hull, and it scales with how big the hull is.
+				float field = ThreatFieldRange(baddy);
+				if (dist <= field)
 				{
-					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, dist / steerRange);
+					float strength = ThreatFieldStrength(dist / field, maxSteerStrength);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / steerRange);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
 					}
 					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
@@ -1017,6 +1201,12 @@ public class PlayerShip : AlienDrawableGameComponent
 				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(powerup.Position - base.Position));
 			}
 		}
+		// NOTE: an earlier revision also parked the ship on the far side of the boss to line the
+		// beam up through it. That was removed -- it is not needed (a beam crossing the screen
+		// gets hit by the boss on its own jump/fly cycle) and it was actively lethal: standing
+		// still on a chosen spot waiting to be shot at measured 24 -> 75 deaths, because the
+		// boss simply landed on the stationary ship. Sparing the big UFOs in DoAIFire is the
+		// whole mechanism; where the ship stands is the evasion code's business.
 		// Close on a level-halting boss that is out of gun range (card f4d1721f). Nothing else in
 		// the level advances until it dies, so hovering at the default station waiting for it to
 		// drift into range is not a strategy -- it is the stall. The standoff point keeps the
@@ -1082,9 +1272,17 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			delta = base.Position - position;
 			float distToTarget = (delta).Length();
-			if (distToTarget > 10f)
+			if (distToTarget > SeekArriveDeadzonePx)
 			{
-				direction += 0.8f * MyMath.AngleToVector(MyMath.VectorToAngle(position - base.Position));
+				// Plain positional pull, as in 2008 -- but with a wider deadzone. The 10px original
+				// meant an idle ship chased the last few pixels of an arbitrary station forever,
+				// sailing past and turning round: the visible "why is it fidgeting when nothing is
+				// happening". A velocity-damped ARRIVE was tried here and reverted -- it contains
+				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
+				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
+				// the bot was being held at a standstill and could not accelerate out of trouble.
+				// Widening the deadzone kills the fidget without ever opposing a real manoeuvre.
+				direction += SeekWeight * MyMath.AngleToVector(MyMath.VectorToAngle(position - base.Position));
 			}
 		}
 		float edgeMargin = steerRange;
@@ -1193,9 +1391,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			return false;
 		}
 		Vector2 toShip = base.Position - baddy.Position;
-		// Time of closest approach along the threat's own velocity (the ship's motion is left out
-		// deliberately -- the ship is what we are choosing, so treating it as stationary asks the
-		// right question: "if I stay here, does this hit me?").
+		// Time of closest approach on the two present courses.
 		float t = Vector2.Dot(toShip, rel) / (speed * speed);
 		if (t <= 0f)
 		{
@@ -1223,16 +1419,39 @@ public class PlayerShip : AlienDrawableGameComponent
 		float byMiss = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, missDist / margin);
 		float byTime = MathHelper.Clamp(1f - t / lead, 0f, 1f);
 		float strength = byMiss * (ThreatUrgencyFloor + (1f - ThreatUrgencyFloor) * byTime);
-		// Panic: a dead-on hit about to land RIGHT NOW has to outrank every other steering term,
-		// not merely tie with them. Without this the evade is one vote of at most maxSteerStrength
-		// (4) against a boss-approach pull, a powerup pull and the edge pushes -- and the ship
-		// takes the hit while politely averaging its options.
+		// A dead-on hit about to land RIGHT NOW has to outrank every other steering term, not
+		// merely tie with them -- otherwise the evade is one vote of at most maxSteerStrength (4)
+		// against a boss-approach pull, a powerup pull and the edge pushes, and the ship takes the
+		// hit while politely averaging its options. Removing this measured 18 -> 27 deaths.
 		if (t < ThreatPanicMs && missDist < margin * ThreatPanicMissFraction)
 		{
 			strength = MathHelper.Max(strength, ThreatPanicStrength);
 		}
 		direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
 		return true;
+	}
+
+	// How far from a threat's HULL the AI wants to stay, scaled by how big the hull is. The 2008
+	// code used one flat 150px for everything, which is nothing next to the spider boss -- by the
+	// time the field pushed at all the ship was inside the hitbox, and the fight read as the bot
+	// having no idea what it was doing.
+	private static float ThreatFieldRange(AlienDrawableGameComponent baddy)
+	{
+		return ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale;
+	}
+
+	// Strength across that field: FULL up close, dropping away fast so the outer half is
+	// effectively free. That combination is the point -- a big field with a gentle falloff would
+	// be a no-go zone the ship could never enter, and it still has to fly in close to shoot and
+	// to weave through bullets.
+	//
+	// Deliberately NOT MyMath.PowerCurve: that is `max * (1 - t^p)`, whose falloff gets SHALLOWER
+	// as p rises (p=4 still pushes at 34% strength at 90% of the range). This is `max * (1-t)^p`,
+	// which is the shape the name "falloff" implies -- p=3 is down to 12% at half range.
+	private static float ThreatFieldStrength(float t, float maxSteerStrength)
+	{
+		float u = 1f - MathHelper.Clamp(t, 0f, 1f);
+		return maxSteerStrength * (float)Math.Pow(u, ThreatFieldFalloff);
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more
@@ -1373,12 +1592,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			float heldScore = ColumnScore(aiGapColumn, x, y, map, span);
 			if (heldScore >= bestScore - GapSwitchMargin)
 			{
-				aiGapCost = heldScore;
 				return aiGapColumn;
 			}
 		}
 		aiGapColumn = best;
-		aiGapCost = bestScore;
 		return best;
 	}
 

@@ -948,6 +948,20 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiPriorityBias { get; private set; }
 
+		// The AI's personal-space field around a threat (PlayerShip.ThreatFieldRange /
+		// ThreatFieldStrength):
+		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull
+		//   ?aifieldsize=<f>   extra clearance per pixel of the threat's own half-extent
+		//   ?aifieldfall=<p>   exponent of the (1-t)^p falloff; higher = bites later and harder
+		// A big field with a FAST falloff is the point: the bot keeps well clear of something
+		// the size of the spider boss, while the outer half of the field stays cheap enough that
+		// it can still dive in to shoot and to weave through bullets.
+		public static float? AiThreatFieldPx { get; private set; }
+
+		public static float? AiThreatFieldSize { get; private set; }
+
+		public static float? AiThreatFieldFalloff { get; private set; }
+
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
 		// ops, checkpoints, music switch, victory) -- the purpose-built two-tab
@@ -1632,6 +1646,24 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
 					{
 						AiThreatLeadMs = MathHelper.Min(aitl, 3000f);
+					}
+					break;
+				case "aifieldpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp >= 0f)
+					{
+						AiThreatFieldPx = MathHelper.Min(aifp, 800f);
+					}
+					break;
+				case "aifieldsize":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifs) && aifs >= 0f)
+					{
+						AiThreatFieldSize = MathHelper.Min(aifs, 10f);
+					}
+					break;
+				case "aifieldfall":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiff2) && aiff2 > 0f)
+					{
+						AiThreatFieldFalloff = MathHelper.Min(aiff2, 12f);
 					}
 					break;
 				case "aibossbias":

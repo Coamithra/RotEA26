@@ -774,6 +774,36 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	// The centre of the boss's standing hitbox -- where the helper aims its beam on Easy/Medium when
 	// the boss is a stationary (standing) target. Matches the SpiderBossState.standing collision box.
+	// The "Danger!" arrow window: the boss is lined up off-screen in its lane and held by
+	// waittimer for flyPauseMs before it sweeps. That pause exists to warn the player, so the AI
+	// should use it the way a player does -- leave the lane BEFORE the boss crosses it, rather
+	// than trying to out-accelerate a screen-wide sweep once it is already moving.
+	// True for the WHOLE horizontal sweep -- the "Danger!" hold off-screen AND the crossing
+	// itself. The lane is lethal for the entire time, not just while the arrow is up, so the AI
+	// treats it as off limits throughout rather than trying to leave once the boss is already
+	// on top of it.
+	internal bool AiSweepIncoming => state == SpiderBossState.flyleft || state == SpiderBossState.flyright;
+
+	// Centre of the horizontal band the sweep will actually occupy. The collision box snaps to
+	// one of three lanes rather than tracking Position.Y exactly (see the flyleft/flyright case
+	// in Update), so avoidance has to aim at the same snapped band or it dodges the wrong place.
+	internal float AiSweepLaneCentreY
+	{
+		get
+		{
+			float height = 186.66667f;
+			if (base.Position.Y <= height)
+			{
+				return height * 0.5f;
+			}
+			if (base.Position.Y <= 1.5f * height)
+			{
+				return height * 1.5f;
+			}
+			return height * 2.5f;
+		}
+	}
+
 	public Vector2 GetAimPoint()
 	{
 		return base.Position + new Vector2(20f * scale, 40f * scale);

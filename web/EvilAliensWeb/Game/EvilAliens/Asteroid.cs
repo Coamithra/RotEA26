@@ -96,6 +96,11 @@ internal class Asteroid : AlienDrawableGameComponent
 		base.Draw(gameTime);
 	}
 
+	// Tumble is decorative and the hitbox is a circle, so a client puppet spins on its own
+	// locally-rolled rotationspeed rather than stepping to the replicated angle once per
+	// round-robin turn (which read as a stutter).
+	internal override float NetSpinPerMs => rotationspeed;
+
 	public override void Update(GameTime gameTime)
 	{
 		rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;

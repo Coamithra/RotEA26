@@ -160,6 +160,74 @@ namespace EvilAliensWeb.Compat
 			return WallProfiler.Report();
 		}
 
+		// JS bridge for the join-in-progress scenery diff (eaNetBg in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetBg'). Returns the live deep-state the
+		// JIP catch-up replays (card 45a4e48d) as one parseable line, so a joiner's scenery is
+		// verified by DIFFING the two peers' output rather than by screenshotting a fly-by that
+		// moves every frame (root CLAUDE.md: never verify motion with timed live screenshots).
+		// Run it in both windows' consoles once the joiner is up; the lines must match.
+		[JSInvokable("debugNetBg")]
+		public static string NetBg()
+		{
+			EvilAliens.GameScene scene = EvilAliens.GameScene.NetActiveScene;
+			return scene == null ? "[netbg] no level" : "[netbg] " + scene.NetCatchUpStateLine();
+		}
+
+		// JS bridge for the JIP catch-up round-trip self-test (eaNetBgTest in index.html).
+		// One tab, no peer, no timing: capture the burst, wipe the scenery to a fresh joiner's,
+		// replay through the real client apply path, diff. See GameScene.NetCatchUpSelfTest --
+		// it is destructive (the screen re-runs the hyperspace entry), so it is a console
+		// command, never something a boot flag arms.
+		[JSInvokable("debugNetBgTest")]
+		public static string NetBgTest()
+		{
+			EvilAliens.GameScene scene = EvilAliens.GameScene.NetActiveScene;
+			return scene == null ? "[netbgtest] no level" : scene.NetCatchUpSelfTest();
+		}
+
+		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).
+		// FpsProfile(on) arms the per-phase accumulators, FpsStats() returns the HUD's JSON
+		// payload and FpsStatsLine() the one-line console form. Same polling contract as the
+		// wall meter above — the HUD reads this ~4x/second, never per frame.
+		[JSInvokable("debugFpsProfile")]
+		public static void FpsProfile(bool on)
+		{
+			FrameProfiler.SetEnabled(on);
+		}
+
+		[JSInvokable("debugFpsStats")]
+		public static string FpsStats()
+		{
+			return FrameProfiler.Report();
+		}
+
+		[JSInvokable("debugFpsStatsLine")]
+		public static string FpsStatsLine()
+		{
+			return FrameProfiler.StatsLine();
+		}
+
+		// Mean GL draw calls per frame, pushed from JS (the HUD patches drawElements/drawArrays
+		// — see index.html eaFps). Counted there because BlazorGL's cost is per-CALL and JS sees
+		// every source of them at once (sprite batches, bloom passes, the walls' 3D primitives)
+		// without touching SpriteBatchWrapper. The HUD renders its own copy; this push exists so
+		// the console one-liner is complete, and rides the 4Hz poll — NOT per frame, which would
+		// cost more interop than the thing being measured.
+		[JSInvokable("debugFpsGlCalls")]
+		public static void FpsGlCalls(int calls)
+		{
+			FrameProfiler.NoteGlCalls(calls);
+		}
+
+		// eaFps.test(): run the frame-window maths over a synthetic frame series and report
+		// measured vs expected. The point is the vsync trap itself — `work` ms of work
+		// delivered every `interval` ms must read as 1000/interval fps and 1000/work headroom.
+		[JSInvokable("debugFpsSelfTest")]
+		public static string FpsSelfTest(double workMs, double intervalMs, int frames)
+		{
+			return FrameProfiler.SelfTest(workMs, intervalMs, frames);
+		}
+
 		// JS bridge for the hitbox debug overlay (eaHitboxes in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitboxes', on). Toggles the ?hitboxes
 		// overlay at runtime (draws every collidable's collision shape colour-coded by kind);
@@ -169,6 +237,15 @@ namespace EvilAliensWeb.Compat
 		{
 			DebugFlags.SetShowHitboxes(on);
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
+		}
+
+		// JS bridge for the ComponentBin lifecycle scenario suite (eaBinTest in
+		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest'). Runs
+		// Compat/BinTest.Run() against the live bin and returns the PASS/FAIL report.
+		[JSInvokable("debugBinTest")]
+		public static string BinTest()
+		{
+			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
@@ -304,11 +381,12 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// JS bridge for the live network-impairment panel (eaNetSim in wwwroot/index.html, shown
-		// on any ?net boot): DotNet.invokeMethod('EvilAliensWeb', 'debugSetNetSim', lagMs,
-		// lossPct, jitterMs). Overrides the artificial impairment applied to INBOUND net traffic
-		// in real time -- same effect as ?netlag=/?netloss=, just live, plus jitter which has no
-		// URL flag (panel-only by design: it is the knob that makes the stream lane actually
-		// REORDER, so it belongs next to the other two rather than in a boot URL).
+		// on a ?net boot that also passes ?netsim, or via eaNetSim.show()/eaNetSim(...) from the
+		// console): DotNet.invokeMethod('EvilAliensWeb', 'debugSetNetSim', lagMs, lossPct,
+		// jitterMs). Overrides the artificial impairment applied to INBOUND net traffic in real
+		// time -- same effect as ?netlag=/?netloss=, just live, plus jitter which has no URL flag
+		// (panel-only by design: it is the knob that makes the stream lane actually REORDER, so
+		// it belongs next to the other two rather than in a boot URL).
 		[JSInvokable("debugSetNetSim")]
 		public static void SetNetSim(double lagMs, double lossPct, double jitterMs)
 		{

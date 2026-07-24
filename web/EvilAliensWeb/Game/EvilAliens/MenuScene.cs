@@ -150,7 +150,23 @@ internal class MenuScene : Scene
 
 	private bool browsingGames;
 
-	private bool netMode;
+	private bool netModeFlag;
+
+	// Property, not a bare field: the level carousel needs the same value to decide whether to
+	// explain the WebcamAliens refusal, and there are several assignment sites -- pushing it
+	// here is what keeps the refusal and its explanation from ever disagreeing.
+	private bool netMode
+	{
+		get => netModeFlag;
+		set
+		{
+			netModeFlag = value;
+			if (challengeSelector != null)
+			{
+				challengeSelector.NetMode = value;
+			}
+		}
+	}
 
 	private bool netStatusShown;
 
@@ -884,8 +900,8 @@ internal class MenuScene : Scene
 	{
 		// Online co-op excludes the webcam challenge (the camera IS the controller and
 		// the mask is wall-clock local -- see plans/stage11-online-coop.md). The entry
-		// stays visible; selecting it in a net lobby just doesn't respond (11.5 polish
-		// may add a proper message).
+		// stays visible and unselectable; SubMenuLevelChoice.DrawCarouselOverlay swaps its
+		// briefing for the reason, so this refusal is explained rather than silent.
 		if (netMode && ((SubMenuLevelChoice)sender).GetSelectedLevel() == Levels.WebcamAliens)
 		{
 			return;

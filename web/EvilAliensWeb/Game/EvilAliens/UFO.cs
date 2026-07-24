@@ -608,8 +608,8 @@ public class UFO : KillableAlien
 		}
 		if (hasbonus)
 		{
-			collection.Add((GameComponent)(object)bonus);
 			bonus.Position = base.Position;
+			collection.Add((GameComponent)(object)bonus);
 			if (IsBig)
 			{
 				Powerup powerup = Powerup.NewPowerup(collection, base.Game);

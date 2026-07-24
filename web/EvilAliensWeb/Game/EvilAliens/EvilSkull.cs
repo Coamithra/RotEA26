@@ -426,8 +426,8 @@ internal class EvilSkull : KillableAlien
 			{
 				bonus.SetSpeedLimit(0.051000003f);
 			}
-			collection.Add((GameComponent)(object)bonus);
 			bonus.Position = base.Position;
+			collection.Add((GameComponent)(object)bonus);
 			bonus = null;
 			hasbonus = false;
 		}

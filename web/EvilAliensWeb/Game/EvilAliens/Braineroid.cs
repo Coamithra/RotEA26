@@ -278,8 +278,8 @@ internal class Braineroid : KillableAlien
 	{
 		if (hasbonus)
 		{
-			collection.Add((GameComponent)(object)bonus);
 			bonus.Position = base.Position;
+			collection.Add((GameComponent)(object)bonus);
 			bonus = null;
 			hasbonus = false;
 		}

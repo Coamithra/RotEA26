@@ -65,8 +65,8 @@ internal class BraineroidsLevel : GameScene
 		{
 			UFO uFO = UFO.NewUFO(Collection, base.Game);
 			uFO.Setup(new Vector2(RandomHelper.RandomNextFloat(0f, 800f), -40f), isBig: false, EnemyBehaviour.classic);
-			Collection.Add((GameComponent)(object)uFO);
 			uFO.SetAsBonus();
+			Collection.Add((GameComponent)(object)uFO);
 		}
 		if (fired && !Collection.ContainsType<Braineroid>())
 		{
@@ -80,8 +80,8 @@ internal class BraineroidsLevel : GameScene
 		fired = true;
 		UFO uFO = UFO.NewUFO(Collection, base.Game);
 		uFO.Setup(new Vector2(RandomHelper.RandomNextFloat(0f, 800f), -115f), isBig: true, EnemyBehaviour.classic);
-		Collection.Add((GameComponent)(object)uFO);
 		uFO.SetAsBonus();
+		Collection.Add((GameComponent)(object)uFO);
 		if (wave == (int)(8f * Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty)) + 1)
 		{
 			Victory();

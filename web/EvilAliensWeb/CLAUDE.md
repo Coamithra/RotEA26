@@ -209,6 +209,8 @@ generate much of the art/audio referenced here.
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
+  `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
+  flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),

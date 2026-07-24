@@ -656,6 +656,11 @@ namespace EvilAliensWeb.Compat
 		// population stops drifting. That pin is the whole point: the first numbers on this card
 		// compared two runs whose spider counts were never equal. N=0 is a legal baseline (an
 		// empty Level 2 to subtract). null => the original endless 5.5/s stream.
+		// Holding N also costs the FOREGROUND variant its collidability -- bench spiders are
+		// forced Collides=false (FlyingSpider.ApplyBenchPlacement), or the player would shoot the
+		// population down mid-run and an un-invulned ship could be killed by the grid it is
+		// measuring. So a foreground bench is a DRAW-cost rig (GL calls / frame ms) that sits out
+		// the collision pass; the background variant it is compared against never collided anyway.
 		public static int? FlySpiderCount { get; private set; }
 
 		// ?flyspiderbox=<half>: override the group-flatten bounding box half-extent in FlyingSpider
@@ -1926,15 +1931,29 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "flyspidercount":
+					// Reported, never swallowed -- same reason as ?flyspiderflatten= above, and it
+					// bites harder here: a typo'd N silently leaves the endless STREAM running,
+					// so the run has no pinned population at all while being labelled a bench.
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc) && fsc >= 0)
 					{
 						FlySpiderCount = fsc;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspidercount= value '" + val
+							+ "' (expected an integer >= 0) -- ignored, staying on the endless stream");
 					}
 					break;
 				case "flyspiderbox":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fsb) && fsb > 0f)
 					{
 						FlySpiderBox = fsb;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspiderbox= value '" + val
+							+ "' (expected a number > 0) -- ignored, staying on the baked "
+							+ EvilAliens.FlyingSpider.DefaultFlattenBoxHalf.ToString(CultureInfo.InvariantCulture));
 					}
 					break;
 				case "tutorialtraining":
@@ -2220,27 +2239,6 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// A bare flag (?menu) or =1/=true/=yes/=on means ON; =0/=false/=no/=off means OFF.
-		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
-		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
-		// the two and would silently run a typo'd variant on the default path.
-		private static bool IsExplicitlyOff(string val)
-		{
-			if (val == null)
-			{
-				return false;
-			}
-			switch (val.Trim().ToLowerInvariant())
-			{
-			case "0":
-			case "false":
-			case "no":
-			case "off":
-				return true;
-			default:
-				return false;
-			}
-		}
-
 		private static bool IsOn(string val)
 		{
 			if (val == null)
@@ -2254,6 +2252,28 @@ namespace EvilAliensWeb.Compat
 			case "true":
 			case "yes":
 			case "on":
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
+		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
+		// the two and would silently run a typo'd variant on the default path. Note a BARE flag is
+		// not explicitly off (null => false), which is the whole difference from !IsOn().
+		private static bool IsExplicitlyOff(string val)
+		{
+			if (val == null)
+			{
+				return false;
+			}
+			switch (val.Trim().ToLowerInvariant())
+			{
+			case "0":
+			case "false":
+			case "no":
+			case "off":
 				return true;
 			default:
 				return false;

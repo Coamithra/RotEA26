@@ -34,7 +34,7 @@ namespace EvilAliens;
 // Owned by Level2 the same way `floor` is: constructed with the level, added in Initialize,
 // removed in Level2_OnFinished. Level scenes are re-added singletons, so a drawable left behind in
 // the global bin would draw over later scenes (the NetWaitOverlay lesson).
-internal class FlyingSpiderSwarm : DrawableGameComponent
+internal class FlyingSpiderSwarm : DrawableGameComponent, IComponentWatcher
 {
 	// True only while an instance is actually live in the bin. FlyingSpider.Draw suppresses its own
 	// draw in Swarm mode ONLY when this says someone is driving it — otherwise a scene that never
@@ -54,7 +54,6 @@ internal class FlyingSpiderSwarm : DrawableGameComponent
 		// The DrawOrder background spiders would have drawn at themselves.
 		base.DrawOrder = 1;
 		spriteBatch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
-		game.Components.ComponentRemoved += OnComponentRemoved;
 	}
 
 	public override void Initialize()
@@ -63,12 +62,22 @@ internal class FlyingSpiderSwarm : DrawableGameComponent
 		Active = true;
 	}
 
-	private void OnComponentRemoved(object sender, GameComponentCollectionEventArgs e)
+	// IComponentWatcher, not a raw Components.ComponentRemoved subscription: that is the seam the
+	// codebase uses for exactly this (Floor, the ownership model the class comment cites, watches
+	// its own removal the same way), and a `+=` in the ctor is never unsubscribed, so the delegate
+	// would root this component in the collection's event for the rest of the process. ComponentBin
+	// keeps the watcher list across a removal (it moves the component to idleList, a net-zero
+	// change to the list) and notifies afterwards, so we still hear about our own removal.
+	public void OnComponentRemoved(GameComponentCollectionEventArgs e)
 	{
 		if (e.GameComponent == this)
 		{
 			Active = false;
 		}
+	}
+
+	public void OnComponentAdded(GameComponentCollectionEventArgs e)
+	{
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -95,7 +104,6 @@ internal class FlyingSpiderSwarm : DrawableGameComponent
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		spriteBatch.EndGroupFlatten(new Color((byte)255, (byte)255, (byte)255, fogAlpha));
-		members.Clear();
 	}
 
 	// One pass over the live components, the same shape Oracle.GetBaddies uses. Deliberately not a
@@ -105,6 +113,12 @@ internal class FlyingSpiderSwarm : DrawableGameComponent
 	// brackets.
 	private void CollectMembers()
 	{
+		// Cleared HERE, by the collector that owns the scratch, rather than at the end of Draw:
+		// Draw early-outs on an empty swarm before it could reach a trailing clear, and a throw
+		// anywhere between the collect and the composite would leave the entries behind for the
+		// next frame to append to -- every stale member then double-drawn inside the flatten, and
+		// compounding frame on frame.
+		members.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
 			if (item is FlyingSpider spider && spider.NetIsBackground && spider.Visible)

@@ -9,34 +9,34 @@ Continuation of `d26f0681` (slice 1, shipped: 625/3032 refs + `tools/verify_il_i
 - [x] Read the card, its comments, and slice 1's card d26f0681
 - [x] Fetch latest main (root pull aborted on user's uncommitted files; branched off origin/main = ae3bac5)
 - [x] Create worktree + branch (`.claude/worktrees/rename-locals-slice2`; wt1..wt8 all claimed by parallel agents, and this card needs no dev server)
-- [ ] Push branch upstream
+- [x] Push branch upstream
 
 ## Phase 2: Research
-- [ ] Read `tools/verify_il_identical.py` — understand the oracle's contract and flags
-- [ ] Re-census the remaining `num`/`val`/`flag`/`text`/`array` refs on current main
-- [ ] Read slice 1's plan/commits for the substitution rules that held up
-- [ ] Pick the slice-2 file set (densest + most-read first)
+- [x] Read `tools/verify_il_identical.py` — understand the oracle's contract and flags
+- [x] Re-census the remaining `num`/`val`/`flag`/`text`/`array` refs on current main
+- [x] Read slice 1's plan/commits for the substitution rules that held up
+- [x] Pick the slice-2 file set (densest + most-read first)
 
 ## Phase 3: Design
-- [ ] Write `plans/rename-locals-slice2.md` (context / design / verification / out of scope)
-- [ ] Present the plan and get user approval BEFORE writing code
-- [ ] Post short TLDR comment on card ace0b261
+- [x] Write `plans/rename-locals-slice2.md` (context / design / verification / out of scope)
+- [x] Present the plan and get user approval BEFORE writing code
+- [x] Post short TLDR comment on card ace0b261
 
 ## Phase 4: Implement
-- [ ] Rename locals file by file, one method body at a time
-- [ ] Run the IL oracle after each file
-- [ ] Re-scan every touched comment line by eye (the oracle cannot see comments)
-- [ ] Update docs if the change adds a convention/gotcha
+- [x] Rename locals file by file, one method body at a time
+- [x] Run the IL oracle after each file
+- [x] Re-scan every touched comment line by eye (the oracle cannot see comments)
+- [x] Update docs if the change adds a convention/gotcha
 
 ## Phase 5: Verify
-- [ ] `python tools/verify_il_identical.py --ref main` → IDENTICAL
-- [ ] Clean `dotnet build -c Debug` (0 errors, warning count unchanged)
-- [ ] Spot-check the full diff by eye (comments, prose corruption, no behaviour/format change)
-- [ ] No browser/dev-server needed for this card class (established by slice 1)
+- [x] `python tools/verify_il_identical.py --ref main` → IDENTICAL
+- [x] Clean `dotnet build -c Debug` (0 errors, warning count unchanged)
+- [x] Spot-check the full diff by eye (comments, prose corruption, no behaviour/format change)
+- [x] No browser/dev-server needed for this card class (established by slice 1)
 
 ## Phase 6: Review & Ship
-- [ ] Commit + push
-- [ ] `/review` the branch diff; fix every finding
+- [x] Commit + push
+- [x] `/review` the branch diff; fix every finding
 - [ ] Pull main into branch, resolve conflicts per runbook rules
 - [ ] Re-verify after merge (oracle + build)
 - [ ] Return to root checkout

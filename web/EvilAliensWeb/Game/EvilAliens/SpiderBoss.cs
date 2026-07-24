@@ -410,11 +410,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			return;
 		}
-		float flySpeed = 0.78f * Settings.GetInstance().DifficultyModifier;
+		float moveSpeed = 0.78f * Settings.GetInstance().DifficultyModifier;
 		switch (state)
 		{
 		case SpiderBossState.flyleft:
-			base.Position = new Vector2(base.Position.X - flySpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
+			base.Position = new Vector2(base.Position.X - moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
 			if (base.Position.X < 800f && !sfxplayed)
 			{
 				sound.PlayCue("wasp");
@@ -446,7 +446,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			break;
 		case SpiderBossState.flyright:
-			base.Position = new Vector2(base.Position.X + flySpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
+			base.Position = new Vector2(base.Position.X + moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
 			if (base.Position.X > 0f && !sfxplayed)
 			{
 				sound.PlayCue("wasp");
@@ -468,7 +468,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			break;
 		case SpiderBossState.flyup:
-			base.Position = new Vector2(base.Position.X, base.Position.Y - flySpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+			base.Position = new Vector2(base.Position.X, base.Position.Y - moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			if (base.Position.Y < -345f && stateTimer.Finished)
 			{
 				state = SpiderBossState.flyleft;
@@ -495,7 +495,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			break;
 		case SpiderBossState.land:
-			base.Position = new Vector2(base.Position.X, base.Position.Y + flySpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+			base.Position = new Vector2(base.Position.X, base.Position.Y + moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			if (base.Position.Y > 400f)
 			{
 				state = SpiderBossState.standing;
@@ -548,7 +548,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			base.Position = new Vector2(base.Position.X + oracle.BackgroundSpeed.X * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
 			if (animationProgress > 30f)
 			{
-				base.Position = new Vector2(base.Position.X, base.Position.Y - flySpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+				base.Position = new Vector2(base.Position.X, base.Position.Y - moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			}
 			if (looped)
 			{

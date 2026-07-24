@@ -50,15 +50,15 @@ public class Oracle : GameComponent, IOracleService
 	{
 		get
 		{
-			int playing = 0;
+			int playingCount = 0;
 			foreach (PlayerInfo player in players)
 			{
 				if (player.isPlaying)
 				{
-					playing++;
+					playingCount++;
 				}
 			}
-			return playing;
+			return playingCount;
 		}
 	}
 
@@ -100,12 +100,12 @@ public class Oracle : GameComponent, IOracleService
 
 	public bool DeviceIsPlaying(ControlDevice device)
 	{
-		bool isPlaying = false;
+		bool anyPlaying = false;
 		foreach (PlayerInfo player in players)
 		{
-			isPlaying |= player.isPlaying && player.controller == device;
+			anyPlaying |= player.isPlaying && player.controller == device;
 		}
-		return isPlaying;
+		return anyPlaying;
 	}
 
 	// Returns the slot the player was seated in -- callers that spawn the ship need the real

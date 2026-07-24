@@ -1756,8 +1756,8 @@ internal class Wall : AlienDrawableGameComponent
 			EvilAliensWeb.Compat.WallProfiler.EndTowers(perf);
 		}
 		Vector2 halfBlock = default(Vector2);
-		Color darkLine = default(Color);
-		Color lightLine = default(Color);
+		Color darkTint = default(Color);
+		Color lightTint = default(Color);
 		// Edge-line draw scale (card a54cc13a): `line` ("black_line_lalalal") is a SEPARATE, fixed-
 		// resolution texture -- a thin line inset near the right edge of its own square canvas, not
 		// part of the 8x8 wall sheet -- drawn `center:true` at each wall block's centre so it reaches
@@ -1797,8 +1797,8 @@ internal class Wall : AlienDrawableGameComponent
 					spriteBatch.Draw(texture, new Rectangle(sheetCol * texture.LogicalWidth() / 8, sheetRow * texture.LogicalHeight() / 8, texture.LogicalWidth() / 8, texture.LogicalHeight() / 8), lifted ? Project(topLeft, topD) : topLeft, 0f, scale * 8f * topD, center: false);
 					(halfBlock) = new Vector2((float)texture.LogicalWidth() * scale / 2f);
 					blockOffset += halfBlock;
-					(darkLine) = new Color(new Vector4(0f, 0f, 0f, 0.6f));
-					(lightLine) = new Color(new Vector4(1f, 1f, 1f, 0.3f));
+					(darkTint) = new Color(new Vector4(0f, 0f, 0f, 0.6f));
+					(lightTint) = new Color(new Vector4(1f, 1f, 1f, 0.3f));
 					Vector2 centre = blockOffset + base.Position;
 					if (lifted)
 					{
@@ -1807,19 +1807,19 @@ internal class Wall : AlienDrawableGameComponent
 					float capLineScale = lineScale * topD;
 					if (isfree(j + 1, i))
 					{
-						spriteBatch.Draw(line, centre, 0f, capLineScale, center: true, darkLine);
+						spriteBatch.Draw(line, centre, 0f, capLineScale, center: true, darkTint);
 					}
 					if (isfree(j - 1, i))
 					{
-						spriteBatch.Draw(line, centre, (float)Math.PI, capLineScale, center: true, lightLine);
+						spriteBatch.Draw(line, centre, (float)Math.PI, capLineScale, center: true, lightTint);
 					}
 					if (isfree(j, i + 1))
 					{
-						spriteBatch.Draw(line, centre, (float)Math.PI / 2f, capLineScale, center: true, darkLine);
+						spriteBatch.Draw(line, centre, (float)Math.PI / 2f, capLineScale, center: true, darkTint);
 					}
 					if (isfree(j, i - 1))
 					{
-						spriteBatch.Draw(line, centre, -(float)Math.PI / 2f, capLineScale, center: true, lightLine);
+						spriteBatch.Draw(line, centre, -(float)Math.PI / 2f, capLineScale, center: true, lightTint);
 					}
 				}
 			}

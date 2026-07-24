@@ -328,9 +328,9 @@ public class StarMine : KillableAlien
 				float overlap = r + starMine.r - distance;
 				Vector2 pushDir = toMine;
 				(pushDir).Normalize();
-				float massShare = scale / (starMine.scale + scale);
-				base.Position -= pushDir * overlap * (1f - massShare);
-				starMine.Position += pushDir * overlap * massShare;
+				float ownScaleShare = scale / (starMine.scale + scale);
+				base.Position -= pushDir * overlap * (1f - ownScaleShare);
+				starMine.Position += pushDir * overlap * ownScaleShare;
 			}
 		}
 		if (other is JunkBoss)

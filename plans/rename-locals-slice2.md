@@ -33,7 +33,7 @@ optimises for what an agent actually reads.
 
 ## Design — the slice
 
-**13 files, ~541 refs.** Two coherent groups:
+**12 files, ~541 refs.** Two coherent groups:
 
 *Engine core — the files nearly every card opens:*
 

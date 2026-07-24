@@ -277,9 +277,9 @@ internal class Ball : AlienDrawableGameComponent
 					float overlap = r + ball.r - distance;
 					Vector2 pushDir = toBall;
 					(pushDir).Normalize();
-					float massShare = scale / (ball.scale + scale);
-					base.Position -= pushDir * overlap * (1f - massShare);
-					ball.Position += pushDir * overlap * massShare;
+					float ownScaleShare = scale / (ball.scale + scale);
+					base.Position -= pushDir * overlap * (1f - ownScaleShare);
+					ball.Position += pushDir * overlap * ownScaleShare;
 				}
 			}
 			if (other is JunkBoss)

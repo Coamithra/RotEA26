@@ -135,7 +135,7 @@ public class PowerupData : DrawableGameComponent
 		{
 			return;
 		}
-		float baseExp = 0.06f;
+		float baseGain = 0.06f;
 		float levelFalloff = (float)Math.Pow(0.6299999952316284, level);
 		float comboBonus = 1f + 0.019f * (float)combo;
 		if (comboBonus > 6.348013f)
@@ -143,7 +143,7 @@ public class PowerupData : DrawableGameComponent
 			comboBonus = 6.348013f;
 		}
 		float difficultyScale = 1f / Settings.GetInstance().DifficultyModifier;
-		progress += baseExp * levelFalloff * comboBonus * difficultyScale;
+		progress += baseGain * levelFalloff * comboBonus * difficultyScale;
 		if (progress >= 1f)
 		{
 			progress = 0f;

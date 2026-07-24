@@ -140,7 +140,7 @@ internal class Explosion : AlienDrawableGameComponent
 
 	private void Vibrate()
 	{
-		Vector2 maxPower = default(Vector2);
+		Vector2 nearPower = default(Vector2);
 		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
 		// (card 4d904410), and Oracle.GetPlayerPosition/Controller THROW on an unseated slot.
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
@@ -152,17 +152,17 @@ internal class Explosion : AlienDrawableGameComponent
 			Vibrator vibrator = ServiceHelper.Get<IVibratorService>().Vibrator;
 			if (size <= 1f)
 			{
-				(maxPower) = new Vector2(0f, 0.5f);
+				(nearPower) = new Vector2(0f, 0.5f);
 			}
 			else
 			{
-				(maxPower) = new Vector2(0.5f, 0f);
+				(nearPower) = new Vector2(0.5f, 0f);
 			}
 			Vector2 zero = Vector2.Zero;
 			Vector2 toPlayer = base.Position - oracle.GetPlayerPosition(i);
 			float distance = (toPlayer).Length();
 			float rangeScale = (size - 1f) * 0.35f + 1f;
-			Vector2 power = Vector2.Lerp(maxPower, zero, MathHelper.Clamp(distance / (200f * rangeScale), 0f, 1f));
+			Vector2 power = Vector2.Lerp(nearPower, zero, MathHelper.Clamp(distance / (200f * rangeScale), 0f, 1f));
 			PlayerIndex playerIndex;
 			switch (oracle.Controller(i))
 			{

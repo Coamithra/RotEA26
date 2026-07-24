@@ -76,8 +76,8 @@ internal class MiniExplosion
 			if (!(explosionData.lifetime <= 0f))
 			{
 				float alpha = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
-				Color color = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(smoketexture, position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, color);
+				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
+				spriteBatch.Draw(smoketexture, position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, tint);
 			}
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
@@ -87,8 +87,8 @@ internal class MiniExplosion
 			if (!(explosionData2.lifetime <= 0f))
 			{
 				float alpha = 4f * explosionData2.normalizedLifetime * (1f - explosionData2.normalizedLifetime);
-				Color color = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(particletexture, position + explosionData2.position, explosionData2.rotation, explosionData2.scale, center: true, color);
+				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
+				spriteBatch.Draw(particletexture, position + explosionData2.position, explosionData2.rotation, explosionData2.scale, center: true, tint);
 			}
 		}
 	}

@@ -792,6 +792,16 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 	}
 
+	// Per-tick client-puppet hook, called by NetPuppetDriver once per frame (UPDATE phase, not
+	// Draw/snapshot) after the base dead-reckon. Default no-op. A type overrides it when a frozen
+	// puppet needs to manage a live CHILD component the host draws by hand -- e.g. the enemy
+	// laser-charge glow (a LazerGenerator the frozen Update would normally spawn); the descriptor's
+	// ApplyStateExtra only records the replicated charge state, and the actual child spawn/free
+	// happens HERE, so the descriptor contract's "never spawn from ApplyStateExtra" holds.
+	internal virtual void NetDriveExtras(GameTime gameTime)
+	{
+	}
+
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)
 	{
 	}

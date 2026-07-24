@@ -271,4 +271,41 @@ internal class SweepUFO : KillableAlien
 			AwardScore(isComboGenerator, other);
 		}
 	}
+
+	// ---- Online co-op replication seams (Compat/Net, coverage-gaps follow-up) ----------------
+	// The charge swarm `g` is a child LazerGenerator the host draws by hand (see Draw). On a JOIN
+	// peer this puppet is frozen, so it never spawns `g`; the descriptor replicates the charge state
+	// and NetDriveExtras rebuilds a local silent copy into the same `g` field (so Draw + the
+	// OnComponentRemoved Free() cover it unchanged). See Compat/Net/NetChargeGlow.
+	private bool netCharging;
+
+	private Vector2 netChargeOffset;
+
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 1f;
+
+	// Host encode: read live off the real generator (non-null only during the charge state).
+	internal bool NetCharging => g != null;
+
+	internal Vector2 NetChargeOffset => g != null ? g.Position - base.Position : Vector2.Zero;
+
+	internal float NetChargeWindup => g != null ? g.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => g != null ? g.NetSize : 1f;
+
+	// Client apply: record the replicated charge state (draw-relevant only; the child spawn happens
+	// in NetDriveExtras, never here -- the descriptor contract forbids spawning from ApplyStateExtra).
+	internal void NetApplyCharge(bool charging, Vector2 offset, float windup, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windup;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref g, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
+	}
 }

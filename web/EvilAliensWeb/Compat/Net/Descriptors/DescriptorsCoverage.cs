@@ -118,9 +118,11 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   (NetApplyHp); the pool is difficulty-scaled but the client shares the session difficulty, so
     //   it matches. Setup's many args only steer the Update-only movement/aim (inert on a frozen
     //   puppet) -- Position rides the base block -- so a benign default Setup reconstructs it.
-    // Spawn extras: none. State extras: [flags:1]  (bit0 = second / mothershipB half showing).
-    // Best-effort: the charge-swarm windup glow (a child LazerGenerator) replicates separately (see
-    //   LazerGeneratorDescriptor); the crash-land death sequence does not play (remote death removes it).
+    // Spawn extras: none. State extras: [flags:1] (bit0 = second/mothershipB half, bit1 = charging)
+    //   followed by the 7-byte NetChargeWire block while charging.
+    // The charge-swarm windup glow is a child LazerGenerator the host draws by hand; it is rebuilt on
+    // the client from the replicated charge state (Compat/Net/NetChargeGlow), not a separate wire type.
+    // Best-effort: the crash-land death sequence does not play (an attributed remote death removes it).
     internal sealed class SpiderHelperMothershipDescriptor : NetTypeDescriptor<SpiderHelperMothership>
     {
         private const byte FlagSecondHalf = 1;
@@ -136,7 +138,21 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
 
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
-            buf[off++] = (byte)(C(c).NetSecondHalf ? FlagSecondHalf : 0);
+            SpiderHelperMothership h = C(c);
+            byte flags = 0;
+            if (h.NetSecondHalf)
+            {
+                flags |= FlagSecondHalf;
+            }
+            if (h.NetCharging)
+            {
+                flags |= NetChargeWire.FlagChargingBit1;
+            }
+            buf[off++] = flags;
+            if (h.NetCharging)
+            {
+                off = NetChargeWire.Encode(buf, off, h.NetChargeOffset, h.NetChargeWindup, h.NetChargeSize);
+            }
             return off;
         }
 
@@ -146,7 +162,17 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             {
                 return;
             }
-            C(c).NetSetSpritesheetHalf((buf[off] & FlagSecondHalf) != 0);
+            SpiderHelperMothership h = C(c);
+            h.NetSetSpritesheetHalf((buf[off] & FlagSecondHalf) != 0);
+            if ((buf[off] & NetChargeWire.FlagChargingBit1) != 0 && len >= 1 + NetChargeWire.Bytes)
+            {
+                NetChargeWire.Decode(buf, off + 1, out Vector2 chargeOffset, out float windup, out float size);
+                h.NetApplyCharge(true, chargeOffset, windup, size);
+            }
+            else
+            {
+                h.NetApplyCharge(false, Vector2.Zero, 2.5f, 2f);
+            }
         }
     }
 
@@ -230,4 +256,52 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             C(c).NetVenting = (buf[off] & FlagVenting) != 0;
         }
     }
+
+    // Shared wire format for the enemy laser-charge glow (SweepUFO/MarsBoss/SpiderHelperMothership).
+    // The charging BIT lives in each descriptor's own leading flags byte (bit0 is already taken by
+    // MarsBoss/SpiderHelper's A/B sheet half, so charging is bit1 there; SweepUFO has no half, so it
+    // uses bit0). When set, this 7-byte block follows: the muzzle offset from the emitter centre
+    // (signed px), the windup duration (centiseconds), and the swarm size -- everything
+    // Compat/Net/NetChargeGlow needs to rebuild + ramp + spread the client's local copy identically.
+    internal static class NetChargeWire
+    {
+        public const byte FlagChargingBit1 = 2; // charging bit when bit0 is the A/B half (bosses)
+        public const int Bytes = 7;
+
+        public static int Encode(byte[] buf, int off, Vector2 offset, float windupSeconds, float size)
+        {
+            WriteI16(buf, ref off, (int)offset.X);
+            WriteI16(buf, ref off, (int)offset.Y);
+            WriteU16(buf, ref off, (int)(windupSeconds * 100f));
+            buf[off++] = (byte)System.Math.Clamp((int)System.Math.Round(size), 0, 255);
+            return off;
+        }
+
+        public static void Decode(byte[] buf, int off, out Vector2 offset, out float windupSeconds, out float size)
+        {
+            offset = new Vector2(ReadI16(buf, off), ReadI16(buf, off + 2));
+            windupSeconds = NetProtocol.ReadU16(buf, off + 4) / 100f;
+            size = buf[off + 6];
+        }
+
+        private static void WriteI16(byte[] b, ref int o, int v)
+        {
+            ushort u = (ushort)(short)System.Math.Clamp(v, short.MinValue, short.MaxValue);
+            b[o++] = (byte)u;
+            b[o++] = (byte)(u >> 8);
+        }
+
+        private static short ReadI16(byte[] b, int o)
+        {
+            return (short)(b[o] | (b[o + 1] << 8));
+        }
+
+        private static void WriteU16(byte[] b, ref int o, int v)
+        {
+            ushort u = (ushort)System.Math.Clamp(v, 0, 65535);
+            b[o++] = (byte)u;
+            b[o++] = (byte)(u >> 8);
+        }
+    }
 }
+

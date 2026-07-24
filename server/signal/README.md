@@ -25,7 +25,29 @@ Server-initiated / error frames:
 | `{"t":"gone"}` | the other member disconnected; room deleted |
 
 One socket can host/join at most one room (a second attempt gets `bad`).
-`GET /health` returns `{"ok": true, "rooms": <count>}`.
+`GET /health` returns `{"ok": true, "rooms": <count>, "listed": <count>, "browsers": <count>}`.
+
+## Public game browser (card 2001fbd8)
+
+A host may **list** its room so strangers can find and join it; a third kind of
+socket — a **browser** — lists build-compatible open rooms and pings each host
+through the relay for a real RTT. Listing is metadata on the same room object;
+it never constructs a game session.
+
+| Client sends | Server replies / behavior |
+|---|---|
+| `{"t":"list","level":L,"difficulty":D,"players":P,"proto":..,"hash":..}` | host only: mark the room listed + set metadata + refresh TTL. Idempotent (also the update path). No reply. |
+| `{"t":"unlist"}` | host only: hide from browse; the room stays joinable by code |
+| `{"t":"beat"}` | host only: refresh the room's TTL (send ~every 30 s while listed) |
+| `{"t":"browse","proto":..,"hash":..}` | `{"t":"rooms","rooms":[{code,level,difficulty,players,ageSec},…]}` — only **listable** (listed + not full) rooms whose `proto` **and** `hash` match |
+| `{"t":"ping","code":..,"id":..}` | browser only (after browse): forwarded to that room's host as `{"t":"ping","id":..,"ref":<opaque>}` |
+| `{"t":"pong","id":..,"ref":..}` | host only: routed back to the originating browser as `{"t":"pong","id":..}` |
+
+Room TTL now counts from the **last beat** (or creation, if never beaten), so a
+listed game stays alive across a long level while unlisted 11.4 lobby rooms keep
+the unchanged 10-minute-from-creation expiry. Pings are rate-limited per browser
+socket; the forwarded `ref` is an opaque server-assigned id, so a host learns
+nothing about who pinged it.
 
 ## Local run (Windows dev)
 

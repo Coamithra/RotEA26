@@ -512,7 +512,11 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
   a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
   `?signal=ws://localhost:8091/ws`). Card 40334a8f adds `?netlag=<ms>` / `?netloss=<0-100>`
-  (impair INBOUND traffic -- see the impairment bullet below). **No `?net` flag = the net layer is never constructed
+  (impair INBOUND traffic -- see the impairment bullet below). `?netfakehash=<s>` (card
+  4717d3cf) overrides THIS tab's build-hash fingerprint so two dev tabs disagree, driving the
+  real `peerHash`-mismatch -> reject flow (`RejectBuild` -> "update required") on the
+  BroadcastChannel rig -- otherwise both tabs read `'dev'` and never mismatch (the two-tab
+  verification for the reject handshake + its teardown grace). **No `?net` flag = the net layer is never constructed
   -- a plain boot is byte-identical single-player, and single-player NEVER contacts any
   server. Hard invariants; keep them.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
@@ -583,7 +587,16 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   publish, dev builds read 'dev') + a flags byte. Hash mismatch -> `MsgReject` -> "Update
   required" notice both sides (a stale-cached client can never desync a session); menu
   sessions also reject if EITHER side has `DebugFlags.Active` (dev `?net=` sessions are
-  anything-goes). Match-end: any player leaving a MENU session (quit, tab close, drop,
+  anything-goes). **Rejection is graceful (card 4717d3cf, `RejectGraceMs` 1s):**
+  `SendRejectOnce` queues the reliable `MsgReject` but defers `NetSession.Stop()` by a tick
+  budget instead of closing instantly -- an immediate `Stop()->transport.Close()->pc.close()`
+  is ABORTIVE on WebRTC and would discard the still-buffered reject frame, leaving the peer to
+  see only a channel close ("other player disconnected") instead of the real reason. Holding
+  the session open for the grace keeps SCTP alive so the reject (and our hello, which drives
+  the peer's own symmetric detection) actually egress; the peer's inbound reject during the
+  grace ends our side early. The detection itself is symmetric (each side derives the notice
+  from the peer's hello), so the frame is belt-and-braces; the grace is what makes it land.
+  Match-end: any player leaving a MENU session (quit, tab close, drop,
   victory/game-over wind-down) ends it for both -- scene-down edge or `PeerLost` sends
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
@@ -639,6 +652,13 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   collisions) dead-reckons `Position += vel*dt`, advances `curframe` at the type's own fps,
   blends snapshot corrections over ~150ms (error > 100px snaps + counts a `pupPops`
   metric), lerps scale, ticks each puppet's `timers` (hit-blink decay), re-applies hp.
+  **The driver ticks on REAL time (`Environment.TickCount64` delta, clamped 200ms), never the
+  turbo/slow-mo/hit-stop-scaled `gameTime` Game1 folds into components** -- the host mirrors
+  its world at its own real pace and stamps every snapshot's observed velocity on real time,
+  so a client time-scale window (the wipe's 180ms death hit-stop, a 1-up slow-motion) must not
+  stall the dead-reckoning or the correction blend, or the puppets fall behind the real-time
+  snapshots and repeatedly snap (this was the first-wipe `pupPops` burst; same rule the
+  remote-ship puppet follows). Characterised in `tools/sim/net_puppet_drive_sim.py`.
 - **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
   round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
   Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
@@ -754,15 +774,64 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   per-slot jitter buffer/interpolation clock (a copy of the single-remote path, kept ISOLATED so
   it can't regress it), IDENTITY slot mapping (the puppet lands in the host's slot so per-slot
   score/lives sync lines up), bullets re-fired locally, death via a per-slot stream timeout. The
-  whole path is dormant unless the cheat is on. `ControlDevice.RemoteFriend` is APPEND-ONLY.
+  budget is `Settings.Friends + 1` TOTAL ships incl. the remote (so a 2-human session needs the
+  cheat >= 2 to spawn any AI friend). The whole path is dormant unless the cheat is on.
+  `ControlDevice.RemoteFriend` is APPEND-ONLY. (NOTE: the game-browser JIP attach path below is a
+  separate session and does not stream friends -- its listing stays refused while `Friends>0`.)
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
   remote puppet lives (LoseLife triggers on AllShipsDead); roster is exactly two peers;
   DevCommentEvent commentary is not replicated (profile-local setting). Boss puppets are
   best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
   state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
-  play on the client -- an attributed remote death removes the puppet). A one-time `pupPops`
-  burst can appear during the FIRST wipe transition of a session (transient, self-heals,
-  cosmetic under the death FX -- follow-up card).
+  play on the client -- an attributed remote death removes the puppet). The time-scaling half of
+  the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
+  above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
+  checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the
+  puppet clock.
+- **Public game browser + join-in-progress (card 2001fbd8, design `plans/net-game-browser.md`):**
+  a running single-player game can be LISTED so strangers find + join it, with NO `NetSession`
+  constructed until someone actually arrives.
+  - **One eligibility predicate drives everything** (`Compat/Net/NetListing.ComputeEligible`):
+    an empty player slot (`oracle.Players == 1`) + `Settings.AllowOnlineJoins` (new Option,
+    **default ON**) + no cheats/`DebugFlags.Active` + level not `WebcamAliens`/`TeamChallenge`
+    + no session already up. The SAME predicate gates the listing, the beacon, and the pause
+    indicator, so they can't disagree. `NetListing.Tick` runs each tick from
+    `Game1.UpdateInner` (right after `NetSession.Update`).
+  - **Listing != session.** A listed game keeps ONE lightweight signaling WS open (via
+    `eaRtc.list`, reusing the 11.4 host machinery: `{t:host}` -> code -> `{t:list}` + a ~30 s
+    `{t:beat}`, auto-answering browser `{t:ping}`s). It stays plain single-player (AI friends,
+    no score sync, no Turbo lock) until a stranger pairs. This knowingly breaks 11.4's
+    "single-player never touches a server" invariant -- the card's default-on premise; the
+    Options toggle + pause "Listed online -- room XYZAB" indicator are the mitigation.
+  - **Join-in-progress:** on pairing (`eaRtc` drives the host handshake -> "connected"),
+    `NetSession.StartListedSession` attaches a HOST session to the running `GameScene`, sends
+    the joiner `EvLaunch(currentLevel, difficulty)` + relies on the existing `EvReady`
+    ->`ReplayLive` + 1 Hz `EvScoreSync` catch-up. The joiner is a normal menu-session client
+    (`NetLobby.JoinWithCode`). A `listedSession` differs from a menu session ONLY in peer-loss:
+    the joiner leaving reverts the host to single-player (NetListing re-lists) instead of
+    force-exiting the host's own level.
+  - **Ping is MEASURED, not estimated** (`server/signal/main.py` relays browser->host->back;
+    `webrtc.js` auto-pongs in JS). Drop the old self-reported rtt idea entirely.
+  - **Browser UI:** `SubMenuOnlineGames` (a `SubMenuCarousel`, the geometry extracted verbatim
+    from `SubMenuLevelChoice` -- both now derive from it) shows one entry per open game with the
+    level's screenshot art (`LevelArt`) + difficulty/players/ping/room-code. `NetGameBrowser`
+    opens the browse socket, parses the room list, and fills each ping as its pong lands ("--"
+    until then). Reached from the main-menu "Online Co-op" submenu's "Join Online Game".
+  - **Beacon:** `ScoreVisualiser.drawPressStart`'s `Player X` <-> `Press Start` blink gains a
+    third string `Room code: XYZAB` while listed, and its 4-cycle stop is suppressed, so the
+    code surfaces ~every 15 s (the existing intermittent rhythm, never a static banner). The
+    `bool showPressStart` became an index `promptPhase` (drawn `% (listed ? 3 : 2)`).
+  - **Flags:** `?gamebrowser` boots straight to the carousel with injected FAKE entries (no
+    server) for a screenshot; `?netjip` lets a `?level=` (`DebugFlags.Active`) host list anyway
+    for the two-window JIP metrics test (it also drops the debug-flag bit from its hello so a
+    clean joiner won't reject it).
+  - **Verify:** `server/signal/test_signal.py` (registry/browse/build-filter/ping-relay/full->
+    delist, all standalone); `?gamebrowser` for the carousel; the eligibility predicate as data;
+    `?netjip` two windows -> `[net]` metrics.
+  - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** deep mid-level
+    background/doodad state beyond the launch; mechanical-friend ships unreplicated (listing
+    refused while `Friends>0`); a mid-boss arrival hits the best-effort puppet limit; public-list
+    abuse surface (rate limiting / hiding a room).
 
 ### Audio runtime (`SoundManager` / `eaMusic`)
 

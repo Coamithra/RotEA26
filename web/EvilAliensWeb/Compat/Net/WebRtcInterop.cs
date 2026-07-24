@@ -19,6 +19,14 @@ namespace EvilAliensWeb.Compat.Net
         internal static event Action<string, string> OnPhase; // (phase, detail)
         internal static event Action<string> OnCodeEntry;     // "" = cancelled
 
+        // Public game browser (card 2001fbd8). OnRooms carries the JSON rooms array from a
+        // browse; OnPing carries a per-host measured RTT (code, ms) as each pong lands;
+        // OnBrowseFail carries a browse-socket failure reason. All fire from JS callbacks --
+        // NetGameBrowser queues + drains them on the game tick (the NetLobby pattern).
+        internal static event Action<string> OnRooms;
+        internal static event Action<string, int> OnPing;
+        internal static event Action<string> OnBrowseFail;
+
         public static void Init(IJSRuntime js)
         {
             _js = js as IJSInProcessRuntime;
@@ -42,6 +50,42 @@ namespace EvilAliensWeb.Compat.Net
         internal static void Close()
         {
             _js?.InvokeVoid("eaRtc.close");
+        }
+
+        // ---- public game browser (card 2001fbd8) ----------------------------------------
+
+        // Host side: list / update / hide / drop this game's room. `proto` is
+        // NetSession.ProtocolVersion; the JS pairs it with the build hash for the
+        // server-side compatibility filter.
+        internal static void List(string signalUrl, int level, int difficulty, int players, int proto)
+        {
+            _js?.InvokeVoid("eaRtc.list", signalUrl, level, difficulty, players, proto);
+        }
+
+        internal static void Relist(int level, int difficulty, int players)
+        {
+            _js?.InvokeVoid("eaRtc.relist", level, difficulty, players);
+        }
+
+        internal static void Unlist()
+        {
+            _js?.InvokeVoid("eaRtc.unlist");
+        }
+
+        internal static void EndListing()
+        {
+            _js?.InvokeVoid("eaRtc.endListing");
+        }
+
+        // Joiner side: open / close the browse socket.
+        internal static void Browse(string signalUrl, int proto)
+        {
+            _js?.InvokeVoid("eaRtc.browse", signalUrl, proto);
+        }
+
+        internal static void EndBrowse()
+        {
+            _js?.InvokeVoid("eaRtc.endBrowse");
         }
 
         internal static void PromptCode()
@@ -100,6 +144,26 @@ namespace EvilAliensWeb.Compat.Net
         public static void CodeEntry(string code)
         {
             OnCodeEntry?.Invoke(code ?? "");
+        }
+
+        // browse -> the JSON rooms array (see server main.py listing_entry()).
+        [JSInvokable("rtcRooms")]
+        public static void Rooms(string json)
+        {
+            OnRooms?.Invoke(json ?? "[]");
+        }
+
+        // A host's pong landed: (room code, measured round-trip ms).
+        [JSInvokable("rtcPing")]
+        public static void Ping(string code, int rttMs)
+        {
+            OnPing?.Invoke(code ?? "", rttMs);
+        }
+
+        [JSInvokable("rtcBrowseFailed")]
+        public static void BrowseFailed(string reason)
+        {
+            OnBrowseFail?.Invoke(reason ?? "");
         }
     }
 }

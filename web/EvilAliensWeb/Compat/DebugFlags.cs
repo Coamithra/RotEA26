@@ -865,6 +865,13 @@ namespace EvilAliensWeb.Compat
 
 		public static string NetCode { get; private set; } = "";
 
+		// ?netfakehash=<s>: override THIS tab's build-hash fingerprint so two dev tabs disagree,
+		// driving the real peerHash-mismatch -> reject flow (RejectBuild -> "update required")
+		// on the BroadcastChannel dev rig -- both tabs otherwise read 'dev' and never mismatch.
+		// The purpose-built two-tab verification for the reject handshake + its teardown grace.
+		// Null/empty = the genuine WebRtcInterop.BuildHash(); dev-only, byte-identical when unset.
+		public static string NetFakeBuildHash { get; private set; } = "";
+
 		// ?aiplayer: force the LOCAL player's ship onto the existing PlayerShip AI branch
 		// (ControlDevice.AI / DoAIMove/DoAIFire -- the attract-demo behaviour) at level start,
 		// so two net tabs can drive themselves unattended (the user-specified 11.1 testing
@@ -914,6 +921,21 @@ namespace EvilAliensWeb.Compat
 			NetLossPct = float.IsNaN(lossPct) ? 0f : MathHelper.Clamp(lossPct, 0f, Net.NetImpairment.MaxLossPct);
 			NetJitterMs = float.IsNaN(jitterMs) ? 0f : MathHelper.Clamp(jitterMs, 0f, Net.NetImpairment.MaxJitterMs);
 		}
+
+		// Public game browser (card 2001fbd8). ?gamebrowser boots STRAIGHT to the
+		// "Join Online Game" carousel populated with injected FAKE entries (no server,
+		// no WebRTC) so the carousel's appearance -- level art, difficulty/players/ping/
+		// code info text, scroll feel -- can be screenshot in isolation, the ?textshot /
+		// ?gamebrowser pattern. Hijacks boot => SkipSplash + AutoStart, and is in Active.
+		public static bool GameBrowser { get; private set; }
+
+		// ?netjip: the two-window join-in-progress test. Pair with ?level=<Name> (+ ?invuln):
+		// the host boots straight into a level, solo, and LISTS it despite the debug boot
+		// (NetListing's eligibility normally refuses a DebugFlags.Active / cheating host, so
+		// a plain ?level= host could never list). The host prints its room code; a second
+		// window joins mid-level via the menu's Join Online Game (or ?net=join&rtc&code=),
+		// and both sides' [net] metrics tell the JIP story. In Active.
+		public static bool NetJip { get; private set; }
 
 		// True if any debug flag is active (i.e. the boot path was altered).
 		public static bool Active { get; private set; }
@@ -1489,6 +1511,12 @@ namespace EvilAliensWeb.Compat
 						NetCode = val.Trim().ToUpperInvariant();
 					}
 					break;
+				case "netfakehash":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetFakeBuildHash = val.Trim();
+					}
+					break;
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
@@ -1500,6 +1528,17 @@ namespace EvilAliensWeb.Compat
 					{
 						AiFriends = (int)MathHelper.Clamp(aif, 0, 3);
 					}
+					break;
+				case "gamebrowser":
+					GameBrowser = IsOn(val);
+					if (GameBrowser)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
+				case "netjip":
+					NetJip = IsOn(val);
 					break;
 				case "netlag":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nlag) && nlag >= 0f)
@@ -1705,7 +1744,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer || NetScript;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

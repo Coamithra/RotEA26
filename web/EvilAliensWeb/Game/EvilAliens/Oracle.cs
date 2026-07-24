@@ -166,6 +166,20 @@ public class Oracle : GameComponent, IOracleService
 		players[slot].Reset();
 	}
 
+	// Release a SINGLE seated slot mid-level (card 2001fbd8): when a join-in-progress peer
+	// leaves, its Remote slot must be freed so the host reverts to single-player (Players == 1
+	// again, so NetListing re-lists + the empty-slot beacon returns). ResetPlayers can't be
+	// reused -- it would also wipe the host's own slot. No-op if the device isn't seated.
+	// PlayerInfo is a reference type, so mutating the list element in place is enough.
+	public void ReleasePlayer(ControlDevice device)
+	{
+		int i = GetPlayerIndex(device);
+		if (i >= 0)
+		{
+			players[i].Reset();
+		}
+	}
+
 	public float Hue(int i)
 	{
 		return players[i].hue;

@@ -277,6 +277,27 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
 - **`tools/sim/`**: isolation sims for verifying behaviour as data (e.g.
   `webcam_mothership_sim.py`, which mirrors `WebcamMothership.PoseAt`). The repo's preferred
   verification style — see the root CLAUDE.md rules.
+- **`tools/sim/aiwallnav/`** (card b4972696): the one sim here that is NOT a mirror. A `net8.0`
+  console app that references the BUILT `EvilAliensWeb.dll` and reflects into it, so it calls the
+  real `PlayerShip.SteerThroughWall` / `ChooseGapColumn` / `ColumnScore` / `DistanceToBlockedRow` /
+  `ClampIntoWallSpace` against the real `CollisionLevelMap` and the real `Wall.Setup` grids. Build
+  the game first, then `dotnet run --project tools/sim/aiwallnav` (`--react=<ms>` writes the same
+  `DebugFlags` property `?aireact` does, `--grid=<n>` picks one variation, `--ladder` repeats the
+  table at all five difficulty scroll speeds). **This is possible only because the game targets
+  plain `net8.0`** despite the BlazorWebAssembly SDK -- keep it a `Reference` to the built DLL,
+  never a `ProjectReference`. It binds private members by name and REFUSES to start if one has
+  been renamed, rather than printing a clean-looking table of nothing.
+  **It drives the WALL TERM ONLY** and cannot produce `?aibench`'s `turn deg/s` / `revs/s` (those
+  are the whole steering sum); a verdict about the bot still needs `eaAiBench.soak()`.
+  Four rig facts that each bit during development, all detailed in its README:
+  **(1) rebuild the game first** -- it benches the built DLL, so an unrebuilt `PlayerShip.cs` edit
+  is measured in its OLD form, silently and plausibly (this published an inverted conclusion once);
+  **(2)** variation 2 must be parsed from `level3.txt` by the bench, because `Wall.Setup` reads it
+  through browser-only `TitleContainer` and otherwise returns its 5x19 emergency grid;
+  **(3)** a death must respawn in a CLEAR cell -- a fixed respawn lands back inside the same slab,
+  which pinned `contacts` at a flat 226 across four look-ahead depths, an artifact that read
+  exactly like a result; **(4)** scroll speed is PINNED per table, never pooled -- run duration is
+  `distance / scroll`, so averaging a sweep silently weights it onto the slowest rung.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight
   alpha — the basis for the project-wide straight-alpha rule).
 - **`tools/audit_add_order.py`**: lint for the ComponentBin instant-add contract (card 02d9ad67)

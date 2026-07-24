@@ -182,6 +182,11 @@ namespace EvilAliensWeb.Compat
 		// (a shipped build never appends to the list). Does NOT alter the boot path.
 		public static bool LoadLog { get; private set; }
 
+		// ?binlog — ComponentBin lifecycle diagnostics (card 02d9ad67): logs adds diverted by
+		// the standing purge filter and world objects frozen by a pause-time add. Pure console
+		// output, no behaviour change; deliberately OUT of `Active`.
+		public static bool BinLog { get; private set; }
+
 		// Cinematic slow-motion motion-trail post-process (Game1.ApplySlowmoTrail). While the
 		// 1up-powerup slowmo is active, the scene is fed through a feedback buffer so moving
 		// objects smear into fading "ghost" trails (movie bullet-time look). ON by default;
@@ -987,6 +992,9 @@ namespace EvilAliensWeb.Compat
 				case "loadlog":
 				case "profileloads":
 					LoadLog = IsOn(val);
+					break;
+				case "binlog":
+					BinLog = IsOn(val);
 					break;
 				case "metalscore":
 					MetalScore = IsOn(val);

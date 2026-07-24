@@ -983,6 +983,11 @@ public class Game1 : Game
 	{
 		if (!wantExit)
 		{
+			// Card 02d9ad67: flush deaths queued during the PREVIOUS tick's collision phase
+			// before any component updates — a killed component must never get one more
+			// "zombie" Update (move/fire/spawn from the grave). Also expires the standing
+			// purge filter (see ComponentBin.TopOfTickFlush).
+			collectionHelper.TopOfTickFlush();
 			inputHandler.Update();
 			((GameComponent)vibrator).Update(gameTime);
 			soundManager.Update(gameTime);

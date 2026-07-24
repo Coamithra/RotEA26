@@ -342,8 +342,8 @@ internal class Braineroid : KillableAlien
 		//IL_0146: Unknown result type (might be due to invalid IL or missing references)
 		if (hasbonus)
 		{
-			collection.Add((GameComponent)(object)bonus);
 			bonus.Position = base.Position;
+			collection.Add((GameComponent)(object)bonus);
 			bonus = null;
 			hasbonus = false;
 		}

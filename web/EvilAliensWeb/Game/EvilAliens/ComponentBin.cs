@@ -11,40 +11,53 @@ public class ComponentBin : IComponentBinService
 {
 	private GameComponentCollection collection;
 
-	private List<GameComponent> birthList = new List<GameComponent>();
-
+	// Spawn/death hardening (card 02d9ad67): births are INSTANT — Add() puts the component
+	// straight into Game.Components (KNI journals the updateable/drawable lists, so mid-update
+	// mutation is safe and a new component never Updates before the next tick; it IS visible to
+	// collisions/Oracle scans/purges immediately, which is the point). Deaths stay QUEUED in
+	// deathList (instant removal would corrupt the collision pass and change within-tick
+	// gameplay) but flush TWICE per tick: at the existing mid-tick point AND at top-of-tick
+	// (TopOfTickFlush), so a collision-phase kill can never run one more full "zombie" Update.
+	// NOTE: KNI runs component.Initialize() synchronously inside collection.Add, so every call
+	// site must fully configure (Setup) BEFORE Add — enforced by tools/audit_add_order.py.
 	private List<GameComponent> deathList = new List<GameComponent>();
 
 	private List<GameComponent> idleList = new List<GameComponent>();
 
 	private Queue<List<GameComponent>> inactive = new Queue<List<GameComponent>>();
 
+	// Standing purge filter: Purge<T> records T here, and any Add of a matching type until the
+	// next top-of-tick flush is diverted to the recycle pool — closing the "clear-all ran early
+	// in the tick, a component updating later re-spawned" race (incl. collision-phase kill side
+	// effects the same tick). Cleared in TopOfTickFlush, BEFORE the next tick's component
+	// updates, so legitimate next-tick spawns are never eaten.
+	private List<Type> pendingPurges = new List<Type>();
+
 	private Game game;
 
 	// Perf batch 2: a persistently-maintained list of every IComponentWatcher present in the
-	// world, so an add/remove no longer rescans all of (collection + birthList + idleList +
-	// inactive) and type-checks each to find the watchers — the notify is now O(watchers).
-	// This list mirrors the multiset (collection + idleList + Σinactive); the small, transient
-	// birthList (this frame's pending adds) is iterated directly at notify time, matching the
-	// original scan order (collection/birth/idle/inactive) closely enough — every watcher's
-	// reaction keys off e.GameComponent alone, so notify order is immaterial. Collection
-	// membership is tracked via the ComponentAdded/Removed events (which also fire for the few
-	// components added straight to Game.Components, bypassing Add()); the other sub-lists are
-	// tracked at their own mutation sites (Recycle/Push/Pop/Purge/ClearCache/FullReset).
+	// world, so an add/remove no longer rescans all of (collection + idleList + inactive) and
+	// type-checks each to find the watchers — the notify is now O(watchers). This list mirrors
+	// the multiset (collection + idleList + Σinactive); every watcher's reaction keys off
+	// e.GameComponent alone, so notify order is immaterial. Collection membership is tracked
+	// via the ComponentAdded/Removed events (which also fire for the few components added
+	// straight to Game.Components, bypassing Add()); the other sub-lists are tracked at their
+	// own mutation sites (Recycle/Push/Pop/ClearCache/FullReset).
 	private List<IComponentWatcher> watchers = new List<IComponentWatcher>();
-
-	private List<GameComponent> birthListCopy = new List<GameComponent>();
 
 	private List<GameComponent> deathListCopy = new List<GameComponent>();
 
 	ComponentBin IComponentBinService.ComponentBin => this;
 
+	// The owning Game — for the eaBinTest console suite (Compat/BinTest.cs).
+	internal Game Game => game;
+
 	public void FullReset()
 	{
-		birthList.Clear();
 		deathList.Clear();
 		idleList.Clear();
 		inactive.Clear();
+		pendingPurges.Clear();
 		RebuildWatchers();
 	}
 
@@ -107,7 +120,13 @@ public class ComponentBin : IComponentBinService
 		return true;
 	}
 
-	public void Purge<T>() where T : GameComponent
+	// standing=true (the default) arms the standing filter: any Add of a T until the next
+	// top-of-tick flush (i.e. from components updating later this tick, or kill side effects
+	// in this tick's collision phase) is diverted to the recycle pool instead of resurrecting
+	// the cleared world. Pass standing=false ONLY for a clear-the-field-and-respawn-NOW purge
+	// whose own call chain re-adds a T in the same tick (GameScene.UpdateStartup: the purge is
+	// immediately followed by SpawnAllPlayers + the Get Ready banners).
+	public void Purge<T>(bool standing = true) where T : GameComponent
 	{
 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
 		//IL_001a: Expected O, but got Unknown
@@ -119,16 +138,9 @@ public class ComponentBin : IComponentBinService
 				Remove(val);
 			}
 		}
-		for (int i = 0; i < birthList.Count; i++)
+		if (standing && !pendingPurges.Contains(typeof(T)))
 		{
-			GameComponent val2 = birthList[i];
-			if (val2 is T)
-			{
-				birthList.RemoveAt(i);
-				idleList.Add(val2);
-				WatcherAdd(val2);
-				i--;
-			}
+			pendingPurges.Add(typeof(T));
 		}
 	}
 
@@ -147,10 +159,6 @@ public class ComponentBin : IComponentBinService
 				list.Add(val);
 				WatcherAdd(val);
 			}
-		}
-		foreach (GameComponent birth in birthList)
-		{
-			birth.Enabled = false;
 		}
 	}
 
@@ -223,9 +231,9 @@ public class ComponentBin : IComponentBinService
 		NotifyWatchers(args, added: false);
 	}
 
-	// Notify the persistent watcher set, then this frame's still-pending birthList adds (which
-	// the original scan also covered). Snapshot the counts so a reaction that queues an add/
-	// remove (deferred to deathList/birthList) can't disturb the in-flight iteration.
+	// Notify the persistent watcher set. Snapshot the count so a reaction that adds/removes
+	// (instant add appends to `watchers` inline; removals are deferred to deathList) can't
+	// disturb the in-flight iteration.
 	private void NotifyWatchers(GameComponentCollectionEventArgs args, bool added)
 	{
 		int n = watchers.Count;
@@ -239,21 +247,6 @@ public class ComponentBin : IComponentBinService
 			else
 			{
 				w.OnComponentRemoved(args);
-			}
-		}
-		int m = birthList.Count;
-		for (int i = 0; i < m; i++)
-		{
-			if (birthList[i] is IComponentWatcher w)
-			{
-				if (added)
-				{
-					w.OnComponentAdded(args);
-				}
-				else
-				{
-					w.OnComponentRemoved(args);
-				}
 			}
 		}
 	}
@@ -272,27 +265,37 @@ public class ComponentBin : IComponentBinService
 		}
 	}
 
+	// Mid-tick flush (Game1.UpdateInner, after component updates / before collisions): deaths
+	// queued during the update phase leave here, exactly like the original — a dying component
+	// never collides in the tick it self-removed. (Births are instant now; nothing to flush.)
 	public void Update()
 	{
-		birthListCopy.Clear();
-		foreach (GameComponent birth in birthList)
-		{
-			birthListCopy.Add(birth);
-		}
-		birthList.Clear();
-		foreach (GameComponent item in birthListCopy)
-		{
-			((Collection<IGameComponent>)(object)collection).Add((IGameComponent)(object)item);
-		}
+		FlushDeaths();
+	}
+
+	// Top-of-tick flush (Game1.UpdateInner, BEFORE component updates): deaths queued during the
+	// previous tick's collision phase leave here, so a killed component never gets one more
+	// full "zombie" Update (moving, firing, spawning — the final-bullet-across-the-paused-
+	// screen class of bug). Also the expiry point of the standing purge filter: clearing it
+	// here, before any component updates, means the filter covers the purge tick's stragglers
+	// + collision side effects + removal cascades, but never eats a legitimate next-tick spawn.
+	public void TopOfTickFlush()
+	{
+		FlushDeaths();
+		pendingPurges.Clear();
+	}
+
+	private void FlushDeaths()
+	{
 		deathListCopy.Clear();
 		foreach (GameComponent death in deathList)
 		{
 			deathListCopy.Add(death);
 		}
 		deathList.Clear();
-		foreach (GameComponent item2 in deathListCopy)
+		foreach (GameComponent item in deathListCopy)
 		{
-			((Collection<IGameComponent>)(object)collection).Remove((IGameComponent)(object)item2);
+			((Collection<IGameComponent>)(object)collection).Remove((IGameComponent)(object)item);
 		}
 	}
 
@@ -324,10 +327,6 @@ public class ComponentBin : IComponentBinService
 			GameComponent val = item;
 			flag = flag || val is T;
 		}
-		foreach (GameComponent birth in birthList)
-		{
-			flag = flag || birth is T;
-		}
 		return flag;
 	}
 
@@ -339,30 +338,81 @@ public class ComponentBin : IComponentBinService
 		// bonus powerup drops) is swallowed into the recycle pool; the host's authoritative
 		// copy replicates in as a puppet instead. Single branch outside a net session.
 		if (EvilAliensWeb.Compat.Net.NetSession.SuppressWorldSpawn(component)
-			&& !((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component)
-			&& !birthList.Contains(component))
+			&& !((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))
 		{
-			deathList.Remove(component);
-			if (!idleList.Contains(component))
+			DivertToIdle(component);
+			return;
+		}
+		// Standing purge filter: this type was cleared this tick — a late same-tick spawn
+		// (or a resurrect-by-Add of an instance the purge already queued dead) must not
+		// outlive the wipe. See pendingPurges / TopOfTickFlush.
+		if (IsPendingPurged(component))
+		{
+			if (!((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))
 			{
-				idleList.Add(component);
-				WatcherAdd(component);
+				DivertToIdle(component);
+			}
+			if (EvilAliensWeb.Compat.DebugFlags.BinLog)
+			{
+				Console.WriteLine("[bin] purge-filter diverted " + ((object)component).GetType().Name);
 			}
 			return;
 		}
 		deathList.Remove(component);
-		if (!birthList.Contains(component))
+		if (((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))
 		{
-			if (((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))
+			component.Initialize();
+			component.Enabled = true;
+			return;
+		}
+		// Instant add: enters Game.Components NOW (KNI runs Initialize inside this call and
+		// journals the update/draw registration, so it first Updates next tick but is already
+		// visible to collisions, Oracle scans and purges — no hidden pending world).
+		((Collection<IGameComponent>)(object)collection).Add((IGameComponent)(object)component);
+		// Pause-aware: a world object added while the world is pushed joins the freeze (and
+		// the newest pause layer, so Pop thaws it). Non-world components (pause menus,
+		// darkener, overlays) must keep running — they ARE the pause UI.
+		if (inactive.Count > 0 && component is AlienDrawableGameComponent)
+		{
+			component.Enabled = false;
+			List<GameComponent> newest = null;
+			foreach (List<GameComponent> layer in inactive)
 			{
-				component.Initialize();
+				newest = layer;
 			}
-			else
+			newest.Add(component);
+			WatcherAdd(component);
+			if (EvilAliensWeb.Compat.DebugFlags.BinLog)
 			{
-				birthList.Add(component);
+				Console.WriteLine("[bin] pause-froze " + ((object)component).GetType().Name);
 			}
 		}
-		component.Enabled = true;
+		else
+		{
+			component.Enabled = true;
+		}
+	}
+
+	private void DivertToIdle(GameComponent component)
+	{
+		deathList.Remove(component);
+		if (!idleList.Contains(component))
+		{
+			idleList.Add(component);
+			WatcherAdd(component);
+		}
+	}
+
+	private bool IsPendingPurged(GameComponent component)
+	{
+		for (int i = 0; i < pendingPurges.Count; i++)
+		{
+			if (pendingPurges[i].IsInstanceOfType(component))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public void Remove(GameComponent component)

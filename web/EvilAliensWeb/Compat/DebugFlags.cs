@@ -460,6 +460,13 @@ namespace EvilAliensWeb.Compat
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
 		public static bool WallsOnly { get; private set; }
 
+		// A/B the mip chain (?nomips): WebContentManager.TryLoadDds uploads level 0 only, so every
+		// .dds falls back to plain bilinear -- the before/after for card 110153c7, where a tower
+		// shaft spends ~10.8 cells of 756-v1 down its length and its far end aliases without mips.
+		// Affects load only, so it must be set at boot; toggling it later changes nothing already
+		// decoded. Out of Active (a pure render toggle, and it must not make a co-op peer reject us).
+		public static bool NoMips { get; private set; }
+
 		// TEMP diagnostic (?walltrace): Wall.Draw logs, per wall instance, the first frame its top
 		// faces appear vs the first frame its shafts appear (with Position.Y), plus a coarse sample of
 		// (posY, topFaces, shaftQuads) as it enters -- to pin down the reported "top slides in before
@@ -1204,6 +1211,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "walltrace":
 					WallTrace = IsOn(val);
+					break;
+				case "nomips":
+					NoMips = IsOn(val);
 					break;
 				case "wallpoptest":
 					WallPopTest = IsOn(val);

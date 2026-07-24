@@ -30,6 +30,7 @@ Run:  python tools/walls/preview_wall3d.py [--tile <f>] [--mirror] [--compare] [
 Writes tools/walls/_preview_wall3d*.png (gitignored). --help for the flags.
 """
 import argparse
+import os
 
 import numpy as np
 from PIL import Image
@@ -177,13 +178,14 @@ def solve_sd(A, B, px, py):
 def sample(tex, u, v):
     """BILINEAR CLAMP -- exactly what DrawGeometry3D binds (SamplerState.LinearClamp).
 
-    Bilinear because point sampling shows a moire the game does not, and it matters most at
-    high ?wallsidetile where the shaft minifies hard (756-v1 ships with no mip chain, so this
-    is genuinely all the filtering there is). CLAMP rather than wrap because the game clamps:
-    at the sheet's own 8->0 wrap the caller emits u == 1 exactly, and clamping there taps the
-    last texel twice instead of blending into the first. That half-texel is the game's real
-    behaviour and must not be prettied up here -- on a PADDED .dds the same tap reaches the
-    transparent pad instead, which is a pipeline problem the tool should not hide."""
+    Bilinear because point sampling shows a moire the game does not. CLAMP rather than wrap
+    because the game clamps: at the sheet's own 8->0 wrap the caller emits u == 1 exactly, and
+    clamping there taps the last texel twice instead of blending into the first. That half-texel
+    is the game's real behaviour and must not be prettied up here -- on a PADDED .dds the same
+    tap reaches the pad's edge gutter, which replicates the edge, so clamp is what it resolves to
+    either way (tools/textures/check_pad_bleed.py asserts exactly that, at every mip level).
+
+    This is ONE level. Trilinear over a pyramid is sample_tri below."""
     th, tw = tex.shape[:2]
     x = u * tw - 0.5
     y = v * th - 0.5
@@ -194,6 +196,56 @@ def sample(tex, u, v):
     top = tex[y0, x0] * (1 - fx) + tex[y0, x1] * fx
     bot = tex[y1, x0] * (1 - fx) + tex[y1, x1] * fx
     return top * (1 - fy) + bot * fy
+
+
+def mip_pyramid(tex):
+    """The chain the GPU samples, modelled from the PNG.
+
+    Mirrors build_textures.py's build_mip_chain: successive integer halving (floor, min 1) with
+    a BOX/area average, built from the LOGICAL content alone. The shipped .dds re-derives its pad
+    per level, so the pad never filters into the content and the levels here are the same
+    surfaces the GPU holds, minus BC3's lossy step -- which is not what aliasing is about.
+    Modelling it from the PNG keeps this tool a pure read of the art, with no BC decoder."""
+    pyr = [tex.astype(np.float64)]
+    while pyr[-1].shape[0] > 1 or pyr[-1].shape[1] > 1:
+        a = pyr[-1]
+        h2, w2 = max(1, a.shape[0] // 2), max(1, a.shape[1] // 2)
+        pyr.append(a[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2, a.shape[2]).mean(axis=(1, 3)))
+    return pyr
+
+
+def sample_tri(pyr, u, v, lod):
+    """TRILINEAR CLAMP: bilinear within two adjacent levels, lerped by the fractional LOD.
+
+    What SamplerState.LinearClamp resolves to once the texture has levels -- KNI maps
+    TextureFilter.Linear to LINEAR_MIPMAP_LINEAR whenever LevelCount > 1, so this needs no
+    engine-side opt-in. Levels are grouped and sampled in one pass each rather than sampling all
+    11 everywhere; a face typically spans only three or four."""
+    maxl = len(pyr) - 1
+    lod = np.clip(lod, 0.0, float(maxl))
+    l0 = np.floor(lod).astype(int)
+    frac = (lod - l0)[..., None]
+    out = np.zeros(np.shape(u) + (pyr[0].shape[2],), float)
+    for lv in np.unique(l0):
+        m = l0 == lv
+        lo = sample(pyr[lv], u[m], v[m])
+        hi = sample(pyr[min(lv + 1, maxl)], u[m], v[m])
+        out[m] = lo * (1.0 - frac[m]) + hi * frac[m]
+    return out
+
+
+def lod_from(uv, uv_dx, uv_dy, tw, th):
+    """log2 of the worst screen-space texel footprint -- the GL/D3D LOD selection rule.
+
+    The derivative MUST be taken on the UNWRAPPED cell walk. Differencing after the `% 8` wrap
+    steps a whole sheet at every crossing, which reads as enormous minification and would slam
+    the one pixel row where the sheet wraps to the coarsest level -- a bug that looks exactly
+    like a seam."""
+    scale = np.array([tw, th], float)
+    dx = (uv_dx - uv) * scale
+    dy = (uv_dy - uv) * scale
+    rho = np.maximum(np.hypot(dx[..., 0], dx[..., 1]), np.hypot(dy[..., 0], dy[..., 1]))
+    return np.log2(np.maximum(rho, 1e-6))
 
 
 def grid_from_level3(path):
@@ -211,7 +263,26 @@ def grid_from_level3(path):
     return g
 
 
-def render(blocks, pos, tex, side_tile=SIDE_TILE, mirror=False):
+def face_uv(A, B, alongA, alongB, c_cap, c_base, along_is_x, px, py, shaftH):
+    """(uv, d, ok) for one face at the given screen points. The cell walk is left UNWRAPPED.
+
+    Split out of render() so the same solve can be re-run at px+1 / py+1 for the screen-space
+    derivative the LOD needs. Wrapping is applied by the caller, at sample time only."""
+    r = solve_sd(A, B, px, py)
+    if r is None:
+        return None
+    d, s, ok = r
+    z = EYE * (1.0 / np.clip(d, 1e-6, None) - 1.0)
+    f = np.clip(z / shaftH, 0.0, 1.0)
+    along = alongA + (alongB - alongA) * s
+    down = (c_cap + (c_base - c_cap) * f) / 8.0     # unwrapped: may run below 0 or past 1
+    uv = np.stack([along, down] if along_is_x else [down, along], axis=-1)
+    return uv, d, ok, f
+
+
+def render(blocks, pos, tex, side_tile=SIDE_TILE, mirror=False, pyr=None):
+    """`pyr` (from mip_pyramid) switches the shafts from bilinear to trilinear -- the A/B for
+    card 110153c7. None reproduces the no-mip status quo exactly."""
     h, w = blocks.shape
     bw = bh = 800.0 / w
     cw, ch = tex.shape[1] // 8, tex.shape[0] // 8
@@ -275,22 +346,29 @@ def render(blocks, pos, tex, side_tile=SIDE_TILE, mirror=False):
         if y1 < VANISH[1] and free(j, i + 1): faces.append((np.array([x0, y1]), np.array([x1, y1]), u0, u1, ic + 1, ic + 1 - walk * rep_v, True, s_f))
 
         for (A, B, alongA, alongB, c_cap, c_base, along_is_x, shade) in faces:
-            r = solve_sd(A, B, px, py)
+            args = (A, B, alongA, alongB, c_cap, c_base, along_is_x)
+            r = face_uv(*args, px, py, shaftH)
             if r is None:
                 continue
-            d, s, ok = r
+            uv, d, ok, f = r
             if not ok.any():
                 continue
-            # d = EYE/(EYE+z) -> z, and the height fraction along the face
-            z = EYE * (1.0 / np.clip(d, 1e-6, None) - 1.0)
-            f = np.clip(z / shaftH, 0.0, 1.0)
-            along = alongA + (alongB - alongA) * s
             # The cell walk, wrapped into the sheet. Wall.AddFace has to CUT the face at every
             # integer crossing (the GPU lerps UVs between vertices, and the wrap has to stay
             # inside the logical region of a padded .dds); solving per pixel here, it is one mod.
-            down = ((c_cap + (c_base - c_cap) * f) % 8.0) / 8.0
-            u, v = (along, down) if along_is_x else (down, along)
-            texel = sample(tex, u, v).astype(float)
+            # Only the DOWN axis wraps -- along-edge already spans one cell.
+            uvw = uv.copy()
+            uvw[..., 1 if along_is_x else 0] %= 1.0
+            u, v = uvw[..., 0], uvw[..., 1]
+            if pyr is None:
+                texel = sample(tex, u, v).astype(float)
+            else:
+                # solve_sd only degenerates on A/B, which these share with the base solve, so a
+                # non-None r above guarantees both of these are non-None too.
+                rx = face_uv(*args, px + 1.0, py, shaftH)
+                ry = face_uv(*args, px, py + 1.0, shaftH)
+                lod = lod_from(uv, rx[0], ry[0], tex.shape[1], tex.shape[0])
+                texel = sample_tri(pyr, u, v, lod)
             src = texel * (SIDE_DARK * shade)
             # Real distance fog: LERP toward the haze colour (a sprite tint could only multiply).
             fw = fog_factor(d, DEPTH)[..., None]
@@ -313,13 +391,33 @@ def render(blocks, pos, tex, side_tile=SIDE_TILE, mirror=False):
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
-def tower_crop(tex, tile, mirror):
+def tower_crop(tex, tile, mirror, pyr=None, dy=0.0):
     """One isolated tower, framed tight, for the side-by-side sheets. A lone block shows both
     of its faces and its full shaft, which is what the side texturing has to be judged on --
     in the contiguous level3 grid the shafts merge into a mass and hide it."""
     iso = np.zeros((9, 9), dtype=bool)
     iso[6, 6] = True
-    return render(iso, np.array([0.0, -40.0]), tex, tile, mirror)[410:600, 470:655]
+    return render(iso, np.array([0.0, -40.0 + dy]), tex, tile, mirror, pyr)[410:600, 470:655]
+
+
+def shimmer(tex, tile, pyr, steps=8):
+    """Aliasing as a NUMBER: mean per-pixel temporal stddev over a sub-pixel scroll sweep.
+
+    The card's complaint is that the shaft shimmers *because the wall scrolls*, which no still
+    frame can show -- so measure the thing itself. The tower is nudged across ONE screen pixel in
+    `steps` sub-pixel increments: over that span its geometry is essentially unchanged, but at
+    high tiling the texture slides many texels under every screen pixel. A well-filtered surface
+    therefore barely moves in value (low stddev) while an under-sampled one jitters (high).
+
+    Averaged only over shaft pixels -- the background is a flat fill with zero variance in both
+    modes and would just dilute the contrast. Geometry is identical across modes, so both are
+    scored on exactly the same pixels."""
+    frames = np.stack([tower_crop(tex, tile, False, pyr, k / steps) for k in range(steps)])
+    bg = np.array([10, 30, 55], float)
+    mask = np.abs(frames[0].astype(float) - bg).sum(axis=-1) > 12
+    if not mask.any():
+        return float("nan")
+    return float(frames.astype(float).std(axis=0).mean(axis=-1)[mask].mean())
 
 
 def filmstrip(panels, path, scale=2):
@@ -344,30 +442,42 @@ if __name__ == "__main__":
     ap.add_argument("--compare", action="store_true",
                     help="also write the before/after A/B sheet (doubles the run)")
     ap.add_argument("--ladder", action="store_true",
-                    help="also write the tiling ladder (mirror | 1 | 2 | 4 | 8) -- how the no-mip aliasing grows with density")
+                    help="also write the tiling ladder (mirror | 1 | 2 | 4 | 8), bilinear-only on top "
+                         "and trilinear below -- how the aliasing grows with density, and what mips do to it")
+    ap.add_argument("--mips", action="store_true",
+                    help="render the main sheet trilinear over a mip pyramid (what the shipped "
+                         "mipped 756-v1.dds gets). Default is bilinear-only, the pre-card look")
+    ap.add_argument("--shimmer", action="store_true",
+                    help="measure aliasing as a NUMBER instead of by eye: mean per-pixel temporal "
+                         "stddev across a sub-pixel scroll sweep, per tiling, with and without mips")
     args = ap.parse_args()
     tile, mirror = args.tile, args.mirror
 
     matrix_check()
     tex = np.array(Image.open(WALL_PNG).convert("RGB"))
+    pyr = mip_pyramid(tex)
     print(f"[image] {BANDS_NOTE}")
+    print(f"[image] mip pyramid: {len(pyr)} levels, "
+          + " ".join(f"{p.shape[1]}x{p.shape[0]}" for p in pyr[:5]) + " ...")
 
     # Row 1: isolated blocks on a 9-wide grid, so each tower's shaft is legible on its own and
     # the lean-toward-the-VP / painter's-order behaviour can be read by eye.
     iso = np.zeros((9, 9), dtype=bool)
     iso[::2, ::2] = True
-    row1 = [render(iso, np.array([0.0, py]), tex, tile, mirror) for py in (-150.0, -40.0, 60.0)]
+    mp = pyr if args.mips else None
+    row1 = [render(iso, np.array([0.0, py]), tex, tile, mirror, mp) for py in (-150.0, -40.0, 60.0)]
 
     # Row 2: the real level3.txt, where blocks are contiguous and the towers merge into masses.
     g = grid_from_level3(LEVEL3)
-    row2 = [render(g, np.array([0.0, py]), tex, tile, mirror) for py in (-260.0, -120.0, 20.0)]
+    row2 = [render(g, np.array([0.0, py]), tex, tile, mirror, mp) for py in (-260.0, -120.0, 20.0)]
 
     sheet = Image.fromarray(np.concatenate([np.concatenate(row1, axis=1),
                                             np.concatenate(row2, axis=1)], axis=0))
     sheet.save("tools/walls/_preview_wall3d.png")
     print(f"[image] wrote tools/walls/_preview_wall3d.png  ({sheet.size[0]}x{sheet.size[1]})")
     print("[image]   row 1: isolated towers (3 scroll positions)   row 2: real level3.txt")
-    print(f"[image]   sideTile={tile}" + ("   MIRROR (pre-card look)" if mirror else ""))
+    print(f"[image]   sideTile={tile}" + ("   MIRROR (pre-card look)" if mirror else "")
+          + ("   TRILINEAR (mipped)" if args.mips else "   bilinear only (no mips)"))
 
     # A/B: the same three framings before and after card 0f7fc977. Top row is the old side
     # texturing (one cell, mirrored about the rim); bottom row is the tile continuing out of the
@@ -387,7 +497,26 @@ if __name__ == "__main__":
     # weighed against each other on one image rather than by re-running.
     if args.ladder:
         rungs = [("mirror", 1.0, True)] + [(str(t), t, False) for t in (1.0, 2.0, 4.0, 8.0)]
-        img = filmstrip([tower_crop(tex, t, m) for (_, t, m) in rungs],
+        top = filmstrip([tower_crop(tex, t, m) for (_, t, m) in rungs],
                         "tools/walls/_preview_wall3d_ladder.png")
-        print(f"[image] wrote tools/walls/_preview_wall3d_ladder.png  ({img.size[0]}x{img.size[1]})")
+        bot = filmstrip([tower_crop(tex, t, m, pyr) for (_, t, m) in rungs],
+                        "tools/walls/_preview_wall3d_ladder_mips.png")
+        both = Image.new("RGB", (top.size[0], top.size[1] * 2 + 8), (255, 255, 255))
+        both.paste(top, (0, 0))
+        both.paste(bot, (0, top.size[1] + 8))
+        both.save("tools/walls/_preview_wall3d_ladder.png")
+        os.remove("tools/walls/_preview_wall3d_ladder_mips.png")
+        print(f"[image] wrote tools/walls/_preview_wall3d_ladder.png  ({both.size[0]}x{both.size[1]})")
         print("[image]   panels: " + " | ".join(n for (n, _, _) in rungs))
+        print("[image]   row 1: bilinear only (no mip chain)   row 2: TRILINEAR (mipped .dds)")
+
+    # Aliasing as data. A still frame cannot show a shimmer, so this is the honest read on both
+    # the fix AND the card's fallback question (mips at tile 4 vs simply dropping the tiling).
+    if args.shimmer:
+        print("[shimmer] mean per-pixel temporal stddev over a 1px sub-pixel scroll sweep "
+              "(lower = steadier under scroll)")
+        print(f"  {'sideTile':>9} {'bilinear':>10} {'trilinear':>10} {'change':>9}")
+        for t in (1.0, 2.0, 4.0, 8.0):
+            a, b = shimmer(tex, t, None), shimmer(tex, t, pyr)
+            mark = "  <-- Wall.DefaultSideTile" if t == SIDE_TILE else ""
+            print(f"  {t:>9} {a:>10.3f} {b:>10.3f} {(b / a - 1) * 100:>8.1f}%{mark}")

@@ -74,6 +74,11 @@ generate much of the art/audio referenced here.
   While that texel was transparent black, the final ~1px of every tile lost up to 50% of its RGB
   **and alpha** — a hairline at every tile boundary, dark over the opaque Mars sky, bright where the
   `marshills` silhouettes sit over it (Trello `4ddcd13f`; measured -64 luminance in the sky band).
+  **On a MIPPED `.dds` that gutter has to be re-derived per level, and the pipeline does it** — the
+  pad is metadata, not content, so each level downsamples the LOGICAL image and pads *that* (see
+  tools/CLAUDE.md). Filtering the padded canvas instead (a plain `texconv -m 0`) blends content
+  into transparent pad as the levels shrink: a 4 px gutter survives `log2(4)=2` levels and then
+  fails hard. `check_pad_bleed.py` asserts the property at **every** level, which is what catches it.
   `build_textures.py`'s `edge_gutter()` therefore replicates the logical edge into the first 4 px of
   the pad (last column right, last row down, corner), which makes the filtered result identical to a
   true clamp at **any** pad size, and keeps the sampled 4×4 BC3 blocks free of transparent-black
@@ -490,11 +495,25 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     crossing on top of the `bands` cuts and each strip maps through the one cell its midpoint falls
     in — every emitted UV stays inside the logical sheet. Cost: ~4 → ~14 quads/face at the baked
     tiling, one batched call unchanged, tower pass 0.73 → 1.29 ms.
-  - **756-v1 ships with NO mip chain**, so a high `?wallsidetile` minifies with bilinear and
-    nothing else, and the far end of a shaft aliases — weigh it on `preview_wall3d.py --ladder`
-    (one tower per tiling). That tool's `sample()` is bilinear CLAMP on purpose: it models
-    `DrawGeometry3D`'s `LinearClamp` exactly, so it neither invents a moire (point sampling would)
-    nor prettifies the sheet's own 8→0 wrap (wrapping would).
+  - **756-v1 SHIPS A MIP CHAIN** (card `110153c7`); it is the only mipped `.dds` in the project.
+    At the baked `?wallsidetile=4` a shaft spends ~10.8 cells down its length, so its far end
+    minifies hard, and with bilinear alone it aliased — which read as a SHIMMER because the wall
+    scrolls, so no still frame could show it. Nothing engine-side opts in: KNI maps
+    `TextureFilter.Linear` to `LINEAR_MIPMAP_LINEAR` as soon as `LevelCount > 1`, so uploading
+    the levels (`WebContentManager.TryLoadDds`) is the whole change, and `SamplerState.LinearClamp`
+    becomes trilinear by itself. NPOT + mips needs **WebGL 2**, which BlazorGL uses (verified: the
+    canvas holds a `webgl2` context). **The tower TOPS are mipped too**, not just the shafts — they
+    are sprite-drawn at ~5x minification (a 156px cell into a ~32px block), so they pick a level as
+    well; that is a fix, not a regression, but it is why this touched more than the shafts.
+    A/B it live with **`?nomips`** (uploads level 0 only, so every `.dds` falls back to bilinear).
+    Weigh tilings on `preview_wall3d.py --ladder` (bilinear row over trilinear row) and
+    **`--shimmer`**, which scores the aliasing as a number instead of by eye: bilinear worsens with
+    density (4.55 / 5.57 / 6.56 / 7.38 at tile 1/2/4/8) while trilinear stays flat (~3.1-3.4). So
+    mips at tile 4 are steadier than bilinear at tile 1, and **dropping `Wall.DefaultSideTile`
+    toward 2 is NOT the cheaper fix** — it is strictly worse and loses the "reads tall" win.
+    That tool's `sample()` is bilinear CLAMP on purpose: it models `DrawGeometry3D`'s `LinearClamp`
+    exactly, so it neither invents a moire (point sampling would) nor prettifies the sheet's own
+    8→0 wrap (wrapping would); `sample_tri` is the trilinear form layered on top.
   - Lifetime: `Wall.DeathY` defers unload past the bottom edge (a base leads/trails its cap by
     ~154px, so dying at y>600 popped visible towers — this also delays the level's next event
     ~0.6s, intended); `Wall.EntryLead` spawns higher so towers enter base-first (bottom-row grids

@@ -204,6 +204,8 @@ generate much of the art/audio referenced here.
   self-test),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
+  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
+  so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
@@ -1031,7 +1033,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v7):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v8):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -1041,7 +1043,9 @@ interpolation feel, both gated on real-network playtests.
   role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410;
   **v6** appends the peer-identity token to the handshake -- card 0b8a300b;
   **v7** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
-  card b0ab09ec, see the Score/lives bullet).
+  card b0ab09ec, see the Score/lives bullet;
+  **v8** appends a `blockedSlots` mask to the handshake (HelloBytes 21 -> 22) so the host can
+  grant a seat that is free on BOTH rosters -- card c0229c57, see the roster-slots bullet).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1195,6 +1199,25 @@ interpolation feel, both gated on real-network playtests.
   its own `AddPlayer(AI)` / a later grant can't reuse it. Host-side couch joins allocate
   locally. `GameScene.AddPlayer` routes to `NetSession.TrySeatLocalJoin` while a session is up;
   offline behaviour is byte-identical.
+  - **The primary grant is a NEGOTIATION, not a guess (card c0229c57, protocol v8).** The host
+    allocates out of its OWN free slots and cannot see the joiner's, so it used to grant a seat
+    the joiner might already hold -- which desynced the pairing silently and permanently (JIP
+    pass trap 3 has the full story). The client's hello now carries a `blockedSlots` mask of the
+    slots it cannot seat its primary in, and `NetSession.FirstMutuallyFreeSlot(hostOccupied,
+    peerBlocked)` picks one free on both. Three rules hold it together:
+    - **The mask is only non-zero while a `GameScene` is up.** At the menu -- where BOTH the
+      menu-lobby and the join-in-progress joiner hello from -- the roster is leftover
+      bookkeeping from the last level or attract demo, which the launch path's `ResetPlayers()`
+      wipes before seating us. Reporting it would refuse seats for no reason.
+    - **`peerPrimarySlot` is assigned ONLY on a settled adoption.** `Update`'s retry condition
+      is `!PeerUp || peerPrimarySlot == SlotNone`, so setting it on a FAILED adopt silences the
+      1 Hz hello on both peers and the pairing can never recover. This is the bug the card was
+      about; treat it as an invariant of `AdoptGrantedPrimarySlot`, not a fact about one branch.
+    - **It terminates.** Each round either seats the joiner or adds a slot to the mask, and the
+      host never re-offers a blocked seat; when nothing works on both sides it sends
+      `RejectFull` ("Game full"). The host's own game SURVIVES that -- `Stop()` does not exit a
+      level and `NetListing.ComputeEligible` needs `!NetSession.Active`, so a listed host drops
+      back to single-player and re-lists. Verify with `eaSlotTest()`.
   - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
     slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
     tab pairs WHILE it boots, so the grant can land before the seat is taken) and
@@ -1551,16 +1574,32 @@ interpolation feel, both gated on real-network playtests.
     `menuSession`-gated, so a `listedSession` host never rejects. **Put `?noattract` on the
     joiner's URL** (out of `Active` since card af63f958) rather than driving its lobby against a
     20s idle timer.
-  - **JIP pass trap 3 -- a grant whose TARGET seat is taken desyncs SILENTLY and permanently.**
-    `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it is the *granted* slot
-    being occupied that bites -- a joiner merely seated in slot 0 with slot 1 free moves across
-    fine and logs `moved local primary slot 0 -> 1`. When it does refuse,
-    `AdoptGrantedPrimarySlot` logs `could not move local primary 0 -> 1 (slot busy) -- staying
-    put` and the peers disagree forever (`pri=0/0` vs `pri=0/1`), the joiner never builds a remote
-    puppet (`remoteShip=0`, `buf=0ms`), and NOTHING surfaces to the player. It cannot self-heal:
-    `peerPrimarySlot` is assigned BEFORE that early return, which satisfies the
-    `peerPrimarySlot == SlotNone` term and stops the hello retry on both peers. Observed once,
-    after the joiner had visited Start/Controls and backed out before joining.
+  - **JIP pass trap 3 -- a grant whose TARGET seat was taken used to desync SILENTLY and
+    permanently. FIXED in card c0229c57 (protocol v8); the trap is recorded because the shape is
+    instructive.** `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it was the
+    *granted* slot being occupied that bit -- a joiner merely seated in slot 0 with slot 1 free
+    moves across fine and logs `moved local primary slot 0 -> 1`. On refusal
+    `AdoptGrantedPrimarySlot` logged `... (slot busy) -- staying put` and the peers disagreed
+    forever (`pri=0/0` vs `pri=0/1`), the joiner never built a remote puppet (`remoteShip=0`,
+    `buf=0ms`), and NOTHING surfaced to the player.
+    **It was reachable with no debug flags at all**, which is the part worth remembering: the
+    menu's roster is whatever the last scene left behind (`GameScene.Terminate` does NOT reset
+    it; only the launch paths' `ResetPlayers()` do), and the attract demo seats MORE than one --
+    `mainMenu_DemoSelected` seats slot 0, then `Demo1/2/3.Initialize` adds 3 more on a 20% roll
+    and 1 more on a further 40% roll. So "idle at the menu -> attract demo -> key out -> Online
+    Co-op -> Join" left slot 1 seated ~60% of the time, and a couch session backed out to the
+    menu did it every time.
+    The fix is three things. (a) The host no longer GUESSES: the v8 handshake carries a
+    `blockedSlots` mask (client -> host) so `ReserveRemotePrimarySlot` grants a seat free on
+    BOTH rosters -- see the roster-slots bullet. (b) The client only moves a seat when a
+    `GameScene` is up; at the menu the roster is bookkeeping `ResetPlayers()` is about to wipe,
+    so there is nothing to move. (c) A grant that still lands badly RENEGOTIATES rather than
+    settling -- `peerPrimarySlot` is now assigned only on a settled adoption, which is what keeps
+    the 1 Hz hello alive so the host can re-grant. **That last one is the general lesson: any
+    early return in `AdoptGrantedPrimarySlot` that leaves `peerPrimarySlot` set silences the
+    retry on BOTH peers and makes the session unrecoverable.** Verify with `eaSlotTest()`.
+    (Note the `?noattract` point in trap 2 is about the TEST RIG only -- a real player never
+    passes flags, so the attract-demo roster is exactly how this reached them.)
   - **JIP pass trap 4 -- use a LOCAL signaling rig, not the deployed one.** All four entry points
     read `DebugFlags.NetSignal` (`NetListing.Tick`, `NetGameBrowser.Start`, `NetLobby` host/join,
     `WebRtcTransport`), so `uvicorn main:app --port 8091` in `server/signal` +

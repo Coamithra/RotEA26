@@ -1343,14 +1343,13 @@ internal abstract class GameScene : Scene
 		// The spread across the spawn edge is keyed to the player's ORDINAL among the seated
 		// slots (not the raw slot index), so a dense offline roster spawns exactly where it
 		// always did while a sparse one still spreads evenly.
-		int ordinal = 0;
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
 			if (!oracle.IsSeated(i))
 			{
 				continue;
 			}
-			ordinal++;
+			int ordinal = oracle.SeatOrdinal(i);
 			if (!oracle.IsAlive(i))
 			{
 				PlayerShip playerShip = Collection.Recycle<PlayerShip>();

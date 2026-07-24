@@ -746,9 +746,11 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   take NO local damage (owner decides its own hits; death arrives as the alive-flag edge ->
   local explosion FX, slot stays reserved for respawn) and CANNOT take powerups locally --
   the owning peer collects on its own screen and the pickup arrives as a claim. Hues need no
-  fixing up since card 4d904410: slots are host-allocated and identity-mapped, so slot 0 is
-  white and slot 1 purple on BOTH screens by construction (the old join-side hue swap is gone).
-  The puppet's render clock advances on REAL time (never turbo/slowmo/
+  fixing up since card 4d904410: slots are host-allocated and identity-mapped, so a slot's
+  colour is the same on both screens by construction and the old join-side hue swap is gone.
+  (Caveat: `MenuScene.changeColor` lets a player recolour a slot and `PlayerInfo.Reset` doesn't
+  restore it, so "host white / joiner purple" holds for DEFAULT colours; nothing normalises the
+  two peers' hue tables.) The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
 - **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable
   `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,

@@ -168,8 +168,14 @@ internal class Explosion : AlienDrawableGameComponent
 		//IL_010e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_011c: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = default(Vector2);
-		for (int i = 0; i < oracle.Players; i++)
+		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
+		// (card 4d904410), and Oracle.GetPlayerPosition/Controller THROW on an unseated slot.
+		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
+			if (!oracle.IsSeated(i))
+			{
+				continue;
+			}
 			Vibrator vibrator = ServiceHelper.Get<IVibratorService>().Vibrator;
 			if (size <= 1f)
 			{

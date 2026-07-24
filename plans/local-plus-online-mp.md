@@ -115,7 +115,7 @@ genuinely varies (1–3) instead of always reading 1.
 Couch joins can't be driven from a script (`eaPress` can't synthesize a *gamepad* Start, and the
 rig has no physical pads), so the card builds its own seam:
 
-`?netlocal=<1-2>` queues *n* synthetic couch joins on **this** peer, firing a few seconds after
+`?netlocal=<1-3>` queues *n* synthetic couch joins on **this** peer, firing a few seconds after
 the session goes live — the exact "someone picks up a controller" edge, on both the host and the
 client, unattended. Combined with `?aiplayer` the extra ships fly themselves (they are not
 puppets, so `EffectiveController` puts them on the AI branch).

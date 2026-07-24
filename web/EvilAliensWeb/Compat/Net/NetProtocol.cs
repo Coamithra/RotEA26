@@ -214,6 +214,11 @@ namespace EvilAliensWeb.Compat.Net
         public const byte RejectVersion = 1; // protocol version mismatch
         public const byte RejectBuild = 2;   // build hash mismatch ("update required")
         public const byte RejectFlags = 3;   // gameplay debug flags active in a menu session
+        // Card 4d904410: the host has no free roster slot for the joiner's primary ship. Reachable
+        // now that a COUCH game can be listed -- a local player can take the last seat between the
+        // listing and the pairing. Must be refused, never left hanging: a joiner with no granted
+        // slot would keep slot 0, which is the host's own player, and cross-credit everything.
+        public const byte RejectFull = 4;
 
         public static byte[] EncodeReject(byte reason)
         {
@@ -310,6 +315,11 @@ namespace EvilAliensWeb.Compat.Net
         // EvScoreSync (host -> client, authoritative): [lives:1 signed][score:f32 x MaxSlots].
         // v5 widened this from 2 slots to the full roster -- couch players (card 4d904410) sit in
         // the high slots and would otherwise never true up.
+        //
+        // MUST EQUAL Oracle.MaxPlayers. It is duplicated rather than referenced on purpose: this
+        // is a WIRE width, so it may only change with a protocol version bump, whereas the game
+        // constant is free to move. If they ever diverge, score sync silently truncates or
+        // over-reads -- so change both together, and bump ProtocolVersion when you do.
         public const int MaxSlots = 4;
 
         public static byte[] EncodeScoreSync(ushort eventSeq, int lives, float[] scores)

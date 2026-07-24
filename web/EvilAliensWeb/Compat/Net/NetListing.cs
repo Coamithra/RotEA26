@@ -13,8 +13,10 @@ namespace EvilAliensWeb.Compat.Net
     //
     // The eligibility predicate here is the SINGLE source of truth: it drives the listing,
     // the ScoreVisualiser room-code beacon, and the pause-menu "Listed online" indicator, so
-    // they can never disagree. Listable == an empty player slot (oracle.Players == 1) + the
-    // setting on + no cheats/debug flags + a net-eligible level + no session already up.
+    // they can never disagree. Listable == ANY empty player slot (oracle.Players <
+    // Oracle.MaxPlayers -- card 4d904410 relaxed this from "exactly one player" once couch
+    // players could coexist with an online peer) + the setting on + no cheats/debug flags + a
+    // net-eligible level + no session already up.
     //
     // On pairing (a browser joins our code -> eaRtc drives the host handshake -> the "connected"
     // phase), NetSession.StartListedSession attaches a real host session to the running level.
@@ -101,8 +103,9 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else if (Listed)
                 {
-                    // In-level but no longer eligible (a second local player joined): hide it
-                    // but keep the code + beat so re-eligibility re-lists the same room.
+                    // In-level but no longer eligible (the roster filled up, the option was
+                    // turned off, a cheat was enabled): hide it but keep the code + beat so
+                    // re-eligibility re-lists the same room.
                     WebRtcInterop.Unlist();
                     Listed = false;
                 }

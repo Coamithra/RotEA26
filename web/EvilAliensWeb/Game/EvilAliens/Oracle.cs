@@ -165,6 +165,26 @@ public class Oracle : GameComponent, IOracleService
 		return slot >= 0 && slot < 4 && players[slot].isPlaying;
 	}
 
+	// 1-based position of `slot` among the SEATED slots (0 if it isn't seated). The spawn/respawn
+	// spread formulas want "the Nth player present" -- `slot + 1` only agrees while the table is
+	// dense, and with a host-allocated sparse roster it pushes high slots off-screen.
+	public int SeatOrdinal(int slot)
+	{
+		if (!IsSeated(slot))
+		{
+			return 0;
+		}
+		int n = 0;
+		for (int i = 0; i <= slot; i++)
+		{
+			if (players[i].isPlaying)
+			{
+				n++;
+			}
+		}
+		return n;
+	}
+
 	// First free slot at or above `from`, or -1 when the roster is full. The host's slot
 	// allocator (NetSession) -- keeping it here means AddPlayer's own scan and the net
 	// allocator agree on what "free" means.

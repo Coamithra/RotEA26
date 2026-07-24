@@ -595,12 +595,6 @@ public class PlayerShip : AlienDrawableGameComponent
 		sound.PlayCue("blast");
 	}
 
-	// Re-apply an oracle hue after Setup already ran.
-	internal void NetApplyHue(float newHue)
-	{
-		hue = newHue;
-	}
-
 	// Move a live ship to another roster slot (card 4d904410). Only the JOIN peer's primary
 	// ever moves, and only in the dev ?net=join flow: it boots into a level at slot 0 and
 	// learns its host-granted slot when it pairs. The oracle registration moves first
@@ -1141,15 +1135,17 @@ public class PlayerShip : AlienDrawableGameComponent
 					(position) = new Vector2(400f, 400f);
 				}
 			}
+			// Spread by the player's ORDINAL among seated slots, not `player + 1`: online co-op's
+			// roster is sparse (card 4d904410), and a high slot would otherwise respawn off-screen.
 			else if (collection.ContainsType<Wall>())
 			{
 				float num14 = 800 / (oracle.Players + 1);
-				(position) = new Vector2((float)(player + 1) * num14, 300f);
+				(position) = new Vector2((float)oracle.SeatOrdinal(player) * num14, 300f);
 			}
 			else
 			{
 				float num15 = 800 / (oracle.Players + 1);
-				(position) = new Vector2((float)(player + 1) * num15, 400f);
+				(position) = new Vector2((float)oracle.SeatOrdinal(player) * num15, 400f);
 			}
 		}
 		if (position.X > 2000f && collection.ContainsType<Floor>() && connectors.Count == 0)
@@ -1160,7 +1156,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			else
 			{
-				(position) = new Vector2(266f, 600f / (float)(oracle.Players + 1) * (float)(player + 1));
+				(position) = new Vector2(266f, 600f / (float)(oracle.Players + 1) * (float)oracle.SeatOrdinal(player));
 			}
 		}
 		if (position.X < 2000f)

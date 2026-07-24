@@ -73,6 +73,12 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // Is this slot actively streamed to us? (Host-side grant bookkeeping asks.)
+        private static bool FriendChannelExists(byte slot)
+        {
+            return friendChannels.ContainsKey(slot);
+        }
+
         // ---- receive (either role) --------------------------------------------------------------
         private static void HandleFriendState(byte[] data)
         {
@@ -94,6 +100,7 @@ namespace EvilAliensWeb.Compat.Net
             ch.BulletLife = life;
             ch.LastRxAt = NowMs;
             ch.Buffer.Add(sample);
+            grantsAwaitingStream.Remove(slot); // the peer took the grant -- stop the claim clock
         }
 
         // ---- per-tick puppet management + interpolation clock (either role) --------------------
@@ -124,6 +131,13 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 if (now - ch.LastRxAt > timeout)
                 {
+                    // The stream stopped: mirror the death, but KEEP the seat -- the owning peer
+                    // holds it for the respawn (exactly like the primary remote puppet, whose
+                    // "slot stays reserved" comment says the same). Freeing it here would let the
+                    // host's own next AddPlayer(AI)/couch join take the slot, and the returning
+                    // ship's stream would then be stuck retrying SpawnFriend forever: an
+                    // invisible ship with cross-credited kills, the very bug this card removes.
+                    // Seats are released on peer loss / teardown (ReleaseAllFriendPuppets).
                     if (ch.Puppet != null)
                     {
                         ExplodeFriend(ch, slot);
@@ -131,7 +145,6 @@ namespace EvilAliensWeb.Compat.Net
                     else
                     {
                         friendChannels.Remove(slot);
-                        oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
                     }
                     continue;
                 }
@@ -201,8 +214,9 @@ namespace EvilAliensWeb.Compat.Net
             Console.WriteLine("[net] friend ship joined slot=" + slot);
         }
 
-        // Mirror the death LOOK locally (explosions + cue) and free the slot. Never Die() -- that would
-        // fire the local respawn-summon for a ship we don't own; a real respawn arrives as a new stream.
+        // Mirror the death LOOK locally (explosions + cue). Never Die() -- that would fire the local
+        // respawn-summon for a ship we don't own; a real respawn arrives as a new stream. The oracle
+        // seat is deliberately NOT freed (see the timeout comment above).
         private static void ExplodeFriend(FriendChannel ch, byte slot)
         {
             PlayerShip p = ch.Puppet;
@@ -217,7 +231,6 @@ namespace EvilAliensWeb.Compat.Net
             bin.Add((GameComponent)(object)explosion);
             sound.PlayCue("expl2");
             bin.Remove((GameComponent)(object)p);
-            oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
             Console.WriteLine("[net] friend ship died slot=" + slot);
         }
 

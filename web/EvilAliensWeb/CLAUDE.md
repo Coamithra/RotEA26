@@ -509,7 +509,11 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
   a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
   `?signal=ws://localhost:8091/ws`). Card 40334a8f adds `?netlag=<ms>` / `?netloss=<0-100>`
-  (impair INBOUND traffic -- see the impairment bullet below). **No `?net` flag = the net layer is never constructed
+  (impair INBOUND traffic -- see the impairment bullet below). `?netfakehash=<s>` (card
+  4717d3cf) overrides THIS tab's build-hash fingerprint so two dev tabs disagree, driving the
+  real `peerHash`-mismatch -> reject flow (`RejectBuild` -> "update required") on the
+  BroadcastChannel rig -- otherwise both tabs read `'dev'` and never mismatch (the two-tab
+  verification for the reject handshake + its teardown grace). **No `?net` flag = the net layer is never constructed
   -- a plain boot is byte-identical single-player, and single-player NEVER contacts any
   server. Hard invariants; keep them.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
@@ -580,7 +584,16 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   publish, dev builds read 'dev') + a flags byte. Hash mismatch -> `MsgReject` -> "Update
   required" notice both sides (a stale-cached client can never desync a session); menu
   sessions also reject if EITHER side has `DebugFlags.Active` (dev `?net=` sessions are
-  anything-goes). Match-end: any player leaving a MENU session (quit, tab close, drop,
+  anything-goes). **Rejection is graceful (card 4717d3cf, `RejectGraceMs` 1s):**
+  `SendRejectOnce` queues the reliable `MsgReject` but defers `NetSession.Stop()` by a tick
+  budget instead of closing instantly -- an immediate `Stop()->transport.Close()->pc.close()`
+  is ABORTIVE on WebRTC and would discard the still-buffered reject frame, leaving the peer to
+  see only a channel close ("other player disconnected") instead of the real reason. Holding
+  the session open for the grace keeps SCTP alive so the reject (and our hello, which drives
+  the peer's own symmetric detection) actually egress; the peer's inbound reject during the
+  grace ends our side early. The detection itself is symmetric (each side derives the notice
+  from the peer's hello), so the frame is belt-and-braces; the grace is what makes it land.
+  Match-end: any player leaving a MENU session (quit, tab close, drop,
   victory/game-over wind-down) ends it for both -- scene-down edge or `PeerLost` sends
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in

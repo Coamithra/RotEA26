@@ -191,6 +191,14 @@
             catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live flying-spider population + the group-flatten settings in force (card
+        // 9c92962e). The flatten costs per BACKGROUND spider, so a frame-time figure without
+        // the count that produced it proves nothing — read this alongside eaFps.stats().
+        window.eaFlySpiders = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugFlySpiders')); }
+            catch (e) { console.warn('[debug] eaFlySpiders failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
         // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
         // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>

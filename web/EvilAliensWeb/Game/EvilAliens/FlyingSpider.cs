@@ -56,6 +56,13 @@ internal class FlyingSpider : KillableAlien
 	// play => the random pick. See NetForceColor.
 	private byte? netForcedColorIndex;
 
+	// ?flyspidercount= bench only: this spider's slot in the pinned grid, set before bin.Add so
+	// Initialize can place + freeze it. null in normal play => the random entry position and the
+	// level's real crossing speed. See SetupBench / Level2.PopulateFlyingSpidersOnly.
+	private int? benchIndex;
+
+	private int benchCount;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -107,10 +114,26 @@ internal class FlyingSpider : KillableAlien
 		this.isbackground = isbackground;
 	}
 
+	// ?flyspidercount= bench (card 9c92962e): pin this spider to slot `index` of `count` instead of
+	// letting it enter at a random height and cross the screen. Call BEFORE bin.Add — Initialize
+	// reads it, and ComponentBin.Add runs Initialize synchronously (tools/audit_add_order.py).
+	public void SetupBench(int index, int count)
+	{
+		benchIndex = index;
+		benchCount = count;
+	}
+
 	public override void Initialize()
 	{
 		base.Initialize();
-		flaptimer.Randomize();
+		// In the sprite harness the object is frozen for a screenshot, so a randomized wing-flap
+		// phase would make every boot a different pose -- and two boots that differ in pose cannot
+		// be A/B'd against each other (the ?flyspiderflatten= comparison this exists for). Pin it.
+		// Live play keeps the randomization: a swarm flapping in lockstep reads as one organism.
+		if (EvilAliensWeb.Compat.DebugFlags.Harness == null)
+		{
+			flaptimer.Randomize();
+		}
 		base.Position = new Vector2(850f, RandomHelper.RandomNextFloat(0f, 475f));
 		base.Direction = (float)Math.PI;
 		base.MaxSpeed = base.Speed;
@@ -149,42 +172,121 @@ internal class FlyingSpider : KillableAlien
 			base.DrawOrder = 20;
 			swiveltimer.Duration = 2700f;
 		}
-		swiveltimer.Randomize();
+		if (EvilAliensWeb.Compat.DebugFlags.Harness == null)
+		{
+			swiveltimer.Randomize();
+		}
+		ApplyBenchPlacement();
+	}
+
+	// Lay the bench spiders out on a deterministic grid over the play field and freeze them in X,
+	// so the on-screen population is EXACTLY the requested N for the whole run. Speed 0 also keeps
+	// Update's `Position.X < -100 => Die()` from ever firing, which is what removed the drift.
+	// Everything time-varying is left alone: the swivel bob still moves them vertically and the
+	// flap timer still animates the wings, so the per-frame draw work stays representative of real
+	// play — only the birth/death churn is gone.
+	private void ApplyBenchPlacement()
+	{
+		if (!benchIndex.HasValue)
+		{
+			return;
+		}
+		base.Speed = 0f;
+		base.MaxSpeed = 0f;
+		int i = benchIndex.Value;
+		int n = Math.Max(1, benchCount);
+		// Widest grid that stays roughly square, so the same N always lands the same way and the
+		// spiders spread over the field instead of stacking in one column.
+		int cols = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(n)));
+		int rows = (int)Math.Ceiling((double)n / cols);
+		int col = i % cols;
+		int row = i / cols;
+		// Inset half a cell so nothing sits on the screen edge, where it would be part-clipped and
+		// draw less than a whole spider.
+		float x = 800f * (col + 0.5f) / cols;
+		float y = 475f * (row + 0.5f) / rows;
+		base.Position = new Vector2(x, y);
+		startheight = isbackground ? MathHelper.Min(350f, y) : y;
+	}
+
+	// Baked half-extent of the per-spider group-flatten box, in DESIGN px before `scale`. Generous
+	// on purpose: it must hold the reared body plus both wings at every point of their ±90° swing
+	// without clipping. Overridable with ?flyspiderbox=<half> — see DebugFlags for why the size is
+	// the discriminator between a per-call and a fill-bound flatten cost (card 9c92962e).
+	public const float DefaultFlattenBoxHalf = 200f;
+
+	internal static float FlattenBoxHalfDesign =>
+		EvilAliensWeb.Compat.DebugFlags.FlySpiderBox ?? DefaultFlattenBoxHalf;
+
+	// The design-space box the flatten captures into. Also used by FlyingSpiderSwarm to union the
+	// whole swarm's boxes into one.
+	internal Rectangle FlattenBox
+	{
+		get
+		{
+			float half = FlattenBoxHalfDesign * scale;
+			return new Rectangle(
+				(int)Math.Floor(base.Position.X - half),
+				(int)Math.Floor(base.Position.Y - half),
+				(int)Math.Ceiling(2f * half),
+				(int)Math.Ceiling(2f * half));
+		}
 	}
 
 	public override void Draw(GameTime gameTime)
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
-		if (isbackground)
+		if (!isbackground)
 		{
+			// Foreground spiders are opaque (alpha 1) -- no overlap double-up to flatten away.
+			DrawSprites(gameTime);
+			return;
+		}
+		switch (EvilAliensWeb.Compat.DebugFlags.FlySpiderFlatten)
+		{
+		case EvilAliensWeb.Compat.DebugFlags.FlySpiderFlattenMode.Swarm
+			when FlyingSpiderSwarm.Active:
+			// FlyingSpiderSwarm brackets ONE flatten around every background spider and calls
+			// DrawFlattened on each; drawing ourselves here as well would double them. Falls
+			// through to the per-spider path when nothing is driving the swarm (the sprite
+			// harness has no Level2 to add the component), so the flag can never blank a scene.
+			break;
+		case EvilAliensWeb.Compat.DebugFlags.FlySpiderFlattenMode.None:
+			// The un-flattened look: the overlaps composite to ~0.36 against a 0.2 body, so the
+			// wings read more solid than the body. This is what "drop the flatten for the fog
+			// layer" would ship.
+			DrawSprites(gameTime);
+			break;
+		default:
 			// Fog spiders are translucent (alpha 0.2). Drawing wing+body+wing separately at 0.2 with
 			// straight-alpha blending makes the overlaps composite to ~0.36, so the wings read more
 			// solid than the body — the reported "opacity is off". Flatten the three sprites OPAQUE
 			// into a shared RT (the union has no internal double-up), then composite the whole
-			// silhouette ONCE at the fog alpha, so body + wings fade as one. Foreground spiders are
-			// opaque (alpha 1) — no double-up — so they skip this and draw directly.
+			// silhouette ONCE at the fog alpha, so body + wings fade as one.
 			Color fog = color;
-			// Design bbox centred on Position, generous enough to hold the reared body + both swung
-			// wings at this scale without clipping (transparent padding costs nothing; the composite
-			// only touches the used sub-rect).
-			float half = 200f * scale;
-			Rectangle box = new Rectangle(
-				(int)Math.Floor(base.Position.X - half),
-				(int)Math.Floor(base.Position.Y - half),
-				(int)Math.Ceiling(2f * half),
-				(int)Math.Ceiling(2f * half));
-			color = new Color(fog.R, fog.G, fog.B, (byte)255);
-			spriteBatch.BeginGroupFlatten(box);
-			DrawSprites(gameTime);
+			spriteBatch.BeginGroupFlatten(FlattenBox);
+			DrawFlattened(gameTime);
 			spriteBatch.BlendMode = (SpriteBlendMode)1;
 			spriteBatch.EndGroupFlatten(new Color((byte)255, (byte)255, (byte)255, fog.A));
-			color = fog;
-		}
-		else
-		{
-			DrawSprites(gameTime);
+			break;
 		}
 	}
+
+	// Draw the three sprites OPAQUE, for capture inside an already-open group flatten. The fog
+	// alpha is applied once by the composite, so it is lifted off `color` here and put back
+	// straight away — callers own the bracket, not this.
+	internal void DrawFlattened(GameTime gameTime)
+	{
+		Color fog = color;
+		color = new Color(fog.R, fog.G, fog.B, (byte)255);
+		DrawSprites(gameTime);
+		color = fog;
+	}
+
+	// The fog alpha every background spider shares (set in Initialize). The swarm composite needs
+	// one alpha for the whole group; they are all the same value, so any live spider answers for
+	// the swarm.
+	internal byte FogAlpha => color.A;
 
 	private void DrawSprites(GameTime gameTime)
 	{

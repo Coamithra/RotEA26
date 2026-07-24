@@ -185,6 +185,18 @@ namespace EvilAliensWeb.Compat
 			return scene == null ? "[netbgtest] no level" : scene.NetCatchUpSelfTest();
 		}
 
+		// JS bridge for the flying-spider population readout (eaFlySpiders in wwwroot/index.html;
+		// card 9c92962e). The group-flatten's cost is per BACKGROUND spider, so any frame-time
+		// number is meaningless without the count that produced it -- the first numbers on that
+		// card compared two runs whose populations were never equal and read the difference as a
+		// flatten cost. Returns the live counts plus the active flatten mode and box size, so a
+		// figure pasted onto the card carries its own conditions.
+		[JSInvokable("debugFlySpiders")]
+		public static string FlySpiders()
+		{
+			return EvilAliens.FlyingSpiderCensus.Report();
+		}
+
 		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).
 		// FpsProfile(on) arms the per-phase accumulators, FpsStats() returns the HUD's JSON
 		// payload and FpsStatsLine() the one-line console form. Same polling contract as the

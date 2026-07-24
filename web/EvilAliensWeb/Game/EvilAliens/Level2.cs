@@ -17,6 +17,11 @@ internal class Level2 : GameScene
 
 	private SpiderBoss preloadBoss;
 
+	// ?flyspiderflatten=swarm only (card 9c92962e) — null on every normal boot, so the shipped
+	// level adds nothing extra. Owned exactly like `floor`: built with the level, added in
+	// Initialize, removed on finish.
+	private FlyingSpiderSwarm flyingSpiderSwarm;
+
 	public Level2(Game game)
 		: base(game, Levels.Level2)
 	{
@@ -24,11 +29,20 @@ internal class Level2 : GameScene
 		base.OnReset += Level2_OnReset;
 		spawnType = PlayerSpawnType.West;
 		floor = new Floor(base.Game);
+		if (EvilAliensWeb.Compat.DebugFlags.FlySpiderFlatten
+			== EvilAliensWeb.Compat.DebugFlags.FlySpiderFlattenMode.Swarm)
+		{
+			flyingSpiderSwarm = new FlyingSpiderSwarm(base.Game);
+		}
 	}
 
 	private void Level2_OnFinished(object sender, FinishedArgs args)
 	{
 		Collection.Remove((GameComponent)(object)floor);
+		if (flyingSpiderSwarm != null)
+		{
+			Collection.Remove((GameComponent)(object)flyingSpiderSwarm);
+		}
 	}
 
 	public override void Initialize()
@@ -36,6 +50,10 @@ internal class Level2 : GameScene
 		setPresence((GamerPresenceMode)13);
 		base.SoundManager.PlayMusic(Songs.Level2);
 		Collection.Add((GameComponent)(object)floor);
+		if (flyingSpiderSwarm != null)
+		{
+			Collection.Add((GameComponent)(object)flyingSpiderSwarm);
+		}
 		Background.SetMars();
 		base.Initialize();
 		ApplyDifficultyPolicy();
@@ -433,6 +451,12 @@ internal class Level2 : GameScene
 	// ?flyspiders — a dense, endless flying-spider swarm for profiling (see the call site).
 	// Rate 5.5/s is the level's own background wave rate; the swarm builds to a steady on-screen
 	// population in a few seconds and stays there, which is what a rolling frame-time window needs.
+	//
+	// ?flyspidercount=<N> swaps the stream for a PINNED bench of exactly N spiders (card
+	// 9c92962e). The streamed population is only steady on average — background spiders never
+	// die to the player and cross ~22% slower than foreground ones, so the two variants settle at
+	// different counts, which is what made the first background-vs-foreground numbers a population
+	// comparison rather than a flatten one. The bench removes the variable entirely.
 	private void PopulateFlyingSpidersOnly()
 	{
 		WaitEvent waitEvent = Wait(0.1f);
@@ -440,8 +464,39 @@ internal class Level2 : GameScene
 		waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += slowdown;
 		bool background = !EvilAliensWeb.Compat.DebugFlags.FlySpidersForeground;
+		int? pinned = EvilAliensWeb.Compat.DebugFlags.FlySpiderCount;
+		if (pinned.HasValue)
+		{
+			waitEvent = Wait(0.1f);
+			benchBackground = background;
+			benchCount = pinned.Value;
+			waitEvent.OnFinished += spawnFlyingSpiderBench;
+			return;
+		}
 		FlyingSpiderEvent swarm = new FlyingSpiderEvent(base.Game, 0f, 5.5f, isbackground: background);
 		eventList.AddEvent(swarm, halting: false);
+	}
+
+	private bool benchBackground;
+
+	private int benchCount;
+
+	// One-shot bench spawn for ?flyspidercount=. Deliberately fired from a WaitEvent rather than
+	// straight out of PopulateEventList: the spiders read oracle.BackgroundSpeed in Initialize, and
+	// the `slowdown` beat above has to have run first for that to be the level's real pace.
+	private void spawnFlyingSpiderBench(GameEvent sender)
+	{
+		for (int i = 0; i < benchCount; i++)
+		{
+			FlyingSpider spider = FlyingSpider.NewFlyingSpider(Collection, base.Game);
+			spider.Setup(benchBackground);
+			spider.SetupBench(i, benchCount);
+			Collection.Add((GameComponent)(object)spider);
+		}
+		System.Console.WriteLine("[flyspiders] bench: " + benchCount + " "
+			+ (benchBackground ? "background" : "foreground") + " spiders pinned, flatten="
+			+ EvilAliensWeb.Compat.DebugFlags.FlySpiderFlatten + ", box half="
+			+ FlyingSpider.FlattenBoxHalfDesign.ToString(System.Globalization.CultureInfo.InvariantCulture));
 	}
 
 	private void invuln(GameEvent sender)

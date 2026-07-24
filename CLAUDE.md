@@ -128,7 +128,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   **A frame rate alone is vsync-capped and cannot see a regression -- read the ms and the
   headroom, and only trust either with the window FOCUSED.** Details: web CLAUDE.md.
 - Level fast-boot added with it: `?level=Level2&flyspiders` (dense flying-spider swarm;
-  `=fg` for the un-flattened foreground variant).
+  `=fg` for the un-flattened foreground variant). **`=fg` is not a flatten A/B** -- for that use
+  the pinned bench `?flyspidercount=<N>` with `?flyspiderflatten=per|0|swarm` (+ `?flyspiderbox=`,
+  console `eaFlySpiders()`); card 9c92962e, details in web CLAUDE.md.
 - Dozens more per-feature tuning/diagnostic flags exist — see web CLAUDE.md ("Debug flags &
   tuning conventions" + each feature's bullet).
 

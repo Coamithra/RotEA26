@@ -183,11 +183,14 @@ namespace EvilAliensWeb.Compat
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's
-		// AllShipsDead check fires LoseLife exactly like a hazard kill would. Written for the
-		// two-tab co-op gate (card 9009a1c4): a host death/reset is the standing-purge-filter
-		// window worth testing, and waiting for the ?aiplayer AI to die on its own is neither
-		// timely nor repeatable. Remote/RemoteFriend puppets are skipped -- their owner decides
-		// their deaths, and asploding one here would fake a death the owning peer never sent.
+		// AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors (client).
+		// Asplode's only guard is !IsDead, so this bites through ?invuln and the post-respawn
+		// invulnerability window alike -- it is a scripted death, NOT a simulated hazard hit.
+		// Written for the two-tab co-op gate (card 9009a1c4): a death/reset is the
+		// standing-purge-filter window worth testing, it needs BOTH co-op ships down, and
+		// waiting for the ?aiplayer AI to die is neither timely nor repeatable.
+		// Remote/RemoteFriend puppets are skipped -- their owner decides their deaths, and
+		// asploding one here would fake a death the owning peer never sent.
 		[JSInvokable("debugKillShips")]
 		public static string KillShips()
 		{
@@ -212,9 +215,7 @@ namespace EvilAliensWeb.Compat
 			{
 				ship.Asplode();
 			}
-			string report = "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
-			Console.WriteLine(report);
-			return report;
+			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
 		}
 
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,

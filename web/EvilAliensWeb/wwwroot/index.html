@@ -177,17 +177,18 @@
         // Debug: run the ComponentBin lifecycle scenario suite (instant births, deferred
         // deaths, purge filter, pause-aware adds — card 02d9ad67). Prints PASS/FAIL per
         // scenario. Best run from the main menu (the pause scenario Push/Pops the world).
-        // Asplode every locally-owned PlayerShip through the real death path, so the scene's
-        // AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors (client). The
-        // repeatable way to reach a death/reset in a two-tab co-op run: eaKillShips().
-        window.eaKillShips = () => {
-            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
-            catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
-        };
-
         window.eaBinTest = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest')); }
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: asplode every locally-owned PlayerShip through the real death path, so the
+        // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
+        // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it
+        // bites through ?invuln, so leave the flag on and keep the rest of the run stable.
+        window.eaKillShips = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
+            catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull

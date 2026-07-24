@@ -40,12 +40,14 @@ public class CollisionHandler
 
 	private List<ICollidable> colliders = new List<ICollidable>();
 
+	private const long growthReportIntervalMs = 2000;
+
 	// Diagnostic for the instant-add lifecycle (card 02d9ad67): how many passes ended with
 	// `collidables` longer than the frozen count they ran over, i.e. a collision callback
 	// spawned a collidable mid-pass. That is the condition that used to index `boxes` out of
 	// range, so reporting it under ?binlog lets a run PROVE the path is exercised instead of
 	// only showing an absence of crashes.
-	private int midPassGrowths;
+	private int midPassGrowthPasses;
 
 	private long lastGrowthReportMs;
 
@@ -106,6 +108,11 @@ public class CollisionHandler
 		// the previous frame's cells. A collidable born during the pass joins the NEXT one --
 		// exactly what the old deferred birthList did, since it wasn't in Game.Components
 		// until the flush.
+		// Indexing against the frozen count is only safe because `collidables` can GROW but
+		// never shrink mid-pass: removals go through ComponentBin.Remove -> deathList and are
+		// flushed at the tick boundaries, and the direct Game.Components.Remove sites (scene
+		// swaps, NetPuppets.Disable, the harness) are unreachable from a CollidesWith callback.
+		// Keep it that way -- a mid-pass removal would shift every later index.
 		int count = collidables.Count;
 		for (int i = 0; i < boxes.Count && i != count; i++)
 		{
@@ -180,15 +187,15 @@ public class CollisionHandler
 				}
 			}
 		}
-		if (EvilAliensWeb.Compat.DebugFlags.BinLog && collidables.Count != count)
+		if (EvilAliensWeb.Compat.DebugFlags.BinLog && collidables.Count > count)
 		{
-			midPassGrowths++;
+			midPassGrowthPasses++;
 			long nowMs = System.Environment.TickCount64;
-			if (nowMs - lastGrowthReportMs >= 2000)
+			if (nowMs - lastGrowthReportMs >= growthReportIntervalMs)
 			{
 				lastGrowthReportMs = nowMs;
-				System.Console.WriteLine("[bin] collision pass held its frozen count through "
-					+ midPassGrowths + " mid-pass collidable add(s)");
+				System.Console.WriteLine("[bin] " + midPassGrowthPasses
+					+ " collision pass(es) held their frozen count through a mid-pass collidable add");
 			}
 		}
 	}

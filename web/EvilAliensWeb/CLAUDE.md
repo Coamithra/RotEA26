@@ -106,7 +106,8 @@ generate much of the art/audio referenced here.
   defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
-  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
+  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
+  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand).
 
 ## Component lifecycle (`ComponentBin`) — the spawn/death contract
 
@@ -767,8 +768,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
   Add `?binlog` to both when the run is about lifecycle (it is the detector for a purge filter
-  or pause freeze eating a puppet/banner), and DROP `?invuln` from both when the run needs a
-  death/reset -- `eaKillShips()` in each console then forces `AllShipsDead` on demand.
+  or pause freeze eating a puppet/banner). For a death/reset, KEEP `?invuln` on both and call
+  `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
+  through invulnerability, and leaving the flag on is what keeps the rest of the run from
+  dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
   **`snapUnk` climbing is not by itself a leak:** the host keeps snapshotting an entity for a
   turn or two while a client claim is in flight, and the client deliberately leaves that id
   dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim

@@ -67,13 +67,16 @@ namespace EvilAliensWeb.Compat.Net
             // 5. Survives the session teardown a kick triggers. This is the one that matters:
             //    KickPeer Stop()s the session, NetListing re-lists within a tick or two, and the
             //    block has to still be standing when the griefer's rejoin hello lands.
-            //    Skipped over a live session -- ending someone's real match to prove this would
-            //    be a worse bug than the one it tests for.
+            //    Drives ResetPerSessionState (the whole body of Stop) rather than Stop itself:
+            //    Stop early-returns when nothing is Active, so calling it here would execute no
+            //    reset at all and the leg would pass no matter what -- including against the very
+            //    regression it exists to catch (a blockedPeers.Clear() added to the teardown).
+            //    Still skipped over a LIVE session: the reset would wipe real per-session state.
             bool stopLegRan = !NetSession.Active;
             if (stopLegRan)
             {
-                NetSession.Stop("kick self-test");
-                Check(NetSession.IsPeerBlocked(griefer), "block survives NetSession.Stop()");
+                NetSession.ResetPerSessionState();
+                Check(NetSession.IsPeerBlocked(griefer), "block survives the session teardown reset");
             }
 
             // 6. Id 0 (the peer could not produce a token) is never recorded and never matched,
@@ -93,7 +96,9 @@ namespace EvilAliensWeb.Compat.Net
             {
                 byte[] hello = NetProtocol.EncodeHello(NetSession.ProtocolVersion, asHost, 0xDEADBEEFCAFEF00DUL,
                     NetProtocol.HelloFlagDebugActive, primarySlot: 2, peerId: griefer);
-                Check(hello.Length == NetProtocol.HelloBytes, "hello is HelloBytes long (host=" + asHost + ")");
+                // Literal 21, not HelloBytes: EncodeHandshake allocates new byte[HelloBytes], so
+                // comparing against it can never fail. The point is to catch the constant moving.
+                Check(hello.Length == 21, "hello is 21 bytes (host=" + asHost + ")");
                 bool ok = NetProtocol.TryDecodeHandshake(hello, out byte ver, out bool isHost, out ulong hash,
                     out byte flags, out byte slot, out ulong id);
                 Check(ok, "hello decodes (host=" + asHost + ")");

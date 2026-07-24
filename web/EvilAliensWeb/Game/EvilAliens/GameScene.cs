@@ -158,7 +158,7 @@ internal abstract class GameScene : Scene
 
 	private bool netKickMenuUp;
 
-	// ?netkickmenu only: when to fire the one-shot freeze+show, so the capture gets a live
+	// ?netkickshot only: when to fire the one-shot freeze+show, so the capture gets a live
 	// level behind the menu rather than a scene that never drew. REAL time, not a tick count:
 	// GameScene.Update does not run at a steady rate through the level intro (a 120-tick
 	// counter measured ~47s here), and the net layer times everything on TickCount64 anyway.
@@ -525,19 +525,26 @@ internal abstract class GameScene : Scene
 	// Card 0b8a300b: swap the passive curtain for the host's kick menu. Called by NetSession
 	// once the remote pause has outlasted its offer delay. Added AFTER the Push (like the
 	// overlay and the local pause menu), which is what keeps it Enabled over the frozen world.
-	internal void NetShowKickMenu()
+	// Returns false when there was nothing to show (no freeze of ours to put it over) -- the
+	// caller MUST NOT latch its "offered" flag on a false, or the offer is silently burned and
+	// never comes back. See NetSession.TickKickOffer.
+	internal bool NetShowKickMenu()
 	{
 		if (netKickMenuUp || !netRemotePauseHeld)
 		{
-			return;
+			return false;
 		}
 		netKickMenuUp = true;
 		// One at a time: the menu carries its own dim and its own "the other player has paused"
 		// prompt, so leaving the overlay under it would double-darken and say it twice.
 		Collection.Remove((GameComponent)(object)netPauseOverlay);
 		netKickMenu.Reset();
-		netKickMenu.Setup(ControlDevice.Keyboard);
+		// No Setup(device) on purpose: unlike every other menu here there is no triggering
+		// device to inherit (the PEER paused), and MenuSub1 treats a null controller as "any
+		// device". Pinning it to Keyboard would leave a gamepad host unable to work its only
+		// escape hatch.
 		netKickMenu.Show(); // Show() does the Collection.Add itself -- the pausedScene pattern.
+		return true;
 	}
 
 	// restoreOverlay: true when the pause is still on and we are only retracting the offer
@@ -559,6 +566,15 @@ internal abstract class GameScene : Scene
 
 	private void netKickMenu_KeepWaitingSelected(MenuSub1 sender)
 	{
+		if (!EvilAliensWeb.Compat.Net.NetSession.RemotePaused)
+		{
+			// The ?netkickshot harness froze us with no peer, so there is no pause to go back to
+			// waiting for and nothing that would ever re-offer the menu -- hand the level back
+			// instead of leaving the tab wedged behind the overlay.
+			NetHideKickMenu(restoreOverlay: false);
+			NetSetRemotePaused(on: false);
+			return;
+		}
 		NetHideKickMenu(restoreOverlay: true);
 		// Re-arm rather than retire: a griefer holding pause forever must not get one refusal
 		// and then a permanently frozen host.
@@ -755,13 +771,13 @@ internal abstract class GameScene : Scene
 			// pick the freeze up now instead of missing the edge.
 			NetSetRemotePaused(on: true);
 		}
-		else if (EvilAliensWeb.Compat.DebugFlags.NetKickMenu)
+		else if (EvilAliensWeb.Compat.DebugFlags.NetKickShot)
 		{
-			// ?netkickmenu: park the host's kick menu with no peer at all, purely so its
+			// ?netkickshot: park the host's kick menu with no peer at all, purely so its
 			// appearance can be screenshot (the ?gamebrowser fake-entry precedent). Drives the
-			// REAL freeze + swap, so what lands in the capture is the real thing; the entries
-			// are inert because KickPeer no-ops without a session. Armed here, fired a couple
-			// of seconds into Update -- see netKickMenuAt.
+			// REAL freeze + swap, so what lands in the capture is the real thing; the Kick
+			// entries are inert because KickPeer no-ops without a session. Armed here, fired a
+			// couple of seconds into Update -- see netKickMenuAt.
 			netKickMenuAt = Environment.TickCount64 + NetKickMenuDelayMs;
 		}
 	}
@@ -995,7 +1011,7 @@ internal abstract class GameScene : Scene
 		snapshottimer.Update(gameTime);
 		snapshotdelaytimer.Update(gameTime);
 		pausestopper.Update(gameTime);
-		// ?netkickmenu: let the level actually get going, THEN freeze it under the kick menu.
+		// ?netkickshot: let the level actually get going, THEN freeze it under the kick menu.
 		// Doing this in Initialize instead would park the world before it has drawn a frame, so
 		// the capture would show the menu over a blank scene -- and the real thing always
 		// freezes a running level. One-shot; ticks down on the normal update, so it fires once

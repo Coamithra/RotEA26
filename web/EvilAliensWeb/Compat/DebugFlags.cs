@@ -916,12 +916,14 @@ namespace EvilAliensWeb.Compat
 		// Null/empty = the genuine WebRtcInterop.PeerId(); dev-only, byte-identical when unset.
 		public static string NetFakePeerId { get; private set; } = "";
 
-		// ?netkickmenu: park the host's remote-pause KICK menu over a booted level with no peer
+		// ?netkickshot: park the host's remote-pause KICK menu over a booted level with no peer
 		// at all (pair with ?level=<Name>), so its appearance can be screenshot in isolation --
-		// the ?gamebrowser fake-entry precedent. Reaching it for real needs two windows AND a
-		// peer that holds a pause past the 4s offer delay, which is not a screenshot rig. The
-		// entries are inert here (there is no peer to kick); it is an appearance harness. In Active.
-		public static bool NetKickMenu { get; private set; }
+		// the ?gamebrowser fake-entry precedent, named for the ?textshot/?lazershot idiom.
+		// Reaching it for real needs two windows AND a peer that holds a pause past the 4s offer
+		// delay, which is not a screenshot rig. It is an APPEARANCE harness only: both Kick
+		// entries no-op (KickPeer needs a session), so only "Keep Waiting" does anything -- it
+		// releases the synthetic freeze and hands the level back. In Active.
+		public static bool NetKickShot { get; private set; }
 
 		// ?aiplayer: force the LOCAL player's ship onto the existing PlayerShip AI branch
 		// (ControlDevice.AI / DoAIMove/DoAIFire -- the attract-demo behaviour) at level start,
@@ -1623,8 +1625,8 @@ namespace EvilAliensWeb.Compat
 						NetFakePeerId = val.Trim();
 					}
 					break;
-				case "netkickmenu":
-					NetKickMenu = IsOn(val);
+				case "netkickshot":
+					NetKickShot = IsOn(val);
 					break;
 				case "netlag":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nlag) && nlag >= 0f)
@@ -1854,7 +1856,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickMenu;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

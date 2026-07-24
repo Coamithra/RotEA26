@@ -120,7 +120,7 @@ otherwise present the same id (blocking one would block yourself).
 | `Game/EvilAliens/GameScene.cs` | host shows the kick menu; `Terminate` clears the block list |
 | `Compat/Net/WebRtcInterop.cs` | `PeerId()` |
 | `wwwroot/webrtc.js` | `eaRtc.peerId` |
-| `Compat/DebugFlags.cs` | `?netfakepeer=`, `?netkickmenu` |
+| `Compat/DebugFlags.cs` | `?netfakepeer=`, `?netkickshot` |
 | `Compat/DebugInput.cs` | `eaKickTest()` console entry point |
 | `web/EvilAliensWeb/CLAUDE.md` | the net-layer bullet + the limitation |
 
@@ -128,11 +128,11 @@ otherwise present the same id (blocking one would block yourself).
 
 All four legs ran. Findings that came out of them are folded into the design above.
 
-1. **`eaKickTest()` — PASS (29/29)**, with the survives-`Stop()` leg included (run from the
+1. **`eaKickTest()` — PASS (29/29)**, with the teardown-persistence leg included (run from the
    menu). **Proved sensitive**, not just green: deliberately breaking `ApplyKickBlock` to ignore
    its `block` flag failed exactly the two legs that rule owns (27/29, "kick without block leaves
    them joinable" + "records nothing") and nothing else. Reverted.
-2. **`?netkickmenu` screenshot** — menu renders over a live, frozen Level 2 with the prompt, all
+2. **`?netkickshot` screenshot** — menu renders over a live, frozen Level 2 with the prompt, all
    three entries and `Keep Waiting` preselected.
 3. **Two windows, the real path** — client `Esc` -> host froze -> kick menu appeared after the
    delay -> `Kick and Block` -> host unfroze and played on solo (peer's score panel gone, score
@@ -152,8 +152,34 @@ Two real bugs the run caught, both fixed:
   the exact abortive close the grace exists to avoid, which would have discarded the `EvKick` it
   had just queued. Split into `ReleasePeerSeats()` (immediate) + a deferred `Stop()`.
 
+### Peer review (`/review`, cold agent) — 8 findings, all fixed
+
+- **blocker** — `TickKickOffer` latched `kickOfferShown` *before* `NetShowKickMenu`, which refuses
+  when we hold no freeze of our own. If the host's own pause menu was up when the peer's `EvPause`
+  landed, the single offer was burned on a menu nobody saw, and the host was then frozen forever
+  once it resumed — **re-opening the exact hole this card closes**. `NetShowKickMenu` now returns
+  whether it showed, and the flag latches on that.
+- **should-fix** — `HashBuildString("")` returns the FNV offset basis, not 0, so the "peerId 0 is
+  never blockable" guard was unreachable *and* every token-less peer shared one id (blocking one
+  would block all). An empty token now maps to 0 explicitly.
+- **should-fix** — the survives-`Stop()` test leg was vacuous: it ran only when no session was
+  Active, and `Stop()` early-returns in exactly that case, so the reset body never executed. Stop's
+  reset body is now `ResetPerSessionState()`, which the test drives directly.
+- **should-fix** — `Setup(ControlDevice.Keyboard)` pinned the host's only escape hatch to the
+  keyboard (a null controller means "any device"). Dropped.
+- **nits** — `DebugFlags.NetKickMenu` collided with the `NetKickMenu` type (renamed to
+  `NetKickShot` / `?netkickshot`, matching the `?textshot`/`?lazershot` idiom); a tautological
+  `hello.Length == HelloBytes` assertion (now a literal 21); `?netkickshot` wedged the level after
+  any choice (Keep Waiting now releases the synthetic freeze); the persistent `eaPeerId`'s
+  cross-session linkability is now stated in webrtc.js rather than only its weakness.
+
+Re-verified after the fixes: `eaKickTest()` still 29/29, `?netkickshot` renders and its Keep
+Waiting hands the level back, and a fresh two-window run still kicks cleanly (this one exercised
+the **no-block** variant — the log correctly omitted "blocked" — so both menu actions are now
+covered end to end). Zero console errors.
+
 Also corrected in passing: `MenuSub1.Show()` already does its own `Collection.Add`, so the extra
-explicit add was dropped; and the `?netkickmenu` trigger moved from `Initialize` to a real-time
+explicit add was dropped; and the `?netkickshot` trigger moved from `Initialize` to a real-time
 one-shot in `Update` (freezing in `Initialize` parked the level before it drew, and a tick counter
 was a bad clock — 120 ticks measured ~47 s through the level intro).
 
@@ -173,7 +199,7 @@ Per the project rules — tool first, real game only as the final smoke check.
    `KickPeer(block: false)` it is **accepted** (kick ≠ block); a *different* id is always accepted;
    the block set survives `Stop()` and is emptied by the level-exit clear. This is the gate — the
    ban rule is a pure predicate and a screenshot cannot prove it.
-2. **Menu appearance — `?netkickmenu`** parks the host-side kick menu over a booted level with no
+2. **Menu appearance — `?netkickshot`** parks the host-side kick menu over a booted level with no
    peer (the `?gamebrowser` fake-entry precedent), giving a static, reliable screenshot. The menu
    is static UI, so a plain screenshot is valid here.
 3. **End-to-end, two windows** on the BroadcastChannel rig with distinct `?netfakepeer=` ids:

@@ -1013,7 +1013,7 @@ interpolation feel, both gated on real-network playtests.
     fails to persist across the kick's own `Stop()`, and a wire-layout slip that decodes the
     wrong bytes as a peer id. It restores the live set, and SKIPS the survives-`Stop()` leg
     over a live session rather than ending a real match (it says so; a skipped leg is not a
-    pass). `?netkickmenu` (pair with `?level=`) parks the menu over a live level for a
+    pass). `?netkickshot` (pair with `?level=`) parks the menu over a live level for a
     screenshot. **`?netfakepeer=<s>` is REQUIRED for any two-tab test** -- both dev tabs share
     one `localStorage`, so they present the SAME peer id and blocking the joiner would block
     yourself (the `?netfakehash=` trick, same reason).

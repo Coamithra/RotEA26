@@ -328,8 +328,14 @@ namespace EvilAliensWeb.Compat.Net
             // ?netfakepeer=<s> plays the same trick on the identity token, and the loopback rig
             // NEEDS it: two dev tabs share one localStorage, so they mint the SAME eaRtc.peerId
             // and a host blocking the joiner would block itself.
-            localPeerId = NetProtocol.HashBuildString(
-                string.IsNullOrEmpty(DebugFlags.NetFakePeerId) ? WebRtcInterop.PeerId() : DebugFlags.NetFakePeerId);
+            string peerToken = string.IsNullOrEmpty(DebugFlags.NetFakePeerId)
+                ? WebRtcInterop.PeerId()
+                : DebugFlags.NetFakePeerId;
+            // An EMPTY token must map to 0 ("no identity"), not to a hash: HashBuildString("")
+            // returns the FNV-1a offset basis, which is a perfectly ordinary non-zero id -- so
+            // every peer whose JS could not mint a token would share it, and blocking one would
+            // block them all. 0 is the value ApplyKickBlock/IsPeerBlocked refuse to touch.
+            localPeerId = string.IsNullOrEmpty(peerToken) ? 0UL : NetProtocol.HashBuildString(peerToken);
             // Impairment wraps whichever transport the caller picked -- BroadcastChannel dev
             // loopback or the real WebRTC one. It decorates INetTransport precisely so it does
             // not care which. Always in the chain inside a net session (a plain boot never gets
@@ -397,6 +403,24 @@ namespace EvilAliensWeb.Compat.Net
                 GameScene.NetActiveScene?.NetSetRemotePaused(false);
             }
             ClearPeerStalled(); // never leave the banner up over a session that no longer exists
+            ResetPerSessionState();
+            if (notice != null)
+            {
+                MenuNotice = notice;
+            }
+            if (menuSession)
+            {
+                menuSession = false;
+                NetLobby.OnSessionEnded();
+            }
+        }
+
+        // Every field a session owns, back to its pre-session value, so a fresh
+        // Start()/StartMenuSession() is clean. Split out of Stop() so NetKickTest can execute
+        // it directly: Stop() early-returns when no session is Active, which made the test's
+        // "the block survives a teardown" leg vacuous -- it ran only when it could do nothing.
+        internal static void ResetPerSessionState()
+        {
             localPaused = false;
             rxQueue.Clear();
             buffer.Clear();
@@ -435,15 +459,7 @@ namespace EvilAliensWeb.Compat.Net
             kickOfferShown = false;
             // NOT blockedPeers -- it must outlive the session it was populated in (that IS the
             // point: a kick stops the session, the host re-lists, the block still holds).
-            if (notice != null)
-            {
-                MenuNotice = notice;
-            }
-            if (menuSession)
-            {
-                menuSession = false;
-                NetLobby.OnSessionEnded();
-            }
+            // NetKickTest asserts exactly this; do not "tidy up" by clearing it here.
         }
 
         // ---- menu-flow accessors (card 11.4) --------------------------------------------
@@ -1671,8 +1687,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            kickOfferShown = true;
-            scene.NetShowKickMenu();
+            // Latch ONLY on a menu that actually went up. NetShowKickMenu refuses when we hold
+            // no freeze of our own -- which happens whenever our OWN pause menu was up when the
+            // peer's EvPause landed (NetSetRemotePaused defers to the local pause). Latching
+            // regardless would burn the single offer on a menu nobody saw, and once the host
+            // resumed into the peer's still-held pause it would be frozen with no way out:
+            // exactly the griefing hole this card closes.
+            kickOfferShown = scene.NetShowKickMenu();
         }
 
         // Host action (card 0b8a300b): throw the peer out of the match and carry on playing.

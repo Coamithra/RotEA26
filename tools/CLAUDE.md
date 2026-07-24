@@ -69,6 +69,11 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   border and not at the (correctly clamped) source rect, so bilinear still reaches one texel past
   it; a transparent texel there is a hairline seam on every tiled sprite (web CLAUDE.md, Trello
   `4ddcd13f`). Every entry needs a real source PNG — a stale line aborts the whole run.
+  **Rebuild with `--padtest 100`, not the bare default.** The shipped `.dds` deliberately carry the
+  over-pad canary (web CLAUDE.md, "The canary is LEFT ON"), but `--padtest` DEFAULTS TO 0 — so a
+  plain `python tools/textures/build_textures.py` silently strips it off every texture it touches
+  and the diff looks like a harmless size win. Check `git diff --stat` on `Content/gfx/**.dds`
+  before committing a rebuild: shrinking files mean you dropped the canary.
 - **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and
   asserts the texel just outside the logical edge still matches the edge (alpha-weighted, and
   calibrated per texture against its own column-to-column step, so BC3 noise doesn't cry wolf).

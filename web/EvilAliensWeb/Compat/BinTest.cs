@@ -18,7 +18,7 @@ namespace EvilAliensWeb.Compat;
 // re-running every real collision that many times, with their own live Collides=true boxes
 // parked mid-playfield for the duration).
 // Some checks are PRECONDITIONS rather than assertions about the code under test (a
-// reachable collision handler, the planted stale cell scenario 6 needs). A failed
+// reachable collision handler, the planted stale cell scenario 8 needs). A failed
 // precondition short-circuits the rest of its scenario, so the pass/fail tally shrinks --
 // read the FAIL line, never the count.
 // Written in place of an offline sim on purpose (the eaNetSim.test rule): the policy under
@@ -41,12 +41,27 @@ internal static class BinTest
 		public override ICollisionType CollisionType => box;
 	}
 
+	// The live EvilBullets in the world, so the net-puppet scenario can tell the puppet it just
+	// built from any the game already owned.
+	private static HashSet<GameComponent> CollectBullets(Game game)
+	{
+		HashSet<GameComponent> set = new HashSet<GameComponent>();
+		foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
+		{
+			if (item is EvilBullet)
+			{
+				set.Add(item);
+			}
+		}
+		return set;
+	}
+
 	// Scratch collidable for the mid-pass-spawn scenarios. Unlike TestAlien it takes part in
 	// the real collision pass (Collides = true, a hand-placed collision shape) and records
 	// every partner the handler hands it. `Spawn` is the one-shot mid-pass birth: it runs
 	// from CollidesWith, so by construction the bin Add it makes happens while
 	// DetectCollisions is on the stack — which is the whole point. It is an EVENT because
-	// scenario 6 can only subscribe after its warm-up pass, i.e. after Add: the configure-
+	// scenario 8 can only subscribe after its warm-up pass, i.e. after Add: the configure-
 	// before-Add rule (tools/audit_add_order.py) exempts event subscriptions, and this is
 	// exactly the hook-up-after-Add case it exempts them for.
 	private sealed class CollidingAlien : AlienDrawableGameComponent
@@ -163,10 +178,104 @@ internal static class BinTest
 		bin.Remove((GameComponent)(object)e);
 		bin.Update();
 
+		// 5. TryAdd reports whether the add actually LANDED (card 74403f83). This is the
+		// contract the net layer's two ship-puppet spawn sites branch on: they keep a
+		// reference to what they add and gate their retry on it being null, so adopting a
+		// component the filter diverted strands that player for the rest of the session.
+		bin.Purge<TestAlien>();
+		TestAlien f = new TestAlien(game);
+		Check("TryAdd reports a diverted add", !bin.TryAdd((GameComponent)(object)f));
+		bin.TopOfTickFlush();
+		TestAlien g = new TestAlien(game);
+		Check("TryAdd reports a landed add", bin.TryAdd((GameComponent)(object)g));
+		bin.Remove((GameComponent)(object)g);
+		bin.Update();
+
+		// 6. The puppet layer is EXEMPT from the standing purge filter (card 74403f83).
+		// Driven through the REAL NetPuppets.OnSpawn path, not a mirror: Enable() needs only
+		// a Game plus the ServiceHelper bin/score (both live from Game1.Initialize), so no
+		// transport and no paired session are required. Before the fix this scenario fails
+		// with the puppet registered but absent from the world — the silent ghost the card
+		// is about: never drawn, never collidable, and invisible to OnSnapshotEntry's
+		// self-heal, which only rebuilds ids it has NEVER seen.
+		// GameScene.NetActiveScene is the "a real world is up" test, and it must gate this:
+		// the scenario arms Purge<AlienDrawableGameComponent> for real, which during a level —
+		// or during the ATTRACT DEMO the main menu launches by itself after an idle timeout —
+		// would queue every ship, enemy, powerup and wall for death, and the cleanup flush
+		// below would carry it out. Scenarios 1-5 only ever touch a private TestAlien; this one
+		// touches the root class of every world object, so it refuses to run near one.
+		if (Net.NetSession.Active || Net.NetPuppets.LiveCount > 0 || GameScene.NetActiveScene != null)
+		{
+			// Also covers a real co-op session, which owns the puppet layer -- Enable/Disable
+			// here would tear it down mid-flight. Report rather than silently "passing" an
+			// unrun scenario.
+			sb.Append("SKIP net-puppet scenarios (run from the main menu, with no level or attract demo up)\n");
+		}
+		else
+		{
+			EvilBullet puppet = null;
+			try
+			{
+				Net.NetPuppets.Enable(game);
+				// Exactly what GameScene.UpdateResetting / UpdateWin arm, and what
+				// NetApplyReset arms from inside the rx drain itself.
+				bin.Purge<AlienDrawableGameComponent>();
+				Net.NetBaseState state = default(Net.NetBaseState);
+				state.Pos = new Vector2(-400f, -400f); // off-screen: never drawn, never collides
+				state.Scale = 1f;
+				// typeIdx 0 = EvilBulletDescriptor, the simplest replicable (no spawn extras).
+				// Identify the puppet as the EvilBullet that was NOT there beforehand: a bare
+				// "is there an EvilBullet?" scan would pass vacuously on any pre-existing one
+				// (and the cleanup below would then evict a bullet the game still owns).
+				bool built;
+				HashSet<GameComponent> before = CollectBullets(game);
+				built = Net.NetPuppets.OnSpawn(64001, 0, state, new byte[1], 0, 0);
+				foreach (GameComponent item in CollectBullets(game))
+				{
+					if (!before.Contains(item))
+					{
+						puppet = (EvilBullet)item;
+					}
+				}
+				Check("puppet spawn reports success", built);
+				Check("puppet survives the standing purge filter", puppet != null);
+				// The invariant the ghost broke: the id registry must never hold a puppet
+				// that isn't in the world. (OnSpawn's own !landed guard is defence in depth
+				// against a future purge path — the exemption above makes it unreachable from
+				// here, so it is deliberately not asserted; it logs if it ever does fire.)
+				Check("registry agrees with the world",
+					Net.NetPuppets.LiveCount == (puppet != null ? 1 : 0));
+			}
+			catch (Exception ex)
+			{
+				Check("net-puppet scenarios ran (" + ex.GetType().Name + ": " + ex.Message + ")", ok: false);
+			}
+			finally
+			{
+				Net.NetPuppets.Disable();
+				// Disable() deliberately leaves live puppets to the scene's Terminate purge,
+				// but this suite has no scene — take the component out ourselves.
+				if (puppet != null)
+				{
+					bin.Remove((GameComponent)(object)puppet);
+					bin.Update();
+					bin.PruneIdle((GameComponent)(object)puppet);
+				}
+				// Expire the AlienDrawableGameComponent filter this scenario armed. A live
+				// game clears it on the next tick anyway, but the suite must hand the bin
+				// back exactly as it found it: TestAlien IS an AlienDrawableGameComponent, so
+				// a second back-to-back run would otherwise have its own scenario-1 add
+				// diverted and report a phantom failure.
+				bin.TopOfTickFlush();
+			}
+		}
+
 		// Leave no trace: every removed/diverted scratch component landed in the recycle
 		// pool (ComponentRemoved -> idleList, filter diverts -> idleList) — prune them so
 		// repeated runs don't accumulate pooled TestAliens (each is an IComponentWatcher,
 		// so they'd otherwise sit in the notify multiset forever).
+		bin.PruneIdle((GameComponent)(object)f);
+		bin.PruneIdle((GameComponent)(object)g);
 		bin.PruneIdle((GameComponent)(object)a);
 		bin.PruneIdle((GameComponent)(object)b);
 		bin.PruneIdle((GameComponent)(object)c);
@@ -180,7 +289,7 @@ internal static class BinTest
 		return sb.ToString();
 	}
 
-	// Scenarios 5-6 (card bcdc7430): the collision pass's half of the instant-birth contract.
+	// Scenarios 7-8 (card bcdc7430): the collision pass's half of the instant-birth contract.
 	// A collidable added DURING a DetectCollisions pass must not take part in that pass, and
 	// must join the next one.
 	//
@@ -190,8 +299,8 @@ internal static class BinTest
 	// two therefore PLANT the precondition the fault needs, and ASSERT the plant took (a
 	// silently-missing plant is the one way they could go quietly vacuous).
 	//
-	// Commit 8e3f4ef froze THREE bounds, not two. Scenario 6 covers the resolution loop.
-	// Scenario 5 covers the other two together, and has to: only a non-gridded type's callback
+	// Commit 8e3f4ef froze THREE bounds, not two. Scenario 8 covers the resolution loop.
+	// Scenario 7 covers the other two together, and has to: only a non-gridded type's callback
 	// runs during the fill phase at all, so its spawner is the sole way to reach either. With
 	// the inner all-pairs bound live the enumeration throws; with only the outer fill bound
 	// live the newborn is instead gridded into fieldMatrix, which "newborn invisible to the
@@ -206,7 +315,7 @@ internal static class BinTest
 			return;
 		}
 
-		// 5. FILL phase. Non-gridded collision types (CollisionMultibox / CollisionLevelMap —
+		// 7. FILL phase. Non-gridded collision types (CollisionMultibox / CollisionLevelMap —
 		// level walls) keep the original all-pairs scan, which used to enumerate the LIVE list;
 		// a spawn from one of its callbacks bumped the list version mid-enumeration
 		// (InvalidOperationException). Deterministic on the broken code with no setup at all:
@@ -233,7 +342,7 @@ internal static class BinTest
 		check("newborn invisible to the fill pass", fillBorn != null && !probe.Seen.Contains(fillBorn) && !wall.Seen.Contains(fillBorn));
 		Retire(bin, probe, wall, fillBorn);
 
-		// 6. RESOLUTION phase, the boxes[m] loop PR #149's IndexOutOfRange actually came from.
+		// 8. RESOLUTION phase, the boxes[m] loop PR #149's IndexOutOfRange actually came from.
 		// `filler` exists only to make the fault's precondition deterministic: a warm-up pass
 		// fills boxes[filler's index] with the probe cell, then filler leaves the collidables
 		// list, so the next pass's frozen count is exactly that index — and the pass's clear

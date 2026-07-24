@@ -1204,6 +1204,11 @@ internal abstract class GameScene : Scene
 		// scenes are singletons that get re-added, the stale netPeerStalled would make the
 		// banner never appear again on the next play of that level.
 		NetSetPeerStalled(on: false);
+		// KEEP THIS ABOVE THE PURGES (card 74403f83). ComponentBin.Add exempts the puppet layer
+		// from the standing purge filter, and the only thing stopping that exemption dropping a
+		// puppet into a scene that is tearing down is that EvSpawn / the snapshot path are gated
+		// on NetActiveScene -- which has to be null BEFORE the purges arm the filter. Moving this
+		// below them, or adding a purge above it, silently reopens the orphan hazard.
 		if (NetActiveScene == this)
 		{
 			NetActiveScene = null;

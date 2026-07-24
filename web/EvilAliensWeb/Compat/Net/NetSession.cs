@@ -47,7 +47,10 @@ namespace EvilAliensWeb.Compat.Net
     // match for both -- Stop() tears the session down and the menus surface a notice.
     public static partial class NetSession
     {
-        public const byte ProtocolVersion = 5;
+        // v6 (card 0b8a300b) appends the peer-identity token to the handshake -- a WIRE LAYOUT
+        // change (HelloBytes 13 -> 21), so the version byte must move with it or two builds
+        // would both claim v5 and mis-decode each other's hellos.
+        public const byte ProtocolVersion = 6;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -72,6 +75,13 @@ namespace EvilAliensWeb.Compat.Net
         // peer's symmetric detection) actually reach it. One hello interval + RTT headroom;
         // imperceptible in the reject UX (the peer is being told to reload either way).
         private const long RejectGraceMs = 1000;
+        // Card 0b8a300b: how long the remote peer must hold its pause before the HOST is
+        // offered the kick menu. A remote pause freezes our whole world with no way out (see
+        // NetKickMenu), so the host needs an escape -- but most pauses are innocent and short,
+        // and a menu inviting you to kick your co-op partner 200ms into their doorbell break
+        // would be worse than the wait. Past this the pause stops looking accidental.
+        // Declining ("Keep Waiting") re-arms it, so waiting once never forfeits the option.
+        private const long KickOfferDelayMs = 4000;
         // While either side holds a PAUSE the stream-heartbeat is unreliable: the paused
         // tab is usually backgrounded AND the pause muffle ducks its audio, which revokes
         // Chrome's audio exemption from intensive timer throttling -- its ticks (and so its
@@ -229,12 +239,27 @@ namespace EvilAliensWeb.Compat.Net
         // host's own level. Always host-side (the joiner is a normal menu-session client).
         private static bool listedSession;
         private static ulong localBuildHash;
+        // Card 0b8a300b. Our own identity token (hashed) and the peer's, as exchanged in the
+        // v6 hello. SELF-REPORTED -- see NetProtocol.HelloBytes; good enough to stop a kicked
+        // griefer walking straight back in, and nothing more.
+        private static ulong localPeerId;
+        private static ulong peerPeerId;
+        // Peers this HOST kicked with "and Block", for the rest of its current level.
+        // Deliberately static-and-not-cleared-by-Stop(): a kick ENDS the session, the host
+        // re-lists seconds later, and the whole point is that the block outlives that. Emptied
+        // by GameScene.Terminate via ClearBlockedPeers() -- i.e. scoped to one level run.
+        private static readonly HashSet<ulong> blockedPeers = new HashSet<ulong>();
         // Reject-in-progress (see RejectGraceMs): NowMs deadline at which we Stop() after
-        // having queued a reliable MsgReject, and the notice to surface then. 0 = not
-        // rejecting. Keeping the transport alive until the deadline lets the reject frame
+        // having queued a reliable MsgReject or EvKick, and the reason/notice to use then.
+        // 0 = not winding down. Keeping the transport alive until the deadline lets the frame
         // actually egress before the abortive close discards it.
         private static long pendingStopAt;
         private static string pendingStopNotice;
+        private static string pendingStopReason = "pairing rejected";
+        // Remote-pause kick offer (card 0b8a300b): when the current remote pause started (or
+        // was last re-armed by "Keep Waiting"), and whether the menu is currently offered.
+        private static long remotePauseAt;
+        private static bool kickOfferShown;
         private static bool sceneWasUp;       // GameScene edge detection (EvReady / match end)
         private static bool pendingLaunchHas;
         private static byte pendingLaunchLevel;
@@ -300,6 +325,17 @@ namespace EvilAliensWeb.Compat.Net
             // otherwise read 'dev'). Null/empty = the genuine published fingerprint. Dev-only.
             localBuildHash = NetProtocol.HashBuildString(
                 string.IsNullOrEmpty(DebugFlags.NetFakeBuildHash) ? WebRtcInterop.BuildHash() : DebugFlags.NetFakeBuildHash);
+            // ?netfakepeer=<s> plays the same trick on the identity token, and the loopback rig
+            // NEEDS it: two dev tabs share one localStorage, so they mint the SAME eaRtc.peerId
+            // and a host blocking the joiner would block itself.
+            string peerToken = string.IsNullOrEmpty(DebugFlags.NetFakePeerId)
+                ? WebRtcInterop.PeerId()
+                : DebugFlags.NetFakePeerId;
+            // An EMPTY token must map to 0 ("no identity"), not to a hash: HashBuildString("")
+            // returns the FNV-1a offset basis, which is a perfectly ordinary non-zero id -- so
+            // every peer whose JS could not mint a token would share it, and blocking one would
+            // block them all. 0 is the value ApplyKickBlock/IsPeerBlocked refuse to touch.
+            localPeerId = string.IsNullOrEmpty(peerToken) ? 0UL : NetProtocol.HashBuildString(peerToken);
             // Impairment wraps whichever transport the caller picked -- BroadcastChannel dev
             // loopback or the real WebRTC one. It decorates INetTransport precisely so it does
             // not care which. Always in the chain inside a net session (a plain boot never gets
@@ -367,6 +403,24 @@ namespace EvilAliensWeb.Compat.Net
                 GameScene.NetActiveScene?.NetSetRemotePaused(false);
             }
             ClearPeerStalled(); // never leave the banner up over a session that no longer exists
+            ResetPerSessionState();
+            if (notice != null)
+            {
+                MenuNotice = notice;
+            }
+            if (menuSession)
+            {
+                menuSession = false;
+                NetLobby.OnSessionEnded();
+            }
+        }
+
+        // Every field a session owns, back to its pre-session value, so a fresh
+        // Start()/StartMenuSession() is clean. Split out of Stop() so NetKickTest can execute
+        // it directly: Stop() early-returns when no session is Active, which made the test's
+        // "the block survives a teardown" leg vacuous -- it ran only when it could do nothing.
+        internal static void ResetPerSessionState()
+        {
             localPaused = false;
             rxQueue.Clear();
             buffer.Clear();
@@ -399,15 +453,13 @@ namespace EvilAliensWeb.Compat.Net
             listedSession = false;
             pendingStopAt = 0;
             pendingStopNotice = null;
-            if (notice != null)
-            {
-                MenuNotice = notice;
-            }
-            if (menuSession)
-            {
-                menuSession = false;
-                NetLobby.OnSessionEnded();
-            }
+            pendingStopReason = "pairing rejected";
+            peerPeerId = 0;
+            remotePauseAt = 0;
+            kickOfferShown = false;
+            // NOT blockedPeers -- it must outlive the session it was populated in (that IS the
+            // point: a kick stops the session, the host re-lists, the block still holds).
+            // NetKickTest asserts exactly this; do not "tidy up" by clearing it here.
         }
 
         // ---- menu-flow accessors (card 11.4) --------------------------------------------
@@ -466,14 +518,18 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (pendingStopAt != 0)
             {
-                // We refused the pairing: keep pumping (impairment.Pump + DrainRx above ran, and
-                // the transport is still open) so the reliable MsgReject actually reaches the peer,
-                // then wind our side down once the grace elapses. If the peer's OWN reject drained
-                // above it already Stop()ped us (Active would be false). A peer bye/close during
-                // the grace is ignored on purpose -- our own notice still wins at the deadline.
+                // We refused the pairing, or kicked the peer (card 0b8a300b): keep pumping
+                // (impairment.Pump + DrainRx above ran, and the transport is still open) so the
+                // reliable MsgReject/EvKick actually reaches the peer, then wind our side down
+                // once the grace elapses. If the peer's OWN reject drained above it already
+                // Stop()ped us (Active would be false). A peer bye/close during the grace is
+                // ignored on purpose -- our own notice still wins at the deadline.
+                // NOTE for the kick path: the world was already unfrozen and reverted to
+                // single-player synchronously in KickPeer, so this grace is a background
+                // teardown, not a second of frozen screen.
                 if (now >= pendingStopAt)
                 {
-                    Stop("pairing rejected", pendingStopNotice);
+                    Stop(pendingStopReason, pendingStopNotice);
                 }
                 return;
             }
@@ -503,7 +559,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     lastHelloTx = now;
                     transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                        isHost ? peerPrimarySlot : NetProtocol.SlotNone));
+                        isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId));
                 }
             }
             if (PeerUp)
@@ -547,6 +603,7 @@ namespace EvilAliensWeb.Compat.Net
                 if (isHost)
                 {
                     ExpireUnclaimedGrants(now);
+                    TickKickOffer(now);
                 }
             }
             ManagePuppet();
@@ -1114,7 +1171,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte ver = data[1];
             bool peerIsHost = data[2] != 0;
-            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot))
+            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot, out ulong helloPeerId))
             {
                 Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion);
                 SendRejectOnce(NetProtocol.RejectVersion);
@@ -1140,6 +1197,19 @@ namespace EvilAliensWeb.Compat.Net
                 SendRejectOnce(NetProtocol.RejectFlags);
                 return;
             }
+            peerPeerId = helloPeerId;
+            // Card 0b8a300b: the block gate. Checked here because the hello is the ONE point
+            // both rejoin routes converge on (the public browser and a typed room code), and
+            // because it is BEFORE PeerConnected/slot reservation -- a blocked peer re-pairing
+            // never reaches the world, so repeated attempts cost the host a re-pair and nothing
+            // else. peerId 0 = the peer could not produce a token; never blockable, so a broken
+            // localStorage can't get someone refused by accident.
+            if (isHost && IsPeerBlocked(helloPeerId))
+            {
+                Console.WriteLine("[net] blocked peer tried to rejoin -- rejecting");
+                SendRejectOnce(NetProtocol.RejectBanned);
+                return;
+            }
             // Slot allocation (card 4d904410). The host reserves the joiner's primary seat the
             // moment it knows a real peer is there -- BEFORE replying -- so its own couch joins
             // and AI friends can never be handed the same slot. The client adopts what it is
@@ -1158,7 +1228,7 @@ namespace EvilAliensWeb.Compat.Net
             if (welcomeBack)
             {
                 transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                    isHost ? peerPrimarySlot : NetProtocol.SlotNone));
+                    isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId));
             }
             if (!PeerUp)
             {
@@ -1553,6 +1623,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             transport.SendReliable(NetProtocol.EncodeReject(reason));
             pendingStopNotice = RejectNotice(reason, weSentIt: true);
+            pendingStopReason = "pairing rejected";
             pendingStopAt = NowMs + RejectGraceMs;
         }
 
@@ -1583,6 +1654,12 @@ namespace EvilAliensWeb.Compat.Net
                 return weSentIt
                     ? "Game full\nNo free player slot for the other player"
                     : "Game full\nThat game has no free player slot";
+            case NetProtocol.RejectBanned:
+                // Asymmetric on purpose -- unlike the cases above, the two sides genuinely know
+                // different things, and the refused player is owed a reason that isn't a lie.
+                return weSentIt
+                    ? "Blocked player\nThey tried to rejoin your game"
+                    : "Removed from that game\nThe host blocked you from rejoining";
             default:
                 return "Connection refused";
             }
@@ -1637,6 +1714,149 @@ namespace EvilAliensWeb.Compat.Net
             bool normalEnd = scene != null && scene.NetEndingNormally;
             Stop(reason, normalEnd ? null : notice);
             scene?.NetApplyPeerLeft();
+        }
+
+        // The other match-end shape: the peer goes but WE stay in our level, playing solo. Used
+        // whenever the host outlives the peer -- a JIP joiner dropping or leaving, and (card
+        // 0b8a300b) a kick, which is the same outcome the host asked for deliberately.
+        //
+        // Freeing the Remote seat matters as much as exploding the puppet: leave it registered
+        // and oracle.Players stays 2, so NetListing never re-lists and a phantom score panel
+        // lingers. Couch players the peer brought (card 4d904410) go the same way -- our level
+        // keeps running, so nothing else would ever purge their puppets or free their seats.
+        private static void RevertToSinglePlayer(string reason)
+        {
+            ReleasePeerSeats();
+            Stop(reason);
+        }
+
+        // The visible half of the revert, without the teardown -- the kick path needs these two
+        // separable, because it must free the world NOW but keep the transport alive for the
+        // grace (Stop() closes it).
+        private static void ReleasePeerSeats()
+        {
+            if (puppet != null)
+            {
+                ExplodePuppet();
+            }
+            oracle.ReleasePlayer(ControlDevice.Remote);
+            ReleaseAllFriendPuppets();
+        }
+
+        // Host-only, card 0b8a300b: once the peer's pause has outlasted KickOfferDelayMs, swap
+        // the passive "OTHER PLAYER PAUSED" curtain for the interactive kick menu.
+        //
+        // The timing lives HERE, not in GameScene or the overlay, for the reason the whole card
+        // exists: Push() disables every collection component, GameScene included, so neither can
+        // tick during the freeze. NetSession.Update is driven straight from Game1.UpdateInner,
+        // which makes it the one clock still running -- and it is already real-time (NowMs), the
+        // right basis for a frozen world where gameTime means nothing.
+        private static void TickKickOffer(long now)
+        {
+            if (!RemotePaused)
+            {
+                kickOfferShown = false;
+                remotePauseAt = 0;
+                return;
+            }
+            if (kickOfferShown || remotePauseAt == 0 || now - remotePauseAt < KickOfferDelayMs)
+            {
+                return;
+            }
+            GameScene scene = GameScene.NetActiveScene;
+            if (scene == null)
+            {
+                return;
+            }
+            // Latch ONLY on a menu that actually went up. NetShowKickMenu refuses when we hold
+            // no freeze of our own -- which happens whenever our OWN pause menu was up when the
+            // peer's EvPause landed (NetSetRemotePaused defers to the local pause). Latching
+            // regardless would burn the single offer on a menu nobody saw, and once the host
+            // resumed into the peer's still-held pause it would be frozen with no way out:
+            // exactly the griefing hole this card closes.
+            kickOfferShown = scene.NetShowKickMenu();
+        }
+
+        // Host action (card 0b8a300b): throw the peer out of the match and carry on playing.
+        // `block` also refuses their rejoin for the rest of this level (see blockedPeers).
+        //
+        // The teardown is deliberately SPLIT: everything the player can see happens now (the
+        // world unfreezes, the puppet goes, the seat frees), but transport.Close() waits out
+        // RejectGraceMs -- Stop() -> pc.close() is abortive on WebRTC and would discard the
+        // still-buffered EvKick, leaving the kicked player staring at a generic "disconnected"
+        // instead of being told what happened. Same reason the reject path has that grace.
+        public static void KickPeer(bool block)
+        {
+            if (!Active || !isHost || pendingStopAt != 0)
+            {
+                return;
+            }
+            ApplyKickBlock(block, peerPeerId);
+            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvKick, (byte)(block ? 1 : 0)));
+            metrics.EventsTx++;
+            Console.WriteLine("[net] kicked the peer" + (block ? " (blocked for this level)" : ""));
+            // Release the freeze BEFORE the revert: the world is still pushed under the kicked
+            // player's pause, and NetSetRemotePaused(false) is what pops it.
+            if (RemotePaused)
+            {
+                RemotePaused = false;
+                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+            }
+            PeerUp = false;
+            ReleasePeerSeats();
+            // Deliberately NOT RevertToSinglePlayer() -- its Stop() would close the transport
+            // and abort the EvKick we just queued. The deadline below does the Stop() instead;
+            // until then the session is Active with no peer, which Update handles by taking the
+            // pendingStopAt branch and nothing else.
+            kickOfferShown = false;
+            pendingStopReason = "kick teardown";
+            pendingStopNotice = null;
+            pendingStopAt = NowMs + RejectGraceMs;
+        }
+
+        // "Keep Waiting": the host declined this offer, so hide the menu and start the delay
+        // again. Waiting once must not forfeit the option -- a griefer holding pause forever
+        // would otherwise get exactly one refusal and then a permanently frozen host.
+        public static void RearmKickOffer()
+        {
+            remotePauseAt = NowMs;
+            kickOfferShown = false;
+        }
+
+        // The two halves of the block rule, factored out of KickPeer and HandleHello so
+        // NetKickTest can drive the REAL decisions rather than a paraphrase of them (the
+        // messaging + teardown around them is what the two-window run covers).
+        //
+        // peerId 0 means the peer could not produce a token at all: never recorded, never
+        // matched. Otherwise one broken localStorage would block every other such peer at once.
+        internal static void ApplyKickBlock(bool block, ulong peerId)
+        {
+            if (block && peerId != 0)
+            {
+                blockedPeers.Add(peerId);
+            }
+        }
+
+        internal static bool IsPeerBlocked(ulong peerId)
+        {
+            return peerId != 0 && blockedPeers.Contains(peerId);
+        }
+
+        // Scoped to one level run (GameScene.Terminate) -- the card's "for that session only".
+        public static void ClearBlockedPeers()
+        {
+            blockedPeers.Clear();
+        }
+
+        internal static int BlockedPeerCount => blockedPeers.Count;
+
+        // For NetKickTest's save/restore, so running the self-test mid-level cannot quietly
+        // un-block someone the host had already thrown out.
+        internal static ulong[] SnapshotBlockedPeers()
+        {
+            ulong[] ids = new ulong[blockedPeers.Count];
+            blockedPeers.CopyTo(ids);
+            return ids;
         }
 
         // Drop the banner with no verdict attached -- used by the teardown paths, where the
@@ -1694,20 +1914,7 @@ namespace EvilAliensWeb.Compat.Net
             ClearPeerStalled();
             if (listedSession)
             {
-                // The JIP joiner dropped: revert the host to plain single-player. Explode the
-                // puppet ship AND free the Remote player slot (else oracle.Players stays 2 and
-                // the host is never re-listed + a phantom score lingers), tear the session down.
-                // The host keeps playing its level; NetListing re-lists next tick. No
-                // force-exit -- the host was here first.
-                if (puppet != null)
-                {
-                    ExplodePuppet();
-                }
-                oracle.ReleasePlayer(ControlDevice.Remote);
-                // ...and any couch players the joiner brought with it (card 4d904410): our level
-                // keeps running, so nothing else would ever purge their puppets or free the seats.
-                ReleaseAllFriendPuppets();
-                Stop("jip peer lost: " + reason);
+                RevertToSinglePlayer("jip peer lost: " + reason);
                 return;
             }
             remoteAlive = false;
@@ -2055,6 +2262,17 @@ namespace EvilAliensWeb.Compat.Net
                 if (on)
                 {
                     metrics.Pauses++;
+                    // Arm the host's kick offer (card 0b8a300b). Note this is the EVENT edge,
+                    // not the freeze edge: the freeze itself is skipped while our own pause menu
+                    // is up, and the clock should still run then -- NetLocalPauseReleased
+                    // re-freezes into a pause that may already have earned the offer.
+                    remotePauseAt = NowMs;
+                    kickOfferShown = false;
+                }
+                else
+                {
+                    remotePauseAt = 0;
+                    kickOfferShown = false;
                 }
                 break;
             }
@@ -2096,16 +2314,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 if (listedSession)
                 {
-                    // A JIP joiner left the match: revert the host to single-player (explode
-                    // the puppet + free the Remote slot so Players==1 again), keep the host in
-                    // its level. NetListing re-lists next tick.
-                    if (puppet != null)
-                    {
-                        ExplodePuppet();
-                    }
-                    oracle.ReleasePlayer(ControlDevice.Remote);
-                    ReleaseAllFriendPuppets(); // and its couch players (card 4d904410)
-                    Stop("jip peer left the match");
+                    RevertToSinglePlayer("jip peer left the match");
                     break;
                 }
                 // A shared victory/game-over also lands here (whichever scene terminates
@@ -2114,6 +2323,25 @@ namespace EvilAliensWeb.Compat.Net
                 // walk-out, so the notice does show; our OWN finished level can't reach this
                 // -- its scene-down edge already stopped the session.)
                 EndMatchPeerGone("peer left the match", "The other player left\nMatch ended");
+                break;
+            }
+            case NetProtocol.EvKick:
+            {
+                // The host threw us out (card 0b8a300b). Only the host may kick, so ignore it
+                // coming the other way rather than letting a client end the host's match.
+                if (isHost || data.Length < 5)
+                {
+                    return;
+                }
+                bool blocked = data[4] != 0;
+                Console.WriteLine("[net] kicked by the host" + (blocked ? " (blocked)" : ""));
+                // Same shape as any other match end: Stop() first (which releases the freeze if
+                // the host was holding one), then NetApplyPeerLeft(), which unwinds our own
+                // pause-menu depth -- we are almost certainly sitting in it, since holding the
+                // pause is what got us kicked -- and force-exits to the main menu.
+                EndMatchPeerGone("kicked by the host", blocked
+                    ? "Removed from the game\nThe host blocked you from rejoining"
+                    : "Removed from the game\nThe host kicked you");
                 break;
             }
             }

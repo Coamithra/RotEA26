@@ -161,6 +161,7 @@ generate much of the art/audio referenced here.
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
+  `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
@@ -1132,6 +1133,53 @@ interpolation feel, both gated on real-network playtests.
   win trigger lives in the host-only script); the client runs its own `Victory()` from it,
   achievements included. `GameScene.NetActiveScene` (static, set in Initialize / cleared
   in Terminate) is how NetSession reaches the private state machine.
+- **Host kick / kick+block (card 0b8a300b) -- the host's ONLY agency under a remote pause.**
+  A remote pause freezes our world via `ComponentBin.Push`, which disables every collection
+  component **including `GameScene`** -- so the host's own pause trigger never runs, and the
+  drop failsafe can't help either (a held pause widens the timeout to the 120s
+  `PausedPeerTimeoutMs` backstop). Before this card a stranger off the public game browser
+  could freeze someone's run indefinitely.
+  - **`NetKickMenu`** (a `ConfirmationMenu`) replaces `NetPauseOverlay` for the HOST once the
+    pause outlasts `NetSession.KickOfferDelayMs` (4s): `Keep Waiting` / `Kick Player` /
+    `Kick and Block`. It works for the same reason the local pause menu does -- **added AFTER
+    the Push, so it stays `Enabled`**. Entry 0 is `Keep Waiting` and preselected, so a
+    reflexive Enter over a suddenly-appearing menu is harmless. Declining **re-arms** the
+    offer (`NetSession.RearmKickOffer`), so waiting once never forfeits it. The client keeps
+    the plain overlay -- there is nobody for it to kick.
+  - **The offer timer lives in `NetSession.Update`, not `GameScene`** -- `GameScene` is frozen
+    by the Push, so it cannot time its own escape hatch. Real time (`NowMs`), like the rest of
+    the net layer; `gameTime` means nothing in a frozen world.
+  - **`KickPeer(block)` splits the teardown deliberately:** everything visible happens now
+    (unfreeze, `ExplodePuppet`, `oracle.ReleasePlayer(Remote)` + `ReleaseAllFriendPuppets`),
+    but `Stop()` waits out `RejectGraceMs` -- `Stop() -> pc.close()` is ABORTIVE on WebRTC and
+    would discard the still-buffered `EvKick`, leaving the kicked player with a generic
+    "disconnected" instead of a reason. Do NOT collapse it back into one call.
+    The client's `EvKick` handler reuses `EndMatchPeerGone` -> `NetApplyPeerLeft`, which
+    already unwinds its own pause-menu depth (it is almost certainly sitting in it) and exits.
+    A kick applies to EVERY session kind and is never a match end for the KICKER: the host
+    reverts to single-player and plays on (`RevertToSinglePlayer`, shared with JIP peer-loss).
+  - **The block needs an identity, so the handshake gained one -- protocol v5 -> v6.**
+    `eaRtc.peerId` = a random 128-bit token minted once into `localStorage`, FNV-hashed to 8
+    wire bytes (`HelloBytes` 13 -> 21). **It is SELF-REPORTED: a speed bump against casual
+    re-joining, not authentication** -- clearing site data or incognito mints a new one. Never
+    sent to the signaling server, only to an already-connected peer. Don't build anything that
+    must trust it on this. `peerId` 0 (JS could not produce one) is never recorded and never
+    matched, so one broken `localStorage` can't get every such peer refused.
+  - Enforced in `HandleHello` (`RejectBanned`) -- the ONE choke point both rejoin routes pass
+    through (public browser AND a typed room code), and before `PeerConnected`/slot
+    reservation, so a blocked peer re-pairing never touches the world. `blockedPeers`
+    deliberately **survives `NetSession.Stop()`** (a kick stops the session and the host
+    re-lists seconds later; the block must outlive that) and is cleared in
+    `GameScene.Terminate` = the card's "for that session only".
+  - **Verify with `eaKickTest()`** (`Compat/Net/NetKickTest.cs`) -- the block predicate + the
+    v6 codec as DATA, because both dangerous failures are invisible in play: a block that
+    fails to persist across the kick's own `Stop()`, and a wire-layout slip that decodes the
+    wrong bytes as a peer id. It restores the live set, and SKIPS the survives-`Stop()` leg
+    over a live session rather than ending a real match (it says so; a skipped leg is not a
+    pass). `?netkickshot` (pair with `?level=`) parks the menu over a live level for a
+    screenshot. **`?netfakepeer=<s>` is REQUIRED for any two-tab test** -- both dev tabs share
+    one `localStorage`, so they present the SAME peer id and blocking the joiner would block
+    yourself (the `?netfakehash=` trick, same reason).
 - **Pause is a replicated event; the triggers stay local (card 11.3):** the local pause
   push / every resume path sends EvPause on/off. The receiving side freezes via
   `Collection.Push()` under a `NetPauseOverlay` ("OTHER PLAYER PAUSED") -- no interactive

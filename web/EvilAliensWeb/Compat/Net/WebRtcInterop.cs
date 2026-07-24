@@ -113,6 +113,22 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // This browser's own identity token (card 0b8a300b) -- a random localStorage value,
+        // hashed into the hello so a host can refuse a peer it kicked+blocked. Self-reported
+        // (see eaRtc.peerId): a speed bump against casual re-joining, not authentication.
+        // "" means JS could not produce one; NetSession treats that as "unblockable".
+        internal static string PeerId()
+        {
+            try
+            {
+                return _js?.Invoke<string>("eaRtc.peerId") ?? "";
+            }
+            catch (Exception)
+            {
+                return "";
+            }
+        }
+
         [JSInvokable("rtcData")]
         public static void Data(string b64, bool reliable)
         {

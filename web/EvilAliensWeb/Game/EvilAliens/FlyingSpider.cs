@@ -417,6 +417,14 @@ internal class FlyingSpider : KillableAlien
 
 	internal bool NetIsBackground => isbackground;
 
+	// Card 9a3175d0: the background form is fog. It spawns Collides=false and Initialize is the
+	// only thing that ever writes Collides (including its ApplyBenchPlacement tail, which only
+	// ever writes false as well), so it can never turn into a hazard; the swarm is
+	// replicated as one NetCosmeticKind.FlyingSpiderBackground beat instead and the joiner runs
+	// its own spawner. `isbackground` is pinned by Setup before bin.Add, which is when this is
+	// read. The FOREGROUND form is a real killable enemy and stays fully replicated.
+	internal override bool NetCosmeticOnly => isbackground;
+
 	internal byte NetColorIndex
 	{
 		get

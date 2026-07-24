@@ -266,6 +266,27 @@ public class Oracle : GameComponent, IOracleService
 		return players[i].controller;
 	}
 
+	// Re-point a SEATED slot at a different device, keeping everything else about it (score,
+	// lives, hue, position). Card e6927ef8: TeamChallenge's auto-pilot partner hands its seat to
+	// the first real pad that joins, and the slot must survive the handover -- releasing and
+	// re-seating would drop the tether and the slot's score with it. Refuses an unseated slot and
+	// refuses to create a DUPLICATE of a device already playing, which is what AddPlayer's own
+	// guard protects (ControlDevice.AI excepted there, and there can be several of those).
+	// The caller owns the live PlayerShip's own `controller` copy -- see PlayerShip.AdoptController.
+	public bool SetController(int slot, ControlDevice device)
+	{
+		if (slot < 0 || slot >= 4 || !players[slot].isPlaying)
+		{
+			return false;
+		}
+		if (device != ControlDevice.AI && GetPlayerIndex(device) >= 0)
+		{
+			return false;
+		}
+		players[slot].controller = device;
+		return true;
+	}
+
 	public int GetPlayerIndex(ControlDevice device)
 	{
 		for (int i = 0; i < 4; i++)

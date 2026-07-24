@@ -63,6 +63,10 @@ namespace EvilAliensWeb.Compat.Net
         // [blocked:1] -- 1 also means the host blocked our peer id for the rest of its level,
         // so a rejoin will be refused at the hello (RejectBanned). Payload via EncodeByteEvent.
         public const byte EvKick = 20;
+        // Card 9a3175d0: a purely DECORATIVE swarm is replicated as one "effect on/off" beat
+        // instead of per entity -- each peer runs its own spawner and its own scenery.
+        // [kind:1][on:1][rate:f32]. See NetCosmeticKind.
+        public const byte EvCosmeticSwarm = 21;
 
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
@@ -655,6 +659,18 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
+        // EvCosmeticSwarm (card 9a3175d0): [kind:1][on:1][rate:f32] -- turn a decorative swarm on
+        // or off on the peer, with the spawn rate the host's own spawner is running at. `rate` is
+        // meaningless when off and written as 0.
+        public static byte[] EncodeCosmeticSwarmEvent(ushort eventSeq, byte kind, bool on, float rate)
+        {
+            byte[] b = EventHeader(EvCosmeticSwarm, eventSeq, 6);
+            b[4] = kind;
+            b[5] = (byte)(on ? 1 : 0);
+            WriteF32(b, 6, on ? rate : 0f);
+            return b;
+        }
+
         // EvMusic: [song:1] (MusicStop = StopMusic). EvCheckpoint/EvVictory/EvTetherBreak carry
         // no payload; EvReset carries [mode:1]; EvPause carries [on:1] -- all use EncodeByteEvent.
         public const byte MusicStop = 0xFF;
@@ -767,6 +783,23 @@ namespace EvilAliensWeb.Compat.Net
         // the Queue* op that re-creates it (which parks it back at its entry point). Its own op
         // rather than a magic non-zero Vector2 on Queue*, so neither carries two meanings.
         SetDoodadPos = 11,
+    }
+
+    // The decorative swarms replicated as one on/off beat rather than per entity (card
+    // 9a3175d0). Wire value = enum value; APPEND-ONLY.
+    //
+    // A kind belongs here only if EVERY entity it spawns is cosmetic by construction -- it can
+    // never become collidable, and nothing gameplay-visible reads it. Both current members
+    // spawn with Collides=false and every AI consumer of Oracle.GetBaddies gates on Collides,
+    // so the two peers' copies being in different places is invisible.
+    public enum NetCosmeticKind : byte
+    {
+        // FlyingSpiderEvent(isbackground: true) -- Level 2's fog swarm and the ?flyspiders rig.
+        FlyingSpiderBackground = 0,
+        // The SetBackground() pair AsteroidSpawner emits alongside each real asteroid (Level 1's
+        // belt, AsteroidChase, Demo1). The client's copy runs the spawner's own
+        // SetBackGroundOnly() seam, so it never produces the collidable ones.
+        BackgroundAsteroids = 1,
     }
 
     public struct ShipSample

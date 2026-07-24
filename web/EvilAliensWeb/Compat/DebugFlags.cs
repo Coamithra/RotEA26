@@ -865,6 +865,13 @@ namespace EvilAliensWeb.Compat
 
 		public static string NetCode { get; private set; } = "";
 
+		// ?netfakehash=<s>: override THIS tab's build-hash fingerprint so two dev tabs disagree,
+		// driving the real peerHash-mismatch -> reject flow (RejectBuild -> "update required")
+		// on the BroadcastChannel dev rig -- both tabs otherwise read 'dev' and never mismatch.
+		// The purpose-built two-tab verification for the reject handshake + its teardown grace.
+		// Null/empty = the genuine WebRtcInterop.BuildHash(); dev-only, byte-identical when unset.
+		public static string NetFakeBuildHash { get; private set; } = "";
+
 		// ?aiplayer: force the LOCAL player's ship onto the existing PlayerShip AI branch
 		// (ControlDevice.AI / DoAIMove/DoAIFire -- the attract-demo behaviour) at level start,
 		// so two net tabs can drive themselves unattended (the user-specified 11.1 testing
@@ -1480,6 +1487,12 @@ namespace EvilAliensWeb.Compat
 					if (!string.IsNullOrEmpty(val))
 					{
 						NetCode = val.Trim().ToUpperInvariant();
+					}
+					break;
+				case "netfakehash":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetFakeBuildHash = val.Trim();
 					}
 					break;
 				case "aiplayer":

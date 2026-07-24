@@ -634,20 +634,20 @@ internal abstract class GameScene : Scene
 		{
 			if (Storage.StorageEnabled)
 			{
-				StorageContainer val = null;
+				StorageContainer container = null;
 				try
 				{
-					val = Storage.StorageDeviceManager.Device.OpenContainer("EvilAliens");
-					snapshotExists = File.Exists(val.Path + level.ToString() + ".dat");
+					container = Storage.StorageDeviceManager.Device.OpenContainer("EvilAliens");
+					snapshotExists = File.Exists(container.Path + level.ToString() + ".dat");
 				}
 				catch (Exception)
 				{
 				}
 				finally
 				{
-					if (val != null)
+					if (container != null)
 					{
-						val.Dispose();
+						container.Dispose();
 					}
 				}
 			}
@@ -874,13 +874,13 @@ internal abstract class GameScene : Scene
 
 	protected void TestBlocks()
 	{
-		int num = 20;
-		for (int i = 0; i < 800 / num; i++)
+		int blockSize = 20;
+		for (int i = 0; i < 800 / blockSize; i++)
 		{
-			for (int j = 0; j < 600 / num; j++)
+			for (int j = 0; j < 600 / blockSize; j++)
 			{
 				TestBlock testBlock = TestBlock.NewTestBlock(Collection, base.Game);
-				testBlock.Setup(new Vector2((float)(i * num), (float)(j * num)), new Vector2((float)((i + 1) * num), (float)((j + 1) * num)));
+				testBlock.Setup(new Vector2((float)(i * blockSize), (float)(j * blockSize)), new Vector2((float)((i + 1) * blockSize), (float)((j + 1) * blockSize)));
 				Collection.Add((GameComponent)(object)testBlock);
 			}
 		}
@@ -896,11 +896,11 @@ internal abstract class GameScene : Scene
 		snapshottimer.Update(gameTime);
 		snapshotdelaytimer.Update(gameTime);
 		pausestopper.Update(gameTime);
-		bool flag = false;
+		bool pauseRequested = false;
 		ControlDevice controlDevice = ControlDevice.AI;
 		if ((base.InputHandler.Pressed(MyKeys.Enter) || base.InputHandler.Pressed(MyKeys.Esc)) && oracle.DeviceIsPlaying(ControlDevice.Keyboard))
 		{
-			flag = true;
+			pauseRequested = true;
 			controlDevice = ControlDevice.Keyboard;
 		}
 		for (int i = 0; i < 4; i++)
@@ -915,16 +915,16 @@ internal abstract class GameScene : Scene
 			};
 			if (oracle.DeviceIsPlaying(controlDevice2) && (!base.InputHandler.PadConnected(i) || base.InputHandler.PadPressed(PadKeys.Start, i)))
 			{
-				flag = true;
+				pauseRequested = true;
 				controlDevice = controlDevice2;
 			}
 		}
 		if (base.InputHandler.Pressed(MyKeys.Generic_Start) && oracle.DeviceIsPlaying(ControlDevice.Generic))
 		{
-			flag = true;
+			pauseRequested = true;
 			controlDevice = ControlDevice.Generic;
 		}
-		if (flag & !pausestopper.Active)
+		if (pauseRequested & !pausestopper.Active)
 		{
 			Collection.Push();
 			Collection.Add((GameComponent)(object)darkener);
@@ -1212,6 +1212,11 @@ internal abstract class GameScene : Scene
 		// scenes are singletons that get re-added, the stale netPeerStalled would make the
 		// banner never appear again on the next play of that level.
 		NetSetPeerStalled(on: false);
+		// KEEP THIS ABOVE THE PURGES (card 74403f83). ComponentBin.Add exempts the puppet layer
+		// from the standing purge filter, and the only thing stopping that exemption dropping a
+		// puppet into a scene that is tearing down is that EvSpawn / the snapshot path are gated
+		// on NetActiveScene -- which has to be null BEFORE the purges arm the filter. Moving this
+		// below them, or adding a purge above it, silently reopens the orphan hazard.
 		if (NetActiveScene == this)
 		{
 			NetActiveScene = null;
@@ -1244,12 +1249,12 @@ internal abstract class GameScene : Scene
 		{
 			snapshotdelaytimer.Reset();
 			snapshotdelaytimer.Stop();
-			float num = 10f;
+			float chancePercent = 10f;
 			if (ScreenShotSpamEnabled)
 			{
-				num = 100f;
+				chancePercent = 100f;
 			}
-			if (RandomHelper.RandomNextFloat(0f, 100f) <= num || (!snapshotExists && !snapshotMadeThisSession))
+			if (RandomHelper.RandomNextFloat(0f, 100f) <= chancePercent || (!snapshotExists && !snapshotMadeThisSession))
 			{
 				if (game1PostDrawEvent == null)
 				{
@@ -1273,53 +1278,53 @@ internal abstract class GameScene : Scene
 			return;
 		}
 		snapshotScanCounter = 0;
-		float num2 = 0f;
+		float interestScore = 0f;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
-			GameComponent val = item;
-			if (!(val is AlienDrawableGameComponent))
+			GameComponent component = item;
+			if (!(component is AlienDrawableGameComponent))
 			{
 				continue;
 			}
-			Vector2 position = ((AlienDrawableGameComponent)(object)val).Position;
+			Vector2 position = ((AlienDrawableGameComponent)(object)component).Position;
 			if (!(position.X > 800f) && !(position.X < 0f) && !(position.Y > 600f) && !(position.Y < 0f))
 			{
-				num2 += 1f;
-				if (val is Explosion)
+				interestScore += 1f;
+				if (component is Explosion)
 				{
-					num2 += 1f;
+					interestScore += 1f;
 				}
-				if (val is EvilBullet)
+				if (component is EvilBullet)
 				{
-					num2 -= 0.66f;
+					interestScore -= 0.66f;
 				}
-				if (val is Bullet)
+				if (component is Bullet)
 				{
-					num2 -= 1f;
+					interestScore -= 1f;
 				}
-				if (val is Lazer)
+				if (component is Lazer)
 				{
-					num2 += 0.5f;
+					interestScore += 0.5f;
 				}
-				if (val is Asteroid && !((Asteroid)(object)val).Collides)
+				if (component is Asteroid && !((Asteroid)(object)component).Collides)
 				{
-					num2 -= 1f;
+					interestScore -= 1f;
 				}
-				if (val is FlyingSpider && !((FlyingSpider)(object)val).Collides)
+				if (component is FlyingSpider && !((FlyingSpider)(object)component).Collides)
 				{
-					num2 -= 1f;
+					interestScore -= 1f;
 				}
-				if (val is BloodExplosion)
+				if (component is BloodExplosion)
 				{
-					num2 += 1f;
+					interestScore += 1f;
 				}
-				if (val is Blast && ((Blast)(object)val).IsMini)
+				if (component is Blast && ((Blast)(object)component).IsMini)
 				{
-					num2 -= 0.8f;
+					interestScore -= 0.8f;
 				}
 			}
 		}
-		if (num2 > 30f)
+		if (interestScore > 30f)
 		{
 			snapshotdelaytimer.Start();
 		}

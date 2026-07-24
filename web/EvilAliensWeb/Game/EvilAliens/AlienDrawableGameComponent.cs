@@ -385,14 +385,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			collisionBox = new CollisionBox();
 		}
-		float num = texture.LogicalWidth();
-		num -= (float)((columns - 1) * separatingspace);
-		num /= (float)columns;
-		float num2 = texture.LogicalHeight();
-		num2 -= (float)((rows - 1) * separatingspace);
-		num2 /= (float)rows;
-		collisionBox.TopLeft = new Vector2((0f - num * DrawScale) / 2f, (0f - num2 * DrawScale) / 2f) * 0.6f;
-		collisionBox.BottomRight = new Vector2(num * DrawScale / 2f, num2 * DrawScale / 2f) * 0.6f;
+		float cellWidth = texture.LogicalWidth();
+		cellWidth -= (float)((columns - 1) * separatingspace);
+		cellWidth /= (float)columns;
+		float cellHeight = texture.LogicalHeight();
+		cellHeight -= (float)((rows - 1) * separatingspace);
+		cellHeight /= (float)rows;
+		collisionBox.TopLeft = new Vector2((0f - cellWidth * DrawScale) / 2f, (0f - cellHeight * DrawScale) / 2f) * 0.6f;
+		collisionBox.BottomRight = new Vector2(cellWidth * DrawScale / 2f, cellHeight * DrawScale / 2f) * 0.6f;
 		return collisionBox;
 	}
 
@@ -430,14 +430,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	protected void Move(float? direction, GameTime gameTime)
 	{
-		float num = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
+		float elapsedMs = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
 		float direction2 = _direction;
-		Vector2 val = MyMath.AngleToVector(direction2) * _speed;
-		Vector2 val2 = MyMath.AngleToVector(direction2) * -1f * MathHelper.Min(_deceleration * num, _speed);
-		Vector2 val3 = ((!direction.HasValue) ? Vector2.Zero : (MyMath.AngleToVector(direction.Value) * (_acceleration + _deceleration) * num));
-		Vector2 v = val + val2 + val3;
-		_direction = MyMath.VectorToAngle(v);
-		_speed = MathHelper.Clamp((v).Length(), _minimumSpeed, _maximumSpeed);
+		Vector2 velocity = MyMath.AngleToVector(direction2) * _speed;
+		Vector2 decelStep = MyMath.AngleToVector(direction2) * -1f * MathHelper.Min(_deceleration * elapsedMs, _speed);
+		Vector2 accelStep = ((!direction.HasValue) ? Vector2.Zero : (MyMath.AngleToVector(direction.Value) * (_acceleration + _deceleration) * elapsedMs));
+		Vector2 newVelocity = velocity + decelStep + accelStep;
+		_direction = MyMath.VectorToAngle(newVelocity);
+		_speed = MathHelper.Clamp((newVelocity).Length(), _minimumSpeed, _maximumSpeed);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -446,8 +446,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			timer.Update(gameTime);
 		}
-		Vector2 val = MyMath.AngleToVector(_direction) * _speed * Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
-		_position += val;
+		Vector2 step = MyMath.AngleToVector(_direction) * _speed * Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
+		_position += step;
 		float span = ActiveLastFrame - FirstFrame;
 		if (span <= 0f)
 		{
@@ -492,15 +492,15 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private void drawWithoutInterpolation()
 	{
-		bool flag = spriteBatch.colorizeEffect.Enabled || spriteBatch.lightenEffect.Enabled;
+		bool needsFade = spriteBatch.colorizeEffect.Enabled || spriteBatch.lightenEffect.Enabled;
 		Rectangle frameRectangle = getFrameRectangle((int)curframe);
-		if (flag)
+		if (needsFade)
 		{
 			spriteBatch.fadeEffect.Enable();
 			spriteBatch.fadeEffect.Value = (color).ToVector4();
 		}
 		spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, color, spriteEffects);
-		if (flag)
+		if (needsFade)
 		{
 			spriteBatch.fadeEffect.Disable();
 		}
@@ -508,43 +508,43 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private Rectangle getFrameRectangle(int framenr)
 	{
-		int num = framenr / columns;
-		int num2 = framenr % columns;
-		int num3 = texture.LogicalWidth() - (columns - 1) * separatingspace;
-		num3 /= columns;
-		int num4 = texture.LogicalHeight() - (rows - 1) * separatingspace;
-		num4 /= rows;
+		int frameRow = framenr / columns;
+		int frameCol = framenr % columns;
+		int cellWidth = texture.LogicalWidth() - (columns - 1) * separatingspace;
+		cellWidth /= columns;
+		int cellHeight = texture.LogicalHeight() - (rows - 1) * separatingspace;
+		cellHeight /= rows;
 		Rectangle result = default(Rectangle);
-		(result) = new Rectangle(num2 * (num3 + separatingspace), num * (num4 + separatingspace), num3, num4);
+		(result) = new Rectangle(frameCol * (cellWidth + separatingspace), frameRow * (cellHeight + separatingspace), cellWidth, cellHeight);
 		return result;
 	}
 
 	private void drawWithInterpolation()
 	{
-		int num = (int)curframe;
-		float num2 = curframe % 1f;
+		int currentFrame = (int)curframe;
+		float frameBlend = curframe % 1f;
 		if (!spriteBatch.colorizeEffect.Enabled)
 		{
 			_ = spriteBatch.lightenEffect.Enabled;
 		}
-		Rectangle frameRectangle = getFrameRectangle(num);
-		int nextFrame = num + 1;
+		Rectangle frameRectangle = getFrameRectangle(currentFrame);
+		int nextFrame = currentFrame + 1;
 		if (nextFrame >= ActiveLastFrame)
 		{
 			nextFrame = FirstFrame;
 		}
 		Rectangle frameRectangle2 = getFrameRectangle(nextFrame);
-		SpriteBlendMode val = blendMode;
-		switch ((int)val)
+		SpriteBlendMode mode = blendMode;
+		switch ((int)mode)
 		{
 		case 2:
 		{
-			Color val2 = default(Color);
-			(val2) = new Color(new Vector4(1f, 1f, 1f, 1f - num2));
-			Color val3 = default(Color);
-			(val3) = new Color(new Vector4(1f, 1f, 1f, num2));
-			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, val2, spriteEffects);
-			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, DrawScale, center: true, val3, spriteEffects);
+			Color currentTint = default(Color);
+			(currentTint) = new Color(new Vector4(1f, 1f, 1f, 1f - frameBlend));
+			Color nextTint = default(Color);
+			(nextTint) = new Color(new Vector4(1f, 1f, 1f, frameBlend));
+			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, currentTint, spriteEffects);
+			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, DrawScale, center: true, nextTint, spriteEffects);
 			break;
 		}
 		case 0:
@@ -555,7 +555,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			// delta must be normalised by the padded Width/Height here, NOT the logical size — the frame
 			// RECTS above are logical pixel-space (correct), but this ratio lives in padded UV space.
 			spriteBatch.interpolateEffect.Offset = new Vector2((float)((frameRectangle2).Left - (frameRectangle).Left), (float)((frameRectangle2).Top - (frameRectangle).Top)) / new Vector2((float)texture.Width, (float)texture.Height);
-			spriteBatch.interpolateEffect.Delta = num2;
+			spriteBatch.interpolateEffect.Delta = frameBlend;
 			spriteBatch.fadeEffect.Enable();
 			spriteBatch.fadeEffect.Value = (color).ToVector4();
 			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, color, spriteEffects);

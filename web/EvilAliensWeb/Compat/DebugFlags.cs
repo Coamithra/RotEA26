@@ -956,6 +956,14 @@ namespace EvilAliensWeb.Compat
 		// A big field with a FAST falloff is the point: the bot keeps well clear of something
 		// the size of the spider boss, while the outer half of the field stays cheap enough that
 		// it can still dive in to shoot and to weave through bullets.
+		// ?aismoothurgent=<ms> the smoothing floor used when the push is strong, and
+		// ?aipark=<demand>     the total push at or below which the ship parks instead of
+		//                      thrusting. Together these are the "damp when calm, fly when not"
+		//                      balance -- see PlayerShip.DoAIMove.
+		public static float? AiSteerSmoothUrgentMs { get; private set; }
+
+		public static float? AiParkDemand { get; private set; }
+
 		public static float? AiThreatFieldPx { get; private set; }
 
 		public static float? AiThreatFieldSize { get; private set; }
@@ -1646,6 +1654,18 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
 					{
 						AiThreatLeadMs = MathHelper.Min(aitl, 3000f);
+					}
+					break;
+				case "aismoothurgent":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisu) && aisu >= 0f)
+					{
+						AiSteerSmoothUrgentMs = MathHelper.Min(aisu, 1000f);
+					}
+					break;
+				case "aipark":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aipk) && aipk >= 0f)
+					{
+						AiParkDemand = MathHelper.Min(aipk, 20f);
 					}
 					break;
 				case "aifieldpx":

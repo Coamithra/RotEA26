@@ -168,13 +168,25 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				break;
 			case SpiderBossState.flyup:
 			case SpiderBossState.land:
+			{
 				boxes.Items[0].Width = 240f * scale;
 				boxes.Items[0].Height = 150f * scale;
 				boxes.Items[0].CenterAround(base.Position + new Vector2(20f * scale, -60f * scale));
-				boxes.Items[1].Height = 1f;
-				boxes.Items[1].Width = 1f;
-				boxes.Items[1].CenterAround(new Vector2(1000f, 1000f));
+				// GAMEPLAY CHANGE (card f4d1721f), deliberate and it affects human players too:
+				// the descent is hard-coded to X 600, which left a safe pocket between the boss and
+				// the right screen edge. Standing in it trivialises the landing for anyone who
+				// notices, and it is not intended behaviour for either side -- the AI found it
+				// immediately and parked there, which is what surfaced it. The second box extends
+				// the landing from the boss's right edge to the edge of the screen, so the only
+				// answer to a landing is to get out from under it and to the LEFT.
+				float bodyRight = boxes.Items[0].Right;
+				float bodyMidY = (boxes.Items[0].Top + boxes.Items[0].Bottom) * 0.5f;
+				float sweepWidth = MathHelper.Max(800f - bodyRight, 1f);
+				boxes.Items[1].Width = sweepWidth;
+				boxes.Items[1].Height = boxes.Items[0].Height;
+				boxes.Items[1].CenterAround(new Vector2(bodyRight + sweepWidth * 0.5f, bodyMidY));
 				break;
+			}
 			case SpiderBossState.standing:
 				boxes.Items[0].Width = 240f * scale;
 				boxes.Items[0].Height = 150f * scale;
@@ -787,6 +799,23 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// Centre of the horizontal band the sweep will actually occupy. The collision box snaps to
 	// one of three lanes rather than tracking Position.Y exactly (see the flyleft/flyright case
 	// in Update), so avoidance has to aim at the same snapped band or it dodges the wrong place.
+	// The VERTICAL half of the cycle. Two strips, both always in the same place:
+	//   land   -- the descent after a fly-by is hard-coded to X 600, falling from y -345 to 400.
+	//   jump   -- the climb that starts the next cycle, straight up from wherever it is standing
+	//             (which only drifts with the background scroll).
+	// Like the horizontal sweep, the boss is either off-screen or barely moving when these start,
+	// so nothing else in the AI sees them coming -- and the landing strip in particular is a
+	// column the ship can simply be standing in.
+	internal bool AiVerticalLaneActive => state == SpiderBossState.land
+		|| state == SpiderBossState.jump
+		|| state == SpiderBossState.flyup;
+
+	internal float AiVerticalLaneX => base.Position.X;
+
+	// True only for the DESCENT, which sweeps to the right screen edge -- so the escape is left,
+	// not merely "away". The climb has no sweep and either side works.
+	internal bool AiLandingSweep => state == SpiderBossState.land;
+
 	internal float AiSweepLaneCentreY
 	{
 		get

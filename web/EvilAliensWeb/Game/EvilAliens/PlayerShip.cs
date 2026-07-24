@@ -99,8 +99,20 @@ public class PlayerShip : AlienDrawableGameComponent
 	// the angle instead would force a genuine 180 reversal to sweep the long way round.
 	public const float DefaultSteerSmoothMs = 90f;
 
-	// Below this the smoothed steer is noise, not a decision (the pre-existing 0.2 deadzone).
-	private const float SteerDeadzone = 0.2f;
+	// Smoothing floor, used when the push is strong (see the adaptive blend in DoAIMove).
+	public const float DefaultSteerSmoothUrgentMs = 15f;
+
+	// The demand either side of which smoothing is at full / at the floor.
+	private const float SteerCalmDemand = 2f;
+
+	private const float SteerUrgentDemand = 9f;
+
+	// At or below this total demand the ship parks instead of thrusting. Just above SeekWeight.
+	public const float DefaultSteerParkDemand = 0.95f;
+
+	private static float SteerSmoothUrgentMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothUrgentMs ?? DefaultSteerSmoothUrgentMs;
+
+	private static float SteerParkDemand => EvilAliensWeb.Compat.DebugFlags.AiParkDemand ?? DefaultSteerParkDemand;
 
 	// How far ahead the wall logic looks, as MILLISECONDS of closing travel rather than a fixed
 	// pixel count. The 2008 code probed `41.67 * MaxSpeed` = ~13.75px against wall tiles that are
@@ -148,11 +160,18 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private const float BossStandoffMaxPx = 300f;
 
-	// The sweep band itself: the boss's collision box snaps to one of three ~187px lanes, so half
-	// a lane is the distance from its centre to the edge of the lethal third.
-	private const float SweepLaneHalfHeightPx = 94f;
+	// How far down the screen the "UFOs spawn here" danger band reaches, and how hard it pushes.
+	// Strong enough to stand up to a lane escape, so the ship settles below the spawn line
+	// instead of being held against it.
+	private const float TopEdgeDangerPx = 170f;
 
-	// ...plus a buffer the AI wants beyond the band before it stops running.
+	private const float TopEdgeAvoidStrength = 20f;
+
+	// Same, for the descent/climb column (the boss's standing box is 240px wide).
+	private const float VerticalLaneClearancePx = 240f;
+
+	// How far from the centre of the boss's telegraphed lane the AI wants to be. The lethal band
+	// is a ~187px third of the screen, so this clears it with room to spare.
 	private const float SweepLaneClearancePx = 210f;
 
 	// Must beat the station pull, a powerup detour and the edge pushes combined: the whole third
@@ -1025,6 +1044,31 @@ public class PlayerShip : AlienDrawableGameComponent
 					direction += LazerDodgeStrength * across;
 				}
 			}
+			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
+			// next cycle. Same treatment as the sweep lane, on the other axis -- flat across the
+			// band, because every part of it is equally lethal.
+			if (baddy is SpiderBoss && ((SpiderBoss)baddy).AiVerticalLaneActive)
+			{
+				float laneX = ((SpiderBoss)baddy).AiVerticalLaneX;
+				float offLane = base.Position.X - laneX;
+				if (Math.Abs(offLane) < VerticalLaneClearancePx)
+				{
+					// ALWAYS break left out of a landing. The landing now sweeps everything from the
+					// boss to the right screen edge (see SpiderBoss's land case), so right is not
+					// an escape at all -- it is a dead end that merely looks like one. For the
+					// jump/climb, which has no such sweep, either side is fine so the ship takes
+					// whichever it is already nearer.
+					float away = ((SpiderBoss)baddy).AiLandingSweep
+						? -1f
+						: ((Math.Abs(offLane) < 1f) ? ((laneX > 400f) ? -1f : 1f) : Math.Sign(offLane));
+					// Same steep falloff as every other field here: hardest at the centre line,
+					// fading out toward the clearance edge. A flat push across the band was tried
+					// and it fights the screen bounds all the way out instead of easing off once
+					// the ship is clearly out of the way.
+					float urge = ThreatFieldStrength(Math.Abs(offLane) / VerticalLaneClearancePx, SweepLaneAvoidStrength);
+					direction += new Vector2(away * urge, 0f);
+				}
+			}
 			// Act on the boss's own telegraph. During the "Danger!" arrow the spider boss sits
 			// off-screen in the lane it is about to cross, so it is STATIONARY -- the movement
 			// prediction says nothing and the distance field is a screen away. Vacating the lane
@@ -1034,10 +1078,6 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				float laneY = ((SpiderBoss)baddy).AiSweepLaneCentreY;
 				float offLane = base.Position.Y - laneY;
-				// The lane is a whole third of the screen and every pixel of it is lethal, so the
-				// push is FLAT across the band rather than tapering toward the middle -- a taper
-				// would leave the ship dawdling near the centre, which is the worst place to be.
-				// It only softens over the last stretch outside the band, to avoid a hard edge.
 				if (Math.Abs(offLane) < SweepLaneClearancePx)
 				{
 					// Flee DOWNWARD out of the lane unless the lane IS the bottom one. Which way
@@ -1045,11 +1085,11 @@ public class PlayerShip : AlienDrawableGameComponent
 					// busy half of the screen and running up out of the middle lane trades one
 					// hazard for another. Only the bottom lane forces the ship upward.
 					float away = (laneY > 400f) ? -1f : 1f;
-					float inBand = SweepLaneHalfHeightPx;
-					float urge = (Math.Abs(offLane) <= inBand)
-						? 1f
-						: 1f - (Math.Abs(offLane) - inBand) / MathHelper.Max(SweepLaneClearancePx - inBand, 1f);
-					direction += new Vector2(0f, away * SweepLaneAvoidStrength * urge);
+					// Steep falloff, like every other field here: hardest on the centre line and
+					// easing off as the ship clears the band, so it hands over cleanly to the
+					// screen-edge terms instead of shoving all the way into them.
+					float urge = ThreatFieldStrength(Math.Abs(offLane) / SweepLaneClearancePx, SweepLaneAvoidStrength);
+					direction += new Vector2(0f, away * urge);
 				}
 			}
 			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
@@ -1336,7 +1376,15 @@ public class PlayerShip : AlienDrawableGameComponent
 		// the VECTOR makes opposing votes cancel toward zero (the ship coasts, which is the right
 		// answer) while a sustained vote still converges in a few frames. Exponential in dt so the
 		// smoothing is framerate-independent.
-		float smoothMs = SteerSmoothMs;
+		// How hard everything is pushing, before smoothing. This is the AI's own measure of "how
+		// much trouble am I in", and both rules below key off it.
+		float demand = (direction).Length();
+		// Smoothing is ADAPTIVE: heavy damping is what stops idle fidget, but it is exactly wrong
+		// when something is bearing down -- a 90ms low-pass on an evade is 30px of travel spent
+		// not turning. So the time constant collapses toward zero as the push gets strong: park
+		// carefully when things are calm, fly immediately when they are not.
+		float smoothMs = MathHelper.Lerp(SteerSmoothMs, SteerSmoothUrgentMs,
+			MathHelper.Clamp((demand - SteerCalmDemand) / MathHelper.Max(SteerUrgentDemand - SteerCalmDemand, 0.001f), 0f, 1f));
 		if (smoothMs > 0f)
 		{
 			float blend = 1f - (float)Math.Exp(0f - gameTime.ElapsedGameTime.TotalMilliseconds / smoothMs);
@@ -1347,6 +1395,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		// "do not fly into that" override, and low-passing it (as an earlier revision did) turns a
 		// full reversal into a gentle suggestion -- which measured as 46 wall contacts against the
 		// old code's 8.
+		// The top edge is not just a boundary, it is where UFOs enter -- a ship pinned against it
+		// gets exploded by something spawning on top of it. The stock edge repulsion tops out at
+		// maxSteerStrength (4), which is no contest against a lane escape (18) or the spider
+		// boss's own field, so fleeing upward parked the ship on the ceiling. This term is scaled
+		// to actually compete, and it ramps linearly rather than with the steep field falloff so
+		// it is already pushing well before the ship gets there.
+		if (base.Position.Y < TopEdgeDangerPx)
+		{
+			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / TopEdgeDangerPx));
+		}
 		if (hasWall)
 		{
 			ClampIntoWallSpace(ref direction, collisionLevelMap);
@@ -1356,7 +1414,13 @@ public class PlayerShip : AlienDrawableGameComponent
 			// Committing it makes the escape the new baseline to smooth from.
 			aiSteer = direction;
 		}
-		if ((direction).Length() <= SteerDeadzone)
+		// PARK when the only thing pulling is the station itself. Move() throws the magnitude away
+		// and thrusts at full acceleration along the angle, so a weak-but-nonzero steer is not a
+		// gentle nudge -- it is full throttle at an arbitrary point the ship is already next to,
+		// which it then sails past and comes back to, forever. That is the visible up-down bounce.
+		// The threshold sits just above the station pull (SeekWeight 0.8), so a lone seek coasts to
+		// a stop while the seek plus ANYTHING else -- an edge push, a threat, a wall -- still flies.
+		if ((direction).Length() <= SteerParkDemand)
 		{
 			direction = Vector2.Zero;
 		}
@@ -1376,17 +1440,27 @@ public class PlayerShip : AlienDrawableGameComponent
 	// the ship off the line while there is still time, which is what a player does.
 	private bool EvadeMovingThreat(ref Vector2 direction, AlienDrawableGameComponent baddy, float dodgeAngle, float minSteerStrength, float maxSteerStrength)
 	{
-		// RELATIVE velocity: the question is "on our present courses, does this hit me", and the
-		// ship is moving too. Using the threat's velocity alone mispredicts every case where the
-		// ship is closing on the threat's path -- which is most near-misses turning into hits.
-		// ObservedVelocity, not SpeedVector, for the threat: the latter is derived from
-		// _speed/_direction and reads zero for everything that writes Position directly --
-		// including the spider boss's fly states, i.e. exactly the case this method exists for.
-		Vector2 rel = baddy.ObservedVelocity - SpeedVector;
+		// Engage on the THREAT's own speed, never the relative speed. This matters: relative
+		// velocity is non-zero for a STATIONARY threat whenever the ship is moving, so gating on
+		// it made this method take over for parked objects too -- and since it returns true the
+		// caller skips the radial push-away field, leaving a perpendicular slide as the only
+		// avoidance. A sideways slide does not stop you flying INTO something, which is exactly
+		// what the ship did to the grounded spider boss. Anything not really moving belongs to
+		// the field.
+		// ObservedVelocity, not SpeedVector: the latter is derived from _speed/_direction and
+		// reads zero for everything that writes Position directly -- including the spider boss's
+		// fly states, i.e. the case this method exists for.
+		Vector2 threatVelocity = baddy.ObservedVelocity;
+		// The player ship's own MaxSpeed is 0.33 px/ms, so this is ~a third of that.
+		if ((threatVelocity).Length() < ThreatMinSpeed)
+		{
+			return false;
+		}
+		// Closest approach is then computed on the RELATIVE course, because the ship is moving too
+		// and ignoring that mispredicts every near-miss it is closing on.
+		Vector2 rel = threatVelocity - SpeedVector;
 		float speed = (rel).Length();
-		// Below this it is not a "mover" in any meaningful sense and the radial term is a better
-		// model. The player ship's own MaxSpeed is 0.33 px/ms, so this is ~a third of that.
-		if (speed < ThreatMinSpeed)
+		if (speed < 0.001f)
 		{
 			return false;
 		}

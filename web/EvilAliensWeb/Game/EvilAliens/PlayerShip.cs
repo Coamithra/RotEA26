@@ -360,7 +360,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			asplodeOnNextFrame = false;
 		}
-		if (!isTutorial && controller != ControlDevice.AI && controller != ControlDevice.Remote && Settings.GetInstance().CurrentDifficulty >= Settings.DifficultyLevel.Hard)
+		if (!isTutorial && controller != ControlDevice.AI && !IsNetPuppet && Settings.GetInstance().CurrentDifficulty >= Settings.DifficultyLevel.Hard)
 		{
 			pacifistTimer.Update(gameTime);
 		}
@@ -471,6 +471,11 @@ public class PlayerShip : AlienDrawableGameComponent
 					// replicated firing state; direction stays Zero so the Move below is a no-op.
 					EvilAliensWeb.Compat.Net.NetSession.DriveRemoteShip(this, gameTime);
 					break;
+				case ControlDevice.RemoteFriend:
+					// Coverage-gaps follow-up: a client-side puppet for one of the HOST's AI friend
+					// ships -- same network-driven scheme as Remote, but keyed by its slot channel.
+					EvilAliensWeb.Compat.Net.NetSession.DriveFriendShip(this, gameTime);
+					break;
 				}
 				Move(direction, gameTime);
 			}
@@ -529,12 +534,17 @@ public class PlayerShip : AlienDrawableGameComponent
 	// pause and "which ship do we stream" logic are untouched; Remote puppets are exempt.
 	private ControlDevice EffectiveController()
 	{
-		if (EvilAliensWeb.Compat.DebugFlags.AIPlayer && controller != ControlDevice.Remote)
+		if (EvilAliensWeb.Compat.DebugFlags.AIPlayer && !IsNetPuppet)
 		{
 			return ControlDevice.AI;
 		}
 		return controller;
 	}
+
+	// A network-driven puppet ship (the other peer's ship, or one of the host's AI friends):
+	// its OWNER decides its motion/hits/pickups, so the local sim never damages it, lets it grab
+	// a powerup, or forces it onto the ?aiplayer AI branch.
+	private bool IsNetPuppet => controller == ControlDevice.Remote || controller == ControlDevice.RemoteFriend;
 
 	// Last tick this ship INTENDED to fire (FireAt is called every tick while the trigger is
 	// held, its internal shoottimer does the cadence gating) and the aim it fired along --
@@ -1507,7 +1517,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			// A Remote puppet never takes damage locally: under distributed authority its OWNER
 			// decides when it was hit (you never die to something you dodged on your screen) --
 			// its death arrives via the ship stream's alive flag instead (Compat/Net/NetSession).
-			else if (!Settings.GetInstance().Invulnerability && !DebugFlags.Invuln && controller != ControlDevice.Remote)
+			else if (!Settings.GetInstance().Invulnerability && !DebugFlags.Invuln && !IsNetPuppet)
 			{
 				if (other is Wall)
 				{
@@ -1534,7 +1544,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		// A Remote puppet can't grab powerups: pickups are CLAIMS under distributed authority
 		// (replicated as events in card 11.3) -- letting the puppet take one here would steal
 		// it from the local player's world with no way to reconcile.
-		if (other is Powerup && !((Powerup)other).taken && controller != ControlDevice.Remote)
+		if (other is Powerup && !((Powerup)other).taken && !IsNetPuppet)
 		{
 			currentPower = ((Powerup)other).type;
 			Score.SetPowerup(currentPower, player);

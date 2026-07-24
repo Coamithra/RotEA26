@@ -21,6 +21,10 @@ namespace EvilAliensWeb.Compat.Net
         public const byte MsgWelcome = 0x02;
         public const byte MsgReject = 0x03;
         public const byte MsgShipState = 0x10;
+        // Coverage-gaps follow-up: the host's AI "friend" ships (Mechanical Friends cheat).
+        // Same body as MsgShipState with a leading slot byte so several stream in parallel;
+        // host -> client only (the client never runs AI friends). Stream lane, ~30 Hz.
+        public const byte MsgFriendState = 0x11;
         public const byte MsgWorldSnapshot = 0x20;
         public const byte MsgEvent = 0x30;
 
@@ -91,6 +95,51 @@ namespace EvilAliensWeb.Compat.Net
             sample.Aim = ReadF32(b, 26);
             sample.Alive = (b[1] & ShipFlagAlive) != 0;
             sample.Firing = (b[1] & ShipFlagFiring) != 0;
+            return true;
+        }
+
+        // Friend (host AI ship) stream: MsgShipState body shifted one byte right for the leading
+        // player-slot. `alive` is implicit (a live friend is streamed; a dead/gone one simply stops
+        // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag.
+        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool firing, int shotsPerSec, float bulletLife)
+        {
+            byte[] b = new byte[31];
+            b[0] = MsgFriendState;
+            b[1] = slot;
+            b[2] = (byte)(firing ? ShipFlagFiring : 0);
+            b[3] = (byte)Math.Clamp(shotsPerSec, 1, 255);
+            b[4] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
+            WriteU16(b, 5, seq);
+            WriteU32(b, 7, senderMs);
+            WriteF32(b, 11, pos.X);
+            WriteF32(b, 15, pos.Y);
+            WriteF32(b, 19, vel.X);
+            WriteF32(b, 23, vel.Y);
+            WriteF32(b, 27, aim);
+            return b;
+        }
+
+        public static bool TryDecodeFriendState(byte[] b, out byte slot, out ushort seq, out ShipSample sample, out int shotsPerSec, out float bulletLife)
+        {
+            slot = 0;
+            seq = 0;
+            sample = default;
+            shotsPerSec = 8;
+            bulletLife = 450f;
+            if (b.Length < 31 || b[0] != MsgFriendState)
+            {
+                return false;
+            }
+            slot = b[1];
+            shotsPerSec = b[3];
+            bulletLife = b[4] * 10f;
+            seq = ReadU16(b, 5);
+            sample.T = ReadU32(b, 7);
+            sample.Pos = new Vector2(ReadF32(b, 11), ReadF32(b, 15));
+            sample.Vel = new Vector2(ReadF32(b, 19), ReadF32(b, 23));
+            sample.Aim = ReadF32(b, 27);
+            sample.Alive = true;
+            sample.Firing = (b[2] & ShipFlagFiring) != 0;
             return true;
         }
 

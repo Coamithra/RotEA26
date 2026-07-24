@@ -36,12 +36,12 @@ Card `432a31e9` — "Remove comment noise from decompilation pass"
 ## Phase 6: Ship
 - [x] Commit + push
 - [x] `/review`, fix findings
-- [x] Pull `main`, re-verify
-- [x] PR + self-merge
-- [x] Worktree/branch cleanup
-- [x] Delete plan + tracker
-- [x] Card → Done + summary comment
-- [x] Follow-up card for decompiled local-variable names
+- [ ] Pull `main`, re-verify
+- [ ] PR + self-merge
+- [ ] Worktree/branch cleanup
+- [ ] Delete plan + tracker
+- [ ] Card → Done + summary comment
+- [ ] Follow-up card for decompiled local-variable names
 
 ## Phase 7: Clean up
-- [x] Kill dev server, close Chrome tabs
+- [ ] Kill dev server, close Chrome tabs

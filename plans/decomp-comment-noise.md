@@ -50,8 +50,14 @@ was done. It walks `web/EvilAliensWeb/Game/**/*.cs` and:
 Preserves CRLF line endings and UTF-8-without-BOM encoding (43 of the 130 files are
 non-ASCII).
 
-Safe as a line-based transform: there are zero multi-line verbatim strings in `Game/`, so no
-`//IL_`-looking line can be string content rather than a comment.
+Safe as a line-based transform, on both code paths:
+
+- **Dropping** a whole line could only misfire if a `//IL_`-looking line were string content;
+  that needs a multi-line verbatim string, and `Game/` has zero of them.
+- **Trimming** a trailing comment is the riskier path — it fires on any line merely
+  *containing* `//IL_`, so a single-line literal such as `"//IL_0001: x"` would be truncated
+  along with everything after it on that line. Checked: the only 3 lines in `Game/` that
+  contain `//IL_` without starting with it are the glued `}//IL_...` braces.
 
 ## Verification
 

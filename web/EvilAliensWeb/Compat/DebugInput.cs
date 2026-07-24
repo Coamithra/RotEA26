@@ -260,6 +260,166 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for the AI telemetry (eaAiBench in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugAiBench'). Returns Compat/AiBench's report
+		// -- wall contacts, the heading-reversal jitter rate, fire idleness, level progress and
+		// the run verdict. Only meaningful on a ?aibench boot (card f4d1721f).
+		[JSInvokable("debugAiBench")]
+		public static string AiBench()
+		{
+			return EvilAliensWeb.Compat.AiBench.Report();
+		}
+
+		// eaAiBench.reset() -- rearm the counters mid-run (e.g. to score one wall section
+		// rather than the whole soak). Does not touch the game.
+		[JSInvokable("debugAiBenchReset")]
+		public static string AiBenchReset()
+		{
+			EvilAliensWeb.Compat.AiBench.Reset();
+			return "[aibench] counters reset";
+		}
+
+		// eaAiBench.world() -- census of the live components vs what the AI's world model
+		// (Oracle.GetBaddies) actually contains. The answer to "the level is stalled and the bot
+		// is shooting something -- what is it blind to?".
+		[JSInvokable("debugAiBenchWorld")]
+		public static string AiBenchWorld()
+		{
+			return EvilAliensWeb.Compat.AiBench.World();
+		}
+
+		// eaAiBench.soak(seconds) -- headless AI soak: tick the real game loop at a fixed 60Hz
+		// dt with no Draw, in bounded chunks. The ONLY way to soak the AI reliably from
+		// automation: a background tab throttles rAF to ~1Hz, so a rendered run measures nothing.
+		[JSInvokable("debugAiBenchRun")]
+		public static string AiBenchRun(double chunkSeconds)
+		{
+			return EvilAliensWeb.Compat.AiBench.RunHeadless(chunkSeconds);
+		}
+
+		// One finished run's counters as `key=value` pairs, for eaAiBench.matrix()'s table
+		// (card 9391f95a). Deliberately separate from AiBench() -- that one is a human report
+		// and free to be reformatted; a sweep that scraped it would break on a cosmetic edit.
+		[JSInvokable("debugAiBenchRow")]
+		public static string AiBenchRow()
+		{
+			return EvilAliensWeb.Compat.AiBench.Row();
+		}
+
+		// JS bridge for eaScore() -- the per-slot score/combo dump. Card b0ab09ec's two-window
+		// comparison is "do the peers agree on the tally", which reading HUD pixels answers
+		// badly (the panels are small, chrome-shaded and mid-animation); this prints the
+		// numbers, plus the provisional total still riding on top of the host's score.
+		[JSInvokable("debugScoreDump")]
+		public static string ScoreDump()
+		{
+			EvilAliens.ScoreVisualiser sv = EvilAliens.ServiceHelper.Get<EvilAliens.IScoreService>().Score;
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>().Oracle;
+			var sb = new System.Text.StringBuilder("[score] lives=").Append(sv.Lives);
+			for (int i = 0; i < EvilAliens.Oracle.MaxPlayers; i++)
+			{
+				sb.Append(" | s").Append(i).Append(oracle.IsSeated(i) ? "=" : "(empty)=")
+					.Append((int)sv.PointScore(i)).Append(" combo=").Append(sv.Combo(i));
+				float pending = EvilAliensWeb.Compat.Net.NetPuppets.UnsettledFor(i);
+				if (pending != 0f)
+				{
+					sb.Append(" unsettled=").Append(pending.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+				}
+				// Card 1a3ad45a: whose simulation the slot's combo and powerup levels come from,
+				// and what they are. `own` is the whole point of the two-window comparison -- the
+				// SAME slot must read own=1 on one console and own=0 on the other, and the combo
+				// and lv= figures beside it must agree across the pair.
+				if (i < EvilAliens.ScoreVisualiser.SlotCount)
+				{
+					int[] levels = new int[EvilAliensWeb.Compat.Net.NetProtocol.HudLevelCount];
+					sv.NetReadHudState(i, levels, out _, out byte activeType, out float progress);
+					sb.Append(" own=").Append(EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i) ? 1 : 0)
+						.Append(" pu=").Append(activeType == EvilAliensWeb.Compat.Net.NetProtocol.HudPowerupNone
+							? "none"
+							: ((EvilAliens.Powerup.PowerupType)activeType).ToString() + "@" + ((int)(progress * 100f)) + "%")
+						.Append(" lv=").Append(string.Join(",", levels));
+				}
+			}
+			return sb.ToString();
+		}
+
+		// JS bridge for the co-op score-reconciliation self-test (eaNetScore in
+		// wwwroot/index.html, card b0ab09ec). Drives NetScoreLedger -- the real policy -- on a
+		// VIRTUAL clock against a synthetic two-peer kill stream, running the old max() adoption
+		// over the identical stream first so the drift it fixes is demonstrated, not asserted;
+		// then round-trips a real EvDeath through ApplyAwards against the live ScoreVisualiser.
+		// Needs no session and no second tab: the failure is a slow tally drift, and a
+		// backgrounded peer tab throttles to ~1 tick/sec so two windows cannot show it anyway.
+		[JSInvokable("debugNetScoreTest")]
+		public static string NetScoreTest(int kills, int comboSkew, int rttMs, int seed)
+		{
+			return EvilAliensWeb.Compat.Net.NetScoreLedger.SelfTest(kills, comboSkew, rttMs, seed)
+				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
+		}
+
+		// JS bridge for the world-snapshot unknown-id attribution (eaNetSnap in
+		// wwwroot/index.html, card 48ab9b2f). Drives the real NetPuppets.OnSnapshotEntry so the
+		// three branches that all `return false` -- rebuilt / left dead / refused -- are proved
+		// to report the kind they took, and pins the derived snapTurn arithmetic. A
+		// classification is invisible in any frame, so this is data, not a two-window run.
+		[JSInvokable("debugNetSnapTest")]
+		public static string NetSnapTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetSnapshotTest.Run();
+		}
+
+		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
+		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
+		// then drives the real PowerupData exp curve over two divergent combo streams -- running
+		// the OLD ungated behaviour first, so the slow motion and the stray powerup levels it
+		// used to inflict on a slot this peer does not own are demonstrated, not asserted.
+		[JSInvokable("debugNetComboTest")]
+		public static string NetComboTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetComboTest.Run();
+		}
+
+		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest'). Runs
+		// Compat/Net/NetKickTest.Run() and returns the PASS/FAIL report.
+		[JSInvokable("debugKickTest")]
+		public static string KickTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
+		}
+
+		// JS bridge for the primary-slot negotiation (eaSlotTest in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugSlotTest'). Runs
+		// Compat/Net/NetSlotTest.Run() and returns the PASS/FAIL report.
+		[JSInvokable("debugSlotTest")]
+		public static string SlotTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetSlotTest.Run();
+		}
+
+		// JS bridge for the texture-load probe (eaTexProbe in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugTexProbe', 'GFX/Base/756'). Reports which
+		// precompiled sibling shipped, which file the texture ACTUALLY came from, its actual vs
+		// logical size, and its mip level count -- and on failure the whole exception chain,
+		// which is the one thing KNI's own FileNotFoundException throws away. See
+		// Compat/TexProbe.cs.
+		[JSInvokable("debugTexProbe")]
+		public static string TexProbeRun(string assetName)
+		{
+			return EvilAliensWeb.Compat.TexProbe.Run(assetName);
+		}
+
+		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
+		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background
+		// is) through the real Draw, and censuses the live layers. See Compat/BgCullTest.cs --
+		// the cull's correctness is invisible to a screenshot, so it is read as data.
+		[JSInvokable("debugBgCull")]
+		public static string BgCull()
+		{
+			return EvilAliensWeb.Compat.BgCullTest.Run();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's
@@ -296,6 +456,37 @@ namespace EvilAliensWeb.Compat
 				ship.Asplode();
 			}
 			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
+		}
+
+		// JS bridge for the on-demand roster dump (eaNetRoster in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster'). Prints the same roster=
+		// string the 5s [net] metrics line carries, plus resets=, at the instant it is called.
+		// Written for the reset-with-couch-players gate (card af0eb00a): the assertion is
+		// before-vs-after a ~2.7s reset, which the metrics cadence can straddle entirely.
+		[JSInvokable("debugNetRoster")]
+		public static string NetRoster()
+		{
+			return EvilAliensWeb.Compat.Net.NetSession.RosterDump();
+		}
+
+		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin'). Makes the same
+		// NetSession.TrySeatLocalJoin call a real gamepad Start press makes. HOST-SIDE that
+		// works before a peer has paired, which ?netlocal cannot do (TickLocalJoinSim is gated
+		// behind PeerUp -- correctly: pre-pairing, AllocateSeat cannot yet know which seat the
+		// joiner needs). That pre-pairing window is the only way to fill the roster ahead of a
+		// joiner, i.e. the sole trigger for the host's RejectFull path (card af0eb00a). On a
+		// CLIENT it is still PeerUp-gated, because a client seat has to be asked for.
+		[JSInvokable("debugNetCouchJoin")]
+		public static string NetCouchJoin()
+		{
+			if (!EvilAliensWeb.Compat.Net.NetSession.Active)
+			{
+				return "[debug] eaNetCouchJoin: no net session (needs a ?net= boot)";
+			}
+			string outcome = EvilAliensWeb.Compat.Net.NetSession.DebugCouchJoin();
+			return "[debug] eaNetCouchJoin: " + outcome + "\n  "
+				+ EvilAliensWeb.Compat.Net.NetSession.RosterDump();
 		}
 
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,

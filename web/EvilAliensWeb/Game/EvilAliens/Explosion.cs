@@ -109,13 +109,13 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		ExplosionData[] array = particles;
-		foreach (ExplosionData explosionData in array)
+		ExplosionData[] fire = particles;
+		foreach (ExplosionData explosionData in fire)
 		{
 			explosionData.Initialize(size, lifetime, impulse);
 		}
-		ExplosionData[] array2 = smokeparticles;
-		foreach (ExplosionData explosionData2 in array2)
+		ExplosionData[] smoke = smokeparticles;
+		foreach (ExplosionData explosionData2 in smoke)
 		{
 			explosionData2.Initialize(size, lifetime * 1.35f, impulse * 0.85f);
 		}
@@ -140,7 +140,7 @@ internal class Explosion : AlienDrawableGameComponent
 
 	private void Vibrate()
 	{
-		Vector2 val = default(Vector2);
+		Vector2 nearPower = default(Vector2);
 		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
 		// (card 4d904410), and Oracle.GetPlayerPosition/Controller THROW on an unseated slot.
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
@@ -152,17 +152,17 @@ internal class Explosion : AlienDrawableGameComponent
 			Vibrator vibrator = ServiceHelper.Get<IVibratorService>().Vibrator;
 			if (size <= 1f)
 			{
-				(val) = new Vector2(0f, 0.5f);
+				(nearPower) = new Vector2(0f, 0.5f);
 			}
 			else
 			{
-				(val) = new Vector2(0.5f, 0f);
+				(nearPower) = new Vector2(0.5f, 0f);
 			}
 			Vector2 zero = Vector2.Zero;
-			Vector2 val2 = base.Position - oracle.GetPlayerPosition(i);
-			float num = (val2).Length();
-			float num2 = (size - 1f) * 0.35f + 1f;
-			Vector2 power = Vector2.Lerp(val, zero, MathHelper.Clamp(num / (200f * num2), 0f, 1f));
+			Vector2 toPlayer = base.Position - oracle.GetPlayerPosition(i);
+			float distance = (toPlayer).Length();
+			float rangeScale = (size - 1f) * 0.35f + 1f;
+			Vector2 power = Vector2.Lerp(nearPower, zero, MathHelper.Clamp(distance / (200f * rangeScale), 0f, 1f));
 			PlayerIndex playerIndex;
 			switch (oracle.Controller(i))
 			{
@@ -195,15 +195,15 @@ internal class Explosion : AlienDrawableGameComponent
 	public override void Draw(GameTime gameTime)
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
-		ExplosionData[] array = particles;
-		foreach (ExplosionData explosionData in array)
+		ExplosionData[] fire = particles;
+		foreach (ExplosionData explosionData in fire)
 		{
 			if (!(explosionData.lifetime <= 0f))
 			{
-				float num = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
-				Color val2 = new Color(new Vector4(1f, 1f, 1f, num));
-				Texture2D val3 = ((!blue) ? redblast : blueblast);
-				spriteBatch.Draw(val3, base.Position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, val2);
+				float alpha = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
+				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
+				Texture2D blastTexture = ((!blue) ? redblast : blueblast);
+				spriteBatch.Draw(blastTexture, base.Position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, tint);
 			}
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
@@ -212,14 +212,14 @@ internal class Explosion : AlienDrawableGameComponent
 	public void DrawSmoke(GameTime gameTime)
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
-		ExplosionData[] array = smokeparticles;
-		foreach (ExplosionData explosionData in array)
+		ExplosionData[] smoke = smokeparticles;
+		foreach (ExplosionData explosionData in smoke)
 		{
 			if (!(explosionData.lifetime <= 0f))
 			{
-				float num = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
-				Color val = new Color(new Vector4(1f, 1f, 1f, num));
-				spriteBatch.Draw(smoketexture, base.Position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, val);
+				float alpha = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
+				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
+				spriteBatch.Draw(smoketexture, base.Position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, tint);
 			}
 		}
 	}
@@ -237,27 +237,27 @@ internal class Explosion : AlienDrawableGameComponent
 		{
 			base.Collides = false;
 		}
-		bool flag = false;
-		ExplosionData[] array = particles;
-		foreach (ExplosionData explosionData in array)
+		bool anyAlive = false;
+		ExplosionData[] fire = particles;
+		foreach (ExplosionData explosionData in fire)
 		{
 			explosionData.Update(gameTime);
 			if (explosionData.lifetime > 0f)
 			{
-				flag = true;
+				anyAlive = true;
 			}
 		}
-		ExplosionData[] array2 = smokeparticles;
-		foreach (ExplosionData explosionData2 in array2)
+		ExplosionData[] smoke = smokeparticles;
+		foreach (ExplosionData explosionData2 in smoke)
 		{
 			explosionData2.Update(gameTime);
 			if (explosionData2.lifetime > 0f)
 			{
-				flag = true;
+				anyAlive = true;
 			}
 		}
 		base.Update(gameTime);
-		if (!flag)
+		if (!anyAlive)
 		{
 			collection.Remove((GameComponent)(object)this);
 		}

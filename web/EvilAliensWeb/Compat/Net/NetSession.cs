@@ -47,10 +47,29 @@ namespace EvilAliensWeb.Compat.Net
     // match for both -- Stop() tears the session down and the menus surface a notice.
     public static partial class NetSession
     {
-        public const byte ProtocolVersion = 5;
+        // v6 (card 0b8a300b) appends the peer-identity token to the handshake -- a WIRE LAYOUT
+        // change (HelloBytes 13 -> 21), so the version byte must move with it or two builds
+        // would both claim v5 and mis-decode each other's hellos.
+        // v7 (card b0ab09ec): EvDeath carries the host's per-slot AWARDED score instead of the
+        // entity's base point value, so both peers tally the identical number. It landed
+        // alongside v6 rather than after it -- two independent wire changes cannot share a
+        // version number for exactly the reason above, so the merge takes the next one.
+        // v8 (card c0229c57): the handshake gains a blockedSlots mask (HelloBytes 21 -> 22) so
+        // the host grants the joiner a seat that is free on BOTH rosters. Another WIRE LAYOUT
+        // change, so the version moves with it for the same reason v6 did.
+        // v9 (card 1a3ad45a): MsgHudState -- each peer streams the combo counter, active powerup,
+        // bar progress and per-type levels for the slots it OWNS, and stops simulating them for
+        // the slots it does not (ScoreVisualiser.SustainCombo). Authored against v8 and merged
+        // after c0229c57 had taken it; two independent wire changes cannot share a version, so
+        // this took the next one -- the same resolution the v6/v7 note above records.
+        public const byte ProtocolVersion = 9;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
+        // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
+        // and it is a readout rather than something the sim reads back, so a third of the ship
+        // rate is plenty and keeps the added stream traffic under ~400 B/s.
+        private const long HudIntervalMs = 100;      // ~10 Hz per-slot HUD state
         private const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
@@ -72,6 +91,13 @@ namespace EvilAliensWeb.Compat.Net
         // peer's symmetric detection) actually reach it. One hello interval + RTT headroom;
         // imperceptible in the reject UX (the peer is being told to reload either way).
         private const long RejectGraceMs = 1000;
+        // Card 0b8a300b: how long the remote peer must hold its pause before the HOST is
+        // offered the kick menu. A remote pause freezes our whole world with no way out (see
+        // NetKickMenu), so the host needs an escape -- but most pauses are innocent and short,
+        // and a menu inviting you to kick your co-op partner 200ms into their doorbell break
+        // would be worse than the wait. Past this the pause stops looking accidental.
+        // Declining ("Keep Waiting") re-arms it, so waiting once never forfeits the option.
+        private const long KickOfferDelayMs = 4000;
         // While either side holds a PAUSE the stream-heartbeat is unreliable: the paused
         // tab is usually backgrounded AND the pause muffle ducks its audio, which revokes
         // Chrome's audio exemption from intensive timer throttling -- its ticks (and so its
@@ -147,9 +173,28 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
+        private static long lastHudTx;
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
         private static readonly byte[] extraScratch = new byte[ExtraScratchBytes];
+        // Per-slot HUD state gather buffers (card 1a3ad45a) -- reused every send/receive, so only
+        // the encoder's own packet allocates (as in every other encoder here).
+        private static readonly byte[] hudTxSlots = new byte[NetProtocol.MaxSlots];
+        private static readonly int[] hudTxCombos = new int[NetProtocol.MaxSlots];
+        private static readonly byte[] hudTxTypes = new byte[NetProtocol.MaxSlots];
+        private static readonly float[] hudTxProgress = new float[NetProtocol.MaxSlots];
+        private static readonly int[][] hudTxLevels = CreateHudLevelScratch();
+        private static readonly int[] hudRxLevels = new int[NetProtocol.HudLevelCount];
+
+        private static int[][] CreateHudLevelScratch()
+        {
+            int[][] rows = new int[NetProtocol.MaxSlots][];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                rows[i] = new int[NetProtocol.HudLevelCount];
+            }
+            return rows;
+        }
 
         // rx / remote-ship puppet
         private static readonly ShipStateBuffer buffer = new ShipStateBuffer();
@@ -175,7 +220,7 @@ namespace EvilAliensWeb.Compat.Net
         // mirror and the ApplyJoinHues compensating swap are both gone; per-slot hues now agree
         // by construction). The host's own primary is always slot 0: it seats itself first in its
         // own game, and couch players only ever arrive later.
-        private const byte HostPrimarySlot = 0;
+        internal const byte HostPrimarySlot = 0;
 
         // OUR primary ship's slot. Host: always 0. Client: granted by the host in MsgWelcome
         // (SlotNone until the handshake completes).
@@ -229,12 +274,27 @@ namespace EvilAliensWeb.Compat.Net
         // host's own level. Always host-side (the joiner is a normal menu-session client).
         private static bool listedSession;
         private static ulong localBuildHash;
+        // Card 0b8a300b. Our own identity token (hashed) and the peer's, as exchanged in the
+        // v6 hello. SELF-REPORTED -- see NetProtocol.HelloBytes; good enough to stop a kicked
+        // griefer walking straight back in, and nothing more.
+        private static ulong localPeerId;
+        private static ulong peerPeerId;
+        // Peers this HOST kicked with "and Block", for the rest of its current level.
+        // Deliberately static-and-not-cleared-by-Stop(): a kick ENDS the session, the host
+        // re-lists seconds later, and the whole point is that the block outlives that. Emptied
+        // by GameScene.Terminate via ClearBlockedPeers() -- i.e. scoped to one level run.
+        private static readonly HashSet<ulong> blockedPeers = new HashSet<ulong>();
         // Reject-in-progress (see RejectGraceMs): NowMs deadline at which we Stop() after
-        // having queued a reliable MsgReject, and the notice to surface then. 0 = not
-        // rejecting. Keeping the transport alive until the deadline lets the reject frame
+        // having queued a reliable MsgReject or EvKick, and the reason/notice to use then.
+        // 0 = not winding down. Keeping the transport alive until the deadline lets the frame
         // actually egress before the abortive close discards it.
         private static long pendingStopAt;
         private static string pendingStopNotice;
+        private static string pendingStopReason = "pairing rejected";
+        // Remote-pause kick offer (card 0b8a300b): when the current remote pause started (or
+        // was last re-armed by "Keep Waiting"), and whether the menu is currently offered.
+        private static long remotePauseAt;
+        private static bool kickOfferShown;
         private static bool sceneWasUp;       // GameScene edge detection (EvReady / match end)
         private static bool pendingLaunchHas;
         private static byte pendingLaunchLevel;
@@ -300,6 +360,17 @@ namespace EvilAliensWeb.Compat.Net
             // otherwise read 'dev'). Null/empty = the genuine published fingerprint. Dev-only.
             localBuildHash = NetProtocol.HashBuildString(
                 string.IsNullOrEmpty(DebugFlags.NetFakeBuildHash) ? WebRtcInterop.BuildHash() : DebugFlags.NetFakeBuildHash);
+            // ?netfakepeer=<s> plays the same trick on the identity token, and the loopback rig
+            // NEEDS it: two dev tabs share one localStorage, so they mint the SAME eaRtc.peerId
+            // and a host blocking the joiner would block itself.
+            string peerToken = string.IsNullOrEmpty(DebugFlags.NetFakePeerId)
+                ? WebRtcInterop.PeerId()
+                : DebugFlags.NetFakePeerId;
+            // An EMPTY token must map to 0 ("no identity"), not to a hash: HashBuildString("")
+            // returns the FNV-1a offset basis, which is a perfectly ordinary non-zero id -- so
+            // every peer whose JS could not mint a token would share it, and blocking one would
+            // block them all. 0 is the value ApplyKickBlock/IsPeerBlocked refuse to touch.
+            localPeerId = string.IsNullOrEmpty(peerToken) ? 0UL : NetProtocol.HashBuildString(peerToken);
             // Impairment wraps whichever transport the caller picked -- BroadcastChannel dev
             // loopback or the real WebRTC one. It decorates INetTransport precisely so it does
             // not care which. Always in the chain inside a net session (a plain boot never gets
@@ -367,6 +438,24 @@ namespace EvilAliensWeb.Compat.Net
                 GameScene.NetActiveScene?.NetSetRemotePaused(false);
             }
             ClearPeerStalled(); // never leave the banner up over a session that no longer exists
+            ResetPerSessionState();
+            if (notice != null)
+            {
+                MenuNotice = notice;
+            }
+            if (menuSession)
+            {
+                menuSession = false;
+                NetLobby.OnSessionEnded();
+            }
+        }
+
+        // Every field a session owns, back to its pre-session value, so a fresh
+        // Start()/StartMenuSession() is clean. Split out of Stop() so NetKickTest can execute
+        // it directly: Stop() early-returns when no session is Active, which made the test's
+        // "the block survives a teardown" leg vacuous -- it ran only when it could do nothing.
+        internal static void ResetPerSessionState()
+        {
             localPaused = false;
             rxQueue.Clear();
             buffer.Clear();
@@ -388,6 +477,7 @@ namespace EvilAliensWeb.Compat.Net
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
+            lastHudTx = 0;
             lastHelloTx = 0;
             lastUpdateAt = 0;
             killNotes.Clear();
@@ -399,15 +489,13 @@ namespace EvilAliensWeb.Compat.Net
             listedSession = false;
             pendingStopAt = 0;
             pendingStopNotice = null;
-            if (notice != null)
-            {
-                MenuNotice = notice;
-            }
-            if (menuSession)
-            {
-                menuSession = false;
-                NetLobby.OnSessionEnded();
-            }
+            pendingStopReason = "pairing rejected";
+            peerPeerId = 0;
+            remotePauseAt = 0;
+            kickOfferShown = false;
+            // NOT blockedPeers -- it must outlive the session it was populated in (that IS the
+            // point: a kick stops the session, the host re-lists, the block still holds).
+            // NetKickTest asserts exactly this; do not "tidy up" by clearing it here.
         }
 
         // ---- menu-flow accessors (card 11.4) --------------------------------------------
@@ -466,14 +554,18 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (pendingStopAt != 0)
             {
-                // We refused the pairing: keep pumping (impairment.Pump + DrainRx above ran, and
-                // the transport is still open) so the reliable MsgReject actually reaches the peer,
-                // then wind our side down once the grace elapses. If the peer's OWN reject drained
-                // above it already Stop()ped us (Active would be false). A peer bye/close during
-                // the grace is ignored on purpose -- our own notice still wins at the deadline.
+                // We refused the pairing, or kicked the peer (card 0b8a300b): keep pumping
+                // (impairment.Pump + DrainRx above ran, and the transport is still open) so the
+                // reliable MsgReject/EvKick actually reaches the peer, then wind our side down
+                // once the grace elapses. If the peer's OWN reject drained above it already
+                // Stop()ped us (Active would be false). A peer bye/close during the grace is
+                // ignored on purpose -- our own notice still wins at the deadline.
+                // NOTE for the kick path: the world was already unfrozen and reverted to
+                // single-player synchronously in KickPeer, so this grace is a background
+                // teardown, not a second of frozen screen.
                 if (now >= pendingStopAt)
                 {
-                    Stop("pairing rejected", pendingStopNotice);
+                    Stop(pendingStopReason, pendingStopNotice);
                 }
                 return;
             }
@@ -503,7 +595,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     lastHelloTx = now;
                     transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                        isHost ? peerPrimarySlot : NetProtocol.SlotNone));
+                        isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
                 }
             }
             if (PeerUp)
@@ -529,6 +621,10 @@ namespace EvilAliensWeb.Compat.Net
                         // Couch players + host AI friends ride the same cadence, both directions.
                         SendFriendStates(now);
                     }
+                    if (now - lastHudTx >= HudIntervalMs)
+                    {
+                        SendHudState(now);
+                    }
                     if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
                     {
                         SendWorldSnapshot(now);
@@ -547,6 +643,7 @@ namespace EvilAliensWeb.Compat.Net
                 if (isHost)
                 {
                     ExpireUnclaimedGrants(now);
+                    TickKickOffer(now);
                 }
             }
             ManagePuppet();
@@ -559,7 +656,8 @@ namespace EvilAliensWeb.Compat.Net
                 metrics.ImpLagMs = impairment.LagMs;
                 metrics.ImpLossPct = impairment.LossPct;
                 metrics.ImpJitterMs = impairment.JitterMs;
-                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
+                int liveCount = isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount;
+                Console.WriteLine(metrics.Report(isHost, PeerUp, liveCount, SnapshotTurnMs(liveCount),
                     FindLocalShip() != null, puppet != null, RosterReport()));
             }
         }
@@ -638,6 +736,67 @@ namespace EvilAliensWeb.Compat.Net
             metrics.StreamTx++;
         }
 
+        // Card 1a3ad45a. Stream the per-slot HUD state for every slot we OWN -- combo counter,
+        // active powerup, bar progress, per-type levels. Keyed off the ROSTER, not off live ships:
+        // a slot keeps its combo and its powerup levels across a death and respawn, and its panel
+        // is drawn throughout, so going quiet while the ship is down would freeze the peer's
+        // readout at whatever it held when the player died.
+        private static void SendHudState(long now)
+        {
+            lastHudTx = now;
+            if (score == null)
+            {
+                return;
+            }
+            int count = 0;
+            for (int slot = 0; slot < NetProtocol.MaxSlots && slot < ScoreVisualiser.SlotCount; slot++)
+            {
+                if (!OwnsSlot(slot))
+                {
+                    continue;
+                }
+                score.NetReadHudState(slot, hudTxLevels[count], out int combo, out byte activeType, out float progress);
+                hudTxSlots[count] = (byte)slot;
+                hudTxCombos[count] = combo;
+                hudTxTypes[count] = activeType;
+                hudTxProgress[count] = progress;
+                count++;
+            }
+            if (count == 0)
+            {
+                return;
+            }
+            transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxTypes, hudTxProgress, hudTxLevels, count));
+            // Counted in ENTRIES, matching HudRx -- a peer with a couch partner puts two slots in
+            // one packet, so counting packets here would make the two sides incomparable.
+            metrics.HudTx += count;
+        }
+
+        private static void HandleHudState(byte[] data)
+        {
+            if (score == null || !NetProtocol.TryDecodeHudCount(data, out int count))
+            {
+                return;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, out byte slot, out int combo, out byte activeType, out float progress))
+                {
+                    continue;
+                }
+                // slot is a raw wire byte, so bound it against the SCORE PANELS (4) -- the same
+                // rule and reasoning as ApplyRemotePowerup. A peer claiming a slot we own is
+                // ignored rather than trusted: our own simulation is authoritative for it, and
+                // adopting it would let a confused or hostile peer rewrite our HUD.
+                if (slot >= ScoreVisualiser.SlotCount || OwnsSlot(slot))
+                {
+                    continue;
+                }
+                score.NetSetHudState(slot, combo, activeType, progress, hudRxLevels);
+                metrics.HudRx++;
+            }
+        }
+
         // A ship THIS peer simulates: its owner reads real input (or runs the local AI) and
         // decides its own motion, hits and pickups. The inverse is a network-driven puppet.
         // With ?aiplayer the controller stays Keyboard/pad and only the Update branch is
@@ -645,6 +804,35 @@ namespace EvilAliensWeb.Compat.Net
         private static bool IsLocallyOwned(PlayerShip s)
         {
             return s.Controller != ControlDevice.Remote && s.Controller != ControlDevice.RemoteFriend;
+        }
+
+        // The same question asked of a ROSTER SLOT rather than a live ship (card 1a3ad45a):
+        // does this peer simulate what happens in that seat? Asked of the seat, not the ship,
+        // because a slot's combo and powerup levels outlive its ship -- they persist across a
+        // death and respawn, and the gate must not flip while the player is waiting to come back.
+        //
+        // OFFLINE THIS IS TRUE FOR EVERY SLOT, which is what keeps single-player and local co-op
+        // byte-identical: with no session there is nobody else to own anything.
+        public static bool OwnsSlot(int slot)
+        {
+            bool seated = Active && oracle != null && oracle.IsSeated(slot);
+            return OwnsSlotCore(Active, seated ? oracle.Controller(slot) : null);
+        }
+
+        // The decision itself, with the live roster lookup lifted out so eaNetCombo.test can
+        // table-drive every case. Offline the predicate cannot discriminate at all (correctly --
+        // there is nobody else to own anything), so a test that could only reach it through the
+        // live Oracle would be structurally unable to cover Remote/RemoteFriend/unseated.
+        // `seatedDevice` is null for an unseated slot.
+        internal static bool OwnsSlotCore(bool sessionActive, ControlDevice? seatedDevice)
+        {
+            if (!sessionActive)
+            {
+                return true;
+            }
+            return seatedDevice.HasValue
+                && seatedDevice.Value != ControlDevice.Remote
+                && seatedDevice.Value != ControlDevice.RemoteFriend;
         }
 
         // The ship carried by the primary MsgShipState stream: the one in our granted primary
@@ -862,10 +1050,15 @@ namespace EvilAliensWeb.Compat.Net
 
         // The other peer collected a powerup: drive THEIR HUD panel here. The local pickup
         // path (PlayerShip.CollidesWith) is the only SetPowerup caller and it is gated to the
-        // local ship, so without this a remote pickup settles as a bare despawn -- the
-        // claimant's powerup icon never changes, and because ScoreVisualiser.increasecombo
-        // only feeds AddExp while that slot's powerupactive is set, their powerup LEVEL never
-        // advances either. Both symptoms read as "the powerup always goes to player 1".
+        // local ship, so without this a remote pickup settles as a bare despawn and the
+        // claimant's powerup icon never changes -- which reads as "the powerup always goes to
+        // player 1".
+        //
+        // Card 1a3ad45a moved the LEVEL half of this elsewhere: that slot's progression is its
+        // owner's alone now (ScoreVisualiser.SustainCombo is gated on OwnsSlot), and its real
+        // level arrives over MsgHudState -- which also re-asserts the indicator, making the
+        // SetPowerup below a redundant-but-immediate head start on the next ~10 Hz packet. The
+        // sound cue is what only this path can do: it belongs to the pickup INSTANT.
         // Idempotent: the collector's own side already ran the local path and never reaches
         // a settle branch for its own pickup (its entity is gone before the echo arrives).
         internal static void ApplyRemotePowerup(Powerup powerup, byte slot)
@@ -925,18 +1118,48 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte killer = TakeKillNote(e.Comp);
             Vector2 pos = e.Comp.Position;
+            // recentDeaths keeps the BASE value: a later claim from the other peer is a fresh
+            // generous payout the host still credits with its own live combo (card 11.2), not
+            // a replay of the award below.
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
             RecordDeath(e.Id, pos, points, killer, e.Comp is Powerup pu && pu.type == Powerup.PowerupType.OneUp);
             if (!PeerUp)
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos, points));
+            // e.Awards is what the per-type death path just credited, slot by slot (null when
+            // nothing was awarded -- a despawn, a zero-point type, an already-awarded entity).
+            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos, e.Awards));
             metrics.EventsTx++;
             if (DebugFlags.NetLog)
             {
-                Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer);
+                Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer
+                    + " award=" + (e.Awards == null ? "-" : string.Join("/", e.Awards)));
             }
+        }
+
+        // ---- award attribution (card b0ab09ec) ------------------------------------------------
+        //
+        // Called by AlienDrawableGameComponent.AwardScore/AwardScoreToAll with the figure the
+        // ScoreVisualiser ACTUALLY credited (already combo-modified). The host stashes it on the
+        // NetId entry for the death broadcast a tick later (the ComponentBin defers removal, so a
+        // single "last award" static could not bridge the gap); the client books it as a
+        // provisional credit its own EvDeath will replace. Offline / no session: one bool test.
+        internal static void NoteAward(AlienDrawableGameComponent comp, int slot, float amount)
+        {
+            if (!Active || amount <= 0f || slot < 0 || slot >= NetProtocol.MaxSlots)
+            {
+                return;
+            }
+            if (isHost)
+            {
+                if (NetIdRegistry.TryGetByComp(comp, out NetIdRegistry.Entry e))
+                {
+                    (e.Awards ??= new float[NetProtocol.MaxSlots])[slot] += amount;
+                }
+                return;
+            }
+            NetPuppets.NoteLocalAward(comp, (byte)slot, amount);
         }
 
         private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot, bool oneUp)
@@ -960,6 +1183,35 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- host world snapshot ------------------------------------------------------------
+
+        // How long a single entity waits between world-snapshot corrections, given how many are
+        // live: the cursor round-robins SnapshotMaxEntries per packet, so a big world stretches
+        // every puppet's blind dead-reckoning window (card 48ab9b2f). This is the context
+        // pupPops cannot be read without -- at 320 entities each puppet only hears from the host
+        // every 1.2s, and anything not moving in a straight line then pops on a healthy link.
+        //
+        // It is the MEAN interval, deliberately, not the worst case. The cursor wraps
+        // continuously rather than restarting each cycle, so an entity's gap alternates between
+        // floor and ceil of liveCount/SnapshotMaxEntries packets and averages the ratio itself;
+        // rounding UP to whole packets would report 120ms for a 17-entity world whose typical
+        // blind window is 64ms -- nearly 2x, on exactly the small worlds this gets read for.
+        // Floored at one packet interval, since a world that fits in a single packet is fully
+        // refreshed every SnapshotIntervalMs and cannot do better than that.
+        //
+        // Reported as snapTurn= on both peers. NOTE the two peers derive it from different
+        // counts -- the host from its authoritative NetIdRegistry, the join side from its own
+        // puppet count, which lags during spawn bursts, id churn and JIP catch-up (i.e. exactly
+        // when it is interesting). The host's line is the authoritative one.
+        // Also the number the population sweep in tools/sim/net_puppet_drive_sim.py sweeps.
+        internal static int SnapshotTurnMs(int liveCount)
+        {
+            if (liveCount <= 0)
+            {
+                return 0;
+            }
+            int mean = liveCount * (int)SnapshotIntervalMs / SnapshotMaxEntries;
+            return Math.Max((int)SnapshotIntervalMs, mean);
+        }
 
         private static void SendWorldSnapshot(long now)
         {
@@ -1034,14 +1286,40 @@ namespace EvilAliensWeb.Compat.Net
 
         private static readonly float[] scoreSyncScratch = new float[NetProtocol.MaxSlots];
 
+        // Host: per-slot scores as they stood at the LAST top-of-tick flush (card b0ab09ec).
+        //
+        // Reading them live at send time is a one-tick lie. Game1.UpdateInner runs
+        // TopOfTickFlush -> DetectCollisions -> NetSession.Update, so a kill in THIS tick's
+        // collision phase has already credited the score, while the death it queued is not
+        // flushed -- and its EvDeath therefore not sent -- until the NEXT tick's flush. A sync
+        // sent in between would carry an award the client has not been told about, so the client
+        // would count it once from the sync and again when the EvDeath finally arrived.
+        // Snapshotting right after the flush closes that window: everything in the snapshot has
+        // already had its EvDeath emitted (both ride the ordered reliable lane, flush first).
+        private static readonly float[] scoreSyncSnapshot = new float[NetProtocol.MaxSlots];
+        private static int scoreSyncSnapshotLives;
+
+        internal static void SnapshotScoresForSync()
+        {
+            if (!Active || !isHost || score == null)
+            {
+                return;
+            }
+            for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
+            {
+                scoreSyncSnapshot[slot] = score.PointScore(slot);
+            }
+            scoreSyncSnapshotLives = score.Lives;
+        }
+
         private static void SendScoreSync(long now)
         {
             lastScoreSyncTx = now;
             for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
             {
-                scoreSyncScratch[slot] = score.PointScore(slot);
+                scoreSyncScratch[slot] = scoreSyncSnapshot[slot];
             }
-            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, score.Lives, scoreSyncScratch));
+            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, scoreSyncSnapshotLives, scoreSyncScratch));
             metrics.EventsTx++;
         }
 
@@ -1066,6 +1344,9 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- wire -> state ----------------------------------------------------------------
+
+        // Client rx: decoded per-slot awards from the EvDeath currently being applied.
+        private static readonly float[] deathAwardScratch = new float[NetProtocol.MaxSlots];
 
         private static void DrainRx()
         {
@@ -1093,6 +1374,9 @@ namespace EvilAliensWeb.Compat.Net
                 case NetProtocol.MsgFriendState:
                     HandleFriendState(data);
                     break;
+                case NetProtocol.MsgHudState:
+                    HandleHudState(data);
+                    break;
                 case NetProtocol.MsgEvent:
                     HandleEvent(data);
                     break;
@@ -1114,7 +1398,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte ver = data[1];
             bool peerIsHost = data[2] != 0;
-            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot))
+            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot, out ulong helloPeerId, out byte peerBlockedSlots))
             {
                 Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion);
                 SendRejectOnce(NetProtocol.RejectVersion);
@@ -1140,15 +1424,28 @@ namespace EvilAliensWeb.Compat.Net
                 SendRejectOnce(NetProtocol.RejectFlags);
                 return;
             }
+            peerPeerId = helloPeerId;
+            // Card 0b8a300b: the block gate. Checked here because the hello is the ONE point
+            // both rejoin routes converge on (the public browser and a typed room code), and
+            // because it is BEFORE PeerConnected/slot reservation -- a blocked peer re-pairing
+            // never reaches the world, so repeated attempts cost the host a re-pair and nothing
+            // else. peerId 0 = the peer could not produce a token; never blockable, so a broken
+            // localStorage can't get someone refused by accident.
+            if (isHost && IsPeerBlocked(helloPeerId))
+            {
+                Console.WriteLine("[net] blocked peer tried to rejoin -- rejecting");
+                SendRejectOnce(NetProtocol.RejectBanned);
+                return;
+            }
             // Slot allocation (card 4d904410). The host reserves the joiner's primary seat the
             // moment it knows a real peer is there -- BEFORE replying -- so its own couch joins
             // and AI friends can never be handed the same slot. The client adopts what it is
             // given. Both are idempotent: hellos repeat at 1 Hz until the pairing settles.
             if (isHost)
             {
-                if (!ReserveRemotePrimarySlot())
+                if (!ReserveRemotePrimarySlot(peerBlockedSlots))
                 {
-                    return; // refused (roster full) -- SendRejectOnce owns the wind-down
+                    return; // refused (no seat free on both sides) -- SendRejectOnce owns the wind-down
                 }
             }
             else if (grantedSlot != NetProtocol.SlotNone)
@@ -1158,7 +1455,7 @@ namespace EvilAliensWeb.Compat.Net
             if (welcomeBack)
             {
                 transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                    isHost ? peerPrimarySlot : NetProtocol.SlotNone));
+                    isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
             }
             if (!PeerUp)
             {
@@ -1168,29 +1465,99 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- roster slot allocation (card 4d904410) --------------------------------------
 
-        // HOST: pick (once) the seat the joining peer's primary ship will occupy, and hold it
+        // Which slots WE cannot seat our primary ship in, as a v8 handshake mask. Only the client
+        // ever reports a constraint (the host allocates), and only while a scene is up: at the
+        // menu -- where both the menu-lobby and the join-in-progress joiner hello from -- the
+        // roster is leftover bookkeeping from the last level or attract demo that the launch
+        // path's ResetPlayers() wipes before it seats us, so nothing there blocks anything.
+        // Our OWN current seat is excluded: that is the seat we would move out of, not a blocker.
+        private static byte LocalBlockedSlots()
+        {
+            if (isHost || GameScene.NetActiveScene == null)
+            {
+                return 0;
+            }
+            return OccupiedMask(oracle, exclude: localPrimarySlot);
+        }
+
+        // A roster as a slot mask, optionally with one seat left out. `exclude` is how the client
+        // omits its OWN seat: that is the seat it would move out of, not one that blocks a grant.
+        // Pass -1 to mask every seated slot. Split out so eaSlotTest can drive it against a
+        // scratch Oracle -- the "which seats are in the way" question is the input BOTH sides of
+        // the negotiation run on, so a slip here is a silent bad grant.
+        internal static byte OccupiedMask(Oracle roster, int exclude)
+        {
+            byte mask = 0;
+            for (int i = 0; i < Oracle.MaxPlayers; i++)
+            {
+                if (i != exclude && roster.IsSeated(i))
+                {
+                    mask |= NetProtocol.SlotBit(i);
+                }
+            }
+            return mask;
+        }
+
+        // HOST: pick the seat the joining peer's primary ship will occupy, and hold it
         // immediately as a Remote registration so nothing else can take it. Normally slot 1; a
         // listed game with a couch player already aboard hands out whatever is free instead --
         // which is exactly why wire slots can no longer be pinned to 0/1.
-        // Returns false when the pairing was REFUSED (roster full) and the caller must stop.
-        private static bool ReserveRemotePrimarySlot()
+        //
+        // `peerBlocked` (v8, card c0229c57) is the joiner's own occupied slots. Honouring it is
+        // what makes the grant a NEGOTIATION rather than a guess: a seat free here but taken
+        // there used to be granted anyway, and the joiner could not take it, could not say so,
+        // and could not recover -- the two peers just disagreed about its slot forever.
+        // Returns false when the pairing was REFUSED (no seat free on both sides) and the caller
+        // must stop.
+        private static bool ReserveRemotePrimarySlot(byte peerBlocked)
         {
             if (peerPrimarySlot != NetProtocol.SlotNone)
             {
-                return true;
+                if (!NetProtocol.SlotInMask(peerBlocked, peerPrimarySlot))
+                {
+                    return true;
+                }
+                // The joiner has told us the seat we are holding does not work for it (its roster
+                // changed between our grant and its hello). Release and re-pick against the new
+                // mask rather than leaving it stranded -- it keeps helloing until its slot
+                // settles, so this converges: we never re-offer a seat the mask still blocks.
+                Console.WriteLine("[net] joiner cannot take granted slot=" + peerPrimarySlot + " -- re-allocating");
+                if (puppet != null)
+                {
+                    // The peer streams as soon as it is PeerUp, which can be BEFORE the slot
+                    // exchange settles -- so a puppet may already be flying in the seat we are
+                    // about to give up. ManagePuppet only re-adopts a ship the scene spawned; it
+                    // never re-stamps a live one's Owner, so leaving it would strand the remote
+                    // player in the old slot while the wire, EvScoreSync and EvBlast all moved to
+                    // the new one. Drop it and let the next stream rebuild it in the right seat.
+                    ExplodePuppet();
+                }
+                oracle.RemovePlayerAt(peerPrimarySlot, ControlDevice.Remote);
+                peerPrimarySlot = NetProtocol.SlotNone;
             }
             int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
+            if (slot >= 0 && NetProtocol.SlotInMask(peerBlocked, slot))
+            {
+                // A Remote registration the joiner cannot use (one that outlived a restarted
+                // session, or was re-seated by SpawnAllPlayers). Free it before re-picking, or we
+                // would hand out a second seat and leave this one squatting the roster.
+                oracle.RemovePlayerAt(slot, ControlDevice.Remote);
+                slot = -1;
+            }
             if (slot < 0)
             {
                 // Never slot 0: that is the host's own primary seat, which in the menu-lobby flow
                 // is still EMPTY at pairing time (the level launches after the peers connect).
-                slot = oracle.FirstFreeSlot(HostPrimarySlot + 1);
+                slot = FirstMutuallyFreeSlot(HostOccupiedSlots(), peerBlocked);
                 if (slot < 0)
                 {
-                    // No seat for the joiner. REFUSE -- do not just wait: the joiner would go
-                    // PeerUp, never be granted a slot, keep slot 0 (our own player) and address
-                    // every claim/blast at it.
-                    Console.WriteLine("[net] no free roster slot for the joiner -- rejecting");
+                    // No seat that works on BOTH sides. REFUSE -- do not just wait: the joiner
+                    // would go PeerUp, never be granted a usable slot, keep slot 0 (our own
+                    // player) and address every claim/blast at it. Our own game survives this:
+                    // Stop() does not exit a level, so a listed host drops back to single-player
+                    // and NetListing re-lists it.
+                    Console.WriteLine("[net] no roster slot free for the joiner on both sides (peerBlocked="
+                        + peerBlocked + ") -- rejecting");
                     SendRejectOnce(NetProtocol.RejectFull);
                     return false;
                 }
@@ -1204,30 +1571,111 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
+        // Our own roster as a slot mask, in the same shape as the peer's blockedSlots -- so the
+        // allocation decision below is a pure function of two masks and can be tested (and its
+        // convergence asserted) with no oracle, transport or session. eaSlotTest() drives it.
+        private static byte HostOccupiedSlots()
+        {
+            return OccupiedMask(oracle, exclude: -1);
+        }
+
+        // The lowest seat free on OUR roster and not blocked on the peer's, or -1 when there is
+        // none. Never slot 0 (HostPrimarySlot): that seat is the host's own primary, and in the
+        // menu-lobby flow it is still empty at pairing time, so a plain "first free" would hand
+        // the joiner the host's chair.
+        internal static int FirstMutuallyFreeSlot(byte hostOccupied, byte peerBlocked)
+        {
+            for (int i = HostPrimarySlot + 1; i < Oracle.MaxPlayers; i++)
+            {
+                if (!NetProtocol.SlotInMask(hostOccupied, i) && !NetProtocol.SlotInMask(peerBlocked, i))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        // What taking the host's granted seat requires of us. Split out as a pure function
+        // (the NetListing.ComputeEligible / PlayerShip.IsAiShootable house style) because the
+        // live method needs an oracle, a transport, a paired session and a GameScene -- so the
+        // branch that shipped this card's bug could not be tested at all. eaSlotTest() drives
+        // this directly.
+        internal enum SlotAdopt
+        {
+            Settled,     // idempotent repeat of a grant we already took
+            TakeSlot,    // nothing seated that matters -- just adopt the number
+            MoveSeat,    // a live scene seat (and its ship) must move across with us
+            Renegotiate, // the seat cannot move; do NOT settle, hello again and let the host re-pick
+        }
+
+        internal static SlotAdopt DecideSlotAdopt(byte localSlot, byte granted, byte peerSlot,
+            bool sceneUp, bool localSeated, bool grantedSeated)
+        {
+            if (localSlot == granted && peerSlot != NetProtocol.SlotNone)
+            {
+                return SlotAdopt.Settled;
+            }
+            // Only a seat inside a LIVE scene is load-bearing. At the menu -- where both the
+            // menu-lobby and the join-in-progress joiner hello from -- the roster is whatever the
+            // last level or attract demo left behind (GameScene.Terminate never clears it, and
+            // ~60% of attract demos seat slot 1), and the launch path's ResetPlayers() wipes it
+            // before seating us at the granted slot. So there is nothing to move and a busy
+            // destination means nothing. Treating that stale roster as real is what made this
+            // reachable from an ordinary "idle at the menu, then join a game".
+            if (localSlot == granted || !sceneUp || !localSeated)
+            {
+                return SlotAdopt.TakeSlot;
+            }
+            // We are already seated mid-level (the dev ?net=join flow boots into a level before
+            // pairing): the registration and the live ship both have to move. If they can't, our
+            // slot must NOT advance -- claiming a slot our ship isn't in silently stops the
+            // primary stream (FindLocalShip goes null -> alive=false forever) and re-streams the
+            // real ship as a friend the host will refuse.
+            return grantedSeated ? SlotAdopt.Renegotiate : SlotAdopt.MoveSeat;
+        }
+
         // CLIENT: take the seat the host granted. In the menu-lobby and JIP flows our ship isn't
         // seated yet (EvLaunch -> Game1.MenuFinished reads LocalPrimarySlot), so this is just
         // bookkeeping. In the dev ?net=join flow we are already mid-level at slot 0, so the
         // registration AND any live ship move across.
         private static void AdoptGrantedPrimarySlot(byte slot)
         {
-            if (localPrimarySlot == slot && peerPrimarySlot != NetProtocol.SlotNone)
+            if (slot >= NetProtocol.MaxSlots)
+            {
+                // Off-the-wire value, so bound it before anything acts on it. An out-of-range
+                // grant is unreachable from our own host code, but taking it on trust would be
+                // the one input the negotiation cannot converge on: LocalBlockedSlots can never
+                // set a bit for a slot that does not exist, so the host would re-offer the same
+                // impossible seat every second forever -- and at the menu we would silently
+                // adopt a slot AddPlayerAt then refuses, leaving our ship in a seat the peer
+                // never addresses.
+                Console.WriteLine("[net] ignoring out-of-range granted slot=" + slot);
+                return;
+            }
+            SlotAdopt action = DecideSlotAdopt(localPrimarySlot, slot, peerPrimarySlot,
+                GameScene.NetActiveScene != null, oracle.IsSeated(localPrimarySlot), oracle.IsSeated(slot));
+            if (action == SlotAdopt.Settled)
             {
                 return;
             }
-            peerPrimarySlot = HostPrimarySlot;
-            if (localPrimarySlot != slot && oracle.IsSeated(localPrimarySlot))
+            if (action == SlotAdopt.MoveSeat && !oracle.MovePlayerSlot(localPrimarySlot, slot))
             {
-                // We are already seated somewhere (the dev ?net=join flow boots into a level
-                // before pairing): the registration and the live ship both have to move, and if
-                // they can't, our slot must NOT advance -- claiming a slot our ship isn't in
-                // silently stops the primary stream (FindLocalShip goes null -> alive=false
-                // forever) and re-streams the real ship as a friend the host will refuse.
-                if (!oracle.MovePlayerSlot(localPrimarySlot, slot))
-                {
-                    Console.WriteLine("[net] could not move local primary " + localPrimarySlot + " -> " + slot
-                        + " (slot busy) -- staying put");
-                    return;
-                }
+                action = SlotAdopt.Renegotiate; // lost a race for the seat since we decided
+            }
+            if (action == SlotAdopt.Renegotiate)
+            {
+                // Do NOT settle. Update's retry condition is `!PeerUp || peerPrimarySlot ==
+                // SlotNone`, so leaving peerPrimarySlot unset keeps the 1 Hz hello going on both
+                // peers -- and our next hello carries a fresh blockedSlots mask, off which the
+                // host releases this seat and grants another (or refuses with RejectFull once
+                // nothing works on both sides). Settling here instead is the whole bug: it
+                // silenced the retry on BOTH peers, so a pairing that failed this way could
+                // never recover and nothing was ever surfaced to the player.
+                Console.WriteLine("[net] granted primary slot " + slot + " is occupied locally -- asking the host to re-grant");
+                return;
+            }
+            if (action == SlotAdopt.MoveSeat)
+            {
                 foreach (PlayerShip s in oracle.GetShips())
                 {
                     if (s.Owner == localPrimarySlot)
@@ -1238,6 +1686,8 @@ namespace EvilAliensWeb.Compat.Net
                 Console.WriteLine("[net] moved local primary slot " + localPrimarySlot + " -> " + slot);
             }
             localPrimarySlot = slot;
+            // Only ever assigned on a SETTLED adoption -- see the Renegotiate note above.
+            peerPrimarySlot = HostPrimarySlot;
         }
 
         // Which seat our primary ship uses. Read by Game1.MenuFinished / LaunchLevelDirect /
@@ -1368,6 +1818,20 @@ namespace EvilAliensWeb.Compat.Net
                 Console.WriteLine("[net] couch join refused by host (roster full)");
                 return;
             }
+            // ?netdropgrant: fail to take the grant on purpose, the way a real client can (its
+            // device got seated meanwhile, its scene changed). Read per grant, so while the flag
+            // is set NO couch join completes -- deliberately not one-shot, since a latch would
+            // need clearing on session restart and a missed reset there is the silent
+            // stale-state bug this seam exists to hunt. Dropped AFTER clearing
+            // joinRequestPending so this side is left exactly as a genuine failed take leaves it
+            // -- no outstanding request, no seat -- and the host is the only one holding the
+            // reservation. That is the state ExpireUnclaimedGrants exists to clean up.
+            if (DebugFlags.NetDropGrant)
+            {
+                Console.WriteLine("[net] ?netdropgrant: dropping granted couch slot=" + slot
+                    + " -- host should release it in " + GrantClaimTimeoutMs + "ms");
+                return;
+            }
             // Same AI exemption as TrySeatLocalJoin: several friends legitimately share
             // ControlDevice.AI, so "already playing" must not block the second one.
             if ((pendingJoinDevice != ControlDevice.AI && oracle.DeviceIsPlaying(pendingJoinDevice))
@@ -1415,6 +1879,73 @@ namespace EvilAliensWeb.Compat.Net
             return (s.Length > 0 ? s : "-")
                 + " pri=" + localPrimarySlot + "/" + (peerPrimarySlot == NetProtocol.SlotNone ? "-" : peerPrimarySlot.ToString())
                 + " ships=" + (ships.Length > 0 ? ships : "-");
+        }
+
+        // On-demand roster dump for the console (eaNetRoster, card af0eb00a). The metrics line
+        // already carries roster=, but it prints on a 5s cadence while the reset it has to be read
+        // across (LoseLife -> respawn -> Normal) lasts ~2.7s -- a sampled before/after can straddle
+        // the whole transition and show nothing. Called by hand on both peers either side of an
+        // eaKillShips() reset, this makes the comparison exact instead. Same string the metrics
+        // line builds, plus the reset counter the assertion is against.
+        internal static string RosterDump()
+        {
+            if (!Active)
+            {
+                return "[net] no session (roster is single-player local state)";
+            }
+            // Positions are the half the metrics line's roster= cannot carry: a puppet that never
+            // re-adopted after a reset still SHOWS as a ship in its seat, and only its pose
+            // distinguishes "driven by the peer's stream" from "frozen where SpawnAllPlayers put
+            // it". Sampled twice a second apart, a live slot moves and a frozen one does not.
+            // ';' between entries, ',' only inside a coordinate -- the whole [net] family is meant
+            // to be parseable, and a single separator for both would make the field ambiguous.
+            string at = "";
+            foreach (PlayerShip p in oracle.GetShips())
+            {
+                Vector2 pos = p.GetPosition();
+                at += (at.Length > 0 ? ";" : "")
+                    + p.Owner + ":" + p.Controller + "@" + (int)pos.X + "," + (int)pos.Y;
+            }
+            return "[net] roster=" + RosterReport()
+                + " at=" + (at.Length > 0 ? at : "-")
+                + " resets=" + metrics.Resets
+                + " role=" + (isHost ? "host" : "join")
+                + " peer=" + (PeerUp ? "up" : "down");
+        }
+
+        // Seat one couch player NOW, on the same path a gamepad Start press takes (card
+        // af0eb00a). Distinct from TickLocalJoinSim below, which is deliberately PeerUp-gated:
+        // this one is not, because the case worth reaching is the host filling its roster BEFORE
+        // anyone pairs -- the only state in which a later joiner finds no seat and gets
+        // RejectFull. Device choice mirrors the sim (Generic first, then AI for extras) so the
+        // two seams seat the same kinds of player.
+        internal static string DebugCouchJoin()
+        {
+            if (!Active)
+            {
+                return "no net session"; // oracle is only assigned once a session starts
+            }
+            ControlDevice device = oracle.DeviceIsPlaying(ControlDevice.Generic)
+                ? ControlDevice.AI
+                : ControlDevice.Generic;
+            // Take the branch a pad press would take THIS tick: seating during the reset window
+            // or a scripted no-ship phase must leave the spawn to SpawnAllPlayers, or we hand the
+            // slot a ship the very next purge eats -- a seated slot with no ship, which is the
+            // "missing owner" artifact this card's own gate reads as a failure.
+            bool spawn = GameScene.NetActiveScene?.JoinWouldSpawnNow ?? false;
+            // TrySeatLocalJoin has five silent early returns (device already playing, roster full,
+            // client not yet paired, a request already outstanding), so report what actually
+            // happened rather than what was asked for: on the host the seat appears synchronously,
+            // on the client the grant is a round trip and "requested" is the honest answer.
+            int before = oracle.Players;
+            TrySeatLocalJoin(device, spawn);
+            string outcome = oracle.Players > before
+                ? "seated device=" + device + " spawn=" + (spawn ? "now" : "deferred")
+                : isHost ? "refused (roster full or device already playing)"
+                : PeerUp ? "requested from host (grant is a round trip)"
+                : "ignored (client, no host paired yet)";
+            Console.WriteLine("[net] eaNetCouchJoin: " + outcome);
+            return outcome;
         }
 
         // ---- ?netlocal=<n>: synthetic couch joins (card 4d904410 verification seam) ----------
@@ -1472,6 +2003,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             transport.SendReliable(NetProtocol.EncodeReject(reason));
             pendingStopNotice = RejectNotice(reason, weSentIt: true);
+            pendingStopReason = "pairing rejected";
             pendingStopAt = NowMs + RejectGraceMs;
         }
 
@@ -1502,6 +2034,12 @@ namespace EvilAliensWeb.Compat.Net
                 return weSentIt
                     ? "Game full\nNo free player slot for the other player"
                     : "Game full\nThat game has no free player slot";
+            case NetProtocol.RejectBanned:
+                // Asymmetric on purpose -- unlike the cases above, the two sides genuinely know
+                // different things, and the refused player is owed a reason that isn't a lie.
+                return weSentIt
+                    ? "Blocked player\nThey tried to rejoin your game"
+                    : "Removed from that game\nThe host blocked you from rejoining";
             default:
                 return "Connection refused";
             }
@@ -1556,6 +2094,149 @@ namespace EvilAliensWeb.Compat.Net
             bool normalEnd = scene != null && scene.NetEndingNormally;
             Stop(reason, normalEnd ? null : notice);
             scene?.NetApplyPeerLeft();
+        }
+
+        // The other match-end shape: the peer goes but WE stay in our level, playing solo. Used
+        // whenever the host outlives the peer -- a JIP joiner dropping or leaving, and (card
+        // 0b8a300b) a kick, which is the same outcome the host asked for deliberately.
+        //
+        // Freeing the Remote seat matters as much as exploding the puppet: leave it registered
+        // and oracle.Players stays 2, so NetListing never re-lists and a phantom score panel
+        // lingers. Couch players the peer brought (card 4d904410) go the same way -- our level
+        // keeps running, so nothing else would ever purge their puppets or free their seats.
+        private static void RevertToSinglePlayer(string reason)
+        {
+            ReleasePeerSeats();
+            Stop(reason);
+        }
+
+        // The visible half of the revert, without the teardown -- the kick path needs these two
+        // separable, because it must free the world NOW but keep the transport alive for the
+        // grace (Stop() closes it).
+        private static void ReleasePeerSeats()
+        {
+            if (puppet != null)
+            {
+                ExplodePuppet();
+            }
+            oracle.ReleasePlayer(ControlDevice.Remote);
+            ReleaseAllFriendPuppets();
+        }
+
+        // Host-only, card 0b8a300b: once the peer's pause has outlasted KickOfferDelayMs, swap
+        // the passive "OTHER PLAYER PAUSED" curtain for the interactive kick menu.
+        //
+        // The timing lives HERE, not in GameScene or the overlay, for the reason the whole card
+        // exists: Push() disables every collection component, GameScene included, so neither can
+        // tick during the freeze. NetSession.Update is driven straight from Game1.UpdateInner,
+        // which makes it the one clock still running -- and it is already real-time (NowMs), the
+        // right basis for a frozen world where gameTime means nothing.
+        private static void TickKickOffer(long now)
+        {
+            if (!RemotePaused)
+            {
+                kickOfferShown = false;
+                remotePauseAt = 0;
+                return;
+            }
+            if (kickOfferShown || remotePauseAt == 0 || now - remotePauseAt < KickOfferDelayMs)
+            {
+                return;
+            }
+            GameScene scene = GameScene.NetActiveScene;
+            if (scene == null)
+            {
+                return;
+            }
+            // Latch ONLY on a menu that actually went up. NetShowKickMenu refuses when we hold
+            // no freeze of our own -- which happens whenever our OWN pause menu was up when the
+            // peer's EvPause landed (NetSetRemotePaused defers to the local pause). Latching
+            // regardless would burn the single offer on a menu nobody saw, and once the host
+            // resumed into the peer's still-held pause it would be frozen with no way out:
+            // exactly the griefing hole this card closes.
+            kickOfferShown = scene.NetShowKickMenu();
+        }
+
+        // Host action (card 0b8a300b): throw the peer out of the match and carry on playing.
+        // `block` also refuses their rejoin for the rest of this level (see blockedPeers).
+        //
+        // The teardown is deliberately SPLIT: everything the player can see happens now (the
+        // world unfreezes, the puppet goes, the seat frees), but transport.Close() waits out
+        // RejectGraceMs -- Stop() -> pc.close() is abortive on WebRTC and would discard the
+        // still-buffered EvKick, leaving the kicked player staring at a generic "disconnected"
+        // instead of being told what happened. Same reason the reject path has that grace.
+        public static void KickPeer(bool block)
+        {
+            if (!Active || !isHost || pendingStopAt != 0)
+            {
+                return;
+            }
+            ApplyKickBlock(block, peerPeerId);
+            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvKick, (byte)(block ? 1 : 0)));
+            metrics.EventsTx++;
+            Console.WriteLine("[net] kicked the peer" + (block ? " (blocked for this level)" : ""));
+            // Release the freeze BEFORE the revert: the world is still pushed under the kicked
+            // player's pause, and NetSetRemotePaused(false) is what pops it.
+            if (RemotePaused)
+            {
+                RemotePaused = false;
+                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+            }
+            PeerUp = false;
+            ReleasePeerSeats();
+            // Deliberately NOT RevertToSinglePlayer() -- its Stop() would close the transport
+            // and abort the EvKick we just queued. The deadline below does the Stop() instead;
+            // until then the session is Active with no peer, which Update handles by taking the
+            // pendingStopAt branch and nothing else.
+            kickOfferShown = false;
+            pendingStopReason = "kick teardown";
+            pendingStopNotice = null;
+            pendingStopAt = NowMs + RejectGraceMs;
+        }
+
+        // "Keep Waiting": the host declined this offer, so hide the menu and start the delay
+        // again. Waiting once must not forfeit the option -- a griefer holding pause forever
+        // would otherwise get exactly one refusal and then a permanently frozen host.
+        public static void RearmKickOffer()
+        {
+            remotePauseAt = NowMs;
+            kickOfferShown = false;
+        }
+
+        // The two halves of the block rule, factored out of KickPeer and HandleHello so
+        // NetKickTest can drive the REAL decisions rather than a paraphrase of them (the
+        // messaging + teardown around them is what the two-window run covers).
+        //
+        // peerId 0 means the peer could not produce a token at all: never recorded, never
+        // matched. Otherwise one broken localStorage would block every other such peer at once.
+        internal static void ApplyKickBlock(bool block, ulong peerId)
+        {
+            if (block && peerId != 0)
+            {
+                blockedPeers.Add(peerId);
+            }
+        }
+
+        internal static bool IsPeerBlocked(ulong peerId)
+        {
+            return peerId != 0 && blockedPeers.Contains(peerId);
+        }
+
+        // Scoped to one level run (GameScene.Terminate) -- the card's "for that session only".
+        public static void ClearBlockedPeers()
+        {
+            blockedPeers.Clear();
+        }
+
+        internal static int BlockedPeerCount => blockedPeers.Count;
+
+        // For NetKickTest's save/restore, so running the self-test mid-level cannot quietly
+        // un-block someone the host had already thrown out.
+        internal static ulong[] SnapshotBlockedPeers()
+        {
+            ulong[] ids = new ulong[blockedPeers.Count];
+            blockedPeers.CopyTo(ids);
+            return ids;
         }
 
         // Drop the banner with no verdict attached -- used by the teardown paths, where the
@@ -1613,20 +2294,7 @@ namespace EvilAliensWeb.Compat.Net
             ClearPeerStalled();
             if (listedSession)
             {
-                // The JIP joiner dropped: revert the host to plain single-player. Explode the
-                // puppet ship AND free the Remote player slot (else oracle.Players stays 2 and
-                // the host is never re-listed + a phantom score lingers), tear the session down.
-                // The host keeps playing its level; NetListing re-lists next tick. No
-                // force-exit -- the host was here first.
-                if (puppet != null)
-                {
-                    ExplodePuppet();
-                }
-                oracle.ReleasePlayer(ControlDevice.Remote);
-                // ...and any couch players the joiner brought with it (card 4d904410): our level
-                // keeps running, so nothing else would ever purge their puppets or free the seats.
-                ReleaseAllFriendPuppets();
-                Stop("jip peer lost: " + reason);
+                RevertToSinglePlayer("jip peer lost: " + reason);
                 return;
             }
             remoteAlive = false;
@@ -1706,7 +2374,7 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped))
+                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
                 {
                     if (popped)
                     {
@@ -1715,9 +2383,18 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else
                 {
-                    // Not spawned yet (stream outran the reliable lane) or died locally with
-                    // the claim still in flight -- both self-heal; just count it.
+                    // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead are ordinary
+                    // traffic -- their rates track the world's spawn and removal rates, so a
+                    // busy level logs plenty of both on a perfectly healthy link. Refused is
+                    // the fault shape (an unknown typeIdx re-counts every turn; the other two
+                    // causes mark the id removed first and so tick more slowly -- NetMetrics).
                     metrics.SnapUnknownIds++;
+                    switch (kind)
+                    {
+                    case SnapUnknownKind.Rebuilt:  metrics.SnapNew++; break;
+                    case SnapUnknownKind.LeftDead: metrics.SnapDead++; break;
+                    case SnapUnknownKind.Refused:  metrics.SnapBad++; break;
+                    }
                 }
             }
         }
@@ -1757,15 +2434,15 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvDeath:
             {
-                if (isHost || data.Length < 17 || GameScene.NetActiveScene == null)
+                if (isHost || data.Length < NetProtocol.DeathEventBytes || GameScene.NetActiveScene == null)
                 {
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
                 byte killer = data[6]; // wire slot == oracle slot on both peers
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
-                ushort points = NetProtocol.ReadU16(data, 15);
-                NetPuppets.OnRemoteDeath(id, killer, pos, points);
+                NetProtocol.ReadDeathAwards(data, deathAwardScratch);
+                NetPuppets.OnRemoteDeath(id, killer, pos, deathAwardScratch);
                 if (DebugFlags.NetLog)
                 {
                     Console.WriteLine("[net] rx death id=" + id + " killer=" + killer);
@@ -1788,10 +2465,27 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 score.Lives = (sbyte)data[4];
+                // Worst skew ACROSS the slots, recorded once. Recording per slot would just
+                // leave the last one standing -- slot 3, unseated in any 2-peer session, so a
+                // hard-coded 0.0 that looks like proof of nothing going wrong.
+                float worstSkew = 0f;
                 for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
                 {
-                    score.NetAdoptScore(slot, NetProtocol.ReadF32(data, 5 + 4 * slot));
+                    float host = NetProtocol.ReadF32(data, 5 + 4 * slot);
+                    // EvDeath and EvScoreSync both ride the ordered reliable lane, and the host
+                    // snapshots these scores at its top-of-tick flush -- the point where that
+                    // tick's EvDeath events go out. So an award inside `host` has already been
+                    // announced (and is off the unsettled books) and one that has not been
+                    // announced is not inside it: the sum is exact either way round.
+                    float pending = NetPuppets.UnsettledFor(slot);
+                    float skew = score.PointScore(slot) - (host + pending);
+                    if (Math.Abs(skew) > Math.Abs(worstSkew))
+                    {
+                        worstSkew = skew;
+                    }
+                    score.NetSetScore(slot, host, pending);
                 }
+                metrics.NoteScoreSkew(worstSkew);
                 break;
             }
             case NetProtocol.EvBlast:
@@ -1851,6 +2545,19 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     msg.SetWarningDirection(angle);
                 }
+                // A standing Purge<AnimatedMessage> can eat this add (GameScene.UpdateWin /
+                // UpdateResetting arm one, and the rx drain runs later in the same tick), and
+                // that is CORRECT -- do not "fix" it by exempting the add (card 74403f83).
+                // Terminate is already excluded by the NetActiveScene gate above, which it nulls
+                // before its purges. In the two remaining windows, eating the banner is what
+                // MATCHES the host: the level script is host-only and only runs in
+                // GameState.Normal, so the host cannot emit a beat while it is itself in Win or
+                // Resetting, and both peers enter those states from the host's own broadcast. A
+                // banner the host is showing is a banner the host has not purged. Reaching this
+                // would mean the two state machines had already diverged -- a different bug,
+                // which letting the banner through would only mask. Nothing dangles either way:
+                // the banner is one-shot and nothing holds a reference past the Add. ?binlog
+                // logs the divert if it ever does fire.
                 bin.Add((GameComponent)(object)msg);
                 metrics.BeatsRx++;
                 break;
@@ -1886,6 +2593,9 @@ namespace EvilAliensWeb.Compat.Net
                     AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
                     banner.Setup(text, (SoundManager.Texts)speech, AnimatedMessage.MessageType.unlocked);
                     banner.SetUnlockType(ut);
+                    // Same standing-purge analysis as EvMessage above: eating this matches the
+                    // host, and the GRANT (which is what actually matters) already happened
+                    // unconditionally. Card 74403f83.
                     bin.Add((GameComponent)(object)banner);
                 }
                 metrics.BeatsRx++;
@@ -1958,6 +2668,17 @@ namespace EvilAliensWeb.Compat.Net
                 if (on)
                 {
                     metrics.Pauses++;
+                    // Arm the host's kick offer (card 0b8a300b). Note this is the EVENT edge,
+                    // not the freeze edge: the freeze itself is skipped while our own pause menu
+                    // is up, and the clock should still run then -- NetLocalPauseReleased
+                    // re-freezes into a pause that may already have earned the offer.
+                    remotePauseAt = NowMs;
+                    kickOfferShown = false;
+                }
+                else
+                {
+                    remotePauseAt = 0;
+                    kickOfferShown = false;
                 }
                 break;
             }
@@ -1999,16 +2720,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 if (listedSession)
                 {
-                    // A JIP joiner left the match: revert the host to single-player (explode
-                    // the puppet + free the Remote slot so Players==1 again), keep the host in
-                    // its level. NetListing re-lists next tick.
-                    if (puppet != null)
-                    {
-                        ExplodePuppet();
-                    }
-                    oracle.ReleasePlayer(ControlDevice.Remote);
-                    ReleaseAllFriendPuppets(); // and its couch players (card 4d904410)
-                    Stop("jip peer left the match");
+                    RevertToSinglePlayer("jip peer left the match");
                     break;
                 }
                 // A shared victory/game-over also lands here (whichever scene terminates
@@ -2017,6 +2729,25 @@ namespace EvilAliensWeb.Compat.Net
                 // walk-out, so the notice does show; our OWN finished level can't reach this
                 // -- its scene-down edge already stopped the session.)
                 EndMatchPeerGone("peer left the match", "The other player left\nMatch ended");
+                break;
+            }
+            case NetProtocol.EvKick:
+            {
+                // The host threw us out (card 0b8a300b). Only the host may kick, so ignore it
+                // coming the other way rather than letting a client end the host's match.
+                if (isHost || data.Length < 5)
+                {
+                    return;
+                }
+                bool blocked = data[4] != 0;
+                Console.WriteLine("[net] kicked by the host" + (blocked ? " (blocked)" : ""));
+                // Same shape as any other match end: Stop() first (which releases the freeze if
+                // the host was holding one), then NetApplyPeerLeft(), which unwinds our own
+                // pause-menu depth -- we are almost certainly sitting in it, since holding the
+                // pause is what got us kicked -- and force-exits to the main menu.
+                EndMatchPeerGone("kicked by the host", blocked
+                    ? "Removed from the game\nThe host blocked you from rejoining"
+                    : "Removed from the game\nThe host kicked you");
                 break;
             }
             }
@@ -2062,7 +2793,11 @@ namespace EvilAliensWeb.Compat.Net
                     {
                         if (e.Comp.NetPointValue > 0f)
                         {
-                            score.AddScore(e.Comp.NetPointValue, true, e.Comp.Position, killerSlot);
+                            // Through NoteAward, not a bare AddScore: this branch settles a claim
+                            // WITHOUT going via AwardScore, so without it e.Awards stays null and
+                            // the EvDeath below would carry an all-zero award array (card b0ab09ec).
+                            NoteAward(e.Comp, killerSlot,
+                                score.AddScore(e.Comp.NetPointValue, true, e.Comp.Position, killerSlot));
                         }
                         Explosion explosion = Explosion.NewExplosion(bin, game);
                         explosion.Setup(e.Comp.Position, 1.2f, 1f, 0f, 0f);
@@ -2157,7 +2892,22 @@ namespace EvilAliensWeb.Compat.Net
                 ship = new PlayerShip(game);
             }
             ship.Setup(slot, buffer.Newest.Pos, startup: false, invulnerable: false, 4.712389f);
-            bin.Add((GameComponent)(object)ship);
+            if (!bin.TryAdd((GameComponent)(object)ship))
+            {
+                // A standing Purge<PlayerShip> is live this tick. The one that can actually
+                // reach us is NetApplyReset's, because it purges from inside this very rx
+                // drain; the LoseLife / UpdateWin / UpdateResetting purges run back in
+                // base.Update and their deaths are flushed by collectionHelper.Update() before
+                // the drain, which leaves FindLocalShip() null and the caller's gate shut. The
+                // ship being purged is CORRECT either way (a reset wipes all ships and
+                // SpawnAllPlayers respawns every seated slot), but adopting one that never
+                // entered the world
+                // would leave `puppet` non-null forever and the guard above is `puppet == null`
+                // -- the remote player would stay invisible for the rest of the session. Leave
+                // it clear and retry next tick, once TopOfTickFlush has expired the filter; the
+                // seat we just took is reused via DeviceIsPlaying above (card 74403f83).
+                return;
+            }
             puppet = ship;
             hasLastPuppetPos = false;
             renderMs = double.NaN;

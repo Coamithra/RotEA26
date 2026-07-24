@@ -27,6 +27,11 @@ namespace EvilAliensWeb.Compat.Net
         // BIDIRECTIONAL (it was host -> client while AI friends were the only case).
         // Stream lane, ~30 Hz.
         public const byte MsgFriendState = 0x11;
+        // Card 1a3ad45a: the per-slot HUD state its OWNER is authoritative for -- combo counter,
+        // active powerup, bar progress and per-type levels. Bidirectional (each peer sends the
+        // slots it owns), stream lane, ~10 Hz. Loss-tolerant by construction: a dropped packet
+        // only means the readout is one interval staler.
+        public const byte MsgHudState = 0x12;
         public const byte MsgWorldSnapshot = 0x20;
         public const byte MsgEvent = 0x30;
 
@@ -54,6 +59,10 @@ namespace EvilAliensWeb.Compat.Net
         // allocates every roster slot, so a client-side join has to ask for one.
         public const byte EvJoinRequest = 18; // client -> host: a couch player pressed Start, give me a slot
         public const byte EvSlotGrant = 19;   // host -> client: [slot:1] (SlotNone = roster full, refused)
+        // Card 0b8a300b (anti-griefing): host -> client, "you are out of this match".
+        // [blocked:1] -- 1 also means the host blocked our peer id for the rest of its level,
+        // so a rejoin will be refused at the hello (RejectBanned). Payload via EncodeByteEvent.
+        public const byte EvKick = 20;
 
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
@@ -153,9 +162,91 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
+        // ---- per-slot HUD state (card 1a3ad45a, stream lane) ------------------------------
+
+        // How many powerup LEVELS ride the wire. Powerup.PowerupType is Blast, Option, FirePower,
+        // Range, Linker, OneUp -- OneUp's level is pinned at 3 and never increments (PowerupData's
+        // ctor), so only the leading 5 are replicated and the wire index IS the enum value. That
+        // makes the enum append-only for this message too: a new type must go AFTER OneUp, or
+        // widen this and bump ProtocolVersion.
+        public const int HudLevelCount = 5;
+        public const int HudSlotBytes = 5 + HudLevelCount;  // slot+combo:2+activeType+progress+levels
+        // 0xFF = "this slot has no powerup active", so the receiver blanks the bar instead of
+        // leaving a stale one lit. A real Powerup.PowerupType is 0..5 and can never collide.
+        public const byte HudPowerupNone = 0xFF;
+
+        // MsgHudState: [0x12][count:1] then `count` fixed-width HudSlotBytes entries:
+        //   [slot:1][combo:2][activeType:1][progress:1][level x HudLevelCount]
+        //
+        // combo is a USHORT, not a byte, and that is load-bearing rather than generous: the host
+        // pays every slot's boss share with THAT slot's own multiplier (AwardScoreToAll ->
+        // comboModify = amount * (1 + combo/20)), so the figure it adopts here is spent, not just
+        // drawn. A byte would silently cap a client's real 400x combo at 255 and underpay it --
+        // and combos well past 255 are expected (ScoreVisualiser precaches 1000 combo strings and
+        // drawPlayerScore has an explicit >= 1000 fallback). Saturation at ushort is unreachable
+        // in play. progress is the active bar's 0..1 fill quantised to a byte.
+        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int count)
+        {
+            byte[] b = new byte[2 + HudSlotBytes * count];
+            b[0] = MsgHudState;
+            b[1] = (byte)count;
+            int off = 2;
+            for (int i = 0; i < count; i++)
+            {
+                b[off++] = slots[i];
+                WriteU16(b, off, (ushort)Math.Clamp(combos[i], 0, ushort.MaxValue));
+                off += 2;
+                b[off++] = activeTypes[i];
+                b[off++] = (byte)Math.Clamp((int)MathF.Round(progress[i] * 255f), 0, 255);
+                for (int t = 0; t < HudLevelCount; t++)
+                {
+                    b[off++] = (byte)Math.Clamp(levels[i][t], 0, 4);
+                }
+            }
+            return b;
+        }
+
+        // Reads entry `index` out of a validated packet. Levels are written into `levels` (length
+        // must be >= HudLevelCount) rather than allocated, so the ~10 Hz rx path stays garbage-free.
+        public static bool TryDecodeHudState(byte[] b, int index, int[] levels, out byte slot, out int combo, out byte activeType, out float progress)
+        {
+            slot = 0;
+            combo = 0;
+            activeType = HudPowerupNone;
+            progress = 0f;
+            if (!TryDecodeHudCount(b, out int count) || index < 0 || index >= count || levels == null || levels.Length < HudLevelCount)
+            {
+                return false;
+            }
+            int off = 2 + HudSlotBytes * index;
+            slot = b[off];
+            combo = ReadU16(b, off + 1);
+            activeType = b[off + 3];
+            progress = b[off + 4] / 255f;
+            for (int t = 0; t < HudLevelCount; t++)
+            {
+                levels[t] = b[off + 5 + t];
+            }
+            return true;
+        }
+
+        // Whole-packet validation: the declared count must exactly account for the bytes present,
+        // so a truncated or padded frame is rejected once here rather than per entry.
+        public static bool TryDecodeHudCount(byte[] b, out int count)
+        {
+            count = 0;
+            if (b == null || b.Length < 2 || b[0] != MsgHudState)
+            {
+                return false;
+            }
+            count = b[1];
+            return b.Length == 2 + HudSlotBytes * count;
+        }
+
         // ---- handshake ----------------------------------------------------------------
 
-        // v5: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1] = 13 bytes. The
+        // v8: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1][peerId:8]
+        // [blockedSlots:1] = 22 bytes. The
         // build hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
         // the identical published binary" -- a stale-cached client is REJECTED, not subtly
         // desynced. Flags currently carry only the DebugFlags.Active bit (menu-lobby
@@ -164,20 +255,53 @@ namespace EvilAliensWeb.Compat.Net
         // slot -- the host allocates every slot, so the oracle slot IS the wire slot on both
         // sides and no host-relative translation exists any more. The client sends SlotNone
         // (it has nothing to grant); the host's own primary is always slot 0.
+        //
+        // peerId (v6, card 0b8a300b) is the sender's own identity -- an FNV-1a 64 of a random
+        // token webrtc.js mints once and keeps in localStorage. It exists ONLY so a host can
+        // refuse a peer it kicked+blocked (RejectBanned) for the rest of its level; nothing
+        // else reads it, and it never reaches the signaling server -- only a peer we are
+        // already connected to P2P. It is SELF-REPORTED, so it is a speed bump against casual
+        // griefing, not authentication: clearing site data mints a new one. Do not build
+        // anything that needs to trust it on top of this.
+        //
+        // blockedSlots (v8, card c0229c57) is the CLIENT telling the host which slots it cannot
+        // seat its primary ship in, so the host can grant one that is free on BOTH rosters
+        // instead of guessing from its own. Without it the host's grant was a guess, and a guess
+        // that landed on a seat the joiner already held desynced the pairing silently and
+        // permanently. Host -> client the byte is always 0: the host allocates, so it has no
+        // constraint to report. A bit mask (slots 0..3) rather than "the slot I refused" so the
+        // negotiation resolves in ONE round and prevents the bad grant instead of recovering
+        // from it.
         public const byte HelloFlagDebugActive = 1 << 0;
-        public const int HelloBytes = 13;
+        public const int HelloBytes = 22;
 
-        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
+        // Bit `slot` of a slot mask. Slots are 0..MaxSlots-1, so the mask fits a nibble today and
+        // a byte for any plausible MaxSlots. Named for the mask, not for either side's meaning of
+        // it: the same predicate reads the peer's BLOCKED slots and our own OCCUPIED ones.
+        public static byte SlotBit(int slot)
         {
-            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot);
+            return (byte)(1 << slot);
         }
 
-        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
+        // Bounded by MaxSlots, not a literal, for the reason its comment gives: the mask builders
+        // iterate Oracle.MaxPlayers, so a raised roster would set bits this predicate then read as
+        // clear -- and the host would hand the joiner an occupied seat, silently.
+        public static bool SlotInMask(byte mask, int slot)
         {
-            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot);
+            return slot >= 0 && slot < MaxSlots && (mask & SlotBit(slot)) != 0;
         }
 
-        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
+        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)
+        {
+            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot, peerId, blockedSlots);
+        }
+
+        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)
+        {
+            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot, peerId, blockedSlots);
+        }
+
+        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)
         {
             byte[] b = new byte[HelloBytes];
             b[0] = type;
@@ -187,16 +311,21 @@ namespace EvilAliensWeb.Compat.Net
             WriteU32(b, 7, (uint)(buildHash >> 32));
             b[11] = flags;
             b[12] = primarySlot;
+            WriteU32(b, 13, (uint)peerId);
+            WriteU32(b, 17, (uint)(peerId >> 32));
+            b[21] = blockedSlots;
             return b;
         }
 
-        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot)
+        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot, out ulong peerId, out byte blockedSlots)
         {
             version = 0;
             isHost = false;
             buildHash = 0;
             flags = 0;
             primarySlot = SlotNone;
+            peerId = 0;
+            blockedSlots = 0;
             if (b.Length < HelloBytes)
             {
                 return false;
@@ -206,6 +335,8 @@ namespace EvilAliensWeb.Compat.Net
             buildHash = ReadU32(b, 3) | ((ulong)ReadU32(b, 7) << 32);
             flags = b[11];
             primarySlot = b[12];
+            peerId = ReadU32(b, 13) | ((ulong)ReadU32(b, 17) << 32);
+            blockedSlots = b[21];
             return true;
         }
 
@@ -219,6 +350,10 @@ namespace EvilAliensWeb.Compat.Net
         // listing and the pairing. Must be refused, never left hanging: a joiner with no granted
         // slot would keep slot 0, which is the host's own player, and cross-credit everything.
         public const byte RejectFull = 4;
+        // Card 0b8a300b: this peer was kicked+blocked by the host earlier in its current level.
+        // Refused at the hello, which is the ONE choke point both rejoin routes pass through
+        // (the public game browser and a typed room code).
+        public const byte RejectBanned = 5;
 
         public static byte[] EncodeReject(byte reason)
         {
@@ -286,20 +421,41 @@ namespace EvilAliensWeb.Compat.Net
             return b.Length >= extraOff + extraLen;
         }
 
-        // EvDeath v2: [netId:2][killerSlot:1 (KillerNone = despawn/off-screen)][posX:4][posY:4]
-        // [points:2] -- killer/pos/points let the receiver pay death FX + generous score even
-        // when its local copy is already gone.
+        // EvDeath v7: [netId:2][killerSlot:1 (KillerNone = despawn/off-screen)][posX:4][posY:4]
+        // [award:f32 x MaxSlots] -- killer/pos let the receiver pay death FX even when its local
+        // copy is already gone; the award array is what it credits.
+        //
+        // v7 replaced a single [points:2] BASE point value (card b0ab09ec). Two reasons it had
+        // to widen, not just change meaning: a combo-modified award overflows a ushort (a 10000
+        // -point boss at a routine 40x combo is 30000, and comboModify has no ceiling), and a
+        // boss pays EVERY seated slot with that slot's own multiplier, so one number cannot
+        // describe the payout. Same fixed f32-per-slot shape as EvScoreSync, for the same
+        // reason -- most kills leave three of the four at zero, and 12 bytes per death is not
+        // worth a variable-length mask.
         public const byte KillerNone = 0xFF;
 
-        public static byte[] EncodeDeathEvent(ushort eventSeq, ushort netId, byte killerSlot, Vector2 pos, ushort points)
+        public const int DeathEventBytes = 4 + 11 + 4 * MaxSlots;
+
+        public static byte[] EncodeDeathEvent(ushort eventSeq, ushort netId, byte killerSlot, Vector2 pos, float[] awards)
         {
-            byte[] b = EventHeader(EvDeath, eventSeq, 13);
+            byte[] b = EventHeader(EvDeath, eventSeq, 11 + 4 * MaxSlots);
             WriteU16(b, 4, netId);
             b[6] = killerSlot;
             WriteF32(b, 7, pos.X);
             WriteF32(b, 11, pos.Y);
-            WriteU16(b, 15, points);
+            for (int i = 0; i < MaxSlots; i++)
+            {
+                WriteF32(b, 15 + 4 * i, (awards != null && i < awards.Length) ? awards[i] : 0f);
+            }
             return b;
+        }
+
+        public static void ReadDeathAwards(byte[] b, float[] into)
+        {
+            for (int i = 0; i < MaxSlots; i++)
+            {
+                into[i] = ReadF32(b, 15 + 4 * i);
+            }
         }
 
         // EvClaim (client -> host, generous at-least-once): [netId:2][killerSlot:1] -- "this

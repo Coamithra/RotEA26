@@ -182,6 +182,401 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: dump the AI telemetry (card f4d1721f) — wall contacts (counted even under
+        // ?invuln), the heading-reversal jitter rate, fire idleness, level progress and the run
+        // verdict. Only meaningful on a ?aibench boot, e.g.
+        //   ?level=Level3&wallsonly&aiplayer&invuln&aibench&aiff=8
+        // eaAiBench.reset() rearms the counters mid-run to score one section at a time.
+        window.eaAiBench = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBench')); }
+            catch (e) { console.warn('[debug] eaAiBench failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaAiBench.reset = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchReset')); }
+            catch (e) { console.warn('[debug] eaAiBench.reset failed (game not booted yet?): ' + e.message); }
+        };
+        // eaAiBench.row() — the same counters as eaAiBench() but as one machine-readable
+        // key=value line. What eaAiBench.matrix() records per run; handy on its own for a
+        // manual soak you want to paste somewhere.
+        window.eaAiBench.row = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow')); }
+            catch (e) { console.warn('[debug] eaAiBench.row failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaAiBench.world = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchWorld')); }
+            catch (e) { console.warn('[debug] eaAiBench.world failed: ' + e.message); }
+        };
+        // eaAiBench.soak(simSeconds) — run the AI headless: tick the real game loop at a fixed
+        // 60Hz dt with NO Draw, in bounded chunks, until simSeconds elapse or the level ends.
+        // This is the only reliable way to soak from automation — a background tab throttles rAF
+        // (and MessageChannel) to ~1Hz, so a rendered run measures almost nothing. Resolves with
+        // the final report. Chunked with a yield between so the page stays responsive.
+        window.eaAiBench.soak = async (simSeconds, chunk) => {
+            const total = simSeconds || 120, step = chunk || 10;
+            let done = 0, verdict = 'running';
+            while (done < total && verdict === 'running') {
+                let r;
+                try { r = DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRun', Math.min(step, total - done)); }
+                catch (e) { console.warn('[debug] eaAiBench.soak failed: ' + e.message); return; }
+                const parts = r.split(' ');
+                const ran = parseFloat(parts[0]);
+                verdict = parts.slice(1).join(' ');
+                if (!(ran > 0)) { console.warn('[aibench] soak stopped: ' + verdict); break; }
+                done += ran;
+                // Yield via MessageChannel, NOT setTimeout: Chrome applies "intensive throttling"
+                // to timers in a backgrounded tab after ~5 minutes, dropping them to ~1/minute --
+                // which silently stalls a long soak and reads as "the AI stopped progressing".
+                // A message-port callback is not a timer and is not throttled that way.
+                await new Promise(r2 => { const c = new MessageChannel(); c.port1.onmessage = () => r2(); c.port2.postMessage(0); });
+            }
+            console.log('[aibench] soak ran ' + done.toFixed(1) + 's sim -> ' + verdict);
+            window.eaAiBench();
+        };
+
+        // eaAiBench.matrix(...) — the AI completion sweep (card 9391f95a). The manual recipe is
+        // one boot per level: type the URL, wait for WASM, eaAiBench.soak(n), read one line.
+        // Twenty-seven of those by hand is where the honesty goes, so this drives exactly that
+        // recipe and nothing more.
+        //
+        // ONE FRESH PAGE LOAD PER RUN, with the plan carried in sessionStorage and resumed at
+        // boot. NOT an in-process relaunch: a level LOCKS the difficulty, seeds score.Lives and
+        // consumes the shared RNG, so runs sharing a page would measure each other's leftovers —
+        // and a single wedged run would take the whole sweep down instead of one row.
+        //
+        // The third verdict lives here, not in C#: AiBench cannot tell "the cap was reached"
+        // from "still going", and on the eight challenge levels that run with score.Lives = -1
+        // (GameScene.Initialize; only InsaneBossI overrides it) a GAME OVER can never arrive at
+        // all — "never finished" IS how those fail, so TIMEOUT has to be a first-class outcome.
+        // For the same reason an INFRASTRUCTURE failure must never be able to wear the TIMEOUT
+        // label: "the bot could not finish" is the whole claim the sweep exists to make, so a
+        // dead runtime or a level that never booted reports ERROR / NO LEVEL instead.
+        //
+        //   eaAiBench.matrix()                          — 9 challenge levels x 3 runs, Very_Hard
+        //   eaAiBench.matrix(['OwnLevel'], 600, 1)      — one level, 600 sim-seconds, one run
+        //   eaAiBench.matrix.results()  .status()  .stop()
+        //
+        // Fire and forget — never await it. Each run outlives any single devtools/CDP eval, and
+        // the sweep survives the navigations that an awaited promise could not.
+        //
+        // KEEP THE TAB FOREGROUNDED. The soak itself is rAF-independent (that is its whole
+        // point), but the BOOT of each run is not: Game1.WarmThenLaunch decodes one texture per
+        // rAF tick, and a backgrounded tab throttles rAF — so a hidden sweep times out waiting
+        // for the level and every row comes back NO LEVEL.
+        (() => {
+            // Namespaced like the file's other web-storage keys (eaweb_save:, eaweb_loadprofile):
+            // the live site shares an origin with the other games on coamithra.github.io.
+            const KEY = 'eaweb_aimatrix';
+            // Bumped when the plan's SHAPE changes. load() drops anything that does not match, so
+            // a plan left by another version of this code can never be half-read by this one.
+            const PLAN_VERSION = 1;
+            // WebcamAliens is excluded by design: it is camera-driven and has no
+            // ControlDevice.AI ship path at all.
+            const LEVELS = ['Tutorial', 'Braineroids', 'SpaceDodge', 'OwnLevel', 'ClassicAliens',
+                            'InsaneBossI', 'TeamChallenge', 'CrazyGame', 'Paratrooper'];
+            // Set by .stop(), and checked by the in-flight run before it saves or navigates: the
+            // running runOne holds `plan` in a closure, so clearing storage alone would let it
+            // save its copy back and resurrect the sweep it was told to end.
+            let stopped = false;
+            const load = () => {
+                try {
+                    const p = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+                    return (p && p.v === PLAN_VERSION && Array.isArray(p.queue)) ? p : null;
+                } catch (e) { return null; }
+            };
+            // Reports rather than swallowing: if this silently fails mid-sweep, plan.at never
+            // advances, the next page loads the same plan and re-runs the same level — an
+            // invisible infinite navigation loop. Same shape as eaSave.set / eaLoadProfile.save.
+            const save = (p) => {
+                try { sessionStorage.setItem(KEY, JSON.stringify(p)); return true; }
+                catch (e) {
+                    console.warn('[aibench] matrix: could not save the plan (storage full or disabled?) — '
+                        + 'stopping rather than looping on the same run: ' + e.message);
+                    stopped = true;
+                    return false;
+                }
+            };
+            const yieldTick = () => new Promise(r => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+
+            const urlFor = (plan, i) => {
+                const level = plan.queue[i];
+                // ?aiteam is what makes TeamChallenge measurable at all — its second slot is
+                // otherwise PadOne, and a seated-but-disconnected pad force-pauses every tick.
+                return location.pathname + '?level=' + level + '&aiplayer&aibench&nofps'
+                    + '&difficulty=' + plan.difficulty + (level === 'TeamChallenge' ? '&aiteam' : '');
+            };
+
+            const parseRow = (s) => {
+                const o = {};
+                String(s || '').split(' ').forEach(kv => {
+                    const i = kv.indexOf('=');
+                    if (i > 0) { o[kv.slice(0, i)] = kv.slice(i + 1); }
+                });
+                return o;
+            };
+
+            const table = (plan) => {
+                const rows = plan.results || [];
+                if (!rows.length) { return '[aibench] matrix: no runs recorded yet'; }
+                const head = '| level | run | verdict | sim s | deaths | prog | contacts | revs/s | coast% | idle% |';
+                const sep  = '|---|---|---|---|---|---|---|---|---|---|';
+                // Row() sends the verdict space-free so it survives the key=value split.
+                const body = rows.map(r => '| ' + [r.level, r.run, String(r.verdict).replace(/_/g, ' '), r.sim, r.deaths,
+                    r.prog + '/' + r.progTotal, r.contacts, r.revs, r.coast, r.idle].join(' | ') + ' |');
+                // The difficulty the runs OBSERVED, not the one that was asked for. ?difficulty=
+                // falls through silently on a typo, so a whole sweep can run at the saved tier
+                // while the header claims Very_Hard — which would then be copied into a doc.
+                const seen = rows.map(r => r.difficulty).filter(Boolean);
+                const actual = seen.filter((d, i) => seen.indexOf(d) === i);
+                const asked = plan.difficulty;
+                const diffNote = (actual.length && (actual.length > 1 || actual[0] !== asked))
+                    ? ' MEASURED AT ' + actual.join('+') + ' (asked for ' + asked + ')' : '';
+                return ['[aibench] completion matrix — difficulty=' + asked + diffNote
+                    + ' cap=' + plan.cap + 's runs=' + plan.runs,
+                    head, sep].concat(body).join('\n');
+            };
+
+            // Wait for the .NET runtime AND for the level to actually be up: ?level= launches
+            // through Game1.WarmThenLaunch, which decodes the level's textures one per tick, so
+            // there are seconds of live ticks during which no GameScene exists yet.
+            const waitForLevel = async (level, timeoutMs) => {
+                const deadline = performance.now() + timeoutMs;
+                while (performance.now() < deadline) {
+                    try {
+                        const row = parseRow(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow'));
+                        if (row.level === level) { return 'ok'; }
+                        if (row.off) { return 'no-aibench'; }
+                    } catch (e) { /* runtime not up yet */ }
+                    await new Promise(r => setTimeout(r, 250));
+                }
+                return 'timeout';
+            };
+
+            // Every column the table prints, so a row built on a failure path renders as '-'
+            // rather than the word "undefined" in five cells.
+            const blankRow = (verdict) => ({ verdict: verdict, sim: '0', deaths: '-', prog: '0',
+                progTotal: '0', contacts: '-', shots: '-', revs: '-', turn: '-', coast: '-', idle: '-' });
+
+            const runOne = async (plan) => {
+                const i = plan.at, level = plan.queue[i];
+                const boot = await waitForLevel(level, 90000);
+                let row;
+                if (boot !== 'ok') {
+                    // NOT a TIMEOUT: nothing was measured. Name the cause, because "the level
+                    // never came up" and "the bot could not finish it" are opposite conclusions.
+                    row = blankRow(boot === 'no-aibench' ? 'NO AIBENCH' : 'NO BOOT');
+                    console.warn('[aibench] matrix: ' + level + ' — ' + (boot === 'no-aibench'
+                        ? '?aibench is off, nothing to measure'
+                        : 'the level never came up within 90s. Is the tab backgrounded? '
+                          + 'The per-run boot decodes one texture per rAF tick and rAF throttles when hidden.'));
+                } else {
+                    // Rearm now that the level is actually up. AiBench.Update runs on EVERY
+                    // tick, including the ~20s of real rAF frames spent booting WASM and warming
+                    // the level's textures -- without this the row's clock overshoots the cap by
+                    // the boot time and its coast%/idle% are diluted by ticks with no level.
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchReset');
+                    let done = 0, verdict = 'running', failure = null;
+                    while (done < plan.cap && verdict === 'running') {
+                        let r;
+                        try { r = DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRun', Math.min(10, plan.cap - done)); }
+                        catch (e) { failure = 'ERROR'; console.warn('[aibench] matrix: ' + level + ' soak threw: ' + e.message); break; }
+                        const parts = r.split(' ');
+                        const ran = parseFloat(parts[0]);
+                        verdict = parts.slice(1).join(' ');
+                        // RunHeadless refuses (0 OFF / 0 NOGAME) or made no progress. The soak
+                        // ended early for a reason that is NOT the AI running out of time.
+                        if (!(ran > 0)) { failure = 'STALLED'; console.warn('[aibench] matrix: ' + level + ' soak stopped early: ' + verdict); break; }
+                        done += ran;
+                        await yieldTick();
+                    }
+                    if (failure) {
+                        row = blankRow(failure);
+                    } else {
+                        row = parseRow(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow'));
+                        // The cap ran out with the level still going. On a score.Lives = -1 level
+                        // that is the ONLY way to fail, so it must read as a distinct outcome and
+                        // never as a blank or a pass. Reached only when the soak ran clean —
+                        // an infrastructure failure above must not borrow this label.
+                        if (row.verdict === 'running') { row.verdict = 'TIMEOUT'; }
+                        if (row.noship) { row = Object.assign(blankRow('NO SHIP'), { sim: row.sim, prog: row.prog, progTotal: row.progTotal, difficulty: row.difficulty }); }
+                    }
+                }
+                row.level = level;
+                row.run = plan.runOf[i];
+                (plan.results = plan.results || []).push(row);
+                plan.at++;
+                console.log('[aibench] matrix ' + plan.at + '/' + plan.queue.length + ' — '
+                    + level + ' run ' + row.run + ': ' + row.verdict
+                    + ' at ' + row.sim + 's sim, deaths=' + row.deaths + ' prog=' + row.prog + '/' + row.progTotal);
+                // .stop() during this run, or a storage failure: do not persist and do not
+                // navigate, or the sweep restarts itself on the next page.
+                if (stopped || !save(plan)) { console.log(table(plan)); return; }
+                if (plan.at < plan.queue.length) { location.replace(urlFor(plan, plan.at)); return; }
+                plan.done = true;
+                save(plan);
+                console.log(table(plan));
+            };
+
+            // A run must never take the SWEEP down -- one fresh page per run exists precisely so
+            // a wedged run costs one row. Record the failure, advance, and carry on.
+            const runOneGuarded = (plan) => runOne(plan).catch(e => {
+                console.warn('[aibench] matrix: ' + plan.queue[plan.at] + ' run failed: ' + e.message);
+                (plan.results = plan.results || []).push(Object.assign(blankRow('ERROR'),
+                    { level: plan.queue[plan.at], run: plan.runOf[plan.at] }));
+                plan.at++;
+                if (stopped || !save(plan)) { return; }
+                if (plan.at < plan.queue.length) { location.replace(urlFor(plan, plan.at)); return; }
+                plan.done = true;
+                save(plan);
+                console.log(table(plan));
+            });
+
+            window.eaAiBench.matrix = (levels, simSeconds, runs, difficulty) => {
+                // A bare string is the easy mistake (the doc line shows an array); without this
+                // it passes the truthiness test, survives .slice(), and throws in forEach.
+                const asked = (typeof levels === 'string') ? [levels] : levels;
+                const lv = (asked && asked.length) ? Array.prototype.slice.call(asked) : LEVELS.slice();
+                const unknown = lv.filter(l => LEVELS.indexOf(l) < 0);
+                // A typo costs 90s of dead waiting per run and yields rows that look like
+                // failures, so refuse up front the way DebugFlags does for a bad ?level=.
+                if (unknown.length) {
+                    console.warn('[aibench] matrix: unknown level(s) ' + unknown.join(', ')
+                        + '. Known: ' + LEVELS.join(', '));
+                    return;
+                }
+                const n = Math.max(1, Number(runs) || 3);
+                const plan = { v: PLAN_VERSION, difficulty: difficulty || 'Very_Hard',
+                               cap: Number(simSeconds) || 1800,
+                               runs: n, queue: [], runOf: [], at: 0, results: [], done: false };
+                // Pass by pass, not level by level: a full matrix exists after the first pass, so
+                // an interrupted sweep still answers the card for every level.
+                for (let r = 1; r <= n; r++) { lv.forEach(l => { plan.queue.push(l); plan.runOf.push(r); }); }
+                // Any run still executing on THIS page would otherwise save its own (now stale)
+                // plan over the one just written, and navigate to its own next run.
+                stopped = true;
+                if (!save(plan)) { return; }
+                stopped = false;
+                console.log('[aibench] matrix: ' + plan.queue.length + ' runs queued ('
+                    + lv.length + ' levels x ' + n + '), cap ' + plan.cap + 's sim, '
+                    + plan.difficulty + '. The page will reload once per run — keep the tab foregrounded.');
+                location.replace(urlFor(plan, 0));
+            };
+            window.eaAiBench.matrix.results = () => { const p = load(); console.log(p ? table(p) : '[aibench] matrix: no sweep in this tab'); };
+            window.eaAiBench.matrix.status = () => {
+                const p = load();
+                console.log(p ? ('[aibench] matrix ' + p.at + '/' + p.queue.length + (p.done ? ' (done)' : ' (running)'))
+                              : '[aibench] matrix: no sweep in this tab');
+            };
+            window.eaAiBench.matrix.stop = () => {
+                stopped = true;
+                try { sessionStorage.removeItem(KEY); } catch (e) { }
+                console.log('[aibench] matrix: stopped — the run in flight finishes but records nothing '
+                    + 'and does not advance. This page keeps playing.');
+            };
+
+            // Resume on boot. This runs inside the page's main <script>, so an uncaught throw
+            // here would abort every definition BELOW it -- including eaQuit, which is SHIPPED
+            // behaviour (the main menu's Exit -> Meridian handoff). Hence the try around the
+            // whole thing, not just the async rejection.
+            try {
+                const plan = load();
+                if (plan && !plan.done && plan.at < plan.queue.length) { runOneGuarded(plan); }
+            } catch (e) {
+                console.warn('[aibench] matrix: could not resume a stored plan: ' + e.message);
+            }
+        })();
+
+        // Debug: print each slot's score + combo (and any provisional credit the host has not
+        // settled yet). The readable way to compare two co-op peers' tallies — card b0ab09ec.
+        window.eaScore = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugScoreDump')); }
+            catch (e) { console.warn('[debug] eaScore failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: co-op score reconciliation self-test (card b0ab09ec). Runs the real
+        // NetScoreLedger policy on a virtual clock against a synthetic two-peer kill stream —
+        // and the OLD max() adoption over the same stream, so the one-way drift it fixes is
+        // demonstrated before the fix is asserted. Pure computation: no session, no second
+        // tab, no scene; runnable straight from the main menu.
+        //   eaNetScore.test()                    — defaults (400 kills, ±6 combo skew, 80ms rtt)
+        //   eaNetScore.test(2000, 12, 150, 7)    — kills, comboSkew, rttMs, seed
+        window.eaNetScore = {
+            test: (kills, comboSkew, rttMs, seed) => {
+                try {
+                    console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScoreTest',
+                        kills | 0, comboSkew | 0, rttMs | 0, seed | 0));
+                }
+                catch (e) { console.warn('[debug] eaNetScore.test failed (game not booted yet?): ' + e.message); }
+            }
+        };
+
+        // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
+        // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
+        // combo streams — running the OLD ungated behaviour over the identical stream first, so
+        // the stray powerup levels and the unilateral 12s slow motion it used to inflict on a
+        // slot this peer does not own are demonstrated before the gate is asserted. No session
+        // and no second tab needed; run it from the main menu or inside a level.
+        window.eaNetCombo = {
+            test: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetComboTest')); }
+                catch (e) { console.warn('[debug] eaNetCombo.test failed (game not booted yet?): ' + e.message); }
+            }
+        };
+
+        // Debug: run the online co-op kick/block rule suite (card 0b8a300b) — the block
+        // predicate the hello gate uses plus the v6 handshake codec. Prints PASS/FAIL.
+        // Best run from the main menu: over a LIVE session it skips the teardown-persistence
+        // leg rather than wiping a real match's state, and says so in the report.
+        window.eaKickTest = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest')); }
+            catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: world-snapshot unknown-id attribution (card 48ab9b2f). A snapshot entry with no
+        // puppet takes one of three branches — the self-heal REBUILT it (the stream lane
+        // outrunning the reliable EvSpawn: ordinary), it was LEFT DEAD inside the removal window
+        // (ordinary), or the rebuild was REFUSED (a fault that re-counts every turn). They used
+        // to share one snapUnk counter, so a JIP reading could not be judged; this proves each
+        // branch reports its own kind, and pins the derived snapTurn arithmetic. Prints
+        // PASS/FAIL. Run from the MAIN MENU — it skips itself over a live session or level.
+        window.eaNetSnap = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetSnapTest')); }
+            catch (e) { console.warn('[debug] eaNetSnap failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the online co-op primary-slot negotiation (card c0229c57) — what the client
+        // does with a grant (DecideSlotAdopt), what the host grants once it can see the
+        // joiner's roster (FirstMutuallyFreeSlot + its convergence), the v8 handshake codec,
+        // and a legacy control proving the old policy breaks on the same input. Prints
+        // PASS/FAIL. Leave-no-trace (a scratch Oracle), so it is safe at any point in play.
+        window.eaSlotTest = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugSlotTest')); }
+            catch (e) { console.warn('[debug] eaSlotTest failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
+        // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
+        // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs
+        // invisibly on every shipping background, so this reads the decisions as data instead
+        // of trusting a screenshot. Run it from inside a level for part 3 to have anything to
+        // census.
+        window.eaBgCull = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull')); }
+            catch (e) { console.warn('[debug] eaBgCull failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: probe the REAL texture load path for one asset (card 35834236).
+        //   eaTexProbe('GFX/Base/756')  ->  .dds, 612x612 actual / 512x512 logical, 1 level
+        // Reports which precompiled sibling the offline build shipped, which file the texture
+        // ACTUALLY came from (a silent .dds -> .png fallback is otherwise undetectable), actual
+        // vs logical size, and the mip level count. On failure it prints the whole exception
+        // chain — KNI's TitleContainer.OpenStream rethrows every cause as a FileNotFoundException
+        // whose Message is only the path, so the tick guard's one-line report ("threw:
+        // Content/gfx/base/756.png") looks like a 404 no matter what really went wrong.
+        window.eaTexProbe = (assetName) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugTexProbe', assetName)); }
+            catch (e) { console.warn('[debug] eaTexProbe failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: asplode every locally-owned PlayerShip through the real death path, so the
         // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
         // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it
@@ -197,6 +592,24 @@
         window.eaFlySpiders = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugFlySpiders')); }
             catch (e) { console.warn('[debug] eaFlySpiders failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: dump the net roster (slot→device seat map, live ships, primary slots) plus the
+        // reset counter, right now. The [net] metrics line carries the same roster= on a 5s
+        // cadence, which can straddle a whole ~2.7s reset — call this on both peers either side
+        // of an eaKillShips() to compare exactly rather than by sampling.
+        window.eaNetRoster = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster')); }
+            catch (e) { console.warn('[debug] eaNetRoster failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: seat a couch player right now, the way a gamepad Start press does. Host-side it
+        // works BEFORE a peer pairs (unlike ?netlocal, which is PeerUp-gated), which is the only
+        // way to fill the host roster ahead of a joiner and so reach the RejectFull path. On a
+        // client it still needs a paired host, since a client seat must be asked for.
+        window.eaNetCouchJoin = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin')); }
+            catch (e) { console.warn('[debug] eaNetCouchJoin failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull

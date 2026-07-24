@@ -102,21 +102,34 @@ static string FindTexturesConfig(string startDir)
 // Upsert one asset's decision in textures.config, preserving comments, blank lines and order.
 // dxt -> "<asset>  dxt  <cols> <rows>"; raw -> "<asset>  raw"; png -> remove the line entirely
 // (PNG = the default, no precompiled sibling). Returns the written line ("" when removed).
+//
+// Trailing OPTIONS on the replaced line (currently just "mip") are carried over. This screen only
+// decides a FORMAT, so it must not silently drop a decision it knows nothing about: one Save on
+// gfx/base/756-v1 would otherwise unmip the Level-3 wall sheet, and the next build_textures.py run
+// would ship it with no diagnostic (Trello 110153c7).
 static string UpsertConfig(string path, string asset, string fmt, int cols, int rows)
 {
     string[] lines = File.ReadAllLines(path);
-    string newLine = fmt == "dxt" ? $"{asset}  dxt  {cols} {rows}" : (fmt == "raw" ? $"{asset}  raw" : "");
     var outLines = new List<string>(lines.Length + 1);
     bool replaced = false;
+    string newLine = fmt == "dxt" ? $"{asset}  dxt  {cols} {rows}" : (fmt == "raw" ? $"{asset}  raw" : "");
     foreach (string raw in lines)
     {
         string code = raw.Split('#', 2)[0].Trim();
-        string firstToken = code.Length == 0 ? "" : code.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)[0].ToLowerInvariant();
+        string[] tokens = code.Length == 0
+            ? System.Array.Empty<string>()
+            : code.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        string firstToken = tokens.Length == 0 ? "" : tokens[0].ToLowerInvariant();
         if (firstToken == asset)
         {
             replaced = true;
             if (newLine.Length > 0)
-                outLines.Add(newLine);   // replace with the new decision
+            {
+                string opts = string.Join(" ", tokens.Skip(2).Where(t => !int.TryParse(t, out _)));
+                if (fmt == "dxt" && opts.Length > 0)
+                    newLine += "  " + opts;   // also what we return, so the echo can't lie
+                outLines.Add(newLine);
+            }
             // else: drop the line (png)
             continue;
         }

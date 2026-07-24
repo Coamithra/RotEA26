@@ -139,20 +139,20 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				boxes.Items[0].Width = 240f * scale;
 				boxes.Items[0].Height = 186.66667f;
 				float height = boxes.Items[0].Height;
-				float num4 = 0f;
+				float laneCenterY = 0f;
 				if (base.Position.Y <= height)
 				{
-					num4 = height * 0.5f;
+					laneCenterY = height * 0.5f;
 				}
 				if (height <= base.Position.Y && base.Position.Y <= 1.5f * height)
 				{
-					num4 = height * 1.5f;
+					laneCenterY = height * 1.5f;
 				}
 				if (1.5f * height <= base.Position.Y)
 				{
-					num4 = height * 2.5f;
+					laneCenterY = height * 2.5f;
 				}
-				boxes.Items[0].CenterAround(new Vector2(base.Position.X, num4));
+				boxes.Items[0].CenterAround(new Vector2(base.Position.X, laneCenterY));
 				boxes.Items[1].Height = 1f;
 				boxes.Items[1].Width = 1f;
 				boxes.Items[1].CenterAround(new Vector2(1000f, 1000f));
@@ -168,13 +168,25 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				break;
 			case SpiderBossState.flyup:
 			case SpiderBossState.land:
+			{
 				boxes.Items[0].Width = 240f * scale;
 				boxes.Items[0].Height = 150f * scale;
 				boxes.Items[0].CenterAround(base.Position + new Vector2(20f * scale, -60f * scale));
-				boxes.Items[1].Height = 1f;
-				boxes.Items[1].Width = 1f;
-				boxes.Items[1].CenterAround(new Vector2(1000f, 1000f));
+				// GAMEPLAY CHANGE (card f4d1721f), deliberate and it affects human players too:
+				// the descent is hard-coded to X 600, which left a safe pocket between the boss and
+				// the right screen edge. Standing in it trivialises the landing for anyone who
+				// notices, and it is not intended behaviour for either side -- the AI found it
+				// immediately and parked there, which is what surfaced it. The second box extends
+				// the landing from the boss's right edge to the edge of the screen, so the only
+				// answer to a landing is to get out from under it and to the LEFT.
+				float bodyRight = boxes.Items[0].Right;
+				float bodyMidY = (boxes.Items[0].Top + boxes.Items[0].Bottom) * 0.5f;
+				float sweepWidth = MathHelper.Max(800f - bodyRight, 1f);
+				boxes.Items[1].Width = sweepWidth;
+				boxes.Items[1].Height = boxes.Items[0].Height;
+				boxes.Items[1].CenterAround(new Vector2(bodyRight + sweepWidth * 0.5f, bodyMidY));
 				break;
+			}
 			case SpiderBossState.standing:
 				boxes.Items[0].Width = 240f * scale;
 				boxes.Items[0].Height = 150f * scale;
@@ -182,13 +194,13 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				boxes.Items[0].Bottom += 100f * scale;
 				if (12f < animationProgress && animationProgress < 18f && currentAnimation == spiderStand)
 				{
-					float num = (animationProgress - 12f) / 6f;
-					float num2 = MathHelper.Lerp(20f, 105f, num);
-					float num3 = MathHelper.Lerp(0f, 30f, num);
-					Vector2 val = new Vector2(num2, num3) * scale;
+					float swipeT = (animationProgress - 12f) / 6f;
+					float swipeX = MathHelper.Lerp(20f, 105f, swipeT);
+					float swipeY = MathHelper.Lerp(0f, 30f, swipeT);
+					Vector2 swipeOffset = new Vector2(swipeX, swipeY) * scale;
 					boxes.Items[1].Height = 120f;
 					boxes.Items[1].Width = 300f;
-					boxes.Items[1].CenterAround(base.Position + new Vector2(20f * scale, 40f * scale) - val);
+					boxes.Items[1].CenterAround(base.Position + new Vector2(20f * scale, 40f * scale) - swipeOffset);
 				}
 				else
 				{
@@ -269,13 +281,13 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private float randomYPosition()
 	{
-		int num = RandomHelper.Random.Next(3);
+		int lane = RandomHelper.Random.Next(3);
 		if (RandomHelper.RandomNextFloat(0f, 1f) <= 0.5f * Settings.GetInstance().DifficultyModifier)
 		{
 			float y = oracle.GetRandomPlayerPosition().Y;
-			num = (int)(y / 183.33333f);
+			lane = (int)(y / 183.33333f);
 		}
-		return num switch
+		return lane switch
 		{
 			0 => 70f, 
 			1 => 235f, 
@@ -341,33 +353,33 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		if (spiderBossState == SpiderBossState.dead)
 		{
 			spriteEffects = (SpriteEffects)0;
-			Color val = default(Color);
-			(val) = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0f, 1f, stateTimer.TimeLeft * 3f / stateTimer.Duration)));
+			Color tint = default(Color);
+			(tint) = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0f, 1f, stateTimer.TimeLeft * 3f / stateTimer.Duration)));
 			for (int i = 0; i < debrisposition.Count; i++)
 			{
-				Texture2D val2 = (Texture2D)(i switch
+				Texture2D debrisTexture = (Texture2D)(i switch
 				{
 					0 => debris1, 
 					1 => debris3, 
 					_ => debris2, 
 				});
-				spriteBatch.Draw(val2, debrisposition[i], debrisrotation[i], scale, center: true, val);
+				spriteBatch.Draw(debrisTexture, debrisposition[i], debrisrotation[i], scale, center: true, tint);
 			}
 		}
 		else
 		{
 			SpriteEffects e = (SpriteEffects)0;
-			Vector2 val3 = spriteOffset;
+			Vector2 drawOffset = spriteOffset;
 			if (state == SpiderBossState.flyright)
 			{
 				e = (SpriteEffects)1;
-				val3.X -= 260f;
+				drawOffset.X -= 260f;
 			}
 			if (state == SpiderBossState.flyleft || state == SpiderBossState.flyright)
 			{
-				val3.Y -= 130f;
+				drawOffset.Y -= 130f;
 			}
-			currentAnimation.Draw((int)animationProgress, base.Position - val3, Color.White, scale, center: false, e);
+			currentAnimation.Draw((int)animationProgress, base.Position - drawOffset, Color.White, scale, center: false, e);
 		}
 		if (hittimer.Active)
 		{
@@ -386,17 +398,17 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Dunce);
 		}
-		float num = 30f * Settings.GetInstance().DifficultyFactorized(0.5f);
+		float animFps = 30f * Settings.GetInstance().DifficultyFactorized(0.5f);
 		if (currentAnimation == spiderStand)
 		{
-			num *= 0.7f;
+			animFps *= 0.7f;
 		}
-		float num2 = animationProgress;
-		bool flag = false;
-		animationProgress = MyMath.Mod(animationProgress + (float)gameTime.ElapsedGameTime.TotalSeconds * num, currentAnimation.Frames);
-		if (animationProgress < num2)
+		float prevProgress = animationProgress;
+		bool looped = false;
+		animationProgress = MyMath.Mod(animationProgress + (float)gameTime.ElapsedGameTime.TotalSeconds * animFps, currentAnimation.Frames);
+		if (animationProgress < prevProgress)
 		{
-			flag = true;
+			looped = true;
 		}
 		base.Update(gameTime);
 		// The warning arrow led by HelperWarningLeadMs; now fly the mothership in. Checked even while
@@ -410,11 +422,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			return;
 		}
-		float num3 = 0.78f * Settings.GetInstance().DifficultyModifier;
+		float moveSpeed = 0.78f * Settings.GetInstance().DifficultyModifier;
 		switch (state)
 		{
 		case SpiderBossState.flyleft:
-			base.Position = new Vector2(base.Position.X - num3 * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
+			base.Position = new Vector2(base.Position.X - moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
 			if (base.Position.X < 800f && !sfxplayed)
 			{
 				sound.PlayCue("wasp");
@@ -446,7 +458,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			break;
 		case SpiderBossState.flyright:
-			base.Position = new Vector2(base.Position.X + num3 * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
+			base.Position = new Vector2(base.Position.X + moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
 			if (base.Position.X > 0f && !sfxplayed)
 			{
 				sound.PlayCue("wasp");
@@ -468,7 +480,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			break;
 		case SpiderBossState.flyup:
-			base.Position = new Vector2(base.Position.X, base.Position.Y - num3 * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+			base.Position = new Vector2(base.Position.X, base.Position.Y - moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			if (base.Position.Y < -345f && stateTimer.Finished)
 			{
 				state = SpiderBossState.flyleft;
@@ -495,7 +507,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			break;
 		case SpiderBossState.land:
-			base.Position = new Vector2(base.Position.X, base.Position.Y + num3 * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+			base.Position = new Vector2(base.Position.X, base.Position.Y + moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			if (base.Position.Y > 400f)
 			{
 				state = SpiderBossState.standing;
@@ -532,13 +544,13 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			break;
 		case SpiderBossState.standing:
 			base.Position = new Vector2(base.Position.X + oracle.BackgroundSpeed.X * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
-			if (stateTimer.Finished && flag)
+			if (stateTimer.Finished && looped)
 			{
 				state = SpiderBossState.jump;
 				animationProgress = 0f;
 				currentAnimation = spiderJump;
 			}
-			else if (flag && currentAnimation == spiderLand)
+			else if (looped && currentAnimation == spiderLand)
 			{
 				currentAnimation = spiderStand;
 				animationProgress = 0f;
@@ -548,9 +560,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			base.Position = new Vector2(base.Position.X + oracle.BackgroundSpeed.X * (float)gameTime.ElapsedGameTime.TotalMilliseconds, base.Position.Y);
 			if (animationProgress > 30f)
 			{
-				base.Position = new Vector2(base.Position.X, base.Position.Y - num3 * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+				base.Position = new Vector2(base.Position.X, base.Position.Y - moveSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			}
-			if (flag)
+			if (looped)
 			{
 				state = SpiderBossState.flyup;
 				ResetTimer(3f);
@@ -586,8 +598,8 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private void rumble(Vector2 Position)
 	{
-		Vector2 val = default(Vector2);
-		Vector2 val2 = default(Vector2);
+		Vector2 nearPower = default(Vector2);
+		Vector2 farPower = default(Vector2);
 		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
 		// (card 4d904410), and Oracle.GetPlayerPosition/Controller THROW on an unseated slot.
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
@@ -597,11 +609,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				continue;
 			}
 			Vibrator vibrator = ServiceHelper.Get<IVibratorService>().Vibrator;
-			(val) = new Vector2(0.35f, 0.35f);
-			(val2) = new Vector2(0.15f, 0.15f);
-			Vector2 val3 = Position - oracle.GetPlayerPosition(i);
-			float num = (val3).Length();
-			Vector2 power = Vector2.Lerp(val, val2, MathHelper.Clamp(num / 450f, 0f, 1f));
+			(nearPower) = new Vector2(0.35f, 0.35f);
+			(farPower) = new Vector2(0.15f, 0.15f);
+			Vector2 toPlayer = Position - oracle.GetPlayerPosition(i);
+			float distance = (toPlayer).Length();
+			Vector2 power = Vector2.Lerp(nearPower, farPower, MathHelper.Clamp(distance / 450f, 0f, 1f));
 			PlayerIndex playerIndex;
 			switch (oracle.Controller(i))
 			{
@@ -774,6 +786,53 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	// The centre of the boss's standing hitbox -- where the helper aims its beam on Easy/Medium when
 	// the boss is a stationary (standing) target. Matches the SpiderBossState.standing collision box.
+	// The "Danger!" arrow window: the boss is lined up off-screen in its lane and held by
+	// waittimer for flyPauseMs before it sweeps. That pause exists to warn the player, so the AI
+	// should use it the way a player does -- leave the lane BEFORE the boss crosses it, rather
+	// than trying to out-accelerate a screen-wide sweep once it is already moving.
+	// True for the WHOLE horizontal sweep -- the "Danger!" hold off-screen AND the crossing
+	// itself. The lane is lethal for the entire time, not just while the arrow is up, so the AI
+	// treats it as off limits throughout rather than trying to leave once the boss is already
+	// on top of it.
+	internal bool AiSweepIncoming => state == SpiderBossState.flyleft || state == SpiderBossState.flyright;
+
+	// Centre of the horizontal band the sweep will actually occupy. The collision box snaps to
+	// one of three lanes rather than tracking Position.Y exactly (see the flyleft/flyright case
+	// in Update), so avoidance has to aim at the same snapped band or it dodges the wrong place.
+	// The VERTICAL half of the cycle. Two strips, both always in the same place:
+	//   land   -- the descent after a fly-by is hard-coded to X 600, falling from y -345 to 400.
+	//   jump   -- the climb that starts the next cycle, straight up from wherever it is standing
+	//             (which only drifts with the background scroll).
+	// Like the horizontal sweep, the boss is either off-screen or barely moving when these start,
+	// so nothing else in the AI sees them coming -- and the landing strip in particular is a
+	// column the ship can simply be standing in.
+	internal bool AiVerticalLaneActive => state == SpiderBossState.land
+		|| state == SpiderBossState.jump
+		|| state == SpiderBossState.flyup;
+
+	internal float AiVerticalLaneX => base.Position.X;
+
+	// True only for the DESCENT, which sweeps to the right screen edge -- so the escape is left,
+	// not merely "away". The climb has no sweep and either side works.
+	internal bool AiLandingSweep => state == SpiderBossState.land;
+
+	internal float AiSweepLaneCentreY
+	{
+		get
+		{
+			float height = 186.66667f;
+			if (base.Position.Y <= height)
+			{
+				return height * 0.5f;
+			}
+			if (base.Position.Y <= 1.5f * height)
+			{
+				return height * 1.5f;
+			}
+			return height * 2.5f;
+		}
+	}
+
 	public Vector2 GetAimPoint()
 	{
 		return base.Position + new Vector2(20f * scale, 40f * scale);

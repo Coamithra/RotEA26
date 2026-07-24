@@ -87,6 +87,17 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   artifact cleanup — a harness or screenshot cannot prove what the hash proves, so don't build one
   for this class of change. It does **not** judge whether a new name is a *good* name; a
   misleading-but-compiling rename hashes identically, so name quality stays a human review job.
+- **A refactor that DELETES a local is a different problem — the hash oracle may not cover it.**
+  The default build keeps every local for the debugger, so removing one changes the IL.
+  `--optimize` folds dead temporaries away and restores the byte-identical claim for some of that
+  class, but not all: collapsing `bool num = held; held = num | X;` to `held |= X` moves the
+  `ldloc` across the neighbouring property read, and collapsing repeated `x.Position - y.Position`
+  recomputations removes real `get_Position` calls (Roslyn never CSEs a property call). For those,
+  the question is **"is the difference confined to the methods I edited"** — answered by
+  `python tools/verify_decompiled_diff.py --ref main`, which decompiles both assemblies and diffs
+  the C#. Caveat: ILSpy NORMALISES, so an absent method means "same construct", not "identical IL".
+  Never read a raw IL diff of such a change directly — deleting a local renumbers every later slot
+  and the diff mispairs them, inventing changes in code you never touched. Details: tools/CLAUDE.md.
 - **Never verify motion with timed live screenshots.** A raw screenshot is only valid for STATIC
   appearance; anything time-varying needs a parked/scrubbed frame or a data sim. If you genuinely
   must see it live, build a break/pause (`DebugFlags` seam) that freezes at the moment of interest.
@@ -111,6 +122,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
   Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
+- **Host kick / block** (card 0b8a300b): `?netkickshot` (pair with `?level=<Name>`) parks the
+  host's remote-pause kick menu over a live level with no peer, for a screenshot;
+  `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
+  two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
+  the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new
@@ -131,6 +147,36 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `=fg` for the un-flattened foreground variant). **`=fg` is not a flatten A/B** -- for that use
   the pinned bench `?flyspidercount=<N>` with `?flyspiderflatten=per|0|swarm` (+ `?flyspiderbox=`,
   console `eaFlySpiders()`); card 9c92962e, details in web CLAUDE.md.
+- **AI bench** (card f4d1721f): `?aibench` turns on telemetry for the `ControlDevice.AI` ships —
+  wall contacts (counted even under `?invuln`), the heading-reversal jitter pair, `idle%`,
+  level progress and the run verdict. **Soak it HEADLESSLY with `eaAiBench.soak(<simSeconds>)`**
+  (ticks the real loop at a fixed 60Hz dt with no Draw) — a backgrounded tab throttles rAF *and*
+  MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
+  fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
+  `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aithreatlead= ?aibossbias=
+  ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with `?aiplayer`.
+  **Per-tier AI skill** (card c10e3e7f): the threat-field and aim-spread knobs resolve through
+  `PlayerShip.AiSkillByDifficulty[]`, keyed off `Settings.EffectiveDifficulty` (the LOCK-aware
+  tier -- attract demos lock Hard). `eaAiBench()` prints the resolved row; the `?ai*` overrides
+  still win, which is how the per-tier values were chosen. Very_Hard == the previous constants.
+  Details + the AI's own gotchas (its world model is `Oracle.GetBaddies`; a low jitter score
+  alone can mean the bot is wedged, not smooth): web CLAUDE.md.
+- **AI completion sweep** (card 9391f95a): **`eaAiBench.matrix()`** runs the whole "can the bot
+  finish it" matrix unattended — one FRESH page load per run (plan in `sessionStorage`, resumed
+  at boot), so no run inherits another's locked difficulty, lives or RNG. `.results()`
+  `.status()` `.stop()`; never `await` it (each run outlives a single devtools eval).
+  **`?aiteam`** seats TeamChallenge's second slot as `Generic` instead of `PadOne` — without it
+  that level cannot be BENCHED at all, because a seated-but-disconnected pad makes
+  `GameScene.Update` force-pause every tick. Pair it with `?aiplayer`: `PlayerShip` has no
+  `Generic` input case, so the flag alone leaves that ship inert (it is a bench seam, not a fix
+  for TeamChallenge being unplayable without a gamepad — that is its own card). **Eight of the
+  nine challenge levels run with `score.Lives = -1`, so `GAME OVER` is unreachable on them** —
+  failure shows up as the sweep's third verdict, `TIMEOUT`, never as a bad verdict. Keep the tab
+  FOREGROUNDED (each run's boot is rAF-paced). Matrix + per-level caveats: web CLAUDE.md.
+
+- **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
+  mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
+  A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.
 - Dozens more per-feature tuning/diagnostic flags exist — see web CLAUDE.md ("Debug flags &
   tuning conventions" + each feature's bullet).
 
@@ -191,13 +237,23 @@ The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
 - **Code:** `/opt/<PROJECT_NAME>/` (this project's server code goes in `/opt/rotea/`; NotZelda
   lives at `/opt/NotZelda/` on the same box — don't touch it)
 - **Ports already in use:** 8080 (NotZelda game server), 8081 (`notzelda-llama` llama-server),
-  80/443 (nginx), plus the fighting game's port — **check `ss -tlnp` for the live list before
-  claiming a port**; pick a free one for this project.
+  8091 (this project's `rotea` signaling server), 80/443 (nginx), plus the fighting game's
+  port — **check `ss -tlnp` for the live list before claiming a port**; pick a free one
+  for this project.
 - **Services:** manage via systemd — `systemctl restart <service>` / `journalctl -u <service> -f`.
-  Existing units: `notzelda`, `notzelda-llama`.
-- **nginx** serves static files / reverse-proxies; add a new server block or location for this
-  project rather than editing NotZelda's (or any other project's) config.
-- **Deploy:** `ssh` in, `cd /opt/<PROJECT_NAME> && git pull`, then restart the project's service.
+  Existing units: `notzelda`, `notzelda-llama`, `rotea` (this project's, port 8091).
+- **nginx** serves static files / reverse-proxies. Keep each project's config in its OWN
+  included file rather than editing another project's blocks in place: rotea ships
+  `server/signal/nginx-location.conf`, installed as `/etc/nginx/rotea-locations.conf` and
+  pulled into the shared `notzelda.haraldmaassen.com` 443 block by a one-line `include`
+  (deliberately NOT a new vhost — the game is served from that same host).
+- **Deploy:** `ssh` in, update `/opt/<PROJECT_NAME>`, then restart the project's service. **This
+  project's `/opt/rotea` is NOT a git checkout** — it is an scp'd copy of `server/signal/`, so
+  there is no `git pull` to run; follow `server/signal/README.md` → "Updating an existing
+  deployment" (stage to `server.new`, run `test_signal.py` there, swap, `systemctl restart rotea`).
+  **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual Pages
+  `workflow_dispatch`); a networked client feature needs both, or the live site talks to a server
+  that does not speak its protocol.
 - **Shared box etiquette:** it's a small CPU-only VPS (2 vCPU / 4GB RAM) also running an LLM
   server — keep resource usage modest and never stop/restart the `notzelda*` (or other
   projects') services from this project.

@@ -32,6 +32,13 @@ namespace EvilAliensWeb.Compat
     public class WebContentManager : ContentManager
     {
         private readonly Dictionary<string, object> _cache = new Dictionary<string, object>();
+        // Which file each cached texture actually came from (".dds"/".rtex"/".png"). A
+        // fallback is otherwise invisible after the fact — the .rtex and .png paths both
+        // yield SurfaceFormat.Color, so nothing about the finished Texture2D can tell them
+        // apart — and "did this asset silently degrade to the PNG path?" is precisely the
+        // question card 35834236 could not answer. One dictionary write per load, on a path
+        // that already runs a Stopwatch and a LoadProfiler call. Read via TexProbe.
+        private readonly Dictionary<string, string> _textureSources = new Dictionary<string, string>();
         private GraphicsDevice _graphicsDevice;
 
         public WebContentManager(IServiceProvider services, string rootDirectory)
@@ -131,7 +138,74 @@ namespace EvilAliensWeb.Compat
                 }
             }
             _cache.Clear();
+            _textureSources.Clear();
             base.Unload();
+        }
+
+        // Open a content file, restating any failure with its actual cause.
+        //
+        // KNI's TitleContainer.OpenStream ends in
+        //     catch (Exception inner) { throw new FileNotFoundException(name, inner); }
+        // so the Message of anything it throws is the bare PATH and nothing else — the real
+        // cause (an HTTP status, a decode error, an OOM) is only in InnerException. That
+        // exception escapes into TickDotNet, where index.html's guard prints e.message: a lone
+        // "Content/gfx/base/756.png", which reads like a 404 whatever actually went wrong.
+        // Card 35834236 was filed and investigated on exactly that misreading.
+        //
+        // The chain has to be flattened INTO the message: e.message is all the JS guard can
+        // see. EVERY Load* path goes through here — a bare OpenStream anywhere in this class
+        // reintroduces the trap for that asset kind.
+        private static Stream OpenOrThrow(string key, string extension, string siblingTried = null)
+        {
+            try
+            {
+                return TitleContainer.OpenStream(key + extension);
+            }
+            catch (Exception ex)
+            {
+                string sib = siblingTried == null ? "" : $" (sibling tried: {siblingTried})";
+                throw new FlattenedContentLoadException(
+                    $"{key}{extension} failed to load{sib} — {DescribeChain(ex)}", ex);
+            }
+        }
+
+        // A ContentLoadException whose Message ALREADY carries the flattened inner chain, so a
+        // reader can print it verbatim instead of walking the chain again and doubling every
+        // frame. Its own type is the signal — testing for the ContentLoadException base would
+        // also match one raised elsewhere, whose message is not flattened, and print only its
+        // outermost line: the exact information loss this class exists to prevent.
+        internal sealed class FlattenedContentLoadException : ContentLoadException
+        {
+            public FlattenedContentLoadException(string message, Exception inner)
+                : base(message, inner) { }
+        }
+
+        // Flatten an exception chain into one console-friendly line.
+        internal static string DescribeChain(Exception ex)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (sb.Length > 0)
+                    sb.Append(" <- ");
+                sb.Append(e.GetType().Name).Append(": ").Append(e.Message);
+            }
+            return sb.ToString();
+        }
+
+        // Which precompiled sibling (if any) the offline build shipped for this asset name.
+        // Takes the game's spelling ("GFX/Base/756") and resolves it the way Load<T> does.
+        internal string DescribeSibling(string assetName, out string resolvedKey)
+        {
+            resolvedKey = ResolvePath(assetName);
+            return PrecompiledTextures.Siblings.TryGetValue(resolvedKey, out string sib) ? sib : null;
+        }
+
+        // Which file the cached texture for this resolved key was actually built from, or null
+        // if this manager has never loaded it.
+        internal string TextureSource(string resolvedKey)
+        {
+            return _textureSources.TryGetValue(resolvedKey, out string src) ? src : null;
         }
 
         private Texture2D LoadTexture(string key)
@@ -152,12 +226,18 @@ namespace EvilAliensWeb.Compat
             // Stopwatch is sub-microsecond; harmless in release.
             var sw = System.Diagnostics.Stopwatch.StartNew();
             Texture2D tex = null;
-            if (PrecompiledTextures.Siblings.TryGetValue(key, out string sib))
+            PrecompiledTextures.Siblings.TryGetValue(key, out string sib);
+            if (sib != null)
                 tex = sib == ".dds" ? TryLoadDds(key) : TryLoadRaw(key);
             if (tex == null)
             {
-                using Stream s = TitleContainer.OpenStream(key + ".png");
+                using Stream s = OpenOrThrow(key, ".png", sib ?? "none");
                 tex = Texture2D.FromStream(GraphicsDevice, s);
+                _textureSources[key] = ".png";
+            }
+            else
+            {
+                _textureSources[key] = sib;
             }
             sw.Stop();
             tex.Name = key;
@@ -167,12 +247,19 @@ namespace EvilAliensWeb.Compat
 
         // Load a precompiled DXT/BCn texture from <key>.dds if one was shipped, else
         // return null so the caller falls back to the .png. Built offline by
-        // tools/textures/build_dxt.py (texconv, BC3_UNORM, no mips, straight alpha).
+        // tools/textures/build_textures.py (texconv, BC3_UNORM, straight alpha; mips only for
+        // assets whose config line carries the "mip" keyword — see the level loop below).
         // Parses only the legacy FourCC DDS header (DXT1/3/5 -> a Dxt SurfaceFormat) and
         // uploads the block bytes straight to the GPU via the compressed path. Any
         // problem (missing file, odd header, unsupported format) yields null + the PNG.
         private Texture2D TryLoadDds(string key)
         {
+            // Only reached when PrecompiledTextures.Siblings says a .dds WAS shipped for this
+            // key, so a read failure here is an anomaly, not the ordinary "PNG-only asset" case
+            // — say so. Swallowing it silently (as this did) downgrades the asset to the PNG
+            // path, i.e. unmipped and a StbImageSharp decode on the WASM main thread, leaving no
+            // trace of why; and if the PNG then fails too, the only surviving evidence is the
+            // path in KNI's message. That is the hole card 35834236 fell into.
             byte[] data;
             try
             {
@@ -181,9 +268,10 @@ namespace EvilAliensWeb.Compat
                 s.CopyTo(ms);
                 data = ms.ToArray();
             }
-            catch
+            catch (Exception ex)
             {
-                return null; // no .dds for this asset — normal; use the PNG
+                Console.WriteLine($"[dds] {key}: registered .dds sibling could not be read — {DescribeChain(ex)} — falling back to PNG");
+                return null;
             }
 
             try
@@ -201,8 +289,53 @@ namespace EvilAliensWeb.Compat
                     _ => throw new NotSupportedException($"DDS FourCC 0x{fourcc:X8} (need DXT1/3/5, no DX10 header)")
                 };
                 const int headerLen = 128; // legacy DDS_HEADER; we never emit the DX10 extension
-                var tex = new Texture2D(GraphicsDevice, width, height, false, fmt);
-                tex.SetData(0, null, data, headerLen, data.Length - headerLen);
+                // Mip chain (build_textures.py's "mip" config keyword). dwMipMapCount is 0 or 1
+                // on the unmipped siblings, which keeps the original single-level path exactly.
+                // KNI derives the GL min filter from LevelCount > 1, so uploading the levels is
+                // all trilinear needs — SamplerState.LinearClamp already maps Linear to
+                // LINEAR_MIPMAP_LINEAR once the texture has them. NPOT + mips needs WebGL 2,
+                // which BlazorGL uses.
+                int levels = Math.Max(1, BitConverter.ToInt32(data, 28));
+                if (DebugFlags.NoMips)
+                    levels = 1;
+                // A PARTIAL chain is worse than none: KNI allocates CalculateMipLevels(w,h) levels
+                // whenever mipMap is true, and GL only samples a mipmap-COMPLETE texture, so
+                // uploading fewer would render solid black rather than degrade. Demand the full
+                // chain or fall back to the PNG.
+                if (levels > 1)
+                {
+                    int full = 1;
+                    for (int m = Math.Max(width, height); m > 1; m /= 2)
+                        full++;
+                    if (levels != full)
+                        throw new InvalidDataException(
+                            $"mip chain has {levels} levels, need the full {full} for {width}x{height}");
+                }
+                int blockBytes = fmt == SurfaceFormat.Dxt1 ? 8 : 16;
+                var tex = new Texture2D(GraphicsDevice, width, height, levels > 1, fmt);
+                try
+                {
+                    int offset = headerLen;
+                    for (int level = 0; level < levels; level++)
+                    {
+                        // Level dims are floor-halved with a floor of 1 (TextureHelpers.GetSizeForLevel),
+                        // and each level's payload is exactly ceil(w/4)*ceil(h/4) blocks — the DDS
+                        // layout, which is also what Texture2D.SetData validates elementCount against.
+                        int lw = Math.Max(width >> level, 1);
+                        int lh = Math.Max(height >> level, 1);
+                        int bytes = ((lw + 3) / 4) * ((lh + 3) / 4) * blockBytes;
+                        if (offset + bytes > data.Length)
+                            throw new InvalidDataException(
+                                $"truncated mip chain: level {level} ({lw}x{lh}) needs {bytes} B at {offset}, file is {data.Length} B");
+                        tex.SetData(level, null, data, offset, bytes);
+                        offset += bytes;
+                    }
+                }
+                catch
+                {
+                    tex.Dispose();   // else a half-uploaded GPU texture leaks on the PNG fallback
+                    throw;
+                }
                 // build_textures.py pads dxt siblings up to a mult-of-4 and stamps the logical
                 // (pre-pad) size into reserved1[0..2] (offsets 32/36 = w/h, 40 = "LOGD" marker).
                 // Register it so every consumer uses the logical size, not the padded upload size.
@@ -218,7 +351,7 @@ namespace EvilAliensWeb.Compat
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[dds] {key}: {ex.Message} — falling back to PNG");
+                Console.WriteLine($"[dds] {key}: {DescribeChain(ex)} — falling back to PNG");
                 return null;
             }
         }
@@ -241,9 +374,11 @@ namespace EvilAliensWeb.Compat
                 s.CopyTo(ms);
                 data = ms.ToArray();
             }
-            catch
+            catch (Exception ex)
             {
-                return null; // no .rtex for this asset — normal; use the PNG
+                // Registered sibling; see the matching note in TryLoadDds.
+                Console.WriteLine($"[rtex] {key}: registered .rtex sibling could not be read — {DescribeChain(ex)} — falling back to PNG");
+                return null;
             }
 
             try
@@ -268,7 +403,7 @@ namespace EvilAliensWeb.Compat
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[rtex] {key}: {ex.Message} — falling back to PNG");
+                Console.WriteLine($"[rtex] {key}: {DescribeChain(ex)} — falling back to PNG");
                 return null;
             }
         }
@@ -276,10 +411,10 @@ namespace EvilAliensWeb.Compat
         private SpriteFont LoadFont(string key)
         {
             Texture2D texture;
-            using (Stream s = TitleContainer.OpenStream(key + ".fnt.png"))
+            using (Stream s = OpenOrThrow(key, ".fnt.png"))
                 texture = Texture2D.FromStream(GraphicsDevice, s);
 
-            using Stream meta = TitleContainer.OpenStream(key + ".fnt");
+            using Stream meta = OpenOrThrow(key, ".fnt");
             using var br = new BinaryReader(meta);
             int lineSpacing = br.ReadInt32();
             float spacing = br.ReadSingle();
@@ -312,7 +447,7 @@ namespace EvilAliensWeb.Compat
         private Effect LoadEffect(string key)
         {
             byte[] code;
-            using (Stream s = TitleContainer.OpenStream(key + ".mgfxo"))
+            using (Stream s = OpenOrThrow(key, ".mgfxo"))
             using (var ms = new MemoryStream())
             {
                 s.CopyTo(ms);
@@ -328,7 +463,7 @@ namespace EvilAliensWeb.Compat
         // is handled by the JS eaMusic layer; see MusicInterop.)
         private SoundEffect LoadSoundEffect(string key)
         {
-            using Stream s = TitleContainer.OpenStream(key + ".wav");
+            using Stream s = OpenOrThrow(key, ".wav");
             SoundEffect fx = SoundEffect.FromStream(s);
             fx.Name = key;
             return fx;
@@ -336,7 +471,7 @@ namespace EvilAliensWeb.Compat
 
         private Curve LoadCurve(string key)
         {
-            using Stream s = TitleContainer.OpenStream(key + ".curve");
+            using Stream s = OpenOrThrow(key, ".curve");
             using var br = new BinaryReader(s);
             var curve = new Curve
             {

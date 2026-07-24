@@ -197,6 +197,15 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private Vector2 _position = Vector2.Zero;
 
+	// See the Update() comment: measured movement per ms, the AI's only trustworthy velocity.
+	private Vector2 _prevPosition;
+
+	private Vector2 _observedVelocity;
+
+	private bool _hasPrevPosition;
+
+	internal Vector2 ObservedVelocity => _observedVelocity;
+
 	private float _minimumSpeed;
 
 	private float _maximumSpeed;
@@ -385,14 +394,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			collisionBox = new CollisionBox();
 		}
-		float num = texture.LogicalWidth();
-		num -= (float)((columns - 1) * separatingspace);
-		num /= (float)columns;
-		float num2 = texture.LogicalHeight();
-		num2 -= (float)((rows - 1) * separatingspace);
-		num2 /= (float)rows;
-		collisionBox.TopLeft = new Vector2((0f - num * DrawScale) / 2f, (0f - num2 * DrawScale) / 2f) * 0.6f;
-		collisionBox.BottomRight = new Vector2(num * DrawScale / 2f, num2 * DrawScale / 2f) * 0.6f;
+		float cellWidth = texture.LogicalWidth();
+		cellWidth -= (float)((columns - 1) * separatingspace);
+		cellWidth /= (float)columns;
+		float cellHeight = texture.LogicalHeight();
+		cellHeight -= (float)((rows - 1) * separatingspace);
+		cellHeight /= (float)rows;
+		collisionBox.TopLeft = new Vector2((0f - cellWidth * DrawScale) / 2f, (0f - cellHeight * DrawScale) / 2f) * 0.6f;
+		collisionBox.BottomRight = new Vector2(cellWidth * DrawScale / 2f, cellHeight * DrawScale / 2f) * 0.6f;
 		return collisionBox;
 	}
 
@@ -430,14 +439,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	protected void Move(float? direction, GameTime gameTime)
 	{
-		float num = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
+		float elapsedMs = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
 		float direction2 = _direction;
-		Vector2 val = MyMath.AngleToVector(direction2) * _speed;
-		Vector2 val2 = MyMath.AngleToVector(direction2) * -1f * MathHelper.Min(_deceleration * num, _speed);
-		Vector2 val3 = ((!direction.HasValue) ? Vector2.Zero : (MyMath.AngleToVector(direction.Value) * (_acceleration + _deceleration) * num));
-		Vector2 v = val + val2 + val3;
-		_direction = MyMath.VectorToAngle(v);
-		_speed = MathHelper.Clamp((v).Length(), _minimumSpeed, _maximumSpeed);
+		Vector2 velocity = MyMath.AngleToVector(direction2) * _speed;
+		Vector2 decelStep = MyMath.AngleToVector(direction2) * -1f * MathHelper.Min(_deceleration * elapsedMs, _speed);
+		Vector2 accelStep = ((!direction.HasValue) ? Vector2.Zero : (MyMath.AngleToVector(direction.Value) * (_acceleration + _deceleration) * elapsedMs));
+		Vector2 newVelocity = velocity + decelStep + accelStep;
+		_direction = MyMath.VectorToAngle(newVelocity);
+		_speed = MathHelper.Clamp((newVelocity).Length(), _minimumSpeed, _maximumSpeed);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -446,8 +455,23 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			timer.Update(gameTime);
 		}
-		Vector2 val = MyMath.AngleToVector(_direction) * _speed * Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
-		_position += val;
+		// Observed velocity (card f4d1721f): how far this thing ACTUALLY moved last tick, in
+		// px/ms. SpeedVector is derived from _speed/_direction and lies for every type that
+		// writes Position directly -- which includes SpiderBoss's screen-crossing fly states, the
+		// single most important thing for the AI to predict. Sampled at the TOP of Update so it
+		// covers a whole previous tick regardless of whether the mover ran before or after
+		// base.Update. (Same reasoning as the net layer's observed velocity, kept independent of
+		// it because the AI must work with no session up. A frozen net puppet never Updates, so
+		// this stays zero for one -- correct, since its owner drives it.)
+		float dtMs = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
+		if (_hasPrevPosition && dtMs > 0f)
+		{
+			_observedVelocity = (_position - _prevPosition) / dtMs;
+		}
+		_prevPosition = _position;
+		_hasPrevPosition = true;
+		Vector2 step = MyMath.AngleToVector(_direction) * _speed * dtMs;
+		_position += step;
 		float span = ActiveLastFrame - FirstFrame;
 		if (span <= 0f)
 		{
@@ -492,15 +516,15 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private void drawWithoutInterpolation()
 	{
-		bool flag = spriteBatch.colorizeEffect.Enabled || spriteBatch.lightenEffect.Enabled;
+		bool needsFade = spriteBatch.colorizeEffect.Enabled || spriteBatch.lightenEffect.Enabled;
 		Rectangle frameRectangle = getFrameRectangle((int)curframe);
-		if (flag)
+		if (needsFade)
 		{
 			spriteBatch.fadeEffect.Enable();
 			spriteBatch.fadeEffect.Value = (color).ToVector4();
 		}
 		spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, color, spriteEffects);
-		if (flag)
+		if (needsFade)
 		{
 			spriteBatch.fadeEffect.Disable();
 		}
@@ -508,43 +532,43 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private Rectangle getFrameRectangle(int framenr)
 	{
-		int num = framenr / columns;
-		int num2 = framenr % columns;
-		int num3 = texture.LogicalWidth() - (columns - 1) * separatingspace;
-		num3 /= columns;
-		int num4 = texture.LogicalHeight() - (rows - 1) * separatingspace;
-		num4 /= rows;
+		int frameRow = framenr / columns;
+		int frameCol = framenr % columns;
+		int cellWidth = texture.LogicalWidth() - (columns - 1) * separatingspace;
+		cellWidth /= columns;
+		int cellHeight = texture.LogicalHeight() - (rows - 1) * separatingspace;
+		cellHeight /= rows;
 		Rectangle result = default(Rectangle);
-		(result) = new Rectangle(num2 * (num3 + separatingspace), num * (num4 + separatingspace), num3, num4);
+		(result) = new Rectangle(frameCol * (cellWidth + separatingspace), frameRow * (cellHeight + separatingspace), cellWidth, cellHeight);
 		return result;
 	}
 
 	private void drawWithInterpolation()
 	{
-		int num = (int)curframe;
-		float num2 = curframe % 1f;
+		int currentFrame = (int)curframe;
+		float frameBlend = curframe % 1f;
 		if (!spriteBatch.colorizeEffect.Enabled)
 		{
 			_ = spriteBatch.lightenEffect.Enabled;
 		}
-		Rectangle frameRectangle = getFrameRectangle(num);
-		int nextFrame = num + 1;
+		Rectangle frameRectangle = getFrameRectangle(currentFrame);
+		int nextFrame = currentFrame + 1;
 		if (nextFrame >= ActiveLastFrame)
 		{
 			nextFrame = FirstFrame;
 		}
 		Rectangle frameRectangle2 = getFrameRectangle(nextFrame);
-		SpriteBlendMode val = blendMode;
-		switch ((int)val)
+		SpriteBlendMode mode = blendMode;
+		switch ((int)mode)
 		{
 		case 2:
 		{
-			Color val2 = default(Color);
-			(val2) = new Color(new Vector4(1f, 1f, 1f, 1f - num2));
-			Color val3 = default(Color);
-			(val3) = new Color(new Vector4(1f, 1f, 1f, num2));
-			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, val2, spriteEffects);
-			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, DrawScale, center: true, val3, spriteEffects);
+			Color currentTint = default(Color);
+			(currentTint) = new Color(new Vector4(1f, 1f, 1f, 1f - frameBlend));
+			Color nextTint = default(Color);
+			(nextTint) = new Color(new Vector4(1f, 1f, 1f, frameBlend));
+			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, currentTint, spriteEffects);
+			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, DrawScale, center: true, nextTint, spriteEffects);
 			break;
 		}
 		case 0:
@@ -555,7 +579,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			// delta must be normalised by the padded Width/Height here, NOT the logical size — the frame
 			// RECTS above are logical pixel-space (correct), but this ratio lives in padded UV space.
 			spriteBatch.interpolateEffect.Offset = new Vector2((float)((frameRectangle2).Left - (frameRectangle).Left), (float)((frameRectangle2).Top - (frameRectangle).Top)) / new Vector2((float)texture.Width, (float)texture.Height);
-			spriteBatch.interpolateEffect.Delta = num2;
+			spriteBatch.interpolateEffect.Delta = frameBlend;
 			spriteBatch.fadeEffect.Enable();
 			spriteBatch.fadeEffect.Value = (color).ToVector4();
 			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, color, spriteEffects);
@@ -569,7 +593,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 		if ((!awarded & (PointValue > 0f)) && other is IAlienKiller && ((IAlienKiller)other).Player() >= 0)
 		{
-			Score.AddScore(PointValue, combo, Position, ((IAlienKiller)other).Player());
+			int slot = ((IAlienKiller)other).Player();
+			// Online co-op (card b0ab09ec): report the combo-modified figure we just credited.
+			// Host -> it rides the death event; client -> it becomes a provisional credit the
+			// host's figure later replaces. No-op offline.
+			EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, slot, Score.AddScore(PointValue, combo, Position, slot));
 			awarded = true;
 		}
 	}
@@ -590,14 +618,17 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			{
 				continue;
 			}
+			// Each slot is credited with ITS OWN combo multiplier, so a boss pays four
+			// different figures -- which is why the wire carries a per-slot award array
+			// rather than one number (card b0ab09ec).
 			if (first)
 			{
-				Score.AddScore(PointValue, combo, Position, i);
+				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, Position, i));
 				first = false;
 			}
 			else
 			{
-				Score.AddScore(PointValue, combo, i);
+				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, i));
 			}
 		}
 		awarded = true;
@@ -674,6 +705,15 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	}
 
 	internal float NetPointValue => PointValue;
+
+	// Online co-op (card b0ab09ec): claim the award slot BEFORE running the real death path,
+	// so its AwardScore/AwardScoreToAll no-ops. Used on a client applying a host EvDeath --
+	// the FX must play, but the score has to be the host's figure off the wire, never this
+	// peer's own combo multiplier. Idempotent; irrelevant offline.
+	internal void NetSuppressAward()
+	{
+		awarded = true;
+	}
 
 	// Advance the sheet animation exactly like Update does (same wrap math), on real dt.
 	internal void NetAdvanceFrame(float dtSeconds)

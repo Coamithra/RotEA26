@@ -51,11 +51,35 @@ to pin any transition residual.
 
 No browser, no game -- pure data, the repo's isolation-sim rule.
 
-Run:  python tools/sim/net_puppet_drive_sim.py           (assert mode; exit 0 = fix holds)
-      python tools/sim/net_puppet_drive_sim.py --sweep   (pops vs window depth/length table)
+--population (card 48ab9b2f) asks a SECOND, independent question of the same model: what ELSE
+can drive pupPops on a client whose clock is behaving? The JIP two-window pass logged 207 pops
+in ~25s and guessed the dense `?flyspiders` swarm was to blame. The sweep weighs both candidate
+explanations against the real background-FlyingSpider motion and answers, in short: the swarm
+essentially cannot -- 0 pops/s at every size swept except ONE cell, N=512, where the turn
+interval lands near half the spiders' 4000ms swivel period and a finite-difference velocity is
+maximally wrong. That resonance is real and worth knowing about (7.2/s at Very_Hard, 92.6/s at
+Inzane's 20%-larger swivel), but it is not what the rig hit: a live boot measures that world at
+17-19 entities, three orders of N away, where the answer is a flat zero. Meanwhile client TICK
+STARVATION can produce the observed rate and then some. The starvation cliff is between 3Hz and 1Hz: the 200ms dt
+clamp in NetPuppetDriver starts DROPPING real motion at 3Hz (133ms lost per tick) but still pops
+nothing, and by 1Hz it is 128 pops/s. That is an occluded/hidden window (JIP trap 1), not the
+~40fps the pass recorded -- 40Hz is nowhere near it. So neither of the pass' own hypotheses
+survives, which is why the card put its effort into making the counters decidable instead.
+
+The swarm hypothesis fails twice over, in fact: the sweep below shows it popping nothing at ANY
+size, and a live `?level=Level2&flyspiders&net=host` boot measures the rig's actual world at
+only 17-19 live entities (`snapTurn=120ms`) -- they spawn at 5.5/s but die off-screen at
+`Position.X < -100`, so it reaches a small steady state rather than accumulating. The table
+still sweeps to N=2048 because the question "how big would a world have to be" is worth an
+answer, not because that rig ever got there.
+
+Run:  python tools/sim/net_puppet_drive_sim.py               (assert mode; exit 0 = fix holds)
+      python tools/sim/net_puppet_drive_sim.py --sweep       (pops vs window depth/length)
+      python tools/sim/net_puppet_drive_sim.py --population  (pops vs live count / client tick)
 """
 
 import argparse
+import math
 import sys
 
 # ---- constants mirrored from the C# net layer -------------------------------------------
@@ -236,12 +260,289 @@ def sweep():
     print("\n(REAL-driver mode logs 0 in every cell above -- the fix.)")
 
 
+# ---- population mode (card 48ab9b2f) ------------------------------------------------------
+# The snapshot cursor round-robins SNAPSHOT_MAX_ENTRIES entries per packet, so an entity's
+# correction interval averages N/16*60ms -- it grows with the live entity count, and between
+# turns the puppet dead-reckons on a straight line. So pupPops COULD be partly a function of how
+# BIG the world is, with nothing wrong with the link. That was the JIP pass' own explanation for
+# its pupPops=207/25s: its host fight was ?flyspiders, whose BACKGROUND spiders have
+# Collides=false and so cannot be shot down.
+#
+# This sweeps N against the REAL background-FlyingSpider motion to find out whether population
+# actually accounts for the observed rate, or whether it falls short and something else is going
+# on. It is deliberately the honest question, not a confirmation: read the printed verdict.
+# (It falls short -- and note that "cannot be shot down" does not mean unbounded either: they
+# die off-screen at Position.X < -100, and a live boot measures that rig at 17-19 entities.)
+SWIVEL_PERIOD_MS = 4000.0     # FlyingSpider.Setup: swiveltimer.Duration for isbackground
+SWIVEL_BASE_PX = 50.0         # FlyingSpider.Update: 50f * DifficultyModifier * scale
+BG_SCALE = 0.67 * 0.75        # Setup: scale = 0.67f * SizeFactor (DefaultSizeFactor 0.75)
+# Settings.GetDifficultyValue. Inzane is included because it has the largest swivel amplitude
+# and so is the tier most likely to widen the one resonance cell that does pop.
+DIFFICULTY = {"Easy": 0.35, "Medium": 0.6, "Hard": 0.8, "Very_Hard": 1.0, "Inzane": 1.2}
+OBSERVED_POPS_PER_S = 207 / 25.0   # the JIP pass' reading, for scale
+
+# Horizontal drift, which is where the SECOND candidate explanation lives. Level2.slowdown sets
+# the background to Vector2(-3, 0) / 16.667 = -0.18 px/ms, and FlyingSpider.Setup takes
+# Speed = |BackgroundSpeed| * 1.11 for the background variant. It is perfectly LINEAR, so it
+# costs a well-fed client nothing at all -- but see DRIVER_MAX_DT_MS.
+FLYSPIDER_X_SPEED = (3.0 / 16.666666) * 1.11
+
+# NetPuppetDriver.Update clamps its real-time delta to this. The clamp is deliberate (a pause
+# Pop or a tab refocus must advance the world by at most one over-long frame, never a fling),
+# but it means a client ticking SLOWER than 5Hz silently loses every millisecond past the clamp:
+# the puppets under-advance by (gap - 200ms) of real motion on every tick, the error integrates,
+# and the next snapshot for that entity snaps. Chrome pauses rAF outright in an occluded window
+# and throttles a hidden tab to ~1Hz, which is JIP-pass trap 1.
+DRIVER_MAX_DT_MS = 200.0
+
+
+def swivel_amplitude_px(diff_mod):
+    return SWIVEL_BASE_PX * diff_mod * BG_SCALE
+
+
+class FlySpider:
+    """A background FlyingSpider, in 2D this time -- the 1D Enemy above cannot show the effect
+    the tick-starvation table needs, because the two axes fail for opposite reasons.
+
+      Y: pure sinusoid, FlyingSpider.Update --
+         Position.Y = startheight + 50 * DifficultyModifier * scale * sin(2pi * swivel.Normalized)
+         Hard to dead-reckon (a straight line never fits a sine) but SMALL in amplitude.
+      X: constant Speed from Setup. Trivially dead-reckoned and free... unless the client's
+         driver dt is being clamped, at which point the lost motion is all horizontal.
+
+    observe() mirrors NetSession.CaptureBaseState: a FINITE-DIFFERENCE velocity measured between
+    this entity's own snapshot turns, which for a sinusoid is an average over the whole interval
+    rather than the instantaneous velocity -- a second reason a long turn interval hurts.
+    """
+
+    def __init__(self, amplitude_px, phase_ms, x_speed):
+        self.amp = amplitude_px
+        self.phase = phase_ms
+        self.x_speed = x_speed
+        self.t = 0.0
+        self.x = 0.0
+        self.y = self._y()
+        self.have_last = False
+        self.last = (0.0, 0.0)
+        self.last_ms = 0.0
+
+    def _y(self):
+        return self.amp * math.sin(2.0 * math.pi * (self.t + self.phase) / SWIVEL_PERIOD_MS)
+
+    def advance(self, dt_ms):
+        self.t += dt_ms
+        self.x -= self.x_speed * dt_ms
+        self.y = self._y()
+
+    def observe(self, now_ms):
+        vx, vy = -self.x_speed, 0.0
+        if self.have_last and now_ms > self.last_ms:
+            dt = now_ms - self.last_ms
+            vx = (self.x - self.last[0]) / dt
+            vy = (self.y - self.last[1]) / dt
+        self.last = (self.x, self.y)
+        self.last_ms = now_ms
+        self.have_last = True
+        return (self.x, self.y), (vx, vy)
+
+
+class Puppet2D:
+    """Mirror of NetPuppets.ApplySnapshotState + Drive, in 2D. The pop test is on the error
+    VECTOR's length, exactly as the C# does (err.Length() > SnapThresholdPx)."""
+
+    def __init__(self, pos):
+        self.x, self.y = pos
+        self.vx = self.vy = 0.0
+        self.cx = self.cy = 0.0
+        self.correction_ms_left = 0.0
+
+    def apply_snapshot(self, pos, vel):
+        ex, ey = pos[0] - self.x, pos[1] - self.y
+        popped = math.hypot(ex, ey) > SNAP_THRESHOLD_PX
+        if popped:
+            self.x, self.y = pos
+            self.cx = self.cy = 0.0
+            self.correction_ms_left = 0.0
+        else:
+            self.cx, self.cy = ex, ey
+            self.correction_ms_left = CORRECTION_WINDOW_MS
+        self.vx, self.vy = vel
+        return popped
+
+    def drive(self, dt_ms):
+        sx, sy = self.vx * dt_ms, self.vy * dt_ms
+        if self.correction_ms_left > 0.0:
+            take = min(dt_ms, self.correction_ms_left)
+            sx += self.cx * (take / CORRECTION_WINDOW_MS)
+            sy += self.cy * (take / CORRECTION_WINDOW_MS)
+            self.correction_ms_left -= take
+        self.x += sx
+        self.y += sy
+
+
+def run_population(n_enemies, diff_mod, total_ms=25000.0, client_tick_ms=TICK_MS):
+    """Steady state: N live entities, healthy link, no time scaling. `client_tick_ms` is how
+    often the CLIENT gets a tick -- the driver's dt is that gap clamped to DRIVER_MAX_DT_MS,
+    so anything slower than 5Hz loses real motion every tick. Returns (pops, peak_px).
+
+    STEADY STATE is the point, so the first full round-robin cycle is a WARM-UP that is
+    simulated but not scored, and each puppet is seeded with its entity's true velocity. Both
+    matter: a puppet that has not had its first turn yet holds still (vel 0) while its entity
+    drifts, so with the warm-up scored, every entity pops exactly once on its first turn and a
+    big N reads as a huge pop RATE -- an artifact of starting the sim, not of the world being
+    big. (Measured while writing this: it invented 36 pops/s at N=1024 and a 769px "peak",
+    which is just 3840ms of un-driven X drift.) A real session's puppets arrive via EvSpawn or
+    the self-heal, both of which seed position AND velocity together.
+    """
+    amp = swivel_amplitude_px(diff_mod)
+    # Decorrelated phases: swiveltimer.Randomize() gives every spider its own, and a swarm
+    # swinging in lockstep would be an unrepresentative best OR worst case.
+    enemies = [FlySpider(amp, SWIVEL_PERIOD_MS * i / max(1, n_enemies), FLYSPIDER_X_SPEED)
+               for i in range(n_enemies)]
+    puppets = []
+    for e in enemies:
+        p = Puppet2D((e.x, e.y))
+        p.vx = -e.x_speed
+        p.vy = (e.amp * 2.0 * math.pi / SWIVEL_PERIOD_MS
+                * math.cos(2.0 * math.pi * e.phase / SWIVEL_PERIOD_MS))
+        puppets.append(p)
+    cursor = 0
+    next_snap = SNAPSHOT_INTERVAL_MS
+    next_client_tick = client_tick_ms
+    pops = 0
+    peak = 0.0
+    t = 0.0
+    warmup_ms = snap_turn_ms(n_enemies) + SNAPSHOT_INTERVAL_MS
+    # The host keeps its own real-time pace whatever the client is doing -- step it finely so a
+    # slow client tick is modelled as the client missing frames, not as time itself stopping.
+    while t < warmup_ms + total_ms:
+        scoring = t >= warmup_ms
+        for e in enemies:
+            e.advance(TICK_MS)
+        if scoring:
+            # Sample the error on the HOST's clock, not the client's. Sampling it only on client
+            # ticks undersamples exactly the runs that matter: at 1Hz the error is read once a
+            # second, long after the intervening snapshots have already snapped it back to zero,
+            # so a badly diverging run reports a reassuringly small peak.
+            for i, p in enumerate(puppets):
+                peak = max(peak, math.hypot(enemies[i].x - p.x, enemies[i].y - p.y))
+        if t >= next_snap:
+            for _ in range(min(SNAPSHOT_MAX_ENTRIES, len(enemies))):
+                idx = cursor % len(enemies)
+                cursor = (cursor + 1) % len(enemies)
+                snap_pos, snap_vel = enemies[idx].observe(t)
+                if puppets[idx].apply_snapshot(snap_pos, snap_vel) and scoring:
+                    pops += 1
+            next_snap += SNAPSHOT_INTERVAL_MS
+        if t >= next_client_tick:
+            dt = min(client_tick_ms, DRIVER_MAX_DT_MS)
+            for p in puppets:
+                p.drive(dt)
+            next_client_tick += client_tick_ms
+        t += TICK_MS
+    return pops, peak
+
+
+def snap_turn_ms(n):
+    """NetSession.SnapshotTurnMs -- the MEAN gap between an entity's turns, pinned C#-side by
+    eaNetSnap(). Mean, not whole packets rounded up: the cursor wraps continuously, so a
+    17-entity world averages ~63ms rather than the 120ms a second whole packet would imply."""
+    if n <= 0:
+        return 0
+    return max(int(SNAPSHOT_INTERVAL_MS), n * int(SNAPSHOT_INTERVAL_MS) // SNAPSHOT_MAX_ENTRIES)
+
+
+def population():
+    secs = 25.0
+    print("Does world POPULATION alone explain the JIP pass' pupPops?\n")
+    print(f"Background FlyingSpider swivel: +/-{swivel_amplitude_px(1.0):.1f}px "
+          f"(Very_Hard) over {SWIVEL_PERIOD_MS:.0f}ms; X is linear and contributes nothing.")
+    print(f"Snap threshold {SNAP_THRESHOLD_PX:.0f}px, correction window {CORRECTION_WINDOW_MS:.0f}ms, "
+          f"round robin {SNAPSHOT_MAX_ENTRIES}/{SNAPSHOT_INTERVAL_MS:.0f}ms.")
+    print(f"Reference: the pass logged {OBSERVED_POPS_PER_S:.1f} pops/s (207 over {secs:.0f}s).\n")
+
+    counts = (16, 32, 64, 128, 256, 512, 1024, 2048)
+    header = f"{'N live':>7} {'snapTurn':>9} " + "".join(f"{d:>12}" for d in DIFFICULTY)
+    print("A. POPULATION, with the client ticking normally (60Hz):\n")
+    print(header)
+    print("-" * len(header))
+    best_pop = 0.0
+    for n in counts:
+        row = [f"{n:>7} {snap_turn_ms(n):>7}ms "]
+        for diff in DIFFICULTY.values():
+            pops, _ = run_population(n, diff, total_ms=secs * 1000.0)
+            best_pop = max(best_pop, pops / secs)
+            row.append(f"{pops / secs:>10.1f}/s")
+        print("".join(row))
+    print("\npeak dead-reckoning error, Very_Hard: " + ", ".join(
+        f"N={n}: {run_population(n, 1.0, total_ms=secs * 1000.0)[1]:.0f}px" for n in (64, 256, 1024)))
+    print(f"\n  -> worst cell {best_pop:.1f} pops/s vs the pass' {OBSERVED_POPS_PER_S:.1f}/s.")
+    print("     Note the shape: this is NOT monotone in N. Every cell is a flat 0 except the\n"
+          "     N=512 column, where snapTurn (%dms) lands near HALF the %.0fms swivel period --\n"
+          "     the phase at which a finite-difference velocity measured across the interval is\n"
+          "     most wrong about where the entity goes next. Off that resonance the swivel is\n"
+          "     only +/-%.0fpx (Very_Hard), too small to miss by 100px however long the turn\n"
+          "     grows, and the X drift is exactly linear so it costs a well-fed client nothing.\n"
+          "     Amplitude decides how hard the resonance bites: Very_Hard 7.2/s, Inzane 92.6/s\n"
+          "     for a 20%% bigger swivel. So a long snapTurn is dangerous for PERIODIC motion\n"
+          "     whose period it happens to straddle -- not for big worlds as such."
+          % (snap_turn_ms(512), SWIVEL_PERIOD_MS, swivel_amplitude_px(1.0)))
+
+    # B. The other candidate, and the one the JIP rig actually risks: a starved client.
+    print("\n\nB. CLIENT TICK STARVATION, at a fixed N=128 (snapTurn %dms), Very_Hard:\n"
+          % snap_turn_ms(128))
+    rates = ((60, TICK_MS), (40, 25.0), (30, 33.3), (10, 100.0), (5, 200.0), (3, 333.0), (1, 1000.0))
+    header = f"{'client':>8} {'tick gap':>10} {'driver dt':>11} {'lost/tick':>11} {'pops':>10} {'peak px':>9}"
+    print(header)
+    print("-" * len(header))
+    best_starve = 0.0
+    for hz, gap in rates:
+        pops, peak = run_population(128, 1.0, total_ms=secs * 1000.0, client_tick_ms=gap)
+        best_starve = max(best_starve, pops / secs)
+        lost = max(0.0, gap - DRIVER_MAX_DT_MS)
+        print(f"{hz:>6}Hz {gap:>8.0f}ms {min(gap, DRIVER_MAX_DT_MS):>9.0f}ms "
+              f"{lost:>9.0f}ms {pops / secs:>8.1f}/s {peak:>8.0f}")
+
+    # Deliberately an order-of-magnitude bracket, not a `>=` threshold. A mechanism that peaks
+    # at 87% of the observed rate in ONE resonance cell has not been cleanly excluded (the
+    # repo's own rule is that differences under ~30% are noise), and one that overshoots 15x
+    # has not been cleanly confirmed either -- it only says the mechanism is capable.
+    def bracket(best):
+        if best >= 3.0 * OBSERVED_POPS_PER_S:
+            return "AMPLY capable"
+        if best >= 0.5 * OBSERVED_POPS_PER_S:
+            return "borderline -- same order, cannot be cleanly excluded"
+        return "cannot get near it"
+
+    print(f"\nVERDICT vs the pass' {OBSERVED_POPS_PER_S:.1f} pops/s over {secs:.0f}s:")
+    print(f"  population alone   : peaks at {best_pop:>6.1f}/s  -- {bracket(best_pop)}")
+    print(f"  tick starvation    : peaks at {best_starve:>6.1f}/s  -- {bracket(best_starve)}")
+    print("\nRead those carefully. Population only bites in the single N=512 resonance cell and\n"
+          "sits at a flat 0 everywhere else, including the 17-19 entities a live boot of that rig\n"
+          "actually measures -- so it is not the explanation there, but a turn interval that\n"
+          "straddles a periodic motion's half-period is a mechanism worth remembering.\n"
+          "Starvation, meanwhile,\n"
+          "is all-or-nothing: the cliff sits between 3Hz and 1Hz, and note that 3Hz is ALREADY\n"
+          "losing 133ms of motion per tick to the clamp while still popping nothing. So a\n"
+          "steady 40fps -- what the pass recorded -- is nowhere near it; only an OCCLUDED or\n"
+          "hidden window gets there (rAF paused / ~1Hz timers, JIP-pass trap 1).\n"
+          "Neither of the pass' hypotheses explains its reading, and the remaining candidates\n"
+          "-- intermittent occlusion, id churn, a genuine fault -- are separated by the\n"
+          "snapTurn + snapNew/snapDead/snapBad fields now in the [net] line, not by another\n"
+          "undecidable two-window run.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sweep", action="store_true", help="pops vs window depth/length (eyeball)")
+    ap.add_argument("--population", action="store_true",
+                    help="pops vs live entity count (card 48ab9b2f: is pupPops a swarm artifact?)")
     args = ap.parse_args()
     if args.sweep:
         sweep()
+        return 0
+    if args.population:
+        population()
         return 0
     ok = assert_mode()
     if ok:

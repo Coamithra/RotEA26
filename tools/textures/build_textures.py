@@ -19,7 +19,10 @@ a cold multi-megapixel PNG is a multi-hundred-ms to multi-second frame hitch):
           sampled and nothing shifts. cols/rows are no longer needed for the build.
           The first GUTTER px of the pad are NOT transparent -- they replicate the
           logical edge, because a clamped source rect does not stop bilinear from
-          reaching one texel past it (see edge_gutter).
+          reaching one texel past it (see edge_gutter). A trailing "mip" on the config
+          line adds a full mip chain, built PER LEVEL so the pad never filters into the
+          content (see build_mip_chain); without one a minified draw gets bilinear and
+          nothing else, and aliases.
 
   raw  -> <name>.rtex  Uncompressed straight-alpha RGBA8 with a 16-byte header.
           Lossless, large on disk, zero decode, NO dimension constraint. For sheets
@@ -38,6 +41,7 @@ Requires: Pillow (PIL); texconv.exe in tools/textures/ for any 'dxt' entries
 (download: https://github.com/microsoft/DirectXTex/releases/latest/download/texconv.exe).
 """
 import argparse
+import fnmatch
 import os
 import struct
 import subprocess
@@ -78,6 +82,21 @@ def pad4(x):
 # both necessary and sufficient: bilinear can only ever reach ONE texel past the source rect, and
 # a full block keeps that texel out of any block that also holds transparent pad.
 GUTTER = 4
+
+
+def mip_sizes(w, h):
+    """The (w, h) of every level of a full chain, D3D/texconv convention.
+
+    Successive integer halving with a floor of 1, which is exactly KNI's
+    TextureHelpers.GetSizeForLevel -- so a level built here lands at the size the runtime
+    computes for it. The chain length matches TextureHelpers.CalculateMipLevels, and it must
+    be the FULL chain: KNI allocates that many levels and GL only samples a mipmap-COMPLETE
+    texture, so a short chain renders black rather than degrading."""
+    sizes = [(w, h)]
+    while sizes[-1] != (1, 1):
+        pw, ph = sizes[-1]
+        sizes.append((max(1, pw // 2), max(1, ph // 2)))
+    return sizes
 
 
 def edge_gutter(canvas, w, h, tw, th):
@@ -144,7 +163,88 @@ def mult4_preserving_pitch(total, divs):
     return ((total + 3) // 4) * 4, True
 
 
-def build_dxt(asset, dry, pad_extra=0):
+def compress_one(img, base, out_dir):
+    """BC3-compress ONE image with no mip chain; return the path of the produced .dds.
+
+    texconv names its output after the input's basename and may spell the extension either
+    way, so normalise to lowercase <base>.dds here rather than at each call site."""
+    os.makedirs(SCRATCH, exist_ok=True)
+    tmp = os.path.join(SCRATCH, base + ".png")
+    img.save(tmp)
+    r = subprocess.run([TEXCONV, "-nologo", "-y", "-m", "1", "-f", "BC3_UNORM",
+                        "-o", out_dir, tmp],
+                       capture_output=True, text=True)
+    # Check the exit code BEFORE probing for output: out_dir is usually the Content dir, where the
+    # previously committed <base>.dds already exists, so a failed texconv would otherwise resolve
+    # to that stale file and get re-stamped and reported as a fresh build.
+    if r.returncode != 0:
+        fail(f"texconv failed for {base} (exit {r.returncode})\n" + r.stdout + r.stderr)
+    produced = None
+    for ext in (".dds", ".DDS"):
+        p = os.path.join(out_dir, base + ext)
+        if os.path.isfile(p):
+            produced = p
+            break
+    if produced is None:
+        fail("texconv produced no .dds for " + base + "\n" + r.stdout + r.stderr)
+    os.remove(tmp)
+    return produced
+
+
+# DDS header fields the mip splice has to set (offsets into the 128-byte legacy header).
+DDSD_MIPMAPCOUNT = 0x00020000   # dwFlags bit saying dwMipMapCount is meaningful
+DDSCAPS_COMPLEX = 0x00000008    # dwCaps: more than one surface
+DDSCAPS_MIPMAP = 0x00400000     # dwCaps: this surface is a mip level
+
+
+def build_mip_chain(im, w, h, tw, th, base, out_dds):
+    """Write a full-mip-chain .dds, re-deriving the PAD AT EVERY LEVEL.
+
+    The pad is metadata, not content. Handing texconv the padded canvas and asking for `-m 0`
+    would filter the pad along WITH the content, so each level blends real pixels into
+    transparent pad near the logical edge -- reintroducing exactly the bleed check_pad_bleed.py
+    exists to prevent. Measured on 756-v1: a GUTTER of 4 px keeps that clean for log2(GUTTER)=2
+    levels and then fails hard (alpha delta 0/0/0 at levels 0-2, then 127/191/223 at 3/4/5).
+
+    So each level is built from the LOGICAL image alone -- downsample content, pad THAT to the
+    level's padded size, run edge_gutter() on it -- and the levels are compressed separately and
+    spliced. Every level then satisfies the same clamp property level 0 does, and the pad stays
+    transparent at every level, so the --padtest canary survives the whole chain.
+    """
+    from PIL import Image
+    pads = mip_sizes(tw, th)
+    logs = mip_sizes(w, h)
+    blobs = []
+    content = im
+    for lv, (pw, ph) in enumerate(pads):
+        lw, lh = logs[min(lv, len(logs) - 1)]
+        if lw > pw or lh > ph:
+            fail(f"{base}: level {lv} content {lw}x{lh} does not fit its pad {pw}x{ph}")
+        if content.size != (lw, lh):
+            # Successive halving (BOX = area average) matches the D3D/texconv chain and KNI's
+            # GetSizeForLevel, so a level lands at exactly the size the runtime computes for it.
+            content = content.resize((lw, lh), Image.Resampling.BOX)
+        canvas = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+        canvas.paste(content, (0, 0))
+        edge_gutter(canvas, lw, lh, pw, ph)
+        produced = compress_one(canvas, base, SCRATCH)
+        with open(produced, "rb") as f:
+            blobs.append(f.read())
+        os.remove(produced)
+    # Level 0's own header describes the whole surface; only the mip fields need setting.
+    header = bytearray(blobs[0][:128])
+    struct.pack_into("<I", header, 8, struct.unpack_from("<I", header, 8)[0] | DDSD_MIPMAPCOUNT)
+    struct.pack_into("<I", header, 28, len(blobs))
+    struct.pack_into("<I", header, 108,
+                     struct.unpack_from("<I", header, 108)[0] | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP)
+    with open(out_dds, "wb") as f:
+        f.write(bytes(header))
+        for blob in blobs:
+            f.write(blob[128:])
+    return len(blobs)
+
+
+def build_dxt(asset, dry, pad_extra=0, mip=False):
     from PIL import Image
     png = src_png(asset)
     if not os.path.isfile(png):
@@ -164,32 +264,22 @@ def build_dxt(asset, dry, pad_extra=0):
     out_dds = os.path.join(os.path.dirname(png), base + ".dds")
     note = f"  (logical {w}x{h}, +{pad_extra}px test-pad)" if pad_extra else (
         f"  (logical {w}x{h})" if padded else "")
+    levels = len(mip_sizes(tw, th)) if mip else 1
+    note += f"  [{levels} mip levels]" if mip else ""
     print(f"  dxt  {asset}  {w}x{h} -> {tw}x{th}{note}")
     if dry:
         return
-    os.makedirs(SCRATCH, exist_ok=True)
-    tmp = os.path.join(SCRATCH, base + ".png")
-    canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-    canvas.paste(im, (0, 0))                              # pad bottom/right, transparent
-    edge_gutter(canvas, w, h, tw, th)                     # ...except the first GUTTER px
-    canvas.save(tmp)
-    r = subprocess.run([TEXCONV, "-nologo", "-y", "-m", "1", "-f", "BC3_UNORM",
-                        "-o", os.path.dirname(png), tmp],
-                       capture_output=True, text=True)
-    # texconv writes <base>.DDS/.dds in -o; normalise to lowercase <base>.dds.
-    produced = None
-    for ext in (".dds", ".DDS"):
-        p = os.path.join(os.path.dirname(png), base + ext)
-        if os.path.isfile(p):
-            produced = p
-            break
-    if produced is None:
-        fail("texconv produced no .dds for " + asset + "\n" + r.stdout + r.stderr)
-    if produced != out_dds:
-        if os.path.exists(out_dds):
-            os.remove(out_dds)
-        os.replace(produced, out_dds)
-    os.remove(tmp)
+    if mip:
+        build_mip_chain(im, w, h, tw, th, base, out_dds)
+    else:
+        canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+        canvas.paste(im, (0, 0))                          # pad bottom/right, transparent
+        edge_gutter(canvas, w, h, tw, th)                 # ...except the first GUTTER px
+        produced = compress_one(canvas, base, os.path.dirname(png))
+        if produced != out_dds:
+            if os.path.exists(out_dds):
+                os.remove(out_dds)
+            os.replace(produced, out_dds)
     if padded:
         poke_dds_logical(out_dds, w, h)   # stamp logical (pre-pad) size for the runtime
     print(f"       wrote {os.path.relpath(out_dds, REPO)}  ({os.path.getsize(out_dds)//1024} KB)")
@@ -223,14 +313,27 @@ def parse_config(path):
             parts = line.split()
             asset, fmt = parts[0], parts[1].lower()
             if fmt == "dxt":
+                # A trailing "mip" opts this asset into a full mip chain (see build_mip_chain).
+                # It is opt-in per asset: mipping everything would cost ~33% more bytes across all
+                # ~124 .dds and soften every minified sprite, for the benefit of the one sheet that
+                # is tiled far past its native size.
+                # Reject anything we don't recognise rather than ignoring it: a typo ("mips",
+                # "Mipmap") would otherwise build an unmipped sheet with no diagnostic, and the
+                # only symptom is a shimmering wall in game. Loud failure is the convention here
+                # (unknown format fails; a stale asset line aborts the whole run).
+                for p in parts[2:]:
+                    if not p.isdigit() and p != "mip":
+                        fail(f"{path}:{ln}: unknown dxt option '{p}' (expected 'mip' or cols/rows)")
+                mip = "mip" in parts[2:]
                 # Optional trailing "cols rows" are parsed but now IGNORED by the build (pad4 no
                 # longer needs the grid — the game owns frame layout via its own AnimationData).
                 # Still accepted so existing config lines and the ?texviewer Save path don't error.
-                cols = int(parts[2]) if len(parts) > 2 else 1
-                rows = int(parts[3]) if len(parts) > 3 else 1
-                entries.append(("dxt", asset, cols, rows))
+                nums = [p for p in parts[2:] if p.isdigit()]
+                cols = int(nums[0]) if len(nums) > 0 else 1
+                rows = int(nums[1]) if len(nums) > 1 else 1
+                entries.append(("dxt", asset, cols, rows, mip))
             elif fmt == "raw":
-                entries.append(("raw", asset, None, None))
+                entries.append(("raw", asset, None, None, False))
             else:
                 fail(f"{path}:{ln}: unknown format '{fmt}' (expected dxt|raw)")
     return entries
@@ -286,6 +389,11 @@ def main():
     ap = argparse.ArgumentParser(description="Precompile sprites to .dds/.rtex per textures.config")
     ap.add_argument("--config", default=DEFAULT_CONFIG)
     ap.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
+    ap.add_argument("--only", metavar="GLOB",
+                    help="rebuild only assets whose Content-relative name matches GLOB (e.g. "
+                         "'gfx/base/756-v1'). The manifest still covers the whole config. Keeps a "
+                         "one-texture change from rewriting all ~124 committed .dds. Matching "
+                         "nothing is an error, not a silent no-op.")
     ap.add_argument("--manifest-only", action="store_true",
                     help="regenerate Compat/PrecompiledTextures.cs only; skip the texture builds "
                          "(no texconv/Pillow needed)")
@@ -308,9 +416,15 @@ def main():
     if args.padtest:
         print(f"  [padtest] over-padding every dxt by ~{args.padtest}px to surface any "
               f"padded-vs-logical size bug")
-    for e in entries:
+    selected = entries
+    if args.only:
+        selected = [e for e in entries if fnmatch.fnmatch(e[1], args.only)]
+        if not selected:
+            fail(f"--only {args.only!r} matched none of the {len(entries)} config entries")
+        print(f"  [only] {len(selected)} of {len(entries)} asset(s) match {args.only!r}")
+    for e in selected:
         if e[0] == "dxt":
-            build_dxt(e[1], args.dry_run, args.padtest)
+            build_dxt(e[1], args.dry_run, args.padtest, mip=e[4])
         else:
             build_raw(e[1], args.dry_run)
     print("done.")

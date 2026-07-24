@@ -85,9 +85,13 @@ namespace EvilAliensWeb.Compat.Net
         {
             games.Clear();
             pingByCode.Clear();
+            // Players deliberately SPAN 1..MaxPlayers-1: a listed game is any game with a free
+            // seat (card 4d904410), so a couch host advertises 2 or 3 taken, and this flag is
+            // the only rig that ever screenshots that column. All-1 entries hid the hard-coded
+            // "/2" denominator this card fixed (48ab9b2f) -- keep them varied.
             AddFake("QX7KP", Levels.Level1, 1, 1, 34, 41);
-            AddFake("B29MT", Levels.Level2, 2, 1, 120, 88);
-            AddFake("Z4HRW", Levels.Level3, 3, 1, 7, 152);
+            AddFake("B29MT", Levels.Level2, 2, 2, 120, 88);
+            AddFake("Z4HRW", Levels.Level3, 3, Oracle.MaxPlayers - 1, 7, 152);
             AddFake("KP8FN", Levels.ClassicAliens, 0, 1, 260, -1);
             Version++;
         }

@@ -78,7 +78,16 @@ internal class TeamChallenge : GameScene
 		// check) -- the card's "pause triggers are local devices only" gotcha.
 		if (!EvilAliensWeb.Compat.Net.NetSession.Active)
 		{
-			oracle.AddPlayer(ControlDevice.PadOne);
+			// ?aiteam (card 9391f95a): seat Generic instead, so the level can be BENCHED at all.
+			// PadOne with no gamepad attached makes GameScene.Update raise pauseRequested every
+			// tick (its !PadConnected(i) check), so an unattended ?aiplayer soak never leaves the
+			// pause menu -- prog=0, no verdict, and nothing in the bench line explaining it.
+			// Generic simply has no connected-check. It gives this slot no DRIVER of its own
+			// (PlayerShip.Update has no Generic case) -- the flag is only ever used with
+			// ?aiplayer, which forces both ships onto the AI branch.
+			oracle.AddPlayer(EvilAliensWeb.Compat.DebugFlags.AiTeam
+				? ControlDevice.Generic
+				: ControlDevice.PadOne);
 		}
 	}
 

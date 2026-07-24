@@ -67,11 +67,24 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   - BEHAVIOUR / timing / feel over time → an **isolation sim**: stub the game, tick the object's
     `Update`/pure core in a plain loop, read the DATA (or plot it), not a frame — the
     `ApplyLifecycle`/`HarnessApplyPhase` pattern (see `Blast`, `Spider`, `tools/sim/`);
-  - tuning values → the matching **live slider panel** (`?wctune`, `?lazershot`, `eaWalls`, ...).
+  - tuning values → the matching **live slider panel** (`?wctune`, `?lazershot`, `eaWalls`, ...);
+  - a change that should alter NOTHING (rename, reformat, decompiler-artifact cleanup) → the
+    **IL-identity oracle**, `python tools/verify_il_identical.py` — see below.
   If no tool covers the change, BUILD one — that is part of the fix, not extra scope. Boot the real
   game only for (a) the FINAL smoke check (boots, change in, zero console errors) after a tool
   already proved it, or (b) boot/menu/scene-flow changes themselves — and even then use fast-boot
   flags to land next to the thing under test.
+- **A no-op refactor is PROVEN, not spot-checked — `python tools/verify_il_identical.py`.** Local
+  variable names live only in the PDB, so a build with `-p:DebugType=none -p:Deterministic=true`
+  must produce a **byte-identical `EvilAliensWeb.dll`** for any change that is genuinely cosmetic.
+  The script builds the working tree and a throwaway worktree at `--ref` (default `HEAD`) and
+  compares SHA-256s; the hash is path-independent, so you can baseline at any point, even after
+  you have started editing. Sound AND sensitive: 19 locals renamed across a 160-line method hashed
+  identically, while flipping one constant `128`→`129` did not. It covers the WHOLE assembly, so a
+  stray edit in an unrelated file is caught too. Use it for renames, reformatting and decompiler-
+  artifact cleanup — a harness or screenshot cannot prove what the hash proves, so don't build one
+  for this class of change. It does **not** judge whether a new name is a *good* name; a
+  misleading-but-compiling rename hashes identically, so name quality stays a human review job.
 - **Never verify motion with timed live screenshots.** A raw screenshot is only valid for STATIC
   appearance; anything time-varying needs a parked/scrubbed frame or a data sim. If you genuinely
   must see it live, build a break/pause (`DebugFlags` seam) that freezes at the moment of interest.

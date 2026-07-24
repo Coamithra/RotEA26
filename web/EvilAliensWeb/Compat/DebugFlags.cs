@@ -880,6 +880,13 @@ namespace EvilAliensWeb.Compat
 		// verification for level-script replication. Pair with ?level=Level1&net=host/join.
 		public static bool NetScript { get; private set; }
 
+		// ?aifriends=<0-3> (coverage-gaps follow-up): seed Settings.Friends at a ?level= direct
+		// boot so the "Mechanical Friends" AI helper ships auto-join without walking the cheats
+		// menu -- the purpose-built seam for two-tab verification of host-authoritative AI-friend
+		// replication (Compat/Net/NetSession.Friends). Applied in Game1.LaunchLevelDirect; shipped
+		// builds are unchanged (0 = off, and it only takes effect on a debug ?level= boot).
+		public static int AiFriends { get; private set; }
+
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
 		// INBOUND traffic by Compat/Net/NetImpairment so the drop-tolerance paths cards
 		// 11.1-11.3 built actually get exercised. ?netlag=<ms> (0-500) delays both lanes;
@@ -1487,6 +1494,12 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "netscript":
 					NetScript = IsOn(val);
+					break;
+				case "aifriends":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aif))
+					{
+						AiFriends = (int)MathHelper.Clamp(aif, 0, 3);
+					}
 					break;
 				case "netlag":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nlag) && nlag >= 0f)

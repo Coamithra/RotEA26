@@ -501,7 +501,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
   must use distinct rooms); `?netlog` = verbose per-event logging; `?aiplayer` forces the
   LOCAL ship onto the existing AI branch (`PlayerShip.EffectiveController`) for unattended
-  soak tests; `?netscript` (pair with `?level=Level1`) replaces the level's event list with
+  soak tests; `?aifriends=<0-3>` (pair with a `?level=` boot) seeds `Settings.Friends` so the
+  host's Mechanical-Friends AI ships auto-join without the cheats menu -- the two-tab seam for
+  AI-friend replication (note the budget is `Friends+1` TOTAL ships incl. the remote, so with a
+  peer connected you need `aifriends>=2` to spawn any AI friend); `?netscript` (pair with `?level=Level1`) replaces the level's event list with
   a compressed ~60s script firing every replicated beat type (message, warning, background
   ops, checkpoints, music switch, victory) -- the purpose-built two-tab verification for
   script replication (`GameScene.PopulateNetScriptTest`). Card 11.4 adds `?rtc` (a

@@ -344,11 +344,24 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- driver ---------------------------------------------------------------------------
 
-        // Ticked by NetPuppetDriver (UpdateOrder well before the world, disabled by pause).
-        internal static void Drive(GameTime gameTime)
+        // Ticked by NetPuppetDriver on REAL elapsed time (dtMs), NOT the turbo/slow-mo/hit-stop-
+        // scaled game clock Game1.Update folds into the gameTime it hands components. The host
+        // mirrors its enemies at its own real pace and stamps every snapshot's observed velocity
+        // on real time (NetSession.CaptureBaseState uses TickCount64), so a client-side time-scale
+        // window -- the wipe's 180ms player-death hit-stop, a 1-up slow-motion overlapping it --
+        // must not stall the dead-reckoning OR the correction blend (which only advances here).
+        // If it does, the puppets fall behind the host's real-time snapshots and the growing error
+        // snaps past SnapThresholdPx again and again: that was the one-time pupPops burst on the
+        // first wipe (deferred from card 11.3; characterised in tools/sim/net_puppet_drive_sim.py).
+        // This is the same real-time rule the remote-SHIP puppet already follows
+        // (NetSession.DriveRemoteShip advances on realDtMs "never the turbo/slowmo/hit-stop-scaled
+        // game time") and that NetAdvanceFrame's own contract already assumes ("on real dt").
+        internal static void Drive(float dtMs)
         {
-            float dtMs = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
-            float dtSeconds = (float)gameTime.ElapsedGameTime.TotalSeconds;
+            float dtSeconds = dtMs / 1000f;
+            // Cosmetic timers (KillableAlien hit-blink decay, pulse timers) tick on the SAME real
+            // clock -- a frozen puppet keeps animating through a local hit-stop, by design.
+            GameTime realTime = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(dtMs));
             for (int i = 0; i < live.Count; i++)
             {
                 PuppetInfo info = live[i];
@@ -367,7 +380,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     comp.scale = MathHelper.Lerp(comp.scale, info.TargetScale, MathHelper.Clamp(dtMs / 100f, 0f, 1f));
                 }
-                comp.NetTickTimers(gameTime);
+                comp.NetTickTimers(realTime);
             }
         }
 
@@ -426,6 +439,13 @@ namespace EvilAliensWeb.Compat.Net
     // which also turns puppet collisions off (see CollidableOverride).
     public sealed class NetPuppetDriver : GameComponent
     {
+        // The puppet clock runs on REAL time (Environment.TickCount64 delta), never the
+        // turbo/slow-mo/hit-stop-scaled game time Game1.Update folds into the gameTime it
+        // hands components -- see NetPuppets.Drive for why (the pupPops burst). Clamped like
+        // NetSession's own realDtMs so a long stall (a pause Pop re-enabling us, a tab
+        // refocus) advances the dead-reckoning by at most one over-long frame, never a fling.
+        private long lastRealMs;
+
         public NetPuppetDriver(Game game)
             : base(game)
         {
@@ -434,7 +454,12 @@ namespace EvilAliensWeb.Compat.Net
 
         public override void Update(GameTime gameTime)
         {
-            NetPuppets.Drive(gameTime);
+            long now = Environment.TickCount64;
+            float dtMs = lastRealMs == 0L
+                ? (float)gameTime.ElapsedGameTime.TotalMilliseconds
+                : MathHelper.Clamp(now - lastRealMs, 0f, 200f);
+            lastRealMs = now;
+            NetPuppets.Drive(dtMs);
             base.Update(gameTime);
         }
     }

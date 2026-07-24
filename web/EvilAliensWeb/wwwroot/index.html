@@ -1401,35 +1401,6 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
-
-            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
-            // pushing per frame, because a per-frame interop call would cost more than the tower pass
-            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
-            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
-            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
-            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
-            // throttled, so the average isn't poisoned for the next two seconds.
-            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
-            setInterval(function ()
-            {
-                var unfocused = document.hidden || !document.hasFocus();
-                try
-                {
-                    if (!armed || (wasUnfocused && !unfocused))
-                    {
-                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
-                        armed = true;
-                    }
-                    wasUnfocused = unfocused;
-                    if (unfocused)
-                    {
-                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
-                        return;
-                    }
-                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
-                }
-                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
-            }, 250);
         })();
     </script>
 
@@ -1661,35 +1632,6 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
-
-            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
-            // pushing per frame, because a per-frame interop call would cost more than the tower pass
-            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
-            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
-            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
-            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
-            // throttled, so the average isn't poisoned for the next two seconds.
-            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
-            setInterval(function ()
-            {
-                var unfocused = document.hidden || !document.hasFocus();
-                try
-                {
-                    if (!armed || (wasUnfocused && !unfocused))
-                    {
-                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
-                        armed = true;
-                    }
-                    wasUnfocused = unfocused;
-                    if (unfocused)
-                    {
-                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
-                        return;
-                    }
-                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
-                }
-                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
-            }, 250);
         })();
     </script>
 
@@ -2179,35 +2121,6 @@
             {
                 var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
             }
-
-            // Cost meter. Armed once the runtime is up, then polled 4x/second — polling rather than
-            // pushing per frame, because a per-frame interop call would cost more than the tower pass
-            // we are trying to measure. Toggle "3D towers" to A/B: tower ms drops to "towers off".
-            // document.hidden / hasFocus is the AUTHORITATIVE throttle signal — a backgrounded tab still
-            // delivers ~1 rAF/second, which no C#-side "time since last frame" test can distinguish from
-            // a slow frame. When focus returns, re-arm: that clears the garbage samples taken while
-            // throttled, so the average isn't poisoned for the next two seconds.
-            var ewPerf = el.querySelector("#ew-perf"), armed = false, wasUnfocused = true;
-            setInterval(function ()
-            {
-                var unfocused = document.hidden || !document.hasFocus();
-                try
-                {
-                    if (!armed || (wasUnfocused && !unfocused))
-                    {
-                        DotNet.invokeMethod('EvilAliensWeb', 'debugWallPerf', true);
-                        armed = true;
-                    }
-                    wasUnfocused = unfocused;
-                    if (unfocused)
-                    {
-                        ewPerf.textContent = "⚠ focus this window — a background tab throttles rAF";
-                        return;
-                    }
-                    ewPerf.textContent = DotNet.invokeMethod('EvilAliensWeb', 'debugWallStats');
-                }
-                catch (e) { ewPerf.textContent = "perf: waiting for the runtime…"; }
-            }, 250);
         })();
     </script>
 

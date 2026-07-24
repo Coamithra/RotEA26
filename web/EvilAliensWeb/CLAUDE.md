@@ -509,7 +509,11 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
   a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
   `?signal=ws://localhost:8091/ws`). Card 40334a8f adds `?netlag=<ms>` / `?netloss=<0-100>`
-  (impair INBOUND traffic -- see the impairment bullet below). **No `?net` flag = the net layer is never constructed
+  (impair INBOUND traffic -- see the impairment bullet below). `?netfakehash=<s>` (card
+  4717d3cf) overrides THIS tab's build-hash fingerprint so two dev tabs disagree, driving the
+  real `peerHash`-mismatch -> reject flow (`RejectBuild` -> "update required") on the
+  BroadcastChannel rig -- otherwise both tabs read `'dev'` and never mismatch (the two-tab
+  verification for the reject handshake + its teardown grace). **No `?net` flag = the net layer is never constructed
   -- a plain boot is byte-identical single-player, and single-player NEVER contacts any
   server. Hard invariants; keep them.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
@@ -580,7 +584,16 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   publish, dev builds read 'dev') + a flags byte. Hash mismatch -> `MsgReject` -> "Update
   required" notice both sides (a stale-cached client can never desync a session); menu
   sessions also reject if EITHER side has `DebugFlags.Active` (dev `?net=` sessions are
-  anything-goes). Match-end: any player leaving a MENU session (quit, tab close, drop,
+  anything-goes). **Rejection is graceful (card 4717d3cf, `RejectGraceMs` 1s):**
+  `SendRejectOnce` queues the reliable `MsgReject` but defers `NetSession.Stop()` by a tick
+  budget instead of closing instantly -- an immediate `Stop()->transport.Close()->pc.close()`
+  is ABORTIVE on WebRTC and would discard the still-buffered reject frame, leaving the peer to
+  see only a channel close ("other player disconnected") instead of the real reason. Holding
+  the session open for the grace keeps SCTP alive so the reject (and our hello, which drives
+  the peer's own symmetric detection) actually egress; the peer's inbound reject during the
+  grace ends our side early. The detection itself is symmetric (each side derives the notice
+  from the peer's hello), so the frame is belt-and-braces; the grace is what makes it land.
+  Match-end: any player leaving a MENU session (quit, tab close, drop,
   victory/game-over wind-down) ends it for both -- scene-down edge or `PeerLost` sends
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
@@ -635,6 +648,13 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   collisions) dead-reckons `Position += vel*dt`, advances `curframe` at the type's own fps,
   blends snapshot corrections over ~150ms (error > 100px snaps + counts a `pupPops`
   metric), lerps scale, ticks each puppet's `timers` (hit-blink decay), re-applies hp.
+  **The driver ticks on REAL time (`Environment.TickCount64` delta, clamped 200ms), never the
+  turbo/slow-mo/hit-stop-scaled `gameTime` Game1 folds into components** -- the host mirrors
+  its world at its own real pace and stamps every snapshot's observed velocity on real time,
+  so a client time-scale window (the wipe's 180ms death hit-stop, a 1-up slow-motion) must not
+  stall the dead-reckoning or the correction blend, or the puppets fall behind the real-time
+  snapshots and repeatedly snap (this was the first-wipe `pupPops` burst; same rule the
+  remote-ship puppet follows). Characterised in `tools/sim/net_puppet_drive_sim.py`.
 - **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
   round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
   Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
@@ -737,8 +757,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   (LoseLife triggers on AllShipsDead); roster is exactly two peers; DevCommentEvent
   commentary is not replicated (profile-local setting). Boss puppets are best-effort
   (the harness caveat): deep Update-reached attack poses may diverge until their state
-  extras grow. A one-time `pupPops` burst can appear during the FIRST wipe transition of
-  a session (transient, self-heals, cosmetic under the death FX -- follow-up card).
+  extras grow. The time-scaling half of the old first-wipe `pupPops` burst is FIXED (the
+  puppet driver now dead-reckons on real time, above); if a residual first-wipe burst ever
+  shows, it's the reset/id-churn transition (purge + checkpoint replay), reproducible in the
+  headless two-peer net sim's reset scenario, not the puppet clock.
 - **Public game browser + join-in-progress (card 2001fbd8, design `plans/net-game-browser.md`):**
   a running single-player game can be LISTED so strangers find + join it, with NO `NetSession`
   constructed until someone actually arrives.

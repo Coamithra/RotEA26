@@ -152,6 +152,21 @@ internal abstract class GameScene : Scene
 
 	private EvilAliensWeb.Compat.Net.NetPauseOverlay netPauseOverlay;
 
+	// The host's interactive replacement for netPauseOverlay (card 0b8a300b). Non-null only
+	// while it is actually up, i.e. a remote pause that outlasted NetSession's offer delay.
+	private EvilAliensWeb.Compat.Net.NetKickMenu netKickMenu;
+
+	private bool netKickMenuUp;
+
+	// ?netkickmenu only: when to fire the one-shot freeze+show, so the capture gets a live
+	// level behind the menu rather than a scene that never drew. REAL time, not a tick count:
+	// GameScene.Update does not run at a steady rate through the level intro (a 120-tick
+	// counter measured ~47s here), and the net layer times everything on TickCount64 anyway.
+	// 0 = not armed.
+	private const long NetKickMenuDelayMs = 2500;
+
+	private long netKickMenuAt;
+
 	private EvilAliensWeb.Compat.Net.NetWaitOverlay netWaitOverlay;
 
 	private bool netPeerStalled;
@@ -212,6 +227,17 @@ internal abstract class GameScene : Scene
 		pausedScene.AddEntryEvent(pausedScene_InstructionsSelected);
 		pausedScene.AddEntry("Exit to Main Menu");
 		pausedScene.AddEntryEvent(pausedScene_ExitSelected);
+		// Online co-op anti-griefing (card 0b8a300b). Built here with the other pause-time
+		// menus, but only ever shown to the HOST, and only once a remote pause has outlasted
+		// NetSession's offer delay -- see NetKickMenu for why this is the host's only agency.
+		netKickMenu = new EvilAliensWeb.Compat.Net.NetKickMenu(base.Game);
+		netKickMenu.OnExit += netKickMenu_KeepWaitingSelected;
+		netKickMenu.AddEntry("Keep Waiting");
+		netKickMenu.AddEntryEvent(netKickMenu_KeepWaitingSelected);
+		netKickMenu.AddEntry("Kick Player");
+		netKickMenu.AddEntryEvent(netKickMenu_KickSelected);
+		netKickMenu.AddEntry("Kick and Block");
+		netKickMenu.AddEntryEvent(netKickMenu_KickAndBlockSelected);
 		exitConfirmationMenu = new ConfirmationMenu(base.Game, "Are you sure you want to exit this game session?");
 		exitConfirmationMenu.OnExit += exitConfirmationMenu_NoSelected;
 		exitConfirmationMenu.AddEntry("Yes");
@@ -487,12 +513,75 @@ internal abstract class GameScene : Scene
 				return;
 			}
 			netRemotePauseHeld = false;
+			NetHideKickMenu(restoreOverlay: false);
 			Collection.Remove((GameComponent)(object)netPauseOverlay);
 			Collection.Pop();
 			base.SoundManager.SetPauseMuffle(on: false);
 			pausestopper.Start();
 			pausestopper.Reset();
 		}
+	}
+
+	// Card 0b8a300b: swap the passive curtain for the host's kick menu. Called by NetSession
+	// once the remote pause has outlasted its offer delay. Added AFTER the Push (like the
+	// overlay and the local pause menu), which is what keeps it Enabled over the frozen world.
+	internal void NetShowKickMenu()
+	{
+		if (netKickMenuUp || !netRemotePauseHeld)
+		{
+			return;
+		}
+		netKickMenuUp = true;
+		// One at a time: the menu carries its own dim and its own "the other player has paused"
+		// prompt, so leaving the overlay under it would double-darken and say it twice.
+		Collection.Remove((GameComponent)(object)netPauseOverlay);
+		netKickMenu.Reset();
+		netKickMenu.Setup(ControlDevice.Keyboard);
+		netKickMenu.Show(); // Show() does the Collection.Add itself -- the pausedScene pattern.
+	}
+
+	// restoreOverlay: true when the pause is still on and we are only retracting the offer
+	// ("Keep Waiting"); false when the freeze itself is ending and the caller removes the
+	// overlay anyway.
+	internal void NetHideKickMenu(bool restoreOverlay)
+	{
+		if (!netKickMenuUp)
+		{
+			return;
+		}
+		netKickMenuUp = false;
+		netKickMenu.RemoveInstantly();
+		if (restoreOverlay && netRemotePauseHeld)
+		{
+			Collection.Add((GameComponent)(object)netPauseOverlay);
+		}
+	}
+
+	private void netKickMenu_KeepWaitingSelected(MenuSub1 sender)
+	{
+		NetHideKickMenu(restoreOverlay: true);
+		// Re-arm rather than retire: a griefer holding pause forever must not get one refusal
+		// and then a permanently frozen host.
+		EvilAliensWeb.Compat.Net.NetSession.RearmKickOffer();
+	}
+
+	private void netKickMenu_KickSelected(MenuSub1 sender)
+	{
+		NetKick(block: false);
+	}
+
+	private void netKickMenu_KickAndBlockSelected(MenuSub1 sender)
+	{
+		NetKick(block: true);
+	}
+
+	// KickPeer unfreezes us synchronously (it clears the remote pause, which pops the
+	// collection), so drop the menu FIRST -- it was added after that Push and must not be
+	// left drawing over a world that is running again.
+	private void NetKick(bool block)
+	{
+		NetHideKickMenu(restoreOverlay: false);
+		EvilAliensWeb.Compat.Net.NetSession.KickPeer(block);
 	}
 
 	// Peer stream has gone quiet, but the drop verdict has not been called yet (card 11.5).
@@ -614,6 +703,7 @@ internal abstract class GameScene : Scene
 		NetActiveScene = this;
 		netLocalPauseUp = false;
 		netRemotePauseHeld = false;
+		netKickMenuUp = false;
 		pausestopper.Reset();
 		pausestopper.Stop();
 		Background.Reset();
@@ -664,6 +754,15 @@ internal abstract class GameScene : Scene
 			// The peer paused before this scene existed (level-load race / reconnect) --
 			// pick the freeze up now instead of missing the edge.
 			NetSetRemotePaused(on: true);
+		}
+		else if (EvilAliensWeb.Compat.DebugFlags.NetKickMenu)
+		{
+			// ?netkickmenu: park the host's kick menu with no peer at all, purely so its
+			// appearance can be screenshot (the ?gamebrowser fake-entry precedent). Drives the
+			// REAL freeze + swap, so what lands in the capture is the real thing; the entries
+			// are inert because KickPeer no-ops without a session. Armed here, fired a couple
+			// of seconds into Update -- see netKickMenuAt.
+			netKickMenuAt = Environment.TickCount64 + NetKickMenuDelayMs;
 		}
 	}
 
@@ -896,6 +995,17 @@ internal abstract class GameScene : Scene
 		snapshottimer.Update(gameTime);
 		snapshotdelaytimer.Update(gameTime);
 		pausestopper.Update(gameTime);
+		// ?netkickmenu: let the level actually get going, THEN freeze it under the kick menu.
+		// Doing this in Initialize instead would park the world before it has drawn a frame, so
+		// the capture would show the menu over a blank scene -- and the real thing always
+		// freezes a running level. One-shot; ticks down on the normal update, so it fires once
+		// the scene is genuinely live.
+		if (netKickMenuAt != 0 && Environment.TickCount64 >= netKickMenuAt)
+		{
+			netKickMenuAt = 0;
+			NetSetRemotePaused(on: true);
+			NetShowKickMenu();
+		}
 		bool flag = false;
 		ControlDevice controlDevice = ControlDevice.AI;
 		if ((base.InputHandler.Pressed(MyKeys.Enter) || base.InputHandler.Pressed(MyKeys.Esc)) && oracle.DeviceIsPlaying(ControlDevice.Keyboard))
@@ -1204,6 +1314,14 @@ internal abstract class GameScene : Scene
 		// scenes are singletons that get re-added, the stale netPeerStalled would make the
 		// banner never appear again on the next play of that level.
 		NetSetPeerStalled(on: false);
+		// Same reasoning as the stall banner above: the kick menu is added outside the pushed
+		// layer, so nothing else here would take it down, and level scenes are re-added
+		// singletons -- a stale netKickMenuUp would make the offer never appear again.
+		NetHideKickMenu(restoreOverlay: false);
+		// Blocks are scoped to ONE level run (the card's "for that session only"). This is also
+		// what stops them outliving the host's game entirely, since NetSession.Stop deliberately
+		// does not clear them.
+		EvilAliensWeb.Compat.Net.NetSession.ClearBlockedPeers();
 		if (NetActiveScene == this)
 		{
 			NetActiveScene = null;

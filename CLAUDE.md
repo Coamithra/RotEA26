@@ -111,6 +111,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
   Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
+- **Host kick / block** (card 0b8a300b): `?netkickmenu` (pair with `?level=<Name>`) parks the
+  host's remote-pause kick menu over a live level with no peer, for a screenshot;
+  `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
+  two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
+  the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new

@@ -248,6 +248,15 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest'). Runs
+		// Compat/Net/NetKickTest.Run() and returns the PASS/FAIL report.
+		[JSInvokable("debugKickTest")]
+		public static string KickTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's

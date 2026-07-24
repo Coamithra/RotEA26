@@ -54,6 +54,10 @@ namespace EvilAliensWeb.Compat.Net
         // allocates every roster slot, so a client-side join has to ask for one.
         public const byte EvJoinRequest = 18; // client -> host: a couch player pressed Start, give me a slot
         public const byte EvSlotGrant = 19;   // host -> client: [slot:1] (SlotNone = roster full, refused)
+        // Card 0b8a300b (anti-griefing): host -> client, "you are out of this match".
+        // [blocked:1] -- 1 also means the host blocked our peer id for the rest of its level,
+        // so a rejoin will be refused at the hello (RejectBanned). Payload via EncodeByteEvent.
+        public const byte EvKick = 20;
 
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
@@ -155,7 +159,7 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- handshake ----------------------------------------------------------------
 
-        // v5: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1] = 13 bytes. The
+        // v6: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1][peerId:8] = 21 bytes. The
         // build hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
         // the identical published binary" -- a stale-cached client is REJECTED, not subtly
         // desynced. Flags currently carry only the DebugFlags.Active bit (menu-lobby
@@ -164,20 +168,28 @@ namespace EvilAliensWeb.Compat.Net
         // slot -- the host allocates every slot, so the oracle slot IS the wire slot on both
         // sides and no host-relative translation exists any more. The client sends SlotNone
         // (it has nothing to grant); the host's own primary is always slot 0.
+        //
+        // peerId (v6, card 0b8a300b) is the sender's own identity -- an FNV-1a 64 of a random
+        // token webrtc.js mints once and keeps in localStorage. It exists ONLY so a host can
+        // refuse a peer it kicked+blocked (RejectBanned) for the rest of its level; nothing
+        // else reads it, and it never reaches the signaling server -- only a peer we are
+        // already connected to P2P. It is SELF-REPORTED, so it is a speed bump against casual
+        // griefing, not authentication: clearing site data mints a new one. Do not build
+        // anything that needs to trust it on top of this.
         public const byte HelloFlagDebugActive = 1 << 0;
-        public const int HelloBytes = 13;
+        public const int HelloBytes = 21;
 
-        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
+        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId)
         {
-            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot);
+            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot, peerId);
         }
 
-        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
+        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId)
         {
-            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot);
+            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot, peerId);
         }
 
-        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
+        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId)
         {
             byte[] b = new byte[HelloBytes];
             b[0] = type;
@@ -187,16 +199,19 @@ namespace EvilAliensWeb.Compat.Net
             WriteU32(b, 7, (uint)(buildHash >> 32));
             b[11] = flags;
             b[12] = primarySlot;
+            WriteU32(b, 13, (uint)peerId);
+            WriteU32(b, 17, (uint)(peerId >> 32));
             return b;
         }
 
-        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot)
+        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot, out ulong peerId)
         {
             version = 0;
             isHost = false;
             buildHash = 0;
             flags = 0;
             primarySlot = SlotNone;
+            peerId = 0;
             if (b.Length < HelloBytes)
             {
                 return false;
@@ -206,6 +221,7 @@ namespace EvilAliensWeb.Compat.Net
             buildHash = ReadU32(b, 3) | ((ulong)ReadU32(b, 7) << 32);
             flags = b[11];
             primarySlot = b[12];
+            peerId = ReadU32(b, 13) | ((ulong)ReadU32(b, 17) << 32);
             return true;
         }
 
@@ -219,6 +235,10 @@ namespace EvilAliensWeb.Compat.Net
         // listing and the pairing. Must be refused, never left hanging: a joiner with no granted
         // slot would keep slot 0, which is the host's own player, and cross-credit everything.
         public const byte RejectFull = 4;
+        // Card 0b8a300b: this peer was kicked+blocked by the host earlier in its current level.
+        // Refused at the hello, which is the ONE choke point both rejoin routes pass through
+        // (the public game browser and a typed room code).
+        public const byte RejectBanned = 5;
 
         public static byte[] EncodeReject(byte reason)
         {

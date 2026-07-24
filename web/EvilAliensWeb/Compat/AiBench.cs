@@ -381,9 +381,10 @@ internal static class AiBench
 	// TeamChallenge, whose second ship is the same bot flying the same tether.
 	//
 	// `verdict` is deliberately NOT resolved here. AiBench cannot tell "the cap was reached"
-	// from "still going" — only the caller knows the budget it set — and on the seven challenge
-	// levels that run with score.Lives = -1 (GameScene.Initialize) a GAME OVER can never arrive,
-	// so "no verdict" is the NORMAL way for those to fail. The runner supplies TIMEOUT.
+	// from "still going" — only the caller knows the budget it set — and on the eight challenge
+	// levels that run with score.Lives = -1 (GameScene.Initialize; only InsaneBossI overrides it)
+	// a GAME OVER can never arrive, so "no verdict" is the NORMAL way for those to fail. The
+	// runner supplies TIMEOUT.
 	internal static string Row()
 	{
 		if (!Enabled)

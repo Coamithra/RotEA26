@@ -820,10 +820,12 @@ before hunting a blind spot in any future stalled-level report.
 
 - **A VICTORY on most of these levels is worth less than it looks, because deaths are FREE.**
   `GameScene.Initialize` sets `score.Lives = -1` and `LoseLife`'s decrement/game-over block is
-  gated on `score.Lives >= 0`, so seven of the nine can never reach GAME OVER -- a death just
-  reverts to the last checkpoint, forever. Only `InsaneBossI` overrides it (5 lives on
-  Hard/Very Hard, 1 on Inzane) among the challenges; the story levels get 7 via
-  `ApplyDifficultyPolicy`. **So read the deaths column, not just the verdict**: SpaceDodge "passes"
+  gated on `score.Lives >= 0`, so EIGHT of the nine can never reach GAME OVER -- a death just
+  reverts to the last checkpoint, forever. `InsaneBossI` is the only challenge that overrides it,
+  and only above Medium (5 lives on Hard/Very Hard, 1 on Inzane -- at Easy/Medium even it is
+  unlimited); the story levels get 7 via `ApplyDifficultyPolicy`, which no challenge calls.
+  (`TutorialLevel.InitialLives = 7` is DEAD -- declared, never read; the Tutorial runs unlimited
+  like the rest.) **So read the deaths column, not just the verdict**: SpaceDodge "passes"
   at 43 deaths in one run, and its 4-death run and its 43-death run are the same word.
 - **Hence the sweep's third verdict, `TIMEOUT`.** `AiBench.BenchVerdict` only knows
   VICTORY/GAME OVER; on a `Lives = -1` level "never finished" is the ONLY way to fail, so the
@@ -851,16 +853,21 @@ before hunting a blind spot in any future stalled-level report.
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),
   the player's own `Bullet`, and `BrainAura` (the BrainBoss's cosmetic aura). All three are
   correctly outside the AI's world model.
-- **`?aiteam` -- TeamChallenge cannot be benched, or played on a keyboard, without it.**
-  `TeamChallenge.Initialize` seats the second slot as `ControlDevice.PadOne`, and
-  `GameScene.Update` raises `pauseRequested` every tick a seated pad device reads
-  `!InputHandler.PadConnected(i)`. With no gamepad attached the world is frozen in the pause
-  menu permanently: measured `ticks=0 noship=1 prog=2/52` over 37 sim-seconds, versus
-  `ticks=1682 shots=1029 prog=6/52` with the flag. The flag swaps in `ControlDevice.Generic` --
-  a real human device with no connected-check, the same reason the net layer's `?netlocal`
-  couch-join sim seats it. **It is DEBUG-ONLY and deliberately does not change the shipped
-  seating**; that the shipped seating makes a challenge level unplayable without a pad is a
-  separate gameplay bug with its own card.
+- **`?aiteam` -- TeamChallenge cannot be BENCHED without it.** `TeamChallenge.Initialize` seats
+  the second slot as `ControlDevice.PadOne`, and `GameScene.Update` raises `pauseRequested`
+  every tick a seated pad device reads `!InputHandler.PadConnected(i)`. With no gamepad attached
+  the world is frozen in the pause menu permanently: measured `ticks=0 noship=1 prog=2/52` over
+  37 sim-seconds, versus `ticks=1682 shots=1029 prog=6/52` with the flag. The flag swaps in
+  `ControlDevice.Generic`, which has no connected-check, so the force-pause never arms.
+  **It is DEBUG-ONLY and shipped behaviour is unchanged.**
+  - **`?aiteam` only works PAIRED WITH `?aiplayer`, and it is not a fix for human play.**
+    `PlayerShip.Update`'s controller switch has **no `ControlDevice.Generic` case at all** (the
+    device appears only in menu/pause/join paths), so a Generic-seated ship never steers and
+    never fires. What makes the second ship move is `?aiplayer` forcing every local ship onto
+    the AI branch via `EffectiveController`. `?aiteam` alone leaves it inert.
+  - So **TeamChallenge really is unplayable on this port without a gamepad** (permanent
+    force-pause), and this flag does NOT address that -- a real fix needs a `Generic` case in
+    the ship's input switch, or a different seating decision. Separate gameplay bug, own card.
 - **Sweep it with `eaAiBench.matrix(levels, simSeconds, runs, difficulty)`** (`index.html`;
   `.results()` `.status()` `.stop()`). ONE FRESH PAGE LOAD PER RUN, plan carried in
   `sessionStorage` and resumed at boot -- not an in-process relaunch, because a level

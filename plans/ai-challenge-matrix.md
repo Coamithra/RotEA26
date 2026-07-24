@@ -14,10 +14,11 @@ All nine derive from `GameScene`, so `?aibench`'s progress/verdict seams
 (`BenchEventPos`/`BenchEventCount`/`BenchVerdict`) work on them unchanged. Four things
 found while reading the code change what "measure" has to mean:
 
-1. **Seven of the nine have INFINITE lives, so `GAME OVER` is unreachable on them.**
+1. **Eight of the nine have INFINITE lives, so `GAME OVER` is unreachable on them.**
    `GameScene.Initialize` sets `score.Lives = -1` (GameScene.cs:736) and only the story
-   levels (`ApplyDifficultyPolicy` → 7) and `InsaneBossI` (5 on Hard/Very Hard, 1 on Inzane)
-   override it. `LoseLife`'s decrement/game-over block is gated on `score.Lives >= 0`, so at
+   levels (`ApplyDifficultyPolicy` → 7, called by Level1/2/3 only) and `InsaneBossI` (5 on
+   Hard/Very Hard, 1 on Inzane — unlimited at Easy/Medium) override it. `TutorialLevel`
+   declares an `InitialLives = 7` const but never reads it, so the Tutorial is unlimited too. `LoseLife`'s decrement/game-over block is gated on `score.Lives >= 0`, so at
    -1 a death just respawns forever. Confirmed live: a 1200 sim-second ClassicAliens run took
    **14 deaths** and never produced a verdict.
    → `AiBench`'s two-value verdict cannot express failure on these levels. The matrix needs a
@@ -69,10 +70,11 @@ revs/s, coast%, idle%) so the runner does not have to regex the human report lin
 ### C. `?aiteam` — make TeamChallenge measurable (`TeamChallenge.cs` + `DebugFlags.cs`)
 
 Seat the second slot as `ControlDevice.Generic` instead of `ControlDevice.PadOne` when the
-flag is set. `Generic` is a real human device with no connected-check (the same trick
-`?netlocal` uses for synthetic couch joins), so the force-pause never arms and `?aiplayer`
-drives both ships through `EffectiveController`. Debug-gated and added to `DebugFlags.Active`;
-a shipped build is byte-identical.
+flag is set. `Generic` has no connected-check, so the force-pause never arms, and `?aiplayer`
+is what actually drives both ships through `EffectiveController` — `PlayerShip.Update` has no
+`Generic` input case, so the flag alone leaves that slot inert. It is a bench seam, **not** a
+fix for TeamChallenge being unplayable without a pad (that needs a real input case → follow-up
+card). Debug-gated and added to `DebugFlags.Active`; shipped behaviour is unchanged.
 
 ### D. Measure
 

@@ -195,6 +195,13 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchReset')); }
             catch (e) { console.warn('[debug] eaAiBench.reset failed (game not booted yet?): ' + e.message); }
         };
+        // eaAiBench.row() — the same counters as eaAiBench() but as one machine-readable
+        // key=value line. What eaAiBench.matrix() records per run; handy on its own for a
+        // manual soak you want to paste somewhere.
+        window.eaAiBench.row = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow')); }
+            catch (e) { console.warn('[debug] eaAiBench.row failed (game not booted yet?): ' + e.message); }
+        };
         window.eaAiBench.world = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchWorld')); }
             catch (e) { console.warn('[debug] eaAiBench.world failed: ' + e.message); }
@@ -237,9 +244,12 @@
         // and a single wedged run would take the whole sweep down instead of one row.
         //
         // The third verdict lives here, not in C#: AiBench cannot tell "the cap was reached"
-        // from "still going", and on the seven challenge levels that run with score.Lives = -1
-        // (GameScene.Initialize) a GAME OVER can never arrive at all — "never finished" IS how
-        // those fail, so TIMEOUT has to be a first-class outcome of the sweep.
+        // from "still going", and on the eight challenge levels that run with score.Lives = -1
+        // (GameScene.Initialize; only InsaneBossI overrides it) a GAME OVER can never arrive at
+        // all — "never finished" IS how those fail, so TIMEOUT has to be a first-class outcome.
+        // For the same reason an INFRASTRUCTURE failure must never be able to wear the TIMEOUT
+        // label: "the bot could not finish" is the whole claim the sweep exists to make, so a
+        // dead runtime or a level that never booted reports ERROR / NO LEVEL instead.
         //
         //   eaAiBench.matrix()                          — 9 challenge levels x 3 runs, Very_Hard
         //   eaAiBench.matrix(['OwnLevel'], 600, 1)      — one level, 600 sim-seconds, one run
@@ -247,14 +257,44 @@
         //
         // Fire and forget — never await it. Each run outlives any single devtools/CDP eval, and
         // the sweep survives the navigations that an awaited promise could not.
+        //
+        // KEEP THE TAB FOREGROUNDED. The soak itself is rAF-independent (that is its whole
+        // point), but the BOOT of each run is not: Game1.WarmThenLaunch decodes one texture per
+        // rAF tick, and a backgrounded tab throttles rAF — so a hidden sweep times out waiting
+        // for the level and every row comes back NO LEVEL.
         (() => {
-            const KEY = 'eaAiMatrix';
+            // Namespaced like the file's other web-storage keys (eaweb_save:, eaweb_loadprofile):
+            // the live site shares an origin with the other games on coamithra.github.io.
+            const KEY = 'eaweb_aimatrix';
+            // Bumped when the plan's SHAPE changes. load() drops anything that does not match, so
+            // a plan left by another version of this code can never be half-read by this one.
+            const PLAN_VERSION = 1;
             // WebcamAliens is excluded by design: it is camera-driven and has no
             // ControlDevice.AI ship path at all.
             const LEVELS = ['Tutorial', 'Braineroids', 'SpaceDodge', 'OwnLevel', 'ClassicAliens',
                             'InsaneBossI', 'TeamChallenge', 'CrazyGame', 'Paratrooper'];
-            const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
-            const save = (p) => { try { sessionStorage.setItem(KEY, JSON.stringify(p)); } catch (e) { } };
+            // Set by .stop(), and checked by the in-flight run before it saves or navigates: the
+            // running runOne holds `plan` in a closure, so clearing storage alone would let it
+            // save its copy back and resurrect the sweep it was told to end.
+            let stopped = false;
+            const load = () => {
+                try {
+                    const p = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+                    return (p && p.v === PLAN_VERSION && Array.isArray(p.queue)) ? p : null;
+                } catch (e) { return null; }
+            };
+            // Reports rather than swallowing: if this silently fails mid-sweep, plan.at never
+            // advances, the next page loads the same plan and re-runs the same level — an
+            // invisible infinite navigation loop. Same shape as eaSave.set / eaLoadProfile.save.
+            const save = (p) => {
+                try { sessionStorage.setItem(KEY, JSON.stringify(p)); return true; }
+                catch (e) {
+                    console.warn('[aibench] matrix: could not save the plan (storage full or disabled?) — '
+                        + 'stopping rather than looping on the same run: ' + e.message);
+                    stopped = true;
+                    return false;
+                }
+            };
             const yieldTick = () => new Promise(r => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
 
             const urlFor = (plan, i) => {
@@ -282,7 +322,15 @@
                 // Row() sends the verdict space-free so it survives the key=value split.
                 const body = rows.map(r => '| ' + [r.level, r.run, String(r.verdict).replace(/_/g, ' '), r.sim, r.deaths,
                     r.prog + '/' + r.progTotal, r.contacts, r.revs, r.coast, r.idle].join(' | ') + ' |');
-                return ['[aibench] completion matrix — difficulty=' + plan.difficulty
+                // The difficulty the runs OBSERVED, not the one that was asked for. ?difficulty=
+                // falls through silently on a typo, so a whole sweep can run at the saved tier
+                // while the header claims Very_Hard — which would then be copied into a doc.
+                const seen = rows.map(r => r.difficulty).filter(Boolean);
+                const actual = seen.filter((d, i) => seen.indexOf(d) === i);
+                const asked = plan.difficulty;
+                const diffNote = (actual.length && (actual.length > 1 || actual[0] !== asked))
+                    ? ' MEASURED AT ' + actual.join('+') + ' (asked for ' + asked + ')' : '';
+                return ['[aibench] completion matrix — difficulty=' + asked + diffNote
                     + ' cap=' + plan.cap + 's runs=' + plan.runs,
                     head, sep].concat(body).join('\n');
             };
@@ -295,72 +343,121 @@
                 while (performance.now() < deadline) {
                     try {
                         const row = parseRow(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow'));
-                        if (row.level === level) { return true; }
-                        if (row.off) { console.warn('[aibench] matrix: ?aibench is off — aborting'); return false; }
+                        if (row.level === level) { return 'ok'; }
+                        if (row.off) { return 'no-aibench'; }
                     } catch (e) { /* runtime not up yet */ }
                     await new Promise(r => setTimeout(r, 250));
                 }
-                return false;
+                return 'timeout';
             };
+
+            // Every column the table prints, so a row built on a failure path renders as '-'
+            // rather than the word "undefined" in five cells.
+            const blankRow = (verdict) => ({ verdict: verdict, sim: '0', deaths: '-', prog: '0',
+                progTotal: '0', contacts: '-', shots: '-', revs: '-', turn: '-', coast: '-', idle: '-' });
 
             const runOne = async (plan) => {
                 const i = plan.at, level = plan.queue[i];
-                const ok = await waitForLevel(level, 90000);
+                const boot = await waitForLevel(level, 90000);
                 let row;
-                if (!ok) {
-                    row = { verdict: 'NO LEVEL', sim: '0', deaths: '-', prog: '0', progTotal: '0',
-                            contacts: '-', revs: '-', coast: '-', idle: '-' };
+                if (boot !== 'ok') {
+                    // NOT a TIMEOUT: nothing was measured. Name the cause, because "the level
+                    // never came up" and "the bot could not finish it" are opposite conclusions.
+                    row = blankRow(boot === 'no-aibench' ? 'NO AIBENCH' : 'NO BOOT');
+                    console.warn('[aibench] matrix: ' + level + ' — ' + (boot === 'no-aibench'
+                        ? '?aibench is off, nothing to measure'
+                        : 'the level never came up within 90s. Is the tab backgrounded? '
+                          + 'The per-run boot decodes one texture per rAF tick and rAF throttles when hidden.'));
                 } else {
                     // Rearm now that the level is actually up. AiBench.Update runs on EVERY
                     // tick, including the ~20s of real rAF frames spent booting WASM and warming
                     // the level's textures -- without this the row's clock overshoots the cap by
                     // the boot time and its coast%/idle% are diluted by ticks with no level.
                     DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchReset');
-                    let done = 0, verdict = 'running';
+                    let done = 0, verdict = 'running', failure = null;
                     while (done < plan.cap && verdict === 'running') {
                         let r;
                         try { r = DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRun', Math.min(10, plan.cap - done)); }
-                        catch (e) { verdict = 'ERROR ' + e.message; break; }
+                        catch (e) { failure = 'ERROR'; console.warn('[aibench] matrix: ' + level + ' soak threw: ' + e.message); break; }
                         const parts = r.split(' ');
                         const ran = parseFloat(parts[0]);
                         verdict = parts.slice(1).join(' ');
-                        if (!(ran > 0)) { break; }
+                        // RunHeadless refuses (0 OFF / 0 NOGAME) or made no progress. The soak
+                        // ended early for a reason that is NOT the AI running out of time.
+                        if (!(ran > 0)) { failure = 'STALLED'; console.warn('[aibench] matrix: ' + level + ' soak stopped early: ' + verdict); break; }
                         done += ran;
                         await yieldTick();
                     }
-                    row = parseRow(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow'));
-                    // The cap ran out with the level still going. On a score.Lives = -1 level
-                    // that is the ONLY way to fail, so it must read as a distinct outcome and
-                    // never as a blank or a pass.
-                    if (row.verdict === 'running') { row.verdict = 'TIMEOUT'; }
-                    if (row.noship) { row.verdict = 'NO SHIP'; }
+                    if (failure) {
+                        row = blankRow(failure);
+                    } else {
+                        row = parseRow(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRow'));
+                        // The cap ran out with the level still going. On a score.Lives = -1 level
+                        // that is the ONLY way to fail, so it must read as a distinct outcome and
+                        // never as a blank or a pass. Reached only when the soak ran clean —
+                        // an infrastructure failure above must not borrow this label.
+                        if (row.verdict === 'running') { row.verdict = 'TIMEOUT'; }
+                        if (row.noship) { row = Object.assign(blankRow('NO SHIP'), { sim: row.sim, prog: row.prog, progTotal: row.progTotal, difficulty: row.difficulty }); }
+                    }
                 }
                 row.level = level;
                 row.run = plan.runOf[i];
                 (plan.results = plan.results || []).push(row);
                 plan.at++;
-                save(plan);
                 console.log('[aibench] matrix ' + plan.at + '/' + plan.queue.length + ' — '
                     + level + ' run ' + row.run + ': ' + row.verdict
                     + ' at ' + row.sim + 's sim, deaths=' + row.deaths + ' prog=' + row.prog + '/' + row.progTotal);
+                // .stop() during this run, or a storage failure: do not persist and do not
+                // navigate, or the sweep restarts itself on the next page.
+                if (stopped || !save(plan)) { console.log(table(plan)); return; }
                 if (plan.at < plan.queue.length) { location.replace(urlFor(plan, plan.at)); return; }
                 plan.done = true;
                 save(plan);
                 console.log(table(plan));
             };
 
+            // A run must never take the SWEEP down -- one fresh page per run exists precisely so
+            // a wedged run costs one row. Record the failure, advance, and carry on.
+            const runOneGuarded = (plan) => runOne(plan).catch(e => {
+                console.warn('[aibench] matrix: ' + plan.queue[plan.at] + ' run failed: ' + e.message);
+                (plan.results = plan.results || []).push(Object.assign(blankRow('ERROR'),
+                    { level: plan.queue[plan.at], run: plan.runOf[plan.at] }));
+                plan.at++;
+                if (stopped || !save(plan)) { return; }
+                if (plan.at < plan.queue.length) { location.replace(urlFor(plan, plan.at)); return; }
+                plan.done = true;
+                save(plan);
+                console.log(table(plan));
+            });
+
             window.eaAiBench.matrix = (levels, simSeconds, runs, difficulty) => {
-                const lv = (levels && levels.length) ? levels.slice() : LEVELS.slice();
-                const n = Math.max(1, runs || 3);
-                const plan = { difficulty: difficulty || 'Very_Hard', cap: simSeconds || 1800,
+                // A bare string is the easy mistake (the doc line shows an array); without this
+                // it passes the truthiness test, survives .slice(), and throws in forEach.
+                const asked = (typeof levels === 'string') ? [levels] : levels;
+                const lv = (asked && asked.length) ? Array.prototype.slice.call(asked) : LEVELS.slice();
+                const unknown = lv.filter(l => LEVELS.indexOf(l) < 0);
+                // A typo costs 90s of dead waiting per run and yields rows that look like
+                // failures, so refuse up front the way DebugFlags does for a bad ?level=.
+                if (unknown.length) {
+                    console.warn('[aibench] matrix: unknown level(s) ' + unknown.join(', ')
+                        + '. Known: ' + LEVELS.join(', '));
+                    return;
+                }
+                const n = Math.max(1, Number(runs) || 3);
+                const plan = { v: PLAN_VERSION, difficulty: difficulty || 'Very_Hard',
+                               cap: Number(simSeconds) || 1800,
                                runs: n, queue: [], runOf: [], at: 0, results: [], done: false };
                 // Pass by pass, not level by level: a full matrix exists after the first pass, so
                 // an interrupted sweep still answers the card for every level.
                 for (let r = 1; r <= n; r++) { lv.forEach(l => { plan.queue.push(l); plan.runOf.push(r); }); }
-                save(plan);
+                // Any run still executing on THIS page would otherwise save its own (now stale)
+                // plan over the one just written, and navigate to its own next run.
+                stopped = true;
+                if (!save(plan)) { return; }
+                stopped = false;
                 console.log('[aibench] matrix: ' + plan.queue.length + ' runs queued ('
                     + lv.length + ' levels x ' + n + '), cap ' + plan.cap + 's sim, '
-                    + plan.difficulty + '. The page will reload once per run.');
+                    + plan.difficulty + '. The page will reload once per run — keep the tab foregrounded.');
                 location.replace(urlFor(plan, 0));
             };
             window.eaAiBench.matrix.results = () => { const p = load(); console.log(p ? table(p) : '[aibench] matrix: no sweep in this tab'); };
@@ -369,13 +466,22 @@
                 console.log(p ? ('[aibench] matrix ' + p.at + '/' + p.queue.length + (p.done ? ' (done)' : ' (running)'))
                               : '[aibench] matrix: no sweep in this tab');
             };
-            window.eaAiBench.matrix.stop = () => { sessionStorage.removeItem(KEY); console.log('[aibench] matrix: plan cleared (this page keeps playing)'); };
+            window.eaAiBench.matrix.stop = () => {
+                stopped = true;
+                try { sessionStorage.removeItem(KEY); } catch (e) { }
+                console.log('[aibench] matrix: stopped — the run in flight finishes but records nothing '
+                    + 'and does not advance. This page keeps playing.');
+            };
 
-            // Resume on boot. Anything that throws here would strand the sweep silently, so the
-            // whole resume is guarded and reports rather than dying quietly.
-            const plan = load();
-            if (plan && !plan.done && plan.at < plan.queue.length) {
-                runOne(plan).catch(e => console.warn('[aibench] matrix run failed: ' + e.message));
+            // Resume on boot. This runs inside the page's main <script>, so an uncaught throw
+            // here would abort every definition BELOW it -- including eaQuit, which is SHIPPED
+            // behaviour (the main menu's Exit -> Meridian handoff). Hence the try around the
+            // whole thing, not just the async rejection.
+            try {
+                const plan = load();
+                if (plan && !plan.done && plan.at < plan.queue.length) { runOneGuarded(plan); }
+            } catch (e) {
+                console.warn('[aibench] matrix: could not resume a stored plan: ' + e.message);
             }
         })();
 

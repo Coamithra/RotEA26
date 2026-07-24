@@ -942,13 +942,16 @@ namespace EvilAliensWeb.Compat
 		public static bool AIPlayer { get; private set; }
 
 		// ?aiteam (card 9391f95a): seat TeamChallenge's SECOND slot as ControlDevice.Generic
-		// instead of ControlDevice.PadOne. Without it that level cannot be benched -- or played
-		// on this port without a gamepad at all: GameScene.Update raises pauseRequested every
-		// tick a seated pad device reads !InputHandler.PadConnected(i), so an unattended soak
-		// sits in the pause menu forever at prog=0 with nothing saying why. Generic is a real
-		// human input device with no connected-check (the same reason NetSession's ?netlocal
-		// couch-join sim seats it), so both ships then follow ?aiplayer's EffectiveController
-		// onto the AI branch. In Active.
+		// instead of ControlDevice.PadOne, so the level can be BENCHED. GameScene.Update raises
+		// pauseRequested every tick a seated pad device reads !InputHandler.PadConnected(i), so
+		// with no gamepad attached an unattended soak sits in the pause menu forever at prog=0
+		// with nothing saying why; Generic has no such connected-check.
+		// PAIR IT WITH ?aiplayer -- this flag does NOT by itself give that slot a driver.
+		// PlayerShip.Update's controller switch has no ControlDevice.Generic case (the device
+		// only appears in menu/pause/join paths), so a Generic-seated ship never steers and never
+		// fires; what moves it is ?aiplayer forcing every local ship onto the AI branch through
+		// EffectiveController. It is therefore a bench seam, NOT a fix for TeamChallenge being
+		// unplayable without a pad -- that needs a real input case and has its own card. In Active.
 		public static bool AiTeam { get; private set; }
 
 		// ?aibench (card f4d1721f): AI telemetry -- wall contacts (counted even under ?invuln),

@@ -15,7 +15,7 @@ Worktree `.claude/worktrees/wt4`, dev port `5284`.
 - [x] Read the AI ship path (`PlayerShip` DoAI*, `Oracle`)
 - [x] Read the 9 unmeasured levels' event scripts + control schemes
 - [x] Identify which levels can even run headless — findings:
-  - 7 of 9 run with `score.Lives = -1` (GameScene.cs:736) so GAME OVER is unreachable
+  - 8 of 9 run with `score.Lives = -1` (GameScene.cs:736) so GAME OVER is unreachable
   - TeamChallenge force-pauses forever (PadOne seated, no pad) → unmeasurable without a fix
   - Paratrooper is a turret (ship pinned at 400,500) → steering metrics vacuous
   - Braineroids/CrazyGame use the ordinary ship (the card's caution was speculative)
@@ -30,20 +30,20 @@ Worktree `.claude/worktrees/wt4`, dev port `5284`.
 - [x] `AiBench.Row()` + `debugAiBenchRow` — machine-readable per-run counters
 - [x] `eaAiBench.matrix()` sweep runner (sessionStorage plan, one fresh boot per run, TIMEOUT verdict)
 - [x] `?aiteam` — seat TeamChallenge slot 1 as Generic so it is measurable
-- [ ] Run the sweep, record the matrix
-- [ ] Triage: fix defects, list follow-ups
-- [ ] Update docs (root CLAUDE.md + web CLAUDE.md)
+- [x] Run the sweep, record the matrix (9x3 at Very Hard; 6 pass, 3 fail)
+- [x] Triage: no world-model/targeting defect found — `?invuln` control wins all 3 failures
+- [x] Update docs (root CLAUDE.md + web CLAUDE.md)
 
 ## Phase 5: Verify
 - [x] Clean `dotnet build -c Debug`
 - [x] `?aiteam` before/after: `ticks=0 noship=1 prog=2/52` → `ticks=1682 shots=1029 prog=6/52`
 - [x] Runner smoke test (2 levels x 1 run) prints the matrix, resumes across reloads
-- [ ] Full sweep completes with zero console exceptions
-- [ ] Completion matrix written down
+- [x] Full sweep completes with zero console exceptions
+- [x] Completion matrix written down (web CLAUDE.md)
 
 ## Phase 6: Review & Ship
-- [ ] Commit + push
-- [ ] `/review` and fix findings
+- [x] Commit + push
+- [x] `/review` and fix findings (17 found, all 17 fixed)
 - [ ] Pull main, resolve, re-verify
 - [ ] PR + self-merge
 - [ ] Remove worktree/branch, delete plan + tracker

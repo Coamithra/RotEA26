@@ -82,8 +82,9 @@ internal class TeamChallenge : GameScene
 			// PadOne with no gamepad attached makes GameScene.Update raise pauseRequested every
 			// tick (its !PadConnected(i) check), so an unattended ?aiplayer soak never leaves the
 			// pause menu -- prog=0, no verdict, and nothing in the bench line explaining it.
-			// Generic is a real human device with no connected-check, which is also why the net
-			// layer's synthetic couch-join sim seats it.
+			// Generic simply has no connected-check. It gives this slot no DRIVER of its own
+			// (PlayerShip.Update has no Generic case) -- the flag is only ever used with
+			// ?aiplayer, which forces both ships onto the AI branch.
 			oracle.AddPlayer(EvilAliensWeb.Compat.DebugFlags.AiTeam
 				? ControlDevice.Generic
 				: ControlDevice.PadOne);

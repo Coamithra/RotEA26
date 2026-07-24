@@ -819,6 +819,15 @@ the rest are tier-independent.
     hard "do not fly into that" override; low-passing it turns a full reversal into a suggestion
     (measured 46 wall contacts vs the old code's 8). Writing it back stops a flickering probe
     making the clamp its own oscillator.
+  - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
+    It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or a
+    `?ai*` knob in seconds with no browser. It reports per grid: `ChooseGapColumn` switches/s,
+    lateral sign flips/s, `ClampIntoWallSpace` X-reversals/s, wall contacts and the share of ticks
+    under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the whole steering
+    sum, so a claim about the BOT still needs `?aibench`. This is the instrument card f4d1721f
+    lacked, which is why OwnLevel's grid was never in its tuning loop; see tools/CLAUDE.md and the
+    tool's README for its rig caveats.
 - **Fast movers are dodged by CLOSEST APPROACH, not by current distance** (`EvadeMovingThreat`,
   `DefaultThreatLeadMs` 700). Radial repulsion from something crossing the screen pushes the ship
   ALONG its path -- precisely the spider boss's screen-wide sweep. Slow/static threats keep the
@@ -972,8 +981,24 @@ before hunting a blind spot in any future stalled-level report.
     bullet-hell attempt.
   - **OwnLevel is the only challenge with WALLS** and the only one scoring `contacts` (13/1/4).
     Its churn (`turn` 254-477 deg/s) runs far above the ~70 deg/s the parent card settled Level 3
-    at -- the wall-nav work was tuned on Level 3's grids, and OwnLevel's `Walls(game, 2)` maze is
-    a harder case that was never in that loop.
+    at. **That 4-7x gap is NOT a wall-nav defect, and reading it as one cost card b4972696 its
+    premise** -- the two figures come from rigs that differ by more than the grid. The ~70 deg/s
+    baseline is from **`?wallsonly`**, i.e. `Level3.PopulateWallsOnly`, whose own comment says it
+    runs the wall sections "with nothing else spawning"; OwnLevel's 254-477 is the WHOLE level,
+    where `Walls(game, 2)` runs concurrently with a continuous `SkullSpawner(0f, 2f, maze: true)`
+    and (Very_Hard+) a `StarMineSpawner`. Scroll speed is NOT the confounder -- `?wallsonly` calls
+    the same 4.3x `speedup` OwnLevel uses. So it is walls-alone against walls-plus-a-sustained-
+    enemy-stream, and the extra churn belongs to the same sum-of-repulsions problem CrazyGame
+    shows at 389-450 deg/s with **no walls at all**, which is the band OwnLevel sits in.
+    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser): on
+    OwnLevel's grid `ChooseGapColumn` switches 0.17/s -- once every six seconds, 1.3x Level 3's
+    var3 -- and wall contacts are LOWER than var3's (7 vs 10). `WallScanRows` 4->16,
+    `WallCrossPenalty` 4->0 and `WallReactionMs` 420->2000 leave OwnLevel flat and some regress
+    Level 3, so there is no tuning win in the wall term. The one genuinely elevated figure is
+    the fraction of ticks with a blocked row inside reach (10.2% vs 1.6-1.9%): OwnLevel's maze
+    IS tighter, it just is not converting that into switching or contacts.
+    **Before attributing any churn on a walled level to the walls, match the rigs** -- suppress
+    the spawners, or bench the grid offline.
 - **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into
   `Oracle.GetBaddies`.** Its `LooksLikeEnemy` is a deliberately name-shaped heuristic, so it
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),

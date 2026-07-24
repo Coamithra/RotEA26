@@ -430,6 +430,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BgCullTest.Run();
 		}
 
+		// JS bridge for TeamChallenge's partner-seat oracle (eaTeamSeat in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugTeamSeat'). Drives the real
+		// TeamChallenge.ResolvePartnerSeat over every pad-connection mask, so the fix for card
+		// e6927ef8 is verified without four physical gamepads, and runs the pre-card
+		// always-PadOne policy as the negative control. See Compat/TeamSeatTest.cs.
+		[JSInvokable("debugTeamSeat")]
+		public static string TeamSeat()
+		{
+			return EvilAliensWeb.Compat.TeamSeatTest.Run();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's

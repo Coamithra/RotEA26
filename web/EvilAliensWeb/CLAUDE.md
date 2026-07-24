@@ -211,6 +211,8 @@ generate much of the art/audio referenced here.
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
+  `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
+  so it needs neither a level nor a gamepad),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
@@ -417,6 +419,54 @@ site now lives under:
   toggle. The corner fullscreen button + touch overlay (D-pad/FIRE/BACK, touch devices only) live in
   `index.html` **outside `#app`** so they survive Blazor's mount — any new HUD/overlay button
   follows the same pattern.
+- **Local co-op needs a SECOND DEVICE, and TeamChallenge is the only level that seats one for you
+  (card e6927ef8).** Every other seat comes from `GameScene.CheckPlayerJoins`, which needs a real
+  `Start` press, so its device is present by construction. `TeamChallenge.Initialize` seats the
+  partner itself, and the 2008 code seated `ControlDevice.PadOne` unconditionally -- which on this
+  port made the level UNPLAYABLE for a keyboard-only player: `GameScene.Update` raises
+  `pauseRequested` on every tick a seated pad reads `!InputHandler.PadConnected(i)`, so the world
+  sat in the pause menu forever (`ticks=0 prog=2/52` over 37 sim-seconds).
+  - **Both seats are resolved by pure functions now, and neither can hold a pad that is absent.**
+    `ResolvePrimarySeat` seats slot 0 with the device that LAUNCHED the level when it can drive a
+    ship (the 2008 code hard-seated `Keyboard`, which hands a pad-only player a ship they cannot
+    steer), falling back to `Keyboard` otherwise -- including for a pad that has gone away since
+    the menu, which would otherwise pause-loop just as badly. `ResolvePartnerSeat` then takes the
+    lowest-indexed connected pad THE PRIMARY IS NOT USING (the original two-human co-op --
+    gamepads do work here, KNI ships `nkast.Wasm.Dom/js/Gamepad.*.js`), else `ControlDevice.AI` as
+    an auto-pilot partner. The level-select briefing says so; an in-level banner has nowhere safe
+    to live (added during `Startup` it is eaten by `UpdateStartup`'s 1300ms
+    `Purge<AnimatedMessage>`, added in `Normal` it collides with the script's own "Get ready!"
+    beat).
+  - **A pad Start press TAKES OVER the bot's seat -- and without that, two-human co-op would be
+    broken by this fix.** The browser Gamepad API only exposes a pad after a button is pressed on
+    it IN THE PAGE, so player two's idle pad reads DISCONNECTED while `Initialize` resolves the
+    seats: the AI takes the seat and their later Start press would seat a THIRD player, which the
+    tether (always `GetShips()[0]/[1]`) leaves flying free while the bot stays bolted to player
+    one. `GameScene.AddPlayer` therefore consults a new `protected virtual TryAdoptJoinDevice`
+    hook first; `TeamChallenge` claims a joining PAD for the seat the bot holds
+    (`Oracle.SetController` re-points the seat, `PlayerShip.AdoptController` the live ship, so the
+    slot keeps its score and its place in the tether). Only while the bot holds it -- a second pad
+    joining a genuine two-human game still adds a player.
+  - **How good the bot partner is remains unmeasured.** The completion matrix's TeamChallenge row
+    is a TIMEOUT at ~90 deaths with both ships bot-driven; the only clean run (VICTORY 402s, 0
+    deaths) was an `?invuln` CONTROL. So the auto-pilot makes the level playable and reachable, not
+    provably finishable -- worth a look before promising more.
+  - **INVARIANT: the resolved device is never a pad that is not connected** -- exactly the
+    force-pause's precondition, so the loop is unreachable by construction. `GameScene`'s guard
+    itself is deliberately UNTOUCHED: a pad dying MID-RUN should still say so.
+  - The net-session branch is untouched (online the partner is the remote peer, and seating a
+    local pad would both squat the puppet's slot and trip that guard).
+  - **`ControlDevice.Generic` is NOT the fix and cannot be** until it has an input case: it is a
+    first-class device in the menus, `CheckPlayerJoins`, the pause guard and `PlayerSettingsMenu`,
+    but `PlayerShip.Update` has no `Generic` case AND **no key produces `MyKeys.Generic_Start` on
+    this port** (`InputHandler.keysToCheck[8]` is an empty array), so it is unreachable outside
+    `eaPress`. A real second KEYBOARD player -- that case plus a key map, i.e. keyboard local co-op
+    on every level, which this port has never had -- is its own follow-up card.
+  - Flags/verification: `?teampartner=ai|pad` (`pad` = the old unconditional `PadOne`, the
+    deliberate bug reproduction) and console **`eaTeamSeat()`** -- all 16 pad masks x 3 overrides
+    through the REAL resolver, plus the pre-card always-`PadOne` policy as the negative control
+    (the `eaNetScore.test()` rule). Seating is a decision, not a picture: a screenshot cannot show
+    it, and covering it live would need four physical gamepads.
 
 ## Rendering / text
 
@@ -911,7 +961,7 @@ the rest are tier-independent.
     `skill effective=<tier> field= aim=` row, which reports the RESOLVED values; verifying the
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
-- Flags: `?aibench` · `?aiteam` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
+- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
   ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
@@ -949,6 +999,14 @@ inferred.
 | ClassicAliens | TIMEOUT 38/47 / 10 | TIMEOUT 32/47 / 20 | TIMEOUT 42/47 / 19 | **fail** |
 | InsaneBossI | GAME OVER 22/50 / 6 | GAME OVER 32/50 / 8 | GAME OVER 6/50 / 6 | **fail** |
 | TeamChallenge | TIMEOUT 14/52 / 91 | TIMEOUT 14/52 / 89 | TIMEOUT 14/52 / 87 | **fail** |
+
+**TeamChallenge's row still stands after card e6927ef8, and the reason is worth knowing.** It was
+run with `?aiteam`, which seated the partner as `ControlDevice.Generic` -- a device
+`PlayerShip.Update` has no case for -- but the switch is on `EffectiveController()`, and the sweep
+always passes `?aiplayer`, which returns `AI` for every non-puppet. So BOTH ships were bot-driven
+then, and both are bot-driven now that the seat resolves to `ControlDevice.AI` directly: the two
+seatings are bench-equivalent and the numbers carry over. (Its 91/89/87 deaths and `prog` pinned at
+14/52 across all three runs are the AI failing to survive a tethered pair, not an inert partner.)
 
 **The `?invuln` control is what makes that diagnosis, and it is the cheapest one available here:
 re-run a failing level with `?invuln` and the AI wins ALL THREE** -- ClassicAliens 341s,
@@ -1011,21 +1069,18 @@ before hunting a blind spot in any future stalled-level report.
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),
   the player's own `Bullet`, and `BrainAura` (the BrainBoss's cosmetic aura). All three are
   correctly outside the AI's world model.
-- **`?aiteam` -- TeamChallenge cannot be BENCHED without it.** `TeamChallenge.Initialize` seats
-  the second slot as `ControlDevice.PadOne`, and `GameScene.Update` raises `pauseRequested`
+- **TeamChallenge needed `?aiteam` to be BENCHED at all; card e6927ef8 fixed the underlying
+  GAMEPLAY bug instead, so the flag is gone.** `TeamChallenge.Initialize` used to seat the second
+  slot as `ControlDevice.PadOne` unconditionally, and `GameScene.Update` raises `pauseRequested`
   every tick a seated pad device reads `!InputHandler.PadConnected(i)`. With no gamepad attached
-  the world is frozen in the pause menu permanently: measured `ticks=0 noship=1 prog=2/52` over
-  37 sim-seconds, versus `ticks=1682 shots=1029 prog=6/52` with the flag. The flag swaps in
-  `ControlDevice.Generic`, which has no connected-check, so the force-pause never arms.
-  **It is DEBUG-ONLY and shipped behaviour is unchanged.**
-  - **`?aiteam` only works PAIRED WITH `?aiplayer`, and it is not a fix for human play.**
-    `PlayerShip.Update`'s controller switch has **no `ControlDevice.Generic` case at all** (the
-    device appears only in menu/pause/join paths), so a Generic-seated ship never steers and
-    never fires. What makes the second ship move is `?aiplayer` forcing every local ship onto
-    the AI branch via `EffectiveController`. `?aiteam` alone leaves it inert.
-  - So **TeamChallenge really is unplayable on this port without a gamepad** (permanent
-    force-pause), and this flag does NOT address that -- a real fix needs a `Generic` case in
-    the ship's input switch, or a different seating decision. Separate gameplay bug, own card.
+  the world was frozen in the pause menu permanently: measured `ticks=0 noship=1 prog=2/52` over
+  37 sim-seconds, versus `ticks=1682 shots=1029 prog=6/52` with the old flag (which swapped in
+  `ControlDevice.Generic` -- no connected-check, so the force-pause never armed). See the
+  partner-seat bullet under "Input" for the fix; for benching, `?level=TeamChallenge&aiplayer` is
+  now enough. **The matrix numbers carry over unchanged**: `PlayerShip.Update` switches on
+  `EffectiveController()`, so under `?aiplayer` the `Generic`-seated ship was already flying the AI
+  branch -- the old and new seatings are bench-equivalent. `?teampartner=pad` restores the pre-card
+  seating verbatim if the force-pause itself is what you want to reach.
 - **Sweep it with `eaAiBench.matrix(levels, simSeconds, runs, difficulty)`** (`index.html`;
   `.results()` `.status()` `.stop()`). ONE FRESH PAGE LOAD PER RUN, plan carried in
   `sessionStorage` and resumed at boot -- not an in-process relaunch, because a level

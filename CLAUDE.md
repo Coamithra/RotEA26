@@ -67,6 +67,11 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   - BEHAVIOUR / timing / feel over time → an **isolation sim**: stub the game, tick the object's
     `Update`/pure core in a plain loop, read the DATA (or plot it), not a frame — the
     `ApplyLifecycle`/`HarnessApplyPhase` pattern (see `Blast`, `Spider`, `tools/sim/`);
+  - a PURE DECISION in C# (a seating rule, a predicate, a resolver) → the **headless logic
+    oracle**, `dotnet run --project tools/sim/logic_probe -- web/EvilAliensWeb/bin/Debug/net8.0`:
+    it `AssemblyLoadContext`-loads the built `EvilAliensWeb.dll` into the DESKTOP CLR and calls the
+    real static method, so the decision is verified with no browser, no WASM and no rig (add a
+    `Probe*` case set per card; details + limits in tools/CLAUDE.md);
   - tuning values → the matching **live slider panel** (`?wctune`, `?lazershot`, `eaWalls`, ...);
   - a change that should alter NOTHING (rename, reformat, decompiler-artifact cleanup) → the
     **IL-identity oracle**, `python tools/verify_il_identical.py` — see below.
@@ -165,15 +170,25 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   finish it" matrix unattended — one FRESH page load per run (plan in `sessionStorage`, resumed
   at boot), so no run inherits another's locked difficulty, lives or RNG. `.results()`
   `.status()` `.stop()`; never `await` it (each run outlives a single devtools eval).
-  **`?aiteam`** seats TeamChallenge's second slot as `Generic` instead of `PadOne` — without it
-  that level cannot be BENCHED at all, because a seated-but-disconnected pad makes
-  `GameScene.Update` force-pause every tick. Pair it with `?aiplayer`: `PlayerShip` has no
-  `Generic` input case, so the flag alone leaves that ship inert (it is a bench seam, not a fix
-  for TeamChallenge being unplayable without a gamepad — that is its own card). **Eight of the
+  **TeamChallenge needs no special flag since card e6927ef8** — its second slot now resolves to
+  `ControlDevice.AI` when no gamepad is plugged in (it was an unconditional `PadOne`, and a
+  seated-but-disconnected pad makes `GameScene.Update` force-pause every tick, so the level could
+  not be benched OR played at all). The old `?aiteam` bench seam is gone; `?teampartner=pad` brings
+  the broken seating back if the force-pause itself is what you want to reach. **Eight of the
   nine challenge levels run with `score.Lives = -1`, so `GAME OVER` is unreachable on them** —
   failure shows up as the sweep's third verdict, `TIMEOUT`, never as a bad verdict. Keep the tab
   FOREGROUNDED (each run's boot is rAF-paced). Matrix + per-level caveats: web CLAUDE.md.
 
+- **`?teampartner=ai|pad`** (card e6927ef8): override how TeamChallenge seats its SECOND slot.
+  Normally the partner is the lowest connected gamepad the primary player is not using, or an
+  auto-pilot `ControlDevice.AI` partner when there is none — the fix for the level being
+  unplayable (permanent force-pause) on a keyboard-only machine, and a pad Start press takes that
+  seat over mid-level (a browser only reveals a gamepad once a button is pressed on it, so player
+  two is invisible until they join). `ai` forces the bot even with a pad attached; **`pad` forces
+  the old unconditional `PadOne` verbatim, i.e. reproduces the bug** and is the only deliberate way
+  to reach the disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
+  pad-connection masks through the real resolver + the pre-card policy as the negative control) —
+  it needs no level and no gamepads. Replaces `?aiteam`.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

@@ -299,10 +299,11 @@
 
             const urlFor = (plan, i) => {
                 const level = plan.queue[i];
-                // ?aiteam is what makes TeamChallenge measurable at all — its second slot is
-                // otherwise PadOne, and a seated-but-disconnected pad force-pauses every tick.
+                // No per-level special-casing: every level benches on the same flags (TeamChallenge
+                // needed ?aiteam until card e6927ef8 stopped its partner slot seating a pad that
+                // is not there — ?teampartner=pad reaches that force-pause deliberately).
                 return location.pathname + '?level=' + level + '&aiplayer&aibench&nofps'
-                    + '&difficulty=' + plan.difficulty + (level === 'TeamChallenge' ? '&aiteam' : '');
+                    + '&difficulty=' + plan.difficulty;
             };
 
             const parseRow = (s) => {
@@ -573,6 +574,17 @@
         window.eaBgCull = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull')); }
             catch (e) { console.warn('[debug] eaBgCull failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: TeamChallenge's partner seat (card e6927ef8). Drives the real
+        // TeamChallenge.ResolvePartnerSeat over all 16 pad-connection masks x the 3
+        // ?teampartner values, asserts no mask can seat an ABSENT pad (which is what
+        // force-paused the level forever), and runs the pre-card always-PadOne policy as the
+        // negative control. Prints PASS/FAIL plus this machine's live pad mask and the seated
+        // roster. Runnable anywhere -- the decision is pure, no level needed.
+        window.eaTeamSeat = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugTeamSeat')); }
+            catch (e) { console.warn('[debug] eaTeamSeat failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: probe the REAL texture load path for one asset (card 35834236).

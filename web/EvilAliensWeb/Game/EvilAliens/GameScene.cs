@@ -1521,6 +1521,15 @@ internal abstract class GameScene : Scene
 		Terminate(FinishedMode.exit);
 	}
 
+	// A scene may claim a joining device for a seat it ALREADY holds instead of letting a new
+	// player be added (card e6927ef8: TeamChallenge hands its auto-pilot partner's seat to the
+	// first real pad that presses Start, keeping that slot's score and its place in the tether).
+	// Return true to mean "handled -- do not add a player". Default: no scene claims anything.
+	protected virtual bool TryAdoptJoinDevice(ControlDevice device)
+	{
+		return false;
+	}
+
 	private void AddPlayer(ControlDevice controlDevice, bool spawnPlayer)
 	{
 		// Online co-op (card 4d904410): while a session is up the HOST allocates every slot, so a
@@ -1529,6 +1538,10 @@ internal abstract class GameScene : Scene
 		if (EvilAliensWeb.Compat.Net.NetSession.Active)
 		{
 			EvilAliensWeb.Compat.Net.NetSession.TrySeatLocalJoin(controlDevice, spawnPlayer);
+			return;
+		}
+		if (TryAdoptJoinDevice(controlDevice))
+		{
 			return;
 		}
 		int slot = oracle.AddPlayer(controlDevice);

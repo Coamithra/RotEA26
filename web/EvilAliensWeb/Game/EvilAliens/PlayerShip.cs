@@ -409,6 +409,17 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	public ControlDevice Controller => controller;
 
+	// A live ship changes driver without respawning (card e6927ef8: a real pad taking over
+	// TeamChallenge's auto-pilot partner seat). `controller` is a copy taken from the oracle in
+	// Setup, so the oracle's own seat must be re-pointed too -- Oracle.SetController is the
+	// caller's other half. The AI's accumulated steering state is dropped: leaving a stale
+	// smoothed steer behind would have the human's first frames fighting the bot's last vote.
+	internal void AdoptController(ControlDevice device)
+	{
+		controller = device;
+		ResetAiState();
+	}
+
 	public int OptionLevel => optionLevel;
 
 	public override ICollisionType CollisionType

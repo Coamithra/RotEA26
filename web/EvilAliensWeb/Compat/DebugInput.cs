@@ -331,6 +331,15 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
 		}
 
+		// JS bridge for the primary-slot negotiation (eaSlotTest in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugSlotTest'). Runs
+		// Compat/Net/NetSlotTest.Run() and returns the PASS/FAIL report.
+		[JSInvokable("debugSlotTest")]
+		public static string SlotTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetSlotTest.Run();
+		}
+
 		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
 		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background

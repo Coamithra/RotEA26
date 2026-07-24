@@ -259,6 +259,16 @@
             catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the online co-op primary-slot negotiation (card c0229c57) — what the client
+        // does with a grant (DecideSlotAdopt), what the host grants once it can see the
+        // joiner's roster (FirstMutuallyFreeSlot + its convergence), the v8 handshake codec,
+        // and a legacy control proving the old policy breaks on the same input. Prints
+        // PASS/FAIL. Leave-no-trace (a scratch Oracle), so it is safe at any point in play.
+        window.eaSlotTest = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugSlotTest')); }
+            catch (e) { console.warn('[debug] eaSlotTest failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
         // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
         // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs

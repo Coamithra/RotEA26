@@ -95,12 +95,12 @@ namespace EvilAliensWeb.Compat.Net
             foreach (bool asHost in new[] { true, false })
             {
                 byte[] hello = NetProtocol.EncodeHello(NetSession.ProtocolVersion, asHost, 0xDEADBEEFCAFEF00DUL,
-                    NetProtocol.HelloFlagDebugActive, primarySlot: 2, peerId: griefer);
-                // Literal 21, not HelloBytes: EncodeHandshake allocates new byte[HelloBytes], so
+                    NetProtocol.HelloFlagDebugActive, primarySlot: 2, peerId: griefer, blockedSlots: 0);
+                // Literal 22, not HelloBytes: EncodeHandshake allocates new byte[HelloBytes], so
                 // comparing against it can never fail. The point is to catch the constant moving.
-                Check(hello.Length == 21, "hello is 21 bytes (host=" + asHost + ")");
+                Check(hello.Length == 22, "hello is 22 bytes (host=" + asHost + ")");
                 bool ok = NetProtocol.TryDecodeHandshake(hello, out byte ver, out bool isHost, out ulong hash,
-                    out byte flags, out byte slot, out ulong id);
+                    out byte flags, out byte slot, out ulong id, out _);
                 Check(ok, "hello decodes (host=" + asHost + ")");
                 Check(ver == NetSession.ProtocolVersion, "version round-trips (host=" + asHost + ")");
                 Check(isHost == asHost, "role round-trips (host=" + asHost + ")");
@@ -109,15 +109,15 @@ namespace EvilAliensWeb.Compat.Net
                 Check(slot == 2, "primary slot round-trips (host=" + asHost + ")");
                 Check(id == griefer, "peer id round-trips (host=" + asHost + ")");
             }
-            byte[] welcome = NetProtocol.EncodeWelcome(NetSession.ProtocolVersion, true, 1UL, 0, 1, bystander);
-            NetProtocol.TryDecodeHandshake(welcome, out _, out _, out _, out _, out _, out ulong wid);
+            byte[] welcome = NetProtocol.EncodeWelcome(NetSession.ProtocolVersion, true, 1UL, 0, 1, bystander, 0);
+            NetProtocol.TryDecodeHandshake(welcome, out _, out _, out _, out _, out _, out ulong wid, out _);
             Check(wid == bystander, "peer id round-trips through welcome");
             Check(welcome[0] == NetProtocol.MsgWelcome, "welcome keeps its message type");
 
             // 9. A v5 hello (the pre-peerId layout) must be REFUSED, not read short. Its 13
             //    bytes would otherwise decode with whatever followed as a peer id.
             byte[] old = new byte[13];
-            Check(!NetProtocol.TryDecodeHandshake(old, out _, out _, out _, out _, out _, out _),
+            Check(!NetProtocol.TryDecodeHandshake(old, out _, out _, out _, out _, out _, out _, out _),
                 "a pre-v6 (13-byte) hello is refused, not misread");
 
             // 10. The kick payload the client reads its notice from.

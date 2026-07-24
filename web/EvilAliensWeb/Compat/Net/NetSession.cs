@@ -54,7 +54,10 @@ namespace EvilAliensWeb.Compat.Net
         // entity's base point value, so both peers tally the identical number. It landed
         // alongside v6 rather than after it -- two independent wire changes cannot share a
         // version number for exactly the reason above, so the merge takes the next one.
-        public const byte ProtocolVersion = 7;
+        // v8 (card c0229c57): the handshake gains a blockedSlots mask (HelloBytes 21 -> 22) so
+        // the host grants the joiner a seat that is free on BOTH rosters. Another WIRE LAYOUT
+        // change, so the version moves with it for the same reason v6 did.
+        public const byte ProtocolVersion = 8;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -189,7 +192,7 @@ namespace EvilAliensWeb.Compat.Net
         // mirror and the ApplyJoinHues compensating swap are both gone; per-slot hues now agree
         // by construction). The host's own primary is always slot 0: it seats itself first in its
         // own game, and couch players only ever arrive later.
-        private const byte HostPrimarySlot = 0;
+        internal const byte HostPrimarySlot = 0;
 
         // OUR primary ship's slot. Host: always 0. Client: granted by the host in MsgWelcome
         // (SlotNone until the handshake completes).
@@ -563,7 +566,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     lastHelloTx = now;
                     transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                        isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId));
+                        isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
                 }
             }
             if (PeerUp)
@@ -1234,7 +1237,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte ver = data[1];
             bool peerIsHost = data[2] != 0;
-            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot, out ulong helloPeerId))
+            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot, out ulong helloPeerId, out byte peerBlockedSlots))
             {
                 Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion);
                 SendRejectOnce(NetProtocol.RejectVersion);
@@ -1279,9 +1282,9 @@ namespace EvilAliensWeb.Compat.Net
             // given. Both are idempotent: hellos repeat at 1 Hz until the pairing settles.
             if (isHost)
             {
-                if (!ReserveRemotePrimarySlot())
+                if (!ReserveRemotePrimarySlot(peerBlockedSlots))
                 {
-                    return; // refused (roster full) -- SendRejectOnce owns the wind-down
+                    return; // refused (no seat free on both sides) -- SendRejectOnce owns the wind-down
                 }
             }
             else if (grantedSlot != NetProtocol.SlotNone)
@@ -1291,7 +1294,7 @@ namespace EvilAliensWeb.Compat.Net
             if (welcomeBack)
             {
                 transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                    isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId));
+                    isHost ? peerPrimarySlot : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
             }
             if (!PeerUp)
             {
@@ -1301,29 +1304,79 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- roster slot allocation (card 4d904410) --------------------------------------
 
-        // HOST: pick (once) the seat the joining peer's primary ship will occupy, and hold it
+        // Which slots WE cannot seat our primary ship in, as a v8 handshake mask. Only the client
+        // ever reports a constraint (the host allocates), and only while a scene is up: at the
+        // menu -- where both the menu-lobby and the join-in-progress joiner hello from -- the
+        // roster is leftover bookkeeping from the last level or attract demo that the launch
+        // path's ResetPlayers() wipes before it seats us, so nothing there blocks anything.
+        // Our OWN current seat is excluded: that is the seat we would move out of, not a blocker.
+        private static byte LocalBlockedSlots()
+        {
+            if (isHost || GameScene.NetActiveScene == null)
+            {
+                return 0;
+            }
+            byte mask = 0;
+            for (int i = 0; i < Oracle.MaxPlayers; i++)
+            {
+                if (i != localPrimarySlot && oracle.IsSeated(i))
+                {
+                    mask |= NetProtocol.SlotBit(i);
+                }
+            }
+            return mask;
+        }
+
+        // HOST: pick the seat the joining peer's primary ship will occupy, and hold it
         // immediately as a Remote registration so nothing else can take it. Normally slot 1; a
         // listed game with a couch player already aboard hands out whatever is free instead --
         // which is exactly why wire slots can no longer be pinned to 0/1.
-        // Returns false when the pairing was REFUSED (roster full) and the caller must stop.
-        private static bool ReserveRemotePrimarySlot()
+        //
+        // `peerBlocked` (v8, card c0229c57) is the joiner's own occupied slots. Honouring it is
+        // what makes the grant a NEGOTIATION rather than a guess: a seat free here but taken
+        // there used to be granted anyway, and the joiner could not take it, could not say so,
+        // and could not recover -- the two peers just disagreed about its slot forever.
+        // Returns false when the pairing was REFUSED (no seat free on both sides) and the caller
+        // must stop.
+        private static bool ReserveRemotePrimarySlot(byte peerBlocked)
         {
             if (peerPrimarySlot != NetProtocol.SlotNone)
             {
-                return true;
+                if (!NetProtocol.SlotIsBlocked(peerBlocked, peerPrimarySlot))
+                {
+                    return true;
+                }
+                // The joiner has told us the seat we are holding does not work for it (its roster
+                // changed between our grant and its hello). Release and re-pick against the new
+                // mask rather than leaving it stranded -- it keeps helloing until its slot
+                // settles, so this converges: we never re-offer a seat the mask still blocks.
+                Console.WriteLine("[net] joiner cannot take granted slot=" + peerPrimarySlot + " -- re-allocating");
+                oracle.RemovePlayerAt(peerPrimarySlot, ControlDevice.Remote);
+                peerPrimarySlot = NetProtocol.SlotNone;
             }
             int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
+            if (slot >= 0 && NetProtocol.SlotIsBlocked(peerBlocked, slot))
+            {
+                // A Remote registration the joiner cannot use (one that outlived a restarted
+                // session, or was re-seated by SpawnAllPlayers). Free it before re-picking, or we
+                // would hand out a second seat and leave this one squatting the roster.
+                oracle.RemovePlayerAt(slot, ControlDevice.Remote);
+                slot = -1;
+            }
             if (slot < 0)
             {
                 // Never slot 0: that is the host's own primary seat, which in the menu-lobby flow
                 // is still EMPTY at pairing time (the level launches after the peers connect).
-                slot = oracle.FirstFreeSlot(HostPrimarySlot + 1);
+                slot = FirstMutuallyFreeSlot(HostOccupiedSlots(), peerBlocked);
                 if (slot < 0)
                 {
-                    // No seat for the joiner. REFUSE -- do not just wait: the joiner would go
-                    // PeerUp, never be granted a slot, keep slot 0 (our own player) and address
-                    // every claim/blast at it.
-                    Console.WriteLine("[net] no free roster slot for the joiner -- rejecting");
+                    // No seat that works on BOTH sides. REFUSE -- do not just wait: the joiner
+                    // would go PeerUp, never be granted a usable slot, keep slot 0 (our own
+                    // player) and address every claim/blast at it. Our own game survives this:
+                    // Stop() does not exit a level, so a listed host drops back to single-player
+                    // and NetListing re-lists it.
+                    Console.WriteLine("[net] no roster slot free for the joiner on both sides (peerBlocked="
+                        + peerBlocked + ") -- rejecting");
                     SendRejectOnce(NetProtocol.RejectFull);
                     return false;
                 }
@@ -1337,30 +1390,107 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
+        // Our own roster as a slot mask, in the same shape as the peer's blockedSlots -- so the
+        // allocation decision below is a pure function of two masks and can be tested (and its
+        // convergence asserted) with no oracle, transport or session. eaSlotTest() drives it.
+        private static byte HostOccupiedSlots()
+        {
+            byte mask = 0;
+            for (int i = 0; i < Oracle.MaxPlayers; i++)
+            {
+                if (oracle.IsSeated(i))
+                {
+                    mask |= NetProtocol.SlotBit(i);
+                }
+            }
+            return mask;
+        }
+
+        // The lowest seat free on OUR roster and not blocked on the peer's, or -1 when there is
+        // none. Never slot 0 (HostPrimarySlot): that seat is the host's own primary, and in the
+        // menu-lobby flow it is still empty at pairing time, so a plain "first free" would hand
+        // the joiner the host's chair.
+        internal static int FirstMutuallyFreeSlot(byte hostOccupied, byte peerBlocked)
+        {
+            for (int i = HostPrimarySlot + 1; i < Oracle.MaxPlayers; i++)
+            {
+                if (!NetProtocol.SlotIsBlocked(hostOccupied, i) && !NetProtocol.SlotIsBlocked(peerBlocked, i))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        // What taking the host's granted seat requires of us. Split out as a pure function
+        // (the NetListing.ComputeEligible / PlayerShip.IsAiShootable house style) because the
+        // live method needs an oracle, a transport, a paired session and a GameScene -- so the
+        // branch that shipped this card's bug could not be tested at all. eaSlotTest() drives
+        // this directly.
+        internal enum SlotAdopt
+        {
+            Settled,     // idempotent repeat of a grant we already took
+            TakeSlot,    // nothing seated that matters -- just adopt the number
+            MoveSeat,    // a live scene seat (and its ship) must move across with us
+            Renegotiate, // the seat cannot move; do NOT settle, hello again and let the host re-pick
+        }
+
+        internal static SlotAdopt DecideSlotAdopt(byte localSlot, byte granted, byte peerSlot,
+            bool sceneUp, bool localSeated, bool grantedSeated)
+        {
+            if (localSlot == granted && peerSlot != NetProtocol.SlotNone)
+            {
+                return SlotAdopt.Settled;
+            }
+            // Only a seat inside a LIVE scene is load-bearing. At the menu -- where both the
+            // menu-lobby and the join-in-progress joiner hello from -- the roster is whatever the
+            // last level or attract demo left behind (GameScene.Terminate never clears it, and
+            // ~60% of attract demos seat slot 1), and the launch path's ResetPlayers() wipes it
+            // before seating us at the granted slot. So there is nothing to move and a busy
+            // destination means nothing. Treating that stale roster as real is what made this
+            // reachable from an ordinary "idle at the menu, then join a game".
+            if (localSlot == granted || !sceneUp || !localSeated)
+            {
+                return SlotAdopt.TakeSlot;
+            }
+            // We are already seated mid-level (the dev ?net=join flow boots into a level before
+            // pairing): the registration and the live ship both have to move. If they can't, our
+            // slot must NOT advance -- claiming a slot our ship isn't in silently stops the
+            // primary stream (FindLocalShip goes null -> alive=false forever) and re-streams the
+            // real ship as a friend the host will refuse.
+            return grantedSeated ? SlotAdopt.Renegotiate : SlotAdopt.MoveSeat;
+        }
+
         // CLIENT: take the seat the host granted. In the menu-lobby and JIP flows our ship isn't
         // seated yet (EvLaunch -> Game1.MenuFinished reads LocalPrimarySlot), so this is just
         // bookkeeping. In the dev ?net=join flow we are already mid-level at slot 0, so the
         // registration AND any live ship move across.
         private static void AdoptGrantedPrimarySlot(byte slot)
         {
-            if (localPrimarySlot == slot && peerPrimarySlot != NetProtocol.SlotNone)
+            SlotAdopt action = DecideSlotAdopt(localPrimarySlot, slot, peerPrimarySlot,
+                GameScene.NetActiveScene != null, oracle.IsSeated(localPrimarySlot), oracle.IsSeated(slot));
+            if (action == SlotAdopt.Settled)
             {
                 return;
             }
-            peerPrimarySlot = HostPrimarySlot;
-            if (localPrimarySlot != slot && oracle.IsSeated(localPrimarySlot))
+            if (action == SlotAdopt.MoveSeat && !oracle.MovePlayerSlot(localPrimarySlot, slot))
             {
-                // We are already seated somewhere (the dev ?net=join flow boots into a level
-                // before pairing): the registration and the live ship both have to move, and if
-                // they can't, our slot must NOT advance -- claiming a slot our ship isn't in
-                // silently stops the primary stream (FindLocalShip goes null -> alive=false
-                // forever) and re-streams the real ship as a friend the host will refuse.
-                if (!oracle.MovePlayerSlot(localPrimarySlot, slot))
-                {
-                    Console.WriteLine("[net] could not move local primary " + localPrimarySlot + " -> " + slot
-                        + " (slot busy) -- staying put");
-                    return;
-                }
+                action = SlotAdopt.Renegotiate; // lost a race for the seat since we decided
+            }
+            if (action == SlotAdopt.Renegotiate)
+            {
+                // Do NOT settle. Update's retry condition is `!PeerUp || peerPrimarySlot ==
+                // SlotNone`, so leaving peerPrimarySlot unset keeps the 1 Hz hello going on both
+                // peers -- and our next hello carries a fresh blockedSlots mask, off which the
+                // host releases this seat and grants another (or refuses with RejectFull once
+                // nothing works on both sides). Settling here instead is the whole bug: it
+                // silenced the retry on BOTH peers, so a pairing that failed this way could
+                // never recover and nothing was ever surfaced to the player.
+                Console.WriteLine("[net] granted primary slot " + slot + " is occupied locally -- asking the host to re-grant");
+                return;
+            }
+            if (action == SlotAdopt.MoveSeat)
+            {
                 foreach (PlayerShip s in oracle.GetShips())
                 {
                     if (s.Owner == localPrimarySlot)
@@ -1371,6 +1501,8 @@ namespace EvilAliensWeb.Compat.Net
                 Console.WriteLine("[net] moved local primary slot " + localPrimarySlot + " -> " + slot);
             }
             localPrimarySlot = slot;
+            // Only ever assigned on a SETTLED adoption -- see the Renegotiate note above.
+            peerPrimarySlot = HostPrimarySlot;
         }
 
         // Which seat our primary ship uses. Read by Game1.MenuFinished / LaunchLevelDirect /

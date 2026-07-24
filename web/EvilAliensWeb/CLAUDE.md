@@ -1087,7 +1087,50 @@ interpolation feel, both gated on real-network playtests.
     clean joiner won't reject it).
   - **Verify:** `server/signal/test_signal.py` (registry/browse/build-filter/ping-relay/full->
     delist, all standalone); `?gamebrowser` for the carousel; the eligibility predicate as data;
-    `?netjip` two windows -> `[net]` metrics.
+    `?netjip` two windows -> `[net]` metrics. The full two-window pass was RUN in card c0398370 --
+    its recipe and the four traps that make it hard are the next bullet.
+  - **Running the `?netjip` two-window JIP pass (card c0398370).** It needs no deployed server and
+    no second machine, but four things bite, in order of how much time they cost:
+    - **It needs two genuinely VISIBLE OS WINDOWS -- two tabs cannot work, and `?fpsuncapped`
+      does NOT rescue them.** A background tab's rAF is *paused* (measured: 0 ticks), and the
+      MessageChannel pump `?fpsuncapped` swaps in is still clamped by Chrome's background-tab
+      task throttling to **1 Hz** (measured: 3 ticks in 3 s) -- nowhere near the ~30 Hz ship
+      stream. An OCCLUDED or MINIMISED window counts as hidden too, so the two windows must be
+      tiled non-overlapping AND kept above everything else; pin exactly the two peers
+      `HWND_TOPMOST` via Win32 and make sure the window driving them is **not** topmost, or every
+      interaction with the driver raises it over a peer and silently freezes that peer mid-run.
+      Both peers ticking at the SAME rate is the check that the rig is honest.
+    - **The joiner must boot FLAG-CLEAN.** `NetSession.cs`'s reject is
+      `menuSession && (peer debug bit || DebugFlags.Active)`, and the joiner IS a menu session, so
+      its OWN `Active` bit rejects the pairing. Only non-`Active` flags are available to it:
+      `?signal= ?binlog ?netlog ?netsim` (plus the JS-owned `?fpsuncapped`/`?nofps`, which never
+      reach C#). The host is fine -- `?netjip` drops its debug bit and the check is
+      `menuSession`-gated, so a `listedSession` host never rejects. **Consequence: the joiner
+      cannot pass `?noattract`, so an unattended joiner's menu keeps getting pulled into the
+      attract demo** -- drive it briskly and re-check state between steps.
+    - **Use a LOCAL signaling rig, not the deployed one.** All four entry points read
+      `DebugFlags.NetSignal` (`NetListing.List`, `NetGameBrowser.Browse`, `NetLobby` host/join,
+      `WebRtcTransport`), so `uvicorn main:app --port 8091` in `server/signal` +
+      `?signal=ws://localhost:8091/ws` on BOTH windows exercises the identical client code.
+      The server is also the best non-perturbing STATE ORACLE: `GET /health` (`rooms`/`listed`/
+      `browsers`) tells you the host listed and the joiner reached the carousel without touching
+      a window, and a one-shot `{t:browse}` client prints the live room code.
+    - **Pick a host fight that does not END.** `?level=Level2&flyspiders` (the endless swarm) is
+      ideal; a plain `?level=Level2&aiplayer` host BEATS the level in a couple of minutes, at
+      which point the scene goes down, `NetListing` drops the room, and the joiner's carousel
+      correctly falls back to "Searching for open games..." mid-test.
+    - Recipe: host `?level=Level2&flyspiders&netjip&aiplayer&invuln&binlog&signal=...`, joiner
+      `?signal=...&binlog&netlog` -> menu -> Online Co-op -> Join Online Game -> pick the room.
+      **Pass looks like:** `session start role=host ... (join-in-progress)` +
+      `... role=join ... (menu lobby)`, `granted joiner primary slot 1` with **mirror-image
+      rosters** (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`),
+      `localShip 1 remoteShip 1` and `buf ~100ms` BOTH sides, `drop/sgap/ordViol/seqGap/extrap 0`,
+      **zero `[bin] purge-filter diverted`**, and identical `eaNetBg()` state lines.
+    - **A joiner already seated in slot 0 when the grant lands is a SILENT, unrecoverable
+      desync**: `AdoptGrantedPrimarySlot` logs `could not move local primary 0 -> 1 (slot busy)
+      -- staying put` and the peers then disagree forever (`pri=0/0` vs `pri=0/1`), the joiner
+      never builds a remote puppet (`remoteShip 0`, `buf 0ms`), and NOTHING surfaces to the
+      player. Seen after the joiner visited Start/Controls and backed out before joining.
   - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
     ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
     best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The

@@ -160,6 +160,8 @@ generate much of the art/audio referenced here.
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
+  `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
+  self-test),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
@@ -875,14 +877,17 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v2):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v7):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
-  (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+points / EvBlast
+  (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+per-slot award / EvBlast
   pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
   `MsgWelcome` handshake (protocol version byte; both sides Hello until paired, opposite
-  role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410).
+  role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410;
+  **v6** appends the peer-identity token to the handshake -- card 0b8a300b;
+  **v7** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
+  card b0ab09ec, see the Score/lives bullet).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -963,9 +968,69 @@ interpolation feel, both gated on real-network playtests.
   shape: the real PlayerShip pickup runs instantly on the collector (a
   `NetSession.NotePowerupTaken` hook attributes it), first claim despawns the entity,
   overlapping collectors inside the RTT window BOTH keep it.
-- **Score/lives:** immediate local generous crediting + host-authoritative `EvScoreSync`
-  at 1Hz -- the client adopts `max(local, host)` per slot (monotone within a life; combo
-  multiplier divergence self-corrects upward) and lives verbatim.
+- **Score/lives: the AWARDED AMOUNT is replicated, not the combo (card b0ab09ec).** `EvDeath`
+  carries what the host actually credited, per slot (`f32 x MaxSlots`), and that figure is
+  authoritative on the client in every branch. Lives stay verbatim off `EvScoreSync`.
+  - **Why: every kill is credited on BOTH peers, each with its own combo multiplier.**
+    `comboModify = amount * (1 + combo/20)`, and the combo counter is a purely local
+    simulation -- the only thing that raises it is a local bullet's first hit
+    (`Bullet.CollidesWith` -> `SustainCombo`), and on a client those bullets hit frozen
+    puppets interpolated ~100ms behind the host's real entities. So the same kill is worth a
+    different number on each screen.
+  - **`max(local, host)` adoption made that unbounded, and is GONE.** It kept every positive
+    excursion of the error and discarded every negative one, so even a perfectly *unbiased*
+    per-kill difference integrated into one-way drift (measured in the 11.5 playtest: a slot
+    the host had at 294 read 304 on the joiner, and climbing). The old note here claimed this
+    "self-corrects upward" -- it did not; it was a ratchet.
+  - **Replicating the COMBO COUNTER instead would not have worked**: combo changes up to
+    ~10x/second, so any replicated copy is stale by at least the latency and the credited
+    numbers would still differ. The award is the only thing that can be exact.
+  - **A client's own kill is credited instantly but PROVISIONALLY** (`NetScoreLedger`): the
+    amount is booked until the host's `EvDeath` for that netId replaces it with the
+    authoritative figure. `EvScoreSync` then adopts `host + unsettled`. Both ride the ORDERED
+    reliable lane, which is what makes that sum exact either way round -- an `EvDeath` seen
+    before a sync is inside that sync's number and off the books, one seen after is outside it
+    and still on them. Carrying `unsettled` is also what stops verbatim adoption from
+    sawtoothing: the host's 1Hz number never contains the client's in-flight claims, so
+    adopting it bare would erase the last second of their own kills once a second.
+  - Provisional entries EXPIRE after `AwardSettleWindowMs` (3s) because one path never echoes
+    a figure back: if the host's copy was already dead when our claim landed it pays us from
+    its recent-death record without re-broadcasting. Expiring lets the next sync land on the
+    host's exact number instead of staying inflated forever.
+  - The real death path still runs on the client for the FX, but `NetSuppressAward()` claims
+    the award slot FIRST so its `AwardScore`/`AwardScoreToAll` no-ops -- otherwise it would
+    re-derive the amount from this peer's combo. **Any new client-side death path must do the
+    same**, or it silently reintroduces the divergence.
+  - `AwardScoreToAll` (every boss) pays each seated slot with THAT slot's own multiplier,
+    which is why the wire carries a per-slot array rather than one number. Wire width: the
+    field went `u16` base-points -> `f32` per slot (protocol **v6**) because a combo-modified
+    award overflows a ushort -- a 10000-point boss at a routine 40x combo is 30000, and
+    `comboModify` has no ceiling.
+  - **Still local, by design:** the combo COUNTER shown under each slot is cosmetic and will
+    differ between screens; only the score is reconciled.
+  - **Verify with `eaNetScore.test()`, not two windows** (`NetScoreLedger.SelfTest` +
+    `NetPuppets.WireRoundTripTest`). It drives the real policy on a virtual clock, and runs
+    the OLD `max()` adoption over the identical kill stream first -- a green tick means
+    nothing unless the same input is shown to break the old policy, because the failure is a
+    slow drift no frame or screenshot can show. It also asserts the injected per-kill error is
+    UNBIASED, so the drift it demonstrates is the ratchet and not a stacked deck. The second
+    section round-trips a real `EncodeDeathEvent` through `ApplyAwards` against the live
+    `ScoreVisualiser` (wire offsets, fresh-pay vs settle, at-most-once).
+  - `eaScore()` dumps per-slot score/combo/unsettled -- the readable way to compare two peers.
+    The `[net]` line gains `scSkew`/`scSkewMax` on the JOIN side only (the host is the
+    authority and never adopts): displayed minus `host + unsettled` at each sync, worst ACROSS
+    the slots, which should sit at 0. (Recording it per slot instead would leave the LAST one
+    standing -- slot 3, unseated in any 2-peer session, so a hard-coded 0.0 that looks like
+    proof.) Measured over a two-peer run: `scSkew=0.0` steady state, and `scSkewMax` held at
+    10.0 while `clTx` grew 20 -> 67 -- i.e. the worst deviation is one kill's correction and
+    does NOT accumulate with kill count, which is exactly the property max() lacked.
+  - **GOTCHA -- a two-window co-op run cannot be driven at full rate from this rig.** A
+    backgrounded tab throttles to ~1 tick/sec (measured: `txStream` advanced 43 in 40s where
+    30Hz would be ~1200), `?fpsuncapped` does NOT defeat it, and two tabs in one window can
+    never both be visible. BroadcastChannel does not cross browser profiles either, so two
+    separate browsers can only pair via `?rtc` + signaling. Plan net verification around
+    one-tab round trips (this test, `eaNetBgTest`) and treat a two-window run as a
+    smoke check whose absolute rates are meaningless.
 - **Roster slots are HOST-ALLOCATED and identity-mapped (card 4d904410 -- local co-op AND
   online co-op at once).** The oracle slot IS the wire slot on both peers; there is no
   host-relative translation anywhere (the old `TranslateSlot` 0<->1 mirror and the

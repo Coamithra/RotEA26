@@ -248,6 +248,43 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for eaScore() -- the per-slot score/combo dump. Card b0ab09ec's two-window
+		// comparison is "do the peers agree on the tally", which reading HUD pixels answers
+		// badly (the panels are small, chrome-shaded and mid-animation); this prints the
+		// numbers, plus the provisional total still riding on top of the host's score.
+		[JSInvokable("debugScoreDump")]
+		public static string ScoreDump()
+		{
+			EvilAliens.ScoreVisualiser sv = EvilAliens.ServiceHelper.Get<EvilAliens.IScoreService>().Score;
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>().Oracle;
+			var sb = new System.Text.StringBuilder("[score] lives=").Append(sv.Lives);
+			for (int i = 0; i < EvilAliens.Oracle.MaxPlayers; i++)
+			{
+				sb.Append(" | s").Append(i).Append(oracle.IsSeated(i) ? "=" : "(empty)=")
+					.Append((int)sv.PointScore(i)).Append(" combo=").Append(sv.Combo(i));
+				float pending = EvilAliensWeb.Compat.Net.NetPuppets.UnsettledFor(i);
+				if (pending != 0f)
+				{
+					sb.Append(" unsettled=").Append(pending.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+				}
+			}
+			return sb.ToString();
+		}
+
+		// JS bridge for the co-op score-reconciliation self-test (eaNetScore in
+		// wwwroot/index.html, card b0ab09ec). Drives NetScoreLedger -- the real policy -- on a
+		// VIRTUAL clock against a synthetic two-peer kill stream, running the old max() adoption
+		// over the identical stream first so the drift it fixes is demonstrated, not asserted;
+		// then round-trips a real EvDeath through ApplyAwards against the live ScoreVisualiser.
+		// Needs no session and no second tab: the failure is a slow tally drift, and a
+		// backgrounded peer tab throttles to ~1 tick/sec so two windows cannot show it anyway.
+		[JSInvokable("debugNetScoreTest")]
+		public static string NetScoreTest(int kills, int comboSkew, int rttMs, int seed)
+		{
+			return EvilAliensWeb.Compat.Net.NetScoreLedger.SelfTest(kills, comboSkew, rttMs, seed)
+				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
+		}
+
 		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest'). Runs
 		// Compat/Net/NetKickTest.Run() and returns the PASS/FAIL report.

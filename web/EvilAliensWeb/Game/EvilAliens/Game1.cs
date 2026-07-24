@@ -1020,6 +1020,11 @@ public class Game1 : Game
 			// "zombie" Update (move/fire/spawn from the grave). Also expires the standing
 			// purge filter (see ComponentBin.TopOfTickFlush).
 			collectionHelper.TopOfTickFlush();
+			// Card b0ab09ec: the flush above is what emits this tick's EvDeath events, so the
+			// scores are captured for EvScoreSync HERE -- every award now in them has already
+			// been announced. Reading them at send time (after DetectCollisions, below) would
+			// leak an award whose EvDeath is still queued, and the client would count it twice.
+			EvilAliensWeb.Compat.Net.NetSession.SnapshotScoresForSync();
 			inputHandler.Update();
 			((GameComponent)vibrator).Update(gameTime);
 			soundManager.Update(gameTime);

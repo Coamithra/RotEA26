@@ -50,7 +50,11 @@ namespace EvilAliensWeb.Compat.Net
         // v6 (card 0b8a300b) appends the peer-identity token to the handshake -- a WIRE LAYOUT
         // change (HelloBytes 13 -> 21), so the version byte must move with it or two builds
         // would both claim v5 and mis-decode each other's hellos.
-        public const byte ProtocolVersion = 6;
+        // v7 (card b0ab09ec): EvDeath carries the host's per-slot AWARDED score instead of the
+        // entity's base point value, so both peers tally the identical number. It landed
+        // alongside v6 rather than after it -- two independent wire changes cannot share a
+        // version number for exactly the reason above, so the merge takes the next one.
+        public const byte ProtocolVersion = 7;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -982,18 +986,48 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte killer = TakeKillNote(e.Comp);
             Vector2 pos = e.Comp.Position;
+            // recentDeaths keeps the BASE value: a later claim from the other peer is a fresh
+            // generous payout the host still credits with its own live combo (card 11.2), not
+            // a replay of the award below.
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
             RecordDeath(e.Id, pos, points, killer, e.Comp is Powerup pu && pu.type == Powerup.PowerupType.OneUp);
             if (!PeerUp)
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos, points));
+            // e.Awards is what the per-type death path just credited, slot by slot (null when
+            // nothing was awarded -- a despawn, a zero-point type, an already-awarded entity).
+            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos, e.Awards));
             metrics.EventsTx++;
             if (DebugFlags.NetLog)
             {
-                Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer);
+                Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer
+                    + " award=" + (e.Awards == null ? "-" : string.Join("/", e.Awards)));
             }
+        }
+
+        // ---- award attribution (card b0ab09ec) ------------------------------------------------
+        //
+        // Called by AlienDrawableGameComponent.AwardScore/AwardScoreToAll with the figure the
+        // ScoreVisualiser ACTUALLY credited (already combo-modified). The host stashes it on the
+        // NetId entry for the death broadcast a tick later (the ComponentBin defers removal, so a
+        // single "last award" static could not bridge the gap); the client books it as a
+        // provisional credit its own EvDeath will replace. Offline / no session: one bool test.
+        internal static void NoteAward(AlienDrawableGameComponent comp, int slot, float amount)
+        {
+            if (!Active || amount <= 0f || slot < 0 || slot >= NetProtocol.MaxSlots)
+            {
+                return;
+            }
+            if (isHost)
+            {
+                if (NetIdRegistry.TryGetByComp(comp, out NetIdRegistry.Entry e))
+                {
+                    (e.Awards ??= new float[NetProtocol.MaxSlots])[slot] += amount;
+                }
+                return;
+            }
+            NetPuppets.NoteLocalAward(comp, (byte)slot, amount);
         }
 
         private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot, bool oneUp)
@@ -1091,14 +1125,40 @@ namespace EvilAliensWeb.Compat.Net
 
         private static readonly float[] scoreSyncScratch = new float[NetProtocol.MaxSlots];
 
+        // Host: per-slot scores as they stood at the LAST top-of-tick flush (card b0ab09ec).
+        //
+        // Reading them live at send time is a one-tick lie. Game1.UpdateInner runs
+        // TopOfTickFlush -> DetectCollisions -> NetSession.Update, so a kill in THIS tick's
+        // collision phase has already credited the score, while the death it queued is not
+        // flushed -- and its EvDeath therefore not sent -- until the NEXT tick's flush. A sync
+        // sent in between would carry an award the client has not been told about, so the client
+        // would count it once from the sync and again when the EvDeath finally arrived.
+        // Snapshotting right after the flush closes that window: everything in the snapshot has
+        // already had its EvDeath emitted (both ride the ordered reliable lane, flush first).
+        private static readonly float[] scoreSyncSnapshot = new float[NetProtocol.MaxSlots];
+        private static int scoreSyncSnapshotLives;
+
+        internal static void SnapshotScoresForSync()
+        {
+            if (!Active || !isHost || score == null)
+            {
+                return;
+            }
+            for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
+            {
+                scoreSyncSnapshot[slot] = score.PointScore(slot);
+            }
+            scoreSyncSnapshotLives = score.Lives;
+        }
+
         private static void SendScoreSync(long now)
         {
             lastScoreSyncTx = now;
             for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
             {
-                scoreSyncScratch[slot] = score.PointScore(slot);
+                scoreSyncScratch[slot] = scoreSyncSnapshot[slot];
             }
-            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, score.Lives, scoreSyncScratch));
+            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, scoreSyncSnapshotLives, scoreSyncScratch));
             metrics.EventsTx++;
         }
 
@@ -1123,6 +1183,9 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- wire -> state ----------------------------------------------------------------
+
+        // Client rx: decoded per-slot awards from the EvDeath currently being applied.
+        private static readonly float[] deathAwardScratch = new float[NetProtocol.MaxSlots];
 
         private static void DrainRx()
         {
@@ -2045,15 +2108,15 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvDeath:
             {
-                if (isHost || data.Length < 17 || GameScene.NetActiveScene == null)
+                if (isHost || data.Length < NetProtocol.DeathEventBytes || GameScene.NetActiveScene == null)
                 {
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
                 byte killer = data[6]; // wire slot == oracle slot on both peers
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
-                ushort points = NetProtocol.ReadU16(data, 15);
-                NetPuppets.OnRemoteDeath(id, killer, pos, points);
+                NetProtocol.ReadDeathAwards(data, deathAwardScratch);
+                NetPuppets.OnRemoteDeath(id, killer, pos, deathAwardScratch);
                 if (DebugFlags.NetLog)
                 {
                     Console.WriteLine("[net] rx death id=" + id + " killer=" + killer);
@@ -2076,10 +2139,27 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 score.Lives = (sbyte)data[4];
+                // Worst skew ACROSS the slots, recorded once. Recording per slot would just
+                // leave the last one standing -- slot 3, unseated in any 2-peer session, so a
+                // hard-coded 0.0 that looks like proof of nothing going wrong.
+                float worstSkew = 0f;
                 for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
                 {
-                    score.NetAdoptScore(slot, NetProtocol.ReadF32(data, 5 + 4 * slot));
+                    float host = NetProtocol.ReadF32(data, 5 + 4 * slot);
+                    // EvDeath and EvScoreSync both ride the ordered reliable lane, and the host
+                    // snapshots these scores at its top-of-tick flush -- the point where that
+                    // tick's EvDeath events go out. So an award inside `host` has already been
+                    // announced (and is off the unsettled books) and one that has not been
+                    // announced is not inside it: the sum is exact either way round.
+                    float pending = NetPuppets.UnsettledFor(slot);
+                    float skew = score.PointScore(slot) - (host + pending);
+                    if (Math.Abs(skew) > Math.Abs(worstSkew))
+                    {
+                        worstSkew = skew;
+                    }
+                    score.NetSetScore(slot, host, pending);
                 }
+                metrics.NoteScoreSkew(worstSkew);
                 break;
             }
             case NetProtocol.EvBlast:
@@ -2387,7 +2467,11 @@ namespace EvilAliensWeb.Compat.Net
                     {
                         if (e.Comp.NetPointValue > 0f)
                         {
-                            score.AddScore(e.Comp.NetPointValue, true, e.Comp.Position, killerSlot);
+                            // Through NoteAward, not a bare AddScore: this branch settles a claim
+                            // WITHOUT going via AwardScore, so without it e.Awards stays null and
+                            // the EvDeath below would carry an all-zero award array (card b0ab09ec).
+                            NoteAward(e.Comp, killerSlot,
+                                score.AddScore(e.Comp.NetPointValue, true, e.Comp.Position, killerSlot));
                         }
                         Explosion explosion = Explosion.NewExplosion(bin, game);
                         explosion.Setup(e.Comp.Position, 1.2f, 1f, 0f, 0f);

@@ -79,6 +79,14 @@ DDS_LOGICAL_MAGIC = b"LOGD"
 # shipped .dds at every level: worst legitimate step 41 (756-v1 level 2), and nothing within 3x of
 # HARD. 64 clears that by 1.6x while staying 1.8x under the SMALLEST real bleed on record (the
 # 116/255 alpha discontinuity on pre-fix eye_idle); a transparent pad reads the full 255.
+#
+# BE HONEST ABOUT WHAT THE PER-TEXEL REFERENCE BUYS AT THIS FLOOR. It is not the upward escape:
+# exactly ONE shipped edge steps past a flat 64 (controls_keyboard level 0, by 2/255), so for
+# 123 of 124 assets this is a flat threshold. What it buys is the DOWNWARD half. The superseded
+# rule had this same shape but took its reference from the whole edge's maximum, so one busy spot
+# handed EVERY texel on that edge the full HARD -- 128 where this rule gives a quiet stretch 64.
+# That factor of two is the entire 64..128 band, which is exactly where a real gap on an otherwise
+# noisy edge hides. Do not "simplify" this to a constant.
 FLOOR = 64
 SLACK = 2
 HARD = 128
@@ -92,19 +100,16 @@ DDSCAPS_COMPLEX = 0x00000008
 DDSCAPS_MIPMAP = 0x00400000
 
 
-def fail(msg):
-    print("ERROR: " + msg, file=sys.stderr)
-    sys.exit(1)
-
-
 def read_dds(path):
     """(data, padded_w, padded_h, logical_w, logical_h, mip_count, block_bytes).
 
-    Unstamped .dds were never padded, so their logical size IS their padded size."""
+    Unstamped .dds were never padded, so their logical size IS their padded size.
+    Raises ValueError rather than exiting -- build_textures.py imports run() as a library, and one
+    malformed file must fail the guard, not kill the build mid-`main()`."""
     with open(path, "rb") as f:
         data = f.read()
     if len(data) < 128 or data[:4] != b"DDS ":
-        fail(f"not a DDS file (bad magic or truncated header): {path}")
+        raise ValueError(f"not a DDS file (bad magic or truncated header): {path}")
     h, w = struct.unpack("<I", data[12:16])[0], struct.unpack("<I", data[16:20])[0]
     mips = max(1, struct.unpack("<I", data[28:32])[0])
     block = DXT_BLOCK_BYTES.get(data[84:88], 16)
@@ -197,8 +202,12 @@ def report(edges):
 
 
 def check(path, verbose):
-    data, pw0, ph0, lw0, lh0, mips, block = read_dds(path)
     rel = os.path.relpath(path, CONTENT).replace(os.sep, "/")
+    try:
+        data, pw0, ph0, lw0, lh0, mips, block = read_dds(path)
+    except ValueError as e:
+        print(f"  BAD   {rel}: {e}")
+        return False
     mipnote = f", {mips} mip levels" if mips > 1 else ""
     if (pw0, ph0) == (lw0, lh0):
         if verbose:
@@ -264,8 +273,8 @@ def _synthetic(rows, lw=63, lh=64):
 def _whole_edge_max_verdict(im, lw, lh):
     """The SUPERSEDED rule, kept only so the selftest can show what it let through.
 
-    Pre-review this compared the whole edge's max gutter step against the whole edge's max
-    intrinsic step -- see the calibration comment above for why that is too lax."""
+    It compared the whole edge's max gutter step against the whole edge's max intrinsic step --
+    see the calibration comment above for why that is too lax."""
     strip = lambda box: weighted(im.crop(box).tobytes())
     inner, edge, gutter = (strip((lw - 2, 0, lw - 1, lh)), strip((lw - 1, 0, lw, lh)),
                            strip((lw, 0, lw + 1, lh)))
@@ -281,13 +290,28 @@ def selftest():
     clean = [((y * 37) % 256, (y * 91) % 256, (y * 91) % 256) for y in range(lh)]
     # A transparent pad next to opaque content is the original bug.
     transparent = [(120, 200, (0, 0, 0, 0))] * lh
-    # THE REVIEW FINDING (f029d30): a quiet edge with one high-contrast spot, and a real gap far
-    # away from it. The whole-edge maximum takes its licence from row 8 and waves row 40 through.
+    # The finding the per-texel reference exists for: a quiet edge with one high-contrast spot, and
+    # a real gap far away from it. The whole-edge maximum takes its licence from row 8 and waves
+    # row 40 through -- the last case below asserts exactly that difference.
     licensed = [(200, 200, 200)] * lh
     licensed[8] = (0, 255, 255)     # intrinsic step 255 here, and no gap
     licensed[40] = (200, 200, 100)  # gap of 100 here, and no intrinsic step
+
+    # The other direction, which a flat threshold could not do: a step of 90 is ABOVE FLOOR, so it
+    # passes only where the image's own across-edge step vouches for it. Rows 20-21 are busy
+    # (intrinsic 60 -> allowed 120); the identical step is legitimate at row 20 and a violation at
+    # row 23, which is WINDOW+1 clear of the busy patch. The pair pins SLACK and WINDOW together --
+    # widen WINDOW and the second case silently starts passing.
+    def busy(gap_row):
+        rows = [(200, 200, 200)] * lh
+        rows[20] = rows[21] = (140, 200, 200)
+        rows[gap_row] = (rows[gap_row][0], 200, 110)
+        return rows
+
     cases = [("replicated gutter", clean, True), ("transparent pad", transparent, False),
-             ("gap licensed by a distant hot spot", licensed, False)]
+             ("gap licensed by a distant hot spot", licensed, False),
+             ("step vouched for by the local content", busy(20), True),
+             ("same step one texel outside the window", busy(23), False)]
     ok = True
     for name, rows, want_pass in cases:
         im, lw, _ = _synthetic(rows, lh=lh)

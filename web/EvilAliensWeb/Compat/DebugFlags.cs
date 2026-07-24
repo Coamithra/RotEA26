@@ -922,7 +922,8 @@ namespace EvilAliensWeb.Compat
 		// artifact can never be reproduced and a before/after pair is meaningless -- the seam has
 		// moved. Frozen, every layer's seam stacks in one screen column and the shots are directly
 		// comparable. Built for the pad-bleed seams (Trello 4ddcd13f); reach for it for any tiling,
-		// wrap-period or parallax-alignment question. null => normal scrolling.
+		// wrap-period or parallax-alignment question. null => normal scrolling, which is what a
+		// bare ?bgfreeze=false gives; a bare ?bgfreeze (no value) parks at design x=400.
 		public static float? BgFreeze { get; private set; }
 
 		// Online co-op (Stage 11, plans/stage11-online-coop.md). ?net=host / ?net=join opts a
@@ -2037,9 +2038,12 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "bgfreeze":
 					// Numeric value = freeze there; bare ?bgfreeze = freeze at design x=400 (mid-screen);
-					// ?bgfreeze=0/false = off, per this file's on/off convention. Parse BEFORE IsOn so
-					// "0" reads as the column 0, not as "off" -- ?bgfreeze=false is the way to disable.
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf))
+					// ?bgfreeze=false = off, per this file's on/off convention. Parse BEFORE IsOn so "0"
+					// reads as the column 0, not as "off" -- =false is the only way to disable it.
+					// IsFinite because NumberStyles.Float accepts NaN/Infinity, and a NaN would ride
+					// through MyMath.Mod into every layer's position.X and wedge the background.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf)
+						&& float.IsFinite(bgf))
 					{
 						BgFreeze = bgf;
 					}

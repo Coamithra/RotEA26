@@ -150,9 +150,16 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   compressor's error does not — 32 was clean on level 0 and false-positived `756-v1` levels 1–3.
   Worst legitimate step measured over all 124 assets at every level is 41; 64 clears it by 1.6x and
   still sits 1.8x under the smallest real bleed on record. **Re-sweep before touching it.**
+  **At that floor the per-texel reference earns its keep DOWNWARD, not upward** — only one
+  shipped edge steps past a flat 64 (`controls_keyboard` level 0, by 2/255), but the superseded
+  rule handed every texel on a busy edge the full `HARD`, where this one gives a quiet stretch
+  64. That 64–128 band is where a real gap on an otherwise noisy edge hides, so don't
+  "simplify" the rule to a constant.
   **`--selftest`** pins the rule itself against synthetic edges (no `.dds`, no texconv): a
-  replicated gutter passes, a transparent pad is flagged, and the licensed-gap case above is
-  flagged by the per-texel rule while the superseded whole-edge rule misses it.
+  replicated gutter passes, a transparent pad is flagged, the licensed-gap case above is flagged
+  by the per-texel rule while the superseded whole-edge rule misses it, and a pair of cases puts
+  the SAME above-floor step inside vs outside a busy patch's window (passes / flagged), which is
+  what pins `SLACK` and `WINDOW` — widen `WINDOW` and that second case silently starts passing.
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,

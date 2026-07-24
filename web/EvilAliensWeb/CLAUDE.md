@@ -131,7 +131,8 @@ generate much of the art/audio referenced here.
   possibly a benign one, so it is NOT a worst case; (2) it freezes the tiled layers and the
   starfield only — the doodad fly-by, the holodeck `drawOffset` glitch and `switchTimer`
   cross-fades keep running, so simulator levels still jitter a few px between shots. GOTCHA:
-  freezing every layer at the SAME design column stacks layers that normally never coincide — at `?bgfreeze=0` the alien base's two
+  freezing every layer at the SAME design column stacks layers that normally never
+  coincide — at `?bgfreeze=0` the alien base's two
   additive `2331-v5` fog layers land exactly on top of each other and the scene whites out. That is
   the flag doing its job, not a blend/alpha regression; drop the flag to see the real look.
 - **The per-tile cull lives in ONE predicate, `BackgroundImage.TileOnScreen` (card 5216412d).** A

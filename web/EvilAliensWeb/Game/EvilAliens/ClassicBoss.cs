@@ -21,16 +21,6 @@ internal class ClassicBoss : KillableAlien
 	{
 		get
 		{
-			//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0075: Unknown result type (might be due to invalid IL or missing references)
-			//IL_009d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_00b3: Unknown result type (might be due to invalid IL or missing references)
-			//IL_00b8: Unknown result type (might be due to invalid IL or missing references)
-			//IL_00d3: Unknown result type (might be due to invalid IL or missing references)
-			//IL_00fa: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0122: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0138: Unknown result type (might be due to invalid IL or missing references)
-			//IL_013d: Unknown result type (might be due to invalid IL or missing references)
 			if (boxes == null)
 			{
 				boxes = new CollisionMultibox();
@@ -80,7 +70,6 @@ internal class ClassicBoss : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		base.Position = new Vector2(400f, -120f);
 		base.Direction = (float)Math.PI / 2f;
@@ -93,8 +82,6 @@ internal class ClassicBoss : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0038: Unknown result type (might be due to invalid IL or missing references)
 		if (isBlinking())
 		{
 			spriteBatch.lightenEffect.Enable();
@@ -109,21 +96,6 @@ internal class ClassicBoss : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_00e2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0155: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ff: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0299: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02a4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_033b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0342: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0321: Unknown result type (might be due to invalid IL or missing references)
 		animationProgress = MyMath.Mod(animationProgress + (float)gameTime.ElapsedGameTime.TotalSeconds * 20f, sprite.Frames);
 		float num = 1f - (float)base.HitPoints / 350f;
 		float num2 = MathHelper.Lerp(0.0002f, 0.0008f, num);
@@ -208,9 +180,6 @@ internal class ClassicBoss : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0067: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
 		Die();
 		AwardScoreToAll(combo: true);
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);

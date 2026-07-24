@@ -102,14 +102,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0019: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft = collisionBox.TopLeft * 0.8f + base.Position;
 			collisionBox.BottomRight = collisionBox.BottomRight * 0.8f + base.Position;
@@ -149,19 +141,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public void Setup(PlayerShip A, PlayerShip B)
 	{
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0031: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
 		this.A = A;
 		this.B = B;
 		Vector2 position = A.Position;
@@ -188,9 +167,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
 		color = new Color(new Vector4(1f, 1f, 1f, 0.65f));
 		base.Initialize();
 		// lazermiddle (thin strip) + lazerglow (radial bloom) drive the live lightning. Both are
@@ -202,7 +178,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 		// Cosmetic FX advance on RAW draw time (like the metal sheen / brain overlays) so the
 		// lightning keeps crackling through a hit-stop freeze.
 		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
@@ -240,7 +215,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// pool of stochastic crackle tendrils, and a throbbing bloom on each orb. All additive.
 	private void DrawLightning(float dt, Vector2 pA, Vector2 pB)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 delta = pB - pA;
 		float gap = delta.Length();
 		if (gap < 1f)
@@ -332,7 +306,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// perpendicular tip, faded in/out by a birth->death sin envelope.
 	private void DrawTendril(ref Tendril tn, Vector2 pA, Vector2 axis, Vector2 perp, float gap, float age)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		float env = (float)Math.Sin(age / tn.life * Math.PI);
 		if (env <= 0.03f)
 		{
@@ -389,7 +362,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// smoothly frame to frame instead of strobing. Mirrors Quad.BuildBolt.
 	private int BuildBolt(Vector2 start, Vector2 end, Vector2 perpUnit, float amp, float time, float seed)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2[] cur = boltA;
 		Vector2[] nxt = boltB;
 		cur[0] = start;
@@ -423,7 +395,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// A thin glowing line p0->p1 as one stretched strip of the lazermiddle texture.
 	private void DrawLine(Vector2 p0, Vector2 p1, float thickness, Color color)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 d = p1 - p0;
 		float len = d.Length();
 		if (len < 0.5f)
@@ -442,7 +413,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// the overall pump. `phase` decorrelates the two orbs.
 	private void DrawEnergyOrb(Vector2 center, float glow, float phase)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		float baseD = OrbBloomDiameter * glow;
 		float breathe = 1f + 0.16f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + phase);
 		float wHalo = Wobble(0.22f, 2.3f, phase);
@@ -467,7 +437,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// Radial bloom of the lazerglow texture to ~diameterPx (it's radial, so rotation is moot).
 	private void DrawGlow(Vector2 center, float diameterPx, Color color)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		float s = diameterPx / (float)glowTex.LogicalWidth();
 		spriteBatch.Draw(glowTex, center, 0f, new Vector2(s, s), center: true, color);
 	}
@@ -485,27 +454,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0062: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0063: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0064: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0078: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ab: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d6: Unknown result type (might be due to invalid IL or missing references)
 		if (A == null || B == null)
 		{
 			Die();

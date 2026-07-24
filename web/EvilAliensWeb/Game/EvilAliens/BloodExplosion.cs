@@ -28,12 +28,6 @@ internal class BloodExplosion : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002c: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 			boundBox.TopLeft = base.Position + new Vector2(-10f, -10f);
 			boundBox.BottomRight = base.Position + new Vector2(10f, 10f);
 			return boundBox;
@@ -50,8 +44,6 @@ internal class BloodExplosion : AlienDrawableGameComponent
 	public BloodExplosion(Game game)
 		: base(game)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Sprites/blooddrop"));
 		base.DrawOrder = 40;
 		particles = new BloodExplosionData[30];
@@ -84,10 +76,6 @@ internal class BloodExplosion : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float size, float lifetime, float impulse, float direction)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 		this.size = size;
 		this.lifetime = lifetime;
@@ -98,9 +86,6 @@ internal class BloodExplosion : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
 		BloodExplosionData[] array = particles;
 		foreach (BloodExplosionData bloodExplosionData in array)
 		{
@@ -116,24 +101,6 @@ internal class BloodExplosion : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0134: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0139: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0147: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0152: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016a: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		BloodExplosionData[] array = particles;
 		foreach (BloodExplosionData bloodExplosionData in array)

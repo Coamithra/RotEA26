@@ -60,16 +60,6 @@ internal class FlyingSpider : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0029: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-			//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0052: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0057: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft *= 0.95f;
 			collisionBox.BottomRight *= 0.95f;
@@ -119,21 +109,6 @@ internal class FlyingSpider : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0091: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0161: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0101: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		flaptimer.Randomize();
 		base.Position = new Vector2(850f, RandomHelper.RandomNextFloat(0f, 475f));
@@ -179,7 +154,6 @@ internal class FlyingSpider : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		if (isbackground)
 		{
@@ -214,7 +188,6 @@ internal class FlyingSpider : KillableAlien
 
 	private void DrawSprites(GameTime gameTime)
 	{
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
 		float num = flaptimer.Duration / 2f;
 		if (base.hittimeractive)
 		{
@@ -247,9 +220,6 @@ internal class FlyingSpider : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0045: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
 		float num = 50f * Settings.GetInstance().DifficultyModifier;
 		base.Position = new Vector2(base.Position.X, startheight + num * scale * (float)Math.Sin(swiveltimer.Normalized * ((float)Math.PI * 2f)));
 		base.Update(gameTime);
@@ -261,10 +231,6 @@ internal class FlyingSpider : KillableAlien
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
 		base.CollidesWith(other);
 		if (other is Floorbottom && base.DirectionalVector.Y > 0f)
 		{
@@ -278,14 +244,6 @@ internal class FlyingSpider : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0063: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0098: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c0: Unknown result type (might be due to invalid IL or missing references)
 		if (!base.IsDead)
 		{
 			Die();

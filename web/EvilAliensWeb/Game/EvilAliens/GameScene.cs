@@ -454,9 +454,6 @@ internal abstract class GameScene : Scene
 
 	protected virtual void setPresence(GamerPresenceMode presenceMode)
 	{
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
 		{
@@ -670,13 +667,6 @@ internal abstract class GameScene : Scene
 
 	protected virtual void PreloadGraphicalContent()
 	{
-		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0117: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0278: Unknown result type (might be due to invalid IL or missing references)
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletevil");
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletgood");
@@ -793,8 +783,6 @@ internal abstract class GameScene : Scene
 
 	protected void TestBlocks()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		int num = 20;
 		for (int i = 0; i < 800 / num; i++)
 		{
@@ -964,9 +952,6 @@ internal abstract class GameScene : Scene
 
 	private void SpawnPlayer(ControlDevice controlDevice)
 	{
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a4: Unknown result type (might be due to invalid IL or missing references)
 		PlayerShip playerShip = Collection.Recycle<PlayerShip>();
 		if (playerShip == null)
 		{
@@ -1138,10 +1123,6 @@ internal abstract class GameScene : Scene
 
 	private void checkScreenShot()
 	{
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00eb: Expected O, but got Unknown
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0101: Unknown result type (might be due to invalid IL or missing references)
 		if (snapshotdelaytimer.Finished)
 		{
 			snapshotdelaytimer.Reset();
@@ -1229,9 +1210,6 @@ internal abstract class GameScene : Scene
 
 	private void takeScreenShot()
 	{
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0078: Expected O, but got Unknown
 		Game1.onPostDraw = (Game1.PostDrawEvent)Delegate.Remove(Game1.onPostDraw, game1PostDrawEvent);
 		if (((Collection<IGameComponent>)(object)base.Game.Components).Contains((IGameComponent)(object)this))
 		{
@@ -1321,9 +1299,6 @@ internal abstract class GameScene : Scene
 
 	protected void SpawnAllPlayers(bool invulnerable)
 	{
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f9: Unknown result type (might be due to invalid IL or missing references)
 		if (!isDemo)
 		{
 			score.ShowStartMessages();

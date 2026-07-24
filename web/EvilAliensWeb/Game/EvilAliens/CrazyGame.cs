@@ -113,14 +113,6 @@ internal class CrazyGame : GameScene
 
 	protected override void UpdateNormal(GameTime gameTime)
 	{
-		//IL_00d4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00da: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0120: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0132: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0137: Unknown result type (might be due to invalid IL or missing references)
 		base.UpdateNormal(gameTime);
 		if (bullets < (int)(30f * Settings.GetInstance().DifficultyModifier))
 		{

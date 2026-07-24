@@ -41,8 +41,6 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 	public Floor(Game game)
 		: base(game)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
 		floorbottom = new Floorbottom(base.Game, 560f);
 		shadows = new List<Shadow>();
 		spriteBatch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
@@ -58,9 +56,6 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0081: Unknown result type (might be due to invalid IL or missing references)
 		foreach (Shadow shadow in shadows)
 		{
 			// shadow.size (in CollidesWith) already self-normalises against shadowimage.Width, so
@@ -118,8 +113,6 @@ public class Floor : DrawableGameComponent, ICollidable, IComponentWatcher
 
 	public ICollisionType GetCollisionType()
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
 		b.TopLeft = new Vector2(-500f, 250f);
 		b.BottomRight = new Vector2(1300f, 1100f);
 		return b;

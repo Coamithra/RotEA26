@@ -130,25 +130,6 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00eb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0111: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0116: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0135: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0147: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0151: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0183: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0190: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ff: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0227: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022c: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		batch.BlendMode = (SpriteBlendMode)1;
 		switch (state)

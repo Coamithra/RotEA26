@@ -14,7 +14,6 @@ public class BrainSpawner : GenericSpawner
 
 	protected override void DoEvent(GameTime gameTime)
 	{
-		//IL_00c3: Unknown result type (might be due to invalid IL or missing references)
 		Braineroid braineroid = Braineroid.NewBraineroid(collectionHelper, game);
 		float num = 200f;
 		Vector2 position = default(Vector2);

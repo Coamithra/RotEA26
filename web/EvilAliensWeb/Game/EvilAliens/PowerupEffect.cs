@@ -21,10 +21,6 @@ internal class PowerupEffect : AlienDrawableGameComponent
 	public PowerupEffect(Game game)
 		: base(game)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Sprites/playersheet", 4, 8, 1, 6f));
 		base.DrawOrder = 40;
 		particles = new PowerupEffectData[5];
@@ -47,10 +43,6 @@ internal class PowerupEffect : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float size, float lifetime, float impulse, float direction)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 		this.size = size;
 		this.lifetime = lifetime;
@@ -60,7 +52,6 @@ internal class PowerupEffect : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		PowerupEffectData[] array = particles;
 		foreach (PowerupEffectData powerupEffectData in array)
 		{
@@ -71,14 +62,6 @@ internal class PowerupEffect : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0097: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		PowerupEffectData[] array = particles;
 		foreach (PowerupEffectData powerupEffectData in array)
@@ -120,7 +103,6 @@ internal class PowerupEffect : AlienDrawableGameComponent
 
 	public void SetPosition(Vector2 position)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 	}
 }

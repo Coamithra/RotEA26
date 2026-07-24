@@ -150,14 +150,6 @@ public class Settings : Savable
 
 	public PlayerSettings GetPlayerSettings(ControlDevice controller)
 	{
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
 		PlayerIndex val = (PlayerIndex)(controller switch
 		{
 			ControlDevice.PadOne => 0, 
@@ -176,14 +168,6 @@ public class Settings : Savable
 
 	public Settings()
 	{
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ac: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f6: Expected I4, but got Unknown
 		for (int i = 0; i < OtherPlayersSettings.Length; i++)
 		{
 			OtherPlayersSettings[i] = new PlayerSettings();

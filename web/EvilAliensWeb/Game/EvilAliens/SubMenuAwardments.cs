@@ -10,25 +10,10 @@ internal class SubMenuAwardments : MenuSub1
 	public SubMenuAwardments(Game game)
 		: base(game)
 	{
-	}//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-	//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-
+	}
 
 	public override void DrawMenu(GameTime gameTime, float yoffset)
 	{
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ed: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0141: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0192: Unknown result type (might be due to invalid IL or missing references)
 		yoffset -= 35f;
 		Vector2 position = default(Vector2);
 		(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);

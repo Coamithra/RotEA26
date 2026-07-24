@@ -89,10 +89,6 @@ public class CollisionHandler
 
 	public void DetectCollisions()
 	{
-		//IL_00f6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0102: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0247: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0255: Unknown result type (might be due to invalid IL or missing references)
 		int count = collidables.Count;
 		for (int i = 0; i < boxes.Count && i != count; i++)
 		{
@@ -170,22 +166,6 @@ public class CollisionHandler
 
 	private void FillCollisionMatrixLine(ICollidable collidable, List<List<BoxInfo>> boxes, int i)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
-		//IL_024b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0154: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0447: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0401: Unknown result type (might be due to invalid IL or missing references)
-		//IL_030c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_048d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03c3: Unknown result type (might be due to invalid IL or missing references)
 		CollisionLine collisionLine = (CollisionLine)collidable.GetCollisionType();
 		Vector2 origin = collisionLine.Origin;
 		Vector2 val = origin;

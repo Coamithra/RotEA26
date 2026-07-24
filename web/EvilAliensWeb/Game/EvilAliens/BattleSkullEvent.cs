@@ -32,7 +32,6 @@ internal class BattleSkullEvent : GenericSpawner
 
 	private void SpawnBattleSkull()
 	{
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
 		float num = ((!spawnleft) ? 680f : 120f);
 		BattleSkull battleSkull = BattleSkull.NewBattleSkull(collectionHelper, game);
 		battleSkull.Setup(new Vector2(num, 700f));

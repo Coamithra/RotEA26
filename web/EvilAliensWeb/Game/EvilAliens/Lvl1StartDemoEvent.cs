@@ -41,9 +41,6 @@ public class Lvl1StartDemoEvent : GameEvent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_009a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d8: Unknown result type (might be due to invalid IL or missing references)
 		timer.Update(gameTime);
 		switch (state)
 		{

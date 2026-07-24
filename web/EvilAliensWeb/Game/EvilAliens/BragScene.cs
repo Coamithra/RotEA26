@@ -76,17 +76,6 @@ public class BragScene : Scene
 
 	private void friendsmenu_OnFriendSelected(MenuSub1 sender)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0058: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0123: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f0: Unknown result type (might be due to invalid IL or missing references)
 		Gamer val = friends[sender.GetSelectedEntry];
 		try
 		{
@@ -155,7 +144,6 @@ public class BragScene : Scene
 
 	private void showError(string p, PlayerIndex player)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
 		if (Guide.IsVisible)
 		{
 			return;
@@ -207,11 +195,6 @@ public class BragScene : Scene
 
 	public override void Initialize()
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		try
 		{
@@ -276,13 +259,6 @@ public class BragScene : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b7: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		base.SpriteBatch.Draw(background, Vector2.Zero);
 		switch (state)
@@ -307,18 +283,6 @@ public class BragScene : Scene
 
 	private void drawButtons(string A, string B)
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013f: Unknown result type (might be due to invalid IL or missing references)
 		float num = 0.5f;
 		float num2 = 0.8f;
 		float num3 = (General.SafeZone).Left;
@@ -335,18 +299,6 @@ public class BragScene : Scene
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0185: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0144: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01cc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01db: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011e: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		waitTimer.Update(gameTime);
 		switch (state)

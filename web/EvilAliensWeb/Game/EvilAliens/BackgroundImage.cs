@@ -41,9 +41,6 @@ internal class BackgroundImage
 
 	public BackgroundImage()
 	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
 		color = Color.White;
 		switchTimer.Stop();
 		switchTimer.Reset();
@@ -91,23 +88,6 @@ internal class BackgroundImage
 
 	public void Draw(SpriteBatchWrapper spriteBatch, GameTime gameTime)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0018: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0111: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = position;
 		val -= realsize;
 		val += drawOffset;
@@ -156,27 +136,6 @@ internal class BackgroundImage
 
 	private void DrawBackground(Vector2 position, SpriteBatchWrapper spriteBatch, bool alternate, float fade)
 	{
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0211: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0212: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0213: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0224: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0354: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0355: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0356: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0367: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0452: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0453: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0454: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0465: Unknown result type (might be due to invalid IL or missing references)
 		Texture2D[,] array = textures;
 		if (alternate)
 		{

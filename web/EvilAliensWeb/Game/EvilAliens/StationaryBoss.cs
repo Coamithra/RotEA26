@@ -17,9 +17,6 @@ internal class StationaryBoss : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0048: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.Width *= 0.90999997f;
 			collisionBox.Height *= 0.48999998f;
@@ -59,7 +56,6 @@ internal class StationaryBoss : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = new Vector2(1100f, 440f);
 		base.Initialize();
 		fakehittimer.Stop();
@@ -88,11 +84,6 @@ internal class StationaryBoss : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0045: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		if (base.Position.X < -500f)
 		{
@@ -103,14 +94,6 @@ internal class StationaryBoss : AlienDrawableGameComponent
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_006b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00af: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c5: Unknown result type (might be due to invalid IL or missing references)
 		base.CollidesWith(other);
 		if ((other is Bullet) & !fakehittimer.Active)
 		{

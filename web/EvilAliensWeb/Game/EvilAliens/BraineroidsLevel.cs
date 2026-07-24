@@ -59,7 +59,6 @@ internal class BraineroidsLevel : GameScene
 
 	protected override void UpdateNormal(GameTime gameTime)
 	{
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
 		base.UpdateNormal(gameTime);
 		ufotimer.Update(gameTime);
 		if (ufotimer.Finished)
@@ -78,8 +77,6 @@ internal class BraineroidsLevel : GameScene
 
 	private void wait_OnFinished(GameEvent sender)
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0144: Unknown result type (might be due to invalid IL or missing references)
 		fired = true;
 		UFO uFO = UFO.NewUFO(Collection, base.Game);
 		uFO.Setup(new Vector2(RandomHelper.RandomNextFloat(0f, 800f), -115f), isBig: true, EnemyBehaviour.classic);

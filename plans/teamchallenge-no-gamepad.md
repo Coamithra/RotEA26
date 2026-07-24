@@ -57,6 +57,18 @@ nothing connected           ->  ControlDevice.AI  (auto-pilot partner)
 The net-session branch (`if (!NetSession.Active)`) is untouched: online, the partner is
 the remote peer and no local second device is seated at all.
 
+Added after `/review` (both are load-bearing, not polish):
+
+- **Slot 0 is resolved too** (`ResolvePrimarySeat`). The 2008 code hard-seated `Keyboard`, so a
+  pad-only player got a ship they cannot steer; it now seats the device that LAUNCHED the level
+  when that device can drive a ship, and falls back to `Keyboard` otherwise -- including for a pad
+  that has gone away since the menu, which would pause-loop exactly like the partner seat did.
+- **A pad Start press TAKES OVER the bot's seat** (`GameScene.TryAdoptJoinDevice` hook ->
+  `Oracle.SetController` + `PlayerShip.AdoptController`). Without it this fix BREAKS two-human
+  co-op: the browser Gamepad API only exposes a pad after a button press in the page, so player
+  two's idle pad reads disconnected at `Initialize`, the bot takes the seat, and their Start press
+  would seat a third player that the tether (always `GetShips()[0]/[1]`) leaves flying free.
+
 The decision lives in a **pure** `internal static ControlDevice ResolvePartnerSeat(
 Func<int,bool> padConnected, DebugFlags.TeamPartnerSeat forced)` — the `OwnsSlotCore` /
 `AiBench.Row` idiom — so the console self-test can table-drive every case instead of
@@ -114,17 +126,20 @@ Per the user's instruction this session (**no live browser testing -- they are o
 The decision itself did NOT have to be deferred:
 
 - **`dotnet run --project tools/sim/logic_probe -- web/EvilAliensWeb/bin/Debug/net8.0` -> ALL
-  PASS.** New tool (this card): it `AssemblyLoadContext`-loads the built `EvilAliensWeb.dll` into
-  the desktop CLR and calls the REAL `TeamChallenge.ResolvePartnerSeat` over all 16 pad-connection
-  masks x 3 `?teampartner` values, through `TeamSeatTest`'s own private `Expected` /
-  `WouldForcePause` helpers (so the browser test's table is executed too, not just the resolver).
-  Results: `none` and `ai` seat a present device in 16/16 masks; `pad` seats an absent one in
-  exactly 1 (the no-pad mask, by design); resolution matches the spec in 48/48 cases; and the
-  negative control -- the pre-card always-`PadOne` policy -- force-pauses in 8/16 masks, i.e. the
-  bug reproduced.
-- **Mutation-tested, so the green run means something:** changing `if (padConnected(i))` to
-  `if (true)` turned 7 PASS lines into 4 FAIL (`mask 0000 -> PadOne, expected AI`) while leaving
-  the `?teampartner=ai` legs correctly green. Reverted, re-run, green.
+  PASS (17 checks).** New tool (this card): it `AssemblyLoadContext`-loads the built
+  `EvilAliensWeb.dll` into the desktop CLR and calls the REAL resolvers -- `ResolvePrimarySeat`
+  over 8 launching devices x 16 pad-connection masks, `ResolvePartnerSeat` over 3 primaries x 16
+  masks x 3 `?teampartner` values -- asserting `TeamSeatTest`'s own PROPERTIES (invoked by
+  reflection, so the browser suite's table is exercised too, not just the resolvers): never an
+  absent pad, never a ship no device can steer, never the same device in both seats, and the
+  partner is the lowest-indexed eligible pad (index recomputed by bit arithmetic, so a
+  PadTwo/PadThree mix-up cannot hide behind an identical one in the oracle). 43/48 `none` cases
+  seat a REAL pad, which is what stops a bot-only resolver passing. Negative control -- the
+  pre-card `Keyboard` + `PadOne` seating -- force-pauses in 8/16 masks, i.e. the bug reproduced.
+- **Mutation-tested three ways, so the green run means something.** `padConnected(i)` -> `true`:
+  4 FAIL. Dropping the `!= primary` check: `FAIL ... seats the SAME device as the primary (PadOne)
+  -- one player, two ships`. `ResolvePrimarySeat` trusting a dead pad: 4 starters FAIL with
+  `seats an absent pad`. Each reverted and re-run green.
 - clean `dotnet build web/EvilAliensWeb -c Debug` (0 errors; 37 pre-existing warnings unchanged);
 - diff spot-check per `CONTRIBUTING.md` (no `content/` casing slip, no `BlendState` change, no
   codegen re-run, no csproj/trim change);

@@ -424,12 +424,31 @@ site now lives under:
   port made the level UNPLAYABLE for a keyboard-only player: `GameScene.Update` raises
   `pauseRequested` on every tick a seated pad reads `!InputHandler.PadConnected(i)`, so the world
   sat in the pause menu forever (`ticks=0 prog=2/52` over 37 sim-seconds).
-  - `TeamChallenge.ResolvePartnerSeat` now picks **the first CONNECTED pad** (unchanged two-human
-    co-op -- gamepads DO work here, KNI ships `nkast.Wasm.Dom/js/Gamepad.*.js`), else
-    **`ControlDevice.AI`**, the shipped Mechanical-Friends bot as an auto-pilot partner. The
-    level-select briefing says so; an in-level banner has nowhere safe to live (added during
-    `Startup` it is eaten by `UpdateStartup`'s 1300ms `Purge<AnimatedMessage>`, added in `Normal`
-    it collides with the script's own "Get ready!" beat).
+  - **Both seats are resolved by pure functions now, and neither can hold a pad that is absent.**
+    `ResolvePrimarySeat` seats slot 0 with the device that LAUNCHED the level when it can drive a
+    ship (the 2008 code hard-seated `Keyboard`, which hands a pad-only player a ship they cannot
+    steer), falling back to `Keyboard` otherwise -- including for a pad that has gone away since
+    the menu, which would otherwise pause-loop just as badly. `ResolvePartnerSeat` then takes the
+    lowest-indexed connected pad THE PRIMARY IS NOT USING (the original two-human co-op --
+    gamepads do work here, KNI ships `nkast.Wasm.Dom/js/Gamepad.*.js`), else `ControlDevice.AI` as
+    an auto-pilot partner. The level-select briefing says so; an in-level banner has nowhere safe
+    to live (added during `Startup` it is eaten by `UpdateStartup`'s 1300ms
+    `Purge<AnimatedMessage>`, added in `Normal` it collides with the script's own "Get ready!"
+    beat).
+  - **A pad Start press TAKES OVER the bot's seat -- and without that, two-human co-op would be
+    broken by this fix.** The browser Gamepad API only exposes a pad after a button is pressed on
+    it IN THE PAGE, so player two's idle pad reads DISCONNECTED while `Initialize` resolves the
+    seats: the AI takes the seat and their later Start press would seat a THIRD player, which the
+    tether (always `GetShips()[0]/[1]`) leaves flying free while the bot stays bolted to player
+    one. `GameScene.AddPlayer` therefore consults a new `protected virtual TryAdoptJoinDevice`
+    hook first; `TeamChallenge` claims a joining PAD for the seat the bot holds
+    (`Oracle.SetController` re-points the seat, `PlayerShip.AdoptController` the live ship, so the
+    slot keeps its score and its place in the tether). Only while the bot holds it -- a second pad
+    joining a genuine two-human game still adds a player.
+  - **How good the bot partner is remains unmeasured.** The completion matrix's TeamChallenge row
+    is a TIMEOUT at ~90 deaths with both ships bot-driven; the only clean run (VICTORY 402s, 0
+    deaths) was an `?invuln` CONTROL. So the auto-pilot makes the level playable and reachable, not
+    provably finishable -- worth a look before promising more.
   - **INVARIANT: the resolved device is never a pad that is not connected** -- exactly the
     force-pause's precondition, so the loop is unreachable by construction. `GameScene`'s guard
     itself is deliberately UNTOUCHED: a pad dying MID-RUN should still say so.
@@ -967,12 +986,13 @@ inferred.
 | InsaneBossI | GAME OVER 22/50 / 6 | GAME OVER 32/50 / 8 | GAME OVER 6/50 / 6 | **fail** |
 | TeamChallenge | TIMEOUT 14/52 / 91 | TIMEOUT 14/52 / 89 | TIMEOUT 14/52 / 87 | **fail** |
 
-**TeamChallenge's row is STALE and should be re-measured (card e6927ef8).** It was run with
-`?aiteam`, which seated the partner as `ControlDevice.Generic` -- a device `PlayerShip.Update` has
-no case for -- so that ship never thrust and never fired, and the rigid tether drags an inert
-half-tonne through every run (91/89/87 deaths, `prog` pinned at 14/52 across all three, the only
-row with no run-to-run variation at all). The partner slot now resolves to `ControlDevice.AI`, so
-both ships fly and shoot; nothing else in the table is affected.
+**TeamChallenge's row still stands after card e6927ef8, and the reason is worth knowing.** It was
+run with `?aiteam`, which seated the partner as `ControlDevice.Generic` -- a device
+`PlayerShip.Update` has no case for -- but the switch is on `EffectiveController()`, and the sweep
+always passes `?aiplayer`, which returns `AI` for every non-puppet. So BOTH ships were bot-driven
+then, and both are bot-driven now that the seat resolves to `ControlDevice.AI` directly: the two
+seatings are bench-equivalent and the numbers carry over. (Its 91/89/87 deaths and `prog` pinned at
+14/52 across all three runs are the AI failing to survive a tethered pair, not an inert partner.)
 
 **The `?invuln` control is what makes that diagnosis, and it is the cheapest one available here:
 re-run a failing level with `?invuln` and the AI wins ALL THREE** -- ClassicAliens 341s,
@@ -1023,11 +1043,12 @@ before hunting a blind spot in any future stalled-level report.
   every tick a seated pad device reads `!InputHandler.PadConnected(i)`. With no gamepad attached
   the world was frozen in the pause menu permanently: measured `ticks=0 noship=1 prog=2/52` over
   37 sim-seconds, versus `ticks=1682 shots=1029 prog=6/52` with the old flag (which swapped in
-  `ControlDevice.Generic` -- no connected-check, so the force-pause never armed). See the partner
-  -seat bullet under "Input" for the fix; for benching, `?level=TeamChallenge&aiplayer` is now
-  enough, and the pre-card numbers above were all measured with the second ship INERT
-  (`PlayerShip.Update` has no `Generic` case), so **the matrix's TeamChallenge row describes one
-  ship doing the work and is due a re-measure.**
+  `ControlDevice.Generic` -- no connected-check, so the force-pause never armed). See the
+  partner-seat bullet under "Input" for the fix; for benching, `?level=TeamChallenge&aiplayer` is
+  now enough. **The matrix numbers carry over unchanged**: `PlayerShip.Update` switches on
+  `EffectiveController()`, so under `?aiplayer` the `Generic`-seated ship was already flying the AI
+  branch -- the old and new seatings are bench-equivalent. `?teampartner=pad` restores the pre-card
+  seating verbatim if the force-pause itself is what you want to reach.
 - **Sweep it with `eaAiBench.matrix(levels, simSeconds, runs, difficulty)`** (`index.html`;
   `.results()` `.status()` `.stop()`). ONE FRESH PAGE LOAD PER RUN, plan carried in
   `sessionStorage` and resumed at boot -- not an in-process relaunch, because a level

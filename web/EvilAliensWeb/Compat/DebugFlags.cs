@@ -1748,24 +1748,27 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "teampartner":
 					// Bare ?teampartner (no value) means the AI partner -- the case someone
-					// reaching for this flag wants; "pad" is the deliberate bug-reproduction.
-					// The off spellings resolve to None (= the normal connected-pad-then-AI
-					// resolution) rather than silently forcing the AI, so ?teampartner=0 does
-					// what a reader expects of it.
-					switch (val?.Trim().ToLowerInvariant())
+					// reaching for this flag wants. An off spelling resolves to None (the normal
+					// connected-pad-then-AI resolution) rather than silently forcing the AI.
+					// An unrecognised value is REPORTED and ignored, for the ?flyspiderflatten
+					// reason: a typo would otherwise quietly run the other arm of the A/B while
+					// the run is labelled as the variant under test.
+					if (val == null || val.Trim().Length == 0 || val.Trim().ToLowerInvariant() == "ai")
 					{
-					case "pad":
-						TeamPartner = TeamPartnerSeat.Pad;
-						break;
-					case "0":
-					case "off":
-					case "false":
-					case "none":
-						TeamPartner = TeamPartnerSeat.None;
-						break;
-					default:
 						TeamPartner = TeamPartnerSeat.Ai;
-						break;
+					}
+					else if (val.Trim().ToLowerInvariant() == "pad")
+					{
+						TeamPartner = TeamPartnerSeat.Pad;
+					}
+					else if (IsExplicitlyOff(val))
+					{
+						TeamPartner = TeamPartnerSeat.None;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?teampartner= value '" + val
+							+ "' (expected ai/pad) -- ignored, seats resolve normally");
 					}
 					break;
 				case "aibench":

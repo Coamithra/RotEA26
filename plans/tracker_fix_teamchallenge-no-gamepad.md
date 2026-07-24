@@ -47,13 +47,16 @@ live pass (ship the PR).
 
 ## Phase 6: Review & Ship
 - [x] Commit + push
-- [x] `/review` branch diff, fix every finding
-- [x] `git pull origin main`, resolve per rules, re-verify
-- [x] PR + self-merge
-- [x] Remove worktree/branch, delete plan + tracker
-- [x] Card -> Done, summary comment (real newlines)
-- [x] Follow-up cards (P2 keyboard device; re-measure the matrix row)
-- [x] Closing overview for user
+- [x] `/review` branch diff -> 12 findings, all triaged; 10 fixed in code, 2 as doc corrections.
+      The reviewer was RIGHT that my "matrix row is stale" claim was false (PlayerShip switches on
+      EffectiveController and the sweep passes ?aiplayer). Added in response: primary-seat
+      resolution, the pad-takeover hook, property-based oracles.
+- [ ] `git pull origin main`, resolve per rules, re-verify
+- [ ] PR + self-merge
+- [ ] Remove worktree/branch, delete plan + tracker
+- [ ] Card -> Done, summary comment (real newlines)
+- [ ] Follow-up cards (P2 keyboard device; measure the bot partner)
+- [ ] Closing overview for user
 
 ## Phase 7: Clean up
 - [x] No dev servers started, no browser tabs opened (no live testing)

@@ -53,7 +53,9 @@ internal static class Program
             Console.WriteLine("usage: logic_probe <path to web/EvilAliensWeb/bin/Debug/net8.0>");
             return 2;
         }
-        string binDir = args[0];
+        // LoadFromAssemblyPath demands an ABSOLUTE path (and so does the Resolving handler below),
+        // while every documented invocation passes a repo-relative one.
+        string binDir = Path.GetFullPath(args[0]);
         string asmPath = Path.Combine(binDir, "EvilAliensWeb.dll");
         if (!File.Exists(asmPath))
         {
@@ -78,14 +80,15 @@ internal static class Program
         return failures == 0 ? 0 : 1;
     }
 
-    // Card e6927ef8 -- TeamChallenge's partner seat. The bug was a seating decision whose
+    // Card e6927ef8 -- TeamChallenge's two seat decisions. The bug was a seating decision whose
     // consequence is a permanent pause loop (GameScene.Update force-pauses every tick a seated pad
-    // reads !PadConnected), so what has to be proven is that no pad-connection mask can resolve to
-    // an ABSENT pad. Sixteen masks x three ?teampartner values, exhaustive.
+    // reads !PadConnected), so what has to be proven is that no pad-connection mask can seat a pad
+    // that is not there. Exhaustive: every launching device and every one of the 16 masks, times
+    // the three ?teampartner values for the partner.
     //
-    // The comparison run here is the SAME one Compat/TeamSeatTest.cs (eaTeamSeat()) performs in the
-    // browser -- its own private Expected/WouldForcePause helpers are invoked, not re-written --
-    // so this also checks the browser test's table rather than only the resolver.
+    // The PROPERTIES asserted are Compat/TeamSeatTest.cs's own -- its PrimaryViolation /
+    // PartnerViolation / WouldForcePause are invoked by reflection rather than re-written here, so
+    // this run also exercises the browser suite's table and the two cannot drift apart.
     private static int ProbeTeamPartnerSeat(Assembly asm)
     {
         Type team = asm.GetType("EvilAliens.TeamChallenge", true);
@@ -93,54 +96,98 @@ internal static class Program
         Type seatEnum = asm.GetType("EvilAliensWeb.Compat.DebugFlags+TeamPartnerSeat", true);
         Type test = asm.GetType("EvilAliensWeb.Compat.TeamSeatTest", true);
         const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-        MethodInfo resolve = team.GetMethod("ResolvePartnerSeat", anyStatic);
-        MethodInfo expected = test.GetMethod("Expected", anyStatic);
+        MethodInfo primarySeat = team.GetMethod("ResolvePrimarySeat", anyStatic);
+        MethodInfo partnerSeat = team.GetMethod("ResolvePartnerSeat", anyStatic);
+        MethodInfo primaryBad = test.GetMethod("PrimaryViolation", anyStatic);
+        MethodInfo partnerBad = test.GetMethod("PartnerViolation", anyStatic);
         MethodInfo forcePause = test.GetMethod("WouldForcePause", anyStatic);
-        if (resolve == null || expected == null || forcePause == null)
+        if (primarySeat == null || partnerSeat == null || primaryBad == null || partnerBad == null || forcePause == null)
         {
-            Console.WriteLine("FAIL: could not reflect the target (ResolvePartnerSeat=" + (resolve != null)
-                + " Expected=" + (expected != null) + " WouldForcePause=" + (forcePause != null)
+            Console.WriteLine("FAIL: could not reflect the targets (ResolvePrimarySeat=" + (primarySeat != null)
+                + " ResolvePartnerSeat=" + (partnerSeat != null) + " PrimaryViolation=" + (primaryBad != null)
+                + " PartnerViolation=" + (partnerBad != null) + " WouldForcePause=" + (forcePause != null)
                 + ") -- renamed or moved?");
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] TeamChallenge.ResolvePartnerSeat (card e6927ef8)");
-        foreach (string name in new[] { "None", "Ai", "Pad" })
+        string[] starters = { "Keyboard", "PadOne", "PadTwo", "PadThree", "PadFour", "Generic", "AI", "Remote" };
+
+        Console.WriteLine("[logic_probe] TeamChallenge.ResolvePrimarySeat (card e6927ef8)");
+        foreach (string starterName in starters)
         {
-            object forced = Enum.Parse(seatEnum, name);
-            int loops = 0;
-            int mismatches = 0;
-            string firstMismatch = null;
+            object starter = Enum.Parse(device, starterName);
+            int bad = 0;
+            string first = null;
             for (int mask = 0; mask < 16; mask++)
             {
                 int m = mask;
                 Func<int, bool> connected = i => (m & (1 << i)) != 0;
-                object seat = resolve.Invoke(null, new object[] { connected, forced });
-                object want = expected.Invoke(null, new object[] { mask, forced });
-                if ((bool)forcePause.Invoke(null, new object[] { seat, mask }))
+                object seat = primarySeat.Invoke(null, new object[] { starter, connected });
+                string why = (string)primaryBad.Invoke(null, new object[] { seat, starter, mask });
+                if (why != null)
                 {
-                    loops++;
-                }
-                if (!seat.Equals(want))
-                {
-                    mismatches++;
-                    if (firstMismatch == null)
+                    bad++;
+                    if (first == null)
                     {
-                        firstMismatch = "mask " + Convert.ToString(mask, 2).PadLeft(4, '0') + " -> " + seat + ", expected " + want;
+                        first = "mask " + Convert.ToString(mask, 2).PadLeft(4, '0') + " -> " + seat + ": " + why;
                     }
                 }
             }
-            // Only ?teampartner=pad may seat an absent pad -- it exists to reproduce the bug, and
-            // exactly one mask (no pads at all) can do it.
-            int wantLoops = (name == "Pad") ? 1 : 0;
-            Check("teampartner=" + name.ToLowerInvariant() + " force-pause masks", loops == wantLoops,
-                loops + "/16 seat an absent pad (expected " + wantLoops + ")");
-            Check("teampartner=" + name.ToLowerInvariant() + " resolution", mismatches == 0,
-                mismatches == 0 ? "16/16 as specified" : mismatches + " unexpected; " + firstMismatch);
+            Check("starter " + starterName, bad == 0, bad == 0 ? "16/16 drivable and never an absent pad" : bad + " bad; " + first);
         }
 
-        // Negative control: the pre-card policy took no arguments -- always PadOne -- so it seats a
-        // dead device in every mask without pad 0. A green suite above means nothing without this.
+        Console.WriteLine("[logic_probe] TeamChallenge.ResolvePartnerSeat");
+        foreach (string name in new[] { "None", "Ai", "Pad" })
+        {
+            object forced = Enum.Parse(seatEnum, name);
+            int bad = 0;
+            int loops = 0;
+            int humans = 0;
+            string first = null;
+            foreach (string primaryName in new[] { "Keyboard", "PadOne", "PadTwo" })
+            {
+                object primary = Enum.Parse(device, primaryName);
+                for (int mask = 0; mask < 16; mask++)
+                {
+                    int m = mask;
+                    Func<int, bool> connected = i => (m & (1 << i)) != 0;
+                    object seat = partnerSeat.Invoke(null, new object[] { primary, connected, forced });
+                    bool pauses = (bool)forcePause.Invoke(null, new object[] { seat, mask });
+                    if (pauses)
+                    {
+                        loops++;
+                    }
+                    else if (!seat.ToString().StartsWith("AI"))
+                    {
+                        humans++;
+                    }
+                    string why = (string)partnerBad.Invoke(null, new object[] { seat, primary, mask, forced });
+                    if (why != null)
+                    {
+                        bad++;
+                        if (first == null)
+                        {
+                            first = "primary " + primaryName + ", mask " + Convert.ToString(mask, 2).PadLeft(4, '0')
+                                + " -> " + seat + ": " + why;
+                        }
+                    }
+                }
+            }
+            string what = "teampartner=" + name.ToLowerInvariant();
+            Check("properties " + what, bad == 0, bad == 0 ? "48/48 cases hold" : bad + " violated; " + first);
+            if (name == "None")
+            {
+                // A resolver that always returned the bot would satisfy every other property.
+                Check("seats real humans " + what, humans > 0, humans + "/48 cases seat a present pad");
+            }
+            // Only the bug-reproduction override may seat a device that is not there.
+            int wantLoops = (name == "Pad") ? 24 : 0;
+            Check("force-pause seats " + what, loops == wantLoops, loops + "/48 (expected " + wantLoops + ")");
+        }
+
+        // Negative control: the pre-card policy took no arguments -- Keyboard in slot 0, PadOne in
+        // slot 1 -- so it seated a dead device in every mask without pad 0. A green suite above
+        // means nothing without this.
         object padOne = Enum.Parse(device, "PadOne");
         int oldLoops = 0;
         for (int mask = 0; mask < 16; mask++)
@@ -150,7 +197,7 @@ internal static class Program
                 oldLoops++;
             }
         }
-        Check("negative control (pre-card always-PadOne)", oldLoops == 8,
+        Check("negative control (pre-card Keyboard + PadOne)", oldLoops == 8,
             oldLoops + "/16 masks force-pause every tick" + (oldLoops == 8 ? " -- the bug, reproduced" : " (expected 8)"));
         return 0;
     }

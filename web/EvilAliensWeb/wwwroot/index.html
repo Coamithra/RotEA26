@@ -299,11 +299,9 @@
 
             const urlFor = (plan, i) => {
                 const level = plan.queue[i];
-                // No per-level special-casing: TeamChallenge used to need ?aiteam here because its
-                // second slot was PadOne and a seated-but-disconnected pad force-pauses every
-                // tick. Card e6927ef8 made that slot resolve to ControlDevice.AI when no pad is
-                // plugged in, so the plain boot below benches it (?teampartner=pad brings the old
-                // broken seating back if the force-pause itself is what you want to reach).
+                // No per-level special-casing: every level benches on the same flags (TeamChallenge
+                // needed ?aiteam until card e6927ef8 stopped its partner slot seating a pad that
+                // is not there — ?teampartner=pad reaches that force-pause deliberately).
                 return location.pathname + '?level=' + level + '&aiplayer&aibench&nofps'
                     + '&difficulty=' + plan.difficulty;
             };

@@ -180,11 +180,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   FOREGROUNDED (each run's boot is rAF-paced). Matrix + per-level caveats: web CLAUDE.md.
 
 - **`?teampartner=ai|pad`** (card e6927ef8): override how TeamChallenge seats its SECOND slot.
-  Normally it takes the first CONNECTED gamepad, or an auto-pilot `ControlDevice.AI` partner when
-  there is none — the fix for the level being unplayable (permanent force-pause) on a
-  keyboard-only machine. `ai` forces the bot even with a pad attached; **`pad` forces the old
-  unconditional `PadOne`, i.e. reproduces the bug** and is the only deliberate way to reach the
-  disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
+  Normally the partner is the lowest connected gamepad the primary player is not using, or an
+  auto-pilot `ControlDevice.AI` partner when there is none — the fix for the level being
+  unplayable (permanent force-pause) on a keyboard-only machine, and a pad Start press takes that
+  seat over mid-level (a browser only reveals a gamepad once a button is pressed on it, so player
+  two is invisible until they join). `ai` forces the bot even with a pad attached; **`pad` forces
+  the old unconditional `PadOne` verbatim, i.e. reproduces the bug** and is the only deliberate way
+  to reach the disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
   pad-connection masks through the real resolver + the pre-card policy as the negative control) —
   it needs no level and no gamepads. Replaces `?aiteam`.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one

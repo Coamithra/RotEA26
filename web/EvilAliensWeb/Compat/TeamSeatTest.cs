@@ -3,28 +3,28 @@ using EvilAliens;
 
 namespace EvilAliensWeb.Compat;
 
-// Console oracle for TeamChallenge's partner seat (card e6927ef8). Invoke with eaTeamSeat()
-// from the browser console.
+// Console oracle for TeamChallenge's two seat decisions (card e6927ef8). Invoke with eaTeamSeat()
+// from the browser console; `tools/sim/logic_probe` reflects into the same helpers to run the
+// identical table headlessly on the desktop CLR.
 //
 // The bug this guards is a SEATING decision whose consequence is a permanent pause loop:
 // GameScene.Update raises pauseRequested on every tick a seated pad device reads
-// !InputHandler.PadConnected(i), and the 2008 code seated ControlDevice.PadOne unconditionally.
-// Verifying the fix by playing it needs four physical gamepads to cover the interesting cases
-// and, for the failure, a machine with none -- so the decision is read as DATA instead, over
-// every pad-connection mask. TeamChallenge.ResolvePartnerSeat is pure precisely for this (the
-// NetSession.OwnsSlotCore idiom); this drives the REAL function, not a restatement of it.
+// !InputHandler.PadConnected(i), and the 2008 code seated Keyboard + PadOne flat. Covering that
+// live would need four physical gamepads for the interesting cases and, for the failure itself, a
+// machine with none -- so the decisions are read as DATA instead, over every pad-connection mask.
+// TeamChallenge.ResolvePrimarySeat/ResolvePartnerSeat are pure precisely for this (the
+// NetSession.OwnsSlotCore idiom); this drives the REAL functions, never a copy of them.
 //
-// Three parts:
-//  1. the invariant that kills the bug -- the resolved device is never an ABSENT pad;
-//  2. the preference order -- a connected pad always beats the AI, lowest index first, and the
-//     two ?teampartner overrides do what they say;
-//  3. the NEGATIVE CONTROL -- the old always-PadOne policy run over the same table, which MUST
-//     violate part 1 in every mask where pad 0 is missing. Without it a green tick proves
-//     nothing about the bug being fixed (the eaNetScore.test / eaNetCombo.test rule).
+// The assertions are PROPERTIES, not a restatement of the implementation: "never an absent pad",
+// "the two seats never hold the same device", "the partner is the LOWEST-INDEXED eligible pad"
+// (the index recomputed by bit arithmetic, so a PadTwo/PadThree mix-up in the resolver's switch
+// cannot hide behind an identical mix-up here). Part 3 is the negative control -- the pre-card
+// policy over the same table, which must FAIL the first property. Per the eaNetScore.test() rule:
+// a green tick means nothing unless the same input is shown to break what came before.
 internal static class TeamSeatTest
 {
-	// Every pad-connection mask: bit i set == pad i connected. 16 of them, so this is
-	// exhaustive rather than sampled -- the whole input space of the decision.
+	// Every pad-connection mask: bit i set == pad i connected. 16 of them, so the input space of
+	// the decision is covered exhaustively rather than sampled.
 	private const int MaskCount = 16;
 
 	private static bool Connected(int mask, int pad)
@@ -32,31 +32,62 @@ internal static class TeamSeatTest
 		return (mask & (1 << pad)) != 0;
 	}
 
-	private static bool IsPad(ControlDevice d)
+	// Independent of TeamChallenge.PadIndexOf on purpose (bit scan vs. a switch): the two agreeing
+	// is what makes the index mapping tested rather than assumed.
+	private static int LowestSetBit(int mask)
 	{
-		return d == ControlDevice.PadOne || d == ControlDevice.PadTwo || d == ControlDevice.PadThree || d == ControlDevice.PadFour;
+		for (int i = 0; i < 4; i++)
+		{
+			if (Connected(mask, i))
+			{
+				return i;
+			}
+		}
+		return -1;
 	}
 
-	private static int PadIndex(ControlDevice d)
+	private static int LowestSetBitOtherThan(int mask, int exclude)
 	{
-		return d switch
+		for (int i = 0; i < 4; i++)
 		{
-			ControlDevice.PadOne => 0,
-			ControlDevice.PadTwo => 1,
-			ControlDevice.PadThree => 2,
-			ControlDevice.PadFour => 3,
-			_ => -1
-		};
+			if (Connected(mask, i) && i != exclude)
+			{
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	// The precondition of GameScene.Update's force-pause, stated positively: a seated PAD whose
-	// controller is not there re-pauses the world every tick. Mirrors that guard's condition
-	// (the PlayerShip.IsAiThreat <-> PlayerShip.CollidesWith idiom) -- if the guard's device set
-	// ever changes, this must follow it.
-	private static bool WouldForcePause(ControlDevice seat, int mask)
+	// controller is not there re-pauses the world every tick. Mirrors that guard's condition (the
+	// PlayerShip.IsAiThreat <-> PlayerShip.CollidesWith idiom) -- if the guard's device set ever
+	// changes, this must follow it.
+	internal static bool WouldForcePause(ControlDevice seat, int mask)
 	{
-		return IsPad(seat) && !Connected(mask, PadIndex(seat));
+		int pad = TeamChallenge.PadIndexOf(seat);
+		return pad >= 0 && !Connected(mask, pad);
 	}
+
+	// Every device that could arrive as the launching device, including the ones that cannot drive
+	// a ship (Generic has no PlayerShip.Update case; the puppets belong to the net layer).
+	private static readonly ControlDevice[] Starters =
+	{
+		ControlDevice.Keyboard,
+		ControlDevice.PadOne,
+		ControlDevice.PadTwo,
+		ControlDevice.PadThree,
+		ControlDevice.PadFour,
+		ControlDevice.Generic,
+		ControlDevice.AI,
+		ControlDevice.Remote
+	};
+
+	private static readonly DebugFlags.TeamPartnerSeat[] Overrides =
+	{
+		DebugFlags.TeamPartnerSeat.None,
+		DebugFlags.TeamPartnerSeat.Ai,
+		DebugFlags.TeamPartnerSeat.Pad
+	};
 
 	private static string MaskName(int mask)
 	{
@@ -75,37 +106,63 @@ internal static class TeamSeatTest
 		return sb.ToString();
 	}
 
-	// The seat the rules say this mask/override deserves. ?teampartner=ai is unconditional;
-	// ?teampartner=pad only differs from None when there is no pad to prefer (it is the
-	// bug-reproduction, so it seats PadOne anyway).
-	private static ControlDevice Expected(int mask, DebugFlags.TeamPartnerSeat forced)
+	// The properties slot 0's device must satisfy. Returns null when it holds, else what broke.
+	internal static string PrimaryViolation(ControlDevice seat, ControlDevice starter, int mask)
+	{
+		if (WouldForcePause(seat, mask))
+		{
+			return "seats an absent pad (would force-pause every tick)";
+		}
+		if (TeamChallenge.PadIndexOf(seat) < 0 && seat != ControlDevice.Keyboard)
+		{
+			return "seats " + seat + ", which has no PlayerShip input case -- a ship nobody can steer";
+		}
+		// A pad that is present AND launched the level keeps its ship; everything else falls back
+		// to the keyboard, which is always drivable here.
+		int starterPad = TeamChallenge.PadIndexOf(starter);
+		bool starterUsable = starterPad >= 0 && Connected(mask, starterPad);
+		if (starterUsable && seat != starter)
+		{
+			return "dropped the launching device " + starter + " (present) in favour of " + seat;
+		}
+		if (!starterUsable && seat != ControlDevice.Keyboard)
+		{
+			return "starter " + starter + " cannot drive, so the seat should fall back to Keyboard, not " + seat;
+		}
+		return null;
+	}
+
+	// The properties the partner seat must satisfy.
+	internal static string PartnerViolation(ControlDevice seat, ControlDevice primary, int mask, DebugFlags.TeamPartnerSeat forced)
 	{
 		if (forced == DebugFlags.TeamPartnerSeat.Ai)
 		{
-			return ControlDevice.AI;
+			return seat == ControlDevice.AI ? null : "?teampartner=ai must force the bot, got " + seat;
 		}
-		for (int i = 0; i < 4; i++)
+		if (forced == DebugFlags.TeamPartnerSeat.Pad)
 		{
-			if (Connected(mask, i))
-			{
-				return i switch
-				{
-					0 => ControlDevice.PadOne,
-					1 => ControlDevice.PadTwo,
-					2 => ControlDevice.PadThree,
-					_ => ControlDevice.PadFour
-				};
-			}
+			// The bug reproduction: the pre-card seating verbatim, absent pad and all.
+			return seat == ControlDevice.PadOne ? null : "?teampartner=pad must seat PadOne verbatim, got " + seat;
 		}
-		return (forced == DebugFlags.TeamPartnerSeat.Pad) ? ControlDevice.PadOne : ControlDevice.AI;
+		if (WouldForcePause(seat, mask))
+		{
+			return "seats an absent pad (would force-pause every tick)";
+		}
+		if (seat == primary)
+		{
+			return "seats the SAME device as the primary (" + seat + ") -- one player, two ships";
+		}
+		int want = LowestSetBitOtherThan(mask, TeamChallenge.PadIndexOf(primary));
+		if (want < 0)
+		{
+			return seat == ControlDevice.AI ? null : "no pad is free for a second human, so the bot should fly, not " + seat;
+		}
+		if (TeamChallenge.PadIndexOf(seat) != want)
+		{
+			return "a second human is on pad " + want + " but the seat went to " + seat;
+		}
+		return null;
 	}
-
-	private static readonly DebugFlags.TeamPartnerSeat[] Overrides =
-	{
-		DebugFlags.TeamPartnerSeat.None,
-		DebugFlags.TeamPartnerSeat.Ai,
-		DebugFlags.TeamPartnerSeat.Pad
-	};
 
 	public static string Run()
 	{
@@ -130,100 +187,144 @@ internal static class TeamSeatTest
 			sb.Append('\n');
 		}
 
-		// ---- 1 + 2. the real resolver over every mask x override ---------------------
-		sb.Append("[teamseat] 1. resolved seat, all 16 pad masks x 3 overrides (real TeamChallenge.ResolvePartnerSeat)\n");
-		foreach (DebugFlags.TeamPartnerSeat forced in Overrides)
+		// ---- 1. slot 0, every launching device x every pad mask ----------------------
+		sb.Append("[teamseat] 1. primary seat (real TeamChallenge.ResolvePrimarySeat), ")
+			.Append(Starters.Length).Append(" starters x 16 pad masks\n");
+		foreach (ControlDevice starter in Starters)
 		{
-			int loops = 0;
-			int wrongPreference = 0;
-			string firstLoop = null;
-			string firstPreference = null;
+			int bad = 0;
+			string first = null;
 			for (int mask = 0; mask < MaskCount; mask++)
 			{
 				int m = mask;
-				ControlDevice seat = TeamChallenge.ResolvePartnerSeat((int pad) => Connected(m, pad), forced);
-				if (WouldForcePause(seat, mask))
+				ControlDevice seat = TeamChallenge.ResolvePrimarySeat(starter, (int pad) => Connected(m, pad));
+				string why = PrimaryViolation(seat, starter, mask);
+				if (why != null)
 				{
-					loops++;
-					if (firstLoop == null)
+					bad++;
+					if (first == null)
 					{
-						firstLoop = "e.g. " + MaskName(mask) + " -> " + seat;
+						first = MaskName(mask) + " -> " + seat + ": " + why;
 					}
 				}
-				// Preference: with a pad plugged in the partner is the LOWEST-numbered one, and
-				// the pad INDEX must map to the matching device (PlayerShip reads GamePad slot i
-				// from the device, so a PadTwo/PadThree mix-up silently reads the wrong pad).
-				// This leg restates the rule rather than deriving it independently -- its value is
-				// catching a resolver that never seats a human at all (which would sail through
-				// part 1) or gets that index mapping wrong. Part 1 and the negative control below
-				// are what carry the property-based weight.
-				ControlDevice expected = Expected(mask, forced);
-				if (seat != expected)
+			}
+			Check("starter " + starter, bad == 0, bad == 0 ? "16/16 drivable and never an absent pad" : bad + " bad; " + first);
+		}
+
+		// ---- 2. slot 1, every primary x every pad mask x every override ---------------
+		sb.Append("[teamseat] 2. partner seat (real TeamChallenge.ResolvePartnerSeat)\n");
+		foreach (DebugFlags.TeamPartnerSeat forced in Overrides)
+		{
+			int bad = 0;
+			int loops = 0;
+			int humans = 0;
+			string first = null;
+			foreach (ControlDevice primary in new[] { ControlDevice.Keyboard, ControlDevice.PadOne, ControlDevice.PadTwo })
+			{
+				for (int mask = 0; mask < MaskCount; mask++)
 				{
-					wrongPreference++;
-					if (firstPreference == null)
+					int m = mask;
+					ControlDevice seat = TeamChallenge.ResolvePartnerSeat(primary, (int pad) => Connected(m, pad), forced);
+					if (WouldForcePause(seat, mask))
 					{
-						firstPreference = "e.g. " + MaskName(mask) + " -> " + seat + ", expected " + expected;
+						loops++;
+					}
+					if (TeamChallenge.PadIndexOf(seat) >= 0 && !WouldForcePause(seat, mask))
+					{
+						humans++;
+					}
+					string why = PartnerViolation(seat, primary, mask, forced);
+					if (why != null)
+					{
+						bad++;
+						if (first == null)
+						{
+							first = "primary " + primary + ", " + MaskName(mask) + " -> " + seat + ": " + why;
+						}
 					}
 				}
 			}
 			string what = "teampartner=" + forced.ToString().ToLowerInvariant();
-			// ?teampartner=pad is the deliberate exception: it exists to reach the force-pause.
-			if (forced == DebugFlags.TeamPartnerSeat.Pad)
+			Check("properties " + what, bad == 0, bad == 0 ? "48/48 cases hold" : bad + " violated; " + first);
+			// A resolver that always returned AI would satisfy every property above except this
+			// one: a real second pad must actually get the seat.
+			if (forced == DebugFlags.TeamPartnerSeat.None)
 			{
-				Check("bug-repro reachable  " + what, loops == 1, loops == 1 ? "seats an absent pad in the no-pad mask only, as intended" : "expected exactly 1 force-pause mask (no pads), got " + loops);
+				Check("seats real humans " + what, humans > 0, humans + " of 48 cases seat a present pad (a bot-only resolver would read 0)");
 			}
-			else
-			{
-				Check("no force-pause seat  " + what, loops == 0, loops == 0 ? "16/16 masks seat a device that is present" : loops + " mask(s) seat an ABSENT pad; " + firstLoop);
-			}
-			Check("preference order     " + what, wrongPreference == 0, wrongPreference == 0 ? null : wrongPreference + " mask(s) resolved unexpectedly; " + firstPreference);
+			// Only the bug-reproduction override may seat a device that is not there.
+			int wantLoops = (forced == DebugFlags.TeamPartnerSeat.Pad) ? 24 : 0;
+			Check("force-pause seats " + what, loops == wantLoops,
+				loops + "/48 seat an absent pad (expected " + wantLoops + ")");
 		}
 
-		// ---- 3. negative control: the OLD policy over the same table -----------------
-		// A green suite above means nothing unless the same input is shown to BREAK the code
-		// this card replaced. The 2008 policy took no arguments at all: always PadOne.
-		sb.Append("[teamseat] 2. negative control -- the pre-card policy (always PadOne)\n");
+		// ---- 3. negative control: the pre-card policy over the same table -------------
+		// The 2008 policy took no arguments at all: Keyboard in slot 0, PadOne in slot 1.
+		sb.Append("[teamseat] 3. negative control -- the pre-card seating (Keyboard + PadOne)\n");
 		int oldLoops = 0;
-		for (int mask = 0; mask < MaskCount; mask++)
+		int oldUnsteerable = 0;
+		foreach (ControlDevice starter in new[] { ControlDevice.Keyboard, ControlDevice.PadOne })
 		{
-			if (WouldForcePause(ControlDevice.PadOne, mask))
+			for (int mask = 0; mask < MaskCount; mask++)
 			{
-				oldLoops++;
+				if (WouldForcePause(ControlDevice.PadOne, mask))
+				{
+					oldLoops++;
+				}
+				// ... and a pad-only player got a Keyboard ship they never asked for.
+				if (starter != ControlDevice.Keyboard)
+				{
+					oldUnsteerable++;
+				}
 			}
 		}
-		Check("old policy pause-loops", oldLoops == 8, oldLoops == 8
-			? "8/16 masks (every one without pad 0) force-pause every tick -- the bug, reproduced"
-			: "expected 8 force-pause masks, got " + oldLoops + " (has WouldForcePause drifted from GameScene.Update?)");
+		Check("old partner seat pause-loops", oldLoops == 16, oldLoops == 16
+			? "16/32 cases (every mask without pad 0, both starters) force-pause every tick -- the bug, reproduced"
+			: "expected 16, got " + oldLoops + " (has WouldForcePause drifted from GameScene.Update?)");
+		Check("old primary seat ignored the starter", oldUnsteerable == 16,
+			"a pad-launched run always got a Keyboard ship in slot 0 (" + oldUnsteerable + "/32 cases)");
 
 		// ---- live state ---------------------------------------------------------------
-		// What THIS machine would seat right now, plus the seated roster if a level is up, so
-		// the browser pass is one call. Info only -- a rig with no pads is the normal case.
-		sb.Append("[teamseat] 3. live state\n");
-		IInputHandlerService input = ServiceHelper.Get<IInputHandlerService>();
-		int liveMask = 0;
-		for (int i = 0; i < 4; i++)
+		// What THIS machine would seat right now, plus the seated roster if a level is up, so the
+		// browser pass is one call. Info only; the services are absent outside a booted game, and
+		// parts 1-3 above need none of them.
+		sb.Append("[teamseat] 4. live state\n");
+		InputHandler input = ServiceHelper.Get<IInputHandlerService>()?.InputHandler;
+		if (input == null)
 		{
-			if (input.InputHandler.PadConnected(i))
-			{
-				liveMask |= 1 << i;
-			}
+			sb.Append("  info  no input service (not booted) -- the pure parts above still ran\n");
 		}
-		sb.Append("  info  ").Append(MaskName(liveMask)).Append(" connected; flag=")
-			.Append(DebugFlags.TeamPartner.ToString().ToLowerInvariant()).Append("; would seat ")
-			.Append(TeamChallenge.ResolvePartnerSeat(input.InputHandler.PadConnected, DebugFlags.TeamPartner))
-			.Append('\n');
-		Oracle oracle = ServiceHelper.Get<IOracleService>().Oracle;
-		StringBuilder roster = new StringBuilder();
-		for (int i = 0; i < Oracle.MaxPlayers; i++)
+		else
 		{
-			if (oracle.IsSeated(i))
+			int liveMask = 0;
+			for (int i = 0; i < 4; i++)
 			{
-				if (roster.Length > 0)
+				if (input.PadConnected(i))
 				{
-					roster.Append(',');
+					liveMask |= 1 << i;
 				}
-				roster.Append(i).Append(':').Append(oracle.Controller(i));
+			}
+			ControlDevice livePrimary = TeamChallenge.ResolvePrimarySeat(ControlDevice.Keyboard, input.PadConnected);
+			sb.Append("  info  ").Append(MaskName(liveMask)).Append(" connected; flag=")
+				.Append(DebugFlags.TeamPartner.ToString().ToLowerInvariant())
+				.Append("; a keyboard-launched run would seat ").Append(livePrimary).Append(" + ")
+				.Append(TeamChallenge.ResolvePartnerSeat(livePrimary, input.PadConnected, DebugFlags.TeamPartner))
+				.Append('\n');
+		}
+		Oracle oracle = ServiceHelper.Get<IOracleService>()?.Oracle;
+		StringBuilder roster = new StringBuilder();
+		if (oracle != null)
+		{
+			for (int i = 0; i < Oracle.MaxPlayers; i++)
+			{
+				if (oracle.IsSeated(i))
+				{
+					if (roster.Length > 0)
+					{
+						roster.Append(',');
+					}
+					roster.Append(i).Append(':').Append(oracle.Controller(i));
+				}
 			}
 		}
 		sb.Append("  info  roster=").Append(roster.Length > 0 ? roster.ToString() : "-").Append('\n');

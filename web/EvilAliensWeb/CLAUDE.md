@@ -777,10 +777,11 @@ and Inzane; per-tier skill scaling is a separate follow-up.
   and pins the ship on the ceiling to be exploded by something spawning on it.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
-- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
+- Flags: `?aibench` · `?aiteam` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
   ?aigapmargin= ?aithreatlead= ?aibossbias= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
-  Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.world()`, `eaAiBench.reset()`. Pair
+  Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
+  `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.
 - **Where it stands (card f4d1721f, Very Hard unless noted).** Spider boss 36 deaths and the
   fight never resolving -> 17 and resolving; Level 3 stalled forever at event 53/60 -> kills the
@@ -788,8 +789,93 @@ and Inzane; per-tier skill scaling is a separate follow-up.
   story level on Very Hard (L1 game over at event 19/64, L2 at 45/104, L3 at 19/60) -- it dies to
   sustained bullet fire, and the sum-of-repulsions model is the wrong shape for bullet hell;
   "pick the safest reachable spot" is the next move. Level 1 on Medium is a VICTORY with 1 death.
-  The challenge levels are unmeasured. **Single runs of a stochastic fight vary a lot -- differences
+  **Single runs of a stochastic fight vary a lot -- differences
   under ~30% are noise, which misled this card more than once.**
+
+#### The challenge-level completion matrix (card 9391f95a)
+
+**Measured: Very Hard, 3 runs each, 1800 sim-second cap, no `?invuln`, via `eaAiBench.matrix()`.
+Six of nine PASS. All three failures are SURVIVAL failures -- there is no world-model,
+targeting or level-progression defect anywhere in the nine.**
+
+| level | r1 | r2 | r3 | |
+|---|---|---|---|---|
+| Tutorial | VICTORY 206s / 0 deaths | VICTORY 265s / 0 | VICTORY 361s / 1 | **pass** |
+| Braineroids | VICTORY 239s / 0 | VICTORY 247s / 0 | VICTORY 305s / 0 | **pass** |
+| SpaceDodge | VICTORY 365s / 15 | VICTORY 183s / 4 | VICTORY 865s / 43 | **pass** |
+| OwnLevel | VICTORY 533s / 20 | VICTORY 73s / 1 | VICTORY 202s / 6 | **pass** |
+| CrazyGame | VICTORY 482s / 20 | VICTORY 162s / 3 | VICTORY 94s / 2 | **pass** |
+| Paratrooper | VICTORY 540s / 13 | VICTORY 557s / 13 | VICTORY 1210s / 31 | **pass** |
+| ClassicAliens | TIMEOUT 38/47 / 10 | TIMEOUT 32/47 / 20 | TIMEOUT 42/47 / 19 | **fail** |
+| InsaneBossI | GAME OVER 22/50 / 6 | GAME OVER 32/50 / 8 | GAME OVER 6/50 / 6 | **fail** |
+| TeamChallenge | TIMEOUT 14/52 / 91 | TIMEOUT 14/52 / 89 | TIMEOUT 14/52 / 87 | **fail** |
+
+**The `?invuln` control is what makes that diagnosis, and it is the cheapest one available here:
+re-run a failing level with `?invuln` and the AI wins ALL THREE** -- ClassicAliens 341s,
+TeamChallenge 402s, InsaneBossI 660s (which kills the BrainBoss), every one at 0 deaths. So the
+bot can already target, dodge-enough-to-shoot and drive every level's script to its end; what it
+cannot do is take less damage. That is the parent card's still-open "dies to sustained bullet
+fire", now shown to be the ONLY thing between this AI and every challenge. Use this control
+before hunting a blind spot in any future stalled-level report.
+
+- **A VICTORY on most of these levels is worth less than it looks, because deaths are FREE.**
+  `GameScene.Initialize` sets `score.Lives = -1` and `LoseLife`'s decrement/game-over block is
+  gated on `score.Lives >= 0`, so seven of the nine can never reach GAME OVER -- a death just
+  reverts to the last checkpoint, forever. Only `InsaneBossI` overrides it (5 lives on
+  Hard/Very Hard, 1 on Inzane) among the challenges; the story levels get 7 via
+  `ApplyDifficultyPolicy`. **So read the deaths column, not just the verdict**: SpaceDodge "passes"
+  at 43 deaths in one run, and its 4-death run and its 43-death run are the same word.
+- **Hence the sweep's third verdict, `TIMEOUT`.** `AiBench.BenchVerdict` only knows
+  VICTORY/GAME OVER; on a `Lives = -1` level "never finished" is the ONLY way to fail, so the
+  runner supplies TIMEOUT when the cap expires with the level still running. A row with a blank
+  or missing verdict would read as a pass.
+- **Per-level metric caveats -- some columns are vacuous by construction, do not read them:**
+  - **Paratrooper is a TURRET.** `Paratrooper.Update` pins every ship to `(400,500)` each tick
+    and `OnComponentAdded` clamps bullet angles upward. Only `DoAIFire` is under test there;
+    `coast=0% turn=2deg/s revs=0.09` is the metric describing a ship that cannot move, not a
+    perfectly smooth flier.
+  - **Braineroids reports `prog=1/1`.** Its event list is one `WaitEvent` and the level loops by
+    `RevertToCheckpoint` per wave, so progress carries no information -- the verdict does.
+  - **CrazyGame fires ZERO shots in every run and still wins.** Nothing in it is shootable
+    (`EvilBullet` is a threat, not a target), so `idle%` is 0 over an empty target set. It also
+    posts the worst steering churn in the whole matrix by a wide margin -- `turn` 389-450 deg/s,
+    `revs` 7.0-7.8/s, against 60-90 deg/s on a typical level. Dodging 30 homing bullets with the
+    sum-of-repulsions model is the shape that churns; it is the natural rig for the next
+    bullet-hell attempt.
+  - **OwnLevel is the only challenge with WALLS** and the only one scoring `contacts` (13/1/4).
+    Its churn (`turn` 254-477 deg/s) runs far above the ~70 deg/s the parent card settled Level 3
+    at -- the wall-nav work was tuned on Level 3's grids, and OwnLevel's `Walls(game, 2)` maze is
+    a harder case that was never in that loop.
+- **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into
+  `Oracle.GetBaddies`.** Its `LooksLikeEnemy` is a deliberately name-shaped heuristic, so it
+  flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),
+  the player's own `Bullet`, and `BrainAura` (the BrainBoss's cosmetic aura). All three are
+  correctly outside the AI's world model.
+- **`?aiteam` -- TeamChallenge cannot be benched, or played on a keyboard, without it.**
+  `TeamChallenge.Initialize` seats the second slot as `ControlDevice.PadOne`, and
+  `GameScene.Update` raises `pauseRequested` every tick a seated pad device reads
+  `!InputHandler.PadConnected(i)`. With no gamepad attached the world is frozen in the pause
+  menu permanently: measured `ticks=0 noship=1 prog=2/52` over 37 sim-seconds, versus
+  `ticks=1682 shots=1029 prog=6/52` with the flag. The flag swaps in `ControlDevice.Generic` --
+  a real human device with no connected-check, the same reason the net layer's `?netlocal`
+  couch-join sim seats it. **It is DEBUG-ONLY and deliberately does not change the shipped
+  seating**; that the shipped seating makes a challenge level unplayable without a pad is a
+  separate gameplay bug with its own card.
+- **Sweep it with `eaAiBench.matrix(levels, simSeconds, runs, difficulty)`** (`index.html`;
+  `.results()` `.status()` `.stop()`). ONE FRESH PAGE LOAD PER RUN, plan carried in
+  `sessionStorage` and resumed at boot -- not an in-process relaunch, because a level
+  `LockDifficulty()`s, seeds `score.Lives` and consumes the shared RNG, so runs sharing a page
+  would measure each other's leftovers, and one wedged run would take the sweep down instead of
+  one row. It rearms the counters once the level is actually up: `AiBench.Update` runs on every
+  tick including the ~20s of real rAF frames spent booting WASM and warming textures, which
+  otherwise overshoots the cap and dilutes `coast%`/`idle%` with level-less ticks.
+  **Never `await` it** -- one run outlives any single devtools/CDP eval, and the sweep survives
+  navigations a pending promise could not. `AiBench.Row()` is the machine-readable
+  `key=value` line it consumes, kept separate from `Report()` so reformatting the human report
+  cannot silently break a sweep; the verdict travels space-free (`GAME_OVER`) because it is the
+  one value containing a space and it truncated to "GAME" in the first sweep.
+- Wall-clock: a soak runs ~60x realtime on a light level and ~3x on a dense one, so the full
+  9x3 sweep is ~40 minutes, dominated by the levels that run the cap out.
 
 ### Webcam challenge "I Made This!" (`Levels.WebcamAliens`)
 

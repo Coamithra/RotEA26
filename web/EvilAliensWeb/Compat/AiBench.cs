@@ -374,6 +374,56 @@ internal static class AiBench
 
 	private static TimeSpan headlessTotal = TimeSpan.Zero;
 
+	// eaAiBench.row() — ONE run's counters as machine-readable `key=value` pairs, for the
+	// sweep runner (card 9391f95a) to append to its matrix. Report() is written for a human and
+	// its shape is free to change; regex-scraping it from JS would make the matrix hostage to
+	// that formatting. Slot 0 only: every level in the sweep is single-ship except
+	// TeamChallenge, whose second ship is the same bot flying the same tether.
+	//
+	// `verdict` is deliberately NOT resolved here. AiBench cannot tell "the cap was reached"
+	// from "still going" — only the caller knows the budget it set — and on the seven challenge
+	// levels that run with score.Lives = -1 (GameScene.Initialize) a GAME OVER can never arrive,
+	// so "no verdict" is the NORMAL way for those to fail. The runner supplies TIMEOUT.
+	internal static string Row()
+	{
+		if (!Enabled)
+		{
+			return "off=1";
+		}
+		GameScene scene = CurrentScene();
+		ships.TryGetValue(0, out ShipRec r);
+		StringBuilder sb = new StringBuilder();
+		// Space-free: the row is parsed as space-separated key=value, and the verdict is the one
+		// value with a space in it ("GAME OVER"), which silently truncated to "GAME" in the
+		// sweep's table. The runner puts the space back for display.
+		sb.Append("verdict=").Append((verdict ?? "running").Replace(' ', '_'));
+		sb.Append(" sim=").Append(Fmt(runMs / 1000.0, 1));
+		sb.Append(" verdictAt=").Append(Fmt(verdictMs / 1000.0, 1));
+		sb.Append(" prog=").Append(peakEventPos);
+		sb.Append(" progTotal=").Append((scene != null) ? scene.BenchEventCount : 0);
+		sb.Append(" level=").Append((scene != null) ? scene.Level.ToString() : "none");
+		sb.Append(" difficulty=").Append(Settings.GetInstance().CurrentDifficulty);
+		if (r == null)
+		{
+			// No ship ever steered. On a level whose ships are all AI that is itself the
+			// finding (the TeamChallenge force-pause), so it must be a reportable row and not
+			// an absent one.
+			return sb.Append(" ticks=0 noship=1").ToString();
+		}
+		double sec = r.SteerMs / 1000.0;
+		sb.Append(" ticks=").Append(r.SteerTicks);
+		sb.Append(" deaths=").Append(r.Deaths);
+		sb.Append(" contacts=").Append(r.Contacts);
+		sb.Append(" shots=").Append(r.Shots);
+		sb.Append(" revs=").Append(Fmt((sec > 0.0) ? ((double)r.Reversals / sec) : 0.0, 2));
+		sb.Append(" turn=").Append(Fmt((sec > 0.0) ? (MathHelper.ToDegrees(r.TurnRadTotal) / sec) : 0.0, 0));
+		sb.Append(" coast=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CoastTicks / (double)r.SteerTicks) : 0.0, 0));
+		sb.Append(" idle=").Append(Fmt((r.TicksWithTarget > 0L)
+			? (100.0 * (double)r.IdleWithTargetTicks / (double)r.TicksWithTarget)
+			: 0.0, 0));
+		return sb.ToString();
+	}
+
 	// eaAiBench() — the full report, including the per-ship table and the run verdict.
 	internal static string Report()
 	{

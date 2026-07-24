@@ -941,6 +941,16 @@ namespace EvilAliensWeb.Compat
 		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
 		public static bool AIPlayer { get; private set; }
 
+		// ?aiteam (card 9391f95a): seat TeamChallenge's SECOND slot as ControlDevice.Generic
+		// instead of ControlDevice.PadOne. Without it that level cannot be benched -- or played
+		// on this port without a gamepad at all: GameScene.Update raises pauseRequested every
+		// tick a seated pad device reads !InputHandler.PadConnected(i), so an unattended soak
+		// sits in the pause menu forever at prog=0 with nothing saying why. Generic is a real
+		// human input device with no connected-check (the same reason NetSession's ?netlocal
+		// couch-join sim seats it), so both ships then follow ?aiplayer's EffectiveController
+		// onto the AI branch. In Active.
+		public static bool AiTeam { get; private set; }
+
 		// ?aibench (card f4d1721f): AI telemetry -- wall contacts (counted even under ?invuln),
 		// the heading-reversal jitter rate, fire-decision idleness and the level-script progress
 		// + run verdict. Pair with ?aiplayer. Console: eaAiBench(). See Compat/AiBench.cs.
@@ -1665,6 +1675,9 @@ namespace EvilAliensWeb.Compat
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
+				case "aiteam":
+					AiTeam = IsOn(val);
+					break;
 				case "aibench":
 					AiBench = IsOn(val);
 					break;
@@ -2000,7 +2013,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || AiTeam || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2016,6 +2029,7 @@ namespace EvilAliensWeb.Compat
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
+								+ (AiTeam ? " aiteam" : "")
 								+ (AiBench ? " aibench" : "")
 								+ (AiFastForward > 1 ? " aiff=" + AiFastForward : "")
 						+ (NetScript ? " netscript" : "")

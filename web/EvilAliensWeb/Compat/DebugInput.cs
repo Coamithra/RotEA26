@@ -285,6 +285,15 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.AiBench.RunHeadless(chunkSeconds);
 		}
 
+		// One finished run's counters as `key=value` pairs, for eaAiBench.matrix()'s table
+		// (card 9391f95a). Deliberately separate from AiBench() -- that one is a human report
+		// and free to be reformatted; a sweep that scraped it would break on a cosmetic edit.
+		[JSInvokable("debugAiBenchRow")]
+		public static string AiBenchRow()
+		{
+			return EvilAliensWeb.Compat.AiBench.Row();
+		}
+
 		// JS bridge for eaScore() -- the per-slot score/combo dump. Card b0ab09ec's two-window
 		// comparison is "do the peers agree on the tally", which reading HUD pixels answers
 		// badly (the panels are small, chrome-shaded and mid-animation); this prints the

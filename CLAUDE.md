@@ -155,6 +155,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with `?aiplayer`.
   Details + the AI's own gotchas (its world model is `Oracle.GetBaddies`; a low jitter score
   alone can mean the bot is wedged, not smooth): web CLAUDE.md.
+- **AI completion sweep** (card 9391f95a): **`eaAiBench.matrix()`** runs the whole "can the bot
+  finish it" matrix unattended — one FRESH page load per run (plan in `sessionStorage`, resumed
+  at boot), so no run inherits another's locked difficulty, lives or RNG. `.results()`
+  `.status()` `.stop()`; never `await` it (each run outlives a single devtools eval).
+  **`?aiteam`** seats TeamChallenge's second slot as `Generic` instead of `PadOne` — without it
+  that level cannot be benched *or played without a gamepad*: a seated-but-disconnected pad
+  makes `GameScene.Update` force-pause every tick. **Most challenge levels run with
+  `score.Lives = -1`, so `GAME OVER` is unreachable on them** — failure shows up as the sweep's
+  third verdict, `TIMEOUT`, never as a bad verdict. Matrix + per-level caveats: web CLAUDE.md.
 
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live

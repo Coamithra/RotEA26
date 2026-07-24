@@ -162,7 +162,9 @@ generate much of the art/audio referenced here.
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
-  `eaBgCull()` (the background tile-cull oracle — run from inside a level).
+  `eaBgCull()` (the background tile-cull oracle — run from inside a level),
+  `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
+  `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -1006,6 +1008,58 @@ interpolation feel, both gated on real-network playtests.
     no ship for the first minute). Expect
     `roster=0:Keyboard*,1:Remote,2:Generic*,3:RemoteFriend` on the host and
     `0:Remote,1:Keyboard*,2:RemoteFriend,3:Generic*` on the join side.
+  - **A full RESET with couch players aboard is reached with `eaKillShips()` on both tabs**
+    (card af0eb00a) -- and needs no new tooling, because the "all four ships dead at once"
+    framing is weaker than it looks: `Oracle.AllShipsDead` is `playerShips.Count == 0` and
+    NOTHING respawns until it fires, so **dead ships stay dead** and the two console calls need
+    not land in the same frame. After the second tab fires, each peer's puppets die on their own
+    existing paths (the primary remote on the `alive=false` edge, the couch puppet on the 500ms
+    `FriendTimeoutMs`) and `AllShipsDead` then trips `LoseLife`. Read the result with
+    **`eaNetRoster()`** on both peers either side of the kill: the 5s `[net]` cadence can
+    straddle the whole ~2.7s reset, so a sampled before/after can show nothing. The gate is
+    `resets` +1 on both, `roster=` (the seat map) IDENTICAL across the reset and still mirror-
+    image, and `ships=` back to one entry per seat -- a **missing** owner is a puppet that never
+    re-adopted (frozen on its spawn pose), a **duplicate** owner is a double spawn.
+    **`ships=` alone cannot tell "adopted" from "frozen"** -- a never-adopted puppet still shows
+    as a ship in its seat. That is what the dump's `at=<owner>:<device>@x,y` is for: sample it
+    twice a second or so apart and check (a) the slot MOVES and (b) the two peers agree per slot
+    within interpolation lag. Observed clean: slot 3 read `592,305|592,305` -> `521,283|521,283`
+    -> `389,362|389,362` host|join across the field after a reset. Caveat: right after the reset
+    the purge leaves no enemies, so the `?aiplayer` AI parks every ship on the spawn ladder
+    (`y ~ 120/240/360/480`) for a few seconds -- that is the AI having no target, NOT a frozen
+    puppet. Wait for the spawners to replay before reading motion.
+  - **GOTCHA -- an OCCLUDED window freezes the whole run, and it fails silently.** Chrome marks a
+    fully covered window `visibilityState:'hidden'` (even with `document.hasFocus()` true) and
+    stops rAF entirely, so a peer parked behind another window simply stops ticking; the peers
+    then time each other out and every metric is garbage. Two side-by-side windows is the
+    documented answer, but when the surrounding tooling covers them (an automated run driving
+    Chrome from another app) **add `?fpsuncapped` to BOTH peers** -- it drives the loop off a
+    `MessageChannel` instead of rAF, so both keep ticking while occluded. Verified: an occluded
+    `?fpsuncapped` pair ran a full reset cycle with `drop=0 sgap=0 ordViol=0 seqGap=0`. It is a
+    LOOP flag, so it needs neither the HUD nor `?nofps`. Cost: the client runs far above vsync,
+    which inflates `pupPops`/`dup`/`snapUnk` around id churn -- read those as not comparable to
+    a normal-rate run, while roster/adopt/`resets` assertions stay valid.
+  - **`?netdropgrant` (client) is the only trigger for `ExpireUnclaimedGrants`.** The host holds
+    a granted couch seat as `RemoteFriend` until the peer's first stream for it lands; a client
+    that silently fails to take the grant would otherwise leak that seat for the session (and the
+    game stops being re-listable). `?netlocal` always TAKES its grant, so the expiry path had no
+    trigger at all -- this flag drops **every** `EvSlotGrant` (it is read per grant, not
+    one-shot, so while it is set no couch join completes) after clearing `joinRequestPending`,
+    leaving this side exactly as a genuine failed take does. Expect the host to log
+    `granted peer couch join slot=N` then `released unclaimed couch grant slot=N` ~10s later
+    (`GrantClaimTimeoutMs`), and the seat to leave `roster=` rather than leak.
+  - **`RejectFull` needs `eaNetCouchJoin()`, NOT `?netlocal`.** Reaching it means the host roster
+    is already full when a joiner says hello, which means couch players seated BEFORE pairing --
+    and `TickLocalJoinSim` is deliberately gated behind `PeerUp` (pre-pairing, `AllocateSeat`
+    cannot yet know which seat the joiner's primary will need, the very hazard its comment warns
+    about). So `?netlocal=3` can never fill the roster in time: the joiner is the peer that
+    ungates it, and it already holds a seat by then. `eaNetCouchJoin()` makes the same
+    `TrySeatLocalJoin` call a real gamepad Start makes, which is NOT PeerUp-gated -- call it 3x
+    on a `?net=host` boot to reach `roster=0:Keyboard*,1:Generic*,2:AI*,3:AI* peer=down`, then
+    pair a `?net=join`. Host logs `no free roster slot for the joiner -- rejecting` +
+    `session stop (pairing rejected)`; the joiner logs `peer rejected the pairing (reason=4)`
+    (4 = `RejectFull`) + `session stop (rejected by peer)` -- an explicit reject rather than a
+    bare channel close is what proves the `RejectGraceMs` deferral let the reliable frame out.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
   own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case

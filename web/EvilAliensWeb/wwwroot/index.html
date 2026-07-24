@@ -202,6 +202,24 @@
             catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: dump the net roster (slot→device seat map, live ships, primary slots) plus the
+        // reset counter, right now. The [net] metrics line carries the same roster= on a 5s
+        // cadence, which can straddle a whole ~2.7s reset — call this on both peers either side
+        // of an eaKillShips() to compare exactly rather than by sampling.
+        window.eaNetRoster = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster')); }
+            catch (e) { console.warn('[debug] eaNetRoster failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: seat a couch player right now, the way a gamepad Start press does. Host-side it
+        // works BEFORE a peer pairs (unlike ?netlocal, which is PeerUp-gated), which is the only
+        // way to fill the host roster ahead of a joiner and so reach the RejectFull path. On a
+        // client it still needs a paired host, since a client seat must be asked for.
+        window.eaNetCouchJoin = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin')); }
+            catch (e) { console.warn('[debug] eaNetCouchJoin failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
         // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
         // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>

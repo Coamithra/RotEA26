@@ -260,18 +260,39 @@ site now lives under:
   by running the whole pass over the entry-time `count` — a collidable born mid-pass joins the
   NEXT pass, which is what the old deferred birthList did anyway. **Apply the same rule to any
   new phase that indexes a parallel array by collection position.**
+  **The contract is PINNED by `eaBinTest()`** (card bcdc7430), scenarios 5 and 6. The fix
+  froze THREE bounds: the outer fill loop, the all-pairs scan inside it, and the resolution
+  loop. Scenario 6 covers the resolution loop; scenario 5 covers the other two together, and
+  has to — only a non-gridded type's callback runs during the fill phase at all, so its
+  `CollisionMultibox` spawner is the sole way to reach either bound.
+  Neither scenario leans on the `boxes[m]` out-of-range throw: whether it fires depends on the
+  high-water mark `boxes` accumulated from prior play, so such a test would pass on the broken
+  code and its verdict would be a function of session history. Each instead PLANTS the fault's
+  precondition — scenario 5 needs only `List<T>` version-checking its enumerator; scenario 6
+  runs a warm-up pass plus a filler collidable it then removes, so the newborn lands on a stale
+  `boxes` entry the clear loop (`i != count`) skipped — and then ASSERTS the plant took, since a
+  silently-missing plant is the one way it could go quietly vacuous (a busy world can shift the
+  index, which is why the suite is menu-only). Both also carry a positive control.
+  Verified by reverting `DetectCollisions` to its pre-fix form: scenario 5 reports
+  `InvalidOperationException` and scenario 6 reports the newborn participating, in the menu AND
+  mid-level.
 - **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds, and reports how many
   passes `DetectCollisions` carried through a mid-pass collidable add (the condition above —
   it fires in the hundreds during ordinary play, so it is a live proof the path is exercised,
   not a warning); `eaBinTest()` runs the scripted scenario suite (`Compat/BinTest.cs`) against
-  the live bin and prints PASS/FAIL. **Run it from the MAIN MENU and expect 15/15.** Its last
-  two scenarios cover the net layer: `TryAdd`'s landed/diverted contract, and the puppet-filter
-  exemption driven END TO END through the real `NetPuppets.OnSpawn` (`NetPuppets.Enable` needs
-  only a `Game` plus the ServiceHelper bin/score, so no transport and no paired session are
-  required). They SKIP themselves if a co-op session is live rather than tearing it down. The
-  suite is strictly leave-no-trace and must stay that way -- it expires the filter it arms and
-  prunes every scratch component, so back-to-back runs in one tick all read 15/15; a run that
-  leaked state would make the NEXT run report phantom failures.
+  the live bin and prints PASS/FAIL -- 27 assertions across 8 scenarios (four lifecycle, two
+  net-layer, and the two collision-pass ones in the bullet above). **Run it from the MAIN
+  MENU.** A few checks are PRECONDITIONS rather than assertions about the code, and a failed
+  one short-circuits the rest of its scenario, so read the FAIL line rather than the tally.
+  The two net scenarios cover `TryAdd`'s landed/diverted contract and the puppet-filter
+  exemption, the latter driven END TO END through the real `NetPuppets.OnSpawn`
+  (`NetPuppets.Enable` needs only a `Game` plus the ServiceHelper bin/score, so no transport
+  and no paired session are required). They SKIP themselves when a co-op session OR any
+  `GameScene` is up -- including the attract demo the menu launches by itself -- because they
+  arm `Purge<AlienDrawableGameComponent>` for real, which near a live world would wipe it.
+  The suite is strictly leave-no-trace and must stay that way: it expires the filter it arms
+  and prunes every scratch component, so back-to-back runs in one tick all read the same
+  tally; a run that leaked state would make the NEXT run report phantom failures.
   `eaKillShips()` asplodes every locally-owned `PlayerShip`
   through the real `Asplode()`→`Die()` path (remote/friend puppets skipped) — the repeatable
   way to reach a death/reset, since `AllShipsDead` needs BOTH co-op ships down and waiting on
@@ -987,6 +1008,17 @@ interpolation feel, both gated on real-network playtests.
   turn or two while a client claim is in flight, and the client deliberately leaves that id
   dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
   rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
+  **A STRUCTURAL check (roster, slots, who-owns-what) is the one thing two HIDDEN tabs in one
+  window can still do**, which is how the four-seat roster in the `?netlocal` bullet was
+  captured without hand-arranging windows. Two things make it survive: `index.html` falls back
+  to `setTimeout(tickJS, 33)` while `document.hidden` (a REQUESTED ~30Hz -- Chrome clamps
+  hidden-tab timers after ~10s and much harder past 5 min, so treat it as a short window, not a
+  rate you hold), and the roster simply does not depend on cadence -- once `PeerStalled` the
+  friend timeout stretches to `PeerTimeoutMs + PeerGraceMs`, and a timed-out friend **keeps its
+  seat** by design (`NetSession.Friends.cs`). It does NOT extend to anything timing-derived:
+  `pops`/`pupPops`/`buf`/`extrap` off a hidden or unfocused tab are meaningless (the FPS HUD
+  says so on its own readout), so every smoothness or feel verdict still needs two focused
+  windows.
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
@@ -1075,8 +1107,17 @@ interpolation feel, both gated on real-network playtests.
     that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
     both draw over the menus and poison the next play of that level.
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
-  remote puppet lives (LoseLife triggers on AllShipsDead); roster is exactly two peers;
-  DevCommentEvent commentary is not replicated (profile-local setting). Boss puppets are
+  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS
+  (see the sub-bullet below); DevCommentEvent commentary is not replicated (profile-local
+  setting).
+  - **Two PEERS is not two PLAYERS -- 4-player online co-op already works today** (card
+    2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
+    `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
+    The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
+    `ScoreVisualiser.SlotCount`, slot-keyed `MsgFriendState`, `EvScoreSync`, the claim
+    ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
+    per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
+    connection math) are in `plans/4p-online-coop.md`. Boss puppets are
   best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
   state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
   play on the client -- an attributed remote death removes the puppet). The time-scaling half of

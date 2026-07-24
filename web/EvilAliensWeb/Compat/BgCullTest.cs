@@ -39,6 +39,14 @@ internal static class BgCullTest
 		return x + w > 0f && x < ScreenW && y + h > 0f && y < ScreenH;
 	}
 
+	// The one case where keeping a zero-area tile is legitimate: it lands exactly on the top
+	// or left edge, which the cull's `>= 0` admits by design (tightening that to `> 0` is its
+	// own change -- see the plan's Out of scope).
+	private static bool TouchesEdgeExactly(float x, float y, float w, float h)
+	{
+		return x + w >= 0f && x < ScreenW && y + h >= 0f && y < ScreenH && (x + w == 0f || y + h == 0f);
+	}
+
 	private static readonly (int W, int H, string Name)[] Shapes =
 	{
 		(512, 512, "square 512 (756)"),
@@ -111,30 +119,48 @@ internal static class BgCullTest
 			{
 				float w = (float)shape.W * scale;
 				float h = (float)shape.H * scale;
+				int here = 0;
 				int culledVisible = 0;
-				string firstExample = null;
+				int keptOffScreen = 0;
+				string firstCulled = null;
+				string firstKept = null;
 				foreach (float x in Axis(w, ScreenW))
 				{
 					foreach (float y in Axis(h, ScreenH))
 					{
 						cases++;
+						here++;
 						bool visible = Intersects(x, y, w, h);
 						bool kept = BackgroundImage.TileOnScreen(x, y, shape.W, shape.H, scale);
 						if (visible && !kept)
 						{
 							culledVisible++;
-							if (firstExample == null)
+							if (firstCulled == null)
 							{
-								firstExample = "e.g. at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
+								firstCulled = "e.g. at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
 							}
 						}
 						else if (kept && !visible)
 						{
 							slack++;
+							if (!TouchesEdgeExactly(x, y, w, h))
+							{
+								keptOffScreen++;
+								if (firstKept == null)
+								{
+									firstKept = "e.g. at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
+								}
+							}
 						}
 					}
 				}
-				Check("soundness  " + shape.Name + " x" + F(scale), culledVisible == 0, culledVisible == 0 ? null : culledVisible + " VISIBLE tiles culled; " + firstExample);
+				string what = shape.Name + " x" + F(scale);
+				// Soundness: never drop a tile the player would have seen. This is the property
+				// the old expression violated.
+				Check("sound  " + what, culledVisible == 0 && here > 0, culledVisible == 0 ? null : culledVisible + " VISIBLE tiles culled; " + firstCulled);
+				// Tightness: and never keep one that is wholly off screen. Without this a cull
+				// that simply returned true -- i.e. no cull at all -- would pass the suite.
+				Check("tight  " + what, keptOffScreen == 0 && here > 0, keptOffScreen == 0 ? null : keptOffScreen + " tiles kept with no on-screen area; " + firstKept);
 			}
 		}
 		sb.Append("  info  ").Append(cases).Append(" cases; ").Append(slack)
@@ -146,43 +172,63 @@ internal static class BgCullTest
 		Texture2D tall = new Texture2D(game.GraphicsDevice, 64, 256);
 		Texture2D wide = new Texture2D(game.GraphicsDevice, 256, 64);
 		Texture2D square = new Texture2D(game.GraphicsDevice, 128, 128);
-		foreach ((Texture2D Tex, string Name) tile in new[] { (tall, "tall 64x256"), (wide, "wide 256x64"), (square, "square 128") })
+		try
 		{
-			foreach (float scale in new[] { 0.5f, 1f, 2f })
+			// Grid shapes matter as well as tile shapes: DrawBackground advances a column by
+			// row 0's width and accumulates Y per row, so a 1x1 grid cannot tell correct
+			// multi-cell indexing from broken. 2x2 exercises it (the only real multi-cell
+			// layer, the Mars ground, is [12,1] and is never mirrored).
+			foreach ((Texture2D Tex, string Name) tile in new[] { (tall, "tall 64x256"), (wide, "wide 256x64"), (square, "square 128") })
 			{
-				for (int m = 0; m < 4; m++)
+				foreach (int cells in new[] { 1, 2 })
 				{
-					bool mx = (m & 1) != 0;
-					bool my = (m & 2) != 0;
-					int visited = 0;
-					int culledVisible = 0;
-					string firstExample = null;
-					// Sweep scroll phases: position is wrapped into [0, realsize) by Move, so
-					// these are the fractions a scrolling layer actually passes through.
-					foreach (float phase in new[] { 0f, 0.13f, 0.5f, 0.87f })
+					foreach (float scale in new[] { 0.5f, 1f, 2f })
 					{
-						List<BackgroundImage.TracedTile> log = DryRun(tile.Tex, scale, mx, my, phase);
-						foreach (BackgroundImage.TracedTile t in log)
+						for (int m = 0; m < 4; m++)
 						{
-							visited++;
-							if (Intersects(t.X, t.Y, t.W, t.H) && !t.Drawn)
+							bool mx = (m & 1) != 0;
+							bool my = (m & 2) != 0;
+							int visited = 0;
+							int culledVisible = 0;
+							int keptOffScreen = 0;
+							string firstCulled = null;
+							// Sweep scroll phases: position is wrapped into [0, realsize) by
+							// Move, so these are the fractions a scrolling layer really passes
+							// through.
+							foreach (float phase in new[] { 0f, 0.13f, 0.5f, 0.87f })
 							{
-								culledVisible++;
-								if (firstExample == null)
+								List<BackgroundImage.TracedTile> log = DryRun(tile.Tex, cells, scale, mx, my, phase);
+								foreach (BackgroundImage.TracedTile t in log)
 								{
-									firstExample = "e.g. tile at (" + F(t.X) + "," + F(t.Y) + ") spanning " + F(t.W) + "x" + F(t.H);
+									visited++;
+									if (Intersects(t.X, t.Y, t.W, t.H) && !t.Drawn)
+									{
+										culledVisible++;
+										if (firstCulled == null)
+										{
+											firstCulled = "e.g. tile at (" + F(t.X) + "," + F(t.Y) + ") spanning " + F(t.W) + "x" + F(t.H);
+										}
+									}
+									else if (t.Drawn && !Intersects(t.X, t.Y, t.W, t.H) && !TouchesEdgeExactly(t.X, t.Y, t.W, t.H))
+									{
+										keptOffScreen++;
+									}
 								}
 							}
+							string label = tile.Name + " " + cells + "x" + cells + " x" + F(scale) + " mirrorX=" + (mx ? "1" : "0") + " mirrorY=" + (my ? "1" : "0");
+							bool ok = culledVisible == 0 && keptOffScreen == 0 && visited > 0;
+							Check(label, ok, ok ? visited + " tiles visited, cull exact" : culledVisible + " of " + visited + " VISIBLE tiles culled (" + keptOffScreen + " kept off-screen); " + firstCulled);
 						}
 					}
-					string label = tile.Name + " x" + F(scale) + " mirrorX=" + (mx ? "1" : "0") + " mirrorY=" + (my ? "1" : "0");
-					Check(label, culledVisible == 0, culledVisible == 0 ? visited + " tiles visited, none visible-but-culled" : culledVisible + " of " + visited + " VISIBLE tiles culled; " + firstExample);
 				}
 			}
 		}
-		tall.Dispose();
-		wide.Dispose();
-		square.Dispose();
+		finally
+		{
+			tall.Dispose();
+			wide.Dispose();
+			square.Dispose();
+		}
 
 		// ---- 3. live layer census ----------------------------------------------------
 		sb.Append("[bgcull] 3. live layer census (per frame, per layer)\n");
@@ -203,19 +249,25 @@ internal static class BgCullTest
 
 	// Walk one layer through its REAL Draw with the trace armed and every graphics call
 	// suppressed, and hand back what the cull decided.
-	private static List<BackgroundImage.TracedTile> DryRun(Texture2D tile, float scale, bool mirrorX, bool mirrorY, float phase)
+	private static List<BackgroundImage.TracedTile> DryRun(Texture2D tile, int cells, float scale, bool mirrorX, bool mirrorY, float phase)
 	{
 		BackgroundImage layer = new BackgroundImage();
-		layer.textures = new Texture2D[1, 1];
-		layer.texturenames = new string[1, 1];
-		layer.textures[0, 0] = tile;
-		layer.texturenames[0, 0] = "scenario";
+		layer.textures = new Texture2D[cells, cells];
+		layer.texturenames = new string[cells, cells];
+		for (int i = 0; i < cells; i++)
+		{
+			for (int j = 0; j < cells; j++)
+			{
+				layer.textures[i, j] = tile;
+				layer.texturenames[i, j] = "scenario";
+			}
+		}
 		layer.size = scale;
 		layer.mirrorX = mirrorX;
 		layer.mirrorY = mirrorY;
 		// A mirrored layer repeats over BOTH halves, which is how a real one would be set up
 		// (the old marsloop code did exactly this before the strip became self-closing).
-		layer.realsize = new Vector2((float)tile.LogicalWidth() * scale * (mirrorX ? 2f : 1f), (float)tile.LogicalHeight() * scale * (mirrorY ? 2f : 1f));
+		layer.realsize = new Vector2((float)tile.LogicalWidth() * scale * (float)cells * (mirrorX ? 2f : 1f), (float)tile.LogicalHeight() * scale * (float)cells * (mirrorY ? 2f : 1f));
 		layer.position = new Vector2(layer.realsize.X * phase, layer.realsize.Y * phase);
 		return Capture(layer);
 	}
@@ -237,7 +289,7 @@ internal static class BgCullTest
 		return log;
 	}
 
-	private static void CensusList(StringBuilder sb, string which, List<BackgroundImage> layers)
+	private static void CensusList(StringBuilder sb, string which, IReadOnlyList<BackgroundImage> layers)
 	{
 		for (int i = 0; i < layers.Count; i++)
 		{
@@ -262,8 +314,15 @@ internal static class BgCullTest
 				.Append("  size ").Append(F(layer.size))
 				.Append("  visited ").Append(log.Count)
 				.Append("  drawn ").Append(drawn)
-				.Append("  of which off-screen ").Append(wasted)
-				.Append('\n');
+				.Append("  of which off-screen ").Append(wasted);
+			// Mid-crossfade (the 5s window after SetAlienBase2..6) Draw runs the outgoing AND
+			// incoming pass, so these counts read ~2x steady state under a name that only
+			// covers the outgoing texture. Say so rather than let it read as a regression.
+			if (layer.switchTimer.Active)
+			{
+				sb.Append("   [CROSSFADING -> ").Append(layer.new_texturenames != null ? layer.new_texturenames[0, 0] : "?").Append(", counts cover both passes]");
+			}
+			sb.Append('\n');
 		}
 	}
 

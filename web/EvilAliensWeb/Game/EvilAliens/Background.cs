@@ -216,9 +216,9 @@ public class Background : Scene
 
 	// Read-only views of the live layer lists for the eaBgCull census (Compat/BgCullTest),
 	// which dry-runs each layer's real Draw to count its per-frame tile decisions.
-	internal List<BackgroundImage> CullTestBackgroundLayers => backgroundLayers;
+	internal IReadOnlyList<BackgroundImage> CullTestBackgroundLayers => backgroundLayers;
 
-	internal List<BackgroundImage> CullTestForegroundLayers => foregroundLayers;
+	internal IReadOnlyList<BackgroundImage> CullTestForegroundLayers => foregroundLayers;
 
 	public Background(Game game)
 		: base(game)

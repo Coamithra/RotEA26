@@ -25,8 +25,12 @@ internal class BackgroundImage
 		public bool Drawn;
 	}
 
-	// Cull instrumentation (card 5216412d), armed only by eaBgCull(). Null = off, which
-	// costs one static null test per tile -- the ?binlog / ?walltrace / LoadProfiler idiom.
+	// Cull instrumentation (card 5216412d), armed only by eaBgCull(). Unlike the FrameProfiler
+	// these seams are NOT compiled out when idle: every build pays one static read per tile
+	// (the null test here, plus the CullTraceDryRun test at each of the four cull sites and
+	// twice in Draw). That is a handful of predictable branches on a path whose worst case is
+	// the holodeck grid's ~150 tiles/frame, against a draw call each -- the ?binlog /
+	// ?walltrace / LoadProfiler idiom. Nothing allocates while the log is null.
 	internal static List<TracedTile> CullTraceLog;
 
 	// While set, Draw walks and records every tile but touches no graphics state at all, so

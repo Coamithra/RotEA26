@@ -132,6 +132,19 @@ public class Settings : Savable
 		}
 	}
 
+	// The tier the CURRENT FIGHT is actually being run at, as opposed to the one the player picked
+	// in the menu. `DifficultyModifier` above already honours the lock; `CurrentDifficulty` does
+	// not, and the gap is not academic -- Demo1/2/3 lock Hard and TutorialLevel locks Very_Hard,
+	// so during an attract demo `CurrentDifficulty` still reports whatever the player last chose
+	// while every enemy on screen is scaled to Hard.
+	// Added for the difficulty-scaled AI (card c10e3e7f): keying the bot's skill off
+	// `CurrentDifficulty` would fly an Easy-tier pilot against a Hard-tier demo for anyone whose
+	// saved setting is Easy. Anything picking a tier for the LIVE fight wants this; menus and the
+	// save file want `CurrentDifficulty`. (Get-only, so XmlSerializer skips it either way -- the
+	// attribute is belt-and-braces against someone later adding a setter.)
+	[XmlIgnore]
+	public DifficultyLevel EffectiveDifficulty => _difficultyLocked ? _difficultyLockedAt : _difficultyLevel;
+
 	public float DifficultyMinimum => _difficultyMin;
 
 	public static void SetInstance(Settings newInstance)

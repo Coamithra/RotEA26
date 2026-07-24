@@ -15,7 +15,10 @@ namespace EvilAliensWeb.Compat
 	//   ?menu          go straight to the main menu (skip splash + auto-"Press Start")
 	//   ?skipsplash    skip only the splash sequence (still shows Press Start)
 	//   ?autostart     auto-press Start on the Press Start screen
-	//   ?noattract     disable the menu's idle -> demo (attract) mode  (alias: ?nodemo)
+	//   ?noattract     disable the menu's idle -> demo (attract) mode  (alias: ?nodemo).
+	//                  Deliberately OUT of `Active` (card af63f958) so an ONLINE JOINER can pass
+	//                  it: a menu session rejects the pairing on its own Active bit, and its
+	//                  lobby is otherwise yanked into the attract demo mid-navigation.
 	//   ?level=<Name>  boot straight into a level, bypassing the menu entirely
 	//                  (<Name> is a Levels enum value, case-insensitive: Level1, Level2,
 	//                   Level3, ClassicAliens, SpaceDodge, Braineroids, Tutorial, ...)
@@ -119,6 +122,8 @@ namespace EvilAliensWeb.Compat
 		public static bool AutoStart { get; private set; }
 
 		// Don't wire the main menu's idle timeout to the demo/attract launcher.
+		// Deliberately OUT of Active (card af63f958): it unwires one menu hook and alters no
+		// gameplay, and an ONLINE JOINER -- whose lobby IS a menu -- must be able to pass it.
 		public static bool NoAttract { get; private set; }
 
 		// If set, boot directly into this level (implies SkipSplash + AutoStart).
@@ -968,13 +973,20 @@ namespace EvilAliensWeb.Compat
 		public static int AiFastForward { get; private set; }
 
 		// AI steering/targeting knobs (card f4d1721f -- Game/EvilAliens/PlayerShip.cs). Null =>
-		// the baked PlayerShip.Default* consts, so a shipped build is byte-identical. A/B them
-		// against the ?aibench counters, then bake a settled value into the const.
+		// the baked value, so a shipped build is byte-identical. A/B them against the ?aibench
+		// counters, then bake a settled value in.
+		// NOTE (card c10e3e7f): "the baked value" is no longer always a single const. TWO knobs
+		// -- ?aifieldpx and ?aiaim -- resolve through PlayerShip.AiSkillByDifficulty, so their
+		// default depends on the tier the fight is being run at. An override here is still
+		// ABSOLUTE and wins over the tier row, which is what makes a per-tier A/B possible (and
+		// is how that table's values were chosen): pair it with ?difficulty=<tier>.
 		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
 		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
 		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
 		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
 		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
+		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
+		//                    (JunkBoss excepted -- it always gets exact aim)
 		public static float? AiSteerSmoothMs { get; private set; }
 
 		public static float? AiWallReactionMs { get; private set; }
@@ -985,9 +997,11 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiPriorityBias { get; private set; }
 
+		public static float? AiAimSpreadRad { get; private set; }
+
 		// The AI's personal-space field around a threat (PlayerShip.ThreatFieldRange /
 		// ThreatFieldStrength):
-		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull
+		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull            [per-tier]
 		//   ?aifieldsize=<f>   extra clearance per pixel of the threat's own half-extent
 		//   ?aifieldfall=<p>   exponent of the (1-t)^p falloff; higher = bites later and harder
 		// A big field with a FAST falloff is the point: the bot keeps well clear of something
@@ -1083,7 +1097,13 @@ namespace EvilAliensWeb.Compat
 		// and both sides' [net] metrics tell the JIP story. In Active.
 		public static bool NetJip { get; private set; }
 
-		// True if any debug flag is active (i.e. the boot path was altered).
+		// True if any flag that HIJACKS boot/levels is set -- deliberately NOT "any debug flag":
+		// pure render/feel/diagnostic toggles stay out (?hitboxes, ?metalscore, ?noattract, ...).
+		// This is not just a log line. NetSession (LocalHelloFlags/HandleHello) refuses a menu
+		// session when either peer has it, and NetListing.ComputeEligible refuses to list a
+		// flagged host -- so putting a flag in this expression DISABLES ONLINE PLAY for that
+		// boot. The test for a new flag is "could this change the shared run?", not "is this a
+		// debug flag?".
 		public static bool Active { get; private set; }
 
 		public static void Parse(string query)
@@ -1696,6 +1716,16 @@ namespace EvilAliensWeb.Compat
 						AiWallReactionMs = MathHelper.Min(aire, 3000f);
 					}
 					break;
+				case "aiaim":
+					// Radians, applied as RandomNextFloat(-aiaim, +aiaim) -- so this is the HALF
+					// width of the error arc and Pi (a full turn of spread) is a genuinely random
+					// shot. Capped there rather than lower because "fires in a random direction" is
+					// a legitimate skill FLOOR to A/B a tier row against, not a nonsense value.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaim) && aiaim >= 0f)
+					{
+						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.Pi);
+					}
+					break;
 				case "aigapmargin":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigm) && aigm >= 0f)
 					{
@@ -2016,7 +2046,14 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || AiTeam || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			// ?noattract is deliberately OUT (card af63f958): its ONE effect is leaving the main
+			// menu's idle timeout unwired, which alters no gameplay, difficulty, unlock or fairness
+			// -- and a menu-session joiner is rejected on its own Active bit (NetSession.HandleHello),
+			// so keeping it in here made "don't yank my lobby into the attract demo" unaskable for
+			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
+			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
+			// refuses Demo1/2/3, so it can never advertise an attract demo.
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || AiTeam || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2095,9 +2132,14 @@ namespace EvilAliensWeb.Compat
 			return true;
 		}
 
+		// Two call sites: an empty/absent query, and the end of Parse when nothing in the
+		// `Active` expression ended up set -- which INCLUDES a boot carrying only out-of-Active
+		// flags (?noattract, ?hitboxes, ?shake=, ?wallfog=, ...), so it does not say "no debug
+		// flags". For an online joiner this line is the useful verdict: flag-clean, so the
+		// menu-session pairing will not reject itself.
 		private static void Hint()
 		{
-			Console.WriteLine("[debug] no debug flags. URL options: ?menu  ?noattract  "
+			Console.WriteLine("[debug] no boot-hijacking debug flags. URL options: ?menu  ?noattract  "
 				+ "?level=<Name>  ?skipsplash  (see Compat/DebugFlags.cs)");
 		}
 

@@ -197,8 +197,10 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		base.SpriteBatch.DrawMetalString(font, title, new Vector2(400f, 50f), Color.AliceBlue, 0f, tc, 1f);
 
 		string ping = g.PingMs < 0 ? "--" : g.PingMs + " ms";
+		// Denominator is the real roster width, not a hard-coded 2: card 4d904410 relaxed a
+		// listed game to ANY free seat, so a couch host genuinely advertises 1..3 of 4 taken.
 		string details = "Difficulty: " + LevelArt.DifficultyName(g.Difficulty)
-			+ "     Players: " + g.Players + "/2     Ping: " + ping;
+			+ "     Players: " + g.Players + "/" + Oracle.MaxPlayers + "     Ping: " + ping;
 		Vector2 dc = font.MeasureString(details) / 2f;
 		dc.Y = 0f;
 		base.SpriteBatch.DrawString(font, details, new Vector2(400f, 340f), Color.AliceBlue, 0f, dc, 0.7f, (SpriteEffects)0, 0f);

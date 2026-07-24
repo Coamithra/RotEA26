@@ -12,6 +12,12 @@ namespace EvilAliensWeb.Compat.Net
         // stream lane
         public long StreamTx;
         public long StreamRx;
+        // Per-slot HUD state (card 1a3ad45a). BOTH count ENTRIES (slot-updates), not packets, so
+        // the two peers' figures are directly comparable even when one has a couch partner and
+        // puts several slots in one packet. A stalled HudRx against a climbing peer HudTx is what
+        // "the other player's combo/powerup readout is frozen" looks like.
+        public long HudTx;
+        public long HudRx;
         public long StreamDropped;      // out-of-order / duplicate samples the buffer refused
         public long StreamSeqGaps;      // stream sequence didn't advance by exactly 1 (loss/reorder)
 
@@ -33,8 +39,28 @@ namespace EvilAliensWeb.Compat.Net
         public long SnapTx;             // snapshot packets sent (host)
         public long SnapRx;             // snapshot packets received (client)
         public long SnapEntriesRx;      // per-entity entries decoded
-        public long SnapUnknownIds;     // entries for ids not (yet / anymore) puppeted
+        public long SnapUnknownIds;     // entries for ids not (yet / anymore) puppeted == the 3 below
         public long PuppetPops;         // snapshot error > snap threshold: hard corrected
+
+        // The three reasons an entry can be "unknown" (card 48ab9b2f). They used to share one
+        // counter, which made the total unreadable: two of them are ordinary traffic and one is
+        // a fault, and a JIP pass that logged a big snapUnk could not tell which it had.
+        // Named for their log tokens; NetPuppets classifies them as SnapUnknownKind
+        // Rebuilt/LeftDead/Refused respectively, where the descriptive name is what reads well
+        // at the branch.
+        public long SnapNew;            // never-seen id: the self-heal BUILT it (stream outran the
+                                        // reliable spawn) -- benign, tracks the world's spawn rate
+        public long SnapDead;           // removed HERE < RecentRemovalWindowMs ago: a death still
+                                        // settling -- benign, tracks the world's TOTAL removal rate
+                                        // (host EvDeaths included, NOT just our own clTx claims)
+        public long SnapBad;            // the rebuild was declined -- the one shape here that means
+                                        // something is actually wrong. An unknown typeIdx (a
+                                        // protocol/registry mismatch) re-counts on EVERY turn the
+                                        // host streams that id; the other two causes -- a descriptor
+                                        // declining, or the bin swallowing the add -- mark the id
+                                        // removed first, so they tick roughly once per
+                                        // RecentRemovalWindowMs with snapDead in between. Any
+                                        // sustained nonzero reading deserves a look either way.
 
         // claims (generous at-least-once)
         public long ClaimsTx;           // client: local deaths claimed
@@ -76,7 +102,7 @@ namespace EvilAliensWeb.Compat.Net
         public float ImpLossPct;
         public float ImpJitterMs;
 
-        public string Report(bool isHost, bool peerUp, int liveIds, bool localShip, bool remoteShip, string roster)
+        public string Report(bool isHost, bool peerUp, int liveIds, int snapTurnMs, bool localShip, bool remoteShip, string roster)
         {
             // Impairment is off in the overwhelmingly common case; keep the line unchanged
             // there rather than padding every log with five zeroes.
@@ -92,16 +118,21 @@ namespace EvilAliensWeb.Compat.Net
             // roster= is the multi-local verification (card 4d904410): both peers must print the
             // SAME slot->owner map, since the host allocates every slot and the wire slot IS the
             // oracle slot. A disagreement here is the bug that used to cross-credit kills.
+            // snapTurn is DERIVED, not counted: the snapshot cursor round-robins a fixed number of
+            // entries per packet, so it is how long a puppet dead-reckons blind between
+            // corrections. Printed because pupPops cannot be judged without it -- a big world
+            // stretches the turn and pops follow, on a perfectly healthy link (card 48ab9b2f).
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={34} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
                 BufferDepthMs, InterpSamples, Extrapolations, CorrectionPops, MaxPopPx,
-                EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds,
-                SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, PuppetPops,
+                EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds, snapTurnMs,
+                SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, SnapNew, SnapDead, SnapBad, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
-                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster) + sc + imp;
+                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
+                HudTx, HudRx) + sc + imp;
         }
     }
 }

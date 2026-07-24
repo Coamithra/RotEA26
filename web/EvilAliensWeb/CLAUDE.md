@@ -39,6 +39,39 @@ generate much of the art/audio referenced here.
   the WASM main thread is the stutter — a cold multi-MP sheet is hundreds of ms). Shaders load via
   `new Effect(gd, bytes)` from offline-compiled `.mgfxo`; effects apply via
   `SpriteBatch.Begin(effect)` (XNA 4.0 model), not `effect.Begin()`.
+- **Content-load diagnostics -- KNI's own exception tells you NOTHING, so don't read it as a 404**
+  (card 35834236). `TitleContainer.OpenStream` ends in
+  `catch (Exception inner) { throw new FileNotFoundException(name, inner); }`, so its `Message`
+  is the bare PATH whatever actually failed (HTTP status, decode error, OOM, genuinely missing
+  file) and the real cause is only in `InnerException`. index.html's tick guard prints
+  `e.message`, so such a failure surfaces as a lone `[loop] TickDotNet threw (1/30):
+  Content/gfx/base/756.png` -- which reads like a missing asset and is not one. A whole card was
+  filed and investigated on that misreading. Two things now prevent the repeat:
+  - **Every** `Load*` path opens through `WebContentManager.OpenOrThrow`, which rethrows as a
+    `FlattenedContentLoadException` whose message carries the extension, the sibling it tried
+    and the FLATTENED inner chain -- so the tick guard's one-liner names the cause. Textures,
+    fonts, effects, sounds and curves alike; a bare `TitleContainer.OpenStream` added anywhere
+    in that class reintroduces the trap for that asset kind. It must stay flattened INTO the
+    message -- `e.message` is all the JS guard can see, and the wrapper's own TYPE is what tells
+    a reader the message is already flattened (the `ContentLoadException` base would also match
+    one raised elsewhere, and printing only ITS outer line is the very loss being fixed).
+  - A registered sibling that fails to open is logged (`[dds]`/`[rtex] <key>: registered ...
+    sibling could not be read -- <chain> -- falling back to PNG`). `PrecompiledTextures.Siblings`
+    already said the file was shipped, so a failure there is an anomaly, NOT the ordinary
+    PNG-only case -- the old bare `catch { return null; }` silently downgraded the asset to the
+    unmipped/StbImageSharp path with no trace. Keep the two cases distinct.
+  **Verify with `eaTexProbe('<asset>')`** (`Compat/TexProbe.cs`), not by booting and squinting:
+  it drives the real `WebContentManager` path and reports the resolved key, the registered
+  sibling, which file the texture ACTUALLY came from (`_textureSources` -- a silent .dds->.png
+  fallback is otherwise undetectable, since .rtex and .png both yield `SurfaceFormat.Color`),
+  actual vs logical size, and `LevelCount`. `eaTexProbe('GFX/Base/756')` reads 612x612/512x512,
+  1 level, Dxt5; `eaTexProbe('GFX/Base/756-v1')` reads 1348x1348/1248x1248, 11 levels -- the
+  mipped-vs-unmipped distinction that card conflated, in one call. **Its negative control needs
+  no broken asset:** `eaTexProbe('GFX/Base/nope')` drives the rethrow end to end and must end in
+  the real cause (`IOException: HTTP request failed. Status:404`), not a bare path -- that is the
+  one-call check that the diagnostics still work. Caveat: the probe uses the SHARED manager, so
+  an asset owned by a scene-local one (HelpText, Bloom, Credits) cannot be inspected -- probing
+  it decodes a second copy and reports on that, not on the one being drawn.
 - **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
   BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
   multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
@@ -145,6 +178,13 @@ generate much of the art/audio referenced here.
 - `DebugFlags.Active` (the `[debug] flags active` console line) lists only flags that hijack
   boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
   (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
+  **`Active` is not just a log line -- it REFUSES online play**: a menu-session pairing rejects if
+  either peer has it (`NetSession.HandleHello`) and a flagged host won't list (`NetListing`, unless
+  `?netjip`). So
+  the test is "could this flag change the shared run?", not "is this a debug flag?" -- which is
+  why `?noattract` is out (card af63f958): it unwires the main menu's idle timeout and nothing
+  else, and a joiner needs it precisely because its lobby is a menu. A boot carrying only
+  out-of-`Active` flags prints the `no boot-hijacking debug flags` hint instead.
 - **Live slider panels** are HTML built in `index.html` OUTSIDE `#app`, only constructed on their
   trigger page (a normal boot has no extra DOM). Pattern: `window.eaXxx(...)` →
   `Compat/DebugInput.SetXxx` ([JSInvokable]) → `DebugFlags.SetXxxOverride`, read every Draw/tick;
@@ -162,12 +202,18 @@ generate much of the art/audio referenced here.
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
+  `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
+  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
+  so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
-  `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does).
+  `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
+  `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
+  `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
+  result as data -- see "Content-load diagnostics" above).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -683,8 +729,8 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
 
 One bot drives three things: the attract demos, the Mechanical-Friends cheat and `?aiplayer`.
 It lives entirely in `PlayerShip`: `DoAIFire` (target pick + `doAIBomb`), `DoAIMove` (steering),
-and the wall-navigation helpers. It is **difficulty-blind** by design -- it plays the same on Easy
-and Inzane; per-tier skill scaling is a separate follow-up.
+and the wall-navigation helpers. Two of its knobs are **difficulty-scaled** (card c10e3e7f, below);
+the rest are tier-independent.
 
 - **`Oracle.GetBaddies()` IS the AI's entire world model.** A type missing from that list is a type
   the bot can neither shoot nor dodge, silently. That was the root cause of two of the three
@@ -777,8 +823,40 @@ and Inzane; per-tier skill scaling is a separate follow-up.
   and pins the ship on the ceiling to be exploded by something spawning on it.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
+- **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
+  `CurrentDifficulty`.** `Demo1/2/3` call `LockDifficulty(Hard)` and `TutorialLevel` locks
+  `Very_Hard`; `LockDifficulty` only redirects `DifficultyModifier` (what the ENEMIES scale by)
+  while `CurrentDifficulty` keeps reporting the player's menu choice. Keying off the latter flies
+  an Easy-tier pilot against a Hard-tier attract demo for anyone whose saved setting is Easy --
+  invisible until someone changes their menu setting and wonders why the demo got worse. Anything
+  picking a tier for the LIVE fight wants `EffectiveDifficulty`; menus and the save file want
+  `CurrentDifficulty`. `DifficultyModifier` is wrong for this too: it ramps with elapsed play time
+  and adapts on death, so a bot keyed to it would silently get smarter the longer a run went on
+  and every `?aibench` number would become a function of run length.
+  - `PlayerShip.AiSkillByDifficulty[]` -- ABSOLUTE final values per tier (the
+    `WebcamLevel.Tunings[]` idiom: no modifier divisor, no within-run ramp). The **Very_Hard row
+    IS the `Default*` consts**, so the configuration card f4d1721f measured stays exactly where it
+    was measured. `?ai*` overrides still win over the row.
+  - The spread is deliberately **subtle**: a Mechanical Friend that visibly cannot play defeats
+    the point of having one. Expect the gradient to show in the readout and NOT to the eye.
+  - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
+    candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
+    not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
+    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`; but
+    **`?aireact` `420 -> 80ms` moved nothing** (contacts `0 -> 0`, turn `22 -> 18 deg/s`, progress
+    `7/8 -> 7/8`) and **`?aithreatlead` `700 -> 80ms` moved nothing** (deaths `11 -> 10`). Both
+    were dropped from the table rather than shipped as dials that do nothing.
+    **`contacts` cannot see wall look-ahead at all** -- `ClampIntoWallSpace` is a hard override
+    that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
+    either knob to the table without an instrument that can actually see it.
+  - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
+    tier (and Level3's wall SCROLL SPEED is `0.43 * GetDifficultyValue`), so an outcome delta
+    between tiers is unattributable. The non-confounded observation is the `eaAiBench()` line's
+    `skill effective=<tier> field= aim=` row, which reports the RESOLVED values; verifying the
+    attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
+    `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiteam` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
-  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
@@ -797,6 +875,12 @@ and Inzane; per-tier skill scaling is a separate follow-up.
 **Measured: Very Hard, 3 runs each, 1800 sim-second cap, no `?invuln`, via `eaAiBench.matrix()`.
 Six of nine PASS. All three failures are SURVIVAL failures -- there is no world-model,
 targeting or level-progression defect anywhere in the nine.**
+
+Measured just before card c10e3e7f's per-tier skill table landed, and **still current because
+the Very_Hard row of `AiSkillByDifficulty[]` IS the old `Default*` consts** -- these numbers
+describe the same bot. They do NOT carry to any other tier: below Very Hard the bot is
+deliberately worse AND the enemies are weaker, so a lower tier has to be re-measured, not
+inferred.
 
 | level | r1 | r2 | r3 | |
 |---|---|---|---|---|
@@ -1082,7 +1166,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v7):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v9):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -1092,7 +1176,11 @@ interpolation feel, both gated on real-network playtests.
   role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410;
   **v6** appends the peer-identity token to the handshake -- card 0b8a300b;
   **v7** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
-  card b0ab09ec, see the Score/lives bullet).
+  card b0ab09ec, see the Score/lives bullet;
+  **v8** appends a `blockedSlots` mask to the handshake (HelloBytes 21 -> 22) so the host can
+  grant a seat that is free on BOTH rosters -- card c0229c57, see the roster-slots bullet;
+  **v9** adds `MsgHudState` (0x12) -- the owner-authoritative per-slot combo + powerup state,
+  card 1a3ad45a, see the per-slot HUD state bullet).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1143,12 +1231,49 @@ interpolation feel, both gated on real-network playtests.
   stall the dead-reckoning or the correction blend, or the puppets fall behind the real-time
   snapshots and repeatedly snap (this was the first-wipe `pupPops` burst; same rule the
   remote-ship puppet follows). Characterised in `tools/sim/net_puppet_drive_sim.py`.
+  - **`pupPops` is meaningless without `snapTurn`, which the `[net]` line now prints** (card
+    48ab9b2f). The snapshot cursor round-robins 16 entries per 60ms packet, so an entity is
+    corrected only every `live/16*60ms` on average (`NetSession.SnapshotTurnMs`) and dead-reckons
+    blind in between. A big world stretches that -- 1.2s at 320 entities -- and how much a pop
+    rate SHOULD be expected depends entirely on it. It is the MEAN, deliberately: the cursor
+    wraps continuously instead of restarting per cycle, so rounding up to whole packets would
+    report 120ms for a 17-entity world whose real blind window is 64ms. **The two peers derive
+    it from different counts** -- the host from its authoritative `NetIdRegistry`, the joiner
+    from its own puppet count, which lags during spawn bursts and JIP catch-up; the host's line
+    is the one to trust.
+  - **The 200ms dt clamp is what makes a starved client pop, and it is worth knowing about
+    before blaming the link.** The clamp is deliberate (a pause Pop or tab refocus must advance
+    the world by at most one over-long frame, never a fling), but a client ticking slower than
+    5Hz silently loses `gap - 200ms` of real motion EVERY tick; the error integrates and the
+    next snapshot snaps. `--population` measures it: at N=128 a client at 60/40/30/10/5 **and
+    3** Hz logs **0 pops/s** -- 3Hz is already losing 133ms per tick to the clamp and still pops
+    nothing -- while 1Hz logs **128/s**. So the cliff is between 3Hz and 1Hz, i.e. an OCCLUDED
+    or hidden window (rAF paused, timers ~1Hz -- JIP trap 1). A merely SLOW client is fine.
+  - **A long `snapTurn` hurts PERIODIC motion by resonance, not big worlds as such.** Same
+    sweep, client healthy: a `?flyspiders` swarm logs 0 pops/s at every N from 16 to 2048 --
+    flat zero, not a curve -- **except** at N=512, where `snapTurn` (1920ms) lands near half the
+    spiders' 4000ms swivel period, the phase at which a velocity measured by finite difference
+    across the interval is most wrong about where the entity goes next. There it jumps to 7.2/s
+    on Very_Hard and **92.6/s on Inzane**, whose swivel is 20% bigger. Off that resonance the
+    +/-25px swivel is simply too small to miss by 100px however long the turn grows, and the X
+    drift is exactly linear so it costs a healthy client nothing. Worth remembering when a new
+    replicated type moves on a cycle.
+  - **But it was NOT the JIP pass' problem, and "the swarm was dense" explains nothing there.**
+    `?flyspiders` spawns 5.5/s yet they die at `Position.X < -100`, so it settles at a MEASURED
+    `liveIds` 17-19 -- `snapTurn` ~64-71ms, i.e. the floor. (It does not accumulate: the
+    "background spiders have `Collides=false` so they pile up" reasoning is about kills, and
+    off-screen death is what actually bounds them.) That is three orders of N away from the
+    resonance, in the region where the sweep reads a flat zero.
 - **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
   round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
   Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
   px/ms, rotation, curframe x64, scale x256, hp) + per-type state extras. A snapshot entry
   for an unknown id self-heals: it REBUILDS the puppet from the snapshot (default spawn
-  extras) unless that id died locally < 3s ago (claim in flight).
+  extras) unless that id was removed locally < 3s ago (a death still settling -- ours OR the
+  host's). Which of those (plus a REFUSED rebuild) happened is reported per entry as a
+  `SnapUnknownKind` and counted separately -- see the `snapNew`/`snapDead`/`snapBad` bullet
+  under "Verify with LOGGED METRICS"; they all return "not applied", so the single total they
+  used to share could not be judged.
 - **Per-type descriptors (`Compat/Net/NetTypeRegistry` + `Compat/Net/Descriptors/`):**
   the wire typeIdx IS the registry order -- append-only, never reorder. A descriptor owns
   (a) puppet CONSTRUCTION: spawn extras pin every random/caller-chosen look (e.g. UFO's
@@ -1211,8 +1336,9 @@ interpolation feel, both gated on real-network playtests.
     field went `u16` base-points -> `f32` per slot (protocol **v6**) because a combo-modified
     award overflows a ushort -- a 10000-point boss at a routine 40x combo is 30000, and
     `comboModify` has no ceiling.
-  - **Still local, by design:** the combo COUNTER shown under each slot is cosmetic and will
-    differ between screens; only the score is reconciled.
+  - **The combo COUNTER is no longer local -- see the per-slot HUD state bullet below.** It was
+    left local by this card ("cosmetic, only the score is reconciled"); card `1a3ad45a` found
+    that framing was wrong and replicated it.
   - **Verify with `eaNetScore.test()`, not two windows** (`NetScoreLedger.SelfTest` +
     `NetPuppets.WireRoundTripTest`). It drives the real policy on a virtual clock, and runs
     the OLD `max()` adoption over the identical kill stream first -- a green tick means
@@ -1229,6 +1355,62 @@ interpolation feel, both gated on real-network playtests.
     proof.) Measured over a two-peer run: `scSkew=0.0` steady state, and `scSkewMax` held at
     10.0 while `clTx` grew 20 -> 67 -- i.e. the worst deviation is one kill's correction and
     does NOT accumulate with kill count, which is exactly the property max() lacked.
+- **Per-slot HUD state: a slot's combo and powerup progression belong to its OWNER (card
+  1a3ad45a).** Every peer used to simulate BOTH -- a remote ship's shots are re-fired locally
+  through the real `FireAt` path, so they are ordinary local `Bullet`s stamped with that slot's
+  owner and `Bullet.CollidesWith` sustains its combo. On a client those bullets hit frozen
+  puppets interpolated ~100ms behind the host's real entities, so the sims diverge routinely.
+  - **The counter diverging is cosmetic; feeding `AddExp` with it was not.** Card `4717d3cf`
+    set `powerupactive` for a remote collector, which is exactly the gate on
+    `ScoreVisualiser.increasecombo` -- so a peer levelled up powerups for a slot it did not own,
+    and `ScoreVisualiser_onLevelUp` then called `PlayerShip.PowerUp` on the PUPPET. For `OneUp`
+    that is `Oracle.SetSlowmotion(12f)`: **twelve seconds of global slow motion fired
+    unilaterally on one peer**, off an invented combo. `Option` spawned a real extra Option ship;
+    `FirePower`/`Range` gave the puppet a weapon its owner did not have; `checkPowerupAchievement`
+    could grant `FullPower` off another slot's simulated progress.
+  - **`NetSession.OwnsSlot(slot)` is the gate, and it sits on `SustainCombo` -- the whole
+    simulation, not just the `AddExp` branch.** Gating only `AddExp` leaves `AddCombo`
+    incrementing between the owner's 100ms packets and the 1s `combotimer` zeroing a live combo
+    whenever OUR re-fired bullets miss, i.e. the replicated value fighting a local one.
+    `NetSetHudState` therefore also refreshes that slot's `combotimer` while the owner reports a
+    live combo, because the readout's alpha is driven by its `TimeLeft`.
+    It asks the ROSTER, not a live ship -- a slot's combo and levels outlive its ship (they
+    persist across a death and respawn), so a ship-keyed test would flip while the player waits
+    to come back. **Offline it is true for every slot**, which is what keeps single-player and
+    local co-op byte-identical. The decision is split into a pure `OwnsSlotCore(active, seat)`
+    so the test can table-drive `Remote`/`RemoteFriend`/unseated -- offline the predicate is
+    unconditionally true, so a live-roster-only test could never reach those cases at all.
+  - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
+    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5]` per owned slot.
+    Protocol **v9**. **combo is a USHORT and that is load-bearing** -- the host SPENDS the
+    adopted figure (`AwardScoreToAll` -> `comboModify`), so a byte would cap a client's real
+    400x combo at 255 and underpay it; combos past 255 are expected (1000 precached combo
+    strings, an explicit `>= 1000` draw fallback). Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
+    pinned at 3 and never increments, so the wire index IS the enum value and a NEW TYPE MUST GO
+    AFTER `OneUp` (or widen `HudLevelCount` and bump the version). Stream lane because it is a
+    readout: a dropped packet only means one interval of staleness.
+  - Received state applies only to slots we do NOT own (a peer claiming one of ours is ignored,
+    not trusted), bounded against `ScoreVisualiser.SlotCount` like `ApplyRemotePowerup`. The
+    receiving peer never re-derives its OWN awards from the adopted combo (its score is
+    reconciled by `EvScoreSync` + the unsettled ledger) -- but the HOST does spend it, which is
+    the point of the side effect below.
+    Levels go through the real `PlayerShip.PowerUp(..., doEffect: false)` one step at a time, so
+    the puppet's re-fired bullets match its owner's actual loadout. **`OneUp` is unreachable
+    there and must stay so** -- slow motion is deliberately local, which is the same reason the
+    puppet driver dead-reckons on real time.
+  - **Side effect, deliberate:** `AwardScoreToAll` (every boss) pays each slot with THAT slot's
+    own multiplier, so the host used to compute the client's boss share from a combo the client
+    never had. It now uses the real one -- a payout change, and a correction.
+  - **Verify with `eaNetCombo.test()`** (`Compat/Net/NetComboTest.cs`), not two windows: the
+    failure is a peer levelling a powerup it does not own, minutes into a fight, and its visible
+    consequence reads as a hiccup rather than a desync. Section 2 drives the REAL
+    `PowerupData.AddExp` over two divergent combo streams and runs the OLD ungated behaviour over
+    the identical stream FIRST, asserting it levels the slot and reaches the `OneUp` trigger --
+    a green tick means nothing otherwise (the `eaNetScore.test()` rule). Section 1 round-trips
+    the wire format against the live `ScoreVisualiser` on the unseated slot 3 and restores it;
+    section 3 pins `OwnsSlot`'s offline answer. `eaScore()` gained `own=`/`pu=`/`lv=` per slot,
+    and the `[net]` line `hudTx`/`hudRx` (`hudRx` counts ENTRIES, not packets -- a peer with a
+    couch partner sends two slots per packet).
   - **GOTCHA -- a two-window co-op run cannot be driven at full rate from this rig.** A
     backgrounded tab throttles to ~1 tick/sec (measured: `txStream` advanced 43 in 40s where
     30Hz would be ~1200), `?fpsuncapped` does NOT defeat it, and two tabs in one window can
@@ -1246,6 +1428,25 @@ interpolation feel, both gated on real-network playtests.
   its own `AddPlayer(AI)` / a later grant can't reuse it. Host-side couch joins allocate
   locally. `GameScene.AddPlayer` routes to `NetSession.TrySeatLocalJoin` while a session is up;
   offline behaviour is byte-identical.
+  - **The primary grant is a NEGOTIATION, not a guess (card c0229c57, protocol v8).** The host
+    allocates out of its OWN free slots and cannot see the joiner's, so it used to grant a seat
+    the joiner might already hold -- which desynced the pairing silently and permanently (JIP
+    pass trap 3 has the full story). The client's hello now carries a `blockedSlots` mask of the
+    slots it cannot seat its primary in, and `NetSession.FirstMutuallyFreeSlot(hostOccupied,
+    peerBlocked)` picks one free on both. Three rules hold it together:
+    - **The mask is only non-zero while a `GameScene` is up.** At the menu -- where BOTH the
+      menu-lobby and the join-in-progress joiner hello from -- the roster is leftover
+      bookkeeping from the last level or attract demo, which the launch path's `ResetPlayers()`
+      wipes before seating us. Reporting it would refuse seats for no reason.
+    - **`peerPrimarySlot` is assigned ONLY on a settled adoption.** `Update`'s retry condition
+      is `!PeerUp || peerPrimarySlot == SlotNone`, so setting it on a FAILED adopt silences the
+      1 Hz hello on both peers and the pairing can never recover. This is the bug the card was
+      about; treat it as an invariant of `AdoptGrantedPrimarySlot`, not a fact about one branch.
+    - **It terminates.** Each round either seats the joiner or adds a slot to the mask, and the
+      host never re-offers a blocked seat; when nothing works on both sides it sends
+      `RejectFull` ("Game full"). The host's own game SURVIVES that -- `Stop()` does not exit a
+      level and `NetListing.ComputeEligible` needs `!NetSession.Active`, so a listed host drops
+      back to single-player and re-lists. Verify with `eaSlotTest()`.
   - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
     slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
     tab pairs WHILE it boots, so the grant can land before the seat is taken) and
@@ -1351,8 +1552,9 @@ interpolation feel, both gated on real-network playtests.
   `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,
   extrap ~0, pops 0 (pop = a step no ship could physically make: > 2x MaxSpeed x realDt
   + 3px), drop/dup/ordViol/seqGap 0; on the world side, host `snapTx` climbing, client
-  `snapRx/snapEnt` climbing with `snapUnk` small and non-climbing at steady state,
-  `pupPops` near 0, and the claim counters telling the kill story (`clTx` client-side ~=
+  `snapRx/snapEnt` climbing with `snapUnk` small and non-climbing at steady state (but read
+  its split -- see below), `pupPops` near 0 **judged against `snapTurn`** (next bullet),
+  and the claim counters telling the kill story (`clTx` client-side ~=
   `clRx` host-side; `clKill` = claims that settled a live enemy, `clPaid` = generous
   payouts for already-dead enemies -- a nonzero `clPaid` IS the double-claim proof).
   **Two-tab test recipe:** the tabs must BOTH be visible (a backgrounded tab's rAF drops
@@ -1368,10 +1570,27 @@ interpolation feel, both gated on real-network playtests.
   `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
   through invulnerability, and leaving the flag on is what keeps the rest of the run from
   dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
-  **`snapUnk` climbing is not by itself a leak:** the host keeps snapshotting an entity for a
-  turn or two while a client claim is in flight, and the client deliberately leaves that id
-  dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
-  rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
+  **`snapUnk` climbing is not by itself a leak -- read the SPLIT, never the total** (card
+  48ab9b2f). Three unrelated things make a snapshot entry "unknown", and the `[net]` line breaks
+  them out as `snapNew`/`snapDead`/`snapBad` (`snapUnk` remains their sum):
+  - `snapNew` = an id we had never seen, which the self-heal REBUILT from the snapshot. The
+    unreliable stream lane routinely outruns the ordered reliable one, so a fresh spawn's first
+    correction can beat its `EvSpawn`. **Benign, and it tracks the world's SPAWN rate** -- in a
+    continuously spawning fight it never stops climbing, which is not a fault.
+  - `snapDead` = an id removed HERE inside the 3s `RecentRemovalWindowMs`, deliberately left
+    dead. **Benign, and it tracks the world's TOTAL removal rate.** The old note here tied this
+    to `clTx`, which was WRONG and cost card 48ab9b2f's JIP pass its verdict: `MarkRemoved`
+    fires on every local removal, host-authoritative `EvDeath`s included, so an IDLE joiner
+    watching the host's AI clear a field logs plenty of `snapDead` with `clTx` pinned at 0.
+  - `snapBad` = the rebuild was REFUSED (no descriptor for the typeIdx, the descriptor declined,
+    or the bin swallowed the add). **This is the one that means trouble** -- it re-counts on
+    every turn the host streams that id. An unknown typeIdx re-counts on literally every turn;
+    the other two mark the id removed first, so they show as one `snapBad` then `snapDead` for
+    3s, then another retry -- i.e. a slow, steady tick rather than a burst. Any sustained
+    `snapBad` deserves a look.
+  Attribution is pinned by **`eaNetSnap()`** (`Compat/Net/NetSnapshotTest.cs`), which drives the
+  real `OnSnapshotEntry` through all four outcomes from the main menu -- a classification is
+  invisible in any frame, and a second peer tab throttles too hard to show it anyway.
   **A STRUCTURAL check (roster, slots, who-owns-what) is the one thing two HIDDEN tabs in one
   window can still do**, which is how the four-seat roster in the `?netlocal` bullet was
   captured without hand-arranging windows. Two things make it survive: `index.html` falls back
@@ -1594,24 +1813,40 @@ interpolation feel, both gated on real-network playtests.
   - **JIP pass trap 2 -- the joiner must boot FLAG-CLEAN.** The reject is
     `menuSession && (peer debug bit || DebugFlags.Active)` (`NetSession.cs`), and the joiner IS a
     menu session, so its OWN `Active` bit rejects the pairing. The net-relevant flags still open
-    to it are `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are in the
-    `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
+    to it are `?noattract`, `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are
+    in the `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
     **`?netsim` is NOT usable on a joiner**: it is parsed only in `index.html`, and that block
     early-returns unless `?net=` is present -- which sets `NetRole` -> `Active` -> rejected. The
     host is fine: `?netjip` drops its debug bit (`LocalHelloFlags`) and the check is
-    `menuSession`-gated, so a `listedSession` host never rejects. **Consequence: the joiner
-    cannot pass `?noattract`, so an unattended joiner's menu keeps getting pulled into the attract
-    demo** -- drive it briskly and re-check state between steps.
-  - **JIP pass trap 3 -- a grant whose TARGET seat is taken desyncs SILENTLY and permanently.**
-    `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it is the *granted* slot
-    being occupied that bites -- a joiner merely seated in slot 0 with slot 1 free moves across
-    fine and logs `moved local primary slot 0 -> 1`. When it does refuse,
-    `AdoptGrantedPrimarySlot` logs `could not move local primary 0 -> 1 (slot busy) -- staying
-    put` and the peers disagree forever (`pri=0/0` vs `pri=0/1`), the joiner never builds a remote
-    puppet (`remoteShip=0`, `buf=0ms`), and NOTHING surfaces to the player. It cannot self-heal:
-    `peerPrimarySlot` is assigned BEFORE that early return, which satisfies the
-    `peerPrimarySlot == SlotNone` term and stops the hello retry on both peers. Observed once,
-    after the joiner had visited Start/Controls and backed out before joining.
+    `menuSession`-gated, so a `listedSession` host never rejects. **Put `?noattract` on the
+    joiner's URL** (out of `Active` since card af63f958) rather than driving its lobby against a
+    20s idle timer.
+  - **JIP pass trap 3 -- a grant whose TARGET seat was taken used to desync SILENTLY and
+    permanently. FIXED in card c0229c57 (protocol v8); the trap is recorded because the shape is
+    instructive.** `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it was the
+    *granted* slot being occupied that bit -- a joiner merely seated in slot 0 with slot 1 free
+    moves across fine and logs `moved local primary slot 0 -> 1`. On refusal
+    `AdoptGrantedPrimarySlot` logged `... (slot busy) -- staying put` and the peers disagreed
+    forever (`pri=0/0` vs `pri=0/1`), the joiner never built a remote puppet (`remoteShip=0`,
+    `buf=0ms`), and NOTHING surfaced to the player.
+    **It was reachable with no debug flags at all**, which is the part worth remembering: the
+    menu's roster is whatever the last scene left behind (`GameScene.Terminate` does NOT reset
+    it; only the launch paths' `ResetPlayers()` do), and the attract demo seats MORE than one --
+    `mainMenu_DemoSelected` seats slot 0, then `Demo1/2/3.Initialize` adds 3 more on a 20% roll
+    and 1 more on a further 40% roll. So "idle at the menu -> attract demo -> key out -> Online
+    Co-op -> Join" left slot 1 seated ~60% of the time, and a couch session backed out to the
+    menu did it every time.
+    The fix is three things. (a) The host no longer GUESSES: the v8 handshake carries a
+    `blockedSlots` mask (client -> host) so `ReserveRemotePrimarySlot` grants a seat free on
+    BOTH rosters -- see the roster-slots bullet. (b) The client only moves a seat when a
+    `GameScene` is up; at the menu the roster is bookkeeping `ResetPlayers()` is about to wipe,
+    so there is nothing to move. (c) A grant that still lands badly RENEGOTIATES rather than
+    settling -- `peerPrimarySlot` is now assigned only on a settled adoption, which is what keeps
+    the 1 Hz hello alive so the host can re-grant. **That last one is the general lesson: any
+    early return in `AdoptGrantedPrimarySlot` that leaves `peerPrimarySlot` set silences the
+    retry on BOTH peers and makes the session unrecoverable.** Verify with `eaSlotTest()`.
+    (Note the `?noattract` point in trap 2 is about the TEST RIG only -- a real player never
+    passes flags, so the attract-demo roster is exactly how this reached them.)
   - **JIP pass trap 4 -- use a LOCAL signaling rig, not the deployed one.** All four entry points
     read `DebugFlags.NetSignal` (`NetListing.Tick`, `NetGameBrowser.Start`, `NetLobby` host/join,
     `WebRtcTransport`), so `uvicorn main:app --port 8091` in `server/signal` +
@@ -1625,12 +1860,24 @@ interpolation feel, both gated on real-network playtests.
     goes down, `NetListing` drops the room, and the joiner's carousel correctly falls back to
     "Searching for open games..." mid-test.
   - **JIP pass recipe:** host `?level=Level2&flyspiders&netjip&aiplayer&invuln&binlog&signal=...`,
-    joiner `?signal=...&binlog&netlog` -> menu -> Online Co-op -> Join Online Game -> pick the
-    room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
+    joiner `?signal=...&noattract&binlog&netlog` -> menu -> Online Co-op -> Join Online Game ->
+    pick the room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
     `... role=join ... (menu lobby)`, `granted joiner primary slot=1`, **mirror-image rosters**
     (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`), `localShip=1
     remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0,
     **zero `[bin] purge-filter diverted`**, and identical `eaNetBg()` state lines.
+  - **JIP pass trap 6 -- `pupPops`/`snapUnk` from this rig were UNREADABLE until card 48ab9b2f,
+    and the two traps that made them so are still live.** The first pass logged `pupPops 207` /
+    `snapUnk 344` over ~25s and could conclude nothing. (a) `snapUnk` was one counter for three
+    unrelated causes -- now split into `snapNew`/`snapDead`/`snapBad`, and note the old "judge it
+    against `clTx`" rule was simply wrong (see the metrics bullet). (b) `?flyspiders` looks like a
+    dense-swarm explanation for the pops but is NOT one: `--population` shows that swarm logging
+    0 pops/s across the whole range bar one far-off resonance, and the rig's live count measures
+    only 17-19 (`snapTurn` at its 60ms floor) anyway. What DOES produce hundreds is a client
+    ticking at ~1Hz -- i.e. trap 1 (an occluded window) intermittently biting, which the rig
+    cannot rule out after the fact. So on a re-measure: read `snapTurn` alongside `pupPops`, keep
+    both windows genuinely visible, and treat a pop rate from a run whose tick rate you did not
+    watch as no evidence at all.
   - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
     ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
     best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The

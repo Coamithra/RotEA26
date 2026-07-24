@@ -41,6 +41,11 @@ internal class FlyingSpider : KillableAlien
 	private static float SizeFactor =>
 		EvilAliensWeb.Compat.DebugFlags.FlySpiderScale ?? DefaultSizeFactor;
 
+	// The bottom of the fog band: a BACKGROUND spider's rest height is held above this, so the
+	// distant layer stays up near the Mars hills instead of wandering down over the play field.
+	// Foreground spiders use the full 475 height.
+	private const float BackgroundBandBottom = 350f;
+
 	private bool isbackground;
 
 	private Texture2D wing;
@@ -109,15 +114,15 @@ internal class FlyingSpider : KillableAlien
 		return flyingSpider;
 	}
 
-	// The per-spawn reset seam: EVERY spawn path calls this before bin.Add (FlyingSpiderEvent,
-	// Level2.spawnFlyingSpiderBench, FlyingSpiderDescriptor.CreatePuppet), and the instance may
+	// The per-spawn reset seam: every spawn path calls this before bin.Add, and the instance may
 	// have come out of the recycle pool with a previous life's settings still on it. So anything
 	// an OPTIONAL later setter writes has to be cleared here, not just defaulted at construction:
 	// a spider recycled out of a ?flyspidercount= bench would otherwise keep benchIndex and be
-	// re-pinned at Speed 0 by Initialize -- and a background one never dies, so a later Level 2
-	// inherits permanently frozen immortal scenery. netForcedColorIndex is the same shape (a
-	// recycled net puppet keeping the host's forced tint in a local game). Both setters that can
-	// follow -- SetupBench and NetForceColor -- run AFTER this call on every path.
+	// re-pinned by Initialize -- and a pinned spider can neither cross off-screen nor be shot
+	// (Speed 0, Collides false), so a later Level 2 inherits permanently frozen immortal scenery.
+	// netForcedColorIndex is the same shape (a recycled net puppet keeping the host's forced tint
+	// in a local game). Both setters that can follow -- SetupBench and NetForceColor -- run AFTER
+	// this call on every path.
 	public void Setup(bool isbackground)
 	{
 		this.isbackground = isbackground;
@@ -172,7 +177,7 @@ internal class FlyingSpider : KillableAlien
 			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 			base.Speed = (backgroundSpeed).Length() * 1.11f;
 			base.DrawOrder = 1;
-			startheight = MathHelper.Min(350f, startheight);
+			startheight = MathHelper.Min(BackgroundBandBottom, startheight);
 			swiveltimer.Duration = 4000f;
 		}
 		else
@@ -221,19 +226,20 @@ internal class FlyingSpider : KillableAlien
 		int rows = (int)Math.Ceiling((double)n / cols);
 		int col = i % cols;
 		int row = i / cols;
-		// Background spiders live in the fog band above y=350 (Initialize clamps startheight to
-		// it, and Update drives the drawn Y off startheight, not off Position.Y). Spreading the
-		// grid over the full 475 and letting that clamp bite would fold every row below the band
-		// onto one line -- 12 of 40 spiders stacked on y=350 -- which is both the opposite of the
-		// spread this grid exists for and a pile of extra overlap for the flatten to chew on. So
-		// scale the rows to the band the variant actually occupies and let the clamp be a no-op.
-		float ySpan = isbackground ? 350f : 475f;
+		// Scale the rows to the band the variant actually occupies. Spreading the grid over the
+		// full 475 and letting Initialize's fog-band clamp bite instead would fold every row below
+		// the band onto one line -- 12 of 40 spiders stacked on y=350 -- which is both the opposite
+		// of the spread this grid exists for and a pile of extra overlap for the flatten to chew
+		// on. Update drives the drawn Y off startheight, not off Position.Y, so that clamp is what
+		// decides where a background spider is SEEN; keeping the rows inside the band means the
+		// grid is the only thing placing them.
+		float ySpan = isbackground ? BackgroundBandBottom : 475f;
 		// Inset half a cell so nothing sits on the screen edge, where it would be part-clipped and
 		// draw less than a whole spider.
 		float x = 800f * (col + 0.5f) / cols;
 		float y = ySpan * (row + 0.5f) / rows;
 		base.Position = new Vector2(x, y);
-		startheight = isbackground ? MathHelper.Min(350f, y) : y;
+		startheight = y;
 	}
 
 	// Baked half-extent of the per-spider group-flatten box, in DESIGN px before `scale`. Generous

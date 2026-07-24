@@ -11,39 +11,39 @@ build + IL/decompiled-diff oracle + code reading, and flag what still needs a br
 - [x] Create worktree `.claude/worktrees/wt1` + branch `fix/flyspider-review-followups`
 
 ## Phase 2: Research
-- [ ] Read FlyingSpider.cs (Setup, bench grid)
-- [ ] Read FlyingSpiderSwarm.cs (ComponentRemoved, members clear)
-- [ ] Read Level2.cs (call-site comment, field decls)
-- [ ] Read DebugFlags.cs (IsOn/IsExplicitlyOff, flyspidercount/box parsing)
-- [ ] Read IComponentWatcher + Floor reference impl
-- [ ] Read web CLAUDE.md console QA helper index
+- [x] Read FlyingSpider.cs (Setup, bench grid)
+- [x] Read FlyingSpiderSwarm.cs (ComponentRemoved, members clear)
+- [x] Read Level2.cs (call-site comment, field decls)
+- [x] Read DebugFlags.cs (IsOn/IsExplicitlyOff, flyspidercount/box parsing)
+- [x] Read IComponentWatcher + Floor reference impl
+- [x] Read web CLAUDE.md console QA helper index
 
 ## Phase 3: Design
-- [ ] Write plan `plans/flyspider-review-followups.md`
-- [ ] Present to user, get approval
-- [ ] Post TLDR comment on card
+- [x] Write plan `plans/flyspider-review-followups.md`
+- [x] Present to user, get approval
+- [x] Post TLDR comment on card
 
 ## Phase 4: Implement
-- [ ] 1. FlyingSpider.Setup clears benchIndex/benchCount/netForcedColorIndex (should-fix)
-- [ ] 2. Level2.cs ?flyspiders call-site comment fix (should-fix)
-- [ ] 3. DebugFlags IsOn/IsExplicitlyOff doc-comment orphan (should-fix)
-- [ ] 4. FlyingSpiderSwarm -> IComponentWatcher instead of raw += (should-fix)
-- [ ] 5. bench grid startheight saturation (nit)
-- [ ] 6. ?flyspidercount= fg Collides caveat (nit)
-- [ ] 7. members cleared at top of CollectMembers (nit)
-- [ ] 8. malformed ?flyspidercount=/?flyspiderbox= warning (nit)
-- [ ] 9. web CLAUDE.md helper index + Level2 field block (nit)
-- [ ] Update docs (web CLAUDE.md) as needed
+- [x] 1. FlyingSpider.Setup clears benchIndex/benchCount/netForcedColorIndex (should-fix)
+- [x] 2. Level2.cs ?flyspiders call-site comment fix (should-fix)
+- [x] 3. DebugFlags IsOn/IsExplicitlyOff doc-comment orphan (should-fix)
+- [x] 4. FlyingSpiderSwarm -> IComponentWatcher instead of raw += (should-fix)
+- [x] 5. bench grid startheight saturation (nit)
+- [x] 6. ?flyspidercount= fg Collides caveat (nit)
+- [x] 7. members cleared at top of CollectMembers (nit)
+- [x] 8. malformed ?flyspidercount=/?flyspiderbox= warning (nit)
+- [x] 9. web CLAUDE.md helper index + Level2 field block (nit)
+- [x] Update docs (web CLAUDE.md) as needed
 
 ## Phase 5: Verify
-- [ ] Clean `dotnet build -c Debug`
-- [ ] Behaviour-preserving parts proven where applicable (IL / decompiled diff)
-- [ ] Diff spot-check (no lowercase content/, no BlendState.AlphaBlend, no codegen re-run)
-- [ ] NOTE: browser/console gate deferred — user asked for no live testing this session
+- [x] Clean `dotnet build -c Debug`
+- [x] Behaviour-preserving parts proven where applicable (IL / decompiled diff)
+- [x] Diff spot-check (no lowercase content/, no BlendState.AlphaBlend, no codegen re-run)
+- [x] NOTE: browser/console gate deferred — user asked for no live testing this session
 
 ## Phase 6: Review & Ship
-- [ ] Commit + push
-- [ ] /review, fix every finding
+- [x] Commit + push
+- [x] /review, fix every finding
 - [ ] Pull main into branch, resolve conflicts
 - [ ] Re-verify
 - [ ] PR + self-merge

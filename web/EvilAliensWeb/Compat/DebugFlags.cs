@@ -663,6 +663,11 @@ namespace EvilAliensWeb.Compat
 		// the collision pass; the background variant it is compared against never collided anyway.
 		public static int? FlySpiderCount { get; private set; }
 
+		// Ceiling for ?flyspidercount=. Far above anything the cost curve needs (it was measured
+		// at N=0/40/80 and is linear), and low enough that a fat-fingered extra zero is reported
+		// as a bad value instead of spending the boot building components on the WASM heap.
+		private const int MaxFlySpiderBench = 4096;
+
 		// ?flyspiderbox=<half>: override the group-flatten bounding box half-extent in FlyingSpider
 		// .Draw (baked 200 design px, scaled by the spider's `scale`). This is the DISCRIMINATOR
 		// between the two candidate costs: a per-CALL / per-FBO-bind cost is flat in the box size,
@@ -1463,6 +1468,16 @@ namespace EvilAliensWeb.Compat
 					{
 						FlySpiderScale = fss;
 					}
+					else
+					{
+						// Reported like its ?flyspidercount=/?flyspiderbox= siblings: a typo'd
+						// value would otherwise run at the baked DefaultSizeFactor while the
+						// session believes it is looking at the size under test.
+						Console.WriteLine("[debug] unknown ?flyspiderscale= value '" + val
+							+ "' (expected a number > 0) -- ignored, staying on "
+							+ (FlySpiderScale ?? EvilAliens.FlyingSpider.DefaultSizeFactor)
+								.ToString(CultureInfo.InvariantCulture));
+					}
 					break;
 				case "wcdiff":
 				case "webcamdiff":
@@ -1926,22 +1941,34 @@ namespace EvilAliensWeb.Compat
 					}
 					else
 					{
+						// Every rejection message below names the setting that is actually IN
+						// FORCE, read back off the property rather than written as a literal --
+						// a repeated flag (?flyspiderbox=250&flyspiderbox=xx) keeps the earlier
+						// valid value, and a diagnostic that can state the wrong condition is
+						// worse than one that states none.
 						Console.WriteLine("[debug] unknown ?flyspiderflatten= value '" + val
-							+ "' (expected per/0/swarm) -- ignored, staying on swarm");
+							+ "' (expected per/0/swarm) -- ignored, staying on " + FlySpiderFlatten);
 					}
 					break;
 				case "flyspidercount":
 					// Reported, never swallowed -- same reason as ?flyspiderflatten= above, and it
 					// bites harder here: a typo'd N silently leaves the endless STREAM running,
 					// so the run has no pinned population at all while being labelled a bench.
-					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc) && fsc >= 0)
+					// The upper bound is rejected for the same reason rather than clamped: one
+					// extra zero would otherwise spend the run building a million components on
+					// the WASM heap, which reads as a hung boot, not as a mislabelled bench.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc)
+						&& fsc >= 0 && fsc <= MaxFlySpiderBench)
 					{
 						FlySpiderCount = fsc;
 					}
 					else
 					{
 						Console.WriteLine("[debug] unknown ?flyspidercount= value '" + val
-							+ "' (expected an integer >= 0) -- ignored, staying on the endless stream");
+							+ "' (expected an integer 0.." + MaxFlySpiderBench + ") -- ignored, staying on "
+							+ (FlySpiderCount.HasValue
+								? "the pinned bench of " + FlySpiderCount.Value
+								: "the endless stream"));
 					}
 					break;
 				case "flyspiderbox":
@@ -1952,8 +1979,8 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						Console.WriteLine("[debug] unknown ?flyspiderbox= value '" + val
-							+ "' (expected a number > 0) -- ignored, staying on the baked "
-							+ EvilAliens.FlyingSpider.DefaultFlattenBoxHalf.ToString(CultureInfo.InvariantCulture));
+							+ "' (expected a number > 0) -- ignored, staying on "
+							+ EvilAliens.FlyingSpider.FlattenBoxHalfDesign.ToString(CultureInfo.InvariantCulture));
 					}
 					break;
 				case "tutorialtraining":

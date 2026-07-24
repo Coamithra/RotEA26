@@ -113,11 +113,10 @@ internal class FlyingSpiderSwarm : DrawableGameComponent, IComponentWatcher
 	// brackets.
 	private void CollectMembers()
 	{
-		// Cleared HERE, by the collector that owns the scratch, rather than at the end of Draw:
-		// Draw early-outs on an empty swarm before it could reach a trailing clear, and a throw
-		// anywhere between the collect and the composite would leave the entries behind for the
-		// next frame to append to -- every stale member then double-drawn inside the flatten, and
-		// compounding frame on frame.
+		// Cleared HERE, by the collector that owns the scratch, rather than at the end of Draw: a
+		// throw anywhere between the collect and the composite would otherwise leave the entries
+		// behind for the next frame to append to -- every stale member then double-drawn inside
+		// the flatten, and compounding frame on frame.
 		members.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{

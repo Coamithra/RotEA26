@@ -651,10 +651,46 @@ and Inzane; per-tier skill scaling is a separate follow-up.
   `?aiff` (or anything else rAF-driven) measures almost nothing unless the window is focused.
   `?aiff=<n>` runs n sims per rendered frame for a WATCHABLE fast-forward, each with a synthesised
   60Hz dt -- not the frame's own, which `IsFixedTimeStep=false` inflates by ~n.
-- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aireact= ?aigapmargin= ?aithreatlead=
-  ?aibossbias=` (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
-  Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.reset()`. Pair with `?aiplayer` and
-  `?difficulty=Very_Hard`.
+- **Damping is DEMAND-DRIVEN, and both halves matter.** `Move()` discards the steer's magnitude
+  and thrusts at full acceleration along its ANGLE, so a weak-but-nonzero steer is not a gentle
+  nudge -- it is full throttle. Hence: **park** below `DefaultSteerParkDemand` (just above the
+  0.8 station pull), so an idle ship coasts to a stop instead of sailing past its station and
+  back forever; and **smooth adaptively**, collapsing the time constant from
+  `DefaultSteerSmoothMs` toward `DefaultSteerSmoothUrgentMs` as the push grows, because heavy
+  damping is exactly wrong when something is bearing down. Two things were tried against the same
+  idle-fidget symptom and are documented in place as REVERTED -- don't re-derive them: a
+  velocity-damped "arrive" at the station (it contains `-SpeedVector`, so it brakes every real
+  manoeuvre: coast 28% -> 59%, spider-boss deaths 24 -> 70) and a tighter deadzone alone.
+- **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
+  is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
+  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
+  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
+  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
+  manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
+  the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
+  lane (UFOs enter from the top) and LEFT out of a landing.
+- **`SpiderBoss`'s landing now sweeps to the right screen edge -- a deliberate GAMEPLAY change,
+  not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
+  that trivialised the landing; the AI found it instantly and parked there. Marked as such in
+  `SpiderBoss.cs`. It affects human players too.
+- **The top screen edge gets its own strong push** (`TopEdgeAvoidStrength`): it is where UFOs
+  spawn, and the stock edge term caps at `maxSteerStrength` 4, which loses to a lane escape (18)
+  and pins the ship on the ceiling to be exploded by something spawning on it.
+- **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
+  flat push across a band fights the screen bounds instead of easing off once the ship is clear.
+- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
+  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
+  Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.world()`, `eaAiBench.reset()`. Pair
+  with `?aiplayer` and `?difficulty=Very_Hard`.
+- **Where it stands (card f4d1721f, Very Hard unless noted).** Spider boss 36 deaths and the
+  fight never resolving -> 17 and resolving; Level 3 stalled forever at event 53/60 -> kills the
+  BrainBoss; wall heading churn ~1050 deg/s -> 70, reversals 6.5/s -> 1.3. It does NOT clear a
+  story level on Very Hard (L1 game over at event 19/64, L2 at 45/104, L3 at 19/60) -- it dies to
+  sustained bullet fire, and the sum-of-repulsions model is the wrong shape for bullet hell;
+  "pick the safest reachable spot" is the next move. Level 1 on Medium is a VICTORY with 1 death.
+  The challenge levels are unmeasured. **Single runs of a stochastic fight vary a lot -- differences
+  under ~30% are noise, which misled this card more than once.**
 
 ### Webcam challenge "I Made This!" (`Levels.WebcamAliens`)
 

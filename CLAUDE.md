@@ -135,7 +135,8 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   (ticks the real loop at a fixed 60Hz dt with no Draw) — a backgrounded tab throttles rAF *and*
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
-  `?aismooth= ?aireact= ?aigapmargin= ?aithreatlead= ?aibossbias=`. Pair with `?aiplayer`.
+  `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aithreatlead= ?aibossbias=
+  ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with `?aiplayer`.
   Details + the AI's own gotchas (its world model is `Oracle.GetBaddies`; a low jitter score
   alone can mean the bot is wedged, not smooth): web CLAUDE.md.
 - Dozens more per-feature tuning/diagnostic flags exist — see web CLAUDE.md ("Debug flags &

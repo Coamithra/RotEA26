@@ -198,6 +198,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
+	// Fraction of a wall tile across which co-op AI ships fan out inside their shared gap.
+	private const float GapSeatSpreadFraction = 0.5f;
+
 	// Clearance the AI wants beyond ANY threat's hull, before the size term below. Much larger
 	// than the 2008 flat 150 -- see ThreatFieldStrength for why a bigger field is not a bigger
 	// no-go zone.
@@ -800,8 +803,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = (float)Math.PI / 12f;
-		// Squared while the loop scans (it is compared against LengthSquared); the Math.Sqrt
-		// after the loop turns it into a real distance for the range test.
+		// Compared in SQUARED space while the loop scans (and carrying the priority discount, so
+		// it is a score rather than a distance); the winner's true distance is recovered after the
+		// loop for the range test.
 		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
 		// big UFO fires one at the player, so the boss walks into any beam that crosses the
 		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
@@ -1577,7 +1581,20 @@ public class PlayerShip : AlienDrawableGameComponent
 		map.GetMapCoords(ref x, ref y, base.Position);
 		float tile = map.TileSize;
 		int column = ChooseGapColumn(x, y, map, box.Width);
-		float dx = map.ColumnCentreX(column) - base.Position.X;
+		// Per-seat lateral offset inside the chosen column. The 2008 wall code gave each slot its
+		// own nudge (8/4/6/10) precisely so co-op ships did not stack; without an equivalent every
+		// AI ship computes the same column and drives at the same point, which in a Level-3 wall
+		// -- where a touch is instant death -- turns four Mechanical Friends into one collision.
+		// Spread by seat ORDINAL (the roster can be sparse), clamped well inside the tile so the
+		// offset can never push a ship into the column's own wall.
+		float seatSpread = 0f;
+		int seated = oracle.Players;
+		if (seated > 1)
+		{
+			float slot = (float)oracle.SeatOrdinal(player) / (float)(seated + 1) - 0.5f;
+			seatSpread = slot * tile * GapSeatSpreadFraction;
+		}
+		float dx = map.ColumnCentreX(column) + seatSpread - base.Position.X;
 		// How much room the ship has in ITS OWN column. Measured in PIXELS to the face of the
 		// first blocked row, not in rows: a row count cannot distinguish "a slab is 60px above
 		// me" from "a slab is 1000px above me", and treating those alike makes the avoidance push
@@ -1645,9 +1662,16 @@ public class PlayerShip : AlienDrawableGameComponent
 	//     or when it stops being passable at all.
 	private int ChooseGapColumn(int x, int y, CollisionLevelMap map, float shipWidth)
 	{
-		int span = MathHelper.Max((int)Math.Ceiling(shipWidth / map.TileSize), 1);
+		// Tiles the ship's box actually overlaps. NOT ceil(width/tile): a 29px box in a 114px tile
+		// straddles TWO tiles whenever it sits near a boundary, and ceil() reports one -- which
+		// made the advertised "does the ship fit" check a no-op on every shipped grid (all are
+		// width=7). floor()+1 is the honest worst case.
+		int span = (int)(shipWidth / map.TileSize) + 1;
+		// Seed with the ship's OWN column so "stay where I am" is a real candidate. Starting from
+		// float.MinValue made it dead code -- the blocked-column sentinel is greater, so the first
+		// iteration always won and a fully-blocked row would have steered hard at column 0.
 		int best = x;
-		float bestScore = float.MinValue;
+		float bestScore = ColumnScore(x, x, y, map, span);
 		for (int c = 0; c < map.Width; c++)
 		{
 			float score = ColumnScore(c, x, y, map, span);
@@ -1731,10 +1755,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// proportional steer in SteerThroughWall.
 	private void ClampIntoWallSpace(ref Vector2 direction, CollisionLevelMap map)
 	{
-		if (map == null)
-		{
-			return;
-		}
 		CollisionBox box = (CollisionBox)GetCollisionType();
 		float reach = base.MaxSpeed * WallClampMs;
 		int cx = 0;

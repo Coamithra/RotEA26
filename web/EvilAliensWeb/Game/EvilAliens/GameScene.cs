@@ -955,14 +955,24 @@ internal abstract class GameScene : Scene
 
 	private void AddPlayer(ControlDevice controlDevice, bool spawnPlayer)
 	{
-		oracle.AddPlayer(controlDevice);
+		// Online co-op (card 4d904410): while a session is up the HOST allocates every slot, so a
+		// couch player joining here must take the slot the host says -- see NetSession.TrySeatLocalJoin
+		// (host: allocate locally; client: EvJoinRequest -> the ship spawns on the grant, not now).
+		if (EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			EvilAliensWeb.Compat.Net.NetSession.TrySeatLocalJoin(controlDevice, spawnPlayer);
+			return;
+		}
+		int slot = oracle.AddPlayer(controlDevice);
 		if (spawnPlayer)
 		{
-			SpawnPlayer(controlDevice);
+			SpawnPlayer(controlDevice, slot);
 		}
 	}
 
-	private void SpawnPlayer(ControlDevice controlDevice)
+	// Spawn the ship for an already-seated slot. `slot` is the seat AddPlayer/the net allocator
+	// actually took -- never `oracle.Players - 1`, which only agrees while the table is dense.
+	internal void SpawnPlayer(ControlDevice controlDevice, int slot)
 	{
 		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
 		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
@@ -975,13 +985,13 @@ internal abstract class GameScene : Scene
 		switch (spawnType)
 		{
 		case PlayerSpawnType.South:
-			playerShip.Setup(oracle.Players - 1, new Vector2(400f, 648f), startup: true, invulnerable: true, 4.712389f);
+			playerShip.Setup(slot, new Vector2(400f, 648f), startup: true, invulnerable: true, 4.712389f);
 			break;
 		case PlayerSpawnType.West:
-			playerShip.Setup(oracle.Players - 1, new Vector2(-48f, 300f), startup: true, invulnerable: true, 0f);
+			playerShip.Setup(slot, new Vector2(-48f, 300f), startup: true, invulnerable: true, 0f);
 			break;
 		case PlayerSpawnType.North:
-			playerShip.Setup(oracle.Players - 1, new Vector2(400f, -48f), startup: true, invulnerable: false, (float)Math.PI / 2f);
+			playerShip.Setup(slot, new Vector2(400f, -48f), startup: true, invulnerable: false, (float)Math.PI / 2f);
 			break;
 		}
 		if (controlDevice == ControlDevice.Keyboard)
@@ -1328,8 +1338,19 @@ internal abstract class GameScene : Scene
 		{
 			score.ShowStartMessages();
 		}
-		for (int i = 0; i < oracle.Players; i++)
+		// Walk every SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and
+		// therefore sparse, and a hole would otherwise silently skip a real player's respawn.
+		// The spread across the spawn edge is keyed to the player's ORDINAL among the seated
+		// slots (not the raw slot index), so a dense offline roster spawns exactly where it
+		// always did while a sparse one still spreads evenly.
+		int ordinal = 0;
+		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
+			if (!oracle.IsSeated(i))
+			{
+				continue;
+			}
+			ordinal++;
 			if (!oracle.IsAlive(i))
 			{
 				PlayerShip playerShip = Collection.Recycle<PlayerShip>();
@@ -1340,13 +1361,13 @@ internal abstract class GameScene : Scene
 				switch (spawnType)
 				{
 				case PlayerSpawnType.South:
-					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)(i + 1), 648f), startup: true, invulnerable: false, 4.712389f);
+					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)ordinal, 648f), startup: true, invulnerable: false, 4.712389f);
 					break;
 				case PlayerSpawnType.West:
-					playerShip.Setup(i, new Vector2(-48f, 600f / ((float)oracle.Players + 1f) * (float)(i + 1)), startup: true, invulnerable: false, 0f);
+					playerShip.Setup(i, new Vector2(-48f, 600f / ((float)oracle.Players + 1f) * (float)ordinal), startup: true, invulnerable: false, 0f);
 					break;
 				case PlayerSpawnType.North:
-					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)(i + 1), -48f), startup: true, invulnerable: false, (float)Math.PI / 2f);
+					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)ordinal, -48f), startup: true, invulnerable: false, (float)Math.PI / 2f);
 					break;
 				}
 				if (invulnerable)

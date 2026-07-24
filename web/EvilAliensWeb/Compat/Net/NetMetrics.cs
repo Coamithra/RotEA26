@@ -59,7 +59,7 @@ namespace EvilAliensWeb.Compat.Net
         public float ImpLossPct;
         public float ImpJitterMs;
 
-        public string Report(bool isHost, bool peerUp, int liveIds, bool localShip, bool remoteShip)
+        public string Report(bool isHost, bool peerUp, int liveIds, bool localShip, bool remoteShip, string roster)
         {
             // Impairment is off in the overwhelmingly common case; keep the line unchanged
             // there rather than padding every log with five zeroes.
@@ -68,8 +68,11 @@ namespace EvilAliensWeb.Compat.Net
                     " impLag={0:0}ms impLoss={1:0}% impJit={2:0}ms impDrop={3} impHeld={4}",
                     ImpLagMs, ImpLossPct, ImpJitterMs, ImpDropped, ImpHeld)
                 : "";
+            // roster= is the multi-local verification (card 4d904410): both peers must print the
+            // SAME slot->owner map, since the host allocates every slot and the wire slot IS the
+            // oracle slot. A disagreement here is the bug that used to cross-credit kills.
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={34} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
@@ -77,7 +80,7 @@ namespace EvilAliensWeb.Compat.Net
                 EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds,
                 SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
-                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks) + imp;
+                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster) + imp;
         }
     }
 }

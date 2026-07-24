@@ -145,7 +145,11 @@ namespace EvilAliensWeb.Compat.Net
                     return false;
                 }
             }
-            return Players() == 1;                         // exactly one active player, slot 2 free
+            // Any free seat will do (card 4d904410). This used to demand exactly one player
+            // because the roster was hard-wired to one local ship per peer; now the host
+            // allocates slots, so a couch game can advertise its spare seat too. The browser's
+            // players column consequently varies 1..3 instead of always reading 1.
+            return Players() < Oracle.MaxPlayers;
         }
 
         private static int Players()

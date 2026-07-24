@@ -595,10 +595,19 @@ public class PlayerShip : AlienDrawableGameComponent
 		sound.PlayCue("blast");
 	}
 
-	// Re-apply an oracle hue after Setup already ran (the join side swaps slot hues once the
-	// handshake settles, so the host ship is white and the join ship purple on BOTH screens).
+	// Re-apply an oracle hue after Setup already ran.
 	internal void NetApplyHue(float newHue)
 	{
+		hue = newHue;
+	}
+
+	// Move a live ship to another roster slot (card 4d904410). Only the JOIN peer's primary
+	// ever moves, and only in the dev ?net=join flow: it boots into a level at slot 0 and
+	// learns its host-granted slot when it pairs. The oracle registration moves first
+	// (Oracle.MovePlayerSlot); this re-stamps the ship's own slot identity and colour.
+	internal void NetSetOwner(int slot, float newHue)
+	{
+		player = slot;
 		hue = newHue;
 	}
 

@@ -894,6 +894,15 @@ namespace EvilAliensWeb.Compat
 		// builds are unchanged (0 = off, and it only takes effect on a debug ?level= boot).
 		public static int AiFriends { get; private set; }
 
+		// ?netlocal=<1-3> (card 4d904410): queue that many synthetic COUCH joins on this peer,
+		// fired a few seconds after the session goes live (NetSession.TickLocalJoinSim). Local
+		// co-op joins are gamepad Start presses, which the automated rig cannot produce -- there
+		// are no physical pads and eaPress only reaches the keyboard path -- so this is the seam
+		// that makes "someone picks up a controller mid-session" testable at all. Pair with
+		// ?net=host/join (+ ?aiplayer so the extra ships fly themselves: they are not puppets, so
+		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
+		public static int NetLocal { get; private set; }
+
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
 		// INBOUND traffic by Compat/Net/NetImpairment so the drop-tolerance paths cards
 		// 11.1-11.3 built actually get exercised. ?netlag=<ms> (0-500) delays both lanes;
@@ -1529,6 +1538,12 @@ namespace EvilAliensWeb.Compat
 						AiFriends = (int)MathHelper.Clamp(aif, 0, 3);
 					}
 					break;
+				case "netlocal":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var nloc))
+					{
+						NetLocal = (int)MathHelper.Clamp(nloc, 0, 3);
+					}
+					break;
 				case "gamebrowser":
 					GameBrowser = IsOn(val);
 					if (GameBrowser)
@@ -1760,6 +1775,7 @@ namespace EvilAliensWeb.Compat
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
 						+ (NetScript ? " netscript" : "")
+						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

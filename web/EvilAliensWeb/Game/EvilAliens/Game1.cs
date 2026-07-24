@@ -711,7 +711,15 @@ public class Game1 : Game
 			collectionHelper.ClearCache();
 			collectionHelper.Remove((GameComponent)(object)menuScene);
 			oracle.ResetPlayers();
-			oracle.AddPlayer(starter);
+			// Online co-op (card 4d904410): the host allocates every roster slot, so a joining
+			// peer seats its starter in the slot it was GRANTED, not simply the first free one.
+			// Offline (and host-side) LocalPrimarySlot is 0, which is what AddPlayer would pick
+			// anyway right after a ResetPlayers.
+			int primarySlot = EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot;
+			if (!oracle.AddPlayerAt(primarySlot, starter))
+			{
+				oracle.AddPlayer(starter);
+			}
 			bragScene.StoreCompletionProgress();
 			AddLevelComponent(selectedLevel);
 		});
@@ -838,7 +846,15 @@ public class Game1 : Game
 		{
 			collectionHelper.ClearCache();
 			oracle.ResetPlayers();
-			oracle.AddPlayer(ControlDevice.Keyboard);
+			// Same host-granted seat as MenuFinished (card 4d904410). A ?net=join tab pairs while
+			// it boots, so the grant can land BEFORE this runs -- seating slot 0 regardless would
+			// leave the ship in a slot the wire doesn't know about (and NetSession's live re-seat
+			// has nothing to move yet at grant time).
+			int primarySlot = EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot;
+			if (!oracle.AddPlayerAt(primarySlot, ControlDevice.Keyboard))
+			{
+				oracle.AddPlayer(ControlDevice.Keyboard);
+			}
 			// ?aifriends=<n> verification seam: seed the Mechanical Friends cheat on a direct
 			// ?level= boot so AI helper ships auto-join (two-tab AI-friend replication testing).
 			if (EvilAliensWeb.Compat.DebugFlags.AiFriends > 0)

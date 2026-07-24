@@ -612,7 +612,8 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+points / EvBlast
   pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
   `MsgWelcome` handshake (protocol version byte; both sides Hello until paired, opposite
-  role replies Welcome). Card 11.3 bumps the protocol to v3 and adds the shared-state
+  role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410).
+  Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
   Peer loss = JS `pagehide` bye OR a 3s stream timeout; the ship stream doubles as the
@@ -692,6 +693,49 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
 - **Score/lives:** immediate local generous crediting + host-authoritative `EvScoreSync`
   at 1Hz -- the client adopts `max(local, host)` per slot (monotone within a life; combo
   multiplier divergence self-corrects upward) and lives verbatim.
+- **Roster slots are HOST-ALLOCATED and identity-mapped (card 4d904410 -- local co-op AND
+  online co-op at once).** The oracle slot IS the wire slot on both peers; there is no
+  host-relative translation anywhere (the old `TranslateSlot` 0<->1 mirror and the
+  `ApplyJoinHues` compensating hue swap are both GONE -- per-slot hues now agree by
+  construction). The host's own primary is always slot 0; the joiner's primary slot rides in
+  `MsgWelcome` (v5); a couch player joining the CLIENT asks with `EvJoinRequest` and the host
+  answers `EvSlotGrant(slot)`, reserving that seat as `RemoteFriend` the moment it grants so
+  its own `AddPlayer(AI)` / a later grant can't reuse it. Host-side couch joins allocate
+  locally. `GameScene.AddPlayer` routes to `NetSession.TrySeatLocalJoin` while a session is up;
+  offline behaviour is byte-identical.
+  - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
+    slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
+    tab pairs WHILE it boots, so the grant can land before the seat is taken) and
+    `TeamChallenge.Initialize`. Getting this wrong is silent: the ship sits in a slot the wire
+    doesn't know about and simply never replicates.
+  - **Sparse rosters are legal now** -- a hole is normal (a granted seat not yet filled, a
+    friend puppet that died). Anything walking the roster asks `Oracle.IsSeated(slot)` over
+    `0..MaxPlayers-1` instead of assuming `0..Players-1`: `ScoreVisualiser`'s score-vs-
+    "Press Start" panels and `GameScene.SpawnAllPlayers` (which spreads spawns by the player's
+    ORDINAL among seated slots, so a dense offline roster spawns exactly where it always did).
+    `Oracle.AddPlayer` returns the slot it seated; `GameScene.SpawnPlayer` takes it explicitly
+    (`oracle.Players - 1` only agreed while dense).
+  - `MsgFriendState` is now BIDIRECTIONAL and carries every locally-owned non-primary ship
+    (AI friends *and* couch players) -- `ControlDevice.RemoteFriend` means "network-driven
+    extra ship", whoever owns it. `EvBlast` gained a slot byte (a couch player's bomb used to
+    detonate on the peer's PRIMARY puppet) and `EvScoreSync` widened from 2 slots to 4.
+  - `DriveFriendShip` ADOPTS a ship the scene spawned into its slot (`SpawnAllPlayers` respawns
+    every seated slot after a reset, puppet slots included) -- without it the re-spawned puppet
+    matched no channel and froze on its spawn pose. The primary remote path always adopted;
+    this one didn't, which only stopped being a corner case once couch players (who hit resets
+    constantly) could exist.
+  - **Verify with `?netlocal=<1-3>`**: queues that many synthetic couch joins on this peer a few
+    seconds after the session goes live. A real couch join is a gamepad Start press, which the
+    rig cannot produce -- no physical pads, and seating a Pad device with none connected trips
+    GameScene's disconnected-gamepad force-pause every tick -- so it seats `Generic` (a real
+    human device with no connected-check) then `AI`. The `[net]` line gained
+    `roster=<slot:device[*]> pri=<local>/<peer> ships=<owner:device>`; **the two consoles must
+    print mirror-image rosters** (`*` = ours). Recipe:
+    `?level=Level2&net=host&aiplayer&invuln&netlocal=1&room=<r>` + the same with `net=join`
+    (Level2, not Level1 -- Level1's intro hands the ship spawn to a script beat, so the host has
+    no ship for the first minute). Expect
+    `roster=0:Keyboard*,1:Remote,2:Generic*,3:RemoteFriend` on the host and
+    `0:Remote,1:Keyboard*,2:RemoteFriend,3:Generic*` on the join side.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
   own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case
@@ -701,8 +745,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   state; bombs arrive as EvBlast -> `NetDoBlast` (no local bomb-count gate). Remote ships
   take NO local damage (owner decides its own hits; death arrives as the alive-flag edge ->
   local explosion FX, slot stays reserved for respawn) and CANNOT take powerups locally --
-  the owning peer collects on its own screen and the pickup arrives as a claim. Hues: the join side swaps slot hues on connect so host=white / join=purple
-  on BOTH screens. The puppet's render clock advances on REAL time (never turbo/slowmo/
+  the owning peer collects on its own screen and the pickup arrives as a claim. Hues need no
+  fixing up since card 4d904410: slots are host-allocated and identity-mapped, so slot 0 is
+  white and slot 1 purple on BOTH screens by construction (the old join-side hue swap is gone).
+  The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
 - **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable
   `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,
@@ -792,7 +838,9 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   a running single-player game can be LISTED so strangers find + join it, with NO `NetSession`
   constructed until someone actually arrives.
   - **One eligibility predicate drives everything** (`Compat/Net/NetListing.ComputeEligible`):
-    an empty player slot (`oracle.Players == 1`) + `Settings.AllowOnlineJoins` (new Option,
+    any empty player slot (`oracle.Players < Oracle.MaxPlayers` -- card 4d904410 relaxed this
+    from `== 1`, so a COUCH game with a spare seat lists too and the browser's players column
+    genuinely varies 1..3) + `Settings.AllowOnlineJoins` (new Option,
     **default ON**) + no cheats/`DebugFlags.Active` + level not `WebcamAliens`/`TeamChallenge`
     + no session already up. The SAME predicate gates the listing, the beacon, and the pause
     indicator, so they can't disagree. `NetListing.Tick` runs each tick from

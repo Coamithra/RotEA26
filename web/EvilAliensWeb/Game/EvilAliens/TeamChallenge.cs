@@ -65,7 +65,12 @@ internal class TeamChallenge : GameScene
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty();
 		oracle.ResetPlayers();
-		oracle.AddPlayer(ControlDevice.Keyboard);
+		// Online co-op (card 4d904410): the host allocates every slot, so seat our primary in
+		// the slot we were granted (offline / host-side that is 0, exactly as before).
+		if (!oracle.AddPlayerAt(EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot, ControlDevice.Keyboard))
+		{
+			oracle.AddPlayer(ControlDevice.Keyboard);
+		}
 		// Online co-op: seat ONLY the local device -- the partner joins as
 		// ControlDevice.Remote through the net layer. Seating the offline PadOne here
 		// would (a) squat the slot the remote puppet needs and (b) trip the

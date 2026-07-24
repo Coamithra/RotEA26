@@ -21,9 +21,11 @@ namespace EvilAliensWeb.Compat.Net
         public const byte MsgWelcome = 0x02;
         public const byte MsgReject = 0x03;
         public const byte MsgShipState = 0x10;
-        // Coverage-gaps follow-up: the host's AI "friend" ships (Mechanical Friends cheat).
-        // Same body as MsgShipState with a leading slot byte so several stream in parallel;
-        // host -> client only (the client never runs AI friends). Stream lane, ~30 Hz.
+        // Every locally-owned ship that ISN'T the sender's primary: the host's AI "friend" ships
+        // (Mechanical Friends cheat) and, since card 4d904410, either peer's couch players. Same
+        // body as MsgShipState with a leading slot byte so several stream in parallel;
+        // BIDIRECTIONAL (it was host -> client while AI friends were the only case).
+        // Stream lane, ~30 Hz.
         public const byte MsgFriendState = 0x11;
         public const byte MsgWorldSnapshot = 0x20;
         public const byte MsgEvent = 0x30;
@@ -48,6 +50,14 @@ namespace EvilAliensWeb.Compat.Net
         public const byte EvLaunch = 15;      // host -> client: [level:1][difficulty:1] -- mirror the launch
         public const byte EvReady = 16;       // client -> host: my GameScene is up, replay the live world
         public const byte EvLeave = 17;       // either peer quit the match -> the match ends for both
+        // Card 4d904410: local (couch) players joining a peer that is already online. The HOST
+        // allocates every roster slot, so a client-side join has to ask for one.
+        public const byte EvJoinRequest = 18; // client -> host: a couch player pressed Start, give me a slot
+        public const byte EvSlotGrant = 19;   // host -> client: [slot:1] (SlotNone = roster full, refused)
+
+        // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
+        // and matches KillerNone's convention.
+        public const byte SlotNone = 0xFF;
 
         public const byte ShipFlagAlive = 1 << 0;
         public const byte ShipFlagFiring = 1 << 1;
@@ -145,25 +155,29 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- handshake ----------------------------------------------------------------
 
-        // v4: [type][protocolVersion][isHost][buildHash:8][flags:1] = 12 bytes. The build
-        // hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
+        // v5: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1] = 13 bytes. The
+        // build hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
         // the identical published binary" -- a stale-cached client is REJECTED, not subtly
         // desynced. Flags currently carry only the DebugFlags.Active bit (menu-lobby
         // sessions refuse gameplay-hijacking flags; the ?net= dev path is anything-goes).
+        // primarySlot (v5, card 4d904410) is the HOST granting the client its primary roster
+        // slot -- the host allocates every slot, so the oracle slot IS the wire slot on both
+        // sides and no host-relative translation exists any more. The client sends SlotNone
+        // (it has nothing to grant); the host's own primary is always slot 0.
         public const byte HelloFlagDebugActive = 1 << 0;
-        public const int HelloBytes = 12;
+        public const int HelloBytes = 13;
 
-        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags)
+        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
         {
-            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags);
+            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot);
         }
 
-        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags)
+        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
         {
-            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags);
+            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot);
         }
 
-        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags)
+        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot)
         {
             byte[] b = new byte[HelloBytes];
             b[0] = type;
@@ -172,15 +186,17 @@ namespace EvilAliensWeb.Compat.Net
             WriteU32(b, 3, (uint)buildHash);
             WriteU32(b, 7, (uint)(buildHash >> 32));
             b[11] = flags;
+            b[12] = primarySlot;
             return b;
         }
 
-        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags)
+        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot)
         {
             version = 0;
             isHost = false;
             buildHash = 0;
             flags = 0;
+            primarySlot = SlotNone;
             if (b.Length < HelloBytes)
             {
                 return false;
@@ -189,6 +205,7 @@ namespace EvilAliensWeb.Compat.Net
             isHost = b[2] != 0;
             buildHash = ReadU32(b, 3) | ((ulong)ReadU32(b, 7) << 32);
             flags = b[11];
+            primarySlot = b[12];
             return true;
         }
 
@@ -290,13 +307,19 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        // EvScoreSync (host -> client, authoritative): [lives:1 signed][score0:f32][score1:f32]
-        public static byte[] EncodeScoreSync(ushort eventSeq, int lives, float score0, float score1)
+        // EvScoreSync (host -> client, authoritative): [lives:1 signed][score:f32 x MaxSlots].
+        // v5 widened this from 2 slots to the full roster -- couch players (card 4d904410) sit in
+        // the high slots and would otherwise never true up.
+        public const int MaxSlots = 4;
+
+        public static byte[] EncodeScoreSync(ushort eventSeq, int lives, float[] scores)
         {
-            byte[] b = EventHeader(EvScoreSync, eventSeq, 9);
+            byte[] b = EventHeader(EvScoreSync, eventSeq, 1 + 4 * MaxSlots);
             b[4] = (byte)(sbyte)Math.Clamp(lives, -128, 127);
-            WriteF32(b, 5, score0);
-            WriteF32(b, 9, score1);
+            for (int i = 0; i < MaxSlots; i++)
+            {
+                WriteF32(b, 5 + 4 * i, i < scores.Length ? scores[i] : 0f);
+            }
             return b;
         }
 
@@ -492,13 +515,16 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        // EvBlast: [posX:4][posY:4][level]
-        public static byte[] EncodeBlastEvent(ushort eventSeq, Vector2 pos, int level)
+        // EvBlast: [slot:1][posX:4][posY:4][level]. The slot (v5, card 4d904410) is which of the
+        // sender's ships bombed -- without it a couch player's bomb detonated on the peer's
+        // PRIMARY puppet.
+        public static byte[] EncodeBlastEvent(ushort eventSeq, byte slot, Vector2 pos, int level)
         {
-            byte[] b = EventHeader(EvBlast, eventSeq, 9);
-            WriteF32(b, 4, pos.X);
-            WriteF32(b, 8, pos.Y);
-            b[12] = (byte)Math.Clamp(level, 0, 255);
+            byte[] b = EventHeader(EvBlast, eventSeq, 10);
+            b[4] = slot;
+            WriteF32(b, 5, pos.X);
+            WriteF32(b, 9, pos.Y);
+            b[13] = (byte)Math.Clamp(level, 0, 255);
             return b;
         }
 

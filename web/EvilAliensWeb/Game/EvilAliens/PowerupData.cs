@@ -308,6 +308,30 @@ public class PowerupData : DrawableGameComponent
 		return level;
 	}
 
+	// Online co-op (card 1a3ad45a): adopt the owner's level for a slot this peer does not own.
+	// Deliberately NOT a level-up -- it fires no onLevelUp (ScoreVisualiser.NetSetPowerupLevel
+	// drives PlayerShip.PowerUp itself, one step at a time) and no flash, so a late joiner
+	// catching up several levels does not strobe the bar. Sets the same display state a real
+	// level-up leaves behind: the bar empties and the level string re-renders.
+	internal void NetSetLevel(int newLevel)
+	{
+		if (type == Powerup.PowerupType.OneUp || newLevel == level)
+		{
+			return;
+		}
+		level = Math.Clamp(newLevel, 0, 4);
+		progress = 0f;
+		displayedprogress = 0f;
+		setDisplayString();
+	}
+
+	// The active bar's fill, from its owner. The chase in Update eases displayedprogress toward
+	// it, so an occasional dropped HUD packet reads as a slightly slower bar, not a jump.
+	internal void NetSetProgress(float newProgress)
+	{
+		progress = MathHelper.Clamp(newProgress, 0f, 1f);
+	}
+
 	internal void Tutorial_Show(ScoreVisualiser.ScorePart whatToShow)
 	{
 		tutorialDisplayItem = whatToShow;

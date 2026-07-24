@@ -248,6 +248,42 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for the co-op score-reconciliation self-test (eaNetScore in
+		// wwwroot/index.html, card b0ab09ec). Drives NetScoreLedger -- the real policy -- on a
+		// VIRTUAL clock against a synthetic two-peer kill stream, and runs the old max()
+		// adoption over the identical stream first so the drift it fixes is demonstrated, not
+		// asserted. Needs no session, no scene and no second tab: the failure is a slow tally
+		// drift, which two windows cannot show inside a reasonable test.
+		// JS bridge for eaScore() -- the per-slot score/combo dump. Card b0ab09ec's two-window
+		// comparison is "do the peers agree on the tally", which reading HUD pixels answers
+		// badly (the panels are small, chrome-shaded and mid-animation); this prints the
+		// numbers, plus the provisional total still riding on top of the host's score.
+		[JSInvokable("debugScoreDump")]
+		public static string ScoreDump()
+		{
+			EvilAliens.ScoreVisualiser sv = EvilAliens.ServiceHelper.Get<EvilAliens.IScoreService>().Score;
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>().Oracle;
+			var sb = new System.Text.StringBuilder("[score] lives=").Append(sv.Lives);
+			for (int i = 0; i < EvilAliens.Oracle.MaxPlayers; i++)
+			{
+				sb.Append(" | s").Append(i).Append(oracle.IsSeated(i) ? "=" : "(empty)=")
+					.Append((int)sv.PointScore(i)).Append(" combo=").Append(sv.Combo(i));
+				float pending = EvilAliensWeb.Compat.Net.NetPuppets.UnsettledFor(i);
+				if (pending != 0f)
+				{
+					sb.Append(" unsettled=").Append(pending.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+				}
+			}
+			return sb.ToString();
+		}
+
+		[JSInvokable("debugNetScoreTest")]
+		public static string NetScoreTest(int kills, int comboSkew, int rttMs, int seed)
+		{
+			return EvilAliensWeb.Compat.Net.NetScoreLedger.SelfTest(kills, comboSkew, rttMs, seed)
+				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's

@@ -50,6 +50,11 @@ namespace EvilAliensWeb.Compat.Net
         private static readonly Dictionary<ushort, byte> paidLedger = new Dictionary<ushort, byte>();
         private static readonly Queue<ushort> paidOrder = new Queue<ushort>();
 
+        // Provisional local credits awaiting the host's authoritative figure (card b0ab09ec).
+        // The policy itself lives in NetScoreLedger, which is driveable on a virtual clock by
+        // eaNetScore.test(); this file only feeds it from the real death paths.
+        private static readonly NetScoreLedger scoreLedger = new NetScoreLedger();
+
         // Recently locally-removed ids: a snapshot entry for one of these is a death whose
         // claim/death event is still in flight, NOT a missed spawn -- don't resurrect it.
         private const float RecentRemovalWindowMs = 3000f;
@@ -109,6 +114,7 @@ namespace EvilAliensWeb.Compat.Net
             live.Clear();
             paidLedger.Clear();
             paidOrder.Clear();
+            scoreLedger.Reset();
             recentlyRemoved.Clear();
             recentlyRemovedOrder.Clear();
             remoteDeaths.Clear();
@@ -264,7 +270,12 @@ namespace EvilAliensWeb.Compat.Net
 
         // Host said this entity is gone. Live puppet + killer -> the real per-type death
         // (FX + credit); live + no killer -> silent despawn; already gone -> generous pay.
-        public static void OnRemoteDeath(ushort netId, byte killerSlot, Vector2 pos, int points)
+        //
+        // `awards` is what the HOST credited, slot by slot. It is the authority on the numbers
+        // in every branch (card b0ab09ec): the real death path still runs for the FX, but its
+        // AwardScore is suppressed first, because it would re-derive the amount from THIS
+        // peer's combo counter -- a local simulation that has no reason to match the host's.
+        public static void OnRemoteDeath(ushort netId, byte killerSlot, Vector2 pos, float[] awards)
         {
             if (!enabled)
             {
@@ -276,12 +287,13 @@ namespace EvilAliensWeb.Compat.Net
                 remoteDeaths.Add((GameComponent)(object)comp); // never echo this back as a claim
                 if (killerSlot != NetProtocol.KillerNone && comp is KillableAlien killable)
                 {
-                    MarkPaid(netId, killerSlot); // NetKill's AwardScore pays the slot
+                    comp.NetSuppressAward();
                     killable.NetKill(KillerAgent(killerSlot, comp.Position), isComboGenerator: true);
                     if (!comp.IsDead)
                     {
                         bin.Remove((GameComponent)(object)comp); // dead-guarded NetKill no-op
                     }
+                    ApplyAwards(netId, comp.Position, awards);
                 }
                 else if (killerSlot != NetProtocol.KillerNone && comp is Powerup pu)
                 {
@@ -297,11 +309,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     // Non-killable replicable (Asteroid/EvilBullet/...): approximate the
                     // death look with a generic burst + credit the killer.
-                    MarkPaid(netId, killerSlot);
-                    if (points > 0)
-                    {
-                        score.AddScore(points, true, comp.Position, killerSlot);
-                    }
+                    ApplyAwards(netId, comp.Position, awards);
                     Explosion explosion = Explosion.NewExplosion(bin, game);
                     explosion.Setup(comp.Position, 1.2f, 1f, 0f, 0f);
                     bin.Add((GameComponent)(object)explosion);
@@ -313,14 +321,34 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 return;
             }
-            // Already dead locally (we killed it and claimed). Still pay a DIFFERENT killer
-            // once -- both peers focus-firing one target must both end up credited.
-            if (killerSlot != NetProtocol.KillerNone && !IsPaid(netId, killerSlot))
+            // Already dead locally (we killed it and claimed). Reconcile whatever we credited
+            // provisionally against the host's figures, and still pay a DIFFERENT killer once --
+            // both peers focus-firing one target must both end up credited.
+            ApplyAwards(netId, pos, awards);
+        }
+
+        // Settle one death's payout against the host's per-slot figures. A slot we already
+        // credited locally is CORRECTED by the difference (silently -- no second floating text
+        // for a kill the player already saw); a slot we never credited is paid in full.
+        private static void ApplyAwards(ushort netId, Vector2 pos, float[] awards)
+        {
+            for (byte slot = 0; slot < NetProtocol.MaxSlots; slot++)
             {
-                MarkPaid(netId, killerSlot);
-                if (points > 0)
+                float hostAward = (awards != null && slot < awards.Length) ? awards[slot] : 0f;
+                float delta = scoreLedger.Settle(netId, slot, hostAward, out bool wasProvisional);
+                if (wasProvisional)
                 {
-                    score.AddScore(points, true, pos, killerSlot);
+                    // Correct silently -- the player already saw the floating text for this kill.
+                    if (delta != 0f)
+                    {
+                        score.AddScore(delta, false, slot);
+                    }
+                    continue;
+                }
+                if (hostAward > 0f && !IsPaid(netId, slot))
+                {
+                    MarkPaid(netId, slot);
+                    score.AddScore(hostAward, false, pos, slot);
                 }
             }
         }
@@ -412,6 +440,119 @@ namespace EvilAliensWeb.Compat.Net
         private static bool IsPaid(ushort netId, byte slot)
         {
             return slot < 8 && paidLedger.TryGetValue(netId, out byte mask) && (mask & (1 << slot)) != 0;
+        }
+
+        // ---- wire + apply round trip (card b0ab09ec) -------------------------------------------
+
+        // Drives a synthetic death through the REAL EncodeDeathEvent -> ReadDeathAwards ->
+        // ApplyAwards chain against the LIVE ScoreVisualiser, and puts the scores back.
+        //
+        // Two windows cannot be the gate for this: a backgrounded tab throttles to ~1 tick/sec
+        // (measured -- txStream advanced 43 in 40s where 30Hz would be ~1200), so the peer never
+        // plays long enough for a tally to diverge, and the two peers cannot be foregrounded at
+        // once. Same reason eaNetBgTest replaced a two-window check for the JIP catch-up. What
+        // this covers that the ledger self-test cannot: wire field offsets/width, the
+        // fresh-pay vs settle branch, and the at-most-once guard.
+        internal static string WireRoundTripTest()
+        {
+            ScoreVisualiser sv = ServiceHelper.Get<IScoreService>().Score;
+            ScoreVisualiser prev = score;
+            score = sv;
+            var before = new float[NetProtocol.MaxSlots];
+            for (int i = 0; i < NetProtocol.MaxSlots; i++)
+            {
+                before[i] = sv.PointScore(i);
+            }
+            var sb = new System.Text.StringBuilder();
+            int pass = 0;
+            int fail = 0;
+            void Check(bool ok, string what)
+            {
+                sb.Append(ok ? "  PASS " : "  FAIL ").Append(what).Append('\n');
+                if (ok) { pass++; } else { fail++; }
+            }
+            // Deliberately far above any id a live session allocates, so a stray real entry
+            // cannot collide with the scenarios below.
+            const ushort idA = 60001;
+            const ushort idB = 60002;
+            try
+            {
+                // 1. Wire round trip: the award array must survive encode/decode intact.
+                var awards = new float[NetProtocol.MaxSlots];
+                awards[0] = 1234.5f;
+                awards[1] = 77.25f;
+                byte[] frame = NetProtocol.EncodeDeathEvent(1, idA, 0, new Vector2(100f, 200f), awards);
+                var back = new float[NetProtocol.MaxSlots];
+                NetProtocol.ReadDeathAwards(frame, back);
+                Check(frame.Length == NetProtocol.DeathEventBytes,
+                    "EvDeath frame is DeathEventBytes (" + frame.Length + " vs " + NetProtocol.DeathEventBytes + ")");
+                Check(back[0] == 1234.5f && back[1] == 77.25f && back[2] == 0f && back[3] == 0f,
+                    "award array round-trips [" + string.Join(",", back) + "]");
+
+                // 2. Fresh pay (host killed it, we never credited): full award, both slots.
+                float s0 = sv.PointScore(0);
+                float s1 = sv.PointScore(1);
+                ApplyAwards(idA, new Vector2(100f, 200f), back);
+                Check(Near(sv.PointScore(0) - s0, 1234.5f) && Near(sv.PointScore(1) - s1, 77.25f),
+                    "unclaimed death pays the host figure verbatim to every awarded slot");
+
+                // 3. At-most-once: replaying the same death must not pay twice.
+                s0 = sv.PointScore(0);
+                ApplyAwards(idA, new Vector2(100f, 200f), back);
+                Check(Near(sv.PointScore(0) - s0, 0f), "a repeated EvDeath for the same id pays nothing extra");
+
+                // 4. Provisional OVER-estimate (our combo ran hotter than the host's): the
+                //    correction must land us on the host's figure exactly, not above it.
+                s0 = sv.PointScore(0);
+                scoreLedger.NoteLocal(idB, 0, 2000f, Environment.TickCount64);
+                sv.AddScore(2000f, false, 0); // what the local kill credited
+                ApplyAwards(idB, new Vector2(0f, 0f), back);
+                Check(Near(sv.PointScore(0) - s0, 1234.5f),
+                    "an over-credited local kill settles DOWN to the host figure (net +1234.5, not +2000)");
+                Check(Near(UnsettledFor(0), 0f), "settled entry leaves the unsettled books (=" + UnsettledFor(0) + ")");
+            }
+            finally
+            {
+                paidLedger.Remove(idA);
+                paidLedger.Remove(idB);
+                scoreLedger.Reset();
+                for (int i = 0; i < NetProtocol.MaxSlots; i++)
+                {
+                    sv.NetSetScore(i, before[i], 0f);
+                }
+                score = prev;
+            }
+            sb.Insert(0, "[netscore] wire+apply round trip (real EncodeDeathEvent -> ApplyAwards -> live ScoreVisualiser)\n");
+            sb.Append(fail == 0 ? "[netscore] wire PASS (" + pass + "/" + (pass + fail) + ")"
+                                : "[netscore] wire FAIL (" + fail + " of " + (pass + fail) + ")");
+            return sb.ToString();
+        }
+
+        private static bool Near(float a, float b)
+        {
+            return Math.Abs(a - b) < 0.05f;
+        }
+
+        // ---- provisional local credits (card b0ab09ec) -----------------------------------------
+
+        // A local kill just credited `amount` to `slot` using OUR combo multiplier. Book it as
+        // provisional so EvScoreSync can carry it on top of the host's score until the host's
+        // own figure for this entity arrives. Entities with no netId (nothing replicated, so
+        // nothing to reconcile against) are ignored.
+        internal static void NoteLocalAward(AlienDrawableGameComponent comp, byte slot, float amount)
+        {
+            if (enabled && idByComp.TryGetValue((GameComponent)(object)comp, out ushort netId))
+            {
+                scoreLedger.NoteLocal(netId, slot, amount, Environment.TickCount64);
+            }
+        }
+
+        // The provisional total still riding on top of the host's authoritative score for a slot.
+        // No `enabled` gate: Disable() empties the ledger, so a dead session already reads 0 --
+        // and gating here would make WireRoundTripTest's check of it vacuously true.
+        internal static float UnsettledFor(int slot)
+        {
+            return scoreLedger.Unsettled(slot, Environment.TickCount64);
         }
 
         private static void MarkPaid(ushort netId, byte slot)

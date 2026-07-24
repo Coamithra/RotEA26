@@ -569,7 +569,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 		if ((!awarded & (PointValue > 0f)) && other is IAlienKiller && ((IAlienKiller)other).Player() >= 0)
 		{
-			Score.AddScore(PointValue, combo, Position, ((IAlienKiller)other).Player());
+			int slot = ((IAlienKiller)other).Player();
+			// Online co-op (card b0ab09ec): report the combo-modified figure we just credited.
+			// Host -> it rides the death event; client -> it becomes a provisional credit the
+			// host's figure later replaces. No-op offline.
+			EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, slot, Score.AddScore(PointValue, combo, Position, slot));
 			awarded = true;
 		}
 	}
@@ -590,14 +594,17 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			{
 				continue;
 			}
+			// Each slot is credited with ITS OWN combo multiplier, so a boss pays four
+			// different figures -- which is why the wire carries a per-slot award array
+			// rather than one number (card b0ab09ec).
 			if (first)
 			{
-				Score.AddScore(PointValue, combo, Position, i);
+				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, Position, i));
 				first = false;
 			}
 			else
 			{
-				Score.AddScore(PointValue, combo, i);
+				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, i));
 			}
 		}
 		awarded = true;
@@ -674,6 +681,15 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	}
 
 	internal float NetPointValue => PointValue;
+
+	// Online co-op (card b0ab09ec): claim the award slot BEFORE running the real death path,
+	// so its AwardScore/AwardScoreToAll no-ops. Used on a client applying a host EvDeath --
+	// the FX must play, but the score has to be the host's figure off the wire, never this
+	// peer's own combo multiplier. Idempotent; irrelevant offline.
+	internal void NetSuppressAward()
+	{
+		awarded = true;
+	}
 
 	// Advance the sheet animation exactly like Update does (same wrap math), on real dt.
 	internal void NetAdvanceFrame(float dtSeconds)

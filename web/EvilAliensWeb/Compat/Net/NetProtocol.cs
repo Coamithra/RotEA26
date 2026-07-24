@@ -286,20 +286,41 @@ namespace EvilAliensWeb.Compat.Net
             return b.Length >= extraOff + extraLen;
         }
 
-        // EvDeath v2: [netId:2][killerSlot:1 (KillerNone = despawn/off-screen)][posX:4][posY:4]
-        // [points:2] -- killer/pos/points let the receiver pay death FX + generous score even
-        // when its local copy is already gone.
+        // EvDeath v6: [netId:2][killerSlot:1 (KillerNone = despawn/off-screen)][posX:4][posY:4]
+        // [award:f32 x MaxSlots] -- killer/pos let the receiver pay death FX even when its local
+        // copy is already gone; the award array is what it credits.
+        //
+        // v6 replaced a single [points:2] BASE point value (card b0ab09ec). Two reasons it had
+        // to widen, not just change meaning: a combo-modified award overflows a ushort (a 10000
+        // -point boss at a routine 40x combo is 30000, and comboModify has no ceiling), and a
+        // boss pays EVERY seated slot with that slot's own multiplier, so one number cannot
+        // describe the payout. Same fixed f32-per-slot shape as EvScoreSync, for the same
+        // reason -- most kills leave three of the four at zero, and 12 bytes per death is not
+        // worth a variable-length mask.
         public const byte KillerNone = 0xFF;
 
-        public static byte[] EncodeDeathEvent(ushort eventSeq, ushort netId, byte killerSlot, Vector2 pos, ushort points)
+        public const int DeathEventBytes = 4 + 11 + 4 * MaxSlots;
+
+        public static byte[] EncodeDeathEvent(ushort eventSeq, ushort netId, byte killerSlot, Vector2 pos, float[] awards)
         {
-            byte[] b = EventHeader(EvDeath, eventSeq, 13);
+            byte[] b = EventHeader(EvDeath, eventSeq, 11 + 4 * MaxSlots);
             WriteU16(b, 4, netId);
             b[6] = killerSlot;
             WriteF32(b, 7, pos.X);
             WriteF32(b, 11, pos.Y);
-            WriteU16(b, 15, points);
+            for (int i = 0; i < MaxSlots; i++)
+            {
+                WriteF32(b, 15 + 4 * i, (awards != null && i < awards.Length) ? awards[i] : 0f);
+            }
             return b;
+        }
+
+        public static void ReadDeathAwards(byte[] b, float[] into)
+        {
+            for (int i = 0; i < MaxSlots; i++)
+            {
+                into[i] = ReadF32(b, 15 + 4 * i);
+            }
         }
 
         // EvClaim (client -> host, generous at-least-once): [netId:2][killerSlot:1] -- "this

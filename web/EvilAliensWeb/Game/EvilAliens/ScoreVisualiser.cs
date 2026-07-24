@@ -335,20 +335,32 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		scores[player].bombs = Math.Min(scores[player].bombs + 1, 3);
 	}
 
-	public void AddScore(float amount, bool isCombo, int player)
+	// Returns what was ACTUALLY credited (the combo-modified figure when isCombo) -- online
+	// co-op puts the host's credited number on the wire so both peers tally identically
+	// (card b0ab09ec). Every other caller ignores the value.
+	public float AddScore(float amount, bool isCombo, int player)
 	{
 		float num = ((!isCombo) ? amount : comboModify(amount, player));
 		scores[player].SetScore(scores[player].score + num);
+		return num;
 	}
 
-	// Online co-op (card 11.2): adopt the host's authoritative score for a slot. Only ever
-	// raises -- the client keeps its immediate generous local credits and the 1Hz sync
-	// trues the tally up without ever visibly rolling a score backwards mid-life.
-	internal void NetAdoptScore(int player, float hostScore)
+	// Online co-op (card b0ab09ec): take the host's authoritative score for a slot VERBATIM,
+	// plus whatever local credit the host has not settled into it yet.
+	//
+	// This replaced a max(local, host) adoption. max() looked safe -- a score can never
+	// visibly roll backwards -- but the client credits every kill with its OWN combo
+	// multiplier, so each peer's per-kill figure differs; max() then accumulated every
+	// positive excursion of that difference and discarded every negative one, turning an
+	// unbiased error into unbounded one-way drift (measured: 304 on the joiner for a slot the
+	// host had at 294, and growing). Verbatim adoption alone would sawtooth instead, because
+	// the host's 1Hz sync never contains the client's in-flight claims -- carrying `unsettled`
+	// is what makes the sum exact in both message orderings AND keeps it monotone in practice.
+	internal void NetSetScore(int player, float hostScore, float unsettled)
 	{
-		if (player >= 0 && player < scores.Count && hostScore > scores[player].score)
+		if (player >= 0 && player < scores.Count)
 		{
-			scores[player].SetScore(hostScore);
+			scores[player].SetScore(hostScore + unsettled);
 		}
 	}
 
@@ -392,12 +404,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 	}
 
-	public void AddScore(float amount, bool isCombo, Vector2 location, int player)
+	public float AddScore(float amount, bool isCombo, Vector2 location, int player)
 	{
-		float num = ((!isCombo) ? amount : comboModify(amount, player));
-		AddScore(amount, isCombo, player);
+		float num = AddScore(amount, isCombo, player);
 		FloatingText text = GetText((int)num, location, FloatingText.ShowType.scrollup, "");
 		floatingtexts.Add(text);
+		return num;
 	}
 
 	private void CheckPowerup(ref Vector2 location, int player)

@@ -28,6 +28,11 @@ namespace EvilAliensWeb.Compat.Net
             public Vector2 LastPos;
             public long LastPosMs;
             public bool HasLastPos;
+            // What the per-type death path credited, per slot (card b0ab09ec). Lazily allocated
+            // -- most entities never award (they despawn) and this is per LIVE entity, so it
+            // must not cost an array each. Filled by NetSession.NoteAward during KilledBy, read
+            // one tick later by OnHostDeath at the removal seam.
+            public float[] Awards;
         }
 
         private static readonly Dictionary<GameComponent, Entry> entries = new Dictionary<GameComponent, Entry>();
@@ -71,6 +76,11 @@ namespace EvilAliensWeb.Compat.Net
         public static bool TryGetById(ushort id, out Entry entry)
         {
             return byId.TryGetValue(id, out entry);
+        }
+
+        public static bool TryGetByComp(GameComponent comp, out Entry entry)
+        {
+            return entries.TryGetValue(comp, out entry);
         }
 
         // Replay the full live set (used when a peer connects mid-world so it can build the

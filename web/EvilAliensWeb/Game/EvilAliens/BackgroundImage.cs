@@ -88,10 +88,10 @@ internal class BackgroundImage
 
 	public void Draw(SpriteBatchWrapper spriteBatch, GameTime gameTime)
 	{
-		Vector2 val = position;
-		val -= realsize;
-		val += drawOffset;
-		Vector2 val2 = val;
+		Vector2 origin = position;
+		origin -= realsize;
+		origin += drawOffset;
+		Vector2 cursor = origin;
 		spriteBatch.BlendMode = blendMode;
 		float fade = 1f;
 		if (switchTimer.Active)
@@ -102,26 +102,26 @@ internal class BackgroundImage
 		{
 			for (int j = 0; j < UpperDiv(600f, realsize.Y) + 1; j++)
 			{
-				DrawBackground(val2, spriteBatch, alternate: false, fade);
-				val2.Y += realsize.Y;
+				DrawBackground(cursor, spriteBatch, alternate: false, fade);
+				cursor.Y += realsize.Y;
 			}
-			val2.Y = val.Y;
-			val2.X += realsize.X;
+			cursor.Y = origin.Y;
+			cursor.X += realsize.X;
 		}
 		if (switchTimer.Active)
 		{
-			val = position - realsize + drawOffset;
-			val2 = val;
+			origin = position - realsize + drawOffset;
+			cursor = origin;
 			spriteBatch.BlendMode = (SpriteBlendMode)2;
 			for (int k = 0; k < UpperDiv(800f, realsize.X) + 1; k++)
 			{
 				for (int l = 0; l < UpperDiv(600f, realsize.Y) + 1; l++)
 				{
-					DrawBackground(val2, spriteBatch, alternate: true, 1f - switchTimer.Normalized);
-					val2.Y += realsize.Y;
+					DrawBackground(cursor, spriteBatch, alternate: true, 1f - switchTimer.Normalized);
+					cursor.Y += realsize.Y;
 				}
-				val2.Y = val.Y;
-				val2.X += realsize.X;
+				cursor.Y = origin.Y;
+				cursor.X += realsize.X;
 			}
 		}
 		switchTimer.Update(gameTime);
@@ -136,76 +136,76 @@ internal class BackgroundImage
 
 	private void DrawBackground(Vector2 position, SpriteBatchWrapper spriteBatch, bool alternate, float fade)
 	{
-		Texture2D[,] array = textures;
+		Texture2D[,] tiles = textures;
 		if (alternate)
 		{
-			array = new_textures;
+			tiles = new_textures;
 		}
-		Color val = default(Color);
+		Color tint = default(Color);
 		if (color == Color.White)
 		{
-			(val) = new Color(new Vector4(fade, fade, fade, 1f));
+			(tint) = new Color(new Vector4(fade, fade, fade, 1f));
 		}
 		else
 		{
-			val = color;
+			tint = color;
 		}
 		// Tile placement is PIXEL-space: use each texture's LOGICAL (pre-pad) size, not the padded
 		// .Width/.Height, or a padded .dds advances/wraps ~pad px too far and leaves a transparent
 		// gap between tiles (the DXT mult-of-4 + --padtest canary; unpadded png is a no-op here).
-		Vector2 val2 = default(Vector2);
-		(val2) = new Vector2(0f, 0f);
-		for (int i = 0; i < array.GetLength(0); i++)
+		Vector2 offset = default(Vector2);
+		(offset) = new Vector2(0f, 0f);
+		for (int i = 0; i < tiles.GetLength(0); i++)
 		{
-			val2.Y = 0f;
-			for (int j = 0; j < array.GetLength(1); j++)
+			offset.Y = 0f;
+			for (int j = 0; j < tiles.GetLength(1); j++)
 			{
-				if ((position.X + val2.X + (float)array[i, j].LogicalWidth() * size >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[i, j].LogicalWidth() * size >= 0f) & (position.Y + val2.Y < 600f))
+				if ((position.X + offset.X + (float)tiles[i, j].LogicalWidth() * size >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[i, j].LogicalWidth() * size >= 0f) & (position.Y + offset.Y < 600f))
 				{
-					spriteBatch.Draw(array[i, j], position + val2, 0f, size, center: false, val);
+					spriteBatch.Draw(tiles[i, j], position + offset, 0f, size, center: false, tint);
 				}
-				val2.Y += size * (float)array[i, j].LogicalHeight();
+				offset.Y += size * (float)tiles[i, j].LogicalHeight();
 			}
 			if (mirrorY)
 			{
-				for (int num = array.GetLength(1) - 1; num >= 0; num--)
+				for (int mirrorRow = tiles.GetLength(1) - 1; mirrorRow >= 0; mirrorRow--)
 				{
-					if ((position.X + val2.X + (float)array[i, num].LogicalWidth() * size >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[i, num].LogicalWidth() * size >= 0f) & (position.Y + val2.Y < 600f))
+					if ((position.X + offset.X + (float)tiles[i, mirrorRow].LogicalWidth() * size >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[i, mirrorRow].LogicalWidth() * size >= 0f) & (position.Y + offset.Y < 600f))
 					{
-						spriteBatch.Draw(array[i, num], position + val2, 0f, size, center: false, val, (SpriteEffects)256);
+						spriteBatch.Draw(tiles[i, mirrorRow], position + offset, 0f, size, center: false, tint, (SpriteEffects)256);
 					}
-					val2.Y += size * (float)array[i, num].LogicalHeight();
+					offset.Y += size * (float)tiles[i, mirrorRow].LogicalHeight();
 				}
 			}
-			val2.X += size * (float)array[i, 0].LogicalWidth();
+			offset.X += size * (float)tiles[i, 0].LogicalWidth();
 		}
 		if (!mirrorX)
 		{
 			return;
 		}
-		for (int num2 = array.GetLength(0) - 1; num2 >= 0; num2--)
+		for (int mirrorCol = tiles.GetLength(0) - 1; mirrorCol >= 0; mirrorCol--)
 		{
-			val2.Y = 0f;
-			for (int k = 0; k < array.GetLength(1); k++)
+			offset.Y = 0f;
+			for (int k = 0; k < tiles.GetLength(1); k++)
 			{
-				if ((position.X + val2.X + (float)array[num2, k].LogicalWidth() >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[num2, k].LogicalWidth() >= 0f) & (position.Y + val2.Y < 600f))
+				if ((position.X + offset.X + (float)tiles[mirrorCol, k].LogicalWidth() >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[mirrorCol, k].LogicalWidth() >= 0f) & (position.Y + offset.Y < 600f))
 				{
-					spriteBatch.Draw(array[num2, k], position + val2, 0f, size, center: false, val, (SpriteEffects)1);
+					spriteBatch.Draw(tiles[mirrorCol, k], position + offset, 0f, size, center: false, tint, (SpriteEffects)1);
 				}
-				val2.Y += size * (float)array[num2, k].LogicalHeight();
+				offset.Y += size * (float)tiles[mirrorCol, k].LogicalHeight();
 			}
 			if (mirrorY)
 			{
-				for (int num3 = array.GetLength(1) - 1; num3 >= 0; num3--)
+				for (int mirrorRow = tiles.GetLength(1) - 1; mirrorRow >= 0; mirrorRow--)
 				{
-					if ((position.X + val2.X + (float)array[num2, num3].LogicalWidth() >= 0f) & (position.X + val2.X < 800f) & (position.Y + val2.Y + (float)array[num2, num3].LogicalWidth() >= 0f) & (position.Y + val2.Y < 600f))
+					if ((position.X + offset.X + (float)tiles[mirrorCol, mirrorRow].LogicalWidth() >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[mirrorCol, mirrorRow].LogicalWidth() >= 0f) & (position.Y + offset.Y < 600f))
 					{
-						spriteBatch.Draw(array[num2, num3], position + val2, 0f, size, center: false, val, (SpriteEffects)257);
+						spriteBatch.Draw(tiles[mirrorCol, mirrorRow], position + offset, 0f, size, center: false, tint, (SpriteEffects)257);
 					}
-					val2.Y += size * (float)array[num2, num3].LogicalHeight();
+					offset.Y += size * (float)tiles[mirrorCol, mirrorRow].LogicalHeight();
 				}
 			}
-			val2.X += size * (float)array[num2, 0].LogicalWidth();
+			offset.X += size * (float)tiles[mirrorCol, 0].LogicalWidth();
 		}
 	}
 }

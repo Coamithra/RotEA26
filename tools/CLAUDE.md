@@ -135,10 +135,12 @@ step/min/max in sync with `MousePointer` if `SIZES` changes.
   projection + shading in numpy/Pillow against the real PNGs, and asserts the `BasicEffect` camera
   reproduces `Wall.Project()` to ~1e-13 px. This is how tower drawing changes are verified (the
   live wall scrolls; a backgrounded tab's canvas is black). `--mirror` reproduces the pre-card
-  0f7fc977 side texturing (one cell, mirrored about the rim) and `--tile <f>` previews a candidate
-  `Wall.DefaultSideTile`; it also always writes `_preview_wall3d_compare.png`, the before/after
-  A/B. Its `sample()` is BILINEAR on purpose — point sampling shows a moire at high tiling that the
-  GPU does not. `SIDE_TILE` mirrors `Wall.DefaultSideTile`; re-bake one, update the other.
+  0f7fc977 side texturing (one cell, mirrored about the rim), `--tile <f>` previews a candidate
+  `Wall.DefaultSideTile`, `--compare` writes the before/after A/B and `--ladder` one tower per
+  tiling (how the no-mip aliasing grows with density) — both opt-in, each roughly doubles the run.
+  Its `sample()` is BILINEAR CLAMP, modelling `DrawGeometry3D`'s `LinearClamp` exactly: point
+  sampling would invent a moire the GPU does not show, wrapping would prettify the sheet's own
+  8→0 wrap. `SIDE_TILE` mirrors `Wall.DefaultSideTile`; re-bake one, update the other.
 - **`verify_tower_order.py`**: certifies the no-depth-buffer painter's sort is exact over the real
   grid files + every `Wall.Setup` width (and rejects two plausible wrong sort keys, so it isn't
   vacuous). Run it if the tower geometry/sort changes.

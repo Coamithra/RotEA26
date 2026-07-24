@@ -26,10 +26,10 @@ Two things are proven:
    here the UV is solved per pixel, so the same thing is one `c % 8`. `--mirror` reproduces
    the pre-card look (one cell, retraced backwards) for an A/B.
 
-Run:  python tools/walls/preview_wall3d.py [--tile <f>] [--mirror]
-Writes tools/walls/_preview_wall3d.png + _preview_wall3d_compare.png (both gitignored).
+Run:  python tools/walls/preview_wall3d.py [--tile <f>] [--mirror] [--compare] [--ladder]
+Writes tools/walls/_preview_wall3d*.png (gitignored). --help for the flags.
 """
-import sys
+import argparse
 
 import numpy as np
 from PIL import Image
@@ -175,17 +175,22 @@ def solve_sd(A, B, px, py):
 
 
 def sample(tex, u, v):
-    """BILINEAR, like the GPU sampler -- point sampling would show a moire the game does not.
-    It matters most at high ?wallsidetile, where the shaft minifies hard (756-v1 ships with no
-    mip chain, so this is genuinely all the filtering there is). Wraps rather than clamps: the
-    caller already folds the cell walk into [0,1), and wrapping keeps the seam honest."""
+    """BILINEAR CLAMP -- exactly what DrawGeometry3D binds (SamplerState.LinearClamp).
+
+    Bilinear because point sampling shows a moire the game does not, and it matters most at
+    high ?wallsidetile where the shaft minifies hard (756-v1 ships with no mip chain, so this
+    is genuinely all the filtering there is). CLAMP rather than wrap because the game clamps:
+    at the sheet's own 8->0 wrap the caller emits u == 1 exactly, and clamping there taps the
+    last texel twice instead of blending into the first. That half-texel is the game's real
+    behaviour and must not be prettied up here -- on a PADDED .dds the same tap reaches the
+    transparent pad instead, which is a pipeline problem the tool should not hide."""
     th, tw = tex.shape[:2]
     x = u * tw - 0.5
     y = v * th - 0.5
     x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
     fx, fy = (x - x0)[..., None], (y - y0)[..., None]
-    x0, x1 = x0 % tw, (x0 + 1) % tw
-    y0, y1 = y0 % th, (y0 + 1) % th
+    x1, y1 = np.clip(x0 + 1, 0, tw - 1), np.clip(y0 + 1, 0, th - 1)
+    x0, y0 = np.clip(x0, 0, tw - 1), np.clip(y0, 0, th - 1)
     top = tex[y0, x0] * (1 - fx) + tex[y0, x1] * fx
     bot = tex[y1, x0] * (1 - fx) + tex[y1, x1] * fx
     return top * (1 - fy) + bot * fy
@@ -308,11 +313,40 @@ def render(blocks, pos, tex, side_tile=SIDE_TILE, mirror=False):
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
+def tower_crop(tex, tile, mirror):
+    """One isolated tower, framed tight, for the side-by-side sheets. A lone block shows both
+    of its faces and its full shaft, which is what the side texturing has to be judged on --
+    in the contiguous level3 grid the shafts merge into a mass and hide it."""
+    iso = np.zeros((9, 9), dtype=bool)
+    iso[6, 6] = True
+    return render(iso, np.array([0.0, -40.0]), tex, tile, mirror)[410:600, 470:655]
+
+
+def filmstrip(panels, path, scale=2):
+    gap = np.full((panels[0].shape[0], 6, 3), 255, np.uint8)
+    row = []
+    for i, p in enumerate(panels):
+        if i:
+            row.append(gap)
+        row.append(p)
+    img = Image.fromarray(np.concatenate(row, axis=1))
+    img = img.resize((img.size[0] * scale, img.size[1] * scale), Image.LANCZOS)
+    img.save(path)
+    return img
+
+
 if __name__ == "__main__":
-    tile = SIDE_TILE
-    if "--tile" in sys.argv:
-        tile = float(sys.argv[sys.argv.index("--tile") + 1])
-    mirror = "--mirror" in sys.argv
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--tile", type=float, default=SIDE_TILE,
+                    help=f"cells of sheet down a shaft, as a multiple of the top face's texel density (default {SIDE_TILE}, = Wall.DefaultSideTile)")
+    ap.add_argument("--mirror", action="store_true",
+                    help="render the pre-card-0f7fc977 side texturing (one cell, mirrored about the rim)")
+    ap.add_argument("--compare", action="store_true",
+                    help="also write the before/after A/B sheet (doubles the run)")
+    ap.add_argument("--ladder", action="store_true",
+                    help="also write the tiling ladder (mirror | 1 | 2 | 4 | 8) -- how the no-mip aliasing grows with density")
+    args = ap.parse_args()
+    tile, mirror = args.tile, args.mirror
 
     matrix_check()
     tex = np.array(Image.open(WALL_PNG).convert("RGB"))
@@ -338,11 +372,22 @@ if __name__ == "__main__":
     # A/B: the same three framings before and after card 0f7fc977. Top row is the old side
     # texturing (one cell, mirrored about the rim); bottom row is the tile continuing out of the
     # cell for the shaft's real height. This is the sheet that shows the card is fixed.
-    cases = [(iso, -40.0), (g, -260.0), (g, 20.0)]
-    old = [render(bl, np.array([0.0, py]), tex, tile, True) for (bl, py) in cases]
-    new = [render(bl, np.array([0.0, py]), tex, tile, False) for (bl, py) in cases]
-    cmp_sheet = Image.fromarray(np.concatenate([np.concatenate(old, axis=1),
-                                                np.concatenate(new, axis=1)], axis=0))
-    cmp_sheet.save("tools/walls/_preview_wall3d_compare.png")
-    print(f"[image] wrote tools/walls/_preview_wall3d_compare.png  ({cmp_sheet.size[0]}x{cmp_sheet.size[1]})")
-    print(f"[image]   row 1: BEFORE (1 cell, mirrored)   row 2: AFTER (continues, sideTile={tile})")
+    if args.compare:
+        cases = [(iso, -40.0), (g, -260.0), (g, 20.0)]
+        old = [render(bl, np.array([0.0, py]), tex, tile, True) for (bl, py) in cases]
+        new = [render(bl, np.array([0.0, py]), tex, tile, False) for (bl, py) in cases]
+        cmp_sheet = Image.fromarray(np.concatenate([np.concatenate(old, axis=1),
+                                                    np.concatenate(new, axis=1)], axis=0))
+        cmp_sheet.save("tools/walls/_preview_wall3d_compare.png")
+        print(f"[image] wrote tools/walls/_preview_wall3d_compare.png  ({cmp_sheet.size[0]}x{cmp_sheet.size[1]})")
+        print(f"[image]   row 1: BEFORE (1 cell, mirrored)   row 2: AFTER (continues, sideTile={tile})")
+
+    # The density ladder: one tower at each tiling, so the "reads taller" win and the aliasing it
+    # buys (756-v1 has no mip chain, so a minified shaft gets bilinear and nothing else) can be
+    # weighed against each other on one image rather than by re-running.
+    if args.ladder:
+        rungs = [("mirror", 1.0, True)] + [(str(t), t, False) for t in (1.0, 2.0, 4.0, 8.0)]
+        img = filmstrip([tower_crop(tex, t, m) for (_, t, m) in rungs],
+                        "tools/walls/_preview_wall3d_ladder.png")
+        print(f"[image] wrote tools/walls/_preview_wall3d_ladder.png  ({img.size[0]}x{img.size[1]})")
+        print("[image]   panels: " + " | ".join(n for (n, _, _) in rungs))

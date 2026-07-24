@@ -345,9 +345,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     crossing on top of the `bands` cuts and each strip maps through the one cell its midpoint falls
     in — every emitted UV stays inside the logical sheet. Cost: ~4 → ~14 quads/face at the baked
     tiling, one batched call unchanged, tower pass 0.73 → 1.29 ms.
-  - **756-v1 ships with NO mip chain**, so a high `?wallsidetile` minifies unfiltered and the far
-    end of a shaft aliases (visible in `preview_wall3d.py`'s density ladder; its `sample()` is
-    bilinear for exactly this reason — point sampling shows a moire the game does not).
+  - **756-v1 ships with NO mip chain**, so a high `?wallsidetile` minifies with bilinear and
+    nothing else, and the far end of a shaft aliases — weigh it on `preview_wall3d.py --ladder`
+    (one tower per tiling). That tool's `sample()` is bilinear CLAMP on purpose: it models
+    `DrawGeometry3D`'s `LinearClamp` exactly, so it neither invents a moire (point sampling would)
+    nor prettifies the sheet's own 8→0 wrap (wrapping would).
   - Lifetime: `Wall.DeathY` defers unload past the bottom edge (a base leads/trails its cap by
     ~154px, so dying at y>600 popped visible towers — this also delays the level's next event
     ~0.6s, intended); `Wall.EntryLead` spawns higher so towers enter base-first (bottom-row grids

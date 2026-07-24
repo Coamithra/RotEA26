@@ -123,11 +123,12 @@ internal class Wall : AlienDrawableGameComponent
 	// vertices would lie exactly ON the near plane and could clip out on float error.
 	private const float NearFrac = 0.9f;
 
-	// Vertical strips a side face is tessellated into. NOT a slice stack -- each band is a real
-	// textured quad, and the geometry would be exact at 1. The bands exist only to resolve the
-	// SMOOTHSTEP bottom dissolve, which is carried as per-vertex alpha and interpolated linearly
-	// between bands; at 1 the dissolve degrades to a straight linear fade. The fog needs no bands
-	// at all: it is linear in world z, so interpolating it is exact.
+	// How many DISSOLVE cuts a side face gets -- not the strip count, which is this plus one per
+	// cell crossing of the side tiling (~14 per face at the baked knobs; see AddFace). NOT a slice
+	// stack either: every strip is a real textured quad and the geometry would be exact at 1 cut.
+	// The cuts exist only to resolve the SMOOTHSTEP bottom dissolve, which is carried as per-vertex
+	// alpha and interpolated linearly between them; at 1 the dissolve degrades to a straight linear
+	// fade. The fog needs none at all: it is linear in world z, so interpolating it is exact.
 	private const int DefaultBands = 4;
 
 	// How densely the sheet tiles DOWN a shaft, as a multiple of the top face's own texel density.
@@ -144,8 +145,10 @@ internal class Wall : AlienDrawableGameComponent
 	// are. It costs nothing structurally: the sheet tiles, so any multiple is seamless.
 	internal const float DefaultSideTile = 4f;
 
-	// Ceiling on cells-down-a-shaft, purely so a degenerate knob (?walldepth=0 -> an infinite
-	// shaft) sizes a finite vertex buffer instead of exploding. Far above any usable value.
+	// Ceiling on cells-down-a-shaft. The buffer sizing is derived from it, and the console
+	// (eaWalls(..., 1e6, ...)) reaches the same setter the slider does, so an absurd tiling must
+	// cost a squashed texture rather than a vertex buffer sized off a wild number. Far above any
+	// usable value; ?wallsidetile is separately bounded at parse.
 	private const float MaxSideTileCells = 64f;
 
 	private VertexPositionColorTexture[] towerVerts;

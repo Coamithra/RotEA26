@@ -8,35 +8,35 @@ Worktree: `.claude/worktrees/wt9` · dev port **5289**
 - [x] Pull latest `main`
 - [x] Read the card + attachment (`tmp.png`) + comments (none)
 - [x] Create worktree `wt9` + branch `feature/tower-render-uv`
-- [ ] Push branch
+- [x] Push branch
 
 ## Phase 2: Research
-- [ ] Find the tower/wall rendering code (geometry + UVs)
-- [ ] Understand how the top (xy) face and side (z) faces get their UVs
-- [ ] Confirm the "mirrored" side texture claim
-- [ ] Identify tower height vs top-width in world units
-- [ ] Check tiling/wrap sampler state and texture atlas constraints
-- [ ] Blast radius: what else uses the same mesh builder
+- [x] Find the tower/wall rendering code (geometry + UVs)
+- [x] Understand how the top (xy) face and side (z) faces get their UVs
+- [x] Confirm the "mirrored" side texture claim
+- [x] Identify tower height vs top-width in world units
+- [x] Check tiling/wrap sampler state and texture atlas constraints
+- [x] Blast radius: what else uses the same mesh builder
 
 ## Phase 3: Design
-- [ ] Write `plans/tower-render-uv.md`
-- [ ] Get user approval
-- [ ] Post short TLDR comment on the card
+- [x] Write `plans/tower-render-uv.md`
+- [x] Get user approval
+- [x] Post short TLDR comment on the card
 
 ## Phase 4: Implement
-- [ ] Side-face UVs continue the tile instead of mirroring
-- [ ] Scale side-face V by tower height so towers read as tall
-- [ ] Update docs if a convention/flag is added
+- [x] Side-face UVs continue the tile instead of mirroring
+- [x] Scale side-face V by tower height so towers read as tall
+- [x] Update docs if a convention/flag is added
 
 ## Phase 5: Verify
-- [ ] Clean `dotnet build -c Debug`
-- [ ] Tool-driven visual verification (harness / wallsonly flag)
-- [ ] Zero console exceptions in real Chrome
-- [ ] Diff spot-check (no lowercase `content/`, no `BlendState.AlphaBlend`)
+- [x] Clean `dotnet build -c Debug`
+- [x] Tool-driven visual verification (harness / wallsonly flag)
+- [x] Zero console exceptions in real Chrome
+- [x] Diff spot-check (no lowercase `content/`, no `BlendState.AlphaBlend`)
 
 ## Phase 6: Review & Ship
-- [ ] Commit + push
-- [ ] `/review` the branch diff, fix every finding
+- [x] Commit + push
+- [x] `/review` the branch diff, fix every finding
 - [ ] Pull `main`, resolve conflicts, re-verify
 - [ ] PR + self-merge
 - [ ] Clean up worktree/branch/plan/tracker

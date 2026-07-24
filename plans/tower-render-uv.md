@@ -107,14 +107,15 @@ is untouched.
 
 **Known cost of the high tiling:** `756-v1` ships with no mip chain, so a minified shaft is
 filtered bilinearly and nothing more; at tiling 4 the far end of a shaft aliases and will
-shimmer as the wall scrolls. Visible in the preview tool's density ladder. The fix is a mip
-chain on the wall sheet (a `tools/textures/build_textures.py` change) — follow-up card.
+shimmer as the wall scrolls. Weigh it on `preview_wall3d.py --ladder`. The fix is a mip chain
+on the wall sheet (a `tools/textures/build_textures.py` change) — follow-up card.
 
 ### 4. Tuning
 
 * New flag **`?wallsidetile=<f>`** (`DebugFlags.WallSideTile`, default null -> the baked
-  `Wall.DefaultSideTile = 1f`). 1 = match the top face's texel density; 2 = twice as many
-  repeats down the shaft.
+  `Wall.DefaultSideTile = 4f`). 1 = match the top face's texel density; 4 = four times as many
+  repeats down the shaft. Bounded `(0, 32]` at parse; `Wall.MaxSideTileCells` is the buffer-sizing
+  backstop for the console/panel path, which does not go through the parser.
 * New slider in the **`eaWalls`** panel (`?wallsonly` / `?walltune`), wired through
   `DebugInput.SetWalls` -> `DebugFlags.SetWallsOverride`, and added to the panel's
   bake-ready orange readout.

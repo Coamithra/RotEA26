@@ -400,8 +400,9 @@ namespace EvilAliensWeb.Compat
 		//   ?wallfaceangle=<deg> light azimuth, screen space (0 = from +x, 90 = from +y; 225 = upper left).
 		//   ?walltoplift=<f>     lift the tower TOPS above the gameplay plane, as a fraction of depth
 		//                        (0 = flush). Cosmetic only -- the hitbox does not move with it.
-		//   ?wall3dbands=<n>     vertical strips a side face is tessellated into (default 4). Geometry
-		//                        and fog are exact at 1; the bands only resolve the smoothstep bottom
+		//   ?wall3dbands=<n>     dissolve cuts down a side face (default 4) -- NOT the strip count,
+		//                        which is this plus one per cell crossing of ?wallsidetile. Geometry
+		//                        and fog are exact at 1; the cuts only resolve the smoothstep bottom
 		//                        dissolve, which rides per-vertex alpha.
 		//   ?wallwisps=<0..1>    alpha of the additive fog wisps drawn across the shafts (0 = off).
 		//   ?wallwispspeed=<f>   the wisps' scroll modifier vs the wall (default 0.8 = the near fog
@@ -1198,7 +1199,7 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "wallsidetile":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wst) && wst > 0f)
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wst) && wst > 0f && wst <= 32f)
 					{
 						WallSideTile = wst;
 					}

@@ -881,26 +881,26 @@ internal class Wall : AlienDrawableGameComponent
 			try
 			{
 				List<string> list = new List<string>();
-				int num;
+				int gridWidth;
 				using (StreamReader streamReader = OpenLevelGrid("level3.txt"))
 				{
-					string text = streamReader.ReadLine();
-					num = Convert.ToInt32(text.Remove(0, 6));
+					string gridLine = streamReader.ReadLine();
+					gridWidth = Convert.ToInt32(gridLine.Remove(0, 6));
 					while (true)
 					{
-						text = streamReader.ReadLine();
-						if (text != null && !text.Contains("end"))
+						gridLine = streamReader.ReadLine();
+						if (gridLine != null && !gridLine.Contains("end"))
 						{
-							list.Add(text);
+							list.Add(gridLine);
 							continue;
 						}
 						break;
 					}
 				}
-				blocks = new bool[list.Count, num];
+				blocks = new bool[list.Count, gridWidth];
 				for (int i = 0; i < list.Count; i++)
 				{
-					for (int j = 0; j < num; j++)
+					for (int j = 0; j < gridWidth; j++)
 					{
 						if (j >= list[i].Length || list[i][j] == ' ')
 						{
@@ -1145,20 +1145,20 @@ internal class Wall : AlienDrawableGameComponent
 		}
 		if (Settings.GetInstance().CurrentDifficulty <= Settings.DifficultyLevel.Medium)
 		{
-			int num2 = height / 2;
-			bool[,] array = new bool[num2, width];
-			for (int k = 0; k < num2; k++)
+			int halfHeight = height / 2;
+			bool[,] trimmed = new bool[halfHeight, width];
+			for (int k = 0; k < halfHeight; k++)
 			{
 				for (int l = 0; l < width; l++)
 				{
-					array[k, l] = blocks[k, l];
+					trimmed[k, l] = blocks[k, l];
 				}
 			}
-			blocks = array;
+			blocks = trimmed;
 		}
 		scale = 800f / (float)(texture.LogicalWidth() * width);
-		float num3 = (float)texture.LogicalHeight() * scale;
-		base.Position = new Vector2(0f, (0f - num3) * (float)height - EntryLead());
+		float rowH = (float)texture.LogicalHeight() * scale;
+		base.Position = new Vector2(0f, (0f - rowH) * (float)height - EntryLead());
 		base.Direction = (float)Math.PI / 2f;
 		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 		base.Speed = (backgroundSpeed).Length() * 1f;
@@ -1206,26 +1206,26 @@ internal class Wall : AlienDrawableGameComponent
 		traceShaftPrev = EvilAliensWeb.Compat.DebugFlags.WallTrace
 			? new System.Collections.Generic.HashSet<int>() : null;
 		System.Collections.Generic.List<string> list = new System.Collections.Generic.List<string>();
-		int num;
+		int gridWidth;
 		using (StreamReader streamReader = OpenLevelGrid(relPath))
 		{
-			string text = streamReader.ReadLine();
-			num = Convert.ToInt32(text.Remove(0, 6));
+			string gridLine = streamReader.ReadLine();
+			gridWidth = Convert.ToInt32(gridLine.Remove(0, 6));
 			while (true)
 			{
-				text = streamReader.ReadLine();
-				if (text != null && !text.Contains("end"))
+				gridLine = streamReader.ReadLine();
+				if (gridLine != null && !gridLine.Contains("end"))
 				{
-					list.Add(text);
+					list.Add(gridLine);
 					continue;
 				}
 				break;
 			}
 		}
-		blocks = new bool[list.Count, num];
+		blocks = new bool[list.Count, gridWidth];
 		for (int i = 0; i < list.Count; i++)
 		{
-			for (int j = 0; j < num; j++)
+			for (int j = 0; j < gridWidth; j++)
 			{
 				blocks[i, j] = j < list[i].Length && list[i][j] != ' ';
 			}
@@ -1755,9 +1755,9 @@ internal class Wall : AlienDrawableGameComponent
 			DrawFogWisps(DrawTowerShafts3D(topD));
 			EvilAliensWeb.Compat.WallProfiler.EndTowers(perf);
 		}
-		Vector2 val2 = default(Vector2);
-		Color val3 = default(Color);
-		Color val4 = default(Color);
+		Vector2 halfBlock = default(Vector2);
+		Color darkTint = default(Color);
+		Color lightTint = default(Color);
 		// Edge-line draw scale (card a54cc13a): `line` ("black_line_lalalal") is a SEPARATE, fixed-
 		// resolution texture -- a thin line inset near the right edge of its own square canvas, not
 		// part of the 8x8 wall sheet -- drawn `center:true` at each wall block's centre so it reaches
@@ -1783,23 +1783,23 @@ internal class Wall : AlienDrawableGameComponent
 				if (blocks[i, j])
 				{
 					traceTopFaces++;
-					Vector2 val = default(Vector2);
-					val.X = (float)texture.LogicalWidth() * scale * (float)j;
-					val.Y = (float)texture.LogicalHeight() * scale * (float)i;
-					int num = 0;
-					int num2 = j % 8;
-					num = i % 8;
+					Vector2 blockOffset = default(Vector2);
+					blockOffset.X = (float)texture.LogicalWidth() * scale * (float)j;
+					blockOffset.Y = (float)texture.LogicalHeight() * scale * (float)i;
+					int sheetRow = 0;
+					int sheetCol = j % 8;
+					sheetRow = i % 8;
 					// The top-face cap and its edge lines ride the lift together: projecting at
 					// topD > 1 scales them away from the VP, so a cap grows and slides outward
 					// exactly as its shaft's topmost slice does. Collision is unaffected -- it
 					// reads `blocks` + Position, never these draw positions.
-					Vector2 topLeft = val + base.Position;
-					spriteBatch.Draw(texture, new Rectangle(num2 * texture.LogicalWidth() / 8, num * texture.LogicalHeight() / 8, texture.LogicalWidth() / 8, texture.LogicalHeight() / 8), lifted ? Project(topLeft, topD) : topLeft, 0f, scale * 8f * topD, center: false);
-					(val2) = new Vector2((float)texture.LogicalWidth() * scale / 2f);
-					val += val2;
-					(val3) = new Color(new Vector4(0f, 0f, 0f, 0.6f));
-					(val4) = new Color(new Vector4(1f, 1f, 1f, 0.3f));
-					Vector2 centre = val + base.Position;
+					Vector2 topLeft = blockOffset + base.Position;
+					spriteBatch.Draw(texture, new Rectangle(sheetCol * texture.LogicalWidth() / 8, sheetRow * texture.LogicalHeight() / 8, texture.LogicalWidth() / 8, texture.LogicalHeight() / 8), lifted ? Project(topLeft, topD) : topLeft, 0f, scale * 8f * topD, center: false);
+					(halfBlock) = new Vector2((float)texture.LogicalWidth() * scale / 2f);
+					blockOffset += halfBlock;
+					(darkTint) = new Color(new Vector4(0f, 0f, 0f, 0.6f));
+					(lightTint) = new Color(new Vector4(1f, 1f, 1f, 0.3f));
+					Vector2 centre = blockOffset + base.Position;
 					if (lifted)
 					{
 						centre = Project(centre, topD);
@@ -1807,19 +1807,19 @@ internal class Wall : AlienDrawableGameComponent
 					float capLineScale = lineScale * topD;
 					if (isfree(j + 1, i))
 					{
-						spriteBatch.Draw(line, centre, 0f, capLineScale, center: true, val3);
+						spriteBatch.Draw(line, centre, 0f, capLineScale, center: true, darkTint);
 					}
 					if (isfree(j - 1, i))
 					{
-						spriteBatch.Draw(line, centre, (float)Math.PI, capLineScale, center: true, val4);
+						spriteBatch.Draw(line, centre, (float)Math.PI, capLineScale, center: true, lightTint);
 					}
 					if (isfree(j, i + 1))
 					{
-						spriteBatch.Draw(line, centre, (float)Math.PI / 2f, capLineScale, center: true, val3);
+						spriteBatch.Draw(line, centre, (float)Math.PI / 2f, capLineScale, center: true, darkTint);
 					}
 					if (isfree(j, i - 1))
 					{
-						spriteBatch.Draw(line, centre, -(float)Math.PI / 2f, capLineScale, center: true, val4);
+						spriteBatch.Draw(line, centre, -(float)Math.PI / 2f, capLineScale, center: true, lightTint);
 					}
 				}
 			}

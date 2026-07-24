@@ -460,6 +460,13 @@ namespace EvilAliensWeb.Compat
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
 		public static bool WallsOnly { get; private set; }
 
+		// A/B the mip chain (?nomips): WebContentManager.TryLoadDds uploads level 0 only, so every
+		// .dds falls back to plain bilinear -- the before/after for card 110153c7, where a tower
+		// shaft spends ~10.8 cells of 756-v1 down its length and its far end aliases without mips.
+		// Affects load only, so it must be set at boot; toggling it later changes nothing already
+		// decoded. Out of Active (a pure render toggle, and it must not make a co-op peer reject us).
+		public static bool NoMips { get; private set; }
+
 		// TEMP diagnostic (?walltrace): Wall.Draw logs, per wall instance, the first frame its top
 		// faces appear vs the first frame its shafts appear (with Position.Y), plus a coarse sample of
 		// (posY, topFaces, shaftQuads) as it enters -- to pin down the reported "top slides in before
@@ -908,6 +915,23 @@ namespace EvilAliensWeb.Compat
 		// Null/empty = the genuine WebRtcInterop.BuildHash(); dev-only, byte-identical when unset.
 		public static string NetFakeBuildHash { get; private set; } = "";
 
+		// ?netfakepeer=<s>: override THIS tab's peer-identity token (card 0b8a300b), the same
+		// trick ?netfakehash= plays on the build hash and for the same reason -- both dev tabs
+		// share ONE localStorage, so they mint the SAME eaRtc.peerId and a host blocking the
+		// joiner would block itself. REQUIRED for any two-tab kick+block test; the loopback rig
+		// cannot exercise the ban at all without it.
+		// Null/empty = the genuine WebRtcInterop.PeerId(); dev-only, byte-identical when unset.
+		public static string NetFakePeerId { get; private set; } = "";
+
+		// ?netkickshot: park the host's remote-pause KICK menu over a booted level with no peer
+		// at all (pair with ?level=<Name>), so its appearance can be screenshot in isolation --
+		// the ?gamebrowser fake-entry precedent, named for the ?textshot/?lazershot idiom.
+		// Reaching it for real needs two windows AND a peer that holds a pause past the 4s offer
+		// delay, which is not a screenshot rig. It is an APPEARANCE harness only: both Kick
+		// entries no-op (KickPeer needs a session), so only "Keep Waiting" does anything -- it
+		// releases the synthetic freeze and hands the level back. In Active.
+		public static bool NetKickShot { get; private set; }
+
 		// ?aiplayer: force the LOCAL player's ship onto the existing PlayerShip AI branch
 		// (ControlDevice.AI / DoAIMove/DoAIFire -- the attract-demo behaviour) at level start,
 		// so two net tabs can drive themselves unattended (the user-specified 11.1 testing
@@ -938,6 +962,15 @@ namespace EvilAliensWeb.Compat
 		// ?net=host/join (+ ?aiplayer so the extra ships fly themselves: they are not puppets, so
 		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
 		public static int NetLocal { get; private set; }
+
+		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop EVERY EvSlotGrant the
+		// host answers a couch join with (not just the first: the flag is read on each grant, so
+		// while it is set no couch join can complete), instead of seating them. That is the one state the host's
+		// ExpireUnclaimedGrants path exists for (the client can silently fail to take a grant: its
+		// device got seated meanwhile, its scene changed) and the ONLY thing that reaches it --
+		// ?netlocal always takes its grant, so without this flag the expiry has no trigger at all
+		// and the seat-leak it guards against is untestable. Shipped builds are unchanged.
+		public static bool NetDropGrant { get; private set; }
 
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
 		// INBOUND traffic by Compat/Net/NetImpairment so the drop-tolerance paths cards
@@ -1204,6 +1237,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "walltrace":
 					WallTrace = IsOn(val);
+					break;
+				case "nomips":
+					NoMips = IsOn(val);
 					break;
 				case "wallpoptest":
 					WallPopTest = IsOn(val);
@@ -1591,6 +1627,9 @@ namespace EvilAliensWeb.Compat
 						NetLocal = (int)MathHelper.Clamp(nloc, 0, 3);
 					}
 					break;
+				case "netdropgrant":
+					NetDropGrant = IsOn(val);
+					break;
 				case "gamebrowser":
 					GameBrowser = IsOn(val);
 					if (GameBrowser)
@@ -1601,6 +1640,15 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "netjip":
 					NetJip = IsOn(val);
+					break;
+				case "netfakepeer":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetFakePeerId = val.Trim();
+					}
+					break;
+				case "netkickshot":
+					NetKickShot = IsOn(val);
 					break;
 				case "netlag":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nlag) && nlag >= 0f)
@@ -1830,7 +1878,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1848,6 +1896,7 @@ namespace EvilAliensWeb.Compat
 							+ (AIPlayer ? " aiplayer" : "")
 						+ (NetScript ? " netscript" : "")
 						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
+						+ (NetDropGrant ? " netdropgrant" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

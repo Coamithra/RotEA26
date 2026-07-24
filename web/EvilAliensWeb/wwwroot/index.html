@@ -182,6 +182,50 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: print each slot's score + combo (and any provisional credit the host has not
+        // settled yet). The readable way to compare two co-op peers' tallies — card b0ab09ec.
+        window.eaScore = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugScoreDump')); }
+            catch (e) { console.warn('[debug] eaScore failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: co-op score reconciliation self-test (card b0ab09ec). Runs the real
+        // NetScoreLedger policy on a virtual clock against a synthetic two-peer kill stream —
+        // and the OLD max() adoption over the same stream, so the one-way drift it fixes is
+        // demonstrated before the fix is asserted. Pure computation: no session, no second
+        // tab, no scene; runnable straight from the main menu.
+        //   eaNetScore.test()                    — defaults (400 kills, ±6 combo skew, 80ms rtt)
+        //   eaNetScore.test(2000, 12, 150, 7)    — kills, comboSkew, rttMs, seed
+        window.eaNetScore = {
+            test: (kills, comboSkew, rttMs, seed) => {
+                try {
+                    console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScoreTest',
+                        kills | 0, comboSkew | 0, rttMs | 0, seed | 0));
+                }
+                catch (e) { console.warn('[debug] eaNetScore.test failed (game not booted yet?): ' + e.message); }
+            }
+        };
+
+        // Debug: run the online co-op kick/block rule suite (card 0b8a300b) — the block
+        // predicate the hello gate uses plus the v6 handshake codec. Prints PASS/FAIL.
+        // Best run from the main menu: over a LIVE session it skips the teardown-persistence
+        // leg rather than wiping a real match's state, and says so in the report.
+        window.eaKickTest = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest')); }
+            catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
+        // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
+        // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs
+        // invisibly on every shipping background, so this reads the decisions as data instead
+        // of trusting a screenshot. Run it from inside a level for part 3 to have anything to
+        // census.
+        window.eaBgCull = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull')); }
+            catch (e) { console.warn('[debug] eaBgCull failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: asplode every locally-owned PlayerShip through the real death path, so the
         // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
         // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it
@@ -189,6 +233,24 @@
         window.eaKillShips = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
             catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: dump the net roster (slot→device seat map, live ships, primary slots) plus the
+        // reset counter, right now. The [net] metrics line carries the same roster= on a 5s
+        // cadence, which can straddle a whole ~2.7s reset — call this on both peers either side
+        // of an eaKillShips() to compare exactly rather than by sampling.
+        window.eaNetRoster = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster')); }
+            catch (e) { console.warn('[debug] eaNetRoster failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: seat a couch player right now, the way a gamepad Start press does. Host-side it
+        // works BEFORE a peer pairs (unlike ?netlocal, which is PeerUp-gated), which is the only
+        // way to fill the host roster ahead of a joiner and so reach the RejectFull path. On a
+        // client it still needs a paired host, since a client seat must be asked for.
+        window.eaNetCouchJoin = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin')); }
+            catch (e) { console.warn('[debug] eaNetCouchJoin failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull

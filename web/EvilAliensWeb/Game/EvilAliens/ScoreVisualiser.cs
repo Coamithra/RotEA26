@@ -176,12 +176,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	{
 		get
 		{
-			float num = 0f;
+			float highest = 0f;
 			foreach (ScoreInfo score in scores)
 			{
-				num = MathHelper.Max(num, score.score);
+				highest = MathHelper.Max(highest, score.score);
 			}
-			return num;
+			return highest;
 		}
 	}
 
@@ -245,18 +245,18 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private void ScoreVisualiser_onLevelUp(Powerup.PowerupType type, int newLevel, PowerupData sender)
 	{
-		int num = -1;
+		int slot = -1;
 		for (int i = 0; i < 4; i++)
 		{
 			if (scores[i].powerupDatas[type] == sender)
 			{
-				num = i;
+				slot = i;
 			}
 		}
 		PlayerShip playerShip = null;
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
-			if (ship.Owner == num)
+			if (ship.Owner == slot)
 			{
 				playerShip = ship;
 			}
@@ -335,20 +335,32 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		scores[player].bombs = Math.Min(scores[player].bombs + 1, 3);
 	}
 
-	public void AddScore(float amount, bool isCombo, int player)
+	// Returns what was ACTUALLY credited (the combo-modified figure when isCombo) -- online
+	// co-op puts the host's credited number on the wire so both peers tally identically
+	// (card b0ab09ec). Every other caller ignores the value.
+	public float AddScore(float amount, bool isCombo, int player)
 	{
-		float num = ((!isCombo) ? amount : comboModify(amount, player));
-		scores[player].SetScore(scores[player].score + num);
+		float points = ((!isCombo) ? amount : comboModify(amount, player));
+		scores[player].SetScore(scores[player].score + points);
+		return points;
 	}
 
-	// Online co-op (card 11.2): adopt the host's authoritative score for a slot. Only ever
-	// raises -- the client keeps its immediate generous local credits and the 1Hz sync
-	// trues the tally up without ever visibly rolling a score backwards mid-life.
-	internal void NetAdoptScore(int player, float hostScore)
+	// Online co-op (card b0ab09ec): take the host's authoritative score for a slot VERBATIM,
+	// plus whatever local credit the host has not settled into it yet.
+	//
+	// This replaced a max(local, host) adoption. max() looked safe -- a score can never
+	// visibly roll backwards -- but the client credits every kill with its OWN combo
+	// multiplier, so each peer's per-kill figure differs; max() then accumulated every
+	// positive excursion of that difference and discarded every negative one, turning an
+	// unbiased error into unbounded one-way drift (measured: 304 on the joiner for a slot the
+	// host had at 294, and growing). Verbatim adoption alone would sawtooth instead, because
+	// the host's 1Hz sync never contains the client's in-flight claims -- carrying `unsettled`
+	// is what makes the sum exact in both message orderings AND keeps it monotone in practice.
+	internal void NetSetScore(int player, float hostScore, float unsettled)
 	{
-		if (player >= 0 && player < scores.Count && hostScore > scores[player].score)
+		if (player >= 0 && player < scores.Count)
 		{
-			scores[player].SetScore(hostScore);
+			scores[player].SetScore(hostScore + unsettled);
 		}
 	}
 
@@ -367,15 +379,15 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private void checkPowerupAchievement(int player)
 	{
-		bool flag = false;
+		bool hasHumanPlayer = false;
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
 			if (ship.Controller != ControlDevice.AI)
 			{
-				flag = true;
+				hasHumanPlayer = true;
 			}
 		}
-		if (GetPowerupLevel(Powerup.PowerupType.Blast, player) == 4 && GetPowerupLevel(Powerup.PowerupType.FirePower, player) == 4 && GetPowerupLevel(Powerup.PowerupType.Option, player) == 4 && GetPowerupLevel(Powerup.PowerupType.Range, player) == 4 && !IsTutorial && !Settings.GetInstance().CheckForCheats() && flag)
+		if (GetPowerupLevel(Powerup.PowerupType.Blast, player) == 4 && GetPowerupLevel(Powerup.PowerupType.FirePower, player) == 4 && GetPowerupLevel(Powerup.PowerupType.Option, player) == 4 && GetPowerupLevel(Powerup.PowerupType.Range, player) == 4 && !IsTutorial && !Settings.GetInstance().CheckForCheats() && hasHumanPlayer)
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.FullPower);
 		}
@@ -392,12 +404,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 	}
 
-	public void AddScore(float amount, bool isCombo, Vector2 location, int player)
+	public float AddScore(float amount, bool isCombo, Vector2 location, int player)
 	{
-		float num = ((!isCombo) ? amount : comboModify(amount, player));
-		AddScore(amount, isCombo, player);
-		FloatingText text = GetText((int)num, location, FloatingText.ShowType.scrollup, "");
-		floatingtexts.Add(text);
+		float points = AddScore(amount, isCombo, player);
+		FloatingText floater = GetText((int)points, location, FloatingText.ShowType.scrollup, "");
+		floatingtexts.Add(floater);
+		return points;
 	}
 
 	private void CheckPowerup(ref Vector2 location, int player)
@@ -406,13 +418,13 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		{
 			displayPowerUpAtNextHit = false;
 			soundManager.PlayText(SoundManager.Texts.PowerUp, 1);
-			FloatingText text = GetText(location, FloatingText.ShowType.pop, "Power Up!");
-			floatingtexts.Add(text);
+			FloatingText floater = GetText(location, FloatingText.ShowType.pop, "Power Up!");
+			floatingtexts.Add(floater);
 		}
 		else if (scores[player].combo % 10 == 0 && scores[player].combo > 0)
 		{
-			FloatingText text = GetText(scores[player].combo, location, FloatingText.ShowType.pop, "X");
-			floatingtexts.Add(text);
+			FloatingText floater = GetText(scores[player].combo, location, FloatingText.ShowType.pop, "X");
+			floatingtexts.Add(floater);
 		}
 	}
 
@@ -534,9 +546,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 		if (phototimer.Active)
 		{
-			float num = MathHelper.SmoothStep(0f, 1f, phototimer.Normalized);
+			float alpha = MathHelper.SmoothStep(0f, 1f, phototimer.Normalized);
 			Color color2 = default(Color);
-			(color2) = new Color(new Vector4((snapshotcolor).ToVector3(), num));
+			(color2) = new Color(new Vector4((snapshotcolor).ToVector3(), alpha));
 			float photoSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/photocamera", photocamera.LogicalWidth());
 			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.LogicalHeight() / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
 		}
@@ -547,25 +559,25 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	{
 		if (showPressStartTimer.Active)
 		{
-			float num = 1f;
+			float alpha = 1f;
 			if (showPressStartTimer.TimeElapsed < 500f)
 			{
-				num = showPressStartTimer.TimeElapsed / 500f;
+				alpha = showPressStartTimer.TimeElapsed / 500f;
 			}
 			if (0f <= showPressStartTimer.TimeLeft - 3000f && showPressStartTimer.TimeLeft - 3000f < 500f)
 			{
-				num = (showPressStartTimer.TimeLeft - 3000f) / 500f;
+				alpha = (showPressStartTimer.TimeLeft - 3000f) / 500f;
 			}
 			if (showPressStartTimer.TimeLeft - 3000f < 0f)
 			{
-				num = 0f;
+				alpha = 0f;
 			}
-			num = MathHelper.SmoothStep(0f, 1f, num);
-			Vector4 val = (playercolor).ToVector4();
+			alpha = MathHelper.SmoothStep(0f, 1f, alpha);
+			Vector4 baseColor = (playercolor).ToVector4();
 			Color aliceBlue = Color.AliceBlue;
 			Color color = default(Color);
-			(color) = new Color(Vector4.Lerp(val, (aliceBlue).ToVector4(), num));
-			string text = i switch
+			(color) = new Color(Vector4.Lerp(baseColor, (aliceBlue).ToVector4(), alpha));
+			string playerLabel = i switch
 			{
 				0 => "Player 1",
 				1 => "Player 2",
@@ -582,12 +594,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			{
 				1 => "Press Start",
 				2 => "Room code: " + code,
-				_ => text,
+				_ => playerLabel,
 			};
 			// Inactive-slot prompt: static chrome, never a sweep (no score to roll over). Shares the
 			// slot's primary-line cache key with the active-player score (only one is drawn per slot
 			// per frame; the dirty check rebuilds when a slot flips between prompt and score).
-			DrawStr(i * 4, str, startpos + new Vector2(0f, -5f), 0.9f, num * 0.6f, color, ParkedGlint);
+			DrawStr(i * 4, str, startpos + new Vector2(0f, -5f), 0.9f, alpha * 0.6f, color, ParkedGlint);
 		}
 	}
 
@@ -600,15 +612,15 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		if (scores[i].combo > 5)
 		{
 			float alpha = 0.2f + 0.8f * MathHelper.SmoothStep(0f, 1f, scores[i].combotimer.TimeLeft / 1000f);
-			float num = MathHelper.Max(font.MeasureString(scores[i].scoreString).X * 0.9f + 17f, 100f);
-			DrawStr(i * 4 + 1, "Combo!", startpos + new Vector2(num - 10f, -5f), 0.6f, alpha, playercolor, ParkedGlint);
+			float comboX = MathHelper.Max(font.MeasureString(scores[i].scoreString).X * 0.9f + 17f, 100f);
+			DrawStr(i * 4 + 1, "Combo!", startpos + new Vector2(comboX - 10f, -5f), 0.6f, alpha, playercolor, ParkedGlint);
 			if (scores[i].combo < 1000)
 			{
-				DrawStr(i * 4 + 2, comboStrings[scores[i].combo], startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
+				DrawStr(i * 4 + 2, comboStrings[scores[i].combo], startpos + new Vector2(comboX, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 			else
 			{
-				DrawStr(i * 4 + 2, scores[i].combo + "x", startpos + new Vector2(num, 13f), 1f, alpha, playercolor, ParkedGlint);
+				DrawStr(i * 4 + 2, scores[i].combo + "x", startpos + new Vector2(comboX, 13f), 1f, alpha, playercolor, ParkedGlint);
 			}
 		}
 		float bombSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/bombicon", bomb.LogicalWidth());

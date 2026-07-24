@@ -50,14 +50,23 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
     regexes). At least one modifier is REQUIRED in the member pattern: relax it and `else if (…)`
     parses as a member named `if`, and every later hunk files under it.
 
-**Decompiler-artifact cleanup: what has deliberately NOT been done.** Card `0c624f9d` collapsed
-ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated `x.Position - y.Position`
-temporaries. It left the neighbouring `GamePadButtons buttonsN = (state).Buttons;` temps in
-`InputHandler.UpdateKeyPads` alone — inlining them was tried and reverted, because removing those
-locals renumbers the slots and yields yet another non-identical hash for a bigger diff and no
-proof. Same for the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead initializers
-(~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`). Each is its
-own artifact class and its own card; don't fold them into an unrelated change.
+**Decompiler-artifact cleanup: what has been done, and what deliberately has not.** Card `0c624f9d`
+collapsed ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated
+`x.Position - y.Position` temporaries. It left the neighbouring
+`GamePadButtons buttonsN = (state).Buttons;` temps in `InputHandler.UpdateKeyPads` alone — inlining
+them renumbers the method's local slots, so the byte-identical hash oracle cannot cover it. Card
+`7d14a3cd` did it anyway, BOUNDING it with `verify_decompiled_diff.py --ref main` instead, which
+is the tool for exactly that class — and that came back IDENTICAL, i.e. not merely confined to the
+edited method but invisible to ILSpy altogether. 24 temporaries inlined, the case-block braces
+dropped with them, and that one method's redundant parens cleared in passing.
+
+**Still deliberately not done.** That card was scoped to `UpdateKeyPads` ALONE, so the SAME temp
+shape survives four more times in the same file — `GamePadThumbSticks thumbSticksN =
+(stateN).ThumbSticks;` in `InputHandler.LeftStick`/`RightStick`. The struct-temporary class is NOT
+finished. Likewise untouched: the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead
+initializers (~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
+everywhere else. Each is its own artifact class and its own card; don't fold them into an
+unrelated change.
 
 ## Shaders — `tools/shaders/`
 

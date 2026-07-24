@@ -38,6 +38,11 @@ public class Game1 : Game
 
 	private CollisionHandler collisionHandler;
 
+	// The live collision handler — for the eaBinTest console suite (Compat/BinTest.cs), whose
+	// mid-pass-spawn scenarios drive DetectCollisions() directly. Same one-line accessor
+	// pattern as ComponentBin.Game.
+	internal CollisionHandler CollisionHandler => collisionHandler;
+
 	private ContentManagerWrapper contentManagerWrapper;
 
 	private ScoreVisualiser score;

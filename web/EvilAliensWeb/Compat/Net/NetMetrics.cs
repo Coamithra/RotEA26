@@ -12,6 +12,11 @@ namespace EvilAliensWeb.Compat.Net
         // stream lane
         public long StreamTx;
         public long StreamRx;
+        // Per-slot HUD state (card 1a3ad45a). HudRx counts ENTRIES adopted, not packets: a peer
+        // with a couch partner sends two slots per packet, and a stalled HudRx against a climbing
+        // peer HudTx is what "the other player's combo/powerup readout is frozen" looks like.
+        public long HudTx;
+        public long HudRx;
         public long StreamDropped;      // out-of-order / duplicate samples the buffer refused
         public long StreamSeqGaps;      // stream sequence didn't advance by exactly 1 (loss/reorder)
 
@@ -93,7 +98,7 @@ namespace EvilAliensWeb.Compat.Net
             // SAME slot->owner map, since the host allocates every slot and the wire slot IS the
             // oracle slot. A disagreement here is the bug that used to cross-credit kills.
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={34} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={34} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} ordViol={16} seqGap={17} liveIds={18} snapTx={19} snapRx={20} snapEnt={21} snapUnk={22} pupPops={23} clTx={24} clRx={25} clKill={26} clPaid={27} beatTx={28} beatRx={29} resets={30} wins={31} pauses={32} tetherBrk={33} hudTx={35} hudRx={36}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
@@ -101,7 +106,8 @@ namespace EvilAliensWeb.Compat.Net
                 EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds,
                 SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
-                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster) + sc + imp;
+                BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
+                HudTx, HudRx) + sc + imp;
         }
     }
 }

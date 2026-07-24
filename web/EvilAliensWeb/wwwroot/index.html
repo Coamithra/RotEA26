@@ -250,6 +250,19 @@
             }
         };
 
+        // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
+        // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
+        // combo streams — running the OLD ungated behaviour over the identical stream first, so
+        // the stray powerup levels and the unilateral 12s slow motion it used to inflict on a
+        // slot this peer does not own are demonstrated before the gate is asserted. No session
+        // and no second tab needed; run it from the main menu or inside a level.
+        window.eaNetCombo = {
+            test: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetComboTest')); }
+                catch (e) { console.warn('[debug] eaNetCombo.test failed (game not booted yet?): ' + e.message); }
+            }
+        };
+
         // Debug: run the online co-op kick/block rule suite (card 0b8a300b) — the block
         // predicate the hello gate uses plus the v6 handshake codec. Prints PASS/FAIL.
         // Best run from the main menu: over a LIVE session it skips the teardown-persistence

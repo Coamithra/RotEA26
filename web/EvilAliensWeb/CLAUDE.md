@@ -162,6 +162,7 @@ generate much of the art/audio referenced here.
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
+  `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test  card 1a3ad45a),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
@@ -989,7 +990,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v7):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v8):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -999,7 +1000,9 @@ interpolation feel, both gated on real-network playtests.
   role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410;
   **v6** appends the peer-identity token to the handshake -- card 0b8a300b;
   **v7** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
-  card b0ab09ec, see the Score/lives bullet).
+  card b0ab09ec, see the Score/lives bullet;
+  **v8** adds `MsgHudState` (0x12) -- the owner-authoritative per-slot combo + powerup state,
+  card 1a3ad45a, see the per-slot HUD state bullet).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1118,8 +1121,9 @@ interpolation feel, both gated on real-network playtests.
     field went `u16` base-points -> `f32` per slot (protocol **v6**) because a combo-modified
     award overflows a ushort -- a 10000-point boss at a routine 40x combo is 30000, and
     `comboModify` has no ceiling.
-  - **Still local, by design:** the combo COUNTER shown under each slot is cosmetic and will
-    differ between screens; only the score is reconciled.
+  - **The combo COUNTER is no longer local -- see the per-slot HUD state bullet below.** It was
+    left local by this card ("cosmetic, only the score is reconciled"); card `1a3ad45a` found
+    that framing was wrong and replicated it.
   - **Verify with `eaNetScore.test()`, not two windows** (`NetScoreLedger.SelfTest` +
     `NetPuppets.WireRoundTripTest`). It drives the real policy on a virtual clock, and runs
     the OLD `max()` adoption over the identical kill stream first -- a green tick means
@@ -1136,6 +1140,50 @@ interpolation feel, both gated on real-network playtests.
     proof.) Measured over a two-peer run: `scSkew=0.0` steady state, and `scSkewMax` held at
     10.0 while `clTx` grew 20 -> 67 -- i.e. the worst deviation is one kill's correction and
     does NOT accumulate with kill count, which is exactly the property max() lacked.
+- **Per-slot HUD state: a slot's combo and powerup progression belong to its OWNER (card
+  1a3ad45a).** Every peer used to simulate BOTH -- a remote ship's shots are re-fired locally
+  through the real `FireAt` path, so they are ordinary local `Bullet`s stamped with that slot's
+  owner and `Bullet.CollidesWith` sustains its combo. On a client those bullets hit frozen
+  puppets interpolated ~100ms behind the host's real entities, so the sims diverge routinely.
+  - **The counter diverging is cosmetic; feeding `AddExp` with it was not.** Card `4717d3cf`
+    set `powerupactive` for a remote collector, which is exactly the gate on
+    `ScoreVisualiser.increasecombo` -- so a peer levelled up powerups for a slot it did not own,
+    and `ScoreVisualiser_onLevelUp` then called `PlayerShip.PowerUp` on the PUPPET. For `OneUp`
+    that is `Oracle.SetSlowmotion(12f)`: **twelve seconds of global slow motion fired
+    unilaterally on one peer**, off an invented combo. `Option` spawned a real extra Option ship;
+    `FirePower`/`Range` gave the puppet a weapon its owner did not have; `checkPowerupAchievement`
+    could grant `FullPower` off another slot's simulated progress.
+  - **`NetSession.OwnsSlot(slot)` is the gate**, and it asks the ROSTER, not a live ship -- a
+    slot's combo and levels outlive its ship (they persist across a death and respawn), so a
+    ship-keyed test would flip while the player waits to come back. **Offline it is true for
+    every slot**, which is what keeps single-player and local co-op byte-identical.
+  - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
+    `[type][count]` then `[slot][combo][activeType][progress][level x 5]` per owned slot.
+    Protocol **v8**. Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
+    pinned at 3 and never increments, so the wire index IS the enum value and a NEW TYPE MUST GO
+    AFTER `OneUp` (or widen `HudLevelCount` and bump the version). Stream lane because it is a
+    readout: a dropped packet only means one interval of staleness.
+  - Received state applies only to slots we do NOT own (a peer claiming one of ours is ignored,
+    not trusted), bounded against `ScoreVisualiser.SlotCount` like `ApplyRemotePowerup`. The
+    combo is **display-only** there: it cannot reach `AddExp` (the gate) and the score is already
+    reconciled by `EvScoreSync` + the unsettled ledger, so it never re-derives an award.
+    Levels go through the real `PlayerShip.PowerUp(..., doEffect: false)` one step at a time, so
+    the puppet's re-fired bullets match its owner's actual loadout. **`OneUp` is unreachable
+    there and must stay so** -- slow motion is deliberately local, which is the same reason the
+    puppet driver dead-reckons on real time.
+  - **Side effect, deliberate:** `AwardScoreToAll` (every boss) pays each slot with THAT slot's
+    own multiplier, so the host used to compute the client's boss share from a combo the client
+    never had. It now uses the real one -- a payout change, and a correction.
+  - **Verify with `eaNetCombo.test()`** (`Compat/Net/NetComboTest.cs`), not two windows: the
+    failure is a peer levelling a powerup it does not own, minutes into a fight, and its visible
+    consequence reads as a hiccup rather than a desync. Section 2 drives the REAL
+    `PowerupData.AddExp` over two divergent combo streams and runs the OLD ungated behaviour over
+    the identical stream FIRST, asserting it levels the slot and reaches the `OneUp` trigger --
+    a green tick means nothing otherwise (the `eaNetScore.test()` rule). Section 1 round-trips
+    the wire format against the live `ScoreVisualiser` on the unseated slot 3 and restores it;
+    section 3 pins `OwnsSlot`'s offline answer. `eaScore()` gained `own=`/`pu=`/`lv=` per slot,
+    and the `[net]` line `hudTx`/`hudRx` (`hudRx` counts ENTRIES, not packets -- a peer with a
+    couch partner sends two slots per packet).
   - **GOTCHA -- a two-window co-op run cannot be driven at full rate from this rig.** A
     backgrounded tab throttles to ~1 tick/sec (measured: `txStream` advanced 43 in 40s where
     30Hz would be ~1200), `?fpsuncapped` does NOT defeat it, and two tabs in one window can

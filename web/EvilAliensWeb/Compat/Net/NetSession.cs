@@ -54,10 +54,17 @@ namespace EvilAliensWeb.Compat.Net
         // entity's base point value, so both peers tally the identical number. It landed
         // alongside v6 rather than after it -- two independent wire changes cannot share a
         // version number for exactly the reason above, so the merge takes the next one.
-        public const byte ProtocolVersion = 7;
+        // v8 (card 1a3ad45a): MsgHudState -- each peer streams the combo counter, active powerup,
+        // bar progress and per-type levels for the slots it OWNS, and stops simulating them for
+        // the slots it does not (ScoreVisualiser.increasecombo).
+        public const byte ProtocolVersion = 8;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
+        // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
+        // and it is a readout rather than something the sim reads back, so a third of the ship
+        // rate is plenty and keeps the added stream traffic under ~400 B/s.
+        private const long HudIntervalMs = 100;      // ~10 Hz per-slot HUD state
         private const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
@@ -161,9 +168,28 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
+        private static long lastHudTx;
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
         private static readonly byte[] extraScratch = new byte[ExtraScratchBytes];
+        // Per-slot HUD state scratch (card 1a3ad45a) -- reused every send/receive so a 10 Hz
+        // readout stream allocates nothing.
+        private static readonly byte[] hudTxSlots = new byte[NetProtocol.MaxSlots];
+        private static readonly int[] hudTxCombos = new int[NetProtocol.MaxSlots];
+        private static readonly byte[] hudTxTypes = new byte[NetProtocol.MaxSlots];
+        private static readonly float[] hudTxProgress = new float[NetProtocol.MaxSlots];
+        private static readonly int[][] hudTxLevels = CreateHudLevelScratch();
+        private static readonly int[] hudRxLevels = new int[NetProtocol.HudLevelCount];
+
+        private static int[][] CreateHudLevelScratch()
+        {
+            int[][] rows = new int[NetProtocol.MaxSlots][];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                rows[i] = new int[NetProtocol.HudLevelCount];
+            }
+            return rows;
+        }
 
         // rx / remote-ship puppet
         private static readonly ShipStateBuffer buffer = new ShipStateBuffer();
@@ -446,6 +472,7 @@ namespace EvilAliensWeb.Compat.Net
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
+            lastHudTx = 0;
             lastHelloTx = 0;
             lastUpdateAt = 0;
             killNotes.Clear();
@@ -589,6 +616,10 @@ namespace EvilAliensWeb.Compat.Net
                         // Couch players + host AI friends ride the same cadence, both directions.
                         SendFriendStates(now);
                     }
+                    if (now - lastHudTx >= HudIntervalMs)
+                    {
+                        SendHudState(now);
+                    }
                     if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
                     {
                         SendWorldSnapshot(now);
@@ -699,6 +730,65 @@ namespace EvilAliensWeb.Compat.Net
             metrics.StreamTx++;
         }
 
+        // Card 1a3ad45a. Stream the per-slot HUD state for every slot we OWN -- combo counter,
+        // active powerup, bar progress, per-type levels. Keyed off the ROSTER, not off live ships:
+        // a slot keeps its combo and its powerup levels across a death and respawn, and its panel
+        // is drawn throughout, so going quiet while the ship is down would freeze the peer's
+        // readout at whatever it held when the player died.
+        private static void SendHudState(long now)
+        {
+            lastHudTx = now;
+            if (score == null)
+            {
+                return;
+            }
+            int count = 0;
+            for (int slot = 0; slot < NetProtocol.MaxSlots && slot < ScoreVisualiser.SlotCount; slot++)
+            {
+                if (!OwnsSlot(slot))
+                {
+                    continue;
+                }
+                score.NetReadHudState(slot, hudTxLevels[count], out int combo, out byte activeType, out float progress);
+                hudTxSlots[count] = (byte)slot;
+                hudTxCombos[count] = combo;
+                hudTxTypes[count] = activeType;
+                hudTxProgress[count] = progress;
+                count++;
+            }
+            if (count == 0)
+            {
+                return;
+            }
+            transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxTypes, hudTxProgress, hudTxLevels, count));
+            metrics.HudTx++;
+        }
+
+        private static void HandleHudState(byte[] data)
+        {
+            if (score == null || !NetProtocol.TryDecodeHudCount(data, out int count))
+            {
+                return;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, out byte slot, out int combo, out byte activeType, out float progress))
+                {
+                    continue;
+                }
+                // slot is a raw wire byte, so bound it against the SCORE PANELS (4) -- the same
+                // rule and reasoning as ApplyRemotePowerup. A peer claiming a slot we own is
+                // ignored rather than trusted: our own simulation is authoritative for it, and
+                // adopting it would let a confused or hostile peer rewrite our HUD.
+                if (slot >= ScoreVisualiser.SlotCount || OwnsSlot(slot))
+                {
+                    continue;
+                }
+                score.NetSetHudState(slot, combo, activeType, progress, hudRxLevels);
+                metrics.HudRx++;
+            }
+        }
+
         // A ship THIS peer simulates: its owner reads real input (or runs the local AI) and
         // decides its own motion, hits and pickups. The inverse is a network-driven puppet.
         // With ?aiplayer the controller stays Keyboard/pad and only the Update branch is
@@ -706,6 +796,27 @@ namespace EvilAliensWeb.Compat.Net
         private static bool IsLocallyOwned(PlayerShip s)
         {
             return s.Controller != ControlDevice.Remote && s.Controller != ControlDevice.RemoteFriend;
+        }
+
+        // The same question asked of a ROSTER SLOT rather than a live ship (card 1a3ad45a):
+        // does this peer simulate what happens in that seat? Asked of the seat, not the ship,
+        // because a slot's combo and powerup levels outlive its ship -- they persist across a
+        // death and respawn, and the gate must not flip while the player is waiting to come back.
+        //
+        // OFFLINE THIS IS TRUE FOR EVERY SLOT, which is what keeps single-player and local co-op
+        // byte-identical: with no session there is nobody else to own anything.
+        public static bool OwnsSlot(int slot)
+        {
+            if (!Active)
+            {
+                return true;
+            }
+            if (oracle == null || !oracle.IsSeated(slot))
+            {
+                return false;
+            }
+            ControlDevice d = oracle.Controller(slot);
+            return d != ControlDevice.Remote && d != ControlDevice.RemoteFriend;
         }
 
         // The ship carried by the primary MsgShipState stream: the one in our granted primary
@@ -1212,6 +1323,9 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 case NetProtocol.MsgFriendState:
                     HandleFriendState(data);
+                    break;
+                case NetProtocol.MsgHudState:
+                    HandleHudState(data);
                     break;
                 case NetProtocol.MsgEvent:
                     HandleEvent(data);

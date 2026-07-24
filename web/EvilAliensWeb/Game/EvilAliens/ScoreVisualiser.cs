@@ -253,14 +253,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 				slot = i;
 			}
 		}
-		PlayerShip playerShip = null;
-		foreach (PlayerShip ship in oracle.GetShips())
-		{
-			if (ship.Owner == slot)
-			{
-				playerShip = ship;
-			}
-		}
+		PlayerShip playerShip = FindShip(slot);
 		if (playerShip != null)
 		{
 			playerShip.PowerUp(type, newLevel, doEffect: true);
@@ -364,12 +357,136 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 	}
 
+	// Online co-op (card 1a3ad45a): the combo counter is a purely LOCAL simulation of every
+	// slot, including slots this peer does not own -- a remote ship's shots are re-fired here
+	// through the real FireAt path, so they are ordinary local Bullets stamped with that slot's
+	// owner and Bullet.CollidesWith sustains its combo. On a client those bullets hit frozen
+	// puppets interpolated ~100ms behind the host's real entities, so the two sims diverge.
+	//
+	// The counter itself diverging is cosmetic. Feeding AddExp with it is NOT: since card
+	// 4717d3cf sets powerupactive for a remote collector, this branch levels up powerups for a
+	// slot we do not own, and ScoreVisualiser_onLevelUp then calls PlayerShip.PowerUp on the
+	// PUPPET -- which for OneUp is Oracle.SetSlowmotion(12f), i.e. twelve seconds of global slow
+	// motion fired unilaterally on one peer off an invented combo (and for Option/FirePower/Range
+	// a puppet whose weapon no longer matches its owner's real ship).
+	//
+	// So progression is the OWNER's alone; the owner's real levels arrive over MsgHudState
+	// instead (NetSetHudState). OwnsSlot is true offline and for our own slots, so single-player
+	// and local co-op are unchanged.
+	// Online co-op (card 1a3ad45a), SEND side: the per-slot HUD state this peer owns and is
+	// therefore authoritative for. `levels` is filled for the leading NetProtocol.HudLevelCount
+	// powerup types (OneUp's level never moves, so it is not on the wire).
+	internal void NetReadHudState(int player, int[] levels, out int combo, out byte activeType, out float progress)
+	{
+		combo = 0;
+		activeType = EvilAliensWeb.Compat.Net.NetProtocol.HudPowerupNone;
+		progress = 0f;
+		if (player < 0 || player >= scores.Count)
+		{
+			return;
+		}
+		ScoreInfo info = scores[player];
+		combo = info.combo;
+		if (info.powerupactive)
+		{
+			activeType = (byte)info.powerup;
+			progress = info.powerupDatas[info.powerup].GetProgress();
+		}
+		for (int t = 0; t < levels.Length && t < EvilAliensWeb.Compat.Net.NetProtocol.HudLevelCount; t++)
+		{
+			levels[t] = info.powerupDatas[(Powerup.PowerupType)t].GetLevel();
+		}
+	}
+
+	// Online co-op (card 1a3ad45a), RECEIVE side: adopt the owner's HUD state for a slot this
+	// peer does NOT own (NetSession gates the call), replacing the local simulation increasecombo
+	// no longer runs for it.
+	//
+	// The combo is DISPLAY-ONLY here: it cannot reach AddExp (increasecombo's gate) and the score
+	// is already reconciled by EvScoreSync plus the unsettled ledger (card b0ab09ec), so it never
+	// re-derives an award on this side.
+	internal void NetSetHudState(int player, int combo, byte activeType, float progress, int[] levels)
+	{
+		if (player < 0 || player >= scores.Count || levels == null)
+		{
+			return;
+		}
+		ScoreInfo info = scores[player];
+		info.combo = combo;
+		bool active = activeType != EvilAliensWeb.Compat.Net.NetProtocol.HudPowerupNone && activeType <= (byte)Powerup.PowerupType.OneUp;
+		if (active)
+		{
+			// SetPowerup restarts the panel's fade, so only touch it on a real change -- at the
+			// ~10Hz HUD cadence an unconditional call would hold the bar permanently fading in.
+			Powerup.PowerupType type = (Powerup.PowerupType)activeType;
+			if (!info.powerupactive || info.powerup != type)
+			{
+				SetPowerup(type, player);
+			}
+			info.powerupDatas[type].NetSetProgress(progress);
+		}
+		else if (info.powerupactive)
+		{
+			RemovePowerup(player);
+		}
+		for (int t = 0; t < levels.Length && t < EvilAliensWeb.Compat.Net.NetProtocol.HudLevelCount; t++)
+		{
+			NetSetPowerupLevel(player, (Powerup.PowerupType)t, levels[t]);
+		}
+	}
+
+	// Raise one slot's powerup level to the owner's, one step at a time through the SAME
+	// PlayerShip.PowerUp path a local level-up takes -- so the puppet's re-fired bullets get the
+	// owner's real asploding/bouncing/splitting loadout and its Option ships actually spawn.
+	// doEffect is false: the pickup sparkle belongs to the owner's screen, not to a catch-up.
+	//
+	// OneUp is unreachable here (it is past HudLevelCount) and must stay that way: its PowerUp
+	// case is Oracle.SetSlowmotion, a whole-sim time scale that is deliberately local -- the
+	// puppet driver dead-reckons on real time precisely so one peer's time scaling cannot poison
+	// replication. A DOWN step (a reset the peers reached at different moments) only snaps the
+	// readout; PowerUp's fields are MathHelper.Max accumulations and cannot be walked back.
+	private void NetSetPowerupLevel(int player, Powerup.PowerupType type, int level)
+	{
+		level = Math.Clamp(level, 0, 4);
+		PowerupData data = scores[player].powerupDatas[type];
+		if (level < data.GetLevel())
+		{
+			data.NetSetLevel(level);
+			return;
+		}
+		while (data.GetLevel() < level)
+		{
+			data.NetSetLevel(data.GetLevel() + 1);
+			FindShip(player)?.PowerUp(type, data.GetLevel(), doEffect: false);
+		}
+	}
+
+	// `oracle` is bound in Initialize, which only runs once this component is added to the bin --
+	// i.e. inside a GameScene. The HUD-state path (card 1a3ad45a) can be reached before that
+	// (eaNetCombo.test from the main menu, and a wire packet that outruns the scene), so the null
+	// is real: no ship exists to power up yet, and the level still lands on the panel.
+	private PlayerShip FindShip(int slot)
+	{
+		if (oracle == null)
+		{
+			return null;
+		}
+		foreach (PlayerShip ship in oracle.GetShips())
+		{
+			if (ship.Owner == slot)
+			{
+				return ship;
+			}
+		}
+		return null;
+	}
+
 	private void increasecombo(int player)
 	{
 		if (combosenabled)
 		{
 			scores[player].AddCombo();
-			if (scores[player].powerupactive)
+			if (scores[player].powerupactive && EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(player))
 			{
 				scores[player].powerupDatas[scores[player].powerup].AddExp(scores[player].combo);
 				checkPowerupAchievement(player);

@@ -926,15 +926,17 @@ namespace EvilAliensWeb.Compat
 		// ?netloss=<0-100> drops STREAM-lane packets only (the reliable lane is never dropped
 		// or reordered -- that contract is what everything above INetTransport assumes).
 		// 0/0 = the wrapper's inline pass-through, so an unimpaired net session behaves exactly
-		// as it did before. All three are live-settable from the eaNetSim panel.
+		// as it did before. All three are live-settable from the eaNetSim panel (opt-in: ?netsim
+		// on top of the ?net= boot, or eaNetSim.show() from the console) -- these two flags do
+		// not need it.
 		public static float NetLagMs { get; private set; }
 
 		public static float NetLossPct { get; private set; }
 
-		// Jitter is deliberately PANEL-ONLY (no URL flag): +/- this many ms on each stream
-		// packet's release, which is the only way the stream lane ever actually REORDERS and so
-		// the only way ordViol/seqGap tolerance gets tested. The reliable lane's releases are
-		// clamped monotone, so jitter can never reorder it.
+		// Jitter is deliberately PANEL-ONLY (no URL flag, so reaching it means ?netsim): +/- this
+		// many ms on each stream packet's release, which is the only way the stream lane ever
+		// actually REORDERS and so the only way ordViol/seqGap tolerance gets tested. The
+		// reliable lane's releases are clamped monotone, so jitter can never reorder it.
 		public static float NetJitterMs { get; private set; }
 
 		// Runtime setter for the live impairment panel (Compat/DebugInput.SetNetSim ->

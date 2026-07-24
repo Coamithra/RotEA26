@@ -122,9 +122,9 @@ generate much of the art/audio referenced here.
   (`?harness=spiderjump`/`?level=Level2&spiders`/`?spidertune`), `eaHolo`
   (`?level=Tutorial`/`ClassicAliens`/`?holotune`), `eaConnector`
   (`?level=TeamChallenge`/`?harness=connector`/`?connectortune`), `eaWcTune` (`?wctune`),
-  `eaTexViewer` (`?texviewer`), `eaNetSim` (any `?net=` boot). GOTCHA: range inputs need
-  `autocomplete='off'` or Chrome's form restoration re-seeds them post-load and desyncs from the
-  defaults.
+  `eaTexViewer` (`?texviewer`), `eaNetSim` (`?netsim` on a `?net=` boot, or `eaNetSim.show()`
+  from the console). GOTCHA: range inputs need `autocomplete='off'` or Chrome's form restoration
+  re-seeds them post-load and desyncs from the defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
@@ -632,7 +632,8 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
   a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
   `?signal=ws://localhost:8091/ws`). Card 40334a8f adds `?netlag=<ms>` / `?netloss=<0-100>`
-  (impair INBOUND traffic -- see the impairment bullet below). `?netfakehash=<s>` (card
+  (impair INBOUND traffic -- see the impairment bullet below) and `?netsim` (show the live
+  impairment panel; the knobs work without it). `?netfakehash=<s>` (card
   4717d3cf) overrides THIS tab's build-hash fingerprint so two dev tabs disagree, driving the
   real `peerHash`-mismatch -> reject flow (`RejectBuild` -> "update required") on the
   BroadcastChannel rig -- otherwise both tabs read `'dev'` and never mismatch (the two-tab
@@ -674,7 +675,11 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
     must not be able to desync a co-op session.
   - Flags `?netlag=<ms>` (0-500) / `?netloss=<0-100>`; **jitter is panel-only** (no URL flag) --
     it is the knob that actually makes the stream lane REORDER. Live panel `eaNetSim` (built
-    outside `#app`, only on a `?net` boot) + console `eaNetSim(lag, loss, jitter)`.
+    outside `#app`), **opt-in via `?netsim`** on top of the `?net` boot -- it sits over a co-op
+    session you are usually trying to watch, and most `?net=` boots never impair anything. A bare
+    `?net=` boot still defines the console entry points `eaNetSim(lag, loss, jitter)` /
+    `eaNetSim.test(...)` / `eaNetSim.show()`+`.hide()` (summon the panel with no reload), and
+    `?netlag=`/`?netloss=` are parsed C#-side in `DebugFlags`, so they impair panel or no panel.
   - **`?netloss=100` starves the ship stream so the 3s peer timeout fires while the handshake
     stays alive on the reliable lane -- that is a simulated silent disconnect, not a bug.**
   - The `[net]` line gains `impLag/impLoss/impJit/impDrop/impHeld` ONLY while impairment is on,

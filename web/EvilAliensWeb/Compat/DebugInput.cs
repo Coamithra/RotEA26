@@ -381,11 +381,12 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// JS bridge for the live network-impairment panel (eaNetSim in wwwroot/index.html, shown
-		// on any ?net boot): DotNet.invokeMethod('EvilAliensWeb', 'debugSetNetSim', lagMs,
-		// lossPct, jitterMs). Overrides the artificial impairment applied to INBOUND net traffic
-		// in real time -- same effect as ?netlag=/?netloss=, just live, plus jitter which has no
-		// URL flag (panel-only by design: it is the knob that makes the stream lane actually
-		// REORDER, so it belongs next to the other two rather than in a boot URL).
+		// on a ?net boot that also passes ?netsim, or via eaNetSim.show()/eaNetSim(...) from the
+		// console): DotNet.invokeMethod('EvilAliensWeb', 'debugSetNetSim', lagMs, lossPct,
+		// jitterMs). Overrides the artificial impairment applied to INBOUND net traffic in real
+		// time -- same effect as ?netlag=/?netloss=, just live, plus jitter which has no URL flag
+		// (panel-only by design: it is the knob that makes the stream lane actually REORDER, so
+		// it belongs next to the other two rather than in a boot URL).
 		[JSInvokable("debugSetNetSim")]
 		public static void SetNetSim(double lagMs, double lossPct, double jitterMs)
 		{

@@ -842,6 +842,15 @@ namespace EvilAliensWeb.Compat
 			SpiderPhase = phase;
 		}
 
+		// ?bgfreeze=<designX> STOPS every background/foreground layer scrolling and parks a tile
+		// BOUNDARY of each one at design column <designX>. The Mars/alien-base layers scroll at six
+		// different speeds (0.3 / 0.33 / 0.53 / 0.85 / 1.0 / 2.5), so a live screenshot of a tiling
+		// artifact can never be reproduced and a before/after pair is meaningless -- the seam has
+		// moved. Frozen, every layer's seam stacks in one screen column and the shots are directly
+		// comparable. Built for the pad-bleed seams (Trello 4ddcd13f); reach for it for any tiling,
+		// wrap-period or parallax-alignment question. null => normal scrolling.
+		public static float? BgFreeze { get; private set; }
+
 		// Online co-op (Stage 11, plans/stage11-online-coop.md). ?net=host / ?net=join opts a
 		// session into the co-op net layer (Compat/Net/NetSession); no ?net flag = None = the
 		// net layer is never constructed, so a plain boot is byte-identical single-player (the
@@ -1669,6 +1678,11 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spph))
 					{
 						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
+					break;
+				case "bgfreeze":
+					// A bare ?bgfreeze freezes with the boundaries at design x=400 (mid-screen).
+					BgFreeze = float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf)
+						? bgf : 400f;
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness

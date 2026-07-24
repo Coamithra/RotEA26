@@ -17,6 +17,9 @@ a cold multi-megapixel PNG is a multi-hundred-ms to multi-second frame hitch):
           back (see TextureDims.cs) and every consumer uses the LOGICAL size for
           pixel-space math + clamps whole-texture draws to it, so the pad is never
           sampled and nothing shifts. cols/rows are no longer needed for the build.
+          The first GUTTER px of the pad are NOT transparent -- they replicate the
+          logical edge, because a clamped source rect does not stop bilinear from
+          reaching one texel past it (see edge_gutter).
 
   raw  -> <name>.rtex  Uncompressed straight-alpha RGBA8 with a 16-byte header.
           Lossless, large on disk, zero decode, NO dimension constraint. For sheets
@@ -62,11 +65,47 @@ RTEX_FMT_RGBA8 = 0  # straight (non-premultiplied) alpha, matching the unpacked 
 # ("logical") size is stamped into the DDS header's unused reserved1 dwords; WebContentManager
 # reads it back and every consumer (frame slicing, source rects, whole-texture draws) uses the
 # LOGICAL size, so the padded strip is never sampled and nothing shifts. See TextureDims.cs.
+# The one exception is the GUTTER-px edge replication in edge_gutter(): bilinear reaches a texel
+# past even a correctly clamped source rect, so that texel must mirror the edge, not be transparent.
 DDS_LOGICAL_MAGIC = b"LOGD"   # written at reserved1[2] to flag that reserved1[0..1] carry (w,h)
 
 
 def pad4(x):
     return ((x + 3) // 4) * 4
+
+
+# How far the logical edge is replicated into the pad (see edge_gutter). One 4x4 BC3 block is
+# both necessary and sufficient: bilinear can only ever reach ONE texel past the source rect, and
+# a full block keeps that texel out of any block that also holds transparent pad.
+GUTTER = 4
+
+
+def edge_gutter(canvas, w, h, tw, th):
+    """Replicate the logical edge into the first GUTTER px of the transparent pad.
+
+    Draw sites clamp their source rect to the LOGICAL bounds, but SamplerState.LinearClamp only
+    clamps at the TEXTURE border -- so a destination pixel landing in the last half texel blends
+    the last content texel with texel [w] / row [h]. While the pad was transparent black that cost
+    the tile's final ~1px up to 50% of its RGB and alpha: a visible seam at every tile boundary
+    (dark on the opaque Mars sky, bright where the marshills silhouettes sit over it). Copying the
+    edge outward makes the filtered result identical to a true clamp, so the seam cannot exist at
+    any pad size.
+
+    Only GUTTER px are filled -- the rest of the pad stays transparent so the --padtest canary
+    (Trello f2621e52) still shows an obvious hole for code that uses the padded size by mistake.
+    """
+    gw = min(GUTTER, tw - w)          # 0 when the width already was a multiple of 4
+    gh = min(GUTTER, th - h)
+    if gw:
+        col = canvas.crop((w - 1, 0, w, h))
+        for x in range(w, w + gw):
+            canvas.paste(col, (x, 0))
+    if gh:
+        row = canvas.crop((0, h - 1, w, h))
+        for y in range(h, h + gh):
+            canvas.paste(row, (0, y))
+    if gw and gh:                     # corner: the one texel diagonally past the logical edge
+        canvas.paste(canvas.crop((w - 1, h - 1, w, h)).resize((gw, gh)), (w, h))
 
 
 def poke_dds_logical(path, w, h):
@@ -132,6 +171,7 @@ def build_dxt(asset, dry, pad_extra=0):
     tmp = os.path.join(SCRATCH, base + ".png")
     canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
     canvas.paste(im, (0, 0))                              # pad bottom/right, transparent
+    edge_gutter(canvas, w, h, tw, th)                     # ...except the first GUTTER px
     canvas.save(tmp)
     r = subprocess.run([TEXCONV, "-nologo", "-y", "-m", "1", "-f", "BC3_UNORM",
                         "-o", os.path.dirname(png), tmp],

@@ -32,8 +32,10 @@ namespace EvilAliensWeb.Compat.Net
     // LoseLife branch, EvPause freezes the peer's world without a menu); the TeamChallenge
     // tether becomes a local soft pull with an or-of-either break event.
     //
-    // Remaining gaps (by design, card 11.5): TURN relay for restrictive NATs;
-    // reconnect/grace instead of instant match end; the roster is exactly two peers.
+    // Card 11.5 adds the drop grace (a stall banner + a deferred verdict instead of an
+    // instant match end) and the single EndMatchPeerGone path behind every way a peer can
+    // go. Remaining gaps (by design): TURN relay for restrictive NATs, which is gated on a
+    // real-world connect-failure rate; the roster is exactly two peers.
     // Card 11.4 adds the REAL TRANSPORT + lobby flow: WebRtcTransport behind the same
     // interface (menu lobby via NetLobby, or ?net=...&rtc for the URL dev rig), a v4
     // handshake carrying a build hash (peers must run the identical published binary --
@@ -93,10 +95,6 @@ namespace EvilAliensWeb.Compat.Net
         public static bool Active { get; private set; }
         public static bool PeerUp { get; private set; }
 
-        // Peer stream quiet past PeerStallMs but not yet past the drop verdict -- the grace
-        // window. Drives the "waiting for other player" banner; never freezes the world.
-        public static bool PeerStalled { get; private set; }
-
         public static bool IsHost => Active && isHost;
         public static bool IsClient => Active && !isHost;
 
@@ -117,6 +115,13 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         internal static Game SessionGame => game;
+
+        // Peer stream quiet past PeerStallMs but not yet past the drop verdict -- the grace
+        // window. Drives the "waiting for other player" banner and parks puppet dead-reckoning
+        // (NetPuppets.Drive); never freezes the world.
+        internal static bool PeerStalled => peerStalled;
+
+        private static bool peerStalled;
 
         private static bool isHost;
         private static Game game;
@@ -475,7 +480,7 @@ namespace EvilAliensWeb.Compat.Net
                     // instead of ending the run. A PAUSED peer is an explicit "here but
                     // frozen" state whose own overlay already says so -- no stall banner on
                     // top of it, and its much wider backstop still applies.
-                    SetPeerStalled(!paused && quiet > PeerStallMs);
+                    SetPeerStalled(!paused && quiet > PeerStallMs, recovered: quiet <= PeerStallMs);
                     if (now - lastStreamTx >= StreamIntervalMs)
                     {
                         SendShipState(now);
@@ -805,11 +810,18 @@ namespace EvilAliensWeb.Compat.Net
         // a settle branch for its own pickup (its entity is gone before the echo arrives).
         internal static void ApplyRemotePowerup(Powerup powerup, byte slot)
         {
-            if (slot == NetProtocol.KillerNone || slot >= 8)
+            // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
+            // slot is a raw wire byte, so a corrupt or mismatched peer must not index past
+            // ScoreVisualiser's fixed 4-slot list.
+            if (slot == NetProtocol.KillerNone || slot >= ScoreVisualiser.SlotCount)
             {
                 return;
             }
             score.SetPowerup(powerup.type, slot);
+            // Only the powerup INDICATOR is mirrored. The local path also does AddBomb for
+            // PowerupType.Blast, deliberately not mirrored here: the spend side (NetDoBlast)
+            // does not decrement bombs on the remote either, so replicating the increment
+            // alone would make the other player's bomb icons pile up and never clear.
             sound.PlayCue("powerup"); // local co-op plays it for either collector too
             if (DebugFlags.NetLog)
             {
@@ -1192,7 +1204,7 @@ namespace EvilAliensWeb.Compat.Net
         // a normal victory/game-over wind-down passes none (it is not a walk-out).
         private static void EndMatchPeerGone(string reason, string notice)
         {
-            ClearPeerStalled();
+            // (the banner is dropped by Stop() below, which every path here goes through)
             GameScene scene = GameScene.NetActiveScene;
             bool normalEnd = scene != null && scene.NetEndingNormally;
             Stop(reason, normalEnd ? null : notice);
@@ -1203,27 +1215,35 @@ namespace EvilAliensWeb.Compat.Net
         // peer did NOT recover and saying so would be a lie.
         private static void ClearPeerStalled()
         {
-            if (!PeerStalled)
+            if (!peerStalled)
             {
                 return;
             }
-            PeerStalled = false;
+            peerStalled = false;
             GameScene.NetActiveScene?.NetSetPeerStalled(false);
         }
 
-        private static void SetPeerStalled(bool on)
+        // `recovered` distinguishes the two ways the banner drops: the stream actually came
+        // back, versus the peer announcing a pause (which suppresses the banner but leaves
+        // the stream just as quiet -- lastRxStreamAt is only refreshed by ship state and
+        // snapshots, never by an event). Claiming a recovery in the second case would be a
+        // lie, and a backgrounded tab bursting out a late EvPause hits it routinely.
+        private static void SetPeerStalled(bool on, bool recovered)
         {
-            if (on == PeerStalled)
+            if (on == peerStalled)
             {
                 return;
             }
             if (!on)
             {
                 ClearPeerStalled();
-                Console.WriteLine("[net] peer recovered");
+                if (recovered)
+                {
+                    Console.WriteLine("[net] peer recovered");
+                }
                 return;
             }
-            PeerStalled = true;
+            peerStalled = true;
             Console.WriteLine("[net] peer stalled (stream quiet > " + PeerStallMs + "ms) -- grace running");
             GameScene.NetActiveScene?.NetSetPeerStalled(true);
         }

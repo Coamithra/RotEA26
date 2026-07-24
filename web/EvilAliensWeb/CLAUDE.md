@@ -495,7 +495,10 @@ card 11.2 (host world authority: client enemy puppets, world snapshots, generous
 score sync), card 11.3 (level-script beat replication, host-broadcast reset/victory,
 replicated pause, TeamChallenge soft tether) and card 11.4 (real WebRTC transport, room-code
 signaling on the shared VPS, menu-driven Host/Join lobby, build-hash handshake, match-end
-semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX polish).
+semantics). Card 11.5 adds the hardening pass: powerup pickups replicate to the collector's HUD
+slot, ONE match-end path, a drop-verdict grace window with a waiting-for-peer banner,
+and the WebcamAliens net-lobby refusal explains itself. Remaining: the TURN go/no-go and
+interpolation feel, both gated on real-network playtests.
 
 - **Flags:** `?net=host` / `?net=join` opt a session in (in `Active`); `?room=<name>` picks
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
@@ -555,7 +558,7 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   - Flags `?netlag=<ms>` (0-500) / `?netloss=<0-100>`; **jitter is panel-only** (no URL flag) --
     it is the knob that actually makes the stream lane REORDER. Live panel `eaNetSim` (built
     outside `#app`, only on a `?net` boot) + console `eaNetSim(lag, loss, jitter)`.
-  - **`?netloss=100` starves the ship stream so the 3s peer timeout fires while the handshake
+  - **`?netloss=100` starves the ship stream so the stall banner raises and, ~8s later, the peer-drop verdict fires while the handshake
     stays alive on the reliable lane -- that is a simulated silent disconnect, not a bug.**
   - The `[net]` line gains `impLag/impLoss/impJit/impDrop/impHeld` ONLY while impairment is on,
     so a deliberately degraded log can never be mistaken for a genuinely broken one.
@@ -579,7 +582,7 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   `MenuScene.NetUpdate` on the game tick; `NetStatusMenu` = the re-textable
   ConfirmationMenu panel). On connect the HOST picks level+difficulty through the NORMAL
   select screens (netPickMenu -> the shared selectors; their OnExit reroutes in net mode;
-  WebcamAliens selection no-ops) and `EvLaunch` mirrors the launch on the client
+  WebcamAliens selection is refused, and the carousel swaps its briefing for the reason) and `EvLaunch` mirrors the launch on the client
   (`MenuScene.NetLaunchMirror` -- same fade/warm path, difficulty locked, starter
   Keyboard). Turbo is forced to 100 while a session is Active (`Game1.Update`).
 - **v4 handshake + match-end (card 11.4):** hello/welcome carry an 8-byte build hash
@@ -615,7 +618,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   role replies Welcome). Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
-  Peer loss = JS `pagehide` bye OR a 3s stream timeout; the ship stream doubles as the
+  Peer loss = JS `pagehide` bye OR a stream timeout (PeerTimeoutMs 3s + PeerGraceMs 5s of
+  continuous silence; past PeerStallMs 1.2s a non-freezing "waiting for other player"
+  banner goes up, so a hiccup or a backgrounded tab recovers instead of ending the run);
+  the ship stream doubles as the
   heartbeat (sent even with no live ship, alive=false). **While either side holds a pause
   the timeout stretches to a 120s backstop** -- a paused tab is usually backgrounded AND
   the pause muffle ducks its audio, which revokes Chrome's audio exemption from intensive
@@ -778,6 +784,31 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   cheat >= 2 to spawn any AI friend). The whole path is dormant unless the cheat is on.
   `ControlDevice.RemoteFriend` is APPEND-ONLY. (NOTE: the game-browser JIP attach path below is a
   separate session and does not stream friends -- its listing stays refused while `Friends>0`.)
+- **Hardening pass (card 4717d3cf / 11.5):**
+  - **A powerup collected by EITHER peer drives that peer's HUD slot.** `PlayerShip.CollidesWith`
+    is the only `SetPowerup` caller and is gated to the local ship, and each peer numbers its
+    OWN ship slot 0 -- so the icon used to move only on the P1 panel, and a remote pickup
+    settled as a bare despawn. Both settle paths (host `HandleClaim`, client
+    `NetPuppets.OnRemoteDeath`) now call `NetSession.ApplyRemotePowerup`. This also restores the
+    remote player's powerup LEVEL, since `ScoreVisualiser.increasecombo` only feeds `AddExp`
+    while that slot's `powerupactive` is set. Only the INDICATOR is mirrored -- the Blast/bomb
+    count deliberately is not, because the spend side (`NetDoBlast`) does not decrement it
+    either. A slot off the wire must be bounded by `ScoreVisualiser.SlotCount` (4), NOT the 8 of
+    the claim ledgers' PaidMask.
+  - **`AlienDrawableGameComponent.NetSpinPerMs` opts a type out of REPLICATED rotation** and
+    spins its puppets locally instead (Asteroid). A puppet's Update is frozen, so a
+    continuously spinning type could only advance at its ~16.7 Hz round-robin snapshot turn --
+    visibly choppy. Only override where rotation is cosmetic and no hitbox reads it.
+  - **Peer stall != peer lost.** `PeerStallMs` raises `NetWaitOverlay` (banner only -- it does
+    NOT push the collection, because the world staying live is the point and dimming a
+    playfield the player is still dodging in would be worse than the hiccup) and parks puppet
+    dead-reckoning (`NetSession.PeerStalled`; without that, the wider grace would let stale
+    velocities fling the enemy world seconds off and then snap). The verdict only lands at
+    `PeerTimeoutMs + PeerGraceMs`, through the single `EndMatchPeerGone` path shared by
+    EvLeave / drop timeout / pagehide bye. GOTCHA: `GameScene.Terminate` must drop the banner
+    BEFORE nulling `NetActiveScene` -- it is a plain `DrawableGameComponent` in the global bin
+    that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
+    both draw over the menus and poison the next play of that level.
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
   remote puppet lives (LoseLife triggers on AllShipsDead); roster is exactly two peers;
   DevCommentEvent commentary is not replicated (profile-local setting). Boss puppets are

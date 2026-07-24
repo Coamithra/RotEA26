@@ -1139,6 +1139,14 @@ internal abstract class GameScene : Scene
 
 	protected void Terminate(FinishedMode mode)
 	{
+		// Before NetActiveScene goes null (after that NetSession can no longer reach us) and
+		// before the purges, which only cover AlienDrawableGameComponent and friends -- the
+		// stall banner is a plain DrawableGameComponent in the GLOBAL bin, so nothing else
+		// would ever remove it. A level that ends while stalled would otherwise leave
+		// "WAITING FOR OTHER PLAYER" drawing over the credits and menus, and because level
+		// scenes are singletons that get re-added, the stale netPeerStalled would make the
+		// banner never appear again on the next play of that level.
+		NetSetPeerStalled(on: false);
 		if (NetActiveScene == this)
 		{
 			NetActiveScene = null;

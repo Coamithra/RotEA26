@@ -2206,7 +2206,7 @@
                 "<div class='out' id='ns-out' title='Click to copy'></div>" +
                 "<div class='hint'>Applies to INBOUND traffic only — the peer's link looks bad from " +
                 "here. The reliable lane is delayed but never dropped or reordered. Loss 100% starves " +
-                "the ship stream, so the 3s peer timeout fires: that is the simulated silent " +
+                "the ship stream, so the stall banner goes up after ~1.2s and the drop verdict lands ~8s in: that is the simulated silent " +
                 "disconnect, not a bug. Watch the 5s [net] line: extrap/pops/sgap should climb and " +
                 "settle back at 0/0.</div>";
             document.body.appendChild(el);

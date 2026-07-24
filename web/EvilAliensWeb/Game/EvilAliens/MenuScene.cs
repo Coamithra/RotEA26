@@ -150,7 +150,23 @@ internal class MenuScene : Scene
 
 	private bool browsingGames;
 
-	private bool netMode;
+	private bool netModeFlag;
+
+	// Property, not a bare field: the level carousel needs the same value to decide whether to
+	// explain the WebcamAliens refusal, and there are several assignment sites -- pushing it
+	// here is what keeps the refusal and its explanation from ever disagreeing.
+	private bool netMode
+	{
+		get => netModeFlag;
+		set
+		{
+			netModeFlag = value;
+			if (challengeSelector != null)
+			{
+				challengeSelector.NetMode = value;
+			}
+		}
+	}
 
 	private bool netStatusShown;
 

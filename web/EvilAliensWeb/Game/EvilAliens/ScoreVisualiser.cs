@@ -118,6 +118,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private int lives;
 
+	// Player score panels. Callers taking a slot from the wire must bound against this.
+	internal const int SlotCount = 4;
+
 	private List<ScoreInfo> scores = new List<ScoreInfo>();
 
 	private List<float> saved = new List<float>();
@@ -217,7 +220,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			comboStrings[i] = i + "x";
 		}
 		List<Powerup.PowerupType> enumValues = Game1.GetEnumValues<Powerup.PowerupType>();
-		for (int j = 0; j < 4; j++)
+		for (int j = 0; j < SlotCount; j++)
 		{
 			ScoreInfo scoreInfo = new ScoreInfo();
 			scoreInfo.score = 0f;

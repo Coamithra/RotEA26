@@ -248,6 +248,44 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
+		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's
+		// AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors (client).
+		// Asplode's only guard is !IsDead, so this bites through ?invuln and the post-respawn
+		// invulnerability window alike -- it is a scripted death, NOT a simulated hazard hit.
+		// Written for the two-tab co-op gate (card 9009a1c4): a death/reset is the
+		// standing-purge-filter window worth testing, it needs BOTH co-op ships down, and
+		// waiting for the ?aiplayer AI to die is neither timely nor repeatable.
+		// Remote/RemoteFriend puppets are skipped -- their owner decides their deaths, and
+		// asploding one here would fake a death the owning peer never sent.
+		[JSInvokable("debugKillShips")]
+		public static string KillShips()
+		{
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			// Collect BEFORE asploding: Asplode() adds two Explosions, and bin adds are instant
+			// (card 02d9ad67), so killing inside the enumeration would mutate Game.Components
+			// mid-foreach.
+			System.Collections.Generic.List<EvilAliens.PlayerShip> targets =
+				new System.Collections.Generic.List<EvilAliens.PlayerShip>();
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.PlayerShip ship
+					&& ship.Controller != EvilAliens.ControlDevice.Remote
+					&& ship.Controller != EvilAliens.ControlDevice.RemoteFriend)
+				{
+					targets.Add(ship);
+				}
+			}
+			foreach (EvilAliens.PlayerShip ship in targets)
+			{
+				ship.Asplode();
+			}
+			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
+		}
+
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
 		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull
@@ -315,20 +353,21 @@ namespace EvilAliensWeb.Compat
 
 		// JS bridge for the live wall-tower slider panel (eaWalls in wwwroot/index.html, shown on
 		// ?level=Level3&wallsonly / a bare ?walltune): DotNet.invokeMethod('EvilAliensWeb',
-		// 'debugSetWalls', towers, depth, fog, sideDark, faceLight, faceAngle, topLift, bands, wisps,
-		// wispSpeed). Overrides the Level-3 tower knobs in real time so the sliders retune without a
-		// page reload — same effect as the ?walltowers/?walldepth/?wallfog/?wallsidedark/
-		// ?wallfacelight/?wallfaceangle/?walltoplift/?wall3dbands/?wallwisps/?wallwispspeed URL flags,
-		// just live. (?wallfogcolor stays URL-only — a colour picker is a different widget and the
-		// haze reads fine off the two brightness knobs.)
+		// 'debugSetWalls', towers, depth, fog, sideDark, sideTile, faceLight, faceAngle, topLift,
+		// bands, wisps, wispSpeed). Overrides the Level-3 tower knobs in real time so the sliders
+		// retune without a page reload — same effect as the ?walltowers/?walldepth/?wallfog/
+		// ?wallsidedark/?wallsidetile/?wallfacelight/?wallfaceangle/?walltoplift/?wall3dbands/
+		// ?wallwisps/?wallwispspeed URL flags, just live. (?wallfogcolor stays URL-only — a colour
+		// picker is a different widget and the haze reads fine off the two brightness knobs.)
 		[JSInvokable("debugSetWalls")]
-		public static void SetWalls(bool towers, double depth, double fog, double sideDark, double faceLight, double faceAngle, double topLift, double bands, double wisps, double wispSpeed)
+		public static void SetWalls(bool towers, double depth, double fog, double sideDark, double sideTile, double faceLight, double faceAngle, double topLift, double bands, double wisps, double wispSpeed)
 		{
 			DebugFlags.SetWallsOverride(
 				towers,
 				(float)depth,
 				(float)fog,
 				(float)sideDark,
+				(float)sideTile,
 				(float)faceLight,
 				(float)faceAngle,
 				(float)topLift,

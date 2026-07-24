@@ -182,6 +182,15 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: asplode every locally-owned PlayerShip through the real death path, so the
+        // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
+        // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it
+        // bites through ?invuln, so leave the flag on and keep the rest of the run stable.
+        window.eaKillShips = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
+            catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
         // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
         // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>
@@ -246,24 +255,19 @@
         // Debug: live-set the Level-3 wall-tower knobs (the ?level=Level3&wallsonly tuner). Drives
         // Compat/DebugInput.SetWalls so the slider panel below (and the console) can retune the
         // tower extrusion without a page reload. Console:
-        // eaWalls(true, 0.66, 1, 1, 0.55, 1, 0, 0.35, 225, 0, 0.15, 0.8) — towers on, depth, slice step
-        // px, fog amount, side darkening, side scan, twist deg, face light, face angle deg, top lift,
-        // wisp alpha, wisp speed.
+        // eaWalls(true, 0.66, 0.55, 0.7, 4, 0.35, 140, 0, 4, 0.15, 0.8) — towers on, depth, fog
+        // amount, side darkening, side tiling, face light, face angle deg, top lift, dissolve bands,
+        // wisp alpha, wisp speed. The defaults below MIRROR the Wall.Default* consts (same
+        // duplication as the slider panel's seeds further down — re-bake a const, update both).
         // Same effect as the ?wall* URL flags, live. eaWalls(false) restores the flat look.
-        window.eaWalls = (towers, depth, sliceStep, fog, sideDark, sideScan, twist, faceLight, faceAngle, topLift, wisps, wispSpeed) => {
+        window.eaWalls = (towers, depth, fog, sideDark, sideTile, faceLight, faceAngle, topLift, bands, wisps, wispSpeed) => {
+            const or = (v, d) => (v === undefined || v === null || isNaN(Number(v))) ? d : Number(v);
             try {
                 DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
                     towers !== false,
-                    Number(depth) || 0.66, Number(sliceStep) || 1,
-                    fog === undefined ? 1 : Number(fog) || 0,
-                    Number(sideDark) || 0.55,
-                    sideScan === undefined ? 1 : Number(sideScan) || 0,
-                    Number(twist) || 0,
-                    faceLight === undefined ? 0.35 : Number(faceLight) || 0,
-                    faceAngle === undefined ? 225 : Number(faceAngle) || 0,
-                    Number(topLift) || 0,
-                    wisps === undefined ? 0.15 : Number(wisps) || 0,
-                    Number(wispSpeed) || 0.8);
+                    or(depth, 0.66), or(fog, 0.55), or(sideDark, 0.7), or(sideTile, 4),
+                    or(faceLight, 0.35), or(faceAngle, 140), or(topLift, 0),
+                    or(bands, 4), or(wisps, 0.15), or(wispSpeed, 0.8));
             }
             catch (e) { console.warn('[debug] eaWalls failed (game not booted yet?): ' + e.message); }
         };
@@ -1850,6 +1854,7 @@
                 depth: num("walldepth", 0.66),
                 fog: num("wallfog", 0.55),
                 side: num("wallsidedark", 0.7),
+                sidetile: num("wallsidetile", 4),
                 bands: num("wall3dbands", 4),
                 facelight: num("wallfacelight", 0.35),
                 faceangle: num("wallfaceangle", 140),
@@ -1865,7 +1870,7 @@
                 try
                 {
                     DotNet.invokeMethod('EvilAliensWeb', 'debugSetWalls',
-                        st.towers, st.depth, st.fog, st.side,
+                        st.towers, st.depth, st.fog, st.side, st.sidetile,
                         st.facelight, st.faceangle, st.lift, st.bands, st.wisps, st.wispspeed);
                     return true;
                 }
@@ -1906,6 +1911,8 @@
                 "<input type='range' id='ew-fog' min='0' max='1' step='0.02' autocomplete='off'></div>" +
                 "<div class='row'><label>Side darkening<span class='v' id='ew-vsd'></span></label>" +
                 "<input type='range' id='ew-side' min='0' max='1' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Side tiling (1 = true scale)<span class='v' id='ew-vst'></span></label>" +
+                "<input type='range' id='ew-sidetile' min='0.25' max='8' step='0.05' autocomplete='off'></div>" +
                 "<div class='row'><label>Dissolve bands<span class='v' id='ew-vb'></span></label>" +
                 "<input type='range' id='ew-bands' min='1' max='16' step='1' autocomplete='off'></div>" +
                 "<div class='row'><label>Face light (corners)<span class='v' id='ew-vfl'></span></label>" +
@@ -1926,13 +1933,14 @@
 
             var ewOn = el.querySelector("#ew-on"), ewDepth = el.querySelector("#ew-depth"),
                 ewFog = el.querySelector("#ew-fog"),
-                ewSide = el.querySelector("#ew-side"), ewBands = el.querySelector("#ew-bands"),
+                ewSide = el.querySelector("#ew-side"), ewSideTile = el.querySelector("#ew-sidetile"),
+                ewBands = el.querySelector("#ew-bands"),
                 ewFaceLight = el.querySelector("#ew-facelight"), ewFaceAngle = el.querySelector("#ew-faceangle"),
                 ewLift = el.querySelector("#ew-lift"), ewWisps = el.querySelector("#ew-wisps"),
                 ewWispSpeed = el.querySelector("#ew-wispspeed"), ewOut = el.querySelector("#ew-out"),
                 vd = el.querySelector("#ew-vd"),
                 vf = el.querySelector("#ew-vf"), vsd = el.querySelector("#ew-vsd"),
-                vb = el.querySelector("#ew-vb"),
+                vst = el.querySelector("#ew-vst"), vb = el.querySelector("#ew-vb"),
                 vfl = el.querySelector("#ew-vfl"), vfa = el.querySelector("#ew-vfa"),
                 vl = el.querySelector("#ew-vl"),
                 vw = el.querySelector("#ew-vw"), vws = el.querySelector("#ew-vws");
@@ -1941,18 +1949,19 @@
             {
                 ewOn.checked = st.towers;
                 ewDepth.value = st.depth; ewFog.value = st.fog;
-                ewSide.value = st.side; ewBands.value = st.bands;
+                ewSide.value = st.side; ewSideTile.value = st.sidetile; ewBands.value = st.bands;
                 ewFaceLight.value = st.facelight; ewFaceAngle.value = st.faceangle;
                 ewLift.value = st.lift;
                 ewWisps.value = st.wisps; ewWispSpeed.value = st.wispspeed;
                 vd.textContent = st.depth; vf.textContent = st.fog;
-                vsd.textContent = st.side; vb.textContent = st.bands;
+                vsd.textContent = st.side; vst.textContent = st.sidetile; vb.textContent = st.bands;
                 vfl.textContent = st.facelight; vfa.textContent = st.faceangle;
                 vl.textContent = st.lift;
                 vw.textContent = st.wisps; vws.textContent = st.wispspeed;
                 ewOut.textContent = st.towers
                     ? ("walldepth=" + st.depth + " wallfog=" + st.fog +
-                        " wallsidedark=" + st.side + " wall3dbands=" + st.bands +
+                        " wallsidedark=" + st.side + " wallsidetile=" + st.sidetile +
+                        " wall3dbands=" + st.bands +
                         " wallfacelight=" + st.facelight +
                         " wallfaceangle=" + st.faceangle + " walltoplift=" + st.lift +
                         " wallwisps=" + st.wisps + " wallwispspeed=" + st.wispspeed)
@@ -1965,6 +1974,7 @@
             ewDepth.addEventListener("input", function () { st.depth = +ewDepth.value; changed(); });
             ewFog.addEventListener("input", function () { st.fog = +ewFog.value; changed(); });
             ewSide.addEventListener("input", function () { st.side = +ewSide.value; changed(); });
+            ewSideTile.addEventListener("input", function () { st.sidetile = +ewSideTile.value; changed(); });
             ewBands.addEventListener("input", function () { st.bands = +ewBands.value; changed(); });
             ewFaceLight.addEventListener("input", function () { st.facelight = +ewFaceLight.value; changed(); });
             ewFaceAngle.addEventListener("input", function () { st.faceangle = +ewFaceAngle.value; changed(); });

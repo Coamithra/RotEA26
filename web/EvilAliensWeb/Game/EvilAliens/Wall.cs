@@ -123,16 +123,45 @@ internal class Wall : AlienDrawableGameComponent
 	// vertices would lie exactly ON the near plane and could clip out on float error.
 	private const float NearFrac = 0.9f;
 
-	// Vertical strips a side face is tessellated into. NOT a slice stack -- each band is a real
-	// textured quad, and the geometry would be exact at 1. The bands exist only to resolve the
-	// SMOOTHSTEP bottom dissolve, which is carried as per-vertex alpha and interpolated linearly
-	// between bands; at 1 the dissolve degrades to a straight linear fade. The fog needs no bands
-	// at all: it is linear in world z, so interpolating it is exact.
+	// How many DISSOLVE cuts a side face gets -- not the strip count, which is this plus one per
+	// cell crossing of the side tiling (~14 per face at the baked knobs; see AddFace). NOT a slice
+	// stack either: every strip is a real textured quad and the geometry would be exact at 1 cut.
+	// The cuts exist only to resolve the SMOOTHSTEP bottom dissolve, which is carried as per-vertex
+	// alpha and interpolated linearly between them; at 1 the dissolve degrades to a straight linear
+	// fade. The fog needs none at all: it is linear in world z, so interpolating it is exact.
 	private const int DefaultBands = 4;
+
+	// How densely the sheet tiles DOWN a shaft, as a multiple of the top face's own texel density.
+	// 1 would be the physically honest answer -- a side texel exactly the world size of a top-face
+	// one, i.e. the shaft's true height in block footprints (2.70 cells at the shipped numbers:
+	// level3.txt width=7 -> 114.3px blocks under a 309.1-unit shaft), versus the 1 flat cell the
+	// side used to stretch over however long the shaft was.
+	//
+	// Dialed to 4 on the panel because true scale still reads SHORT. The eye judges a tower's
+	// height by how many times the texture repeats down it, and these shafts are steeply
+	// foreshortened -- most of their length is compressed into the far few pixels -- so honest
+	// texel density spends its detail where none of it survives. Over-tiling puts repeats back in
+	// the near part, where they are actually legible, and the towers read as the big slabs they
+	// are. It costs nothing structurally: the sheet tiles, so any multiple is seamless.
+	internal const float DefaultSideTile = 4f;
+
+	// Ceiling on cells-down-a-shaft. The buffer sizing is derived from it, and the console
+	// (eaWalls(..., 1e6, ...)) reaches the same setter the slider does, so an absurd tiling must
+	// cost a squashed texture rather than a vertex buffer sized off a wild number. Far above any
+	// usable value; ?wallsidetile is separately bounded at parse.
+	private const float MaxSideTileCells = 64f;
 
 	private VertexPositionColorTexture[] towerVerts;
 
 	private int[] towerIndices;
+
+	// Where one side face is cut down the shaft (band boundaries + cell crossings), rebuilt per
+	// face. Grow-only like the vertex buffers -- it settles on the first frame.
+	private float[] faceSplits = new float[16];
+
+	// Two cuts closer than this (as a fraction of shaft height) are the same cut: a cell crossing
+	// that happens to land on a band boundary must not emit a zero-area strip.
+	private const float SplitEpsilon = 1e-4f;
 
 	// Visible blocks for the 3D pass, packed as i * width + j, painter-sorted each frame.
 	private readonly List<int> towerOrder = new List<int>();
@@ -1359,10 +1388,6 @@ internal class Wall : AlienDrawableGameComponent
 		towerOrder.Sort((a, b) => BlockVpDistanceSq(b, w, blockW, blockH, pos)
 			.CompareTo(BlockVpDistanceSq(a, w, blockW, blockH, pos)));
 
-		// Worst case is 2 visible faces per block (a block straddling the VP on an axis shows
-		// fewer), each tessellated into `bands` quads.
-		EnsureTowerBuffers(towerOrder.Count * 2 * bands);
-
 		// The shaft spans the cap (topD, above the plane when lifted) down to the ground (depth).
 		float zCap = ZAtDepth(topD);
 		float zBase = ZAtDepth(depth);
@@ -1373,6 +1398,23 @@ internal class Wall : AlienDrawableGameComponent
 		Vector4 face = FaceFactors(faceLight, faceAngle);
 		int cw = texture.LogicalWidth() / 8;
 		int ch = texture.LogicalHeight() / 8;
+
+		// CELLS OF SHEET SPENT DOWN THE SHAFT, per axis: the shaft's real world height measured in
+		// block footprints. That is what makes a side texel the same WORLD size as a top-face one --
+		// the shaft is a wall of the same material as the cap it hangs from, so it wants the same
+		// texture SCALE, not the same texture AREA squashed to fit however long the shaft is. World
+		// units ARE design px at the gameplay plane (the camera's frustum is +/-400 x +/-300 at
+		// z = 0), so this is a plain ratio with no unit conversion hiding in it. Read from the LIVE
+		// depth/lift knobs rather than baked, so ?walldepth / ?walltoplift stay consistent with it.
+		float sideTile = EvilAliensWeb.Compat.DebugFlags.WallSideTile ?? DefaultSideTile;
+		float shaftWorld = zBase - zCap;
+		float repU = MathHelper.Clamp(sideTile * shaftWorld / blockW, 0f, MaxSideTileCells);
+		float repV = MathHelper.Clamp(sideTile * shaftWorld / blockH, 0f, MaxSideTileCells);
+
+		// Worst case is 2 visible faces per block (a block straddling the VP on an axis shows
+		// fewer). A face is cut at every `bands` boundary AND at every cell crossing of the walk
+		// (see AddFace), so it can reach bands + ceil(repeats) quads.
+		EnsureTowerBuffers(towerOrder.Count * 2 * (bands + (int)Math.Ceiling(Math.Max(repU, repV)) + 1));
 
 		int nv = 0;
 		int quads = 0;
@@ -1389,11 +1431,13 @@ internal class Wall : AlienDrawableGameComponent
 			// would pull each face away from its neighbour's and re-open the seam it means to avoid.
 			// UV denominators are the ACTUAL (padded) texture size: cw/ch above are the logical
 			// content cell (content stays top-left), but these are GPU texcoords, so a content pixel
-			// x maps to UV x/paddedW. (No pad in ship — 756-v1 is mult-of-4 — but correct under pad.)
-			float u0 = (float)(j % 8 * cw) / (float)texture.Width;
-			float u1 = (float)((j % 8 + 1) * cw) / (float)texture.Width;
-			float v0 = (float)(i % 8 * ch) / (float)texture.Height;
-			float v1 = (float)((i % 8 + 1) * ch) / (float)texture.Height;
+			// x maps to UV x/paddedW.
+			int jc = j % 8;
+			int ic = i % 8;
+			float u0 = (float)(jc * cw) / (float)texture.Width;
+			float u1 = (float)((jc + 1) * cw) / (float)texture.Width;
+			float v0 = (float)(ic * ch) / (float)texture.Height;
+			float v1 = (float)((ic + 1) * ch) / (float)texture.Height;
 
 			// A wall is emitted only when it is BOTH an outer edge of the wall and turned toward
 			// the eye.
@@ -1416,20 +1460,33 @@ internal class Wall : AlienDrawableGameComponent
 			// instead of continuing it, hard-seaming every block boundary.
 			//
 			// DOWN the shaft: the wall hangs off one particular cell edge, so it has to START at
-			// that edge's coordinate and run away from it -- the sheet then folds over the top
-			// face's rim continuously instead of cutting to the far side of the cell. Hence the
-			// down range reverses between the west wall (u0 -> u1) and the east one (u1 -> u0).
+			// that edge and run AWAY FROM THE CELL, continuing the sheet past the rim. Both halves
+			// of that matter and neither is arbitrary.
 			//
-			// Every tower spans the same world z, so spending one whole cell down the shaft is
-			// uniform for every block, however long the shaft happens to look on screen.
+			// Starting at the hanging edge is what makes the sheet fold over the top face's rim
+			// continuously instead of cutting to the far side of the cell.
+			//
+			// Running away from the cell rather than back across it is what stops the shaft being
+			// a MIRROR of its own cap. Every shaft runs away from the VP on screen, and the UV
+			// direction that continues the top face's flow across the rim is the one leaving the
+			// cell -- so the down range is `edge -> edge -/+ repeats`, the sign flipping with which
+			// edge the wall hangs from (west leaves via u0 going down, east via u1 going up). Run
+			// it the other way and the cell is retraced backwards: the top face reflected about the
+			// rim, which is legible as a mirror precisely BECAUSE the sheet tiles and could just
+			// have carried on.
+			//
+			// How FAR it runs is repU/repV above -- the shaft's true height in block footprints,
+			// so a side texel is the same world size as a top-face texel. It is expressed in CELL
+			// units (1.0 == one cell, the sheet wrapping every 8) rather than as a UV, because it
+			// now crosses cells and AddFace has to walk that wrap itself.
 			if (x0 > VanishX && isfree(j - 1, i))
-				AddFace(ref nv, ref quads, x0, y0, x0, y1, v0, v1, u0, u1, alongIsX: false, bands, zCap, zBase, sideDark * face.W);
+				AddFace(ref nv, ref quads, x0, y0, x0, y1, v0, v1, jc, jc - repU, cw, texture.Width, alongIsX: false, bands, zCap, zBase, sideDark * face.W);
 			if (x1 < VanishX && isfree(j + 1, i))
-				AddFace(ref nv, ref quads, x1, y1, x1, y0, v1, v0, u1, u0, alongIsX: false, bands, zCap, zBase, sideDark * face.Z);
+				AddFace(ref nv, ref quads, x1, y1, x1, y0, v1, v0, jc + 1, jc + 1 + repU, cw, texture.Width, alongIsX: false, bands, zCap, zBase, sideDark * face.Z);
 			if (y0 > VanishY && isfree(j, i - 1))
-				AddFace(ref nv, ref quads, x1, y0, x0, y0, u1, u0, v0, v1, alongIsX: true, bands, zCap, zBase, sideDark * face.X);
+				AddFace(ref nv, ref quads, x1, y0, x0, y0, u1, u0, ic, ic - repV, ch, texture.Height, alongIsX: true, bands, zCap, zBase, sideDark * face.X);
 			if (y1 < VanishY && isfree(j, i + 1))
-				AddFace(ref nv, ref quads, x0, y1, x1, y1, u0, u1, v1, v0, alongIsX: true, bands, zCap, zBase, sideDark * face.Y);
+				AddFace(ref nv, ref quads, x0, y1, x1, y1, u0, u1, ic + 1, ic + 1 + repV, ch, texture.Height, alongIsX: true, bands, zCap, zBase, sideDark * face.Y);
 		}
 		if (quads == 0)
 		{
@@ -1533,26 +1590,78 @@ internal class Wall : AlienDrawableGameComponent
 	}
 
 	// One side face: the top edge (ax,ay)->(bx,by) swept from the cap (zCap) down to the ground
-	// (zBase), cut into `bands` vertical strips so the bottom dissolve survives as interpolated
-	// vertex alpha. `shade` is this wall's flat brightness (sideDark x its face factor) -- the haze
-	// is real fog now, applied by the effect, so the colour does not vary down the shaft.
-	// `alongA`/`alongB` are the along-edge texture coordinate at each end of the top edge;
-	// `down0`/`down1` are the down-the-shaft one at the cap and the base. `alongIsX` says which
-	// texture channel each belongs to -- see the UV note in DrawTowerShafts3D.
+	// (zBase), cut into vertical strips so the bottom dissolve survives as interpolated vertex
+	// alpha. `shade` is this wall's flat brightness (sideDark x its face factor) -- the haze is real
+	// fog now, applied by the effect, so the colour does not vary down the shaft. `alongA`/`alongB`
+	// are the along-edge texture coordinate at each end of the top edge, and `alongIsX` says which
+	// texture channel that is -- see the UV note in DrawTowerShafts3D.
+	//
+	// The DOWN-the-shaft coordinate arrives not as a UV pair but as a walk in CELL coordinates
+	// (`cCap` -> `cBase`; 1.0 == one cell of the 8x8 sheet, which wraps every 8), because it now
+	// spans SEVERAL cells and therefore has to wrap. It CANNOT be handed to the GPU as an
+	// out-of-range UV with a wrapping sampler: `.dds` textures are padded up to a mult-of-4 and the
+	// content keeps the top-left, so GPU wrap would wrap at the PADDED edge and run every shaft off
+	// into transparent pad (web CLAUDE.md's padded-vs-logical rule -- and the sheet is NPOT
+	// besides, which no backend owes REPEAT on). So the wrap is walked HERE, and every UV emitted
+	// lands inside the logical sheet: cut the face at each integer crossing of `c` on top of the
+	// `bands` cuts, then map each strip through the one cell it lies in. Adjacent cells are the
+	// correct continuation (the sheet is one seamlessly-tiling image), so a cut is invisible.
 	private void AddFace(ref int nv, ref int quads, float ax, float ay, float bx, float by,
-		float alongA, float alongB, float down0, float down1, bool alongIsX, int bands,
-		float zCap, float zBase, float shade)
+		float alongA, float alongB, float cCap, float cBase, int cellPx, int texSize,
+		bool alongIsX, int bands, float zCap, float zBase, float shade)
 	{
-		for (int k = 0; k < bands; k++)
+		// Where the face is cut. The `bands` boundaries carry the dissolve; every integer crossing
+		// of the cell walk is cut too, so no strip ever straddles the sheet's wrap and each one can
+		// be mapped whole into a single cell.
+		int n = 0;
+		EnsureSplitBuffer(bands + (int)Math.Abs(cBase - cCap) + 3);
+		for (int k = 0; k <= bands; k++)
 		{
-			float fTop = (float)k / (float)bands;
-			float fBot = (float)(k + 1) / (float)bands;
+			faceSplits[n++] = (float)k / (float)bands;
+		}
+		float lo = Math.Min(cCap, cBase);
+		float hi = Math.Max(cCap, cBase);
+		for (int m = (int)Math.Floor(lo) + 1; (float)m < hi; m++)
+		{
+			float f = ((float)m - cCap) / (cBase - cCap);
+			if (f > SplitEpsilon && f < 1f - SplitEpsilon)
+			{
+				faceSplits[n++] = f;
+			}
+		}
+		Array.Sort(faceSplits, 0, n);
+		// Compact away near-duplicates (a cell crossing landing on a band boundary) so no strip is
+		// degenerate, then snap the last one back to exactly 1 -- the face must reach the ground.
+		int splits = 1;
+		for (int s = 1; s < n; s++)
+		{
+			if (faceSplits[s] - faceSplits[splits - 1] >= SplitEpsilon)
+			{
+				faceSplits[splits++] = faceSplits[s];
+			}
+		}
+		faceSplits[splits - 1] = 1f;
+
+		float texel = (float)cellPx / (float)texSize;
+		for (int k = 1; k < splits; k++)
+		{
+			float fTop = faceSplits[k - 1];
+			float fBot = faceSplits[k];
 			float zTop = MathHelper.Lerp(zCap, zBase, fTop);
 			float zBot = MathHelper.Lerp(zCap, zBase, fBot);
 			Color cTop = new Color(new Vector4(shade, shade, shade, ShaftAlpha(fTop)));
 			Color cBot = new Color(new Vector4(shade, shade, shade, ShaftAlpha(fBot)));
-			float dTop = MathHelper.Lerp(down0, down1, fTop);
-			float dBot = MathHelper.Lerp(down0, down1, fBot);
+			// This strip's cell, taken from its MIDPOINT so a strip that starts or ends exactly ON
+			// a cell boundary still resolves to the cell it actually covers (a downward walk ends
+			// each strip at the boundary, an upward one starts there). The offset from that cell's
+			// origin then stays in [0,1], so the emitted UV always lands inside the LOGICAL sheet
+			// -- which is the whole reason the wrap is walked here instead of by the sampler.
+			float cA = MathHelper.Lerp(cCap, cBase, fTop);
+			float cB = MathHelper.Lerp(cCap, cBase, fBot);
+			float cellOrigin = (float)Math.Floor(0.5f * (cA + cB));
+			float cell = (float)((((int)cellOrigin % 8) + 8) % 8);
+			float dTop = (cell + (cA - cellOrigin)) * texel;
+			float dBot = (cell + (cB - cellOrigin)) * texel;
 			int b = nv;
 			towerVerts[nv++] = new VertexPositionColorTexture(new Vector3(ax, ay, zTop), cTop, FaceUv(alongA, dTop, alongIsX));
 			towerVerts[nv++] = new VertexPositionColorTexture(new Vector3(bx, by, zTop), cTop, FaceUv(alongB, dTop, alongIsX));
@@ -1583,6 +1692,14 @@ internal class Wall : AlienDrawableGameComponent
 		{
 			towerVerts = new VertexPositionColorTexture[maxQuads * 4];
 			towerIndices = new int[maxQuads * 6];
+		}
+	}
+
+	private void EnsureSplitBuffer(int count)
+	{
+		if (faceSplits.Length < count)
+		{
+			faceSplits = new float[Math.Max(count, faceSplits.Length * 2)];
 		}
 	}
 

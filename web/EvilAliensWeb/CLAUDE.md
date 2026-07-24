@@ -129,7 +129,8 @@ generate much of the art/audio referenced here.
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
-  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
+  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
+  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -215,8 +216,25 @@ site now lives under:
   added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
   `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
   the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
-- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds; `eaBinTest()` runs the
-  scripted scenario suite (`Compat/BinTest.cs`) against the live bin and prints PASS/FAIL.
+- **A pass that walks a live collection must FREEZE its count first.** Instant births mean any
+  callback that spawns (a kill's asteroid split / powerup drop, a wall-hit explosion) grows
+  `Game.Components` — and every mirror list fed by `ComponentAdded` — *while* the pass is
+  running. `CollisionHandler.DetectCollisions` sized its `boxes` list to a count taken at entry
+  but re-read `collidables.Count` in its later loops, so a mid-pass spawn indexed `boxes` out of
+  range (an intermittent `IndexOutOfRange` swallowed by the `tickJS` guard, i.e. a dropped
+  frame, not a visible crash) and could read a previous frame's cells; the inner all-pairs
+  `foreach` over the same live list was one spawn away from `InvalidOperationException`. Fixed
+  by running the whole pass over the entry-time `count` — a collidable born mid-pass joins the
+  NEXT pass, which is what the old deferred birthList did anyway. **Apply the same rule to any
+  new phase that indexes a parallel array by collection position.**
+- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds, and reports how many
+  passes `DetectCollisions` carried through a mid-pass collidable add (the condition above —
+  it fires in the hundreds during ordinary play, so it is a live proof the path is exercised,
+  not a warning); `eaBinTest()` runs the scripted scenario suite (`Compat/BinTest.cs`) against
+  the live bin and prints PASS/FAIL. `eaKillShips()` asplodes every locally-owned `PlayerShip`
+  through the real `Asplode()`→`Die()` path (remote/friend puppets skipped) — the repeatable
+  way to reach a death/reset, since `AllShipsDead` needs BOTH co-op ships down and waiting on
+  the `?aiplayer` AI to die is neither timely nor repeatable.
 
 ## Input
 
@@ -452,6 +470,24 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     axes** — along-edge must follow the axis the edge runs along, down-the-shaft must start at the
     cell edge the wall hangs from (reverses west vs east). NO half-texel inset (adjacent atlas
     cells are the correct continuation).
+  - **Down the shaft the sheet CONTINUES out of the block's cell — it must not run back across it**
+    (card 0f7fc977). Starting at the hanging edge is the rim-seam fix and stays; running *into* the
+    cell made every side face a mirror of its own cap, legible as a mirror precisely because the
+    sheet tiles and could have carried on. How far it runs is `?wallsidetile` × the shaft's true
+    height in block footprints (1 = a side texel the world size of a top-face one = 2.70 cells at
+    the shipped numbers; **baked at 4** — honest scale reads short because a steeply foreshortened
+    shaft buries most of its length in its far few pixels).
+  - **The wrap is walked on the CPU in `AddFace`, never by a wrapping sampler.** `.dds` are padded
+    to a mult-of-4 with content top-left, so GPU wrap would wrap at the PADDED edge and run every
+    shaft into transparent pad (and 756-v1 is NPOT besides). So the face is cut at every cell
+    crossing on top of the `bands` cuts and each strip maps through the one cell its midpoint falls
+    in — every emitted UV stays inside the logical sheet. Cost: ~4 → ~14 quads/face at the baked
+    tiling, one batched call unchanged, tower pass 0.73 → 1.29 ms.
+  - **756-v1 ships with NO mip chain**, so a high `?wallsidetile` minifies with bilinear and
+    nothing else, and the far end of a shaft aliases — weigh it on `preview_wall3d.py --ladder`
+    (one tower per tiling). That tool's `sample()` is bilinear CLAMP on purpose: it models
+    `DrawGeometry3D`'s `LinearClamp` exactly, so it neither invents a moire (point sampling would)
+    nor prettifies the sheet's own 8→0 wrap (wrapping would).
   - Lifetime: `Wall.DeathY` defers unload past the bottom edge (a base leads/trails its cap by
     ~154px, so dying at y>600 popped visible towers — this also delays the level's next event
     ~0.6s, intended); `Wall.EntryLead` spawns higher so towers enter base-first (bottom-row grids
@@ -465,7 +501,8 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     (additive `2331-v5`) tile by position, never a drifting source rect (null samplerState =
     LinearClamp — an out-of-bounds window clamps).
   - Flags: `?walltowers=0` (exact flat look) · `?walldepth= ?wallfog= ?wallfogcolor= ?wallsidedark=
-    ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps= ?wallwispspeed=` ·
+    ?wallsidetile= ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps=
+    ?wallwispspeed=` ·
     fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
     POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
     COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check
@@ -896,6 +933,15 @@ interpolation feel, both gated on real-network playtests.
   to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
+  Add `?binlog` to both when the run is about lifecycle (it is the detector for a purge filter
+  or pause freeze eating a puppet/banner). For a death/reset, KEEP `?invuln` on both and call
+  `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
+  through invulnerability, and leaving the flag on is what keeps the rest of the run from
+  dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
+  **`snapUnk` climbing is not by itself a leak:** the host keeps snapshotting an entity for a
+  turn or two while a client claim is in flight, and the client deliberately leaves that id
+  dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
+  rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their

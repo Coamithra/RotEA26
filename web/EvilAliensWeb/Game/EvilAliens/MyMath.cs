@@ -7,8 +7,8 @@ public static class MyMath
 {
 	public static float SnapAngle(float angle, int sensitivity)
 	{
-		float num = angle + (float)Math.PI * 2f / (float)(2 * sensitivity);
-		return num - Mod(num, (float)Math.PI * 2f / (float)sensitivity);
+		float biasedAngle = angle + (float)Math.PI * 2f / (float)(2 * sensitivity);
+		return biasedAngle - Mod(biasedAngle, (float)Math.PI * 2f / (float)sensitivity);
 	}
 
 	public static float DifferenceMod(float a, float b, float modulo)
@@ -22,9 +22,9 @@ public static class MyMath
 
 	public static float SnapAngle(Vector2 vector, int sensitivity)
 	{
-		float num = VectorToAngle(vector);
-		float num2 = num + (float)Math.PI * 2f / (float)(2 * sensitivity);
-		return num2 - Mod(num2, (float)Math.PI * 2f / (float)sensitivity);
+		float angle = VectorToAngle(vector);
+		float biasedAngle = angle + (float)Math.PI * 2f / (float)(2 * sensitivity);
+		return biasedAngle - Mod(biasedAngle, (float)Math.PI * 2f / (float)sensitivity);
 	}
 
 	public static float Sin(float a)
@@ -67,22 +67,22 @@ public static class MyMath
 
 	public static int Mod(int a, int b)
 	{
-		int num = a % b;
-		if (num < 0)
+		int remainder = a % b;
+		if (remainder < 0)
 		{
-			return b + num;
+			return b + remainder;
 		}
-		return num;
+		return remainder;
 	}
 
 	public static float Mod(float a, float b)
 	{
-		float num = a % b;
-		if (num < 0f)
+		float remainder = a % b;
+		if (remainder < 0f)
 		{
-			return b + num;
+			return b + remainder;
 		}
-		return num;
+		return remainder;
 	}
 
 	public static float PowerCurve(float value1, float value2, float power, float step)

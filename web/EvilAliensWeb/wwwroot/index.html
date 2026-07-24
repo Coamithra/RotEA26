@@ -290,6 +290,25 @@
             catch (e) { return 'not booted'; }
         };
 
+        // Debug: the join-in-progress scenery diff. eaNetBg() returns one line of the deep
+        // mid-level state the JIP catch-up replays (scroll speed, alien-base switch, belt
+        // slowdown, in-flight doodad + position, current song). Verification is a DIFF, not a
+        // screenshot: run it in the host window and the joiner window once the joiner's level
+        // is up and the two lines must match. Works in any level, session or not.
+        window.eaNetBg = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugNetBg'); }
+            catch (e) { return 'not booted'; }
+        };
+        // eaNetBgTest() proves the same catch-up in ONE tab: it captures the burst the host
+        // would send, wipes the scenery back to a fresh joiner's, replays the burst through the
+        // real client apply path and diffs the result — exact, where two independently-ticking
+        // windows can only ever be approximate. DESTRUCTIVE: the background re-runs its
+        // hyperspace entry, so the screen flashes. Solo tab only.
+        window.eaNetBgTest = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugNetBgTest'); }
+            catch (e) { return 'not booted'; }
+        };
+
         // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
         // ?level=Level2&spiders tuner). Drives Compat/DebugInput.SetSpider so the slider panel below
         // (and the console) can retune shadow/jump-frame/land-frame/jump-X without a page reload.
@@ -317,6 +336,16 @@
         var tickFailures = 0;
         var TICK_MAX_FAILURES = 30;
 
+        // Frame-loop hooks for the dev FPS HUD (card 22e655b5). Declared here, owned by the
+        // eaFps block near the bottom of this file — it fills them in when it arms itself, so
+        // a build with no HUD runs the loop exactly as before (two null checks per frame).
+        //   eaFpsAfterTick  — called right after the tick returns (GPU-sync measurement)
+        //   eaFpsUncapped   — true drives the loop off a MessageChannel instead of rAF, so the
+        //                     frame rate is no longer vsync-gated and the fps readout becomes a
+        //                     real throughput number instead of "your refresh rate".
+        window.eaFpsAfterTick = null;
+        window.eaFpsUncapped = false;
+
         function tickJS()
         {
             try {
@@ -330,6 +359,14 @@
                     showLoopStopped(); // the canvas is frozen; tell the player it's not just slow
                     return; // stop rescheduling: the game is wedged, not just hiccuping
                 }
+            }
+            // Deliberately OUTSIDE the try above, with its own guard: a throw from the debug HUD
+            // must never be reported as "TickDotNet threw" nor block the failure-counter reset --
+            // 30 of those in a row would raise the "unrecoverable error, reload" overlay for a
+            // profiler bug.
+            if (window.eaFpsAfterTick) {
+                try { window.eaFpsAfterTick(); }
+                catch (e) { console.warn('[fps] after-tick hook failed, disabling: ' + ((e && e.message) || e)); window.eaFpsAfterTick = null; }
             }
             scheduleTick();
         }
@@ -349,6 +386,22 @@
             document.body.appendChild(ov);
         }
 
+        // The uncapped pump (eaFpsUncapped). A MessageChannel post schedules a macrotask with
+        // no clamp — setTimeout(0) is floored at ~4ms (≈250fps) by every browser, which would
+        // put a fake ceiling on the very number the uncapped mode exists to measure. It still
+        // yields to the event loop between frames, so the page stays responsive enough to turn
+        // the mode back off.
+        var uncapChannel = null;
+        function pumpUncapped()
+        {
+            if (!uncapChannel)
+            {
+                uncapChannel = new MessageChannel();
+                uncapChannel.port1.onmessage = function () { tickJS(); };
+            }
+            uncapChannel.port2.postMessage(0);
+        }
+
         function scheduleTick()
         {
             // Browsers pause requestAnimationFrame in a backgrounded/hidden tab,
@@ -357,6 +410,8 @@
             // running; use rAF when visible for smooth, vsync-aligned frames.
             if (document.hidden)
                 setTimeout(tickJS, 33);
+            else if (window.eaFpsUncapped)
+                pumpUncapped();
             else
                 window.requestAnimationFrame(tickJS);
         }
@@ -2147,12 +2202,21 @@
          timeout) had never actually executed. These knobs make packets go missing on demand.
          Drives Compat/DebugInput.SetNetSim -> NetImpairment, which wraps the transport behind
          INetTransport and so impairs the WebRTC transport (card 11.4) unchanged. Built outside
-         #app and only on a ?net boot — a normal boot gets no extra DOM and no extra globals. -->
+         #app, and only when a ?net boot also passes ?netsim — a bare ?net= boot gets just the
+         eaNetSim console entry points, and a normal boot no extra DOM and no extra globals. -->
     <script>
         (function ()
         {
             var q = window.location.search || "";
             if (!/[?&]net=(host|join|client)\b/i.test(q)) { return; }
+
+            // The PANEL is opt-in (?netsim). It parks over the top-right corner of a co-op
+            // session you are usually trying to WATCH, and most ?net= boots never impair
+            // anything — so without the flag nothing is added to the DOM. The console entry
+            // points below still exist on any ?net= boot, and eaNetSim.show() builds the
+            // panel on demand. The knobs themselves are unaffected: ?netlag=/?netloss= are
+            // parsed C#-side in DebugFlags, so they impair with or without this panel.
+            var wantPanel = /[?&]netsim\b/i.test(q);
 
             function num(name, def)
             {
@@ -2183,59 +2247,99 @@
                 catch (e) { return false; }
             }
 
-            var css = document.createElement("style");
-            css.textContent =
-                "#ea-netsim{position:fixed;top:10px;right:10px;z-index:99999;width:262px;" +
-                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
-                "background:rgba(10,8,20,.82);border:1px solid rgba(150,180,220,.35);" +
-                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
-                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
-                "#ea-netsim h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
-                "color:#b8d8e8}" +
-                "#ea-netsim .row{margin:7px 0}" +
-                "#ea-netsim label{display:flex;justify-content:space-between;align-items:baseline}" +
-                "#ea-netsim .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
-                "#ea-netsim input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fa8d0}" +
-                "#ea-netsim button{width:100%;margin-top:8px;padding:5px 8px;font:11px/1.2 inherit;" +
-                "color:#e8e8f0;background:rgba(110,150,200,.25);border:1px solid rgba(150,180,220,.4);" +
-                "border-radius:5px;cursor:pointer}" +
-                "#ea-netsim button:hover{background:rgba(110,150,200,.4)}" +
-                "#ea-netsim .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(150,180,220,.25);" +
-                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
-                "word-break:break-all;cursor:pointer}" +
-                "#ea-netsim .res{margin-top:6px;font-family:ui-monospace,Consolas,monospace;" +
-                "font-size:10px;color:#9ffcd0;word-break:break-all;line-height:1.35}" +
-                "#ea-netsim .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
-            document.head.appendChild(css);
+            var el = null, elLag, elLoss, elJit, elOut, elRes, elTest, vlag, vloss, vjit;
 
-            var el = document.createElement("div");
-            el.id = "ea-netsim";
-            el.innerHTML =
-                "<h4>Network impairment (inbound)</h4>" +
-                "<div class='row'><label>Lag<span class='v' id='ns-vlag'></span></label>" +
-                "<input type='range' id='ns-lag' min='0' max='500' step='5' autocomplete='off'></div>" +
-                "<div class='row'><label>Packet loss (stream lane)<span class='v' id='ns-vloss'></span></label>" +
-                "<input type='range' id='ns-loss' min='0' max='100' step='1' autocomplete='off'></div>" +
-                "<div class='row'><label>Jitter &plusmn; (session only)<span class='v' id='ns-vjit'></span></label>" +
-                "<input type='range' id='ns-jit' min='0' max='200' step='5' autocomplete='off'></div>" +
-                "<button id='ns-test'>Self-test (200 packets/lane)</button>" +
-                "<div class='res' id='ns-res'></div>" +
-                "<div class='out' id='ns-out' title='Click to copy'></div>" +
-                "<div class='hint'>Applies to INBOUND traffic only — the peer's link looks bad from " +
-                "here. The reliable lane is delayed but never dropped or reordered. Loss 100% starves " +
-                "the ship stream, so the 3s peer timeout fires: that is the simulated silent " +
-                "disconnect, not a bug. Watch the 5s [net] line: extrap/pops/sgap should climb and " +
-                "settle back at 0/0.</div>";
-            document.body.appendChild(el);
+            function buildPanel()
+            {
+                if (el) { el.style.display = ""; return; }
 
-            var elLag = el.querySelector("#ns-lag"), elLoss = el.querySelector("#ns-loss"),
-                elJit = el.querySelector("#ns-jit"), elOut = el.querySelector("#ns-out"),
-                elRes = el.querySelector("#ns-res"), elTest = el.querySelector("#ns-test"),
-                vlag = el.querySelector("#ns-vlag"), vloss = el.querySelector("#ns-vloss"),
+                var css = document.createElement("style");
+                css.textContent =
+                    "#ea-netsim{position:fixed;top:10px;right:10px;z-index:99999;width:262px;" +
+                    "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                    "background:rgba(10,8,20,.82);border:1px solid rgba(150,180,220,.35);" +
+                    "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                    "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                    "#ea-netsim h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                    "color:#b8d8e8}" +
+                    "#ea-netsim .row{margin:7px 0}" +
+                    "#ea-netsim label{display:flex;justify-content:space-between;align-items:baseline}" +
+                    "#ea-netsim .v{font-variant-numeric:tabular-nums;color:#9ffcd0;font-weight:600}" +
+                    "#ea-netsim input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fa8d0}" +
+                    "#ea-netsim button{width:100%;margin-top:8px;padding:5px 8px;font:11px/1.2 inherit;" +
+                    "color:#e8e8f0;background:rgba(110,150,200,.25);border:1px solid rgba(150,180,220,.4);" +
+                    "border-radius:5px;cursor:pointer}" +
+                    "#ea-netsim button:hover{background:rgba(110,150,200,.4)}" +
+                    "#ea-netsim .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(150,180,220,.25);" +
+                    "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                    "word-break:break-all;cursor:pointer}" +
+                    "#ea-netsim .res{margin-top:6px;font-family:ui-monospace,Consolas,monospace;" +
+                    "font-size:10px;color:#9ffcd0;word-break:break-all;line-height:1.35}" +
+                    "#ea-netsim .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+                document.head.appendChild(css);
+
+                el = document.createElement("div");
+                el.id = "ea-netsim";
+                el.innerHTML =
+                    "<h4>Network impairment (inbound)</h4>" +
+                    "<div class='row'><label>Lag<span class='v' id='ns-vlag'></span></label>" +
+                    "<input type='range' id='ns-lag' min='0' max='500' step='5' autocomplete='off'></div>" +
+                    "<div class='row'><label>Packet loss (stream lane)<span class='v' id='ns-vloss'></span></label>" +
+                    "<input type='range' id='ns-loss' min='0' max='100' step='1' autocomplete='off'></div>" +
+                    "<div class='row'><label>Jitter &plusmn; (session only)<span class='v' id='ns-vjit'></span></label>" +
+                    "<input type='range' id='ns-jit' min='0' max='200' step='5' autocomplete='off'></div>" +
+                    "<button id='ns-test'>Self-test (200 packets/lane)</button>" +
+                    "<div class='res' id='ns-res'></div>" +
+                    "<div class='out' id='ns-out' title='Click to copy'></div>" +
+                    "<div class='hint'>Applies to INBOUND traffic only — the peer's link looks bad from " +
+                    "here. The reliable lane is delayed but never dropped or reordered. Loss 100% starves " +
+                    "the ship stream, so the stall banner goes up after ~1.2s and the drop verdict lands ~8s in: that is the simulated silent " +
+                    "disconnect, not a bug. Watch the 5s [net] line: extrap/pops/sgap should climb and " +
+                    "settle back at 0/0.</div>";
+                document.body.appendChild(el);
+
+                elLag = el.querySelector("#ns-lag"); elLoss = el.querySelector("#ns-loss");
+                elJit = el.querySelector("#ns-jit"); elOut = el.querySelector("#ns-out");
+                elRes = el.querySelector("#ns-res"); elTest = el.querySelector("#ns-test");
+                vlag = el.querySelector("#ns-vlag"); vloss = el.querySelector("#ns-vloss");
                 vjit = el.querySelector("#ns-vjit");
+
+                elLag.addEventListener("input", function () { st.lag = +elLag.value; changed(); });
+                elLoss.addEventListener("input", function () { st.loss = +elLoss.value; changed(); });
+                elJit.addEventListener("input", function () { st.jitter = +elJit.value; changed(); });
+                elOut.addEventListener("click", function ()
+                {
+                    var t = elOut.textContent;
+                    if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                    var old = elOut.style.color; elOut.style.color = "#9ffcd0";
+                    setTimeout(function () { elOut.style.color = old; }, 250);
+                });
+                elTest.addEventListener("click", function () { window.eaNetSim.test(st.lag, st.loss, st.jitter, 200); });
+
+                render();
+                // Retry until the .NET runtime is up — but BOUNDED. push() swallows every exception,
+                // so an unbounded retry would spin silently forever on a genuine SetNetSim failure
+                // instead of ever saying so. ~24s is far past a cold WASM boot.
+                if (!push())
+                {
+                    var tries = 0;
+                    var iv = setInterval(function ()
+                    {
+                        if (push()) { clearInterval(iv); return; }
+                        if (++tries >= 60)
+                        {
+                            clearInterval(iv);
+                            console.warn('[netsim] gave up pushing impairment settings after ' + tries
+                                + ' attempts — debugSetNetSim is failing, not just waiting for boot');
+                        }
+                    }, 400);
+                }
+            }
 
             function render()
             {
+                if (!el) { return; }
+
                 elLag.value = st.lag; elLoss.value = st.loss; elJit.value = st.jitter;
                 vlag.textContent = st.lag + " ms";
                 vloss.textContent = st.loss + " %";
@@ -2246,21 +2350,10 @@
 
             function changed() { render(); push(); }
 
-            elLag.addEventListener("input", function () { st.lag = +elLag.value; changed(); });
-            elLoss.addEventListener("input", function () { st.loss = +elLoss.value; changed(); });
-            elJit.addEventListener("input", function () { st.jitter = +elJit.value; changed(); });
-            elOut.addEventListener("click", function ()
-            {
-                var t = elOut.textContent;
-                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
-                var old = elOut.style.color; elOut.style.color = "#9ffcd0";
-                setTimeout(function () { elOut.style.color = old; }, 250);
-            });
-            elTest.addEventListener("click", function () { window.eaNetSim.test(st.lag, st.loss, st.jitter, 200); });
-
-            // Console entry points, defined only on a ?net boot (same gate as the panel):
+            // Console entry points, defined on any ?net= boot (the panel needs ?netsim):
             //   eaNetSim(120, 10, 30)          — set lag ms / loss % / jitter ms live
             //   eaNetSim.test(120, 10, 30, 200) — run the impairment self-test on a virtual clock
+            //   eaNetSim.show() / .hide()      — summon / dismiss the slider panel
             window.eaNetSim = function (lag, loss, jitter)
             {
                 st.lag = clamp(+lag || 0, 0, 500);
@@ -2276,34 +2369,23 @@
                     var line = DotNet.invokeMethod('EvilAliensWeb', 'debugNetSimTest',
                         +lag || 0, +loss || 0, +jitter || 0, n || 200);
                     console.log(line);
-                    elRes.textContent = line.replace(/^\[netsim\] /, "");
+                    if (elRes) { elRes.textContent = line.replace(/^\[netsim\] /, ""); }
                     return line;
                 }
                 catch (e)
                 {
                     console.warn('[netsim] self-test failed (game not booted yet?): ' + e.message);
+                    if (!elRes) { return; }
                     elRes.textContent = "self-test: waiting for the runtime…";
                 }
             };
 
-            render();
-            // Retry until the .NET runtime is up — but BOUNDED. push() swallows every exception,
-            // so an unbounded retry would spin silently forever on a genuine SetNetSim failure
-            // instead of ever saying so. ~24s is far past a cold WASM boot.
-            if (!push())
-            {
-                var tries = 0;
-                var iv = setInterval(function ()
-                {
-                    if (push()) { clearInterval(iv); return; }
-                    if (++tries >= 60)
-                    {
-                        clearInterval(iv);
-                        console.warn('[netsim] gave up pushing impairment settings after ' + tries
-                            + ' attempts — debugSetNetSim is failing, not just waiting for boot');
-                    }
-                }, 400);
-            }
+            // On demand, so a ?net= boot that did not ask for the panel can still summon
+            // the sliders without a reload.
+            window.eaNetSim.show = function () { buildPanel(); };
+            window.eaNetSim.hide = function () { if (el) { el.style.display = "none"; } };
+
+            if (wantPanel) { buildPanel(); }
         })();
     </script>
 
@@ -2658,6 +2740,461 @@
                 },
                 hide: function () { if (el) { el.style.display = "none"; } }
             };
+        })();
+    </script>
+
+    <!-- eaFps: the dev-build frame profiler HUD (card 22e655b5).
+
+         WHY IT IS NOT JUST AN FPS COUNTER. The loop is rAF-driven, so the frame RATE is
+         vsync-gated: at 60Hz a 3ms frame and a 15ms frame both read "60 fps", right up until
+         the game falls off the cliff. So the HUD leads with fps but the number that actually
+         moves when you optimize is HEADROOM (1000 / frame work ms) — and under it, the
+         per-phase breakdown from Compat/FrameProfiler that says WHICH part costs the ms.
+
+         Built outside #app so it survives Blazor's mount, and fixed-position top-left: the
+         other panels (eaWalls/eaSpider/...) and the fullscreen button all live top-right, and
+         in a 16:9 window the left letterbox bar is dead space anyway. Fullscreen targets
+         document.documentElement, so it stays visible there too.
+
+         VISIBLE BY DEFAULT IN DEV BUILDS, INVISIBLE IN THE PUBLISHED ONE: keyed off
+         window.eaBuildHash === 'dev' (deploy.yml stamps a real fingerprint at publish). That
+         is exactly "all dev builds" — Debug *and* a local Release publish — with no #if DEBUG
+         and no behavioural divergence between configurations. The C# accumulators are armed by
+         this panel, so a shipped build never touches a stopwatch.
+
+         Flags: ?fpshud force on (works on the live site) · ?fpshud=full force on, expanded ·
+         ?nofps hide in a dev build (keeps harness/showcase screenshots clean) ·
+         ?fpsuncapped boot with the rAF cap off · ?fpsgpu boot with gl.finish() frame sync on.
+         Console: eaFps() toggles compact/expanded/off, eaFps.stats(), eaFps.uncap(b),
+         eaFps.gpu(b), eaFps.test(workMs, intervalMs, frames). ?fps= is NOT this — that is the
+         sprite harness' playback rate. -->
+    <script>
+        window.eaFps = (function ()
+        {
+            var q = window.location.search || "";
+            var forced = /[?&]fpshud\b/i.test(q);
+            var suppressed = /[?&]nofps\b/i.test(q);
+            var isDevBuild = String(window.eaBuildHash || 'dev') === 'dev';
+            var expanded = /[?&]fpshud=full\b/i.test(q);
+
+            // Screenshot-driven verification is how nearly everything in this project is checked
+            // (sprite harness, showcase scenes, the texture viewer), and those scenes draw their
+            // own readouts in the top-left design corner -- exactly where this panel sits. So a
+            // dev build suppresses the HUD on those pages by default; ?fpshud forces it back on.
+            var showcase = /[?&](harness|textshot|bulletshot|lazershot|castbrain|castshow|texviewer|gamebrowser|spiderphase|wcmothershipfreeze)\b/i.test(q);
+            var visible = forced || (isDevBuild && !suppressed && !showcase);
+
+            var el = null, armed = false, wasUnfocused = true, poll = null;
+            var glCalls = 0, glWindow = [], glPatched = false;
+            var gpuMs = 0, gl = null, gpuSync = /[?&]fpsgpu\b/i.test(q);
+            // Shortest frame interval ever observed. Under vsync that converges on the display's
+            // refresh period within a second or two of idling, which is the ONLY honest budget
+            // for the sparkline: the mean interval inflates in lockstep with the work, so using
+            // it would paint an overloaded 25ms frame green against its own 33ms delivery rate.
+            // Monotone, so a bad stretch can never raise it.
+            var minIntervalMs = Infinity, lastFrameAt = 0;
+
+            // Draw-call counting. Patch the PROTOTYPES rather than a live context: KNI creates
+            // the context itself (nkast.Wasm.Canvas), so this works whichever GL version it
+            // picks and regardless of whether we run before or after creation. The first call
+            // through also hands us the context for gl.finish(). Only installed when the HUD is
+            // up — a shipped build never wraps a hot GL entry point.
+            function patchGl()
+            {
+                if (glPatched) { return; }
+                glPatched = true;
+                ["WebGLRenderingContext", "WebGL2RenderingContext"].forEach(function (name)
+                {
+                    var C = window[name];
+                    if (!C || !C.prototype) { return; }
+                    ["drawElements", "drawArrays", "drawElementsInstanced",
+                     "drawArraysInstanced", "drawRangeElements"].forEach(function (m)
+                    {
+                        var orig = C.prototype[m];
+                        if (typeof orig !== "function") { return; }
+                        C.prototype[m] = function ()
+                        {
+                            glCalls++;
+                            if (!gl) { gl = this; }
+                            return orig.apply(this, arguments);
+                        };
+                    });
+                });
+            }
+
+            // Runs right after each tick returns (window.eaFpsAfterTick, called from tickJS).
+            // Rolls the per-frame draw-call count, and — only in gpu-sync mode — blocks on
+            // gl.finish() to convert the GPU's asynchronous work into a measurable wait.
+            // WebGL commands are QUEUED, so without this the CPU-derived headroom overstates a
+            // GPU-bound frame; the stall is the price of finding that out, hence opt-in.
+            function afterTick()
+            {
+                glWindow.push(glCalls);
+                if (glWindow.length > 120) { glWindow.shift(); }
+                glCalls = 0;
+                // Track the shortest interval we have ever been delivered (see minIntervalMs).
+                // Only while focused and capped: an unfocused tab's throttled intervals are
+                // garbage, and the uncapped pump's intervals are not a display budget at all.
+                var now = performance.now();
+                if (lastFrameAt && !window.eaFpsUncapped && !document.hidden && document.hasFocus())
+                {
+                    var dt = now - lastFrameAt;
+                    if (dt > 1 && dt < minIntervalMs) { minIntervalMs = dt; }
+                }
+                lastFrameAt = now;
+                if (gpuSync && gl)
+                {
+                    var t0 = performance.now();
+                    try { gl.finish(); }
+                    catch (e)
+                    {
+                        console.warn('[fps] gl.finish() failed, turning gpu sync off: ' + ((e && e.message) || e));
+                        setGpuSync(false);   // route through the setter so the checkbox follows
+                        return;
+                    }
+                    // Smoothed, or it reads as noise: the wait is bimodal frame to frame.
+                    gpuMs += (performance.now() - t0 - gpuMs) * 0.1;
+                }
+                else { gpuMs = 0; }
+            }
+
+            function mean(a)
+            {
+                if (!a.length) { return 0; }
+                var s = 0;
+                for (var i = 0; i < a.length; i++) { s += a[i]; }
+                return s / a.length;
+            }
+
+            function build()
+            {
+                var css = document.createElement("style");
+                css.textContent =
+                    "#ea-fps{position:fixed;top:10px;left:10px;z-index:99998;width:246px;" +
+                    "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                    "background:rgba(10,8,20,.82);border:1px solid rgba(140,170,220,.35);" +
+                    "border-radius:8px;padding:8px 10px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                    "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px);" +
+                    // pointer-events:none is deliberate — this thing sits over a shoot-'em-up
+                    // where Mouse1 anywhere on the canvas fires. A clickable panel would eat
+                    // every shot aimed at that corner. Only the tiny mode tag (the expand/
+                    // collapse button) and the mode checkboxes opt back in below, so the dead
+                    // zone is ~54x14px instead of the whole panel.
+                    "pointer-events:none}" +
+                    "#ea-fps.compact{width:186px}" +
+                    "#ea-fps .hdr{display:flex;align-items:baseline;gap:6px}" +
+                    "#ea-fps .big{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;color:#9ffcd0}" +
+                    "#ea-fps .u{font-size:11px;color:#8a86a0}" +
+                    "#ea-fps .tag{margin-left:auto;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;" +
+                    "color:#8a86a0;border:1px solid rgba(140,170,220,.3);border-radius:4px;padding:1px 5px;" +
+                    "pointer-events:auto;cursor:pointer}" +
+                    "#ea-fps .tag:hover{color:#e8e8f0;border-color:rgba(140,170,220,.7)}" +
+                    "#ea-fps .tag.hot{color:#ffd98f;border-color:rgba(255,217,143,.5)}" +
+                    "#ea-fps .sub{margin-top:2px;font-variant-numeric:tabular-nums;color:#b8d4ff}" +
+                    "#ea-fps .sub b{color:#ffd98f;font-weight:600}" +
+                    "#ea-fps .warn{margin-top:4px;font-size:10.5px;color:#ffb0b0;line-height:1.3}" +
+                    "#ea-fps .body{margin-top:7px;padding-top:7px;border-top:1px solid rgba(140,170,220,.25)}" +
+                    "#ea-fps canvas{display:block;width:100%;height:34px;border-radius:3px;" +
+                    "background:rgba(255,255,255,.04)}" +
+                    "#ea-fps table{width:100%;border-collapse:collapse;margin-top:6px;" +
+                    "font-variant-numeric:tabular-nums}" +
+                    "#ea-fps td{padding:1px 0;font-size:11px}" +
+                    "#ea-fps td.k{color:#b8b4c8}" +
+                    "#ea-fps td.k.sub2{padding-left:9px;color:#8a86a0}" +
+                    "#ea-fps td.v{text-align:right;width:44px;color:#9ffcd0}" +
+                    "#ea-fps td.bar{width:56px;padding-left:6px}" +
+                    "#ea-fps td.bar i{display:block;height:6px;border-radius:2px;background:#6fb0ff;min-width:1px}" +
+                    "#ea-fps td.k.sub2+td+td.bar i{background:#4a7cc0}" +
+                    "#ea-fps .gl{margin-top:6px;font-size:11px;color:#ffd98f;font-variant-numeric:tabular-nums}" +
+                    "#ea-fps .modes{margin-top:7px;display:flex;gap:10px;font-size:10.5px;color:#b8b4c8;" +
+                    "pointer-events:auto}" +
+                    "#ea-fps .modes label{display:flex;gap:4px;align-items:center;cursor:pointer}" +
+                    "#ea-fps .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.35}";
+                document.head.appendChild(css);
+
+                el = document.createElement("div");
+                el.id = "ea-fps";
+                el.innerHTML =
+                    '<div class="hdr"><span class="big" id="eaf-fps">--</span><span class="u">fps</span>' +
+                    '<span class="tag" id="eaf-mode" title="Click to expand / collapse the frame breakdown">vsync</span></div>' +
+                    '<div class="sub"><span id="eaf-cpu">--</span> ms/frame &rarr; <b id="eaf-hr">--</b> fps headroom</div>' +
+                    '<div class="warn" id="eaf-warn" style="display:none"></div>' +
+                    '<div class="body" id="eaf-body">' +
+                    '<canvas id="eaf-spark" width="452" height="68"></canvas>' +
+                    '<table id="eaf-rows"></table>' +
+                    '<div class="gl" id="eaf-gl"></div>' +
+                    '<div class="modes">' +
+                    '<label><input type="checkbox" id="eaf-uncap" autocomplete="off"> uncap</label>' +
+                    '<label><input type="checkbox" id="eaf-gpu" autocomplete="off"> gpu sync</label>' +
+                    '</div>' +
+                    '<div class="hint" id="eaf-hint"></div>' +
+                    '</div>';
+                document.body.appendChild(el);
+
+                el.querySelector("#eaf-mode").addEventListener("click", function ()
+                {
+                    setExpanded(!expanded);
+                });
+
+                var un = el.querySelector("#eaf-uncap");
+                un.checked = window.eaFpsUncapped;
+                un.addEventListener("change", function () { setUncapped(un.checked); });
+                var gp = el.querySelector("#eaf-gpu");
+                gp.checked = gpuSync;
+                gp.addEventListener("change", function () { setGpuSync(gp.checked); });
+
+                setExpanded(expanded);
+            }
+
+            function setExpanded(on)
+            {
+                expanded = !!on;
+                if (!el) { return; }
+                el.classList.toggle("compact", !expanded);
+                el.querySelector("#eaf-body").style.display = expanded ? "block" : "none";
+            }
+
+            function setUncapped(on)
+            {
+                window.eaFpsUncapped = !!on;
+                if (el) { el.querySelector("#eaf-uncap").checked = window.eaFpsUncapped; }
+                // The rate changes the instant the pump does, so the old samples describe a
+                // different loop. Re-arm to drop them rather than average across the switch.
+                rearm();
+            }
+
+            function setGpuSync(on)
+            {
+                gpuSync = !!on;
+                gpuMs = 0;
+                if (el) { el.querySelector("#eaf-gpu").checked = gpuSync; }
+                rearm();
+            }
+
+            function rearm()
+            {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsProfile', true); armed = true; }
+                catch (e) { armed = false; }
+            }
+
+            // The section rows. `update` is the PARENT of the three indented sub-rows, so only
+            // update + the draw rows + other sum to the tick — the sub-rows must never be added
+            // in or the total double-counts.
+            var ROWS = [
+                { k: "update",     label: "update",     sub: false },
+                { k: "components", label: "components", sub: true },
+                { k: "collision",  label: "collision",  sub: true },
+                { k: "net",        label: "net",        sub: true },
+                { k: "scene",      label: "draw scene", sub: false },
+                { k: "post",       label: "post fx",    sub: false },
+                { k: "present",    label: "present",    sub: false },
+                { k: "swap",       label: "swap (gpu)", sub: false }
+            ];
+
+            function renderRows(s, otherMs, tickMs)
+            {
+                var html = "", scale = Math.max(tickMs, 0.001);
+                for (var i = 0; i < ROWS.length; i++)
+                {
+                    var r = ROWS[i], v = s[r.k] || 0;
+                    html += '<tr><td class="k' + (r.sub ? " sub2" : "") + '">' + r.label + '</td>'
+                        + '<td class="v">' + v.toFixed(2) + '</td>'
+                        + '<td class="bar"><i style="width:' + Math.min(100, v / scale * 100).toFixed(1) + '%"></i></td></tr>';
+                }
+                html += '<tr><td class="k">other</td><td class="v">' + otherMs.toFixed(2) + '</td>'
+                    + '<td class="bar"><i style="width:' + Math.min(100, otherMs / scale * 100).toFixed(1) + '%"></i></td></tr>';
+                el.querySelector("#eaf-rows").innerHTML = html;
+            }
+
+            // Frame-time sparkline over the profiler's own 120-frame window. The bar colour is
+            // the budget verdict, not decoration: green under the vsync budget, amber over it,
+            // red over double — a stutter you can see in the graph but never in the mean.
+            function renderSpark(frames, budgetMs)
+            {
+                var c = el.querySelector("#eaf-spark");
+                var ctx = c.getContext("2d");
+                var w = c.width, h = c.height;
+                ctx.clearRect(0, 0, w, h);
+                if (!frames || !frames.length) { return; }
+                var peak = 0;
+                for (var i = 0; i < frames.length; i++) { if (frames[i] > peak) { peak = frames[i]; } }
+                // Never scale to less than the budget, or a healthy flat run looks alarming.
+                var top = Math.max(peak * 1.15, budgetMs * 1.3, 1);
+                var bw = w / frames.length;
+                for (var j = 0; j < frames.length; j++)
+                {
+                    var v = frames[j];
+                    var bh = Math.max(1, (v / top) * h);
+                    ctx.fillStyle = (v > budgetMs * 2) ? "#ff7a7a" : (v > budgetMs ? "#ffd98f" : "#6fe3b0");
+                    ctx.fillRect(j * bw, h - bh, Math.max(1, bw - 0.5), bh);
+                }
+                // The budget line (one vsync interval): bars crossing it are dropped frames.
+                var y = h - (budgetMs / top) * h;
+                if (y > 0 && y < h)
+                {
+                    ctx.strokeStyle = "rgba(184,212,255,.55)";
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(w, y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+
+            function refresh()
+            {
+                if (!el) { return; }
+                // document.hidden / hasFocus is the AUTHORITATIVE throttle signal: a backgrounded
+                // tab still delivers ~1 rAF/second, which no timing test inside the game can tell
+                // apart from a very slow frame. Re-arm on regaining focus so the throttled garbage
+                // is dropped instead of poisoning the average for the next two seconds.
+                var unfocused = document.hidden || !document.hasFocus();
+                var warn = el.querySelector("#eaf-warn");
+                if (!armed || (wasUnfocused && !unfocused)) { rearm(); }
+                wasUnfocused = unfocused;
+                if (unfocused)
+                {
+                    warn.style.display = "block";
+                    warn.textContent = "⚠ unfocused — a background tab throttles rAF, readings are meaningless";
+                    return;
+                }
+
+                var raw;
+                try { raw = DotNet.invokeMethod('EvilAliensWeb', 'debugFpsStats'); }
+                catch (e) { warn.style.display = "block"; warn.textContent = "waiting for the runtime…"; return; }
+                var d;
+                try { d = JSON.parse(raw); } catch (e) { return; }
+                if (!d.on) { rearm(); return; }
+                if (d.stale)
+                {
+                    warn.style.display = "block";
+                    warn.textContent = "collecting samples…";
+                    return;
+                }
+                warn.style.display = "none";
+
+                var glMean = mean(glWindow);
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsGlCalls', Math.round(glMean)); }
+                catch (e) { /* runtime went away between calls — the next poll retries */ }
+
+                // Headroom is CPU-derived; in gpu-sync mode the measured GPU wait is added in,
+                // which is the whole reason that mode exists. Label which one is on screen.
+                var cost = d.tickMs + (gpuSync ? gpuMs : 0);
+                var headroom = gpuSync ? (cost > 0.0001 ? 1000 / cost : 0) : d.headroomFps;
+                el.querySelector("#eaf-fps").textContent = d.fps.toFixed(1);
+                el.querySelector("#eaf-cpu").textContent = cost.toFixed(2);
+                el.querySelector("#eaf-hr").textContent = headroom.toFixed(0);
+                var mode = el.querySelector("#eaf-mode");
+                mode.textContent = window.eaFpsUncapped ? "uncapped" : "vsync";
+                mode.classList.toggle("hot", !!window.eaFpsUncapped);
+
+                if (!expanded) { return; }
+                renderRows(d.sections || {}, d.otherMs || 0, d.tickMs);
+                // Budget = the display's refresh period, estimated as the SHORTEST interval ever
+                // delivered — NOT the current mean. The mean rises with the workload, so a frame
+                // that is blowing the budget would be measured against its own degraded delivery
+                // rate and painted green. Falls back to 60Hz until the estimate has settled.
+                var budget = isFinite(minIntervalMs) ? minIntervalMs : 16.7;
+                renderSpark(d.frames, budget);
+                el.querySelector("#eaf-gl").textContent =
+                    Math.round(glMean) + " GL draw calls/frame"
+                    + (gpuSync ? "  ·  gpu wait " + gpuMs.toFixed(2) + " ms" : "");
+                el.querySelector("#eaf-hint").textContent =
+                    "p95 " + d.tickP95Ms.toFixed(2) + " ms"
+                    + (window.eaFpsUncapped
+                        ? "  ·  uncapped: fps is real throughput"
+                        : "  ·  fps is vsync-capped; headroom is not");
+            }
+
+            function show(mode)
+            {
+                if (!el) { patchGl(); build(); window.eaFpsAfterTick = afterTick; }
+                el.style.display = "block";
+                if (mode === "full") { setExpanded(true); }
+                else if (mode === "compact") { setExpanded(false); }
+                rearm();
+                if (!poll) { poll = setInterval(refresh, 250); }
+                refresh();
+            }
+
+            function hide()
+            {
+                if (el) { el.style.display = "none"; }
+                if (poll) { clearInterval(poll); poll = null; }
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsProfile', false); } catch (e) { }
+                armed = false;
+                // Hiding must actually STOP the work, not just stop showing it. Left armed, the
+                // per-frame hook keeps counting, gpu sync keeps stalling on gl.finish() every
+                // frame, and — worst — the uncapped pump keeps the loop off vsync at full tilt
+                // with nothing on screen to say so.
+                window.eaFpsAfterTick = null;
+                window.eaFpsUncapped = false;
+                gpuSync = false;
+                gpuMs = 0;
+            }
+
+            var api = function (arg)
+            {
+                if (arg === false || arg === "off") { hide(); return "fps hud off"; }
+                if (arg === "full" || arg === true) { show("full"); return "fps hud: expanded"; }
+                if (arg === "compact") { show("compact"); return "fps hud: compact"; }
+                // No argument: cycle compact -> expanded -> off, so one repeated call from the
+                // console reaches every state.
+                if (!el || el.style.display === "none") { show("compact"); return "fps hud: compact"; }
+                if (!expanded) { setExpanded(true); return "fps hud: expanded"; }
+                hide();
+                return "fps hud off";
+            };
+
+            // The console one-liner carries the SAME focus guard as the HUD. C# can't see
+            // document.hasFocus(), and an unfocused-but-visible window gets its rAF throttled to
+            // a rate the C#-side staleness test (mean interval > 100ms) does NOT catch — so the
+            // profiler would report a confident, badly wrong frame cost. Prefixing here is what
+            // stops a reading taken while you were tabbed away from being believed.
+            api.stats = function ()
+            {
+                try
+                {
+                    var line = DotNet.invokeMethod('EvilAliensWeb', 'debugFpsStatsLine');
+                    if (document.hidden || !document.hasFocus())
+                    {
+                        return "[UNFOCUSED — readings are meaningless, focus the window] " + line;
+                    }
+                    return line;
+                }
+                catch (e) { return "not booted"; }
+            };
+            api.uncap = function (on) { setUncapped(on !== false); return "uncapped: " + window.eaFpsUncapped; };
+            api.gpu = function (on) { setGpuSync(on !== false); return "gpu sync: " + gpuSync; };
+            // Data self-test for the window maths — the vsync trap as an assertion: `work` ms of
+            // work delivered every `interval` ms MUST read 1000/interval fps and 1000/work
+            // headroom. A profiler that reported the work rate as "fps" fails this loudly.
+            api.test = function (workMs, intervalMs, frames)
+            {
+                var w = Number(workMs) || 5, iv = Number(intervalMs) || 16.7, n = Number(frames) || 120;
+                try { return DotNet.invokeMethod('EvilAliensWeb', 'debugFpsSelfTest', w, iv, n); }
+                catch (e) { return "not booted"; }
+            };
+
+            // ?fpsuncapped / ?fpsgpu are LOOP flags, applied whether or not the panel shows:
+            // they change how the game is driven, and wanting the measurement without the
+            // overlay (?nofps&fpsuncapped, or either flag on the published site) is legitimate.
+            // Both need the per-tick hook, so arming them pulls the machinery up on its own.
+            var uncapAsked = /[?&]fpsuncapped\b/i.test(q);
+            if (uncapAsked || gpuSync)
+            {
+                patchGl();
+                window.eaFpsAfterTick = afterTick;
+                window.eaFpsUncapped = uncapAsked;
+            }
+            if (visible)
+            {
+                // The runtime isn't up at parse time; showing is cheap and idempotent, and
+                // rearm() retries on every poll until debugFpsProfile stops throwing.
+                show(expanded ? "full" : "compact");
+            }
+            return api;
         })();
     </script>
 </body>

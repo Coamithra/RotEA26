@@ -21,6 +21,10 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 
 	private List<Settings.DifficultyLevel> difficultyLevelValues = Game1.GetEnumValues<Settings.DifficultyLevel>();
 
+	// Mirrors MenuScene.netMode, so the WebcamAliens refusal and the message explaining it
+	// can never disagree. Set by the MenuScene alongside its own flag.
+	internal bool NetMode { get; set; }
+
 	public SubMenuLevelChoice(Game game)
 		: base(game)
 	{
@@ -77,9 +81,20 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 	{
 		Vector2 val = font.MeasureString(menuEntries[selectedEntry]) / 2f;
 		base.SpriteBatch.DrawMetalString(font, menuEntries[selectedEntry], new Vector2(400f, 50f), Color.AliceBlue, 0f, val, 1f);
-		val = font.MeasureString(briefings[selectedEntry]) / 2f;
+		// Online co-op excludes the webcam challenge (the camera IS the controller and the
+		// mask is wall-clock local -- plans/stage11-online-coop.md). Card 11.5: say so in
+		// place of the briefing, so the blocked entry explains itself instead of silently
+		// refusing to respond. Blocking (not hiding) keeps the carousel's parallel index
+		// lists intact. NetMode is set by the MenuScene from the SAME flag that gates the
+		// refusal itself -- deriving it independently (e.g. from NetSession.Active) would let
+		// the two disagree on a URL dev-rig boot, where the message would claim the level is
+		// unavailable and selecting it would launch anyway.
+		string briefing = (NetMode && levels[selectedEntry] == Levels.WebcamAliens)
+			? "NOT AVAILABLE IN ONLINE CO-OP\nYour camera is the controller, so this one can't\nbe shared over the network. Pick another challenge."
+			: briefings[selectedEntry];
+		val = font.MeasureString(briefing) / 2f;
 		val.Y = 0f;
-		base.SpriteBatch.DrawString(font, briefings[selectedEntry], new Vector2(400f, 350f), Color.AliceBlue, 0f, val, 0.7f, (SpriteEffects)0, 0f);
+		base.SpriteBatch.DrawString(font, briefing, new Vector2(400f, 350f), Color.AliceBlue, 0f, val, 0.7f, (SpriteEffects)0, 0f);
 	}
 
 	protected override void DrawEntryAt(int entry, float step)

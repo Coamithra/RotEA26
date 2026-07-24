@@ -128,14 +128,31 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   plain `python tools/textures/build_textures.py` silently strips it off every texture it touches
   and the diff looks like a harmless size win. Check `git diff --stat` on `Content/gfx/**.dds`
   before committing a rebuild: shrinking files mean you dropped the canary.
-- **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and
-  asserts the texel just outside the logical edge still matches the edge (alpha-weighted, and
-  calibrated per texture against its own column-to-column step, so BC3 noise doesn't cry wolf).
-  **Run it after every `build_textures.py` rebuild** — a pass means bilinear at the logical edge is
-  indistinguishable from a true clamp, so no pad-bleed seam is possible at any pad size. It checks
-  **every mip level**, not just level 0 (decoding a level by re-heading its blocks as a standalone
-  single-level DDS, so Pillow's decoder is reused verbatim); that is what catches a chain built the
-  naive `-m 0` way, which passes levels 0–2 and fails from level 3.
+- **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and checks
+  the texel just outside the logical edge still looks like the edge it replicates (alpha-weighted,
+  each texel calibrated against the image's own local across-edge step, so BC3 noise doesn't cry
+  wolf). `build_textures.py` **runs it automatically** and fails the build on a regression; run it
+  by hand after anything else touches the `.dds`. It's a tolerance check, not a proof of equality —
+  a pass means no logical edge has a step big enough to read as a seam. It flags 85 of the 103
+  pre-fix assets; the rest had already-transparent edges with nothing to see, so a clean run does
+  not mean every texture was rebuilt. It checks **every mip level**, not just level 0 (decoding a
+  level by re-heading its blocks as a standalone single-level DDS, so Pillow's decoder is reused
+  verbatim); that is what catches a chain built the naive `-m 0` way, which passes levels 0–2 and
+  fails from level 3.
+  **The calibration is per TEXEL, against the worst intrinsic step within `WINDOW` either side —
+  never a whole-edge maximum**, which is what it used to be and which let one high-contrast spot on
+  a long edge license a real gap everywhere else along it (it passed a 116/255 alpha discontinuity
+  on pre-fix `eye_idle`). Widening `WINDOW` re-opens exactly that hole: it is variation ALONG the
+  edge being used to excuse a step ACROSS it.
+  **`FLOOR` is swept, not guessed, and mips are why it is 64.** It absorbs CROSS-BLOCK BC3 error,
+  which the intrinsic reference under-reads (adjacent content texels usually share endpoints).
+  Downsampling flattens the content, so at higher levels the reference collapses toward 0 while the
+  compressor's error does not — 32 was clean on level 0 and false-positived `756-v1` levels 1–3.
+  Worst legitimate step measured over all 124 assets at every level is 41; 64 clears it by 1.6x and
+  still sits 1.8x under the smallest real bleed on record. **Re-sweep before touching it.**
+  **`--selftest`** pins the rule itself against synthetic edges (no `.dds`, no texconv): a
+  replicated gutter passes, a transparent pad is flagged, and the licensed-gap case above is
+  flagged by the per-texel rule while the superseded whole-edge rule misses it.
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,

@@ -12,10 +12,21 @@ background tile seams (dark on the opaque Mars sky, bright where the marshills s
 over it). build_textures.py now replicates the logical edge into the pad gutter, which makes the
 filtered result identical to a true clamp.
 
-This script proves that property directly on the committed bytes: for every .dds it checks that
-the texel one step outside the logical edge EQUALS the edge texel, along the right column, the
-bottom row, and the corner. All zero deltas => bilinear at the logical edge cannot differ from
-clamp => no seam is possible, at any pad size.
+This script checks that property directly on the committed bytes: for every .dds, along the right
+column, the bottom row and the corner, the texel one step outside the logical edge must still look
+like the edge texel it replicates.
+
+It is a TOLERANCE CHECK, not a proof. BC3 is lossy and the gutter lands in a different 4x4 block
+from the edge it copies, so the two never decode bit-identical; the bar each texel is held to is
+derived from the image itself (see FLOOR/SLACK/HARD/WINDOW below). A pass means no texel on a
+logical edge steps away from its replica by more than that image's own local variation there --
+i.e. nothing that would read as a seam. It is not a guarantee of pixel equality.
+
+Sensitivity, measured against the pre-fix assets: of the 103 .dds the gutter actually changed, it
+flags 85. The rest have logical edges that are already (near-)transparent, where a transparent pad
+is within noise of a replica and there is genuinely nothing to see -- so a clean run does NOT mean
+"every texture was rebuilt", only "no texture has a visible gap at its logical edge". Whether the
+gutter is present at all is build_textures.py's business, not this script's.
 
 EVERY MIP LEVEL IS CHECKED, not just level 0 (Trello 110153c7). A mipped .dds has the same
 property to keep at each level, and it is easy to lose: a chain built by handing texconv the
@@ -26,11 +37,12 @@ log2(GUTTER) = 2 levels and then fails hard -- alpha delta 0/0/0 at levels 0-2, 
 The level's own logical size is `logical >> level` (KNI's GetSizeForLevel), and levels where the
 pad has shrunk away entirely are skipped as unpadded.
 
-It is a pure read of the shipped assets -- no texconv, no GPU, no game. Run it after any
-build_textures.py rebuild.
+It is a pure read of the shipped assets -- no texconv, no GPU, no game. build_textures.py runs it
+automatically at the end of a real build; run it by hand after anything else touches the .dds.
 
 Usage:
   python tools/textures/check_pad_bleed.py [--verbose]
+  python tools/textures/check_pad_bleed.py --selftest
 
 Exit code 0 = clean, 1 = at least one asset would bleed. Requires Pillow (PIL).
 """
@@ -46,20 +58,31 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 CONTENT = os.path.join(REPO, "web", "EvilAliensWeb", "wwwroot", "Content")
 DDS_LOGICAL_MAGIC = b"LOGD"
 
-# BC3 is lossy and the gutter lands in a DIFFERENT 4x4 block from the edge it copies, so it never
-# decodes bit-identical -- a fixed tolerance would either miss real gaps on noisy art or cry wolf
-# on clean art. Instead each texture calibrates against ITSELF: the gutter step is compared to the
-# step between the last two content columns, i.e. the image's own column-to-column variation at
-# that same edge, under the same compressor. A replicated gutter sits at or below that; a
-# transparent pad blows through it (delta ~255 against a backdrop of single digits).
-# FLOOR keeps a perfectly flat edge (intrinsic step 0) from tripping on a few levels of noise, and
-# SLACK leaves room for the gutter block being a harder fit than the content block on a
-# high-contrast edge. HARD is the backstop those two must not explain away: a replica can never
-# legitimately differ from its source by half of full scale, so a re-transparent pad (which reads
-# as the full 255) is caught even where the edge itself is violently noisy.
-FLOOR = 16
+# A fixed tolerance would either miss real gaps on noisy art or cry wolf on clean art, so each
+# texel is judged against the image's own behaviour AT THAT POSITION: the step from the edge texel
+# to its gutter replica is compared to the step between the last two content texels there, under
+# the same compressor. A replica sits at or below that; a transparent pad blows through it.
+# The reference is the worst intrinsic step within WINDOW texels either side -- per-texel alone is
+# too twitchy where BC3 quantises a flat run to exactly 0, and a whole-edge maximum is far too lax
+# (one high-contrast spot on a 1000-texel edge would license a real gap everywhere else). Keep
+# WINDOW small: it smooths quantisation, but it is variation ALONG the edge being used to excuse a
+# step ACROSS it, so widening it re-opens exactly that hole.
+# FLOOR keeps a flat edge from tripping on a few levels of noise; SLACK leaves room for the gutter
+# block being a harder fit than the content block on a high-contrast edge; HARD is the backstop
+# neither may explain away, since a replica can never legitimately differ from its source by half
+# of full scale -- so a re-transparent pad is caught even on a violently noisy edge.
+# FLOOR is SWEPT, not guessed, and it has to absorb CROSS-BLOCK error: adjacent content texels
+# usually share BC3 endpoints, so the intrinsic reference systematically under-reads the error the
+# gutter takes from landing in a different 4x4 block. Mip levels widen that gap -- downsampling
+# flattens the content (so the intrinsic reference shrinks toward 0 and the allowance collapses to
+# FLOOR) while the compressor's absolute error does not shrink with it. Measured over all 124
+# shipped .dds at every level: worst legitimate step 41 (756-v1 level 2), and nothing within 3x of
+# HARD. 64 clears that by 1.6x while staying 1.8x under the SMALLEST real bleed on record (the
+# 116/255 alpha discontinuity on pre-fix eye_idle); a transparent pad reads the full 255.
+FLOOR = 64
 SLACK = 2
 HARD = 128
+WINDOW = 1
 CHANNELS = ("R", "G", "B", "A")
 
 
@@ -69,12 +92,19 @@ DDSCAPS_COMPLEX = 0x00000008
 DDSCAPS_MIPMAP = 0x00400000
 
 
+def fail(msg):
+    print("ERROR: " + msg, file=sys.stderr)
+    sys.exit(1)
+
+
 def read_dds(path):
     """(data, padded_w, padded_h, logical_w, logical_h, mip_count, block_bytes).
 
     Unstamped .dds were never padded, so their logical size IS their padded size."""
     with open(path, "rb") as f:
         data = f.read()
+    if len(data) < 128 or data[:4] != b"DDS ":
+        fail(f"not a DDS file (bad magic or truncated header): {path}")
     h, w = struct.unpack("<I", data[12:16])[0], struct.unpack("<I", data[16:20])[0]
     mips = max(1, struct.unpack("<I", data[28:32])[0])
     block = DXT_BLOCK_BYTES.get(data[84:88], 16)
@@ -111,52 +141,59 @@ def mip_level_image(data, w, h, level, block):
     return Image.open(io.BytesIO(bytes(hdr) + data[off:off + n])).convert("RGBA"), lw, lh
 
 
-def deltas(a, b):
-    """Per-channel (R,G,B,A) worst difference between two equal-length raw RGBA byte strips.
+def weighted(strip):
+    """Raw RGBA bytes -> alpha-WEIGHTED (r*a, g*a, b*a, a) samples.
 
-    Compared alpha-WEIGHTED (r*a, g*a, b*a, a). The assets are straight alpha and stay that way --
-    this is only the comparison metric, chosen because it measures what the renderer can actually
-    show. RGB under a=0 never reaches the framebuffer, so texconv rewriting a fully transparent
-    texel's colour (it collapses uniform transparent blocks to 0,0,0,0) is not a gap; weighting by
-    alpha discounts it exactly as much as the blend does, while a genuinely transparent PAD next to
-    opaque content still reads as the full 255 it is.
+    The assets are straight alpha and stay that way -- this is only the comparison metric, chosen
+    because it measures what the renderer can actually show. RGB under a=0 never reaches the
+    framebuffer, so texconv rewriting a fully transparent texel's colour (it collapses uniform
+    transparent blocks to 0,0,0,0) is not a gap; weighting by alpha discounts it exactly as much as
+    the blend does, while a genuinely transparent PAD next to opaque content still reads as the
+    full 255 it is.
     """
-    def w(s, i):
-        al = s[i + 3]
-        return (s[i] * al // 255, s[i + 1] * al // 255, s[i + 2] * al // 255, al)
-    return [max((abs(w(a, i)[k] - w(b, i)[k]) for i in range(0, len(a), 4)), default=0)
-            for k in range(4)]
+    return [(strip[i] * strip[i + 3] // 255, strip[i + 1] * strip[i + 3] // 255,
+             strip[i + 2] * strip[i + 3] // 255, strip[i + 3])
+            for i in range(0, len(strip), 4)]
 
 
-def exceeds(step, intrinsic):
-    """The channels where the gutter step outruns the image's own step at that edge."""
-    return [CHANNELS[k] + f"+{step[k]}/{intrinsic[k]}" for k in range(4)
-            if step[k] > HARD or step[k] > max(SLACK * intrinsic[k], FLOOR)]
+def edge_margin(edge, gutter, inner):
+    """Tightest margin along one edge: (slack, label). Negative slack == a violation.
+
+    `inner` is the texel one further inside, so |inner-edge| is the image's own step at that spot.
+    Each texel is allowed the worst such step within WINDOW either side, so a locally busy patch
+    stays permissive without licensing a gap on the quiet stretches around it.
+    """
+    intrinsic = [[abs(inner[i][k] - edge[i][k]) for k in range(4)] for i in range(len(edge))]
+    worst = None
+    for i in range(len(edge)):
+        lo, hi = max(0, i - WINDOW), min(len(edge), i + WINDOW + 1)
+        for k in range(4):
+            step = abs(edge[i][k] - gutter[i][k])
+            allowed = min(HARD, max(SLACK * max(intrinsic[j][k] for j in range(lo, hi)), FLOOR))
+            if worst is None or allowed - step < worst[0]:
+                worst = (allowed - step, f"{CHANNELS[k]}{step}/{allowed}@{i}")
+    return worst or (0, "-")
 
 
 def check_edges(im, lw, lh, pw, ph):
-    """The gutter assertions for ONE surface. Returns a list of human-readable failures."""
-    strip = lambda box: im.crop(box).tobytes()   # raw RGBA, 4 bytes per texel
-    bad = []
-    col_ref = row_ref = [0, 0, 0, 0]
-    if pw > lw:   # right gutter vs the last content column, scaled by that edge's own step
-        col_ref = deltas(strip((lw - 2, 0, lw - 1, lh)), strip((lw - 1, 0, lw, lh)))
-        over = exceeds(deltas(strip((lw - 1, 0, lw, lh)), strip((lw, 0, lw + 1, lh))), col_ref)
-        if over:
-            bad.append("right column " + " ".join(over))
+    """The gutter margins for ONE surface: [(edge name, (slack, label))], tightest per edge."""
+    strip = lambda box: weighted(im.crop(box).tobytes())
+    edges = []
+    if pw > lw:   # right gutter vs the last content column, scaled by that edge's own steps
+        edges.append(("right column", edge_margin(
+            strip((lw - 1, 0, lw, lh)), strip((lw, 0, lw + 1, lh)), strip((lw - 2, 0, lw - 1, lh)))))
     if ph > lh:   # bottom gutter vs the last content row
-        row_ref = deltas(strip((0, lh - 2, lw, lh - 1)), strip((0, lh - 1, lw, lh)))
-        over = exceeds(deltas(strip((0, lh - 1, lw, lh)), strip((0, lh, lw, lh + 1))), row_ref)
-        if over:
-            bad.append("bottom row " + " ".join(over))
+        edges.append(("bottom row", edge_margin(
+            strip((0, lh - 1, lw, lh)), strip((0, lh, lw, lh + 1)), strip((0, lh - 2, lw, lh - 1)))))
     if pw > lw and ph > lh:
-        # One texel, so it is the noisiest sample -- calibrate it against the looser of the two
-        # edges rather than against a single-pixel reference of its own.
-        ref = [max(c, r) for c, r in zip(col_ref, row_ref)]
-        over = exceeds(deltas(strip((lw - 1, lh - 1, lw, lh)), strip((lw, lh, lw + 1, lh + 1))), ref)
-        if over:
-            bad.append("corner " + " ".join(over))
-    return bad
+        edges.append(("corner", edge_margin(   # calibrated against the diagonal inner neighbour
+            strip((lw - 1, lh - 1, lw, lh)), strip((lw, lh, lw + 1, lh + 1)),
+            strip((lw - 2, lh - 2, lw - 1, lh - 1)))))
+    return edges
+
+
+def report(edges):
+    return "  ".join(f"{name} {label}" for name, (_, label) in edges)
 
 
 def check(path, verbose):
@@ -169,41 +206,118 @@ def check(path, verbose):
         return True
     ok = True
     checked = 0
+    tightest = {}
     for level in range(mips):
         im, pw, ph = mip_level_image(data, pw0, ph0, level, block)
         lw, lh = max(1, lw0 >> level), max(1, lh0 >> level)
-        # A 2-texel reference needs 2 content texels to compare, and once the pad has shrunk
-        # away the level is unpadded and clamp applies to it as-is.
+        # A per-texel reference needs a texel one further in, and once the pad has shrunk away the
+        # level is unpadded and clamp applies to it as-is.
         if (pw, ph) == (lw, lh) or lw < 2 or lh < 2:
             continue
         checked += 1
-        bad = check_edges(im, lw, lh, pw, ph)
-        if bad:
-            print(f"  BLEED {rel}  level {level}  {lw}x{lh} -> {pw}x{ph}:  " + ", ".join(bad))
+        edges = check_edges(im, lw, lh, pw, ph)
+        for name, margin in edges:
+            if name not in tightest or margin[0] < tightest[name][0]:
+                tightest[name] = margin
+        if any(slack < 0 for _, (slack, _) in edges):
+            print(f"  BLEED {rel}  level {level}  {lw}x{lh} -> {pw}x{ph}:  " + report(edges))
             ok = False
     if ok and verbose:
         print(f"  ok    {rel}  {lw0}x{lh0} -> {pw0}x{ph0}  ({checked} padded level"
-              f"{'' if checked == 1 else 's'} checked{mipnote})")
+              f"{'' if checked == 1 else 's'} checked{mipnote}):  " + report(tightest.items()))
+    return ok
+
+
+def run(verbose=False):
+    """Check every shipped .dds; True if all clean. Imported by build_textures.py's final gate."""
+    # texviewer/ holds throwaway comparison previews (gitignored, never loaded by the game).
+    paths = sorted(p for p in glob.glob(os.path.join(CONTENT, "**", "*.dds"), recursive=True)
+                   if "texviewer" not in p.replace(os.sep, "/"))
+    print(f"check_pad_bleed: {len(paths)} shipped .dds under "
+          f"{os.path.relpath(CONTENT, REPO)}  (local calibration, floor {FLOOR}/255, cap {HARD}, "
+          f"every mip level)")
+    failed = [p for p in paths if not check(p, verbose)]
+    if failed:
+        print(f"FAIL: {len(failed)} of {len(paths)} step away from the replicated edge by more "
+              f"than the image's own local variation there.")
+        print("  Rebuild: python tools/textures/build_textures.py [--only GLOB] [--padtest N]")
+        return False
+    print(f"ok: all {len(paths)} replicate their logical edge into the pad, at every mip level.")
+    return True
+
+
+def _synthetic(rows, lw=63, lh=64):
+    """An RGBA image (lw+1)x lh whose last three columns are `rows` = [(inner, edge, gutter)].
+
+    Only the right gutter exists (height stays a mult-of-4), so a case exercises one edge alone.
+    Values are opaque grey levels unless a 4-tuple RGBA is given."""
+    from PIL import Image
+    px = lambda v: v if isinstance(v, tuple) else (v, v, v, 255)
+    im = Image.new("RGBA", (lw + 1, lh), (0, 0, 0, 255))
+    for y, (inner, edge, gutter) in enumerate(rows):
+        im.putpixel((lw - 2, y), px(inner))
+        im.putpixel((lw - 1, y), px(edge))
+        im.putpixel((lw, y), px(gutter))
+    return im, lw, lh
+
+
+def _whole_edge_max_verdict(im, lw, lh):
+    """The SUPERSEDED rule, kept only so the selftest can show what it let through.
+
+    Pre-review this compared the whole edge's max gutter step against the whole edge's max
+    intrinsic step -- see the calibration comment above for why that is too lax."""
+    strip = lambda box: weighted(im.crop(box).tobytes())
+    inner, edge, gutter = (strip((lw - 2, 0, lw - 1, lh)), strip((lw - 1, 0, lw, lh)),
+                           strip((lw, 0, lw + 1, lh)))
+    worst = lambda a, b: [max(abs(a[i][k] - b[i][k]) for i in range(len(a))) for k in range(4)]
+    step, intrinsic = worst(edge, gutter), worst(inner, edge)
+    return not any(step[k] > HARD or step[k] > max(SLACK * intrinsic[k], FLOOR) for k in range(4))
+
+
+def selftest():
+    """Pin the three properties the tolerance rule is supposed to have. No .dds, no texconv."""
+    lh = 64
+    # A replicated gutter passes even where the content itself is busy across the edge.
+    clean = [((y * 37) % 256, (y * 91) % 256, (y * 91) % 256) for y in range(lh)]
+    # A transparent pad next to opaque content is the original bug.
+    transparent = [(120, 200, (0, 0, 0, 0))] * lh
+    # THE REVIEW FINDING (f029d30): a quiet edge with one high-contrast spot, and a real gap far
+    # away from it. The whole-edge maximum takes its licence from row 8 and waves row 40 through.
+    licensed = [(200, 200, 200)] * lh
+    licensed[8] = (0, 255, 255)     # intrinsic step 255 here, and no gap
+    licensed[40] = (200, 200, 100)  # gap of 100 here, and no intrinsic step
+    cases = [("replicated gutter", clean, True), ("transparent pad", transparent, False),
+             ("gap licensed by a distant hot spot", licensed, False)]
+    ok = True
+    for name, rows, want_pass in cases:
+        im, lw, _ = _synthetic(rows, lh=lh)
+        edges = check_edges(im, lw, lh, lw + 1, lh)
+        got_pass = all(slack >= 0 for _, (slack, _) in edges)
+        ok &= got_pass == want_pass
+        print(f"  {'ok  ' if got_pass == want_pass else 'FAIL'}  {name}: "
+              f"{'passes' if got_pass else 'flagged'} (want {'passes' if want_pass else 'flagged'})"
+              f"  [{report(edges)}]")
+    # The discrimination is the point of the change, so assert it, not just the new verdict.
+    im, lw, _ = _synthetic(licensed, lh=lh)
+    if not _whole_edge_max_verdict(im, lw, lh):
+        print("  FAIL  the superseded whole-edge rule was expected to MISS the licensed gap")
+        ok = False
+    else:
+        print("  ok    the superseded whole-edge rule misses that gap; per-texel catches it")
+    print("selftest: " + ("ok" if ok else "FAILED"))
     return ok
 
 
 def main():
     ap = argparse.ArgumentParser(description="Assert every padded .dds replicates its logical edge")
-    ap.add_argument("--verbose", action="store_true", help="list every asset, not just failures")
+    ap.add_argument("--verbose", action="store_true",
+                    help="list every asset with its tightest margin, not just failures")
+    ap.add_argument("--selftest", action="store_true",
+                    help="check the tolerance rule itself against synthetic edges; no .dds needed")
     args = ap.parse_args()
-
-    # texviewer/ holds throwaway comparison previews (gitignored, never loaded by the game).
-    paths = sorted(p for p in glob.glob(os.path.join(CONTENT, "**", "*.dds"), recursive=True)
-                   if "texviewer" not in p.replace(os.sep, "/"))
-    print(f"check_pad_bleed: {len(paths)} shipped .dds under "
-          f"{os.path.relpath(CONTENT, REPO)}  (per-texture calibration, floor {FLOOR}/255, "
-          f"every mip level)")
-    failed = [p for p in paths if not check(p, args.verbose)]
-    if failed:
-        print(f"FAIL: {len(failed)} of {len(paths)} would bleed the pad across the logical edge.")
-        print("  Rebuild: python tools/textures/build_textures.py [--only GLOB] [--padtest N]")
-        sys.exit(1)
-    print(f"ok: all {len(paths)} replicate their logical edge into the pad, at every mip level.")
+    if args.selftest:
+        sys.exit(0 if selftest() else 1)
+    sys.exit(0 if run(args.verbose) else 1)
 
 
 if __name__ == "__main__":

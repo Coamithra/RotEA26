@@ -78,9 +78,10 @@ def pad4(x):
     return ((x + 3) // 4) * 4
 
 
-# How far the logical edge is replicated into the pad (see edge_gutter). One 4x4 BC3 block is
-# both necessary and sufficient: bilinear can only ever reach ONE texel past the source rect, and
-# a full block keeps that texel out of any block that also holds transparent pad.
+# How far the logical edge is replicated into the pad (see edge_gutter). ONE texel is all
+# correctness needs -- bilinear can never reach further past the source rect. 4 rounds that up to a
+# full BC3 block so that under a large --padtest pad no block the sampler can touch also holds
+# transparent pad; at the ship pad (0-3 px) the whole pad is filled and the rounding is moot.
 GUTTER = 4
 
 
@@ -427,6 +428,14 @@ def main():
             build_dxt(e[1], args.dry_run, args.padtest, mip=e[4])
         else:
             build_raw(e[1], args.dry_run)
+    # Gate the build on the pad gutter surviving compression -- a silent regression here is a
+    # hairline seam on every tiled sprite, which is exactly the class of bug nobody re-checks by
+    # hand. Nothing was written on --dry-run/--manifest-only, so there is nothing to verify there.
+    if not args.dry_run:
+        sys.path.insert(0, HERE)   # sibling module, whichever way this file was invoked
+        import check_pad_bleed
+        if not check_pad_bleed.run():
+            fail("the rebuilt .dds do not replicate their logical edge (see above)")
     print("done.")
 
 

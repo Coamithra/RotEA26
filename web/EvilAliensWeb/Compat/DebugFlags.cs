@@ -2036,9 +2036,17 @@ namespace EvilAliensWeb.Compat
 						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
 					break;
 				case "bgfreeze":
-					// A bare ?bgfreeze freezes with the boundaries at design x=400 (mid-screen).
-					BgFreeze = float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf)
-						? bgf : 400f;
+					// Numeric value = freeze there; bare ?bgfreeze = freeze at design x=400 (mid-screen);
+					// ?bgfreeze=0/false = off, per this file's on/off convention. Parse BEFORE IsOn so
+					// "0" reads as the column 0, not as "off" -- ?bgfreeze=false is the way to disable.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf))
+					{
+						BgFreeze = bgf;
+					}
+					else
+					{
+						BgFreeze = IsOn(val) ? 400f : (float?)null;
+					}
 					break;
 				case "harness":
 						// The object name itself is the value (?harness=Spider). A bare ?harness

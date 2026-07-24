@@ -116,16 +116,22 @@ generate much of the art/audio referenced here.
   the pad (last column right, last row down, corner), which makes the filtered result identical to a
   true clamp at **any** pad size, and keeps the sampled 4×4 BC3 blocks free of transparent-black
   endpoints on non-mult-of-4 art (`marsloop*` are 1587/1588 wide). Only 4 px are filled so the
-  `--padtest` canary keeps its transparent hole. Guard: `tools/textures/check_pad_bleed.py` (asserts
-  the gutter matches the edge on every shipped `.dds`) — **re-run it after any `build_textures.py`
-  rebuild**. Watch for this any time a texture is TILED or stretched far past its native size.
+  `--padtest` canary keeps its transparent hole. Guard: `tools/textures/check_pad_bleed.py` (a
+  TOLERANCE check that no logical edge on any shipped `.dds` steps away from its replica by more
+  than that image's own local variation there — not a proof of pixel equality, which BC3 cannot
+  give). `build_textures.py` runs it automatically; **re-run it by hand after anything else touches
+  the `.dds`**. Watch for this any time a texture is TILED or stretched far past its native size.
 - **`?bgfreeze=<designX>`** stops every background/foreground layer scrolling and parks a tile
   BOUNDARY of each at that design column (`Background.Update`). The Mars/alien-base layers scroll at
   six different speeds, so a tiling/wrap/parallax artifact can only be inspected once it holds
-  still. Caveat: sub-pixel artifacts like the pad bleed vary in strength with where the boundary
-  falls relative to render-target pixel centres, so sweep the FRACTIONAL part to cover phases — one
-  frozen frame is one phase, not the worst case. GOTCHA: freezing every layer at the SAME design
-  column stacks layers that normally never coincide — at `?bgfreeze=0` the alien base's two
+  still. `?bgfreeze=false` turns it off; `?bgfreeze=0` means design column 0 (numerics are parsed
+  before the on/off convention, so `=0` can't read as "off"). Two caveats: (1) sub-pixel artifacts
+  like the pad bleed vary in strength with where the boundary falls relative to render-target pixel
+  centres, so sweep the FRACTIONAL part to cover phases — one frozen frame is one phase, and quite
+  possibly a benign one, so it is NOT a worst case; (2) it freezes the tiled layers and the
+  starfield only — the doodad fly-by, the holodeck `drawOffset` glitch and `switchTimer`
+  cross-fades keep running, so simulator levels still jitter a few px between shots. GOTCHA:
+  freezing every layer at the SAME design column stacks layers that normally never coincide — at `?bgfreeze=0` the alien base's two
   additive `2331-v5` fog layers land exactly on top of each other and the scene whites out. That is
   the flag doing its job, not a blend/alpha regression; drop the flag to see the real look.
 - **The per-tile cull lives in ONE predicate, `BackgroundImage.TileOnScreen` (card 5216412d).** A

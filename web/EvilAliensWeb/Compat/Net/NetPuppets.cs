@@ -245,7 +245,10 @@ namespace EvilAliensWeb.Compat.Net
             info.Vel = state.Vel;
             info.TargetScale = state.Scale;
             info.HasSnapshot = true;
-            comp.rotation = state.Rotation;
+            if (comp.NetSpinPerMs == 0f)
+            {
+                comp.rotation = state.Rotation; // free-spinners rotate locally -- see NetSpinPerMs
+            }
             comp.NetSetFrame(state.CurFrame);
             comp.NetSpeedVector = state.Vel; // per-type Draw reading Direction stays truthful
             if (state.Hp > 0 && comp is KillableAlien killable)
@@ -279,6 +282,16 @@ namespace EvilAliensWeb.Compat.Net
                     {
                         bin.Remove((GameComponent)(object)comp); // dead-guarded NetKill no-op
                     }
+                }
+                else if (killerSlot != NetProtocol.KillerNone && comp is Powerup pu)
+                {
+                    // A powerup is a PICKUP, not a kill -- it must not take the generic-burst
+                    // branch below (an explosion where the other player collected). Drive the
+                    // collector's HUD slot instead; see NetSession.ApplyRemotePowerup.
+                    MarkPaid(netId, killerSlot);
+                    pu.taken = true;
+                    NetSession.ApplyRemotePowerup(pu, killerSlot);
+                    bin.Remove((GameComponent)(object)comp);
                 }
                 else if (killerSlot != NetProtocol.KillerNone)
                 {
@@ -367,7 +380,13 @@ namespace EvilAliensWeb.Compat.Net
                 PuppetInfo info = live[i];
                 AlienDrawableGameComponent comp = info.Comp;
                 comp.Enabled = false; // re-assert the freeze (pause Pop / stray enables)
-                Vector2 step = info.Vel * dtMs;
+                // Hold position while the peer is stalled: the last-known velocity is stale by
+                // up to the whole grace window, and dead-reckoning on it for seconds would fling
+                // the enemy world hundreds of px off -- which the LOCAL player can be killed by,
+                // since each peer owns its own hits -- then snap back hard when the host returns.
+                // ShipStateBuffer caps its own extrapolation at 250ms for exactly this reason.
+                // An in-flight correction still drains; it is finishing a snapshot we DID get.
+                Vector2 step = NetSession.PeerStalled ? Vector2.Zero : info.Vel * dtMs;
                 if (info.CorrectionMsLeft > 0f)
                 {
                     float take = MathHelper.Min(dtMs, info.CorrectionMsLeft);
@@ -375,6 +394,7 @@ namespace EvilAliensWeb.Compat.Net
                     info.CorrectionMsLeft -= take;
                 }
                 comp.Position += step;
+                comp.rotation += comp.NetSpinPerMs * dtMs; // no-op unless the type opted out of replicated rotation
                 comp.NetAdvanceFrame(dtSeconds);
                 if (info.HasSnapshot && info.TargetScale > 0f)
                 {

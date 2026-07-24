@@ -136,15 +136,23 @@ public class PlayerShip : AlienDrawableGameComponent
 	// target, so it outranks the trash the boss itself keeps spawning.
 	public const float DefaultPriorityTargetBias = 0.45f;
 
-	private static float SteerSmoothMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothMs ?? DefaultSteerSmoothMs;
+	// Random error added to every shot's aim angle (JunkBoss excepted -- it gets exact aim).
+	// Was a bare local in DoAIFire; promoted to a named const + ?aiaim so it can be tuned like
+	// the other knobs, and because it is the most legible SKILL dial there is (card c10e3e7f).
+	public const float DefaultAimSpreadRad = (float)Math.PI / 12f;
 
-	private static float WallReactionMs => EvilAliensWeb.Compat.DebugFlags.AiWallReactionMs ?? DefaultWallReactionMs;
+	private static float SteerSmoothMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothMs ?? DefaultSteerSmoothMs;
 
 	private static float GapSwitchMargin => EvilAliensWeb.Compat.DebugFlags.AiGapSwitchMargin ?? DefaultGapSwitchMargin;
 
+	private static float PriorityTargetBias => EvilAliensWeb.Compat.DebugFlags.AiPriorityBias ?? DefaultPriorityTargetBias;
+
+	private static float WallReactionMs => EvilAliensWeb.Compat.DebugFlags.AiWallReactionMs ?? DefaultWallReactionMs;
+
 	private static float ThreatLeadMs => EvilAliensWeb.Compat.DebugFlags.AiThreatLeadMs ?? DefaultThreatLeadMs;
 
-	private static float PriorityTargetBias => EvilAliensWeb.Compat.DebugFlags.AiPriorityBias ?? DefaultPriorityTargetBias;
+	// DIFFICULTY-SCALED (with ThreatFieldBasePx below); see AiSkillByDifficulty.
+	private static float AimSpread => EvilAliensWeb.Compat.DebugFlags.AiAimSpreadRad ?? Skill.AimSpreadRad;
 
 	// Bullet travel per ms of its lifetime -- i.e. `bulletlifetime * this` is how far a shot
 	// reaches. The 0.78 factor is the 2008 range test in DoAIFire, named here because the
@@ -213,11 +221,93 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Exponent of the (1-t)^p falloff. Higher = the field bites later and harder.
 	public const float DefaultThreatFieldFalloff = 3f;
 
-	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? DefaultThreatFieldBasePx;
+	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? Skill.ThreatFieldBasePx;
 
 	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
 
 	private static float ThreatFieldFalloff => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldFalloff ?? DefaultThreatFieldFalloff;
+
+	// ---- per-difficulty AI skill (card c10e3e7f) -------------------------------------------
+	// One bot drives the attract demos, the Mechanical Friends cheat and ?aiplayer, and until
+	// this card it had ONE set of constants -- it played identically on Easy and Inzane.
+	//
+	// ABSOLUTE final values per tier (the WebcamLevel.Tunings[] idiom): no DifficultyModifier
+	// divisor and no within-run ramp, so a bench run is reproducible. The Very_Hard row IS the
+	// Default* consts above, which keeps the configuration card f4d1721f actually measured
+	// exactly where it was measured.
+	//
+	// The spread is deliberately SUBTLE, and that is a design constraint rather than caution:
+	// a Mechanical Friend that visibly cannot play defeats the point of having one. "Worse"
+	// here means reacting a little later and aiming a little looser -- never a bot that reads
+	// as broken. Expect the gradient to show on ?aibench and not to the eye.
+	//
+	// ONLY these two scale, and that is a MEASURED result, not a judgement call. Four knobs
+	// were tried; each was isolated by holding the tier (and so the level's own difficulty
+	// scaling) fixed and moving one ?ai* override, since comparing tiers end-to-end cannot
+	// separate the pilot from the enemies:
+	//   AimSpreadRad      Level1, 15deg -> 57.3deg  : progress 50/64 -> 45/64.  KEPT
+	//   ThreatFieldBasePx spiderboss, 190 -> 30px   : deaths 11 -> 14.          KEPT (weak)
+	//   WallReactionMs    wallsonly, 420 -> 80ms    : contacts 0 -> 0, turn 22 -> 18 deg/s,
+	//                                                 progress 7/8 -> 7/8.      DROPPED
+	//   ThreatLeadMs      spiderboss, 700 -> 80ms   : deaths 11 -> 10.          DROPPED
+	// The two dropped ones did not move ANY available metric at a 5-9x degradation, so tiering
+	// them would ship a dial that does nothing. `contacts` in particular is floored by
+	// ClampIntoWallSpace -- the hard override runs regardless of how far ahead the bot looked,
+	// so wall look-ahead cannot show up there. **Don't re-add either to this table without an
+	// instrument that can actually see it**; their consts and ?aireact/?aithreatlead overrides
+	// are untouched from card f4d1721f.
+	//
+	// The steering smoothing / park demand are excluded for a different reason -- jitter and
+	// idle fidget are the BUGS f4d1721f fixed, so degrading them reproduces a defect instead of
+	// modelling a novice. Nor does PriorityTargetBias scale: degrading it stops the bot
+	// prioritising the boss that HALTS the level, and a demo that never progresses is worse
+	// than one that plays badly.
+	private readonly struct AiSkill
+	{
+		internal readonly float ThreatFieldBasePx;
+
+		internal readonly float AimSpreadRad;
+
+		internal AiSkill(float threatFieldBasePx, float aimSpreadRad)
+		{
+			ThreatFieldBasePx = threatFieldBasePx;
+			AimSpreadRad = aimSpreadRad;
+		}
+	}
+
+	// Indexed by Settings.DifficultyLevel (Easy, Medium, Hard, Very_Hard, Inzane).
+	private static readonly AiSkill[] AiSkillByDifficulty = new AiSkill[5]
+	{
+		/* Easy      */ new AiSkill(150f, (float)Math.PI / 8f),
+		/* Medium    */ new AiSkill(163f, (float)Math.PI / 10f),
+		/* Hard      */ new AiSkill(176f, (float)Math.PI / 11f),
+		/* Very_Hard */ new AiSkill(DefaultThreatFieldBasePx, DefaultAimSpreadRad),
+		/* Inzane    */ new AiSkill(200f, (float)Math.PI / 16f)
+	};
+
+	// EFFECTIVE difficulty, not CurrentDifficulty: the attract demos lock Hard and the tutorial
+	// locks Very_Hard, and only the lock-aware value describes the fight the bot is actually
+	// flying in. See Settings.EffectiveDifficulty. Clamped because the tier is deserialized
+	// from the save file, so an out-of-range value is reachable without any code being wrong.
+	private static AiSkill Skill
+	{
+		get
+		{
+			int tier = (int)Settings.GetInstance().EffectiveDifficulty;
+			return AiSkillByDifficulty[MathHelper.Clamp(tier, 0, AiSkillByDifficulty.Length - 1)];
+		}
+	}
+
+	// For the ?aibench readout. The RESOLVED values (overrides applied), so the bench line answers
+	// "which skill row am I actually flying?" directly instead of leaving it to be inferred from
+	// noisy outcome counters -- the tier lookup is the whole mechanism of card c10e3e7f, and every
+	// end-to-end metric that could confirm it is confounded by the ENEMIES scaling with the same
+	// tier. This is the only non-confounded observation of it.
+	internal static void GetAiSkillReadout(out float fieldPx, out float aimRad)
+	{
+		fieldPx = ThreatFieldBasePx;
+		aimRad = AimSpread;
+	}
 
 	// An impact this close, this centred, gets a steer strong enough to beat every other term.
 	private const float ThreatPanicMs = 260f;
@@ -802,7 +892,7 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
-		float aimSpread = (float)Math.PI / 12f;
+		float aimSpread = AimSpread;
 		// Compared in SQUARED space while the loop scans (and carrying the priority discount, so
 		// it is a score rather than a distance); the winner's true distance is recovered after the
 		// loop for the range test.

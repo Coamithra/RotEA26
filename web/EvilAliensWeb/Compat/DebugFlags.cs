@@ -955,14 +955,23 @@ namespace EvilAliensWeb.Compat
 		public static int AiFastForward { get; private set; }
 
 		// AI steering/targeting knobs (card f4d1721f -- Game/EvilAliens/PlayerShip.cs). Null =>
-		// the baked PlayerShip.Default* consts, so a shipped build is byte-identical. A/B them
-		// against the ?aibench counters, then bake a settled value into the const.
+		// the baked value, so a shipped build is byte-identical. A/B them against the ?aibench
+		// counters, then bake a settled value in.
+		// NOTE (card c10e3e7f): "the baked value" is no longer always a single const. TWO knobs
+		// -- ?aifieldpx and ?aiaim -- resolve through PlayerShip.AiSkillByDifficulty, so their
+		// default depends on the tier the fight is being run at. An override here is still
+		// ABSOLUTE and wins over the tier row, which is what makes a per-tier A/B possible (and
+		// is how that table's values were chosen): pair it with ?difficulty=<tier>.
 		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
 		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
 		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
 		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
 		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
+		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
+		//                    (JunkBoss excepted -- it always gets exact aim)
 		public static float? AiSteerSmoothMs { get; private set; }
+
+		public static float? AiAimSpreadRad { get; private set; }
 
 		public static float? AiWallReactionMs { get; private set; }
 
@@ -1678,6 +1687,14 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aire) && aire >= 0f)
 					{
 						AiWallReactionMs = MathHelper.Min(aire, 3000f);
+					}
+					break;
+				case "aiaim":
+					// Radians. Capped at a quarter turn: past that the "aimed" shot carries less
+					// information than firing in a random direction, which is not a skill setting.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaim) && aiaim >= 0f)
+					{
+						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.PiOver2);
 					}
 					break;
 				case "aigapmargin":

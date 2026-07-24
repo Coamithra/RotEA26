@@ -20,14 +20,6 @@ public class Vibrator : GameComponent, IVibratorService
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0092: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a6: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		for (int i = 0; i < 4; i++)
 		{
@@ -52,10 +44,6 @@ public class Vibrator : GameComponent, IVibratorService
 
 	public void addVibration(Vector2 power, float time, PlayerIndex playerIndex)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0018: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0019: Unknown result type (might be due to invalid IL or missing references)
 		VibratorInfo item = default(VibratorInfo);
 		item.timer = new Timer(time, repeating: false);
 		item.power = power;

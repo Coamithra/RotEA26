@@ -10,12 +10,6 @@ internal class EvilBullet : AlienDrawableGameComponent, IComponentWatcher
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -42,7 +36,6 @@ internal class EvilBullet : AlienDrawableGameComponent, IComponentWatcher
 
 	public void Setup(Vector2 position, float direction)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 		base.Direction = direction;
 	}
@@ -57,10 +50,6 @@ internal class EvilBullet : AlienDrawableGameComponent, IComponentWatcher
 
 	public bool OffScreen()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
 		return (base.Position.X < -50f) | (base.Position.X > 850f) | (base.Position.Y < -50f) | (base.Position.Y > 650f);
 	}
 
@@ -80,7 +69,6 @@ internal class EvilBullet : AlienDrawableGameComponent, IComponentWatcher
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_004f: Unknown result type (might be due to invalid IL or missing references)
 		if (other is Option || (other is Blast && !((Blast)other).IsMini) || other is Ball)
 		{
 			Die();

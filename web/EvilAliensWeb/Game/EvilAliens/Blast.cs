@@ -36,7 +36,6 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 			c.Position = base.Position;
 			// DrawScale (not raw scale): blast.png is a 1.5x supersampled sheet, so sizing the
 			// hitbox off texture.Width * scale made it 1.5x too big — damage reached well outside
@@ -51,7 +50,6 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 	public Blast(Game game)
 		: base(game)
 	{
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Sprites/blast"));
 		base.DrawOrder = 20;
 		timers.Add(lifetime);
@@ -69,7 +67,6 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 
 	public void Setup(Vector2 position, int power, int player)
 	{
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
 		this.player = player;
 		mini = false;
 		base.Position = position;
@@ -79,7 +76,6 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 
 	public void SetupAsMini(Vector2 position, float lifetime, int player)
 	{
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
 		this.player = player;
 		mini = true;
 		base.Position = position;
@@ -155,7 +151,6 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 	// (active while alpha >= ActiveAlpha), so "dangerous" now coincides with "clearly visible".
 	private void ApplyLifecycle(float p)
 	{
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
 		float grow = MyMath.PowerCurve(0f, 1f, 0.3f, p);
 		if (!mini)
 		{
@@ -190,7 +185,6 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 
 	public void SetPosition(Vector2 position)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 	}
 

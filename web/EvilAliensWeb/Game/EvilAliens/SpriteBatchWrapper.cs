@@ -179,15 +179,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	{
 		get
 		{
-			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 			return blendmode;
 		}
 		set
 		{
-			//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0011: Unknown result type (might be due to invalid IL or missing references)
 			if (value != blendmode)
 			{
 				Flush();
@@ -201,7 +196,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	public SpriteBatchWrapper(Game game)
 		: base(game)
 	{
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
 		blendmode = (SpriteBlendMode)1;
 		effectHandler = new EffectHandler();
 	}
@@ -230,7 +224,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	private void _beginDrawing()
 	{
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 		if (effectHandler.HasChanged())
 		{
 			Flush();
@@ -580,7 +573,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// glint. A null `metal` (missing on a partial deploy) degrades to a plain DrawString.
 	public void DrawMetalString(string text, Vector2 position, Color tint, float rotation, Vector2 origin, float scale, float time)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		if (string.IsNullOrEmpty(text) || font == null)
 		{
 			return;
@@ -1002,35 +994,18 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void DrawString(SpriteFont spritefont, string text, Vector2 position, Color color, float rotation, Vector2 origin, float scale, SpriteEffects spriteeffect, float layerdepth)
 	{
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		DrawStringScaled(spritefont, text, position, color, rotation, origin, new Vector2(scale, scale), spriteeffect, layerdepth);
 	}
 
 	public void DrawString(string text, Vector2 position, Color color, float rotation, Vector2 origin, float scale, SpriteEffects spriteeffect, float layerdepth)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		DrawStringScaled(font, text, position, color, rotation, origin, new Vector2(scale, scale), spriteeffect, layerdepth);
 	}
 
 	public void DrawString(string text, Vector2 position, Color color, float rotation, bool centered, float scale, SpriteEffects spriteeffect, float layerdepth)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = ((!centered) ? Vector2.Zero : (font.MeasureString(text) / 2f));
 		_beginDrawing();
 		DrawStringScaled(font, text, position, color, rotation, val, new Vector2(scale, scale), spriteeffect, layerdepth);
@@ -1038,16 +1013,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void DrawString(string text, Vector2 position, Color color, float rotation, bool centered, Vector2 scale, SpriteEffects spriteeffect, float layerdepth)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = ((!centered) ? Vector2.Zero : (font.MeasureString(text) / 2f));
 		_beginDrawing();
 		DrawStringScaled(font, text, position, color, rotation, val, scale, spriteeffect, layerdepth);
@@ -1065,7 +1030,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// before while the texels come from the dense atlas -> crisp after RenderScale.
 	private void DrawStringScaled(SpriteFont sf, string text, Vector2 position, Color color, float rotation, Vector2 origin, Vector2 scale, SpriteEffects effects, float layerdepth)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		if (sf == null || string.IsNullOrEmpty(text))
 			return;
 		Texture2D tex = sf.Texture;
@@ -1110,8 +1074,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		// Clamp to the logical region so a padded dxt texture never draws its pad (which reads BLACK
 		// under Opaque blend, not transparent). No-op for unpadded textures (LogicalBounds == full).
@@ -1121,8 +1083,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position, Color color)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		// Clamp to logical (see above): the pad is black under Opaque; no-op when unpadded.
 		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color,
@@ -1131,12 +1091,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position, Vector2 scale, bool center)
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0046: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1154,12 +1108,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, bool center, Color color, SpriteEffects spriteEffects)
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1177,21 +1125,12 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, Vector2 offset, Color color, SpriteEffects spriteEffects)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), color, rotation, offset, scale, spriteEffects, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, bool center)
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1209,20 +1148,12 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, Vector2 offset)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		spriteBatch.Draw(texture, position, (Rectangle?)texture.LogicalBounds(), Color.White, rotation, offset, scale, (SpriteEffects)0, 0f);
 	}
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, float scale, bool center, Color color)
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1240,12 +1171,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Vector2 position, float rotation, Vector2 scale, bool center, Color color)
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1263,12 +1188,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Rectangle source, Vector2 position, float rotation, float scale, bool center, Color color)
 	{
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1284,9 +1203,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Rectangle source, Rectangle dest, Color color)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		spriteBatch.Draw(texture, dest, (Rectangle?)source, color);
 	}
@@ -1302,13 +1218,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Rectangle source, Vector2 position, float rotation, float scale, bool center, Color color, SpriteEffects spriteEffects)
 	{
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1324,12 +1233,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Rectangle source, Vector2 position, float rotation, float scale, bool center)
 	{
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 zero = default(Vector2);
 		if (center)
 		{
@@ -1345,8 +1248,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	public void Draw(Texture2D texture, Rectangle dest, Color color)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		_beginDrawing();
 		// Whole texture scaled to fill dest: clamp the source to the logical region so a padded dxt
 		// texture doesn't shrink its content into part of dest (leaving a transparent pad margin).
@@ -1355,8 +1256,6 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 
 	protected override void LoadContent()
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Expected O, but got Unknown
 		base.LoadContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		spriteBatch = new SpriteBatch(ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice);

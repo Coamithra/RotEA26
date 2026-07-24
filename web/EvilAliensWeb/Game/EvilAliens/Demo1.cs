@@ -246,15 +246,11 @@ internal class Demo1 : GameScene
 
 	private void waitevent_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 0.2f) / 16.666666f);
 	}
 
 	private void waitevent_OnFinished2(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 7.6f) / 16.666666f);
 	}
 
@@ -265,8 +261,6 @@ internal class Demo1 : GameScene
 
 	private void spawner_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0.25f, 0.6f) / 16.666666f);
 		// Attract-mode demo mirrors Level 1's belt: slow the near stars so the fastest star reads
 		// clearly slower than the slowest asteroid (see Background.BeltStarSlowdownFactor).

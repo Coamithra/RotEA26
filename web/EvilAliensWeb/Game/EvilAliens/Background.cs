@@ -102,6 +102,25 @@ public class Background : Scene
 
 	private bool beltSlowActive;
 
+	// Join-in-progress catch-up (card 45a4e48d): the LAST latching op the level script ran, so a
+	// peer that arrives mid-level can be brought up to the host's scenery instead of the level's
+	// initial one. Tracked HERE rather than sniffed off NetSession's send path because
+	// OnBackgroundOp early-returns while no peer is connected -- for a listed single-player game
+	// that is precisely the window whose ops have to be remembered. null = the script never
+	// touched it, which is NOT the same as "set to the default": before the first SetSpeed,
+	// targetscrollspeed is still zero while the real scrollspeed is whatever SetSpace()/SetMars()
+	// put there at Initialize, so replaying a blind zero would freeze the joiner's starfield.
+	private Vector2? netLastSpeed;
+
+	private EvilAliensWeb.Compat.Net.NetBackgroundOp? netLastAlienBase;
+
+	// Which Queue* op owns the doodad currently crossing. Tracked explicitly rather than
+	// inferred from doodadname, because the holodeck sim-earth (QueueEarthSim) reuses the hero
+	// earth's texture with a different tint/blend and has no wire op of its own -- it sets this
+	// to null so it is simply not replayed, instead of a joiner being handed a white
+	// star-freezing hero earth in a Tutorial/Classic holodeck.
+	private EvilAliensWeb.Compat.Net.NetBackgroundOp? netLastDoodad;
+
 	// Eased 0..1 slowdown amount for the belt: rises to 1 while engaged, falls to 0 while disengaged,
 	// stepped each frame in Update by the ramp durations above.
 	private float beltSlowAmount;
@@ -215,26 +234,16 @@ public class Background : Scene
 	// (SetSpace/SetMars/...) are not hooked: both peers run their own scene Initialize.
 	public void SetSpeed(Vector2 speed)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		targetscrollspeed = speed;
 		scrollspeedinitial = scrollspeed;
 		scrollspeedchangetimer.Reset();
 		scrollspeedchangetimer.Start();
+		netLastSpeed = speed;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed, speed);
 	}
 
 	public void QueueSmallEarth()
 	{
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			// Minor "earth in the corner" appearance uses a dedicated small texture
@@ -251,24 +260,13 @@ public class Background : Scene
 			// Milder than the hero earth (small corner planet): slow the stars to ~25%.
 			doodadStarSlowdown = 0.25f;
 			doodadEnterFromTop = true;
+			netLastDoodad = EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueSmallEarth;
 			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueSmallEarth, Vector2.Zero);
 		}
 	}
 
 	public void QueueEarth()
 	{
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			doodadname = "GFX/Sprites/earth";
@@ -301,21 +299,13 @@ public class Background : Scene
 			{
 				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
+			netLastDoodad = EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueEarth;
 			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueEarth, Vector2.Zero);
 		}
 	}
 
 	public void QueueAndromeda()
 	{
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0096: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			doodadcolor = Color.White;
@@ -340,16 +330,13 @@ public class Background : Scene
 			{
 				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
+			netLastDoodad = EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueAndromeda;
 			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueAndromeda, Vector2.Zero);
 		}
 	}
 
 	protected void fadeBackBufferToWhite(float factor)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
 		factor = MathHelper.Clamp(factor, 0f, 1f);
 		int num = Convert.ToInt16(factor * 255f);
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
@@ -358,9 +345,6 @@ public class Background : Scene
 
 	protected void fadeBackBufferToBlack(float factor)
 	{
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
 		factor = MathHelper.Clamp(factor, 0f, 1f);
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.SpriteBatch.Draw(blank, new Rectangle(0, 0, 800, 600), new Color(new Vector4(0f, 0f, 0f, factor)));
@@ -368,21 +352,6 @@ public class Background : Scene
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0049: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0213: Unknown result type (might be due to invalid IL or missing references)
-		//IL_021e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_025a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_027a: Unknown result type (might be due to invalid IL or missing references)
 		timer += gameTime.ElapsedGameTime;
 		if (showdoodad)
 		{
@@ -421,15 +390,37 @@ public class Background : Scene
 		// currently deeper and never stacks them, so the composition is correct on both paths.
 		float starSlowdown = MathHelper.Min(DoodadStarSlowdownFactor(), BeltStarSlowdownFactor());
 		float effectiveModifier = scrollspeedmodifier * starSlowdown;
+		// ?bgfreeze=<designX>: hold every layer still with a tile BOUNDARY parked at that design
+		// column (boundaries sit at position.X + k*realsize.X, so position.X = designX mod realsize.X
+		// puts one there). The layers scroll at six different speeds, so a tiling artifact can only
+		// be screenshotted comparably before/after if it stops moving. position.Y is deliberately
+		// left alone -- the marsloop floor sits at 300 by design.
+		bool frozen = DebugFlags.BgFreeze.HasValue;
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
-			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			if (frozen)
+			{
+				backgroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, backgroundLayer.realsize.X);
+			}
+			else
+			{
+				backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			}
 		}
 		foreach (BackgroundImage foregroundLayer in foregroundLayers)
 		{
-			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			if (frozen)
+			{
+				foregroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, foregroundLayer.realsize.X);
+			}
+			else
+			{
+				foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			}
 		}
-		Vector2 starDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
+		Vector2 starDelta = frozen
+			? Vector2.Zero
+			: scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
 		if (starfield != null)
 		{
 			starfield.Advance(starDelta);
@@ -552,6 +543,117 @@ public class Background : Scene
 		return MathHelper.Lerp(1f, doodadStarSlowdown, t);
 	}
 
+	// Join-in-progress catch-up (card 45a4e48d). A peer arriving mid-level ran its OWN scene
+	// Initialize, so it starts from the level's INITIAL scenery and -- the script being
+	// host-only (11.2 sim-split) -- will never run the ops that already fired. Replay them as
+	// the same reliable NetBackgroundOp events the live path uses, so the client applies them
+	// through the identical GameScene.NetApplyBackgroundOp switch and nothing needs a second
+	// code path. Host-only + peer-gated inside OnBackgroundOp; called once, from the EvReady
+	// handler (the client's scene-up edge) -- NOT at pairing time, when the joiner has no
+	// GameScene yet and its imminent Initialize would clobber the lot.
+	//
+	// Order matters for the doodad pair only: the kind before its position, because Queue* parks
+	// a fresh doodad back at its entry point and SetDoodadPos then moves it to the host's.
+	// (Speed goes first for readability, NOT for correctness: SetSpeed only retargets a 1333ms
+	// lerp, so scrollspeed -- which is what Queue* reads for its entry/exit edge -- has not moved
+	// by the time the doodad op is applied. The joiner's own Initialize already gave it the same
+	// scroll direction as the host, which is what actually makes the edge agree.)
+	//
+	// `emit` is the sink rather than a hard call to NetSession.OnBackgroundOp so the burst can
+	// also be captured into a list -- which is what makes the whole catch-up testable as a pure
+	// encode->apply function in one tab (GameScene.NetCatchUpSelfTest / eaNetBgTest), with no
+	// second peer and no timing.
+	internal void NetReplayCatchUp(Action<EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2> emit)
+	{
+		if (netLastSpeed.HasValue)
+		{
+			emit(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed, netLastSpeed.Value);
+		}
+		if (netLastAlienBase.HasValue)
+		{
+			emit(netLastAlienBase.Value, Vector2.Zero);
+		}
+		if (beltSlowActive)
+		{
+			emit(EvilAliensWeb.Compat.Net.NetBackgroundOp.EngageBeltSlowdown, Vector2.Zero);
+		}
+		if (showdoodad && netLastDoodad.HasValue)
+		{
+			emit(netLastDoodad.Value, Vector2.Zero);
+			emit(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetDoodadPos, doodadPos);
+		}
+	}
+
+	// Catch-up only: place an in-flight doodad where the host has it, so the joiner picks the
+	// fly-by up mid-crossing instead of watching it descend again from the top (and running the
+	// star-freeze envelope for a whole extra crossing). No-op if nothing is showing -- the
+	// preceding Queue* is what decides that, and a client whose own doodad slot was busy
+	// simply keeps its own.
+	// Debug only (the eaNetBgTest round-trip): put the scenery back to what a peer that just ran
+	// its own scene Initialize would hold, so the replayed burst has something real to restore.
+	// Reset() covers the doodad, the belt and the latches; targetscrollspeed is cleared on top
+	// because Reset() leaves it (it only rewinds the LIVE scrollspeed), and a stale target would
+	// make the speed leg of the diff pass without the burst doing anything.
+	//
+	// What this canNOT wipe is the alien-base tile: Reset() deliberately leaves layer 0 alone and
+	// the level's initial texture name isn't recoverable from here, so a SetAlienBaseN in the
+	// burst is re-applied but reads identical either way. The self-test prints the ops it
+	// replayed precisely so that gap is visible instead of hiding inside a PASS.
+	internal void NetTestWipe()
+	{
+		Reset();
+		targetscrollspeed = Vector2.Zero;
+		scrollspeedchangetimer.Stop();
+	}
+
+	// A hostile peer is on the other end of this once a game is publicly listed, and a NaN would
+	// wedge the doodad forever: BOTH exit tests in Update are false for NaN, so showdoodad never
+	// clears and DoodadStarSlowdownFactor poisons the star modifier -- a permanently frozen
+	// starfield. Cheap to refuse here.
+	internal void NetSetDoodadPos(Vector2 pos)
+	{
+		if (showdoodad && float.IsFinite(pos.X) && float.IsFinite(pos.Y))
+		{
+			doodadPos = pos;
+		}
+	}
+
+	// The live catch-up state, for the eaNetBg() verification dump (card 45a4e48d): one
+	// parseable line so a JIP joiner's scenery can be DIFFED against the host's instead of
+	// eyeballed off a screenshot of something that moves every frame.
+	//
+	// Deliberately reports the state the ops CONSUME, not the netLast* bookkeeping they replay:
+	// printing the latches would make the round-trip self-test a tautology (latch -> wire ->
+	// latch), passing even if SetSpeed/SetAlienBaseN never touched the scenery. speed is the
+	// lerp TARGET rather than the live scrollspeed because SetSpeed only retargets a 1333ms
+	// ramp -- the live value is still mid-flight the instant the burst is applied.
+	internal string NetStateLine()
+	{
+		string doodad = showdoodad
+			? (netLastDoodad.HasValue ? netLastDoodad.Value.ToString() : (doodadname ?? "?") + "(nosync)")
+				+ "@" + doodadPos.X.ToString("0.#") + "," + doodadPos.Y.ToString("0.#")
+			: "-";
+		return "speed=" + targetscrollspeed.X.ToString("0.####") + "," + targetscrollspeed.Y.ToString("0.####")
+			+ " base=" + NetBaseTextureName()
+			+ " belt=" + (beltSlowActive ? "1" : "0")
+			+ " doodad=" + doodad;
+	}
+
+	// The floor tile layer 0 is actually showing (or switching to) -- what SetAlienBaseN really
+	// changes, as opposed to the op we remembered running.
+	private string NetBaseTextureName()
+	{
+		if (backgroundLayers == null || backgroundLayers.Count == 0)
+		{
+			return "-";
+		}
+		BackgroundImage layer = backgroundLayers[0];
+		string[,] names = layer.new_texturenames ?? layer.texturenames;
+		return (names != null && names.GetLength(0) > 0 && names.GetLength(1) > 0)
+			? (names[0, 0] ?? "-")
+			: "-";
+	}
+
 	// Engage the asteroid-belt star-slowdown (Level 1 sideways belt phase). Called from
 	// Level1.spawner_OnFinished when the belt scroll speed is set; the near stars ramp DOWN over
 	// BeltRampInMs so the fastest star drops below the slowest asteroid. Idempotent.
@@ -610,9 +712,6 @@ public class Background : Scene
 
 	public void DrawForeground(GameTime gameTime)
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
 		if (XFade.Active && rendertarget != null)
 		{
 			// Normalized counts DOWN (1 -> 0, fraction of the fade REMAINING), so
@@ -633,10 +732,6 @@ public class Background : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0081: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0098: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0156: Unknown result type (might be due to invalid IL or missing references)
 		if (XFade.Active)
 		{
 			base.SpriteBatch.Flush();
@@ -732,6 +827,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v8");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v8";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6, Vector2.Zero);
 	}
 
@@ -742,6 +838,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v6");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v6";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5, Vector2.Zero);
 	}
 
@@ -752,6 +849,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v4");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v4";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4, Vector2.Zero);
 	}
 
@@ -762,6 +860,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v3");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v3";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3, Vector2.Zero);
 	}
 
@@ -772,22 +871,12 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v5");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v5";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2, Vector2.Zero);
 	}
 
 	public void SetAlienBase()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0295: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029a: Unknown result type (might be due to invalid IL or missing references)
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
@@ -837,17 +926,6 @@ public class Background : Scene
 
 	public void SetSpace()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0295: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029a: Unknown result type (might be due to invalid IL or missing references)
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
 		isHolodeck = false;
@@ -872,8 +950,6 @@ public class Background : Scene
 
 	public void SetSimpleSpace()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 		// Holodeck / trial-simulation chamber. Space here is PROJECTED, not real: the stars
 		// stay (a space-combat sim that showed no stars would be dull AND a poor simulation)
 		// but are cool-tinted + dimmed so they read as part of the projection, while the grid
@@ -952,8 +1028,6 @@ public class Background : Scene
 
 	public void Reset()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 		XFade.Stop();
 		showdoodad = false;
 		beltSlowActive = false;
@@ -962,6 +1036,14 @@ public class Background : Scene
 		fadeFactor = 0.998f;
 		scrollspeed = scrollspeedreset;
 		scrollspeedmodifier = 10f;
+		// The JIP catch-up latches (above). Reset() is reached from level entry AND from every
+		// scene setter (SetSpace/SetMars/SetAlienBase/...), including the mid-level scene swaps
+		// InsaneBossI drives -- and EVERY one of those callers rebuilds the layers and the scroll
+		// baseline first. So by the time we get here the tracked ops describe scenery that no
+		// longer exists, whichever path arrived; clearing them is right in all cases.
+		netLastSpeed = null;
+		netLastAlienBase = null;
+		netLastDoodad = null;
 	}
 
 	// Dispose the procedural starfield (the SpriteBatch it owns) and forget it, so a
@@ -982,17 +1064,6 @@ public class Background : Scene
 
 	internal void SetMars()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04ab: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04b0: Unknown result type (might be due to invalid IL or missing references)
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
 		isHolodeck = false;
@@ -1075,8 +1146,6 @@ public class Background : Scene
 
 	protected override void LoadContent()
 	{
-		//IL_00d9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Expected O, but got Unknown
 		base.LoadContent();
 		if (doodadname != null)
 		{
@@ -1133,9 +1202,6 @@ public class Background : Scene
 
 	public void SetSpaceClassic()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
 		SetSpace();
 		scrollspeedreset = new Vector2(0f, -0.2f) / 16.666666f;
 		Reset();
@@ -1229,7 +1295,6 @@ public class Background : Scene
 	// design space (scaled by RenderScale.Matrix), like the fade overlays.
 	private void DrawHoloPulse()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		if (!isHolodeck || !pulseActive)
 		{
 			return;
@@ -1250,9 +1315,6 @@ public class Background : Scene
 
 	public void SetSimpleSpaceClassic()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
 		SetSimpleSpace();
 		scrollspeedreset = new Vector2(0f, -0.2f) / 16.666666f;
 		Reset();
@@ -1260,18 +1322,6 @@ public class Background : Scene
 
 	public void QueueEarthSim()
 	{
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			doodadname = "GFX/Sprites/earth";
@@ -1287,6 +1337,8 @@ public class Background : Scene
 			doodadblendmode = (SpriteBlendMode)2;
 			// Holodeck sim-earth (projected, over the grid starfield) is out of scope — no slowdown.
 			doodadStarSlowdown = 1f;
+			// Not replicable (no wire op, and it shares QueueEarth's texture) -- see netLastDoodad.
+			netLastDoodad = null;
 			if (scrollspeed.Y > 0f)
 			{
 				doodadPos = new Vector2(400f, (float)(-doodad.LogicalHeight()) * doodadscale / 2f);

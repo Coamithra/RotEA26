@@ -61,8 +61,6 @@ internal class CreditsScene : Scene
 	public CreditsScene(Game game)
 		: base(game)
 	{
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004a: Expected O, but got Unknown
 		// Web port: load unpacked web assets via WebContentManager (KNI can't read the
 		// original .xnb). Kept scene-local so it can Unload() when the scene finishes.
 		content = new WebContentManager((IServiceProvider)game.Services, "Content");
@@ -73,8 +71,6 @@ internal class CreditsScene : Scene
 
 	public override void Initialize()
 	{
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
@@ -136,8 +132,6 @@ internal class CreditsScene : Scene
 
 	public void SetupLevel1()
 	{
-		//IL_0135: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
 		castWillBeDisplayed = false;
 		lines.Clear();
 		lines.Add("As the debris of the destroyed Fleet");
@@ -165,8 +159,6 @@ internal class CreditsScene : Scene
 
 	public void SetupLevel2()
 	{
-		//IL_0115: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011a: Unknown result type (might be due to invalid IL or missing references)
 		castWillBeDisplayed = false;
 		lines.Clear();
 		lines.Add("Having fought your way past the alien");
@@ -194,8 +186,6 @@ internal class CreditsScene : Scene
 
 	public void SetupLevel3()
 	{
-		//IL_0327: Unknown result type (might be due to invalid IL or missing references)
-		//IL_032c: Unknown result type (might be due to invalid IL or missing references)
 		lines.Clear();
 		if (Settings.GetInstance().CurrentDifficulty >= Settings.DifficultyLevel.Hard)
 		{
@@ -340,20 +330,12 @@ internal class CreditsScene : Scene
 
 	protected void fadeBackBufferToWhite(int alpha)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
 		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)alpha));
 	}
 
 	protected void fadeBackBufferToBlack(int alpha)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
 		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
 	}
@@ -489,15 +471,6 @@ internal class CreditsScene : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0076: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.GraphicsDevice.Clear(Color.Black);
 		base.SpriteBatch.Draw(bg, new Rectangle(0, 0, 800, 600), color);

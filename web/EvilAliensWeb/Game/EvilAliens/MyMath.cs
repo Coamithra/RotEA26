@@ -22,7 +22,6 @@ public static class MyMath
 
 	public static float SnapAngle(Vector2 vector, int sensitivity)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		float num = VectorToAngle(vector);
 		float num2 = num + (float)Math.PI * 2f / (float)(2 * sensitivity);
 		return num2 - Mod(num2, (float)Math.PI * 2f / (float)sensitivity);
@@ -60,8 +59,6 @@ public static class MyMath
 
 	public static Vector2 AngleToVector(float angle)
 	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 result = default(Vector2);
 		result.X = Cos(angle);
 		result.Y = Sin(angle);

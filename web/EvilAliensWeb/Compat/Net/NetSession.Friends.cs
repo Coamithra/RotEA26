@@ -111,7 +111,14 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             long now = NowMs;
-            long timeout = (RemotePaused || localPaused) ? PausedPeerTimeoutMs : FriendTimeoutMs;
+            // While the peer is PAUSED its stream stops entirely; while it is STALLED (card 11.5's
+            // grace window) the link is unwell but the session is deliberately being ridden out --
+            // in neither case may a 500 ms gap blow up the puppets, or a wifi hiccup would kill the
+            // peer's couch players while the run itself survives. Enemy puppets park for the same
+            // reason (NetPuppets' PeerStalled check).
+            long timeout = (RemotePaused || localPaused) ? PausedPeerTimeoutMs
+                : PeerStalled ? PeerTimeoutMs + PeerGraceMs
+                : FriendTimeoutMs;
             friendScratchSlots.Clear();
             foreach (byte slot in friendChannels.Keys)
             {

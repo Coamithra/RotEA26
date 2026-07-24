@@ -31,7 +31,6 @@ internal class UfoFormationSpawner : GameEvent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0095: Unknown result type (might be due to invalid IL or missing references)
 		wavetimer.Update(gameTime);
 		if (wavetimer.Finished)
 		{

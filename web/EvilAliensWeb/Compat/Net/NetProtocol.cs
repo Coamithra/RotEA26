@@ -606,6 +606,11 @@ namespace EvilAliensWeb.Compat.Net
         SetAlienBase4 = 8,
         SetAlienBase5 = 9,
         SetAlienBase6 = 10,
+        // Join-in-progress catch-up only (card 45a4e48d), never fired by a live script beat:
+        // places an already-crossing doodad at the host's current position, sent straight after
+        // the Queue* op that re-creates it (which parks it back at its entry point). Its own op
+        // rather than a magic non-zero Vector2 on Queue*, so neither carries two meanings.
+        SetDoodadPos = 11,
     }
 
     public struct ShipSample

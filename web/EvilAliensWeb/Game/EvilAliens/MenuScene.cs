@@ -150,7 +150,23 @@ internal class MenuScene : Scene
 
 	private bool browsingGames;
 
-	private bool netMode;
+	private bool netModeFlag;
+
+	// Property, not a bare field: the level carousel needs the same value to decide whether to
+	// explain the WebcamAliens refusal, and there are several assignment sites -- pushing it
+	// here is what keeps the refusal and its explanation from ever disagreeing.
+	private bool netMode
+	{
+		get => netModeFlag;
+		set
+		{
+			netModeFlag = value;
+			if (challengeSelector != null)
+			{
+				challengeSelector.NetMode = value;
+			}
+		}
+	}
 
 	private bool netStatusShown;
 
@@ -884,8 +900,8 @@ internal class MenuScene : Scene
 	{
 		// Online co-op excludes the webcam challenge (the camera IS the controller and
 		// the mask is wall-clock local -- see plans/stage11-online-coop.md). The entry
-		// stays visible; selecting it in a net lobby just doesn't respond (11.5 polish
-		// may add a proper message).
+		// stays visible and unselectable; SubMenuLevelChoice.DrawCarouselOverlay swaps its
+		// briefing for the reason, so this refusal is explained rather than silent.
 		if (netMode && ((SubMenuLevelChoice)sender).GetSelectedLevel() == Levels.WebcamAliens)
 		{
 			return;
@@ -1312,8 +1328,6 @@ internal class MenuScene : Scene
 
 	public override void Initialize()
 	{
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
 		{
@@ -1414,9 +1428,6 @@ internal class MenuScene : Scene
 
 	protected override void LoadContent()
 	{
-		//IL_0115: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011f: Expected O, but got Unknown
-		//IL_0137: Unknown result type (might be due to invalid IL or missing references)
 		base.LoadContent();
 		stargfx = content.Load<Texture2D>("GFX/Menu/star");
 		blankTexture = content.Load<Texture2D>("GFX/Menu/blank");
@@ -1463,11 +1474,6 @@ internal class MenuScene : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d9: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.Flush();
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		EnsureRenderTarget();
@@ -1689,18 +1695,6 @@ internal class MenuScene : Scene
 
 	private void drawButtonTips()
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0100: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0126: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0132: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014f: Unknown result type (might be due to invalid IL or missing references)
 		float num = 0.5f;
 		float num2 = 0.8f;
 		float num3 = (General.SafeZone).Left;
@@ -1803,8 +1797,6 @@ internal class MenuScene : Scene
 
 	private void CreateStar(bool moveit)
 	{
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0055: Unknown result type (might be due to invalid IL or missing references)
 		float num = RandomHelper.RandomNextFloat(0.001f, 0.8f);
 		float num2 = (float)Math.PI * 2f * RandomHelper.RandomNextFloat(0f, 1f);
 		float size = RandomHelper.RandomNextFloat(0.002f, 0.005f);
@@ -1829,10 +1821,6 @@ internal class MenuScene : Scene
 
 	protected void fadeBackBufferToWhite(int alpha)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen fade in 800x600 design space (RenderScale.Matrix scales it
 		// to fill the render target); reading the viewport would over/under-cover it.
 		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color(byte.MaxValue, byte.MaxValue, byte.MaxValue, (byte)alpha));

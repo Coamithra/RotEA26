@@ -208,12 +208,6 @@ public class Game1 : Game
 
 	public Game1()
 	{
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001e: Expected O, but got Unknown
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Expected O, but got Unknown
-		//IL_01d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e1: Expected O, but got Unknown
 		instance = this;
 		ServiceHelper.Game = (Game)(object)this;
 		graphics = new GraphicsDeviceManager((Game)(object)this);
@@ -514,13 +508,6 @@ public class Game1 : Game
 
 	protected override void LoadContent()
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Expected O, but got Unknown
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0058: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0063: Expected O, but got Unknown
 		base.LoadContent();
 		spriteBatch = new SpriteBatch(base.GraphicsDevice);
 		blackPixel = base.Content.Load<Texture2D>("Content/GFX/Splash/blank");
@@ -949,7 +936,25 @@ public class Game1 : Game
 		graphics.ApplyChanges();
 	}
 
+	// The dev-build FPS HUD's "update" row (Compat/FrameProfiler, card 22e655b5). The body
+	// moved into UpdateCore so the whole of it -- including the settings/achievements pumps
+	// and the turbo/slowmo/hit-stop time rescale, not just UpdateInner -- lands inside the
+	// bracket; anything left outside a section shows up as unexplained "other" in the HUD.
+	// try/finally because UpdateCore has an early return and a rethrow path.
 	protected override void Update(GameTime gameTime)
+	{
+		long profileStart = FrameProfiler.Begin();
+		try
+		{
+			UpdateCore(gameTime);
+		}
+		finally
+		{
+			FrameProfiler.End(FrameSection.Update, profileStart);
+		}
+	}
+
+	private void UpdateCore(GameTime gameTime)
 	{
 		Settings.GetInstance().Update();
 		Achievements.GetInstance().Update();
@@ -1005,13 +1010,28 @@ public class Game1 : Game
 	{
 		if (!wantExit)
 		{
+			// Card 02d9ad67: flush deaths queued during the PREVIOUS tick's collision phase
+			// before any component updates — a killed component must never get one more
+			// "zombie" Update (move/fire/spawn from the grave). Also expires the standing
+			// purge filter (see ComponentBin.TopOfTickFlush).
+			collectionHelper.TopOfTickFlush();
 			inputHandler.Update();
 			((GameComponent)vibrator).Update(gameTime);
 			soundManager.Update(gameTime);
 			Storage.Update(gameTime, this);
+			// FPS HUD sub-rows: every game component's Update, then the collision sweep (the
+			// collision matrix' DDA fills are the known hot spot), then the net layer. Three
+			// separate brackets because "update is expensive" is not actionable but "collision
+			// is 6ms of it" is. They nest inside the Update bracket, so the HUD subtracts only
+			// the parent from the tick.
+			long profComponents = FrameProfiler.Begin();
 			base.Update(gameTime);
 			collectionHelper.Update();
+			FrameProfiler.End(FrameSection.UpdComponents, profComponents);
+			long profCollision = FrameProfiler.Begin();
 			collisionHandler.DetectCollisions();
+			FrameProfiler.End(FrameSection.UpdCollision, profCollision);
+			long profNet = FrameProfiler.Begin();
 			// Online co-op: drain received messages + send the ~30Hz ship stream ON the game
 			// tick (never from JS callbacks). Placed before the level-warm early-return so
 			// heartbeats keep flowing while a launch is warming. A single branch when inactive.
@@ -1020,6 +1040,7 @@ public class Game1 : Game
 			// (open/update/close the listing, drain its phase callbacks, start a session on a
 			// join-in-progress pairing). A plain boot has no GameScene up, so it early-returns.
 			EvilAliensWeb.Compat.Net.NetListing.Tick((Game)(object)this);
+			FrameProfiler.End(FrameSection.UpdNet, profNet);
 			// A pending level launch takes warm priority (and excludes the other
 			// queues that tick, so a tick never pays two decodes).
 			if (pendingLevelLaunch != null)
@@ -1048,6 +1069,13 @@ public class Game1 : Game
 
 	protected override void Draw(GameTime gameTime)
 	{
+		// FPS HUD "scene" row: opened here rather than around DrawInner alone so the scene
+		// target's realloc-check / SetRenderTarget / full clear are attributed to drawing
+		// instead of silently inflating the HUD's "other" remainder. The fullscreen branch
+		// below rethrows, so it closes the section itself before throwing (a try/finally here
+		// would re-indent the whole method for a branch that is dead on web -- KNI's BlazorGL
+		// never reports IsFullScreen).
+		long profScene = FrameProfiler.Begin();
 		if (oracle.Slowmotion == 1f)
 		{
 			bloom.Settings = BloomSettings.PresetSettings[5];
@@ -1109,6 +1137,9 @@ public class Game1 : Game
 				catch (Exception)
 				{
 				}
+				// Close the FPS HUD's scene section before unwinding, so a failed frame is
+				// recorded with the work it actually did instead of silently landing in "other".
+				FrameProfiler.End(FrameSection.DrawScene, profScene);
 				throw new Exception("See inner exception (error.txt): ", innerException);
 			}
 		}
@@ -1116,7 +1147,12 @@ public class Game1 : Game
 		{
 			DrawInner(gameTime);
 		}
+		FrameProfiler.End(FrameSection.DrawScene, profScene);
 
+		// FPS HUD "post" row: both full-frame post-processes together. They're one line item
+		// because they share a cost shape (a full-screen pass over sceneTarget) and both are
+		// zero on most frames -- a non-zero "post" is itself the finding.
+		long profPost = FrameProfiler.Begin();
 		// Cinematic slow-motion ghost trails: post-process the fully composited (and
 		// bloomed) frame in sceneTarget before the present blit. No-op unless the 1up
 		// slowmo is active (and ramping). Leaves the render target on sceneTarget, which
@@ -1126,7 +1162,12 @@ public class Game1 : Game
 		// Tutorial holo-sim filter: same seam, runs after the trail so the ghosts get
 		// scanlined too. Leaves the render target on sceneTarget like the trail does.
 		ApplyHoloSim(gameTime);
+		FrameProfiler.End(FrameSection.DrawPost, profPost);
 
+		// FPS HUD "present" row: the letterboxed gamma blit. Scales with WINDOW size, not
+		// scene complexity, so it's the row that moves when you resize rather than when you
+		// spawn enemies.
+		long profPresent = FrameProfiler.Begin();
 		// Present the scene target to the real (window-sized) back buffer, letterboxed.
 		Xna3GraphicsDeviceCompat.BaseRenderTarget = null;
 		base.GraphicsDevice.SetRenderTarget((RenderTarget2D)null);
@@ -1168,6 +1209,27 @@ public class Game1 : Game
 			spriteBatch.Draw((Texture2D)(object)sceneTarget, dest, Color.White);
 		}
 		spriteBatch.End();
+		FrameProfiler.End(FrameSection.DrawPresent, profPresent);
+	}
+
+	// FPS HUD "swap" row. Game.Tick calls Update, then Draw, then EndDraw — and EndDraw is
+	// where the back buffer is actually presented, OUTSIDE the Draw override above. That
+	// matters more than it sounds: WebGL commands are queued, so this is where a GPU-bound
+	// frame's real cost finally lands as a blocking wait. Without this bracket a 22ms frame
+	// showed 3ms of attributed work and 19ms of unexplained "other", which points the
+	// optimizer at exactly the wrong place. A big `swap` means the GPU is the bottleneck and
+	// no amount of CPU-side work will move it.
+	protected override void EndDraw()
+	{
+		long profileStart = FrameProfiler.Begin();
+		try
+		{
+			base.EndDraw();
+		}
+		finally
+		{
+			FrameProfiler.End(FrameSection.Swap, profileStart);
+		}
 	}
 
 	// Cinematic slow-motion motion blur ("ghost trails"). The base slowmo (1up powerup ->
@@ -1328,23 +1390,6 @@ public class Game1 : Game
 		// Stage 13: feed the chrome-sheen glint clock once per frame so every DrawMetalString
 		// call site (the bespoke menu renderers) animates without needing GameTime in scope.
 		spriteBatchWrapper.MetalTime = (float)gameTime.TotalGameTime.TotalSeconds;
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0124: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0129: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0179: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0199: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01f4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_021c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0221: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0244: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		spriteBatchWrapper.Flush();
 		if (onPostDraw != null)

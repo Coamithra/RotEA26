@@ -43,11 +43,6 @@ public class StartScreen : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0088: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		base.GraphicsDevice.Clear(Color.Black);
 		// Metallic chrome sheen on the marquee text (Stage 13). Same position/origin/scale
@@ -62,9 +57,6 @@ public class StartScreen : Scene
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0018: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ba: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		float num = 15f / font.MeasureString(text).X;
 		float num2 = (float)gameTime.TotalGameTime.TotalSeconds;
@@ -122,10 +114,6 @@ public class StartScreen : Scene
 
 	private bool isSignedIn(PlayerIndex starter)
 	{
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
 		{

@@ -17,8 +17,6 @@ internal class TestBlock : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0018: Unknown result type (might be due to invalid IL or missing references)
 			b.TopLeft = topleft;
 			b.BottomRight = bottomright;
 			return b;
@@ -28,8 +26,6 @@ internal class TestBlock : AlienDrawableGameComponent
 	public TestBlock(Game game)
 		: base(game)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Sprites/Block"));
 		base.DrawOrder = 10;
 	}
@@ -46,10 +42,6 @@ internal class TestBlock : AlienDrawableGameComponent
 
 	public void Setup(Vector2 topleft, Vector2 bottomright)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
 		this.topleft = topleft;
 		this.bottomright = bottomright;
 	}
@@ -61,8 +53,6 @@ internal class TestBlock : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0073: Unknown result type (might be due to invalid IL or missing references)
 		if (l)
 		{
 			spriteBatch.lightenEffect.Enable();

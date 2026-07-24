@@ -36,8 +36,6 @@ internal class InstructionsMenu : DrawableGameComponent
 	public InstructionsMenu(Game game)
 		: base(game)
 	{
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Expected O, but got Unknown
 		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
 		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
 		base.DrawOrder = 2000;
@@ -145,29 +143,6 @@ internal class InstructionsMenu : DrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0093: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0122: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0139: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0213: Unknown result type (might be due to invalid IL or missing references)
-		//IL_023c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0241: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0250: Unknown result type (might be due to invalid IL or missing references)
-		//IL_025a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0299: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c6: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		switch (currentlyDisplaying)
 		{
@@ -261,17 +236,6 @@ internal class InstructionsMenu : DrawableGameComponent
 
 	private void ExplainPowerup(Powerup.PowerupType powerupType, float y, string p)
 	{
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0038: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0086: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0091: Unknown result type (might be due to invalid IL or missing references)
 		Color color = default(Color);
 		(color) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;

@@ -31,7 +31,6 @@ internal class PlasmaBall : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 			c.Position = base.Position;
 			// texture.Width is the DOWNSCALED redraw (plasmaball2: 523px vs design 697); DrawScale
 			// removes the supersample factor so the hitbox tracks the visible disc, not the raw PNG
@@ -44,10 +43,6 @@ internal class PlasmaBall : AlienDrawableGameComponent
 	public PlasmaBall(Game game)
 		: base(game)
 	{
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0055: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Sprites/plasmaball2"));
 		base.DrawOrder = 800;
 		color = Color.LightBlue;
@@ -67,7 +62,6 @@ internal class PlasmaBall : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float direction)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 		base.Direction = direction;
 		base.Speed = 0.06f;

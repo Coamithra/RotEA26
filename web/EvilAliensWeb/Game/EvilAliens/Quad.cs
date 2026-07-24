@@ -106,30 +106,6 @@ public class Quad
 
 	public void LoadContent()
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0029: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a4: Expected O, but got Unknown
-		//IL_00aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f6: Expected O, but got Unknown
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0118: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0148: Expected O, but got Unknown
-		//IL_014e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0194: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019e: Expected O, but got Unknown
 		if (!alreadyloaded)
 		{
 			alreadyloaded = true;
@@ -157,10 +133,6 @@ public class Quad
 
 	public Quad(Game game, Vector2 origin, float direction, float width, float height, float lead)
 	{
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0062: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
 		this.game = game;
 		this.origin = new Vector3(origin.X - 400f, 300f - origin.Y, 0f);
 		this.height = height;
@@ -180,7 +152,6 @@ public class Quad
 	// round flares blooming at the muzzle and leading tip + electric tendrils crackling off it.
 	public void Draw(float time)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		SpriteBatchWrapper sb = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		// Beam axis in screen space (y-down): texture +Y runs along the beam, +X across it.
 		Vector2 dirScreen = new Vector2(direction.X, 0f - direction.Y);
@@ -217,14 +188,12 @@ public class Quad
 	// Quad world space is centred + y-up (origin at screen centre); convert to screen pixels.
 	private static Vector2 ToScreen(Vector3 p)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		return new Vector2(p.X + 400f, 300f - p.Y);
 	}
 
 	// Stretches the soft beam strip to acrossPx x alongPx, centred and rotated about `center`.
 	private void DrawBeam(SpriteBatchWrapper sb, Texture2D tex, Vector2 center, float rotation, float acrossPx, float alongPx, Color color)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 scale = new Vector2(acrossPx / (float)tex.LogicalWidth(), alongPx / (float)tex.LogicalHeight());
 		sb.Draw(tex, center, rotation, scale, center: true, color);
 	}
@@ -259,7 +228,6 @@ public class Quad
 	// Blooms the round glow texture to ~diameterPx, centred (it's radial, so rotation is moot).
 	private void DrawFlare(SpriteBatchWrapper sb, Vector2 center, float diameterPx, Color color)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		float s = diameterPx / (float)glow.LogicalWidth();
 		sb.Draw(glow, center, 0f, new Vector2(s, s), center: true, color);
 	}
@@ -267,7 +235,6 @@ public class Quad
 	// Draws a thin glowing line p0->p1 as one stretched strip -- a single electric tendril edge.
 	private void DrawLine(SpriteBatchWrapper sb, Vector2 p0, Vector2 p1, float thickness, Color color)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 d = p1 - p0;
 		float len = d.Length();
 		if (len < 0.5f)
@@ -382,7 +349,6 @@ public class Quad
 	// animates smoothly frame to frame instead of being re-rolled.
 	private int BuildBolt(Vector2 start, Vector2 end, Vector2 perpUnit, float amp, float time, float seed)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		Vector2[] cur = boltA;
 		Vector2[] nxt = boltB;
 		cur[0] = start;
@@ -427,10 +393,6 @@ public class Quad
 
 	public void SetProperties(Vector2 position, float direction, float length, float lead)
 	{
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
 		origin = new Vector3(position.X - 400f, 300f - position.Y, 0f);
 		this.direction = convertToVector3(direction);
 		height = length;
@@ -441,17 +403,6 @@ public class Quad
 
 	public void SetLead(float lead)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
 		Vector3 val = direction * (height - lead);
 		this.lead = lead;
 		lowerLeft = upperLeft - val;
@@ -460,37 +411,6 @@ public class Quad
 
 	private void calculatePoints()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0055: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0068: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0083: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ac: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ce: Unknown result type (might be due to invalid IL or missing references)
 		left = Vector3.Cross(normal, direction);
 		Vector3 val = direction * height + origin;
 		upperLeft = val + left * width / 2f;
@@ -501,17 +421,6 @@ public class Quad
 
 	public void SetLength(float length)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
 		Vector3 val = direction * (length - height);
 		height = length;
 		upperLeft += val;
@@ -520,24 +429,18 @@ public class Quad
 
 	public void MoveTo(Vector2 position)
 	{
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
 		origin = new Vector3(position.X - 400f, 300f - position.Y, 0f);
 		calculatePoints();
 	}
 
 	public void AimAt(float direction)
 	{
-		//IL_0003: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
 		this.direction = convertToVector3(direction);
 		calculatePoints();
 	}
 
 	private Vector3 convertToVector3(float direction)
 	{
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = default(Vector2);
 		(val) = new Vector2(Convert.ToSingle(Math.Cos(direction)), -1f * Convert.ToSingle(Math.Sin(direction)));
 		return new Vector3(val, 0f);

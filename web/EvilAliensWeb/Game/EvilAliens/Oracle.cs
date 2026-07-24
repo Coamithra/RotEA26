@@ -33,8 +33,6 @@ public class Oracle : GameComponent, IOracleService
 	{
 		get
 		{
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 			if (background != null)
 			{
 				return background.ScrollSpeed;
@@ -282,8 +280,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public void SetPlayerPosition(int player, Vector2 position)
 	{
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
 		PlayerInfo playerInfo = players[player];
 		playerInfo.position = position;
 		players[player] = playerInfo;
@@ -350,8 +346,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public Vector2 GetRandomPlayerPosition()
 	{
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
 		if (playerShips.Count > 0)
 		{
 			int index = RandomHelper.Random.Next(playerShips.Count);
@@ -362,7 +356,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public Vector2 GetPlayerPosition(int index)
 	{
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
 		if (!players[index].isPlaying)
 		{
 			throw new Exception("Player " + index + " is not playing!");
@@ -392,8 +385,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<AlienDrawableGameComponent> GetBaddies()
 	{
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Expected O, but got Unknown
 		baddies.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -408,8 +399,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<ParatrooperBrain> GetParatrooperBrains()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Expected O, but got Unknown
 		paratrooperBrains.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -424,8 +413,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<Powerup> GetPowerups()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Expected O, but got Unknown
 		powerups.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -440,8 +427,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<StarMine> GetStarMines()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Expected O, but got Unknown
 		starmines.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -456,8 +441,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public int NrOfShipConnectors()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Expected O, but got Unknown
 		int num = 0;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{

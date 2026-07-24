@@ -142,7 +142,6 @@ internal class TeamChallenge : GameScene
 
 	protected override void PopulateEventList()
 	{
-		//IL_01d4: Unknown result type (might be due to invalid IL or missing references)
 		BonusSpawner gameEvent = new BonusSpawner(base.Game, 20f, 0.1f, randomly: false);
 		eventList.AddEvent(gameEvent, halting: false);
 		UfoSpawner gameEvent2 = new UfoSpawner(base.Game, 20f, 3f, big: false);

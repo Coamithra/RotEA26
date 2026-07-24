@@ -23,7 +23,6 @@ internal class SkullSpawner : GenericSpawner
 
 	protected override void DoEvent(GameTime gameTime)
 	{
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
 		EvilSkull evilSkull = EvilSkull.NewEvilSkull(collectionHelper, game);
 		evilSkull.Setup(new Vector2(RandomHelper.RandomNextFloat(0f, 800f), -48f), EnemyBehaviour.normal);
 		if (maze)

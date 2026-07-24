@@ -118,6 +118,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private int lives;
 
+	// Player score panels. Callers taking a slot from the wire must bound against this.
+	internal const int SlotCount = 4;
+
 	private List<ScoreInfo> scores = new List<ScoreInfo>();
 
 	private List<float> saved = new List<float>();
@@ -186,13 +189,11 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private Vector2 livePosition(int i)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
 		return new Vector2((float)(316 + i * 24 + 12), (float)((General.SafeZone).Bottom - 10));
 	}
 
 	public void RemoveLife()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
 		lives--;
 		explosion.Show(livePosition(lives));
 	}
@@ -210,14 +211,13 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	public ScoreVisualiser(Game game)
 		: base(game)
 	{
-		//IL_0127: Unknown result type (might be due to invalid IL or missing references)
 		IsTutorial = false;
 		for (int i = 0; i < comboStrings.Length; i++)
 		{
 			comboStrings[i] = i + "x";
 		}
 		List<Powerup.PowerupType> enumValues = Game1.GetEnumValues<Powerup.PowerupType>();
-		for (int j = 0; j < 4; j++)
+		for (int j = 0; j < SlotCount; j++)
 		{
 			ScoreInfo scoreInfo = new ScoreInfo();
 			scoreInfo.score = 0f;
@@ -394,7 +394,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	public void AddScore(float amount, bool isCombo, Vector2 location, int player)
 	{
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
 		float num = ((!isCombo) ? amount : comboModify(amount, player));
 		AddScore(amount, isCombo, player);
 		FloatingText text = GetText((int)num, location, FloatingText.ShowType.scrollup, "");
@@ -403,8 +402,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private void CheckPowerup(ref Vector2 location, int player)
 	{
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
 		if (displayPowerUpAtNextHit)
 		{
 			displayPowerUpAtNextHit = false;
@@ -421,8 +418,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private FloatingText GetText(Vector2 location, FloatingText.ShowType type, string suffix)
 	{
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 		FloatingText floatingText;
 		if (pendingtexts.Count > 0)
 		{
@@ -439,8 +434,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private FloatingText GetText(int amount, Vector2 location, FloatingText.ShowType type, string suffix)
 	{
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
 		FloatingText floatingText;
 		if (pendingtexts.Count > 0)
 		{
@@ -480,17 +473,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private Vector2 getScorePosition(int player, out Color color)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0068: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0094: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d3: Unknown result type (might be due to invalid IL or missing references)
 		Rectangle safeZone = General.SafeZone;
 		Vector2 result = default(Vector2);
 		switch (player)
@@ -519,18 +501,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0063: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0068: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0145: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0185: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0195: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		foreach (FloatingText floatingtext in floatingtexts)
@@ -575,15 +545,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private void drawPressStart(GameTime gameTime, int i, ref Color playercolor, ref Vector2 startpos)
 	{
-		//IL_00b2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0128: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0137: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014d: Unknown result type (might be due to invalid IL or missing references)
 		if (showPressStartTimer.Active)
 		{
 			float num = 1f;
@@ -632,27 +593,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private void drawPlayerScore(int i, ref Color playercolor, ref Vector2 startpos, GameTime gameTime)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0177: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0182: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0187: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0193: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0138: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d3: Unknown result type (might be due to invalid IL or missing references)
 		// Only the score NUMBER is event-driven (sweeps on a leading-digit rollover); the combo
 		// readout has no "first digit", so it keeps the static chrome with no sweep (ParkedGlint).
 		// Cache keys: i*4 = primary line (score), i*4+1 = "Combo!" label, i*4+2 = combo count.
@@ -695,22 +635,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// text/scale/colour actually change instead of every frame.
 	private void DrawStr(int cacheKey, string str, Vector2 position, float scale, float alpha, Color color, float glintTime)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f6: Unknown result type (might be due to invalid IL or missing references)
 		// Shadow + text COLOURS (opaque); the shadow is the base hue, the text a brightened
 		// version — exactly the two-tone drop the score always had. Transparency is applied
 		// once to the whole flattened sprite below, not per layer.

@@ -65,8 +65,7 @@ public class StorageDeviceManager : GameComponent
 	public StorageDeviceManager(Game game, PlayerIndex player)
 		: this(game, player, 0)
 	{
-	}//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-
+	}
 
 	public StorageDeviceManager(Game game, int requiredBytes)
 		: this(game, (PlayerIndex?)null, requiredBytes)
@@ -76,8 +75,7 @@ public class StorageDeviceManager : GameComponent
 	public StorageDeviceManager(Game game, PlayerIndex player, int requiredBytes)
 		: this(game, (PlayerIndex?)player, requiredBytes)
 	{
-	}//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-
+	}
 
 	private StorageDeviceManager(Game game, PlayerIndex? player, int requiredBytes)
 		: base(game)
@@ -95,15 +93,6 @@ public class StorageDeviceManager : GameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0192: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0181: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0202: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0272: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0261: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c5: Unknown result type (might be due to invalid IL or missing references)
 		if (General.IsTrial)
 		{
 			return;

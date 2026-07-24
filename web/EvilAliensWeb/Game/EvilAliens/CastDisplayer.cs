@@ -160,15 +160,11 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	public CastDisplayer(Game game)
 		: base(game)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
 		base.DrawOrder = 1000;
 	}
 
 	public void LoadAnimation(AnimationData animationData)
 	{
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
 		texture = content.Load<Texture2D>(animationData.TextureName);
 		texturename = animationData.TextureName;
 		rows = animationData.rows;
@@ -255,18 +251,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_054c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0559: Unknown result type (might be due to invalid IL or missing references)
-		//IL_056e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0573: Unknown result type (might be due to invalid IL or missing references)
-		//IL_058f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05af: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0601: Unknown result type (might be due to invalid IL or missing references)
-		//IL_061a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0640: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0658: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0663: Unknown result type (might be due to invalid IL or missing references)
 		stateTimer.Update(gameTime);
 		spiderdeadtimer.Update(gameTime);
 		base.Update(gameTime);
@@ -466,8 +450,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodePlayer()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(spawnposition, 2f, 2f, 0f, 0f);
@@ -481,10 +463,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void UberExplosion(Vector2 p)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00be: Unknown result type (might be due to invalid IL or missing references)
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(p, 2f, 1.3f, 0f, 0f);
 		collection.Add((GameComponent)(object)explosion);
@@ -501,18 +479,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeBrainBoss()
 	{
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0088: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0133: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016c: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		sound.PlayCue("expl2");
 		sound.PlayCue("hit_boss");
@@ -541,8 +507,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeDeathStar()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(spawnposition, 3.5f, 2.5f, 0f, 0f);
@@ -565,12 +529,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeRuler()
 	{
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0046: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
 		AsplodeBig();
 		texture = null;
 		for (int i = 0; i < 5; i++)
@@ -590,12 +548,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void Bleed(float size)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
 		BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 		FindSpawnSpot(out var angle, out var range);
 		Vector2 position = MyMath.AngleToVector(angle) * range + spawnposition;
@@ -606,8 +558,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeSpiderBoss()
 	{
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0105: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		sound.PlayCue("spiderbossdeath");
 		sound.PlayCue("head asplode");
@@ -645,8 +595,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeSpider()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 		bloodExplosion.Setup(spawnposition, 5f, 0.75f, 0f, 0f);
@@ -663,8 +611,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeBraineroid()
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		for (int i = 0; i < 3; i++)
 		{
@@ -699,9 +645,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void AsplodeBig()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0097: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(spawnposition, 2f, 1.3f, 0f, 0f);
@@ -718,7 +661,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	private void Asplode()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
 		texture = null;
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(spawnposition, 1f, 1f, 0f, 0f);
@@ -738,7 +680,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	// aligned at any sheet resolution. Restores the normal blend mode for the brain draw.
 	private void DrawBrainGlow(GameTime gameTime, Vector2 center)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		if (brainGlow == null)
 		{
 			return;
@@ -785,7 +726,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	// path and AlienDrawableGameComponent.getFrameRectangle).
 	private Rectangle FrameRect(int frame)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		int row = frame / columns;
 		int col = frame % columns;
 		int frameWidth = (texture.LogicalWidth() - (columns - 1) * separatingspace) / columns;
@@ -802,7 +742,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 	// hand-step single frames; ShouldInterpolate gates which states route here.
 	private void DrawInterpolatedFrame(Vector2 center)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		int frame = (int)curframe;
 		float delta = curframe % 1f;
 		int total = rows * columns;
@@ -823,53 +762,6 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0110: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0124: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0129: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0194: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0418: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0442: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0447: Unknown result type (might be due to invalid IL or missing references)
-		//IL_045c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0466: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0491: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0496: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04ac: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04b6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0506: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0531: Unknown result type (might be due to invalid IL or missing references)
-		//IL_055e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_057e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_058b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05a4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05a9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0261: Unknown result type (might be due to invalid IL or missing references)
-		//IL_027a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_037b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0384: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0389: Unknown result type (might be due to invalid IL or missing references)
-		//IL_039c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_033a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_033c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0345: Unknown result type (might be due to invalid IL or missing references)
-		//IL_034a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_035d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0363: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03c2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03db: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		if (state == CastState.intro)

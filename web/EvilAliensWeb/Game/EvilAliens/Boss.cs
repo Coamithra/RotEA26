@@ -27,9 +27,6 @@ internal class Boss : KillableAlien
 	{
 		get
 		{
-			//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0048: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.Width *= 0.90999997f;
 			collisionBox.Height *= 0.48999998f;
@@ -76,8 +73,6 @@ internal class Boss : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0049: Unknown result type (might be due to invalid IL or missing references)
 		interpolationOptions = InterpolationOptions.never;
 		base.Acceleration = 1E-05f;
 		base.Deceleration = 0f;
@@ -95,11 +90,6 @@ internal class Boss : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00be: Unknown result type (might be due to invalid IL or missing references)
 		targetDirection = MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position);
 		Move((float?)targetDirection, gameTime);
 		foreach (Lazer lazor in lazors)
@@ -143,15 +133,11 @@ internal class Boss : KillableAlien
 
 	public void Setup(Vector2 position)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 	}
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a6: Unknown result type (might be due to invalid IL or missing references)
 		Die();
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(base.Position, 2f, 1.3f, base.Speed * 0.9f, base.Direction);

@@ -30,9 +30,6 @@ internal class StationarySpawner : GenericSpawner
 
 	protected override void DoEvent(GameTime gameTime)
 	{
-		//IL_00a7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0159: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0109: Unknown result type (might be due to invalid IL or missing references)
 		float num = RandomHelper.RandomNextFloat(0f, ufochance + bigufochance + brainchance + spiderchance);
 		if (num >= ufochance + bigufochance + brainchance)
 		{

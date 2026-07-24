@@ -5,8 +5,9 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
-// ?flyspiderflatten=swarm (card 9c92962e): flatten the WHOLE background flying-spider swarm
-// through ONE render-target round trip per frame instead of one per spider.
+// The SHIPPED flatten path for the background flying-spider swarm (card 9c92962e): flatten the
+// WHOLE swarm through ONE render-target round trip per frame instead of one per spider. Default
+// since the card's measurement; ?flyspiderflatten=per|0 are the A/B overrides.
 //
 // WHY IT CAN EXIST AT ALL: every background spider shares the same fog alpha (FlyingSpider
 // .Initialize sets `new Color(1,1,1,0.2f)` unconditionally), and the flatten's only job is to stop
@@ -15,10 +16,10 @@ namespace EvilAliens;
 // The render-target cost stops scaling with the population — one Clear + one composite per frame
 // instead of N.
 //
-// WHAT IT CHANGES ABOUT THE LOOK: spider-vs-spider overlaps stop double-brightening too, not just
-// body-vs-wing. Arguably more correct (the fog layer reads as one translucent stratum), but it IS
-// a visual difference from the shipped per-spider path, so it is a mode under measurement, not a
-// silent swap.
+// WHAT IT CHANGED ABOUT THE LOOK vs the old per-spider path: spider-vs-spider overlaps stop
+// double-brightening too, not just body-vs-wing. Arguably more correct (the fog layer reads as
+// one translucent stratum), and at alpha 0.2 over bright Mars dust the difference is not
+// perceptible — which is what let the measurement card ship it as the default.
 //
 // HOW IT HOOKS IN: background spiders draw at DrawOrder 1 (between Background's 0 and Floor's 2).
 // This component takes that slot and calls FlyingSpider.DrawFlattened on each one itself, while

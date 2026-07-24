@@ -633,16 +633,21 @@ namespace EvilAliensWeb.Compat
 		// 9c92962e -- background-vs-foreground was never a flatten A/B at all, because the two
 		// variants differ in six things (flatten, Collides, Speed, scale, alpha, DrawOrder), so
 		// most of the measured gap was population, not the render-target round trip.
-		//   ?flyspiderflatten=per    (default) one RT round trip PER SPIDER -- the shipped path
+		//   ?flyspiderflatten=swarm  (default, SHIPPED since this card) ONE RT round trip for the
+		//                            whole swarm (FlyingSpiderSwarm). Measured ~1 GL call total
+		//                            regardless of population vs +1.97 calls PER SPIDER for the
+		//                            per-spider bracket, at the identical pinned bench.
+		//   ?flyspiderflatten=per    the pre-card path: one RT round trip PER SPIDER. Kept as the
+		//                            A/B baseline (also what a non-Level2 scene with no swarm
+		//                            driver still uses -- see FlyingSpider.Draw's fallback).
 		//   ?flyspiderflatten=0|off  no flatten at all: body+wings drawn straight at fog alpha,
 		//                            so the overlaps double-brighten (what the flatten exists to
 		//                            stop). Also the "drop it for the fog layer" option's look.
-		//   ?flyspiderflatten=swarm  ONE RT round trip for the whole swarm (FlyingSpiderSwarm)
 		// Holding population/scale/alpha fixed with ?flyspidercount=, this is the ONLY variable.
 		public enum FlySpiderFlattenMode { PerSpider, None, Swarm }
 
 		public static FlySpiderFlattenMode FlySpiderFlatten { get; private set; } =
-			FlySpiderFlattenMode.PerSpider;
+			FlySpiderFlattenMode.Swarm;
 
 		// ?flyspidercount=<N>: turn the ?flyspiders fast-boot from an endless STREAM into a pinned
 		// bench -- spawn exactly N flying spiders once, on a deterministic grid, frozen in X
@@ -1917,7 +1922,7 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						Console.WriteLine("[debug] unknown ?flyspiderflatten= value '" + val
-							+ "' (expected per/0/swarm) -- ignored, staying on per-spider");
+							+ "' (expected per/0/swarm) -- ignored, staying on swarm");
 					}
 					break;
 				case "flyspidercount":

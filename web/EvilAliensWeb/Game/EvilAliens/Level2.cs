@@ -17,9 +17,11 @@ internal class Level2 : GameScene
 
 	private SpiderBoss preloadBoss;
 
-	// ?flyspiderflatten=swarm only (card 9c92962e) — null on every normal boot, so the shipped
-	// level adds nothing extra. Owned exactly like `floor`: built with the level, added in
-	// Initialize, removed on finish.
+	// The SHIPPED flatten driver for the background fog spiders (card 9c92962e): one render-target
+	// round trip for the whole swarm per frame instead of one per spider (~1 GL call total vs
+	// +1.97 per spider, measured on the pinned bench). Null only under the ?flyspiderflatten=per|0
+	// A/B overrides. Owned exactly like `floor`: built with the level, added in Initialize,
+	// removed on finish.
 	private FlyingSpiderSwarm flyingSpiderSwarm;
 
 	public Level2(Game game)

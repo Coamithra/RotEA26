@@ -143,15 +143,26 @@ real, so "just drop it" is the worst of the three options. The swarm variant pre
 exactly (identical per-spider math); it differs only where two *spiders* overlap, which also stops
 double-brightening — at alpha 0.2 over Mars dust that is not perceptible.
 
-**Still outstanding: the ms numbers.** They need a foregrounded window (`document.hidden` was true
-throughout — Chrome throttles a hidden tab's rAF and the project's own docs measure a 2.5ms frame
-reading 22.8ms unfocused). Everything above is deliberately chosen to be immune to that; the
-frame-time confirmation and the `?flyspiderbox=` fill-vs-call sweep are not.
+**The ms confirmation and the `?flyspiderbox=` fill-vs-call sweep were DROPPED, deliberately.**
+They need a genuinely foregrounded window (`document.hidden` was true throughout the first
+attempt — Chrome throttles a hidden tab's rAF and the project's own docs measure a 2.5ms frame
+reading 22.8ms unfocused), and the decision does not actually hinge on either:
 
-**Recommendation (pending the ms confirmation): switch the default to `swarm`.** It keeps the
-visual the flatten exists for, at ~1/40th of its draw-call cost, and stops the cost scaling with
-the population. Flipping the default is a one-line change to `DebugFlags.FlySpiderFlatten`'s
-initialiser plus making `Level2` always construct the driver.
+- The GL draw-call count is THE established cost metric for this port ("BlazorGL's cost is
+  per-CALL... the most actionable single number" — web CLAUDE.md, FPS HUD section), it is
+  focus-independent, and at identical pinned N the three modes differ in nothing else. `swarm`
+  matching `no flatten`'s slope exactly settles the ranking whatever the per-call ms happens to be.
+- The fill-vs-call question only ever mattered for salvaging the PER-SPIDER path by shrinking its
+  box. With the swarm variant strictly dominating it (same visual, ~1/40th the calls), there is
+  nothing left for that discriminator to decide; `?flyspiderbox=` stays available should anyone
+  revisit.
+
+**DECISION (applied): the default is `swarm`.** It keeps the visual the flatten exists for, at
+~1/40th of its draw-call cost, and stops the cost scaling with the population.
+`DebugFlags.FlySpiderFlatten` now initialises to `Swarm` (so `Level2`'s existing mode-conditioned
+construction runs the driver on every normal boot); `?flyspiderflatten=per|0` remain as A/B
+overrides, and a scene with no driver (the sprite harness) still falls back to the per-spider
+bracket in `FlyingSpider.Draw`, so no scene can blank.
 
 ## Verification
 
@@ -164,5 +175,9 @@ console exceptions in real Chrome.
 - Flatten on/off must be visually compared on a **frozen** bench (nothing translates in bench
   mode, so a screenshot is valid here — the spiders bob/flap, so the pair is compared for the
   wing-vs-body brightness relationship, not pixel equality).
-- The measurement matrix above, focused window, `?fpsuncapped`.
+- The GL-call matrix above (focus-independent, already run; the ms matrix was dropped — see
+  Results).
+- Post-decision: a fresh `?level=Level2&flyspiders&flyspidercount=40` boot with NO flatten flag
+  must report `flatten=Swarm` in `eaFlySpiders()` and land at the swarm call count (~102, not
+  ~180) — the default actually moved.
 - Final smoke: plain `?level=Level2&invuln` boots, spiders look unchanged, console clean.

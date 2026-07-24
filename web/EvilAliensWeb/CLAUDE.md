@@ -448,7 +448,11 @@ site now lives under:
 - **Group-flatten for translucent multi-part sprites** (`SpriteBatchWrapper.BeginGroupFlatten`/
   `EndGroupFlatten`): overlapping straight-alpha sprites at partial alpha double-brighten; bracket
   their draws to flatten opaque into a shared RT (premultiplied capture), composite once at group
-  alpha. Used by the background-fog `FlyingSpider` (body+wings fade as one silhouette).
+  alpha. Used by the background-fog `FlyingSpider` (body+wings fade as one silhouette) -- which
+  since card 9c92962e ships on the SWARM variant: `FlyingSpiderSwarm` (owned by `Level2` like
+  `floor`) brackets ONE flatten around the whole population per frame, and the per-spider bracket
+  in `FlyingSpider.Draw` is only the `?flyspiderflatten=per` A/B override plus the fallback for a
+  scene with no driver (the sprite harness).
   **Measured cost (card 9c92962e): +2.0 GL draw calls per flattened GROUP** -- it roughly DOUBLES
   the calls the group would otherwise cost (a fog spider is ~2.0 calls unflattened, ~4.0
   flattened), and BlazorGL's cost is per-CALL. Perfectly linear in the group count (pinned bench,
@@ -456,7 +460,7 @@ site now lives under:
   is cheap for a handful of groups and expensive for a swarm; **if you are about to bracket
   something that exists in the dozens, flatten the whole POPULATION as one group instead** --
   `FlyingSpiderSwarm` does exactly that and measures at ~1 call TOTAL regardless of N (N=40/80:
-  102.1 / 183.0, i.e. the same slope as no flatten at all).
+  102.1 / 183.0, i.e. the same slope as no flatten at all), which is why it is the shipped default.
   GOTCHA: the shared `groupRT` is **grow-only** and `BeginGroupFlatten`'s `Clear` is whole-RT, so
   the largest group ever flattened in a session sets the clear cost of every later one. Compare box
   sizes on FRESH page loads, and don't mix a swarm-sized group with per-sprite ones in one scene.
@@ -540,8 +544,9 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
     grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
     stays representative. `?flyspiderflatten=per|0|swarm` then varies ONLY the flatten:
-    `per` (shipped, one RT round trip per spider) / `0` (none) / `swarm` (`FlyingSpiderSwarm`, one
-    RT round trip for the whole population). `?flyspiderbox=<half>` overrides the flatten bbox
+    `swarm` (the SHIPPED default since this card: `FlyingSpiderSwarm`, one RT round trip for the
+    whole population) / `per` (the pre-card path, one RT round trip per spider) / `0` (none).
+    `?flyspiderbox=<half>` overrides the flatten bbox
     half-extent (baked `FlyingSpider.DefaultFlattenBoxHalf` 200 design px) -- a per-call cost is
     flat in the box size, a fill cost scales with its area, so the sweep tells the two apart.
     Console `eaFlySpiders()` prints the live count split background/foreground plus the settings
@@ -556,7 +561,10 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     than the body (they composite to ~0.36 over a 0.2 body), with it on the silhouette fades as
     one. The harness pins the flap/swivel phase (`Initialize` skips `Randomize()` while
     `DebugFlags.Harness` is set) precisely so the two boots are the same pose and therefore
-    comparable; live play keeps the randomization.
+    comparable; live play keeps the randomization. The swarm variant preserves the per-spider
+    silhouette exactly (identical body+wing math); it differs only where two SPIDERS overlap,
+    which also stops double-brightening -- at alpha 0.2 over Mars dust that is not perceptible,
+    which is what let it ship as the default.
   - In-game the fog layer draws at alpha 0.2 over bright Mars dust, where the spiders are already
     near-invisible -- **do not try to judge the flatten from a live Level 2 screenshot**, use the
     harness stills.

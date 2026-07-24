@@ -47,10 +47,14 @@ generate much of the art/audio referenced here.
   `e.message`, so such a failure surfaces as a lone `[loop] TickDotNet threw (1/30):
   Content/gfx/base/756.png` -- which reads like a missing asset and is not one. A whole card was
   filed and investigated on that misreading. Two things now prevent the repeat:
-  - `WebContentManager` rethrows the PNG fallback's failure as a `ContentLoadException` whose
-    message carries the sibling it tried plus the FLATTENED inner chain, so the tick guard's
-    one-liner names the cause. It must stay flattened INTO the message -- `e.message` is all the
-    JS guard can see.
+  - **Every** `Load*` path opens through `WebContentManager.OpenOrThrow`, which rethrows as a
+    `FlattenedContentLoadException` whose message carries the extension, the sibling it tried
+    and the FLATTENED inner chain -- so the tick guard's one-liner names the cause. Textures,
+    fonts, effects, sounds and curves alike; a bare `TitleContainer.OpenStream` added anywhere
+    in that class reintroduces the trap for that asset kind. It must stay flattened INTO the
+    message -- `e.message` is all the JS guard can see, and the wrapper's own TYPE is what tells
+    a reader the message is already flattened (the `ContentLoadException` base would also match
+    one raised elsewhere, and printing only ITS outer line is the very loss being fixed).
   - A registered sibling that fails to open is logged (`[dds]`/`[rtex] <key>: registered ...
     sibling could not be read -- <chain> -- falling back to PNG`). `PrecompiledTextures.Siblings`
     already said the file was shipped, so a failure there is an anomaly, NOT the ordinary
@@ -62,7 +66,12 @@ generate much of the art/audio referenced here.
   fallback is otherwise undetectable, since .rtex and .png both yield `SurfaceFormat.Color`),
   actual vs logical size, and `LevelCount`. `eaTexProbe('GFX/Base/756')` reads 612x612/512x512,
   1 level, Dxt5; `eaTexProbe('GFX/Base/756-v1')` reads 1348x1348/1248x1248, 11 levels -- the
-  mipped-vs-unmipped distinction that card conflated, in one call.
+  mipped-vs-unmipped distinction that card conflated, in one call. **Its negative control needs
+  no broken asset:** `eaTexProbe('GFX/Base/nope')` drives the rethrow end to end and must end in
+  the real cause (`IOException: HTTP request failed. Status:404`), not a bare path -- that is the
+  one-call check that the diagnostics still work. Caveat: the probe uses the SHARED manager, so
+  an asset owned by a scene-local one (HelpText, Bloom, Credits) cannot be inspected -- probing
+  it decodes a second copy and reports on that, not on the one being drawn.
 - **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
   BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
   multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
@@ -193,7 +202,7 @@ generate much of the art/audio referenced here.
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
-  result as data -- see "Content-load diagnostics" below).
+  result as data -- see "Content-load diagnostics" above).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 

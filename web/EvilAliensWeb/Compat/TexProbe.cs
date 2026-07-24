@@ -22,9 +22,19 @@
 // Those two lines are the distinction the card conflated when it blamed the mip
 // work for a failure on the unmipped sibling.
 //
-// Loads go through the shared content manager, so a probe of an already-loaded
-// asset is a cache hit and costs nothing; a probe of a cold one warms it (and is
-// therefore not free — say so rather than pretend otherwise).
+// Negative control (no need to break an asset to test the tool):
+//     eaTexProbe('GFX/Base/nope')
+// drives the failure path end to end and prints the flattened chain, ending in
+// the real cause — "IOException: HTTP request failed. Status:404".
+//
+// TWO CAVEATS, both from it using the SHARED manager (ServiceHelper's
+// IContentManagerService is always Game1.content):
+//   - A probe of a cold asset DECODES it. Not free, and it warms the shared cache.
+//   - An asset owned by a scene-local WebContentManager (HelpText's GFX/Help/*,
+//     Bloom, Credits) is not reachable here: probing one decodes a SECOND copy into
+//     the shared manager, reports on that copy rather than the one the game is
+//     drawing, and leaks it until game teardown. Each manager decodes its own
+//     instances — see WebContentManager.Unload's note.
 // ---------------------------------------------------------------------------
 using System;
 using Microsoft.Xna.Framework.Content;
@@ -62,11 +72,13 @@ namespace EvilAliensWeb.Compat
             }
             catch (Exception ex)
             {
-                // The whole point: the cause, not just the outermost message. WebContentManager's
-                // own ContentLoadException already carries the flattened chain in its Message --
-                // it has to, because the tick guard in index.html prints nothing but e.message --
-                // so walking it again here would print every frame twice.
-                string detail = ex is ContentLoadException ? ex.Message : WebContentManager.DescribeChain(ex);
+                // The whole point: the cause, not just the outermost message. A
+                // FlattenedContentLoadException already carries the chain in its Message (it has
+                // to -- the tick guard in index.html prints nothing but e.message), so re-walking
+                // it would print every frame of the chain twice.
+                string detail = ex is WebContentManager.FlattenedContentLoadException
+                    ? ex.Message
+                    : WebContentManager.DescribeChain(ex);
                 return $"{head}\n[texprobe] FAILED — {detail}";
             }
 
@@ -82,12 +94,12 @@ namespace EvilAliensWeb.Compat
                 ? $"{tex.Width}x{tex.Height} actual / {tex.LogicalWidth()}x{tex.LogicalHeight()} logical (DXT pad)"
                 : $"{tex.Width}x{tex.Height} (unpadded)";
 
+            // A successful Load<Texture2D> on this manager always ran LoadTexture, which always
+            // records the source — so there is no "unknown" case to report here.
             string src = wcm.TextureSource(key);
-            string via = src == null
-                ? "source unrecorded (cached by another manager)"
-                : (sib != null && src != sib
-                    ? $"FELL BACK to {src} — the shipped {sib} did not load; see the [dds]/[rtex] line above for why"
-                    : $"loaded from {src}");
+            string via = sib != null && src != sib
+                ? $"FELL BACK to {src} — the shipped {sib} did not load; the [dds]/[rtex] line saying why was logged when this asset FIRST loaded, which may be long since scrolled away — re-boot and probe again to see it"
+                : $"loaded from {src}";
 
             return $"{head}\n[texprobe] OK — {pad} · {mips} · format {tex.Format} · {via}";
         }

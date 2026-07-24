@@ -142,10 +142,45 @@ namespace EvilAliensWeb.Compat
             base.Unload();
         }
 
-        // Flatten an exception chain into one console-friendly line. Exists because the one
-        // exception this port hits most often — KNI's FileNotFoundException from
-        // TitleContainer.OpenStream — puts NOTHING but the path in its own Message and hides
-        // the cause (an HTTP status, a decode error) one level down.
+        // Open a content file, restating any failure with its actual cause.
+        //
+        // KNI's TitleContainer.OpenStream ends in
+        //     catch (Exception inner) { throw new FileNotFoundException(name, inner); }
+        // so the Message of anything it throws is the bare PATH and nothing else — the real
+        // cause (an HTTP status, a decode error, an OOM) is only in InnerException. That
+        // exception escapes into TickDotNet, where index.html's guard prints e.message: a lone
+        // "Content/gfx/base/756.png", which reads like a 404 whatever actually went wrong.
+        // Card 35834236 was filed and investigated on exactly that misreading.
+        //
+        // The chain has to be flattened INTO the message: e.message is all the JS guard can
+        // see. EVERY Load* path goes through here — a bare OpenStream anywhere in this class
+        // reintroduces the trap for that asset kind.
+        private static Stream OpenOrThrow(string key, string extension, string siblingTried = null)
+        {
+            try
+            {
+                return TitleContainer.OpenStream(key + extension);
+            }
+            catch (Exception ex)
+            {
+                string sib = siblingTried == null ? "" : $" (sibling tried: {siblingTried})";
+                throw new FlattenedContentLoadException(
+                    $"{key}{extension} failed to load{sib} — {DescribeChain(ex)}", ex);
+            }
+        }
+
+        // A ContentLoadException whose Message ALREADY carries the flattened inner chain, so a
+        // reader can print it verbatim instead of walking the chain again and doubling every
+        // frame. Its own type is the signal — testing for the ContentLoadException base would
+        // also match one raised elsewhere, whose message is not flattened, and print only its
+        // outermost line: the exact information loss this class exists to prevent.
+        internal sealed class FlattenedContentLoadException : ContentLoadException
+        {
+            public FlattenedContentLoadException(string message, Exception inner)
+                : base(message, inner) { }
+        }
+
+        // Flatten an exception chain into one console-friendly line.
         internal static string DescribeChain(Exception ex)
         {
             var sb = new System.Text.StringBuilder();
@@ -196,24 +231,8 @@ namespace EvilAliensWeb.Compat
                 tex = sib == ".dds" ? TryLoadDds(key) : TryLoadRaw(key);
             if (tex == null)
             {
-                // KNI's TitleContainer.OpenStream ends in
-                //   catch (Exception inner) { throw new FileNotFoundException(name, inner); }
-                // so the Message of anything it throws is the bare PATH and nothing else — the
-                // real cause is only in InnerException. That exception escapes into TickDotNet,
-                // where index.html's guard prints e.message: a lone "Content/gfx/base/x.png",
-                // which reads like a 404 whatever actually went wrong. Card 35834236 was filed
-                // and investigated on exactly that misreading. Restate it with the cause, which
-                // sibling (if any) was tried before us, and the full inner chain.
-                try
-                {
-                    using Stream s = TitleContainer.OpenStream(key + ".png");
-                    tex = Texture2D.FromStream(GraphicsDevice, s);
-                }
-                catch (Exception ex)
-                {
-                    throw new ContentLoadException(
-                        $"{key}.png failed to load (sibling tried: {sib ?? "none"}) — {DescribeChain(ex)}", ex);
-                }
+                using Stream s = OpenOrThrow(key, ".png", sib ?? "none");
+                tex = Texture2D.FromStream(GraphicsDevice, s);
                 _textureSources[key] = ".png";
             }
             else
@@ -332,7 +351,7 @@ namespace EvilAliensWeb.Compat
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[dds] {key}: {ex.Message} — falling back to PNG");
+                Console.WriteLine($"[dds] {key}: {DescribeChain(ex)} — falling back to PNG");
                 return null;
             }
         }
@@ -384,7 +403,7 @@ namespace EvilAliensWeb.Compat
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[rtex] {key}: {ex.Message} — falling back to PNG");
+                Console.WriteLine($"[rtex] {key}: {DescribeChain(ex)} — falling back to PNG");
                 return null;
             }
         }
@@ -392,10 +411,10 @@ namespace EvilAliensWeb.Compat
         private SpriteFont LoadFont(string key)
         {
             Texture2D texture;
-            using (Stream s = TitleContainer.OpenStream(key + ".fnt.png"))
+            using (Stream s = OpenOrThrow(key, ".fnt.png"))
                 texture = Texture2D.FromStream(GraphicsDevice, s);
 
-            using Stream meta = TitleContainer.OpenStream(key + ".fnt");
+            using Stream meta = OpenOrThrow(key, ".fnt");
             using var br = new BinaryReader(meta);
             int lineSpacing = br.ReadInt32();
             float spacing = br.ReadSingle();
@@ -428,7 +447,7 @@ namespace EvilAliensWeb.Compat
         private Effect LoadEffect(string key)
         {
             byte[] code;
-            using (Stream s = TitleContainer.OpenStream(key + ".mgfxo"))
+            using (Stream s = OpenOrThrow(key, ".mgfxo"))
             using (var ms = new MemoryStream())
             {
                 s.CopyTo(ms);
@@ -444,7 +463,7 @@ namespace EvilAliensWeb.Compat
         // is handled by the JS eaMusic layer; see MusicInterop.)
         private SoundEffect LoadSoundEffect(string key)
         {
-            using Stream s = TitleContainer.OpenStream(key + ".wav");
+            using Stream s = OpenOrThrow(key, ".wav");
             SoundEffect fx = SoundEffect.FromStream(s);
             fx.Name = key;
             return fx;
@@ -452,7 +471,7 @@ namespace EvilAliensWeb.Compat
 
         private Curve LoadCurve(string key)
         {
-            using Stream s = TitleContainer.OpenStream(key + ".curve");
+            using Stream s = OpenOrThrow(key, ".curve");
             using var br = new BinaryReader(s);
             var curve = new Curve
             {

@@ -4,14 +4,22 @@ Run:  python test_signal.py
 Starts the app in-process on an ephemeral port (uvicorn), drives it with
 the `websockets` client (already a dependency via uvicorn[standard]),
 prints PASS/FAIL per case, exits nonzero on any failure.
+
+Covers the 11.4 relay protocol AND the card-2001fbd8 registry: list/
+browse/build-filter/unlist/full->delist/ping-relay over the socket, plus
+deterministic unit checks of the TTL-from-last_beat + listable() logic
+(no 600s waits -- the Room object is exercised directly).
 """
 
 import asyncio
 import json
 import sys
+import time
 
 import uvicorn
 import websockets
+
+import main
 
 TIMEOUT = 3.0
 results: list[tuple[str, bool, str]] = []
@@ -38,6 +46,40 @@ async def host_room(url):
     msg = await recv_json(ws)
     assert msg.get("t") == "code", msg
     return ws, msg["code"]
+
+
+async def browse(url, proto="4", hash="h1"):
+    """Open a browser socket, return (ws, rooms-list)."""
+    ws = await websockets.connect(url)
+    await send(ws, {"t": "browse", "proto": proto, "hash": hash})
+    msg = await recv_json(ws)
+    assert msg.get("t") == "rooms", msg
+    return ws, msg["rooms"]
+
+
+def unit_tests() -> None:
+    """Deterministic Room-object checks -- no server, no timing waits."""
+    # expired() counts from last_beat, not created.
+    r = main.Room("AAAAA", None)
+    r.created = time.monotonic() - (main.ROOM_TTL_SECONDS + 100)
+    r.last_beat = time.monotonic()  # a recent beat keeps a long-lived room alive
+    record("beat keeps a long-lived room from expiring", not r.expired())
+
+    r.last_beat = time.monotonic() - (main.ROOM_TTL_SECONDS + 1)
+    record("no beat within TTL -> expired", r.expired())
+
+    # An unlisted room never beats: last_beat == created == old expiry.
+    u = main.Room("BBBBB", None)
+    u.created = u.last_beat = time.monotonic() - (main.ROOM_TTL_SECONDS + 1)
+    record("unlisted room keeps from-creation expiry", u.expired())
+
+    # listable() == listed AND empty joiner slot (mirrors join-eligibility).
+    l = main.Room("CCCCC", None)
+    record("fresh room is not listable", not l.listable())
+    l.listed = True
+    record("listed + empty slot is listable", l.listable())
+    l.joiner = object()
+    record("full room is not listable", not l.listable())
 
 
 async def run_tests(url: str) -> None:
@@ -131,8 +173,113 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         record("closed room's code -> error nocode", False, repr(e))
 
+    # ---- card 2001fbd8: registry + browse + ping relay ----------------------
 
-async def main() -> int:
+    # 9. list -> the room shows in a build-compatible browse
+    try:
+        host, code = await host_room(url)
+        await send(host, {"t": "list", "level": 3, "difficulty": 2,
+                          "players": 1, "proto": "4", "hash": "h1"})
+        bws, rooms = await browse(url, proto="4", hash="h1")
+        entry = next((r for r in rooms if r.get("code") == code), None)
+        ok = (entry is not None and entry.get("level") == 3
+              and entry.get("difficulty") == 2 and entry.get("players") == 1
+              and "ageSec" in entry)
+        record("listed room appears in matching browse", ok, repr(entry))
+        await bws.close()
+    except Exception as e:
+        record("listed room appears in matching browse", False, repr(e))
+        return
+
+    # 10. build filter: a mismatched hash hides the room
+    try:
+        bws, rooms = await browse(url, proto="4", hash="OTHER")
+        hidden = all(r.get("code") != code for r in rooms)
+        record("incompatible build hash filters the room out", hidden,
+               repr([r.get("code") for r in rooms]))
+        await bws.close()
+    except Exception as e:
+        record("incompatible build hash filters the room out", False, repr(e))
+
+    # 10b. build filter: a mismatched proto hides the room
+    try:
+        bws, rooms = await browse(url, proto="99", hash="h1")
+        hidden = all(r.get("code") != code for r in rooms)
+        record("incompatible protocol filters the room out", hidden,
+               repr([r.get("code") for r in rooms]))
+        await bws.close()
+    except Exception as e:
+        record("incompatible protocol filters the room out", False, repr(e))
+
+    # 11. ping relay: browser -> server -> host -> server -> browser
+    try:
+        bws = await websockets.connect(url)
+        await send(bws, {"t": "browse", "proto": "4", "hash": "h1"})
+        await recv_json(bws)  # the rooms list
+        await send(bws, {"t": "ping", "code": code, "id": "corr-7"})
+        fwd = await recv_json(host)  # host receives the forwarded ping
+        ok_fwd = fwd.get("t") == "ping" and fwd.get("id") == "corr-7" and isinstance(fwd.get("ref"), int)
+        # host auto-pongs (the real one is JS; here we do it manually)
+        await send(host, {"t": "pong", "id": fwd.get("id"), "ref": fwd.get("ref")})
+        pong = await recv_json(bws)
+        ok_pong = pong.get("t") == "pong" and pong.get("id") == "corr-7"
+        record("ping relayed to host and pong routed back", ok_fwd and ok_pong,
+               f"fwd={fwd} pong={pong}")
+        await bws.close()
+    except Exception as e:
+        record("ping relayed to host and pong routed back", False, repr(e))
+
+    # 12. ping before browse -> bad
+    try:
+        stray = await websockets.connect(url)
+        await send(stray, {"t": "ping", "code": code, "id": "x"})
+        msg = await recv_json(stray)
+        record("ping without browse -> error bad",
+               msg == {"t": "error", "reason": "bad"}, repr(msg))
+        await stray.close()
+    except Exception as e:
+        record("ping without browse -> error bad", False, repr(e))
+
+    # 13. unlist -> gone from browse, still joinable by code
+    try:
+        await send(host, {"t": "unlist"})
+        bws, rooms = await browse(url, proto="4", hash="h1")
+        gone = all(r.get("code") != code for r in rooms)
+        await bws.close()
+        joiner = await websockets.connect(url)
+        await send(joiner, {"t": "join", "code": code})
+        j = await recv_json(joiner)
+        record("unlist hides from browse but code still joins",
+               gone and j == {"t": "peer"}, f"gone={gone} join={j}")
+    except Exception as e:
+        record("unlist hides from browse but code still joins", False, repr(e))
+
+    # 14. full -> delisted: a paired room never advertises
+    try:
+        host2, code2 = await host_room(url)
+        await send(host2, {"t": "list", "level": 1, "difficulty": 0,
+                           "players": 1, "proto": "4", "hash": "h1"})
+        bws, rooms = await browse(url, proto="4", hash="h1")
+        listed_before = any(r.get("code") == code2 for r in rooms)
+        await bws.close()
+        j2 = await websockets.connect(url)
+        await send(j2, {"t": "join", "code": code2})
+        await recv_json(j2)   # peer
+        await recv_json(host2)  # peer
+        bws, rooms = await browse(url, proto="4", hash="h1")
+        listed_after = any(r.get("code") == code2 for r in rooms)
+        record("a full room is delisted from browse",
+               listed_before and not listed_after,
+               f"before={listed_before} after={listed_after}")
+        await bws.close()
+        await j2.close()
+        await host2.close()
+    except Exception as e:
+        record("a full room is delisted from browse", False, repr(e))
+
+
+async def main_async() -> int:
+    unit_tests()
     config = uvicorn.Config("main:app", host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve())
@@ -156,4 +303,4 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(asyncio.run(main_async()))

@@ -739,6 +739,50 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   (the harness caveat): deep Update-reached attack poses may diverge until their state
   extras grow. A one-time `pupPops` burst can appear during the FIRST wipe transition of
   a session (transient, self-heals, cosmetic under the death FX -- follow-up card).
+- **Public game browser + join-in-progress (card 2001fbd8, design `plans/net-game-browser.md`):**
+  a running single-player game can be LISTED so strangers find + join it, with NO `NetSession`
+  constructed until someone actually arrives.
+  - **One eligibility predicate drives everything** (`Compat/Net/NetListing.ComputeEligible`):
+    an empty player slot (`oracle.Players == 1`) + `Settings.AllowOnlineJoins` (new Option,
+    **default ON**) + no cheats/`DebugFlags.Active` + level not `WebcamAliens`/`TeamChallenge`
+    + no session already up. The SAME predicate gates the listing, the beacon, and the pause
+    indicator, so they can't disagree. `NetListing.Tick` runs each tick from
+    `Game1.UpdateInner` (right after `NetSession.Update`).
+  - **Listing != session.** A listed game keeps ONE lightweight signaling WS open (via
+    `eaRtc.list`, reusing the 11.4 host machinery: `{t:host}` -> code -> `{t:list}` + a ~30 s
+    `{t:beat}`, auto-answering browser `{t:ping}`s). It stays plain single-player (AI friends,
+    no score sync, no Turbo lock) until a stranger pairs. This knowingly breaks 11.4's
+    "single-player never touches a server" invariant -- the card's default-on premise; the
+    Options toggle + pause "Listed online -- room XYZAB" indicator are the mitigation.
+  - **Join-in-progress:** on pairing (`eaRtc` drives the host handshake -> "connected"),
+    `NetSession.StartListedSession` attaches a HOST session to the running `GameScene`, sends
+    the joiner `EvLaunch(currentLevel, difficulty)` + relies on the existing `EvReady`
+    ->`ReplayLive` + 1 Hz `EvScoreSync` catch-up. The joiner is a normal menu-session client
+    (`NetLobby.JoinWithCode`). A `listedSession` differs from a menu session ONLY in peer-loss:
+    the joiner leaving reverts the host to single-player (NetListing re-lists) instead of
+    force-exiting the host's own level.
+  - **Ping is MEASURED, not estimated** (`server/signal/main.py` relays browser->host->back;
+    `webrtc.js` auto-pongs in JS). Drop the old self-reported rtt idea entirely.
+  - **Browser UI:** `SubMenuOnlineGames` (a `SubMenuCarousel`, the geometry extracted verbatim
+    from `SubMenuLevelChoice` -- both now derive from it) shows one entry per open game with the
+    level's screenshot art (`LevelArt`) + difficulty/players/ping/room-code. `NetGameBrowser`
+    opens the browse socket, parses the room list, and fills each ping as its pong lands ("--"
+    until then). Reached from the main-menu "Online Co-op" submenu's "Join Online Game".
+  - **Beacon:** `ScoreVisualiser.drawPressStart`'s `Player X` <-> `Press Start` blink gains a
+    third string `Room code: XYZAB` while listed, and its 4-cycle stop is suppressed, so the
+    code surfaces ~every 15 s (the existing intermittent rhythm, never a static banner). The
+    `bool showPressStart` became an index `promptPhase` (drawn `% (listed ? 3 : 2)`).
+  - **Flags:** `?gamebrowser` boots straight to the carousel with injected FAKE entries (no
+    server) for a screenshot; `?netjip` lets a `?level=` (`DebugFlags.Active`) host list anyway
+    for the two-window JIP metrics test (it also drops the debug-flag bit from its hello so a
+    clean joiner won't reject it).
+  - **Verify:** `server/signal/test_signal.py` (registry/browse/build-filter/ping-relay/full->
+    delist, all standalone); `?gamebrowser` for the carousel; the eligibility predicate as data;
+    `?netjip` two windows -> `[net]` metrics.
+  - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** deep mid-level
+    background/doodad state beyond the launch; mechanical-friend ships unreplicated (listing
+    refused while `Friends>0`); a mid-boss arrival hits the best-effort puppet limit; public-list
+    abuse surface (rate limiting / hiding a room).
 
 ### Audio runtime (`SoundManager` / `eaMusic`)
 

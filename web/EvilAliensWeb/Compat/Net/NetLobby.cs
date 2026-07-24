@@ -50,6 +50,18 @@ namespace EvilAliensWeb.Compat.Net
             Phase = LobbyPhase.Prompting;
         }
 
+        // Join a specific room code directly (card 2001fbd8: the game browser picked it),
+        // skipping the code-entry overlay. Identical to the overlay path once a code is in
+        // hand -- Contacting -> Connecting -> Connected -> the client waits for the host's
+        // EvLaunch. The host is mid-level, so this becomes join-in-progress on the host side.
+        public static void JoinWithCode(Game g, string code)
+        {
+            Begin(g, host: false);
+            RoomCode = code;
+            WebRtcInterop.Join(DebugFlags.NetSignal, code);
+            Phase = LobbyPhase.Contacting;
+        }
+
         private static void Begin(Game g, bool host)
         {
             game = g;
@@ -108,6 +120,15 @@ namespace EvilAliensWeb.Compat.Net
             while (phaseQueue.Count > 0)
             {
                 (string p, string detail) = phaseQueue.Dequeue();
+                // eaRtc's phase channel is shared with the in-level game LISTING flow
+                // (card 2001fbd8: NetListing drives eaRtc.list on the same OnPhase). When
+                // this lobby isn't in an active flow, any phase it sees belongs to the
+                // listing (or is stale) -- discard it so a listed game's 'connected' can't
+                // start a spurious menu session here. NetListing owns those.
+                if (Phase == LobbyPhase.Idle)
+                {
+                    continue;
+                }
                 switch (p)
                 {
                 case "code":

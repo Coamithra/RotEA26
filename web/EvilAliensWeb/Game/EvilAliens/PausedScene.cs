@@ -60,6 +60,15 @@ internal class PausedScene : MenuSub1
 		base.DrawMenu(gameTime, yoffset + 75f);
 		Vector2 val = font.MeasureString("Paused..") / 2f + new Vector2(0f, 60f);
 		base.SpriteBatch.DrawMetalString(font, "Paused..", new Vector2(400f, 300f), Color.AliceBlue, 0f, val, 1f);
+		// Card 2001fbd8 privacy + easy-reference: while the game is publicly listed, show that
+		// (and the room code) here -- the host can always find their code, and a player can
+		// always see their game is joinable. Nothing shown when the game isn't listed.
+		if (EvilAliensWeb.Compat.Net.NetListing.Listed)
+		{
+			string line = "Listed online  -  room " + EvilAliensWeb.Compat.Net.NetListing.RoomCode;
+			Vector2 o = font.MeasureString(line) / 2f;
+			base.SpriteBatch.DrawString(font, line, new Vector2(400f, 400f), Color.Gold, 0f, o, 0.6f, (SpriteEffects)0, 0f);
+		}
 	}
 
 	public override void Draw(GameTime gameTime)

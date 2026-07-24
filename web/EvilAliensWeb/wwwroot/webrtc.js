@@ -21,6 +21,15 @@ window.eaRtc = (() => {
     let isHost = false, connected = false, finished = false, connectTimer = null;
     let overlay = null;
 
+    // Public game browser (card 2001fbd8). A LISTED single-player host keeps this same
+    // signaling WS open, beats to hold its room alive, and auto-pongs browser pings; a
+    // peer arriving drives the normal host handshake below (= join-in-progress). BROWSING
+    // for games uses a SEPARATE socket (bws) in a third role that belongs to no room.
+    let beatTimer = null, listing = false, listMeta = null;
+    let bws = null, browseTimer = null;
+    const pingSentAt = new Map(); // room code -> performance.now() of its last ping
+    const BEAT_MS = 30000, BROWSE_REFRESH_MS = 4000;
+
     const invoke = (m, ...a) => {
         try { DotNet.invokeMethod('EvilAliensWeb', m, ...a); }
         catch (e) { console.warn('[rtc] ' + m + ' dispatch failed: ' + e.message); }
@@ -56,8 +65,17 @@ window.eaRtc = (() => {
         try { if (chR && chR.readyState === 'open') chR.send(new Uint8Array([0])); } catch (e) { }
     };
 
+    const stopBeat = () => { if (beatTimer) { clearInterval(beatTimer); beatTimer = null; } };
+    const sendList = () => {
+        if (!listMeta) return;
+        sendSignal({ t: 'list', level: listMeta.level, difficulty: listMeta.difficulty,
+            players: listMeta.players, proto: listMeta.proto, hash: String(window.eaBuildHash || 'dev') });
+    };
+
     const teardown = () => {
         window.removeEventListener('pagehide', bye);
+        stopBeat();
+        listing = false;
         if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
         if (ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
         const kill = (ch) => { if (ch) { try { ch.onclose = null; ch.close(); } catch (e) { } } };
@@ -81,6 +99,9 @@ window.eaRtc = (() => {
             if (chS && chS.readyState === 'open' && chR && chR.readyState === 'open') {
                 connected = true;
                 if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+                // The listing role is over -- a peer arrived, the game is now full.
+                stopBeat();
+                listing = false;
                 // Signaling's job is done -- gameplay never touches the server again.
                 if (ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
                 phase('connected');
@@ -126,8 +147,19 @@ window.eaRtc = (() => {
         let m;
         try { m = JSON.parse(ev.data); } catch (e) { return; }
         try {
-            if (m.t === 'code') phase('code', m.code);
+            if (m.t === 'code') {
+                phase('code', m.code);
+                // Listed host: advertise now that we have a room, and start the heartbeat
+                // that keeps the room alive across a long level (TTL counts from last beat).
+                if (listing) {
+                    sendList();
+                    if (!beatTimer) beatTimer = setInterval(() => sendSignal({ t: 'beat' }), BEAT_MS);
+                }
+            }
             else if (m.t === 'peer') { phase('peer'); if (isHost) await startAsHost(); else startAsJoiner(); }
+            // A browser is pinging us (relayed by the server). Auto-pong in JS without
+            // touching C#, so the measured RTT is the network, not our frame pacing.
+            else if (m.t === 'ping') sendSignal({ t: 'pong', id: m.id, ref: m.ref });
             else if (m.t === 'sdp') {
                 await pc.setRemoteDescription(m.d);
                 if (!isHost) {
@@ -186,6 +218,90 @@ window.eaRtc = (() => {
             this.closePrompt();
         },
         buildHash() { return String(window.eaBuildHash || 'dev'); },
+
+        // ---- public game browser (card 2001fbd8) ------------------------------------
+
+        // Host side: list this single-player game so strangers can find + join it. Opens
+        // the signaling WS (reusing the host machinery above) if it isn't already up; the
+        // 'code' handler then advertises + starts beating. Called again to UPDATE metadata
+        // (level/difficulty/players changed) -- idempotent on the server.
+        list(signalUrl, level, difficulty, players, proto) {
+            listMeta = { level, difficulty, players, proto: String(proto) };
+            if (ws || pc) {
+                // Signaling socket already up: this is the metadata-update path (or a
+                // no-op if a non-listing session owns the socket).
+                if (listing) sendList();
+                return;
+            }
+            listing = true;
+            isHost = true;
+            phase('contacting');
+            openSignaling(signalUrl, () => sendSignal({ t: 'host' }));
+        },
+        // Update metadata / re-advertise after an unlist, without reopening the socket.
+        relist(level, difficulty, players) {
+            if (!listMeta || !ws) return;
+            listMeta.level = level; listMeta.difficulty = difficulty; listMeta.players = players;
+            listing = true;
+            sendList();
+        },
+        // Hide from browse but keep the room (and its code) joinable + alive; the beat and
+        // socket stay so a later relist() reuses the same code.
+        unlist() {
+            if (!listing) return;
+            listing = false;
+            sendSignal({ t: 'unlist' });
+        },
+        // Fully stop listing (level exit with no peer): drop the room entirely. A session
+        // that already started owns its own teardown via close().
+        endListing() {
+            listing = false;
+            listMeta = null;
+            stopBeat();
+            if (!connected && !pc && ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
+        },
+
+        // Joiner side: open the browse socket (a third role, no room), fetch the listed
+        // build-compatible games, and ping each host in parallel. Rooms arrive via
+        // rtcRooms; each entry's RTT fills in via rtcPing as its pong lands.
+        browse(signalUrl, proto) {
+            if (bws) return;
+            pingSentAt.clear();
+            try { bws = new WebSocket(signalUrl); }
+            catch (e) { invoke('rtcBrowseFailed', 'signal'); bws = null; return; }
+            const doBrowse = () => {
+                if (bws && bws.readyState === WebSocket.OPEN) {
+                    bws.send(JSON.stringify({ t: 'browse', proto: String(proto), hash: String(window.eaBuildHash || 'dev') }));
+                }
+            };
+            bws.onopen = () => { doBrowse(); browseTimer = setInterval(doBrowse, BROWSE_REFRESH_MS); };
+            bws.onmessage = (ev) => {
+                let m;
+                try { m = JSON.parse(ev.data); } catch (e) { return; }
+                if (m.t === 'rooms') {
+                    const list = Array.isArray(m.rooms) ? m.rooms : [];
+                    invoke('rtcRooms', JSON.stringify(list));
+                    const now = performance.now();
+                    for (const r of list) {
+                        if (!r || typeof r.code !== 'string') continue;
+                        pingSentAt.set(r.code, now);
+                        try { bws.send(JSON.stringify({ t: 'ping', code: r.code, id: r.code })); } catch (e) { }
+                    }
+                } else if (m.t === 'pong') {
+                    const t0 = pingSentAt.get(m.id);
+                    if (t0 !== undefined) invoke('rtcPing', String(m.id), Math.round(performance.now() - t0));
+                } else if (m.t === 'error') {
+                    invoke('rtcBrowseFailed', String(m.reason || 'server'));
+                }
+            };
+            bws.onerror = () => { invoke('rtcBrowseFailed', 'signal'); };
+            bws.onclose = () => { if (browseTimer) { clearInterval(browseTimer); browseTimer = null; } };
+        },
+        endBrowse() {
+            if (browseTimer) { clearInterval(browseTimer); browseTimer = null; }
+            if (bws) { try { bws.onclose = null; bws.close(); } catch (e) { } bws = null; }
+            pingSentAt.clear();
+        },
 
         // Room-code entry overlay (the house outside-#app pattern, like the slider panels/
         // trailer overlay). Built on demand; Join -> rtcCodeEntry(code), Cancel/Esc ->

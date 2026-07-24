@@ -501,4 +501,22 @@ internal class FakeBoss : KillableAlien
 		sprite = new AnimatedSprite("GFX/alienboss/alienboss");
 		base.LoadContent();
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// Mirrors ClassicBoss/BattleSkull: the alienboss body runs off `animationProgress` (its own
+	// 20fps clock, advanced only in Update -> frozen on a puppet). The host streams the current
+	// frame so the client's sprite keeps animating. scale + the HP-redden colorize arrive in the
+	// base state (Scale, and Hp -> NetApplyHp; initialhitpoints is a fixed 500 either side, so the
+	// redden matches exactly). The Update-spawned bullets/UFOs replicate as their own types.
+	internal int NetAnimFrame
+	{
+		get
+		{
+			return (int)animationProgress;
+		}
+		set
+		{
+			animationProgress = value;
+		}
+	}
 }

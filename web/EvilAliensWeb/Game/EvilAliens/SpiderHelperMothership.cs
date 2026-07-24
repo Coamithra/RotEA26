@@ -563,4 +563,29 @@ internal class SpiderHelperMothership : KillableAlien
 		}
 		base.CollidesWith(other);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// Mirrors MarsBoss/Boss: the 4x4 mothershipB sheet ALTERNATES between the mothershipA/mothershipB
+	// halves each animation wrap in Update; that A/B choice is the one bit of Draw state the base
+	// fields (curframe/Hp) don't carry, so it is streamed. The HP-redden colorize rides the base Hp
+	// (NetApplyHp); initialhitpoints is difficulty-scaled but the client shares the session
+	// difficulty (TeamChallenge locks it), so the redden matches. The charge-swarm windup glow is a
+	// child LazerGenerator that replicates separately (see LazerGeneratorDescriptor); the fired Lazer
+	// is its own replicated entity.
+	internal bool NetSecondHalf => texture == secondHalfOfSpritesheet;
+
+	internal void NetSetSpritesheetHalf(bool second)
+	{
+		if (second)
+		{
+			if (secondHalfOfSpritesheet != null)
+			{
+				texture = secondHalfOfSpritesheet;
+			}
+		}
+		else if (firstHalfOfSpritesheet != null)
+		{
+			texture = firstHalfOfSpritesheet;
+		}
+	}
 }

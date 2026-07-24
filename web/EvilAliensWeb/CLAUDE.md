@@ -101,8 +101,9 @@ generate much of the art/audio referenced here.
   (`?harness=spiderjump`/`?level=Level2&spiders`/`?spidertune`), `eaHolo`
   (`?level=Tutorial`/`ClassicAliens`/`?holotune`), `eaConnector`
   (`?level=TeamChallenge`/`?harness=connector`/`?connectortune`), `eaWcTune` (`?wctune`),
-  `eaTexViewer` (`?texviewer`). GOTCHA: range inputs need `autocomplete='off'` or Chrome's form
-  restoration re-seeds them post-load and desyncs from the defaults.
+  `eaTexViewer` (`?texviewer`), `eaNetSim` (any `?net=` boot). GOTCHA: range inputs need
+  `autocomplete='off'` or Chrome's form restoration re-seeds them post-load and desyncs from the
+  defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`.
 
@@ -507,7 +508,8 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   `?net=` boot uses the REAL WebRtcTransport: host prints its room code to the console,
   join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
   a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
-  `?signal=ws://localhost:8091/ws`). **No `?net` flag = the net layer is never constructed
+  `?signal=ws://localhost:8091/ws`). Card 40334a8f adds `?netlag=<ms>` / `?netloss=<0-100>`
+  (impair INBOUND traffic -- see the impairment bullet below). **No `?net` flag = the net layer is never constructed
   -- a plain boot is byte-identical single-player, and single-player NEVER contacts any
   server. Hard invariants; keep them.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
@@ -522,6 +524,39 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   free Google servers, NO TURN in v1 (~10-15% of NAT pairs get a clean "could not
   connect"; 11.5 owns the TURN decision). Nothing above the interface may assume loopback
   reliability.
+- **Artificial impairment (`Compat/Net/NetImpairment`, card 40334a8f) is what makes the
+  drop-tolerance paths testable at all.** BroadcastChannel never loses or reorders a packet, so
+  until this landed the interpolation underrun, the snapshot unknown-id self-heal, the claim
+  ledgers and the peer timeout had NEVER executed -- every one of `sgap`/`extrap`/`pops`/
+  `pupPops` was structurally pinned at 0. It DECORATES `INetTransport` (so it impairs the
+  WebRTC transport unchanged) and is always in the chain inside a net session, forwarding
+  inline at 0/0. **RX-ONLY** -- impairing our own inbound == the peer's outbound being bad, so
+  an asymmetric link is just two tabs with different settings, and tx is untouched.
+  - **Per lane: the STREAM lane takes delay + loss + jitter; the RELIABLE lane takes delay
+    ONLY.** Dropping or reordering the reliable lane would break the contract everything above
+    the interface assumes and could only manufacture fake bugs. Its release times are clamped
+    monotone, so jitter can never reorder it.
+  - The held stream packets are a LIST scanned for everything due, not a head-first FIFO: with
+    jitter a late-stamped packet must not block a later one that came due earlier, or jitter
+    silently degrades back into pure delay. Loss with no lag releases inline (queuing it would
+    add a hidden tick of latency and make loss impossible to isolate).
+  - `Pump(now)` runs at the top of `NetSession.Update` BEFORE `DrainRx`, on the same
+    `TickCount64` clock as the rest of the cadence -- so **delay granularity is one tick
+    (~16ms)**; a lag below that is indistinguishable from 0.
+  - Private `Random`, never the shared game RNG (the `Quad`/`ShipConnector` rule) -- a dev knob
+    must not be able to desync a co-op session.
+  - Flags `?netlag=<ms>` (0-500) / `?netloss=<0-100>`; **jitter is panel-only** (no URL flag) --
+    it is the knob that actually makes the stream lane REORDER. Live panel `eaNetSim` (built
+    outside `#app`, only on a `?net` boot) + console `eaNetSim(lag, loss, jitter)`.
+  - **`?netloss=100` starves the ship stream so the 3s peer timeout fires while the handshake
+    stays alive on the reliable lane -- that is a simulated silent disconnect, not a bug.**
+  - The `[net]` line gains `impLag/impLoss/impJit/impDrop/impHeld` ONLY while impairment is on,
+    so a deliberately degraded log can never be mistaken for a genuinely broken one.
+  - **Verify with `eaNetSim.test(lag, loss, jitter, n)`** -- pushes n synthetic packets per lane
+    through the real wrapper on a VIRTUAL clock and prints measured delay/drop/per-lane reorder.
+    Written in place of a `tools/sim/` python mirror on purpose: the policy is small enough that
+    a mirror would drift from the C# and prove nothing. Reliable lane must read `drop=0
+    reorder=0` in every configuration, including `loss=100`.
 - **Signaling (card 11.4): room codes on the shared Hetzner VPS** (root CLAUDE.md has the
   box details). `server/signal/` in THIS repo = a FastAPI/uvicorn dumb relay (mints 5-char
   codes, no 0/O/1/I; relays SDP/ICE between exactly 2 peers; room TTL 10 min; `python

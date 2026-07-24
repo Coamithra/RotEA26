@@ -104,6 +104,7 @@ namespace EvilAliensWeb.Compat.Net
         private static SoundManager sound;
         private static ScoreVisualiser score;
         private static INetTransport transport;
+        private static NetImpairment impairment;
 
         private static readonly Queue<(byte[] data, bool reliable)> rxQueue = new Queue<(byte[], bool)>();
 
@@ -213,7 +214,13 @@ namespace EvilAliensWeb.Compat.Net
             isHost = host;
             menuSession = asMenuSession;
             localBuildHash = NetProtocol.HashBuildString(WebRtcInterop.BuildHash());
-            transport = t;
+            // Impairment wraps whichever transport the caller picked -- BroadcastChannel dev
+            // loopback or the real WebRTC one. It decorates INetTransport precisely so it does
+            // not care which. Always in the chain inside a net session (a plain boot never gets
+            // here, so the single-player invariant is untouched) because the knobs are live-
+            // settable from eaNetSim; at 0/0 it forwards inline with no queue.
+            impairment = new NetImpairment(t);
+            transport = impairment;
             transport.OnData += (data, reliable, from) => rxQueue.Enqueue((data, reliable));
             // Queued, not applied inline: the bye fires from a JS callback, and the menu-
             // session PeerLost now tears down the whole match (world mutation belongs on
@@ -256,6 +263,9 @@ namespace EvilAliensWeb.Compat.Net
             PeerUp = false;
             transport.Close();
             transport = null;
+            // Dropped alongside `transport` (it IS `transport`) so a restarted session can't
+            // pump a closed wrapper -- Start() builds a fresh one around the new transport.
+            impairment = null;
             if (isHost)
             {
                 NetIdRegistry.Disable(game);
@@ -348,6 +358,9 @@ namespace EvilAliensWeb.Compat.Net
             long now = NowMs;
             realDtMs = lastUpdateAt == 0 ? 16f : MathHelper.Clamp(now - lastUpdateAt, 0f, 200f);
             lastUpdateAt = now;
+            // Release anything the impairment wrapper is holding BEFORE draining, so a
+            // delayed packet lands in rxQueue in time for this tick rather than the next.
+            impairment.Pump(now);
             DrainRx();
             if (!Active)
             {
@@ -402,6 +415,11 @@ namespace EvilAliensWeb.Compat.Net
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
                 lastMetricsAt = now;
+                metrics.ImpDropped = impairment.Dropped;
+                metrics.ImpHeld = impairment.HeldCount;
+                metrics.ImpLagMs = impairment.LagMs;
+                metrics.ImpLossPct = impairment.LossPct;
+                metrics.ImpJitterMs = impairment.JitterMs;
                 Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
                     FindLocalShip() != null, puppet != null));
             }

@@ -15,7 +15,10 @@ namespace EvilAliensWeb.Compat
 	//   ?menu          go straight to the main menu (skip splash + auto-"Press Start")
 	//   ?skipsplash    skip only the splash sequence (still shows Press Start)
 	//   ?autostart     auto-press Start on the Press Start screen
-	//   ?noattract     disable the menu's idle -> demo (attract) mode  (alias: ?nodemo)
+	//   ?noattract     disable the menu's idle -> demo (attract) mode  (alias: ?nodemo).
+	//                  Deliberately OUT of `Active` (card af63f958) so an ONLINE JOINER can pass
+	//                  it: a menu session rejects the pairing on its own Active bit, and its
+	//                  lobby is otherwise yanked into the attract demo mid-navigation.
 	//   ?level=<Name>  boot straight into a level, bypassing the menu entirely
 	//                  (<Name> is a Levels enum value, case-insensitive: Level1, Level2,
 	//                   Level3, ClassicAliens, SpaceDodge, Braineroids, Tutorial, ...)
@@ -2000,7 +2003,12 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			// ?noattract is deliberately OUT (card af63f958): its ONE effect is leaving the main
+			// menu's idle timeout unwired, which alters no gameplay, difficulty, unlock or fairness
+			// -- and a menu-session joiner is rejected on its own Active bit (NetSession.HandleHello),
+			// so keeping it in here made "don't yank my lobby into the attract demo" unaskable for
+			// exactly the peer that needs it most.
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2078,9 +2086,13 @@ namespace EvilAliensWeb.Compat
 			return true;
 		}
 
+		// Reached whenever nothing in the `Active` expression is set -- which INCLUDES a boot
+		// carrying only out-of-Active flags (?noattract, ?hitboxes, ?shake=, ?wallfog=, ...),
+		// so it does not say "no debug flags". For an online joiner this line is the useful
+		// verdict: flag-clean, so the menu-session pairing will not reject itself.
 		private static void Hint()
 		{
-			Console.WriteLine("[debug] no debug flags. URL options: ?menu  ?noattract  "
+			Console.WriteLine("[debug] no boot-hijacking debug flags. URL options: ?menu  ?noattract  "
 				+ "?level=<Name>  ?skipsplash  (see Compat/DebugFlags.cs)");
 		}
 

@@ -145,6 +145,12 @@ generate much of the art/audio referenced here.
 - `DebugFlags.Active` (the `[debug] flags active` console line) lists only flags that hijack
   boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
   (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
+  **`Active` is not just a log line -- it REFUSES online play**: a menu-session pairing rejects if
+  either peer has it (`NetSession.HandleHello`) and a flagged host won't list (`NetListing`). So
+  the test is "could this flag change the shared run?", not "is this a debug flag?" -- which is
+  why `?noattract` is out (card af63f958): it unwires the main menu's idle timeout and nothing
+  else, and a joiner needs it precisely because its lobby is a menu. A boot carrying only
+  out-of-`Active` flags prints the `no boot-hijacking debug flags` hint instead.
 - **Live slider panels** are HTML built in `index.html` OUTSIDE `#app`, only constructed on their
   trigger page (a normal boot has no extra DOM). Pattern: `window.eaXxx(...)` →
   `Compat/DebugInput.SetXxx` ([JSInvokable]) → `DebugFlags.SetXxxOverride`, read every Draw/tick;
@@ -1501,14 +1507,15 @@ interpolation feel, both gated on real-network playtests.
   - **JIP pass trap 2 -- the joiner must boot FLAG-CLEAN.** The reject is
     `menuSession && (peer debug bit || DebugFlags.Active)` (`NetSession.cs`), and the joiner IS a
     menu session, so its OWN `Active` bit rejects the pairing. The net-relevant flags still open
-    to it are `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are in the
-    `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
+    to it are `?noattract`, `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are
+    in the `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
     **`?netsim` is NOT usable on a joiner**: it is parsed only in `index.html`, and that block
     early-returns unless `?net=` is present -- which sets `NetRole` -> `Active` -> rejected. The
     host is fine: `?netjip` drops its debug bit (`LocalHelloFlags`) and the check is
-    `menuSession`-gated, so a `listedSession` host never rejects. **Consequence: the joiner
-    cannot pass `?noattract`, so an unattended joiner's menu keeps getting pulled into the attract
-    demo** -- drive it briskly and re-check state between steps.
+    `menuSession`-gated, so a `listedSession` host never rejects. **`?noattract` was itself in
+    `Active` until card af63f958** -- so an unattended joiner's menu kept getting pulled into the
+    attract demo mid-navigation. It is out now (it unwires one menu hook and alters no gameplay);
+    **put it on the joiner's URL** rather than driving the lobby against a 20s idle timer.
   - **JIP pass trap 3 -- a grant whose TARGET seat is taken desyncs SILENTLY and permanently.**
     `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it is the *granted* slot
     being occupied that bites -- a joiner merely seated in slot 0 with slot 1 free moves across
@@ -1532,8 +1539,8 @@ interpolation feel, both gated on real-network playtests.
     goes down, `NetListing` drops the room, and the joiner's carousel correctly falls back to
     "Searching for open games..." mid-test.
   - **JIP pass recipe:** host `?level=Level2&flyspiders&netjip&aiplayer&invuln&binlog&signal=...`,
-    joiner `?signal=...&binlog&netlog` -> menu -> Online Co-op -> Join Online Game -> pick the
-    room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
+    joiner `?signal=...&noattract&binlog&netlog` -> menu -> Online Co-op -> Join Online Game ->
+    pick the room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
     `... role=join ... (menu lobby)`, `granted joiner primary slot=1`, **mirror-image rosters**
     (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`), `localShip=1
     remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0,

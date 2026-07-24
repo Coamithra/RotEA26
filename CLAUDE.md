@@ -219,15 +219,19 @@ The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
 - **Code:** `/opt/<PROJECT_NAME>/` (this project's server code goes in `/opt/rotea/`; NotZelda
   lives at `/opt/NotZelda/` on the same box — don't touch it)
 - **Ports already in use:** 8080 (NotZelda game server), 8081 (`notzelda-llama` llama-server),
-  80/443 (nginx), plus the fighting game's port — **check `ss -tlnp` for the live list before
-  claiming a port**; pick a free one for this project.
+  8091 (this project's `rotea` signaling server), 80/443 (nginx), plus the fighting game's
+  port — **check `ss -tlnp` for the live list before claiming a port**; pick a free one
+  for this project.
 - **Services:** manage via systemd — `systemctl restart <service>` / `journalctl -u <service> -f`.
-  Existing units: `notzelda`, `notzelda-llama`.
-- **nginx** serves static files / reverse-proxies; add a new server block or location for this
-  project rather than editing NotZelda's (or any other project's) config.
+  Existing units: `notzelda`, `notzelda-llama`, `rotea` (this project's, port 8091).
+- **nginx** serves static files / reverse-proxies. Keep each project's config in its OWN
+  included file rather than editing another project's blocks in place: rotea ships
+  `server/signal/nginx-location.conf`, installed as `/etc/nginx/rotea-locations.conf` and
+  pulled into the shared `notzelda.haraldmaassen.com` 443 block by a one-line `include`
+  (deliberately NOT a new vhost — the game is served from that same host).
 - **Deploy:** `ssh` in, update `/opt/<PROJECT_NAME>`, then restart the project's service. **This
   project's `/opt/rotea` is NOT a git checkout** — it is an scp'd copy of `server/signal/`, so
-  there is no `git pull` to run; follow `server/signal/README.md` -> "Updating an existing
+  there is no `git pull` to run; follow `server/signal/README.md` → "Updating an existing
   deployment" (stage to `server.new`, run `test_signal.py` there, swap, `systemctl restart rotea`).
   **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual Pages
   `workflow_dispatch`); a networked client feature needs both, or the live site talks to a server

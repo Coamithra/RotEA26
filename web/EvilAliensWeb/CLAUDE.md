@@ -1372,7 +1372,60 @@ interpolation feel, both gated on real-network playtests.
     clean joiner won't reject it).
   - **Verify:** `server/signal/test_signal.py` (registry/browse/build-filter/ping-relay/full->
     delist, all standalone); `?gamebrowser` for the carousel; the eligibility predicate as data;
-    `?netjip` two windows -> `[net]` metrics.
+    `?netjip` two windows -> `[net]` metrics. The full two-window pass was RUN in card c0398370;
+    the five traps that make it hard, and the recipe, are the next five bullets.
+  - **JIP pass trap 1 -- it needs two genuinely VISIBLE OS WINDOWS. Two TABS cannot work, and
+    `?fpsuncapped` does not rescue them.** A background tab's rAF is *paused* outright (measured
+    0 ticks), and the `MessageChannel` pump `?fpsuncapped` swaps in still ran at only ~3 ticks in
+    3 s in one measurement -- roughly 1 Hz, nowhere near the ~30 Hz ship stream
+    (`StreamIntervalMs` 33). Chrome's *documented* intensive throttling targets timers rather
+    than `MessageChannel` macrotasks, so treat the exact mechanism as unconfirmed inference; the
+    observation (rAF 0, uncapped ~1 Hz, both useless) is what matters. An OCCLUDED or MINIMISED
+    window counts as hidden too, so the two windows must be tiled non-overlapping AND kept above
+    everything else: pin exactly the two peers `HWND_TOPMOST` via Win32 and make sure the window
+    DRIVING them is **not** topmost, or every interaction with the driver raises it over a peer
+    and silently freezes that peer mid-run. Both peers ticking at the SAME rate is the check that
+    the rig is honest.
+  - **JIP pass trap 2 -- the joiner must boot FLAG-CLEAN.** The reject is
+    `menuSession && (peer debug bit || DebugFlags.Active)` (`NetSession.cs`), and the joiner IS a
+    menu session, so its OWN `Active` bit rejects the pairing. The net-relevant flags still open
+    to it are `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are in the
+    `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
+    **`?netsim` is NOT usable on a joiner**: it is parsed only in `index.html`, and that block
+    early-returns unless `?net=` is present -- which sets `NetRole` -> `Active` -> rejected. The
+    host is fine: `?netjip` drops its debug bit (`LocalHelloFlags`) and the check is
+    `menuSession`-gated, so a `listedSession` host never rejects. **Consequence: the joiner
+    cannot pass `?noattract`, so an unattended joiner's menu keeps getting pulled into the attract
+    demo** -- drive it briskly and re-check state between steps.
+  - **JIP pass trap 3 -- a grant whose TARGET seat is taken desyncs SILENTLY and permanently.**
+    `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it is the *granted* slot
+    being occupied that bites -- a joiner merely seated in slot 0 with slot 1 free moves across
+    fine and logs `moved local primary slot 0 -> 1`. When it does refuse,
+    `AdoptGrantedPrimarySlot` logs `could not move local primary 0 -> 1 (slot busy) -- staying
+    put` and the peers disagree forever (`pri=0/0` vs `pri=0/1`), the joiner never builds a remote
+    puppet (`remoteShip=0`, `buf=0ms`), and NOTHING surfaces to the player. It cannot self-heal:
+    `peerPrimarySlot` is assigned BEFORE that early return, which satisfies the
+    `peerPrimarySlot == SlotNone` term and stops the hello retry on both peers. Observed once,
+    after the joiner had visited Start/Controls and backed out before joining.
+  - **JIP pass trap 4 -- use a LOCAL signaling rig, not the deployed one.** All four entry points
+    read `DebugFlags.NetSignal` (`NetListing.Tick`, `NetGameBrowser.Start`, `NetLobby` host/join,
+    `WebRtcTransport`), so `uvicorn main:app --port 8091` in `server/signal` +
+    `?signal=ws://localhost:8091/ws` on BOTH windows exercises the identical client code. The
+    server is also the best non-perturbing STATE ORACLE: `GET /health` (`rooms`/`listed`/
+    `browsers`) tells you the host listed and the joiner reached the carousel without touching a
+    window, and a one-shot `{t:browse}` client prints the live room code.
+  - **JIP pass trap 5 -- pick a host fight that does not END.** `?level=Level2&flyspiders` (the
+    endless swarm) is ideal; a plain `?level=Level2&aiplayer` host finished the level on its own
+    partway through one run (how fast depends on difficulty, AI and RNG), at which point the scene
+    goes down, `NetListing` drops the room, and the joiner's carousel correctly falls back to
+    "Searching for open games..." mid-test.
+  - **JIP pass recipe:** host `?level=Level2&flyspiders&netjip&aiplayer&invuln&binlog&signal=...`,
+    joiner `?signal=...&binlog&netlog` -> menu -> Online Co-op -> Join Online Game -> pick the
+    room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
+    `... role=join ... (menu lobby)`, `granted joiner primary slot=1`, **mirror-image rosters**
+    (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`), `localShip=1
+    remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0,
+    **zero `[bin] purge-filter diverted`**, and identical `eaNetBg()` state lines.
   - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
     ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
     best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The

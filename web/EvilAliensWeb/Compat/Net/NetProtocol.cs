@@ -27,6 +27,11 @@ namespace EvilAliensWeb.Compat.Net
         // BIDIRECTIONAL (it was host -> client while AI friends were the only case).
         // Stream lane, ~30 Hz.
         public const byte MsgFriendState = 0x11;
+        // Card 1a3ad45a: the per-slot HUD state its OWNER is authoritative for -- combo counter,
+        // active powerup, bar progress and per-type levels. Bidirectional (each peer sends the
+        // slots it owns), stream lane, ~10 Hz. Loss-tolerant by construction: a dropped packet
+        // only means the readout is one interval staler.
+        public const byte MsgHudState = 0x12;
         public const byte MsgWorldSnapshot = 0x20;
         public const byte MsgEvent = 0x30;
 
@@ -155,6 +160,87 @@ namespace EvilAliensWeb.Compat.Net
             sample.Alive = true;
             sample.Firing = (b[2] & ShipFlagFiring) != 0;
             return true;
+        }
+
+        // ---- per-slot HUD state (card 1a3ad45a, stream lane) ------------------------------
+
+        // How many powerup LEVELS ride the wire. Powerup.PowerupType is Blast, Option, FirePower,
+        // Range, Linker, OneUp -- OneUp's level is pinned at 3 and never increments (PowerupData's
+        // ctor), so only the leading 5 are replicated and the wire index IS the enum value. That
+        // makes the enum append-only for this message too: a new type must go AFTER OneUp, or
+        // widen this and bump ProtocolVersion.
+        public const int HudLevelCount = 5;
+        public const int HudSlotBytes = 5 + HudLevelCount;  // slot+combo:2+activeType+progress+levels
+        // 0xFF = "this slot has no powerup active", so the receiver blanks the bar instead of
+        // leaving a stale one lit. A real Powerup.PowerupType is 0..5 and can never collide.
+        public const byte HudPowerupNone = 0xFF;
+
+        // MsgHudState: [0x12][count:1] then `count` fixed-width HudSlotBytes entries:
+        //   [slot:1][combo:2][activeType:1][progress:1][level x HudLevelCount]
+        //
+        // combo is a USHORT, not a byte, and that is load-bearing rather than generous: the host
+        // pays every slot's boss share with THAT slot's own multiplier (AwardScoreToAll ->
+        // comboModify = amount * (1 + combo/20)), so the figure it adopts here is spent, not just
+        // drawn. A byte would silently cap a client's real 400x combo at 255 and underpay it --
+        // and combos well past 255 are expected (ScoreVisualiser precaches 1000 combo strings and
+        // drawPlayerScore has an explicit >= 1000 fallback). Saturation at ushort is unreachable
+        // in play. progress is the active bar's 0..1 fill quantised to a byte.
+        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int count)
+        {
+            byte[] b = new byte[2 + HudSlotBytes * count];
+            b[0] = MsgHudState;
+            b[1] = (byte)count;
+            int off = 2;
+            for (int i = 0; i < count; i++)
+            {
+                b[off++] = slots[i];
+                WriteU16(b, off, (ushort)Math.Clamp(combos[i], 0, ushort.MaxValue));
+                off += 2;
+                b[off++] = activeTypes[i];
+                b[off++] = (byte)Math.Clamp((int)MathF.Round(progress[i] * 255f), 0, 255);
+                for (int t = 0; t < HudLevelCount; t++)
+                {
+                    b[off++] = (byte)Math.Clamp(levels[i][t], 0, 4);
+                }
+            }
+            return b;
+        }
+
+        // Reads entry `index` out of a validated packet. Levels are written into `levels` (length
+        // must be >= HudLevelCount) rather than allocated, so the ~10 Hz rx path stays garbage-free.
+        public static bool TryDecodeHudState(byte[] b, int index, int[] levels, out byte slot, out int combo, out byte activeType, out float progress)
+        {
+            slot = 0;
+            combo = 0;
+            activeType = HudPowerupNone;
+            progress = 0f;
+            if (!TryDecodeHudCount(b, out int count) || index < 0 || index >= count || levels == null || levels.Length < HudLevelCount)
+            {
+                return false;
+            }
+            int off = 2 + HudSlotBytes * index;
+            slot = b[off];
+            combo = ReadU16(b, off + 1);
+            activeType = b[off + 3];
+            progress = b[off + 4] / 255f;
+            for (int t = 0; t < HudLevelCount; t++)
+            {
+                levels[t] = b[off + 5 + t];
+            }
+            return true;
+        }
+
+        // Whole-packet validation: the declared count must exactly account for the bytes present,
+        // so a truncated or padded frame is rejected once here rather than per entry.
+        public static bool TryDecodeHudCount(byte[] b, out int count)
+        {
+            count = 0;
+            if (b == null || b.Length < 2 || b[0] != MsgHudState)
+            {
+                return false;
+            }
+            count = b[1];
+            return b.Length == 2 + HudSlotBytes * count;
         }
 
         // ---- handshake ----------------------------------------------------------------

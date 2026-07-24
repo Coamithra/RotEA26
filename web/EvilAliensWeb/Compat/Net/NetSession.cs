@@ -57,10 +57,19 @@ namespace EvilAliensWeb.Compat.Net
         // v8 (card c0229c57): the handshake gains a blockedSlots mask (HelloBytes 21 -> 22) so
         // the host grants the joiner a seat that is free on BOTH rosters. Another WIRE LAYOUT
         // change, so the version moves with it for the same reason v6 did.
-        public const byte ProtocolVersion = 8;
+        // v9 (card 1a3ad45a): MsgHudState -- each peer streams the combo counter, active powerup,
+        // bar progress and per-type levels for the slots it OWNS, and stops simulating them for
+        // the slots it does not (ScoreVisualiser.SustainCombo). Authored against v8 and merged
+        // after c0229c57 had taken it; two independent wire changes cannot share a version, so
+        // this took the next one -- the same resolution the v6/v7 note above records.
+        public const byte ProtocolVersion = 9;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
+        // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
+        // and it is a readout rather than something the sim reads back, so a third of the ship
+        // rate is plenty and keeps the added stream traffic under ~400 B/s.
+        private const long HudIntervalMs = 100;      // ~10 Hz per-slot HUD state
         private const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
@@ -164,9 +173,28 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
+        private static long lastHudTx;
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
         private static readonly byte[] extraScratch = new byte[ExtraScratchBytes];
+        // Per-slot HUD state gather buffers (card 1a3ad45a) -- reused every send/receive, so only
+        // the encoder's own packet allocates (as in every other encoder here).
+        private static readonly byte[] hudTxSlots = new byte[NetProtocol.MaxSlots];
+        private static readonly int[] hudTxCombos = new int[NetProtocol.MaxSlots];
+        private static readonly byte[] hudTxTypes = new byte[NetProtocol.MaxSlots];
+        private static readonly float[] hudTxProgress = new float[NetProtocol.MaxSlots];
+        private static readonly int[][] hudTxLevels = CreateHudLevelScratch();
+        private static readonly int[] hudRxLevels = new int[NetProtocol.HudLevelCount];
+
+        private static int[][] CreateHudLevelScratch()
+        {
+            int[][] rows = new int[NetProtocol.MaxSlots][];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                rows[i] = new int[NetProtocol.HudLevelCount];
+            }
+            return rows;
+        }
 
         // rx / remote-ship puppet
         private static readonly ShipStateBuffer buffer = new ShipStateBuffer();
@@ -449,6 +477,7 @@ namespace EvilAliensWeb.Compat.Net
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
+            lastHudTx = 0;
             lastHelloTx = 0;
             lastUpdateAt = 0;
             killNotes.Clear();
@@ -592,6 +621,10 @@ namespace EvilAliensWeb.Compat.Net
                         // Couch players + host AI friends ride the same cadence, both directions.
                         SendFriendStates(now);
                     }
+                    if (now - lastHudTx >= HudIntervalMs)
+                    {
+                        SendHudState(now);
+                    }
                     if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
                     {
                         SendWorldSnapshot(now);
@@ -702,6 +735,67 @@ namespace EvilAliensWeb.Compat.Net
             metrics.StreamTx++;
         }
 
+        // Card 1a3ad45a. Stream the per-slot HUD state for every slot we OWN -- combo counter,
+        // active powerup, bar progress, per-type levels. Keyed off the ROSTER, not off live ships:
+        // a slot keeps its combo and its powerup levels across a death and respawn, and its panel
+        // is drawn throughout, so going quiet while the ship is down would freeze the peer's
+        // readout at whatever it held when the player died.
+        private static void SendHudState(long now)
+        {
+            lastHudTx = now;
+            if (score == null)
+            {
+                return;
+            }
+            int count = 0;
+            for (int slot = 0; slot < NetProtocol.MaxSlots && slot < ScoreVisualiser.SlotCount; slot++)
+            {
+                if (!OwnsSlot(slot))
+                {
+                    continue;
+                }
+                score.NetReadHudState(slot, hudTxLevels[count], out int combo, out byte activeType, out float progress);
+                hudTxSlots[count] = (byte)slot;
+                hudTxCombos[count] = combo;
+                hudTxTypes[count] = activeType;
+                hudTxProgress[count] = progress;
+                count++;
+            }
+            if (count == 0)
+            {
+                return;
+            }
+            transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxTypes, hudTxProgress, hudTxLevels, count));
+            // Counted in ENTRIES, matching HudRx -- a peer with a couch partner puts two slots in
+            // one packet, so counting packets here would make the two sides incomparable.
+            metrics.HudTx += count;
+        }
+
+        private static void HandleHudState(byte[] data)
+        {
+            if (score == null || !NetProtocol.TryDecodeHudCount(data, out int count))
+            {
+                return;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, out byte slot, out int combo, out byte activeType, out float progress))
+                {
+                    continue;
+                }
+                // slot is a raw wire byte, so bound it against the SCORE PANELS (4) -- the same
+                // rule and reasoning as ApplyRemotePowerup. A peer claiming a slot we own is
+                // ignored rather than trusted: our own simulation is authoritative for it, and
+                // adopting it would let a confused or hostile peer rewrite our HUD.
+                if (slot >= ScoreVisualiser.SlotCount || OwnsSlot(slot))
+                {
+                    continue;
+                }
+                score.NetSetHudState(slot, combo, activeType, progress, hudRxLevels);
+                metrics.HudRx++;
+            }
+        }
+
         // A ship THIS peer simulates: its owner reads real input (or runs the local AI) and
         // decides its own motion, hits and pickups. The inverse is a network-driven puppet.
         // With ?aiplayer the controller stays Keyboard/pad and only the Update branch is
@@ -709,6 +803,35 @@ namespace EvilAliensWeb.Compat.Net
         private static bool IsLocallyOwned(PlayerShip s)
         {
             return s.Controller != ControlDevice.Remote && s.Controller != ControlDevice.RemoteFriend;
+        }
+
+        // The same question asked of a ROSTER SLOT rather than a live ship (card 1a3ad45a):
+        // does this peer simulate what happens in that seat? Asked of the seat, not the ship,
+        // because a slot's combo and powerup levels outlive its ship -- they persist across a
+        // death and respawn, and the gate must not flip while the player is waiting to come back.
+        //
+        // OFFLINE THIS IS TRUE FOR EVERY SLOT, which is what keeps single-player and local co-op
+        // byte-identical: with no session there is nobody else to own anything.
+        public static bool OwnsSlot(int slot)
+        {
+            bool seated = Active && oracle != null && oracle.IsSeated(slot);
+            return OwnsSlotCore(Active, seated ? oracle.Controller(slot) : null);
+        }
+
+        // The decision itself, with the live roster lookup lifted out so eaNetCombo.test can
+        // table-drive every case. Offline the predicate cannot discriminate at all (correctly --
+        // there is nobody else to own anything), so a test that could only reach it through the
+        // live Oracle would be structurally unable to cover Remote/RemoteFriend/unseated.
+        // `seatedDevice` is null for an unseated slot.
+        internal static bool OwnsSlotCore(bool sessionActive, ControlDevice? seatedDevice)
+        {
+            if (!sessionActive)
+            {
+                return true;
+            }
+            return seatedDevice.HasValue
+                && seatedDevice.Value != ControlDevice.Remote
+                && seatedDevice.Value != ControlDevice.RemoteFriend;
         }
 
         // The ship carried by the primary MsgShipState stream: the one in our granted primary
@@ -926,10 +1049,15 @@ namespace EvilAliensWeb.Compat.Net
 
         // The other peer collected a powerup: drive THEIR HUD panel here. The local pickup
         // path (PlayerShip.CollidesWith) is the only SetPowerup caller and it is gated to the
-        // local ship, so without this a remote pickup settles as a bare despawn -- the
-        // claimant's powerup icon never changes, and because ScoreVisualiser.increasecombo
-        // only feeds AddExp while that slot's powerupactive is set, their powerup LEVEL never
-        // advances either. Both symptoms read as "the powerup always goes to player 1".
+        // local ship, so without this a remote pickup settles as a bare despawn and the
+        // claimant's powerup icon never changes -- which reads as "the powerup always goes to
+        // player 1".
+        //
+        // Card 1a3ad45a moved the LEVEL half of this elsewhere: that slot's progression is its
+        // owner's alone now (ScoreVisualiser.SustainCombo is gated on OwnsSlot), and its real
+        // level arrives over MsgHudState -- which also re-asserts the indicator, making the
+        // SetPowerup below a redundant-but-immediate head start on the next ~10 Hz packet. The
+        // sound cue is what only this path can do: it belongs to the pickup INSTANT.
         // Idempotent: the collector's own side already ran the local path and never reaches
         // a settle branch for its own pickup (its entity is gone before the echo arrives).
         internal static void ApplyRemotePowerup(Powerup powerup, byte slot)
@@ -1215,6 +1343,9 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 case NetProtocol.MsgFriendState:
                     HandleFriendState(data);
+                    break;
+                case NetProtocol.MsgHudState:
+                    HandleHudState(data);
                     break;
                 case NetProtocol.MsgEvent:
                     HandleEvent(data);

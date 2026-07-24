@@ -304,6 +304,20 @@ namespace EvilAliensWeb.Compat
 				{
 					sb.Append(" unsettled=").Append(pending.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
 				}
+				// Card 1a3ad45a: whose simulation the slot's combo and powerup levels come from,
+				// and what they are. `own` is the whole point of the two-window comparison -- the
+				// SAME slot must read own=1 on one console and own=0 on the other, and the combo
+				// and lv= figures beside it must agree across the pair.
+				if (i < EvilAliens.ScoreVisualiser.SlotCount)
+				{
+					int[] levels = new int[EvilAliensWeb.Compat.Net.NetProtocol.HudLevelCount];
+					sv.NetReadHudState(i, levels, out _, out byte activeType, out float progress);
+					sb.Append(" own=").Append(EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i) ? 1 : 0)
+						.Append(" pu=").Append(activeType == EvilAliensWeb.Compat.Net.NetProtocol.HudPowerupNone
+							? "none"
+							: ((EvilAliens.Powerup.PowerupType)activeType).ToString() + "@" + ((int)(progress * 100f)) + "%")
+						.Append(" lv=").Append(string.Join(",", levels));
+				}
 			}
 			return sb.ToString();
 		}
@@ -320,6 +334,17 @@ namespace EvilAliensWeb.Compat
 		{
 			return EvilAliensWeb.Compat.Net.NetScoreLedger.SelfTest(kills, comboSkew, rttMs, seed)
 				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
+		}
+
+		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
+		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
+		// then drives the real PowerupData exp curve over two divergent combo streams -- running
+		// the OLD ungated behaviour first, so the slow motion and the stray powerup levels it
+		// used to inflict on a slot this peer does not own are demonstrated, not asserted.
+		[JSInvokable("debugNetComboTest")]
+		public static string NetComboTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetComboTest.Run();
 		}
 
 		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):

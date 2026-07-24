@@ -28,9 +28,13 @@ planting the exact precondition the fault needs rather than hoping the session s
 
 ## Design
 
-Two new scenarios in `Compat/BinTest.cs`, one per loop the fix touched. Both are
-synchronous (no tick runs between steps, so `collidables` can only change through our own
-actions and indices stay aligned), self-cleaning, and menu-scoped like the rest of the suite.
+Two new scenarios in `Compat/BinTest.cs`. The fix froze THREE bounds (outer fill loop,
+its inner all-pairs scan, resolution loop); 5b covers the resolution loop and 5a covers the
+other two together, since only a non-gridded type can spawn during the fill phase at all.
+Both are self-cleaning and menu-scoped like the rest of the suite. No tick runs between the
+steps, but a pass can still run REAL collision callbacks that spawn REAL collidables, so the
+index alignment 5b needs is ASSERTED, not assumed (see below) -- it holds where no other
+collidable is around, which is what "run it from the menu" means.
 
 ### New plumbing
 

@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ===================================================================================
+       eahl — the HEADLESS desktop test host (see tools/headless/README.md).
+
+       Runs the REAL game (the same Game/ + Compat/ sources the browser build compiles)
+       as a plain desktop exe: no Chrome, no dev server, no visible window, no rAF. It
+       steps the loop at a fixed 60 Hz dt and can write any frame out as a PNG.
+
+       Deliberately NOT referencing web/EvilAliensWeb, and never referenced BY it — the
+       same isolation rule tools/sim/logic_probe follows. That project targets
+       browser-wasm and cannot be referenced from a desktop exe anyway; more importantly
+       nothing in web/ knows this exists, and CI only publishes web/EvilAliensWeb, so the
+       shipped build is byte-for-byte unaffected by anything in here.
+
+       Instead of a ProjectReference the game SOURCES are linked in below, so this exe
+       contains the same types in the same assembly. That is what lets the host reach
+       Game1's `internal` bench seams (BenchTick) and the Compat debug surface
+       (DebugInput, AiBench, TexProbe, ...) with zero edits to the shipped code.
+       =================================================================================== -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>eahl</AssemblyName>
+    <RootNamespace>EvilAliensWeb.Headless</RootNamespace>
+
+    <!-- Match the browser build's culture behaviour so number parse/format can't diverge. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- KNI platform selection: the desktop SDL2 + OpenGL backend. The graphics factories
+         are found by REFLECTION at runtime ("Microsoft.Xna.Platform.ConcreteGraphicsFactory,
+         Kni.Platform"), so referencing the package is all the selection there is. -->
+    <KniPlatform>SDL2</KniPlatform>
+
+    <!-- The game has one `#if DEBUG` block (BrainBossOverlays). Debug is the default so a
+         headless run matches what a dev browser build shows. -->
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+
+    <!-- The linked game sources are decompiler output: they trip a pile of style/analysis
+         warnings that are not this project's business to fix, and would bury a real one.
+         CS0169/0414 unused fields, CS0219 unused locals, CS0618 obsolete, CS1998 async. -->
+    <NoWarn>$(NoWarn);CS0169;CS0414;CS0219;CS0618;CS1998;CS0162;CS0649</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same engine versions as web/EvilAliensWeb.csproj. Keep them in lockstep: the whole
+         point of this host is that it runs the SAME code on the SAME engine. -->
+    <PackageReference Include="nkast.Xna.Framework" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Content" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Graphics" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Audio" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Media" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Input" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Game" Version="4.1.9001.*" />
+    <PackageReference Include="nkast.Xna.Framework.Devices" Version="4.1.9001.*" />
+
+    <!-- Desktop platform backend (brings SDL2.dll + soft_oal.dll natives). The browser
+         build uses nkast.Kni.Platform.Blazor.GL instead; everything above is shared. -->
+    <PackageReference Include="nkast.Kni.Platform.SDL2.GL" Version="4.1.9001.*" />
+
+    <!-- web/EvilAliensWeb.csproj drops nkast.Xna.Framework.Storage on purpose: the game
+         wants the XNA *3.x* synchronous storage API, which Compat/StorageStub.cs provides.
+         The platform package drags it back in transitively, and its StorageDevice /
+         StorageContainer then collide with the stub's (CS0436 x25). `ExcludeAssets=compile`
+         keeps the runtime assembly (the platform dll is linked against it) while removing
+         it from THIS compilation, so the stub is the only definition the game sees — the
+         same types the browser build compiles against, rather than a silent near-miss. -->
+    <PackageReference Include="nkast.Xna.Framework.Storage" Version="4.1.9001.*" ExcludeAssets="compile" />
+
+    <!-- Compat/*Interop.cs talk to the browser through IJSRuntime. The abstractions are a
+         plain netstandard library (nothing WASM-only about them), so the interop files
+         compile unchanged here and HeadlessJsRuntime.cs answers the calls instead of a
+         browser. See HeadlessJsRuntime.cs for why this beats stubbing 13 classes. -->
+    <PackageReference Include="Microsoft.JSInterop" Version="8.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The game itself, compiled straight into this assembly.
+         `Visible=false` keeps 239 linked files out of IDE solution explorers — edit them at
+         their real home under web/EvilAliensWeb/. -->
+    <Compile Include="..\..\web\EvilAliensWeb\Game\**\*.cs"
+             Link="linked\Game\%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+    <Compile Include="..\..\web\EvilAliensWeb\Compat\**\*.cs"
+             Link="linked\Compat\%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+    <!-- NOT linked: web/EvilAliensWeb/Program.cs, App.razor, MainLayout.razor and Pages/**
+         (the Blazor host + the rAF tick driver). Program.cs / HeadlessHost.cs here are
+         their headless counterparts. -->
+  </ItemGroup>
+
+</Project>

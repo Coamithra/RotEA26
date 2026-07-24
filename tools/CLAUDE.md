@@ -60,6 +60,46 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
 
+## Headless desktop test host -- `tools/headless/` (`eahl`)
+
+**Runs the WHOLE game with no browser, no dev server and no visible window, and writes PNG frames.**
+It links the same `Game/**` + `Compat/**` sources into a desktop exe on the KNI **SDL2** backend,
+reads content live from `wwwroot`, and steps `Update`/`Draw` at a fixed 60 Hz dt.
+
+```sh
+dotnet build tools/headless -c Debug
+tools/headless/bin/Debug/net8.0/eahl.exe --flags "?level=Level1&invuln" --frames 400 --out shot.png
+tools/headless/bin/Debug/net8.0/eahl.exe --repl        # step / shot / eval / info / quit
+```
+
+Full docs + the option list: `tools/headless/README.md`. The essentials:
+
+- **`--flags` is the URL query verbatim** -- every `DebugFlags.cs` flag works unchanged. So the
+  sprite harness, the scrub/showcase scenes and the level fast-boots are all reachable without a
+  browser, which is what makes this worth reaching for before `preview_start` + Chrome.
+- **`eval` binds by reflection to `Compat/DebugInput.cs`'s public statics** -- the same curated
+  surface the browser console exposes (`eaPress`, `eaAiBench`, `eaTexProbe`, `eaTeamSeat`, ...).
+  There is NO mirror to drift: a method added there is callable here immediately.
+- **`--nodraw` is ~1 ms/frame** (~17x real time); rendered is ~5.5 ms. An `eaAiBench.soak`-style
+  run that needed a foregrounded tab can just run in the background here.
+- **It does NOT replace the browser pass.** Trimming, IndexedDB saves, WebGL-specific shader
+  behaviour, the `index.html` JS layer and real WebRTC only fail in Chrome. The `CONTRIBUTING.md`
+  gate is unchanged -- this gets you to the frame/number faster, it is not the final smoke check.
+- **GOTCHA -- a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is wrong.** Every
+  scene that calls `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
+  `LeavingHyperspace` with `fadeFactor = 0.998`, decaying at `0.0005/ms` = ~120 frames. Settle
+  first (`--frames 150`, or `step 150 nodraw` in the REPL). The host prints a `NOTE` on a
+  near-white frame inside that window; don't lean on it. This cost a full investigation once.
+- Presenting the hidden window costs ~32 ms/frame for nothing, so `EndDraw` is skipped by default
+  (`--present` restores it); the capture reads the back buffer BEFORE the swap either way, after
+  bloom/post/gamma, so it is the finished frame.
+- Audio is silent by default via OpenAL Soft's `null` backend -- no device is opened, so a box with
+  no sound card runs too (`--audio` opts in). `--software` routes GL through Mesa llvmpipe for a
+  machine with no GPU at all, and FAILS (exit 3) rather than quietly using the GPU.
+- Same isolation rule as `logic_probe` below: nothing in `web/` references it, CI only publishes
+  `web/EvilAliensWeb`, so the shipped build is untouched. Keep its `nkast.*` versions in lockstep
+  with `web/EvilAliensWeb.csproj`.
+
 ## Refactor oracles — `verify_il_identical.py` / `verify_decompiled_diff.py`
 
 Neither is codegen; both only build + inspect, so they are safe to run any number of times.

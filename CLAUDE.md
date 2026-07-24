@@ -73,6 +73,17 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     real static method, so the decision is verified with no browser, no WASM and no rig (add a
     `Probe*` case set per card; details + limits in tools/CLAUDE.md);
   - tuning values → the matching **live slider panel** (`?wctune`, `?lazershot`, `eaWalls`, ...);
+  - ANY of the above without a browser at all → the **headless host**,
+    `dotnet build tools/headless -c Debug` then
+    `tools/headless/bin/Debug/net8.0/eahl.exe --flags "?harness=spider&frame=3" --frames 150 --out shot.png`:
+    it links the same `Game/` + `Compat/` sources into a desktop exe (KNI SDL2, hidden window),
+    takes the **URL query verbatim** so every debug flag/harness/showcase scene above is reachable,
+    and writes PNGs — no Chrome, no dev server, no rAF, safe to leave running in the background.
+    `--repl` boots once then takes `step`/`shot`/`eval` lines, where `eval` reflects into
+    `DebugInput`'s console surface (`Press`, `AiBench`, `TexProbe`, ...). **Settle ~150 frames
+    before shooting** — the intro white fade (details in tools/CLAUDE.md). It does NOT replace the
+    Chrome pass: trimming, IndexedDB saves, WebGL-specific shaders, the `index.html` JS layer and
+    real WebRTC only fail there. Details: `tools/headless/README.md`;
   - a change that should alter NOTHING (rename, reformat, decompiler-artifact cleanup) → the
     **IL-identity oracle**, `python tools/verify_il_identical.py` — see below.
   If no tool covers the change, BUILD one — that is part of the fix, not extra scope. Boot the real

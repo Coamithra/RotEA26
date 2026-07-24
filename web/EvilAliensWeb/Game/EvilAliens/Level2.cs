@@ -150,6 +150,18 @@ internal class Level2 : GameScene
 			PopulateSpidersOnly();
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.FlySpiders)
+		{
+			// DEBUG (?flyspiders): skip the level and run a dense continuous FLYING-spider swarm.
+			// Built for the frame profiler (card 22e655b5): the background variant is the only
+			// user of SpriteBatchWrapper.BeginGroupFlatten/EndGroupFlatten -- a per-swarm render
+			// target round trip -- so "is the group flatten expensive?" needs the swarm on screen
+			// and steady, which the real level only reaches minutes in. ?flyspiders=fg runs the
+			// FOREGROUND variant instead (identical sprites, NO flatten), which is the A/B that
+			// isolates the render-target cost from the drawing itself.
+			PopulateFlyingSpidersOnly();
+			return;
+		}
 		WaitEvent waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += resetlives;
 		StationaryWave(8f, 3f, 100f, 0f, 0f, 0f);
@@ -416,6 +428,20 @@ internal class Level2 : GameScene
 		StationarySpawner stationarySpawner = new StationarySpawner(base.Game, 560f, 600f, 1.5f);
 		stationarySpawner.SetChances(0f, 0f, 0f, 1f);
 		eventList.AddEvent(stationarySpawner, halting: false);
+	}
+
+	// ?flyspiders — a dense, endless flying-spider swarm for profiling (see the call site).
+	// Rate 5.5/s is the level's own background wave rate; the swarm builds to a steady on-screen
+	// population in a few seconds and stays there, which is what a rolling frame-time window needs.
+	private void PopulateFlyingSpidersOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += resetlives;
+		waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += slowdown;
+		bool background = !EvilAliensWeb.Compat.DebugFlags.FlySpidersForeground;
+		FlyingSpiderEvent swarm = new FlyingSpiderEvent(base.Game, 0f, 5.5f, isbackground: background);
+		eventList.AddEvent(swarm, halting: false);
 	}
 
 	private void invuln(GameEvent sender)

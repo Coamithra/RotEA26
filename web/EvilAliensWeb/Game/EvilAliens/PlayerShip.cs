@@ -128,8 +128,8 @@ public class PlayerShip : AlienDrawableGameComponent
 		base.OnComponentRemoved(e);
 		if (e.GameComponent is Option)
 		{
-			List<Option>[] array = options;
-			foreach (List<Option> list in array)
+			List<Option>[] optionLayers = options;
+			foreach (List<Option> list in optionLayers)
 			{
 				if (list.Contains((Option)(object)e.GameComponent))
 				{
@@ -168,8 +168,8 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void RedressOptions()
 	{
-		List<Option>[] array = options;
-		foreach (List<Option> list in array)
+		List<Option>[] optionLayers = options;
+		foreach (List<Option> list in optionLayers)
 		{
 			for (int j = 0; j < list.Count; j++)
 			{
@@ -261,8 +261,8 @@ public class PlayerShip : AlienDrawableGameComponent
 		asplodingbulletspercentage = 0f;
 		shotspersec = 8;
 		bulletlifetime = 450f;
-		List<Option>[] array = options;
-		foreach (List<Option> list in array)
+		List<Option>[] optionLayers = options;
+		foreach (List<Option> list in optionLayers)
 		{
 			list.Clear();
 		}
@@ -355,13 +355,13 @@ public class PlayerShip : AlienDrawableGameComponent
 						ControlDevice.PadFour => 3, 
 						_ => throw new Exception(), 
 					};
-					Vector2 val = input.LeftStick(i);
-					if ((val).LengthSquared() > 0.09f)
+					Vector2 leftStick = input.LeftStick(i);
+					if ((leftStick).LengthSquared() > 0.09f)
 					{
 						direction = input.LeftStick(i);
 					}
-					Vector2 val2 = input.RightStick(i);
-					if ((val2).LengthSquared() > 0.0025000002f)
+					Vector2 rightStick = input.RightStick(i);
+					if ((rightStick).LengthSquared() > 0.0025000002f)
 					{
 						FireAt(MyMath.VectorToAngle(input.RightStick(i)));
 					}
@@ -556,8 +556,10 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
-		float num = (float)Math.PI / 12f;
-		float num2 = float.MaxValue;
+		float aimSpread = (float)Math.PI / 12f;
+		// Squared while the loop scans (it is compared against LengthSquared); the Math.Sqrt
+		// after the loop turns it into a real distance for the range test.
+		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent alienDrawableGameComponent = null;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
@@ -567,17 +569,17 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					break;
 				}
-				Vector2 val = baddy.Position - base.Position;
-				if ((val).LengthSquared() < num2 && baddy.Position.X > 0f && baddy.Position.X < 800f && baddy.Position.Y > 0f && baddy.Position.Y < 600f)
+				Vector2 toBaddy = baddy.Position - base.Position;
+				if ((toBaddy).LengthSquared() < nearestDist && baddy.Position.X > 0f && baddy.Position.X < 800f && baddy.Position.Y > 0f && baddy.Position.Y < 600f)
 				{
-					Vector2 val2 = baddy.Position - base.Position;
-					num2 = (val2).LengthSquared();
+					Vector2 toNearest = baddy.Position - base.Position;
+					nearestDist = (toNearest).LengthSquared();
 					alienDrawableGameComponent = baddy;
 				}
 			}
 		}
-		num2 = (float)Math.Sqrt(num2);
-		if (num2 <= bulletlifetime * 0.78f)
+		nearestDist = (float)Math.Sqrt(nearestDist);
+		if (nearestDist <= bulletlifetime * 0.78f)
 		{
 			if (alienDrawableGameComponent is JunkBoss)
 			{
@@ -585,7 +587,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			else
 			{
-				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position) + RandomHelper.RandomNextFloat(0f - num, num));
+				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position) + RandomHelper.RandomNextFloat(0f - aimSpread, aimSpread));
 			}
 		}
 		doAIBomb(baddies);
@@ -597,38 +599,38 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			return;
 		}
-		int num;
+		int minTargets;
 		switch (Score.NrBombs(player))
 		{
 		case 0:
 			return;
 		case 1:
-			num = 10;
+			minTargets = 10;
 			break;
 		case 2:
-			num = 7;
+			minTargets = 7;
 			break;
 		case 3:
-			num = 4;
+			minTargets = 4;
 			break;
 		default:
-			num = 4;
+			minTargets = 4;
 			break;
 		}
-		int num2 = 0;
-		float num3 = 200 * (1 + Score.GetPowerupLevel(Powerup.PowerupType.Blast, player));
+		int targetsInRange = 0;
+		float blastRadius = 200 * (1 + Score.GetPowerupLevel(Powerup.PowerupType.Blast, player));
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
 			if (isBlastable(baddy))
 			{
-				Vector2 val = baddy.Position - base.Position;
-				if ((val).LengthSquared() <= num3 * num3)
+				Vector2 toBaddy = baddy.Position - base.Position;
+				if ((toBaddy).LengthSquared() <= blastRadius * blastRadius)
 				{
-					num2++;
+					targetsInRange++;
 				}
 			}
 		}
-		if (num2 >= num)
+		if (targetsInRange >= minTargets)
 		{
 			doBlast();
 		}
@@ -646,39 +648,39 @@ public class PlayerShip : AlienDrawableGameComponent
 	private void DoAIMove(ref Vector2 direction, GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		CollisionLevelMap collisionLevelMap = null;
-		bool flag = false;
-		bool flag2 = false;
-		float num = 150f;
-		float num2 = 0f;
-		float num3 = 4f;
+		bool hasWall = false;
+		bool altSteering = false;
+		float steerRange = 150f;
+		float minSteerStrength = 0f;
+		float maxSteerStrength = 4f;
 		Vector2 position = default(Vector2);
 		(position) = new Vector2(float.MaxValue, float.MaxValue);
-		float num4 = 0f;
+		float dodgeAngle = 0f;
 		if (player == 0)
 		{
-			num4 = (float)Math.PI / 16f;
+			dodgeAngle = (float)Math.PI / 16f;
 		}
 		if (player == 1)
 		{
-			num4 = -(float)Math.PI / 16f;
+			dodgeAngle = -(float)Math.PI / 16f;
 		}
 		if (player == 2)
 		{
-			num4 = (float)Math.PI / 6f;
+			dodgeAngle = (float)Math.PI / 6f;
 		}
 		if (player == 3)
 		{
-			num4 = -(float)Math.PI / 6f;
+			dodgeAngle = -(float)Math.PI / 6f;
 		}
-		Vector2 val;
+		Vector2 delta;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
 			if (isBlastable(baddy) && blast != null && blast.Collides)
 			{
-				val = baddy.Position - base.Position;
-				float num5 = (val).LengthSquared();
-				Vector2 val2 = position - base.Position;
-				if (num5 < (val2).LengthSquared())
+				delta = baddy.Position - base.Position;
+				float distSq = (delta).LengthSquared();
+				Vector2 toTarget = position - base.Position;
+				if (distSq < (toTarget).LengthSquared())
 				{
 					position = baddy.Position;
 				}
@@ -690,24 +692,24 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (baddy is Wall)
 			{
-				flag = true;
-				float num6 = 1.2f * (float)gameTime.ElapsedGameTime.TotalMilliseconds * base.MaxSpeed;
-				float num7 = 0f;
+				hasWall = true;
+				float wallProbeStep = 1.2f * (float)gameTime.ElapsedGameTime.TotalMilliseconds * base.MaxSpeed;
+				float wallNudge = 0f;
 				if (player == 0)
 				{
-					num7 = 8f;
+					wallNudge = 8f;
 				}
 				if (player == 1)
 				{
-					num7 = 4f;
+					wallNudge = 4f;
 				}
 				if (player == 2)
 				{
-					num7 = 6f;
+					wallNudge = 6f;
 				}
 				if (player == 3)
 				{
-					num7 = 10f;
+					wallNudge = 10f;
 				}
 				collisionLevelMap = (CollisionLevelMap)((Wall)baddy).GetCollisionType();
 				CollisionBox collisionBox = (CollisionBox)GetCollisionType();
@@ -719,39 +721,39 @@ public class PlayerShip : AlienDrawableGameComponent
 				findNextTileOnMap(x, y, ref target_x, ref target_y, collisionLevelMap);
 				if (target_y < y)
 				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - num6, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
-						direction += new Vector2(num7, 0f);
+						direction += new Vector2(wallNudge, 0f);
 					}
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + num6, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
-						direction += new Vector2(0f - num7, 0f);
+						direction += new Vector2(0f - wallNudge, 0f);
 					}
 				}
 				else if (target_x > x)
 				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - num6, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
-						direction += new Vector2(num7, 0f);
+						direction += new Vector2(wallNudge, 0f);
 					}
 					if (collisionLevelMap.TileIsOccupied(target_x, y - 1))
 					{
-						direction += new Vector2(0f, num7);
+						direction += new Vector2(0f, wallNudge);
 					}
 				}
 				else if (target_x < x)
 				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + num6, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
-						direction += new Vector2(0f - num7, 0f);
+						direction += new Vector2(0f - wallNudge, 0f);
 					}
 					if (collisionLevelMap.TileIsOccupied(target_x, y - 1))
 					{
-						direction += new Vector2(0f, num7);
+						direction += new Vector2(0f, wallNudge);
 					}
 				}
 				else if (target_x != x)
@@ -761,14 +763,14 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
-				if (d <= num)
+				if (d <= steerRange)
 				{
-					float num8 = MyMath.PowerCurve(num3, num2, 2f, d / num);
-					if (flag2)
+					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, d / steerRange);
+					if (altSteering)
 					{
-						num8 = MathHelper.Lerp(num3, num2, d / num);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / steerRange);
 					}
-					direction += num8 * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + num4);
+					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}
 			}
 			else
@@ -777,36 +779,36 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					continue;
 				}
-				float num9;
+				float dist;
 				if (baddy.GetCollisionType() is CollisionBox)
 				{
-					Vector2 val3 = base.Position - baddy.Position;
-					num9 = (val3).Length() - ((CollisionBox)baddy.GetCollisionType()).Width / 2f * (float)Math.Sqrt(2.0);
+					Vector2 toBaddy = base.Position - baddy.Position;
+					dist = (toBaddy).Length() - ((CollisionBox)baddy.GetCollisionType()).Width / 2f * (float)Math.Sqrt(2.0);
 				}
 				else if (baddy.GetCollisionType() is CollisionMultibox)
 				{
-					Vector2 val4 = base.Position - baddy.Position;
-					num9 = (val4).Length() - ((CollisionMultibox)baddy.GetCollisionType()).Items[0].Width / 2f * (float)Math.Sqrt(2.0);
+					Vector2 toBaddy = base.Position - baddy.Position;
+					dist = (toBaddy).Length() - ((CollisionMultibox)baddy.GetCollisionType()).Items[0].Width / 2f * (float)Math.Sqrt(2.0);
 				}
 				else if (baddy.GetCollisionType() is CollisionSimpleCircle)
 				{
 					float radius = ((CollisionSimpleCircle)baddy.GetCollisionType()).Radius;
-					Vector2 val5 = base.Position - baddy.Position;
-					num9 = MathHelper.Clamp((val5).Length() - radius, 0f, 1000f);
+					Vector2 toBaddy = base.Position - baddy.Position;
+					dist = MathHelper.Clamp((toBaddy).Length() - radius, 0f, 1000f);
 				}
 				else
 				{
-					Vector2 val6 = base.Position - baddy.Position;
-					num9 = (val6).Length();
+					Vector2 toBaddy = base.Position - baddy.Position;
+					dist = (toBaddy).Length();
 				}
-				if (num9 <= num)
+				if (dist <= steerRange)
 				{
-					float num10 = MyMath.PowerCurve(num3, num2, 2f, num9 / num);
-					if (flag2)
+					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, dist / steerRange);
+					if (altSteering)
 					{
-						num10 = MathHelper.Lerp(num3, num2, num9 / num);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / steerRange);
 					}
-					direction += num10 * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + num4);
+					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
 			}
 		}
@@ -816,45 +818,45 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				continue;
 			}
-			bool flag3 = wantsToTakePowerup(powerup);
-			if (flag3)
+			bool goForPowerup = wantsToTakePowerup(powerup);
+			if (goForPowerup)
 			{
 				foreach (PlayerShip ship in oracle.GetShips())
 				{
 					if (ship.wantsToTakePowerup(powerup))
 					{
-						Vector2 val7 = ship.Position - powerup.Position;
-						float num11 = (val7).LengthSquared();
-						Vector2 val8 = base.Position - powerup.Position;
-						if (num11 < (val8).LengthSquared() && !isConnectedWith(ship))
+						Vector2 otherToPowerup = ship.Position - powerup.Position;
+						float otherDistSq = (otherToPowerup).LengthSquared();
+						Vector2 myToPowerup = base.Position - powerup.Position;
+						if (otherDistSq < (myToPowerup).LengthSquared() && !isConnectedWith(ship))
 						{
-							flag3 = false;
+							goForPowerup = false;
 						}
 					}
 				}
 			}
-			if (!flag3)
+			if (!goForPowerup)
 			{
 				continue;
 			}
-			Vector2 val9 = powerup.Position - base.Position;
-			float num12 = (val9).Length();
-			Vector2 val10 = position - base.Position;
-			if (num12 < (val10).Length())
+			Vector2 toPowerup = powerup.Position - base.Position;
+			float distToPowerup = (toPowerup).Length();
+			Vector2 toTarget = position - base.Position;
+			if (distToPowerup < (toTarget).Length())
 			{
 				position = powerup.Position;
 			}
-			Vector2 val11 = powerup.Position - base.Position;
-			if ((val11).Length() <= num)
+			Vector2 toPowerup2 = powerup.Position - base.Position;
+			if ((toPowerup2).Length() <= steerRange)
 			{
-				Vector2 val12 = powerup.Position - base.Position;
-				float num13 = MyMath.PowerCurve(num3, num2, 2f, (val12).Length() / num);
-				if (flag2)
+				Vector2 toPowerup3 = powerup.Position - base.Position;
+				float pull = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, (toPowerup3).Length() / steerRange);
+				if (altSteering)
 				{
-					Vector2 val13 = powerup.Position - base.Position;
-					num13 = MathHelper.Lerp(num3, num2, (val13).Length() / num);
+					Vector2 toPowerup4 = powerup.Position - base.Position;
+					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, (toPowerup4).Length() / steerRange);
 				}
-				direction += num13 * MyMath.AngleToVector(MyMath.VectorToAngle(powerup.Position - base.Position));
+				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(powerup.Position - base.Position));
 			}
 		}
 		foreach (PlayerShip ship2 in oracle.GetShips())
@@ -879,13 +881,13 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			else if (collection.ContainsType<Wall>())
 			{
-				float num14 = 800 / (oracle.Players + 1);
-				(position) = new Vector2((float)(player + 1) * num14, 300f);
+				float spacing = 800 / (oracle.Players + 1);
+				(position) = new Vector2((float)(player + 1) * spacing, 300f);
 			}
 			else
 			{
-				float num15 = 800 / (oracle.Players + 1);
-				(position) = new Vector2((float)(player + 1) * num15, 400f);
+				float spacing = 800 / (oracle.Players + 1);
+				(position) = new Vector2((float)(player + 1) * spacing, 400f);
 			}
 		}
 		if (position.X > 2000f && collection.ContainsType<Floor>() && connectors.Count == 0)
@@ -901,72 +903,72 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		if (position.X < 2000f)
 		{
-			val = base.Position - position;
-			float num16 = (val).Length();
-			if (num16 > 10f)
+			delta = base.Position - position;
+			float distToTarget = (delta).Length();
+			if (distToTarget > 10f)
 			{
 				direction += 0.8f * MyMath.AngleToVector(MyMath.VectorToAngle(position - base.Position));
 			}
 		}
-		float num17 = num;
-		float num18 = 600f;
+		float edgeMargin = steerRange;
+		float bottomEdge = 600f;
 		if (collection.ContainsType<Floor>())
 		{
-			num18 = 560f;
+			bottomEdge = 560f;
 		}
-		if (!flag2)
+		if (!altSteering)
 		{
-			if (base.Position.X < num17)
+			if (base.Position.X < edgeMargin)
 			{
-				float num19 = MyMath.PowerCurve(num3, num2, 2f, base.Position.X / num17);
-				if (flag2)
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.X / edgeMargin);
+				if (altSteering)
 				{
-					num19 = MathHelper.Lerp(num3, num2, base.Position.X / num17);
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.X / edgeMargin);
 				}
-				direction += num19 * new Vector2(1f, 0f);
+				direction += push * new Vector2(1f, 0f);
 			}
-			if (base.Position.X > 800f - num17)
+			if (base.Position.X > 800f - edgeMargin)
 			{
-				float num20 = MyMath.PowerCurve(num3, num2, 2f, Math.Abs((800f - base.Position.X) / num17));
-				if (flag2)
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
+				if (altSteering)
 				{
-					num20 = MathHelper.Lerp(num3, num2, Math.Abs((800f - base.Position.X) / num17));
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
 				}
-				direction += num20 * new Vector2(-1f, 0f);
+				direction += push * new Vector2(-1f, 0f);
 			}
-			if (base.Position.Y < num17)
+			if (base.Position.Y < edgeMargin)
 			{
-				float num21 = MyMath.PowerCurve(num3, num2, 2f, base.Position.Y / num17);
-				if (flag2)
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.Y / edgeMargin);
+				if (altSteering)
 				{
-					num21 = MathHelper.Lerp(num3, num2, base.Position.Y / num17);
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.Y / edgeMargin);
 				}
-				direction += num21 * new Vector2(0f, 1f);
+				direction += push * new Vector2(0f, 1f);
 			}
-			if (base.Position.Y > num18 - num17)
+			if (base.Position.Y > bottomEdge - edgeMargin)
 			{
-				float num22 = MyMath.PowerCurve(num3, num2, 2f, Math.Abs((num18 - base.Position.Y) / num17));
-				if (flag2)
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
+				if (altSteering)
 				{
-					num22 = MathHelper.Lerp(num3, num2, Math.Abs((num18 - base.Position.Y) / num17));
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				}
-				direction += num22 * new Vector2(0f, -1f);
+				direction += push * new Vector2(0f, -1f);
 			}
 		}
-		if (flag)
+		if (hasWall)
 		{
 			CollisionBox collisionBox2 = (CollisionBox)GetCollisionType();
-			float num23 = 41.666668f * base.MaxSpeed;
+			float wallProbeReach = 41.666668f * base.MaxSpeed;
 			if (direction.X > 0f)
 			{
 				int x2 = 0;
 				int y2 = 0;
-				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.BottomRight + new Vector2(num23, 0f));
+				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.BottomRight + new Vector2(wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x2, y2))
 				{
 					direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
 				}
-				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.TopRight + new Vector2(num23, 0f));
+				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.TopRight + new Vector2(wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x2, y2))
 				{
 					direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
@@ -976,12 +978,12 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				int x3 = 0;
 				int y3 = 0;
-				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.BottomLeft + new Vector2(0f - num23, 0f));
+				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.BottomLeft + new Vector2(0f - wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x3, y3))
 				{
 					direction.X = 0f + MathHelper.Max(Math.Abs(direction.Y), 1f);
 				}
-				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.TopLeft + new Vector2(0f - num23, 0f));
+				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.TopLeft + new Vector2(0f - wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x3, y3))
 				{
 					direction.X = 0f + MathHelper.Max(Math.Abs(direction.Y), 1f);
@@ -989,12 +991,12 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			int x4 = 0;
 			int y4 = 0;
-			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopLeft + new Vector2(0f, -3f * num23));
+			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopLeft + new Vector2(0f, -3f * wallProbeReach));
 			if (collisionLevelMap.TileIsOccupied(x4, y4))
 			{
 				direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
 			}
-			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopRight + new Vector2(0f, -3f * num23));
+			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopRight + new Vector2(0f, -3f * wallProbeReach));
 			if (collisionLevelMap.TileIsOccupied(x4, y4))
 			{
 				direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
@@ -1014,37 +1016,37 @@ public class PlayerShip : AlienDrawableGameComponent
 			target_y = y - 1;
 			return;
 		}
-		int num = x - 1;
-		int num2 = 0;
-		while (map.TileIsOccupied(num, y) || map.TileIsOccupied(num, y - 1))
+		int scanX = x - 1;
+		int leftCost = 0;
+		while (map.TileIsOccupied(scanX, y) || map.TileIsOccupied(scanX, y - 1))
 		{
-			num2++;
-			num--;
-			if (num < 0)
+			leftCost++;
+			scanX--;
+			if (scanX < 0)
 			{
-				num2 = 1000;
+				leftCost = 1000;
 				break;
 			}
 		}
-		num = x + 1;
-		int num3 = 0;
-		while (map.TileIsOccupied(num, y) || map.TileIsOccupied(num, y - 1))
+		scanX = x + 1;
+		int rightCost = 0;
+		while (map.TileIsOccupied(scanX, y) || map.TileIsOccupied(scanX, y - 1))
 		{
-			num3++;
-			num++;
-			if (num >= map.Width)
+			rightCost++;
+			scanX++;
+			if (scanX >= map.Width)
 			{
-				num3 = 1000;
+				rightCost = 1000;
 				break;
 			}
 		}
-		if (num2 < num3)
+		if (leftCost < rightCost)
 		{
 			target_x = x - 1;
 			target_y = y;
 			return;
 		}
-		if (num2 > num3)
+		if (leftCost > rightCost)
 		{
 			target_x = x + 1;
 			target_y = y;
@@ -1077,28 +1079,30 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (start == end)
 		{
 			shortestpoint = start;
-			Vector2 val = position - start;
-			d = (val).Length();
+			Vector2 toStart = position - start;
+			d = (toStart).Length();
 			return;
 		}
-		float num = (position.X - start.X) * (end.X - start.X) + (position.Y - start.Y) * (end.Y - start.Y);
-		float num2 = num;
-		Vector2 val2 = end - start;
-		num = num2 / (val2).LengthSquared();
-		if (num < 0f)
+		// One decompiled slot serving two roles: `t` holds the raw dot product on this line and
+		// only becomes the normalised 0..1 position along the segment after the divide below.
+		float t = (position.X - start.X) * (end.X - start.X) + (position.Y - start.Y) * (end.Y - start.Y);
+		float dot = t;
+		Vector2 segment = end - start;
+		t = dot / (segment).LengthSquared();
+		if (t < 0f)
 		{
 			shortestpoint = start;
 		}
-		else if (num > 1f)
+		else if (t > 1f)
 		{
 			shortestpoint = end;
 		}
 		else
 		{
-			shortestpoint = start + num * (end - start);
+			shortestpoint = start + t * (end - start);
 		}
-		Vector2 val3 = position - shortestpoint;
-		d = (val3).Length();
+		Vector2 toClosest = position - shortestpoint;
+		d = (toClosest).Length();
 	}
 
 	private void FireAt(float direction)
@@ -1144,19 +1148,19 @@ public class PlayerShip : AlienDrawableGameComponent
 			break;
 		case Powerup.PowerupType.Option:
 		{
-			int num = 1;
-			int num2 = 1;
+			int perLayer = 1;
+			int layers = 1;
 			if (optionLevel == 3)
 			{
-				num = 2;
+				perLayer = 2;
 			}
 			if (optionLevel == 4)
 			{
-				num2 = 2;
+				layers = 2;
 			}
-			for (int i = 0; i < num2; i++)
+			for (int i = 0; i < layers; i++)
 			{
-				for (int j = 0; j < num; j++)
+				for (int j = 0; j < perLayer; j++)
 				{
 					Option option = Option.NewOption(collection, base.Game);
 					option.Setup(this, 0f, i + 1, player);
@@ -1197,15 +1201,15 @@ public class PlayerShip : AlienDrawableGameComponent
 			((PlayerShip)other).connectors.Add(shipConnector);
 			connectors.Add(shipConnector);
 			collection.Add((GameComponent)(object)shipConnector);
-			bool flag = false;
+			bool hasHumanPlayer = false;
 			foreach (PlayerShip ship in oracle.GetShips())
 			{
 				if (ship.controller != ControlDevice.AI)
 				{
-					flag = true;
+					hasHumanPlayer = true;
 				}
 			}
-			if (oracle.NrOfShipConnectors() == 3 && flag)
+			if (oracle.NrOfShipConnectors() == 3 && hasHumanPlayer)
 			{
 				ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Coop);
 			}
@@ -1284,13 +1288,13 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private bool isConnectedWith(ICollidable other)
 	{
-		bool flag = false;
+		bool connected = false;
 		foreach (ShipConnector connector in connectors)
 		{
-			flag |= connector.A == other;
-			flag |= connector.B == other;
+			connected |= connector.A == other;
+			connected |= connector.B == other;
 		}
-		return flag;
+		return connected;
 	}
 
 	public void Win()

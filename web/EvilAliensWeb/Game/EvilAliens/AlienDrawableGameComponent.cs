@@ -710,6 +710,18 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 	}
 
+	// Radians/ms of FREE-SPINNING, purely cosmetic rotation. A type overriding this to a
+	// non-zero value opts its puppets OUT of replicated rotation: the driver spins them
+	// locally at this rate and the snapshot's rotation field is ignored for them.
+	//
+	// WHY: a puppet's Update is frozen, so a continuously spinning type's rotation could only
+	// ever advance when its turn came up in the ~16.7 Hz round-robin snapshot -- visibly
+	// choppy (asteroids). Rotation that no hitbox reads is not worth a wire round-trip to get
+	// wrong; spinning locally is both smoother and free. Only override it where rotation is
+	// genuinely cosmetic -- a type whose Draw or collision depends on a rotation the HOST
+	// chose (a lazer's beam angle) must keep taking the replicated value.
+	internal virtual float NetSpinPerMs => 0f;
+
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)
 	{
 	}

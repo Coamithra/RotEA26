@@ -60,11 +60,20 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 
 - **`build_textures.py`** reads `textures.config` and precompiles listed sprites to a GPU-ready
   sibling that `WebContentManager` prefers over the PNG: **`.dds`** (BC3/DXT5, lossy, ~0 decode;
-  needs `texconv.exe`; dims auto-cropped to a mult-of-4 that preserves the `floor(W/cols)` cell
-  pitch — Chrome/ANGLE→D3D11 rejects non-mult-of-4 block textures as black) or **`.rtex`**
+  needs `texconv.exe`; dims padded up to a mult-of-4 with the logical size stamped in the header —
+  Chrome/ANGLE→D3D11 rejects non-mult-of-4 block textures as black) or **`.rtex`**
   (uncompressed straight-alpha RGBA8, lossless, any dims). Rule of thumb: high-frequency detail
   hides BC3 artifacts (spider sheet, brain) → dxt; smooth gradients/glows band → raw. Re-run after
-  editing a source PNG or the config.
+  editing a source PNG or the config. **The first 4 px of the pad are NOT transparent** —
+  `edge_gutter()` replicates the logical edge there, because `LinearClamp` clamps at the texture
+  border and not at the (correctly clamped) source rect, so bilinear still reaches one texel past
+  it; a transparent texel there is a hairline seam on every tiled sprite (web CLAUDE.md, Trello
+  `4ddcd13f`). Every entry needs a real source PNG — a stale line aborts the whole run.
+- **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and
+  asserts the texel just outside the logical edge still matches the edge (alpha-weighted, and
+  calibrated per texture against its own column-to-column step, so BC3 noise doesn't cry wolf).
+  **Run it after every `build_textures.py` rebuild** — a pass means bilinear at the logical edge is
+  indistinguishable from a true clamp, so no pad-bleed seam is possible at any pad size.
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,
@@ -194,3 +203,7 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   verification style — see the root CLAUDE.md rules.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight
   alpha — the basis for the project-wide straight-alpha rule).
+- **`tools/audit_add_order.py`**: lint for the ComponentBin instant-add contract (card 02d9ad67)
+  — flags any `ComponentBin.Add` call site that still configures the object (Setup/Make*/property
+  write) AFTER the Add; KNI runs `Initialize()` synchronously inside the Add, so config must come
+  first. Run after adding spawn sites; exit 0 = clean. See web CLAUDE.md "Component lifecycle".

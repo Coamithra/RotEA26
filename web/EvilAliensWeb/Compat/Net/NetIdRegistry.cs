@@ -6,9 +6,9 @@ using Microsoft.Xna.Framework;
 namespace EvilAliensWeb.Compat.Net
 {
     // Host-side NetId registry on the ComponentBin seam: every replicable component gets a
-    // ushort id when it actually enters Game.Components (adds are deferred through the bin's
-    // birthList, so hooking the collection's own events -- the same seam Oracle uses -- sees
-    // exactly the live world) and frees it when it leaves. Spawn/death are forwarded to
+    // ushort id when it actually enters Game.Components (bin adds are instant since card
+    // 02d9ad67, so the collection's own events -- the same seam Oracle uses -- fire right in
+    // Add and always see exactly the live world) and frees it when it leaves. Spawn/death are forwarded to
     // NetSession as reliable events; the live list is what the world-snapshot scheduler
     // round-robins over (card 11.2).
     //

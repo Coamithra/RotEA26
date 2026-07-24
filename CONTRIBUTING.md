@@ -36,6 +36,10 @@ handshake is never needed here.
 
 - **Per-worktree bootstrap: none.** `bin/`/`obj/` regenerate on the first `dotnet build` (slow —
   WASM workload restore; expected). No `.env`, no package install.
+- **Most cards need no dev server at all** — verify through `tools/headless/` (`eahl`) instead
+  (see the Phase-5 gate below). It resolves `wwwroot` from its own build output, so a worktree
+  build automatically reads *that worktree's* content with no port, no launch config and nothing
+  to kill afterwards. The rest of this section applies once you escalate to a browser.
 - **One dev PORT per slot: `5280 + k`** (wt1 = 5281 … wt8 = 5288; the root checkout is 5280).
   Slots **wt1/wt2 have provisioned launch configs** (`eaweb-wt1`/`eaweb-wt2` in
   `.claude/launch.json`) usable via `preview_start`; for wt3+ run the server yourself:
@@ -62,6 +66,27 @@ proof.
   building one is part of the card if none exists), boot the real game only as the final smoke
   check, never time a live screenshot of anything that moves, verify in foreground Chrome via
   claude-in-chrome (not `preview_screenshot`), script input with `eaPress(...)`.
+- **Drive that tool through the headless host FIRST — `tools/headless/` (`eahl`).** It is the
+  default route for a card's verification work; a browser is what you escalate to, not what you
+  start with. It runs the real game as a desktop exe with **no Chrome, no dev server and no
+  visible window**, takes the **URL query verbatim** (so every harness/showcase/fast-boot flag
+  works unchanged), and writes the PNG to disk:
+  ```sh
+  dotnet build tools/headless -c Debug
+  tools/headless/bin/Debug/net8.0/eahl.exe --flags "?level=Level3&brainboss&invuln" --frames 400 --out shot.png
+  tools/headless/bin/Debug/net8.0/eahl.exe --repl     # step / shot / eval / info / quit
+  ```
+  Practical consequences for a card: **no worktree dev server needed** for most verification (so
+  no port-slot dance, and nothing to kill before `git worktree remove`); soaks run in the
+  background at ~17x real time instead of needing a foregrounded tab; and `--script <file>` turns
+  the check into a repeatable probe that exits non-zero on the first failure, which is worth
+  committing alongside the card when the behaviour is worth re-checking later. Settle ~150 frames
+  before any screenshot (the intro white fade). Details: `tools/headless/README.md`.
+- **The gate itself still ends in real Chrome.** `eahl` proves the frame or the number; it runs
+  desktop GL, not WASM/WebGL, so it cannot see a trimming break, an IndexedDB save failure, a
+  WebGL-specific shader difference, an `index.html` JS-layer error, a real WebRTC problem, or a
+  lowercase `content/` path that only 404s on a case-sensitive host. Finish with the foreground
+  Chrome smoke check and zero console exceptions, as below.
 - **A clean build does NOT mean it runs** — WASM runtime errors only appear in the browser
   console. Zero console exceptions is the bar.
 - **Touched the csproj / anything reflection-loaded (save types, KNI factories)?** Do a LOCAL

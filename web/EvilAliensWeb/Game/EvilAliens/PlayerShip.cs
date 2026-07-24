@@ -851,7 +851,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			sparedUfo = null;
 		}
 		float nearestDist = float.MaxValue;
-		AlienDrawableGameComponent alienDrawableGameComponent = null;
+		AlienDrawableGameComponent nearest = null;
 		// The priority bias decides WHICH target wins, but a discounted boss can win from well
 		// outside gun range (at bias 0.45 a boss 780px away outranks a UFO at 350px). Without a
 		// fallback the AI then fires at nothing at all while a killable target sits in range --
@@ -882,7 +882,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (scoreSq < nearestDist && onScreen)
 				{
 					nearestDist = scoreSq;
-					alienDrawableGameComponent = baddy;
+					nearest = baddy;
 				}
 				float trueDistSq = (toBaddy).LengthSquared();
 				if (onScreen && trueDistSq <= gunRangeSq && trueDistSq < nearestInRangeSq)
@@ -894,13 +894,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		// Undo the bias before the range test: the discount decides WHICH target wins, never
 		// whether a bullet can actually reach it.
-		if (alienDrawableGameComponent != null)
+		if (nearest != null)
 		{
-			Vector2 toChosen = alienDrawableGameComponent.Position - base.Position;
+			Vector2 toChosen = nearest.Position - base.Position;
 			nearestDist = (toChosen).Length();
 			if (nearestDist > bulletlifetime * BulletRangePerMs && inRangeTarget != null)
 			{
-				alienDrawableGameComponent = inRangeTarget;
+				nearest = inRangeTarget;
 				nearestDist = (float)Math.Sqrt(nearestInRangeSq);
 			}
 		}
@@ -912,19 +912,19 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (nearestDist <= bulletlifetime * BulletRangePerMs)
 		{
 			fired = true;
-			if (alienDrawableGameComponent is JunkBoss)
+			if (nearest is JunkBoss)
 			{
-				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position));
+				FireAt(MyMath.VectorToAngle(nearest.Position - base.Position));
 			}
 			else
 			{
-				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position) + RandomHelper.RandomNextFloat(0f - aimSpread, aimSpread));
+				FireAt(MyMath.VectorToAngle(nearest.Position - base.Position) + RandomHelper.RandomNextFloat(0f - aimSpread, aimSpread));
 			}
 		}
 		// AI bench (card f4d1721f): "there was something on screen I could have killed and I did
 		// not shoot" is the signature of a target the AI cannot see -- the shape of the Level 3
 		// stall, where the boss that gates the level was never in the list above.
-		EvilAliensWeb.Compat.AiBench.NoteFireDecision(this, alienDrawableGameComponent != null, fired);
+		EvilAliensWeb.Compat.AiBench.NoteFireDecision(this, nearest != null, fired);
 		doAIBomb(baddies);
 	}
 
@@ -988,8 +988,8 @@ public class PlayerShip : AlienDrawableGameComponent
 		float steerRange = 150f;
 		float minSteerStrength = 0f;
 		float maxSteerStrength = 4f;
-		Vector2 position = default(Vector2);
-		(position) = new Vector2(float.MaxValue, float.MaxValue);
+		Vector2 steerTarget = default(Vector2);
+		(steerTarget) = new Vector2(float.MaxValue, float.MaxValue);
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -1016,16 +1016,16 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				delta = baddy.Position - base.Position;
 				float distSq = (delta).LengthSquared();
-				Vector2 toTarget = position - base.Position;
+				Vector2 toTarget = steerTarget - base.Position;
 				if (distSq < (toTarget).LengthSquared())
 				{
-					position = baddy.Position;
+					steerTarget = baddy.Position;
 				}
 				continue;
 			}
 			if (baddy is JunkBoss)
 			{
-				position = baddy.Position;
+				steerTarget = baddy.Position;
 			}
 			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
 			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
@@ -1227,22 +1227,19 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			Vector2 toPowerup = powerup.Position - base.Position;
 			float distToPowerup = (toPowerup).Length();
-			Vector2 toTarget = position - base.Position;
+			Vector2 toTarget = steerTarget - base.Position;
 			if (distToPowerup < (toTarget).Length())
 			{
-				position = powerup.Position;
+				steerTarget = powerup.Position;
 			}
-			Vector2 toPowerup2 = powerup.Position - base.Position;
-			if ((toPowerup2).Length() <= steerRange)
+			if (distToPowerup <= steerRange)
 			{
-				Vector2 toPowerup3 = powerup.Position - base.Position;
-				float pull = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, (toPowerup3).Length() / steerRange);
+				float pull = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, distToPowerup / steerRange);
 				if (altSteering)
 				{
-					Vector2 toPowerup4 = powerup.Position - base.Position;
-					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, (toPowerup4).Length() / steerRange);
+					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, distToPowerup / steerRange);
 				}
-				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(powerup.Position - base.Position));
+				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(toPowerup));
 			}
 		}
 		// NOTE: an earlier revision also parked the ship on the far side of the boss to line the
@@ -1265,27 +1262,27 @@ public class PlayerShip : AlienDrawableGameComponent
 			float standoff = MathHelper.Clamp(gunRange * BossStandoffFraction, BossStandoffMinPx, BossStandoffMaxPx);
 			if (bossDist > standoff && bossDist > 0.001f)
 			{
-				position = haltingBoss.Position + (fromBoss / bossDist) * standoff;
+				steerTarget = haltingBoss.Position + (fromBoss / bossDist) * standoff;
 			}
 		}
 		foreach (PlayerShip ship2 in oracle.GetShips())
 		{
 			if (ship2.readyToConnect && ship2 != this && readyToConnect && !isConnectedWith(ship2))
 			{
-				position = ship2.Position;
+				steerTarget = ship2.Position;
 			}
 		}
-		if (position.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
+		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
 			if (oracle.LiveShips == 1)
 			{
 				if (collection.ContainsType<Wall>())
 				{
-					(position) = new Vector2(400f, 300f);
+					(steerTarget) = new Vector2(400f, 300f);
 				}
 				else
 				{
-					(position) = new Vector2(400f, 400f);
+					(steerTarget) = new Vector2(400f, 400f);
 				}
 			}
 			// Spread by the player's ORDINAL among seated slots, not `player + 1`: online co-op's
@@ -1293,28 +1290,28 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (collection.ContainsType<Wall>())
 			{
 				float spacing = 800 / (oracle.Players + 1);
-				(position) = new Vector2((float)oracle.SeatOrdinal(player) * spacing, 300f);
+				(steerTarget) = new Vector2((float)oracle.SeatOrdinal(player) * spacing, 300f);
 			}
 			else
 			{
 				float spacing = 800 / (oracle.Players + 1);
-				(position) = new Vector2((float)oracle.SeatOrdinal(player) * spacing, 400f);
+				(steerTarget) = new Vector2((float)oracle.SeatOrdinal(player) * spacing, 400f);
 			}
 		}
-		if (position.X > 2000f && collection.ContainsType<Floor>() && connectors.Count == 0)
+		if (steerTarget.X > 2000f && collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
 			if (oracle.LiveShips == 1)
 			{
-				(position) = new Vector2(266f, 300f);
+				(steerTarget) = new Vector2(266f, 300f);
 			}
 			else
 			{
-				(position) = new Vector2(266f, 600f / (float)(oracle.Players + 1) * (float)oracle.SeatOrdinal(player));
+				(steerTarget) = new Vector2(266f, 600f / (float)(oracle.Players + 1) * (float)oracle.SeatOrdinal(player));
 			}
 		}
-		if (position.X < 2000f)
+		if (steerTarget.X < 2000f)
 		{
-			delta = base.Position - position;
+			delta = base.Position - steerTarget;
 			float distToTarget = (delta).Length();
 			if (distToTarget > SeekArriveDeadzonePx)
 			{
@@ -1326,7 +1323,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
 				// the bot was being held at a standstill and could not accelerate out of trouble.
 				// Widening the deadzone kills the fidget without ever opposing a real manoeuvre.
-				direction += SeekWeight * MyMath.AngleToVector(MyMath.VectorToAngle(position - base.Position));
+				direction += SeekWeight * MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
 			}
 		}
 		float edgeMargin = steerRange;

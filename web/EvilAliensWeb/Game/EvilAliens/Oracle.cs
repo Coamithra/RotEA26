@@ -50,15 +50,15 @@ public class Oracle : GameComponent, IOracleService
 	{
 		get
 		{
-			int num = 0;
+			int playingCount = 0;
 			foreach (PlayerInfo player in players)
 			{
 				if (player.isPlaying)
 				{
-					num++;
+					playingCount++;
 				}
 			}
-			return num;
+			return playingCount;
 		}
 	}
 
@@ -100,12 +100,12 @@ public class Oracle : GameComponent, IOracleService
 
 	public bool DeviceIsPlaying(ControlDevice device)
 	{
-		bool flag = false;
+		bool anyPlaying = false;
 		foreach (PlayerInfo player in players)
 		{
-			flag |= player.isPlaying && player.controller == device;
+			anyPlaying |= player.isPlaying && player.controller == device;
 		}
-		return flag;
+		return anyPlaying;
 	}
 
 	// Returns the slot the player was seated in -- callers that spawn the ship need the real
@@ -365,12 +365,12 @@ public class Oracle : GameComponent, IOracleService
 
 	public bool IsAlive(int player)
 	{
-		bool flag = false;
+		bool alive = false;
 		foreach (PlayerShip playerShip in playerShips)
 		{
-			flag |= playerShip.Owner == player;
+			alive |= playerShip.Owner == player;
 		}
-		return flag;
+		return alive;
 	}
 
 	public PlayerShip GetRandomPlayerShip()
@@ -398,11 +398,11 @@ public class Oracle : GameComponent, IOracleService
 		baddies.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
-			GameComponent val = item;
-			if (val is EvilBullet || val is UFO || val is Asteroid || val is Braineroid || val is JunkBoss || val is Ball || val is Boss || val is Spider || val is StationaryBoss || val is MarsBoss || val is EvilSkull || val is Lazer || val is ClassicBoss || val is DeathStar || val is Wall || val is BattleSkull || val is FlyingSpider || (val is Explosion && ((Explosion)(object)val).Collides) || val is StarMine || val is SweepUFO || val is PunchingBag
-				|| val is BrainBoss || val is FakeBoss || val is SpiderBoss || val is PlasmaBall || val is ParatrooperAlien || val is ParatrooperBrain || val is Parachute)
+			GameComponent component = item;
+			if (component is EvilBullet || component is UFO || component is Asteroid || component is Braineroid || component is JunkBoss || component is Ball || component is Boss || component is Spider || component is StationaryBoss || component is MarsBoss || component is EvilSkull || component is Lazer || component is ClassicBoss || component is DeathStar || component is Wall || component is BattleSkull || component is FlyingSpider || (component is Explosion && ((Explosion)(object)component).Collides) || component is StarMine || component is SweepUFO || component is PunchingBag
+				|| component is BrainBoss || component is FakeBoss || component is SpiderBoss || component is PlasmaBall || component is ParatrooperAlien || component is ParatrooperBrain || component is Parachute)
 			{
-				baddies.Add((AlienDrawableGameComponent)(object)val);
+				baddies.Add((AlienDrawableGameComponent)(object)component);
 			}
 		}
 		return baddies;
@@ -413,10 +413,10 @@ public class Oracle : GameComponent, IOracleService
 		paratrooperBrains.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
-			GameComponent val = item;
-			if (val is ParatrooperBrain)
+			GameComponent component = item;
+			if (component is ParatrooperBrain)
 			{
-				paratrooperBrains.Add((ParatrooperBrain)(object)val);
+				paratrooperBrains.Add((ParatrooperBrain)(object)component);
 			}
 		}
 		return paratrooperBrains;
@@ -427,10 +427,10 @@ public class Oracle : GameComponent, IOracleService
 		powerups.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
-			GameComponent val = item;
-			if (val is Powerup)
+			GameComponent component = item;
+			if (component is Powerup)
 			{
-				powerups.Add((Powerup)(object)val);
+				powerups.Add((Powerup)(object)component);
 			}
 		}
 		return powerups;
@@ -441,10 +441,10 @@ public class Oracle : GameComponent, IOracleService
 		starmines.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
-			GameComponent val = item;
-			if (val is StarMine)
+			GameComponent component = item;
+			if (component is StarMine)
 			{
-				starmines.Add((StarMine)(object)val);
+				starmines.Add((StarMine)(object)component);
 			}
 		}
 		return starmines;
@@ -452,16 +452,16 @@ public class Oracle : GameComponent, IOracleService
 
 	public int NrOfShipConnectors()
 	{
-		int num = 0;
+		int connectors = 0;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
-			GameComponent val = item;
-			if (val is ShipConnector)
+			GameComponent component = item;
+			if (component is ShipConnector)
 			{
-				num++;
+				connectors++;
 			}
 		}
-		return num;
+		return connectors;
 	}
 
 	internal PlayerShip GetPlayerShip(int player)

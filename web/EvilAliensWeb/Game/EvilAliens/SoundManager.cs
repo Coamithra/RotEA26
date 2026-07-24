@@ -114,6 +114,10 @@ public class SoundManager : ISoundManagerService
 	private SoundEffectInstance _narration;
 	private string _currentMusicCue;
 
+	// The Songs value behind _currentMusicCue (-1 = stopped). Kept separately because the wire
+	// carries the enum, and because it is latched even when music is muted or the cue is empty.
+	private int _currentSong = -1;
+
 	SoundManager ISoundManagerService.SoundManager => this;
 
 	public SoundManager(Game game)
@@ -354,10 +358,19 @@ public class SoundManager : ISoundManagerService
 			: Songs.ClassicClean;
 	}
 
+	// The track the game last asked for (-1 = stopped), for the join-in-progress catch-up
+	// (card 45a4e48d). Latched alongside the OnMusic hook and therefore, like it, ABOVE the
+	// local mute check and independent of whether the call actually reached a peer: a muted
+	// host still owes a joiner the right track, and a level's own Initialize sets this before
+	// NetActiveScene exists (so live replication skips it) yet it is exactly what a later
+	// joiner needs.
+	internal int NetCurrentSong => _currentSong;
+
 	public void PlayMusic(Songs song)
 	{
 		// Online co-op (card 11.3): mid-level music switches come from the level script /
 		// boss code, which is host-only -- replicate the call (no-op unless active host).
+		_currentSong = (int)song;
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic((int)song);
 		if (!Settings.GetInstance().PlayMusic)
 			return;
@@ -370,6 +383,7 @@ public class SoundManager : ISoundManagerService
 
 	public void StopMusic()
 	{
+		_currentSong = -1;
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic(-1);
 		_currentMusicCue = null;
 		MusicInterop.Stop();
@@ -382,11 +396,18 @@ public class SoundManager : ISoundManagerService
 	{
 		if (song < 0)
 		{
+			_currentSong = -1;
 			_currentMusicCue = null;
 			MusicInterop.Stop();
 			return;
 		}
-		if (!Settings.GetInstance().PlayMusic || song >= SongInstance.songFiles.Length)
+		if (song >= SongInstance.songFiles.Length)
+			return;
+		// Latch above the mute check and above the cue dedupe below, mirroring PlayMusic: this
+		// is what the game is ON, not what it just restarted, so a muted client still reports
+		// the peer's track to the eaNetBg() catch-up diff.
+		_currentSong = song;
+		if (!Settings.GetInstance().PlayMusic)
 			return;
 		string cue = SongInstance.songFiles[song];
 		if (string.IsNullOrEmpty(cue) || cue == _currentMusicCue)

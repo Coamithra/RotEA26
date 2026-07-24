@@ -281,6 +281,25 @@
             catch (e) { return 'not booted'; }
         };
 
+        // Debug: the join-in-progress scenery diff. eaNetBg() returns one line of the deep
+        // mid-level state the JIP catch-up replays (scroll speed, alien-base switch, belt
+        // slowdown, in-flight doodad + position, current song). Verification is a DIFF, not a
+        // screenshot: run it in the host window and the joiner window once the joiner's level
+        // is up and the two lines must match. Works in any level, session or not.
+        window.eaNetBg = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugNetBg'); }
+            catch (e) { return 'not booted'; }
+        };
+        // eaNetBgTest() proves the same catch-up in ONE tab: it captures the burst the host
+        // would send, wipes the scenery back to a fresh joiner's, replays the burst through the
+        // real client apply path and diffs the result — exact, where two independently-ticking
+        // windows can only ever be approximate. DESTRUCTIVE: the background re-runs its
+        // hyperspace entry, so the screen flashes. Solo tab only.
+        window.eaNetBgTest = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugNetBgTest'); }
+            catch (e) { return 'not booted'; }
+        };
+
         // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
         // ?level=Level2&spiders tuner). Drives Compat/DebugInput.SetSpider so the slider panel below
         // (and the console) can retune shadow/jump-frame/land-frame/jump-X without a page reload.

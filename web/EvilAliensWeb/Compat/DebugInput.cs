@@ -160,6 +160,31 @@ namespace EvilAliensWeb.Compat
 			return WallProfiler.Report();
 		}
 
+		// JS bridge for the join-in-progress scenery diff (eaNetBg in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetBg'). Returns the live deep-state the
+		// JIP catch-up replays (card 45a4e48d) as one parseable line, so a joiner's scenery is
+		// verified by DIFFING the two peers' output rather than by screenshotting a fly-by that
+		// moves every frame (root CLAUDE.md: never verify motion with timed live screenshots).
+		// Run it in both windows' consoles once the joiner is up; the lines must match.
+		[JSInvokable("debugNetBg")]
+		public static string NetBg()
+		{
+			EvilAliens.GameScene scene = EvilAliens.GameScene.NetActiveScene;
+			return scene == null ? "[netbg] no level" : "[netbg] " + scene.NetCatchUpStateLine();
+		}
+
+		// JS bridge for the JIP catch-up round-trip self-test (eaNetBgTest in index.html).
+		// One tab, no peer, no timing: capture the burst, wipe the scenery to a fresh joiner's,
+		// replay through the real client apply path, diff. See GameScene.NetCatchUpSelfTest --
+		// it is destructive (the screen re-runs the hyperspace entry), so it is a console
+		// command, never something a boot flag arms.
+		[JSInvokable("debugNetBgTest")]
+		public static string NetBgTest()
+		{
+			EvilAliens.GameScene scene = EvilAliens.GameScene.NetActiveScene;
+			return scene == null ? "[netbgtest] no level" : scene.NetCatchUpSelfTest();
+		}
+
 		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).
 		// FpsProfile(on) arms the per-phase accumulators, FpsStats() returns the HUD's JSON
 		// payload and FpsStatsLine() the one-line console form. Same polling contract as the

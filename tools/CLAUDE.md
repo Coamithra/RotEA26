@@ -17,6 +17,48 @@ a `blender` exe, the `../animgen` ComfyUI venv, `pymusiclooper`, PyAV. Raw sourc
 gitignored dirs (`new_assets_raw/`, `tools/*/source/`); the committed wwwroot artifacts are the
 products of record.
 
+## Refactor oracles — `verify_il_identical.py` / `verify_decompiled_diff.py`
+
+Neither is codegen; both only build + inspect, so they are safe to run any number of times.
+
+- **`verify_il_identical.py`** — the strong oracle: a cosmetic change must produce a byte-identical
+  `EvilAliensWeb.dll`. Covers renames. Full rules in root `CLAUDE.md`. **`--optimize`** (card
+  `0c624f9d`) additionally folds away dead stores and unused locals, which is what a refactor that
+  DELETES a local needs — the default Debug build keeps every local for the debugger, so a deleted
+  one changes the IL and the oracle would report DIFFERENT for a provably behaviour-preserving
+  change. It is strictly WEAKER (it also hides differences a rename could never introduce), so use
+  the default for a pure rename. Its own negative control: a clean tree plus one flipped constant
+  reports DIFFERENT under `--optimize`.
+- **`verify_decompiled_diff.py`** — the companion for changes the compiler legitimately DOES see:
+  collapsing `bool num = held; held = num | X;` to `held |= X` (the `ldloc` moves), or collapsing
+  four `x.Position - y.Position` recomputations into one local (Roslyn cannot CSE a property call).
+  It decompiles both assemblies and diffs the C#, reporting which members changed. The question it
+  answers is "is the difference CONFINED to what I edited", not "is it identical".
+  - **Read a raw IL diff of such a change at your peril** — deleting a local renumbers every later
+    slot, so `diff` mispairs `ldloc.s 53` with `ldloc.s 51` and drags in untouched code (measured:
+    317 bogus lines in `PlayerShip.DoAIMove`). Decompiling first makes slot numbers vanish.
+    If you do diff IL directly, normalise `// Method begins at RVA 0x…` away first — removing code
+    shifts every later method's RVA and otherwise reports thousands of false positives.
+  - **GOTCHA — ILSpy normalises, so this tool can hide a real difference.** Both `|=` shapes
+    decompile to the same C#, so that method simply does not appear in the report. An absent
+    method means "ILSpy considers these the same construct", NOT "the IL is identical" — only
+    `verify_il_identical.py` answers the latter. It also decompiles the dll IN PLACE so ILSpy can
+    resolve references; copying it somewhere isolated first yields noisier unresolved-type output
+    (`((GamePadState)(ref state)).Buttons`) with the transforms disabled.
+  - Its per-member attribution is the whole contract ("a member you did not touch appearing here
+    is the finding"), so it has **`--selftest`** (no build, no git — run it after touching the
+    regexes). At least one modifier is REQUIRED in the member pattern: relax it and `else if (…)`
+    parses as a member named `if`, and every later hunk files under it.
+
+**Decompiler-artifact cleanup: what has deliberately NOT been done.** Card `0c624f9d` collapsed
+ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated `x.Position - y.Position`
+temporaries. It left the neighbouring `GamePadButtons buttonsN = (state).Buttons;` temps in
+`InputHandler.UpdateKeyPads` alone — inlining them was tried and reverted, because removing those
+locals renumbers the slots and yields yet another non-identical hash for a bigger diff and no
+proof. Same for the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead initializers
+(~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`). Each is its
+own artifact class and its own card; don't fold them into an unrelated change.
+
 ## Shaders — `tools/shaders/`
 
 The lost `.fx` were rewritten in `src/` and compile offline to MGFX v10 GLSL `.mgfxo` via
@@ -69,6 +111,18 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   border and not at the (correctly clamped) source rect, so bilinear still reaches one texel past
   it; a transparent texel there is a hairline seam on every tiled sprite (web CLAUDE.md, Trello
   `4ddcd13f`). Every entry needs a real source PNG — a stale line aborts the whole run.
+  **A trailing `mip` on a `dxt` config line adds a full mip chain** (card `110153c7`; only
+  `gfx/base/756-v1` takes it — a tower shaft spends ~10.8 cells of it, so its far end minifies
+  hard and bilinear alone shimmers as the wall scrolls). It is opt-in because mipping all ~124
+  `.dds` would cost ~33% more bytes and soften every minified sprite. **The chain is built PER
+  LEVEL, not by `texconv -m 0`** — each level downsamples the LOGICAL image, pads *that* to the
+  level's padded size and re-runs `edge_gutter()`, then the levels are compressed separately and
+  spliced. Handing texconv the padded canvas instead filters the pad along WITH the content, so
+  the levels blend real pixels into transparent pad near the logical edge: measured on 756-v1, a
+  4 px gutter survives `log2(4)=2` levels and then fails hard (alpha delta 0/0/0 at levels 0–2,
+  then 127/191/223 at 3/4/5). The full chain must be shipped — KNI allocates every level and GL
+  needs a mipmap-COMPLETE texture, so a short chain renders black.
+  **Rebuild one asset with `--only <glob>`** rather than rewriting all ~124 committed `.dds`.
   **Rebuild with `--padtest 100`, not the bare default.** The shipped `.dds` deliberately carry the
   over-pad canary (web CLAUDE.md, "The canary is LEFT ON"), but `--padtest` DEFAULTS TO 0 — so a
   plain `python tools/textures/build_textures.py` silently strips it off every texture it touches
@@ -78,7 +132,10 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   asserts the texel just outside the logical edge still matches the edge (alpha-weighted, and
   calibrated per texture against its own column-to-column step, so BC3 noise doesn't cry wolf).
   **Run it after every `build_textures.py` rebuild** — a pass means bilinear at the logical edge is
-  indistinguishable from a true clamp, so no pad-bleed seam is possible at any pad size.
+  indistinguishable from a true clamp, so no pad-bleed seam is possible at any pad size. It checks
+  **every mip level**, not just level 0 (decoding a level by re-heading its blocks as a standalone
+  single-level DDS, so Pillow's decoder is reused verbatim); that is what catches a chain built the
+  naive `-m 0` way, which passes levels 0–2 and fails from level 3.
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,
@@ -151,7 +208,21 @@ step/min/max in sync with `MousePointer` if `SIZES` changes.
   live wall scrolls; a backgrounded tab's canvas is black). `--mirror` reproduces the pre-card
   0f7fc977 side texturing (one cell, mirrored about the rim), `--tile <f>` previews a candidate
   `Wall.DefaultSideTile`, `--compare` writes the before/after A/B and `--ladder` one tower per
-  tiling (how the no-mip aliasing grows with density) — both opt-in, each roughly doubles the run.
+  tiling, bilinear-only on top and trilinear below — both opt-in, each roughly doubles the run.
+  **Trilinear over the mip pyramid is now the DEFAULT** -- that is what the shipped mipped
+  `756-v1.dds` gets, so a bare run models the real game; **`--nomips`** gives the pre-card
+  bilinear-only look, named and polarised to match the game's own `?nomips` flag.
+  Its LOD comes from screen-space UV derivatives, and those MUST be taken on the *unwrapped* cell
+  walk: differencing after the `% 8` wrap steps a whole sheet at every crossing and would slam
+  that pixel row to the coarsest level, which looks exactly like a seam.
+  **`--shimmer` measures aliasing as a NUMBER** (mean per-pixel temporal stddev over a sub-pixel
+  scroll sweep, per tiling, with and without mips). The card's complaint is a shimmer *under
+  scroll*, which no still frame can show, so this is the honest read. Measured: bilinear worsens
+  with density (4.15 / 6.26 / 8.21 / 9.93 at tile 1/2/4/8) while trilinear stays flat (~1.2-1.8),
+  i.e. mips at the baked tile 4 beat bilinear at *any* tiling. **Score SHAFT pixels only** -- the
+  tops are an axis-aligned blit that snaps to whole pixels, so they jitter by an equal,
+  mode-independent amount that would dilute the measurement (`render(want_mask=True)`), and pass
+  the SAME mask to both modes.
   Its `sample()` is BILINEAR CLAMP, modelling `DrawGeometry3D`'s `LinearClamp` exactly: point
   sampling would invent a moire the GPU does not show, wrapping would prettify the sheet's own
   8→0 wrap. `SIDE_TILE` mirrors `Wall.DefaultSideTile`; re-bake one, update the other.

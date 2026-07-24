@@ -86,13 +86,13 @@ internal class BloodExplosion : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		BloodExplosionData[] array = particles;
-		foreach (BloodExplosionData bloodExplosionData in array)
+		BloodExplosionData[] drops = particles;
+		foreach (BloodExplosionData bloodExplosionData in drops)
 		{
 			bloodExplosionData.Initialize(size, lifetime, impulse);
 		}
-		BloodExplosionData[] array2 = gooparticles;
-		foreach (BloodExplosionData bloodExplosionData2 in array2)
+		BloodExplosionData[] blobs = gooparticles;
+		foreach (BloodExplosionData bloodExplosionData2 in blobs)
 		{
 			bloodExplosionData2.Initialize(size, lifetime, impulse * 1.2f);
 		}
@@ -102,58 +102,58 @@ internal class BloodExplosion : AlienDrawableGameComponent
 	public override void Draw(GameTime gameTime)
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
-		BloodExplosionData[] array = particles;
-		foreach (BloodExplosionData bloodExplosionData in array)
+		BloodExplosionData[] drops = particles;
+		foreach (BloodExplosionData bloodExplosionData in drops)
 		{
 			if (!(bloodExplosionData.lifetime <= 0f))
 			{
-				float num = 4f * bloodExplosionData.normalizedLifetime * (1f - bloodExplosionData.normalizedLifetime);
-				Color val = new Color(new Vector4(1f, 1f, 1f, num));
+				float alpha = 4f * bloodExplosionData.normalizedLifetime * (1f - bloodExplosionData.normalizedLifetime);
+				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
 				if (green)
 				{
-					spriteBatch.Draw(greenblood, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth()), center: true, val);
+					spriteBatch.Draw(greenblood, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth()), center: true, tint);
 				}
 				else
 				{
-					spriteBatch.Draw(texture, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth()), center: true, val);
+					spriteBatch.Draw(texture, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth()), center: true, tint);
 				}
 			}
 		}
-		BloodExplosionData[] array2 = gooparticles;
-		foreach (BloodExplosionData bloodExplosionData2 in array2)
+		BloodExplosionData[] blobs = gooparticles;
+		foreach (BloodExplosionData bloodExplosionData2 in blobs)
 		{
 			if (!(bloodExplosionData2.lifetime <= 0f))
 			{
-				float num = 4f * bloodExplosionData2.normalizedLifetime * (1f - bloodExplosionData2.normalizedLifetime);
-				Color val = new Color(new Vector4(1f, 1f, 1f, num));
-				spriteBatch.Draw(goo, base.Position + bloodExplosionData2.position, bloodExplosionData2.rotation, bloodExplosionData2.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth()), center: true, val);
+				float alpha = 4f * bloodExplosionData2.normalizedLifetime * (1f - bloodExplosionData2.normalizedLifetime);
+				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
+				spriteBatch.Draw(goo, base.Position + bloodExplosionData2.position, bloodExplosionData2.rotation, bloodExplosionData2.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth()), center: true, tint);
 			}
 		}
 	}
 
 	public override void Update(GameTime gameTime)
 	{
-		bool flag = false;
-		BloodExplosionData[] array = particles;
-		foreach (BloodExplosionData bloodExplosionData in array)
+		bool anyAlive = false;
+		BloodExplosionData[] drops = particles;
+		foreach (BloodExplosionData bloodExplosionData in drops)
 		{
 			bloodExplosionData.Update(gameTime);
 			if (bloodExplosionData.lifetime > 0f)
 			{
-				flag = true;
+				anyAlive = true;
 			}
 		}
-		BloodExplosionData[] array2 = gooparticles;
-		foreach (BloodExplosionData bloodExplosionData2 in array2)
+		BloodExplosionData[] blobs = gooparticles;
+		foreach (BloodExplosionData bloodExplosionData2 in blobs)
 		{
 			bloodExplosionData2.Update(gameTime);
 			if (bloodExplosionData2.lifetime > 0f)
 			{
-				flag = true;
+				anyAlive = true;
 			}
 		}
 		base.Update(gameTime);
-		if (!flag)
+		if (!anyAlive)
 		{
 			collection.Remove((GameComponent)(object)this);
 		}

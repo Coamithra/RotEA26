@@ -87,6 +87,17 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   artifact cleanup — a harness or screenshot cannot prove what the hash proves, so don't build one
   for this class of change. It does **not** judge whether a new name is a *good* name; a
   misleading-but-compiling rename hashes identically, so name quality stays a human review job.
+- **A refactor that DELETES a local is a different problem — the hash oracle may not cover it.**
+  The default build keeps every local for the debugger, so removing one changes the IL.
+  `--optimize` folds dead temporaries away and restores the byte-identical claim for some of that
+  class, but not all: collapsing `bool num = held; held = num | X;` to `held |= X` moves the
+  `ldloc` across the neighbouring property read, and collapsing repeated `x.Position - y.Position`
+  recomputations removes real `get_Position` calls (Roslyn never CSEs a property call). For those,
+  the question is **"is the difference confined to the methods I edited"** — answered by
+  `python tools/verify_decompiled_diff.py --ref main`, which decompiles both assemblies and diffs
+  the C#. Caveat: ILSpy NORMALISES, so an absent method means "same construct", not "identical IL".
+  Never read a raw IL diff of such a change directly — deleting a local renumbers every later slot
+  and the diff mispairs them, inventing changes in code you never touched. Details: tools/CLAUDE.md.
 - **Never verify motion with timed live screenshots.** A raw screenshot is only valid for STATIC
   appearance; anything time-varying needs a parked/scrubbed frame or a data sim. If you genuinely
   must see it live, build a break/pause (`DebugFlags` seam) that freezes at the moment of interest.
@@ -111,6 +122,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
   Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
+- **Host kick / block** (card 0b8a300b): `?netkickshot` (pair with `?level=<Name>`) parks the
+  host's remote-pause kick menu over a live level with no peer, for a screenshot;
+  `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
+  two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
+  the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new
@@ -129,6 +145,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   headroom, and only trust either with the window FOCUSED.** Details: web CLAUDE.md.
 - Level fast-boot added with it: `?level=Level2&flyspiders` (dense flying-spider swarm;
   `=fg` for the un-flattened foreground variant).
+- **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
+  mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
+  A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.
 - Dozens more per-feature tuning/diagnostic flags exist — see web CLAUDE.md ("Debug flags &
   tuning conventions" + each feature's bullet).
 

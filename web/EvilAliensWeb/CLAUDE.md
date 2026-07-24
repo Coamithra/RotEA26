@@ -74,6 +74,11 @@ generate much of the art/audio referenced here.
   While that texel was transparent black, the final ~1px of every tile lost up to 50% of its RGB
   **and alpha** — a hairline at every tile boundary, dark over the opaque Mars sky, bright where the
   `marshills` silhouettes sit over it (Trello `4ddcd13f`; measured -64 luminance in the sky band).
+  **On a MIPPED `.dds` that gutter has to be re-derived per level, and the pipeline does it** — the
+  pad is metadata, not content, so each level downsamples the LOGICAL image and pads *that* (see
+  tools/CLAUDE.md). Filtering the padded canvas instead (a plain `texconv -m 0`) blends content
+  into transparent pad as the levels shrink: a 4 px gutter survives `log2(4)=2` levels and then
+  fails hard. `check_pad_bleed.py` asserts the property at **every** level, which is what catches it.
   `build_textures.py`'s `edge_gutter()` therefore replicates the logical edge into the first 4 px of
   the pad (last column right, last row down, corner), which makes the filtered result identical to a
   true clamp at **any** pad size, and keeps the sampled 4×4 BC3 blocks free of transparent-black
@@ -86,7 +91,26 @@ generate much of the art/audio referenced here.
   six different speeds, so a tiling/wrap/parallax artifact can only be inspected once it holds
   still. Caveat: sub-pixel artifacts like the pad bleed vary in strength with where the boundary
   falls relative to render-target pixel centres, so sweep the FRACTIONAL part to cover phases — one
-  frozen frame is one phase, not the worst case.
+  frozen frame is one phase, not the worst case. GOTCHA: freezing every layer at the SAME design
+  column stacks layers that normally never coincide — at `?bgfreeze=0` the alien base's two
+  additive `2331-v5` fog layers land exactly on top of each other and the scene whites out. That is
+  the flag doing its job, not a blend/alpha regression; drop the flag to see the real look.
+- **The per-tile cull lives in ONE predicate, `BackgroundImage.TileOnScreen` (card 5216412d).** A
+  tile at `(x,y)` covers `[x, x+W*size) x [y, y+H*size)` and is drawn iff that overlaps 800x600.
+  It used to be four copy-pasted conditions and they had drifted: two measured the tile's WIDTH
+  along Y, and the two mirrorX ones had lost their `* size`. **Both slips cull tiles that are
+  VISIBLE** (a missing strip at the screen edge, not a spare tile) — a tall tile under-tests its
+  height, and a layer drawn bigger than its art under-tests both axes. Neither can show on a
+  shipped background (nothing sets `mirrorX`/`mirrorY`, and every live tile is square or wider than
+  tall), so **keep the predicate single** — a new call site must call it, never re-inline the
+  comparison. Sizes and shapes in play: `size` 1 / 1.5 / 2 / 2.4 / `1/3.238`; the Mars ground is the
+  only `[12,1]` grid and the only layer whose `realsize.Y` (600) is not its tile height, which is
+  what makes its Y term non-vacuous — for every `[1,1]` layer the Y term is trivially true.
+  **Verify with console `eaBgCull()`** (`Compat/BgCullTest.cs`): sweeps the real predicate for
+  soundness (a tile that intersects the screen is never culled), dry-runs whole scenario layers —
+  mirrored and TALL, shapes no shipped background uses — through the REAL `Draw`, then censuses the
+  live layers' per-frame `drawn` / `off-screen` counts. A screenshot cannot verify this cull at all,
+  since every shipping configuration errs invisibly; read the decisions as data instead.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
@@ -139,7 +163,11 @@ generate much of the art/audio referenced here.
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
-  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand).
+  `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
+  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
+  `eaBgCull()` (the background tile-cull oracle — run from inside a level),
+  `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
+  `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -221,6 +249,32 @@ site now lives under:
   (sole current case: `GameScene.UpdateStartup`'s pre-spawn clear — the ships and Get Ready
   banners follow in the same tick; the filter would eat them, which is exactly the no-ship
   regression `?binlog` caught during development).
+- **The puppet layer is EXEMPT from the standing filter** (card 74403f83). `Game1.UpdateInner`
+  drains the net rx AFTER `base.Update` in the same tick, so a purge armed by
+  `GameScene.UpdateWin`/`UpdateResetting` -- or by `NetApplyReset`, which purges from INSIDE the
+  drain itself -- is still live when the host's authoritative spawns arrive. `ComponentBin.Add`
+  therefore skips the filter while `NetPuppets.Constructing`, symmetric with the
+  `SuppressWorldSpawn` exemption immediately above it. A client that ate one diverged
+  PERMANENTLY and SILENTLY: `OnSpawn` registered the id either way, and `OnSnapshotEntry`'s
+  self-heal only rebuilds ids it has NEVER seen, so the ghost was never drawn, never collidable,
+  and `snapUnk` never climbed. Safe at teardown because `EvSpawn` and the snapshot path are both
+  gated on `GameScene.NetActiveScene`, which `Terminate` nulls BEFORE its own purges.
+- **A caller that ADOPTS what it adds must use `ComponentBin.TryAdd`, not `Add`.** `Add` diverts
+  silently -- that is the point, ordinary game code must not have to care -- but the net layer's
+  ship puppets keep the reference and gate their retry on it being null, so adopting a diverted
+  ship stranded that player for the rest of the session (`NetSession.SpawnPuppet` and
+  `SpawnFriend`; the couch/friend one bites more often, since couch players hit the resets that
+  arm `Purge<PlayerShip>`). `TryAdd` reports whether the component actually landed; on false,
+  leave the reference clear and let the retry fire next tick. Note the ship SHOULD be purged by
+  a reset (`SpawnAllPlayers` respawns every seated slot), so verify-and-retry is correct here
+  and exempting would be wrong.
+- **Wire-driven banners are NOT exempt, deliberately** (card 74403f83). `NetSession`'s
+  `EvMessage`/`EvUnlock` adds can be eaten by a standing `Purge<AnimatedMessage>`, and that
+  MATCHES the host: the level script is host-only and only runs in `GameState.Normal`, so the
+  host cannot emit a beat while it is itself in Win or Resetting, and both peers enter those
+  states from the host's own broadcast. Reaching it needs the two state machines to have already
+  diverged -- a different bug, which letting the banner through would only mask. Nothing dangles
+  either way (one-shot, no reference held past the `Add`). Don't "fix" it.
 - **Adds while the world is `Push`ed (paused) join the freeze**: an `AlienDrawableGameComponent`
   added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
   `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
@@ -236,11 +290,40 @@ site now lives under:
   by running the whole pass over the entry-time `count` — a collidable born mid-pass joins the
   NEXT pass, which is what the old deferred birthList did anyway. **Apply the same rule to any
   new phase that indexes a parallel array by collection position.**
+  **The contract is PINNED by `eaBinTest()`** (card bcdc7430), scenarios 5 and 6. The fix
+  froze THREE bounds: the outer fill loop, the all-pairs scan inside it, and the resolution
+  loop. Scenario 6 covers the resolution loop; scenario 5 covers the other two together, and
+  has to — only a non-gridded type's callback runs during the fill phase at all, so its
+  `CollisionMultibox` spawner is the sole way to reach either bound.
+  Neither scenario leans on the `boxes[m]` out-of-range throw: whether it fires depends on the
+  high-water mark `boxes` accumulated from prior play, so such a test would pass on the broken
+  code and its verdict would be a function of session history. Each instead PLANTS the fault's
+  precondition — scenario 5 needs only `List<T>` version-checking its enumerator; scenario 6
+  runs a warm-up pass plus a filler collidable it then removes, so the newborn lands on a stale
+  `boxes` entry the clear loop (`i != count`) skipped — and then ASSERTS the plant took, since a
+  silently-missing plant is the one way it could go quietly vacuous (a busy world can shift the
+  index, which is why the suite is menu-only). Both also carry a positive control.
+  Verified by reverting `DetectCollisions` to its pre-fix form: scenario 5 reports
+  `InvalidOperationException` and scenario 6 reports the newborn participating, in the menu AND
+  mid-level.
 - **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds, and reports how many
   passes `DetectCollisions` carried through a mid-pass collidable add (the condition above —
   it fires in the hundreds during ordinary play, so it is a live proof the path is exercised,
   not a warning); `eaBinTest()` runs the scripted scenario suite (`Compat/BinTest.cs`) against
-  the live bin and prints PASS/FAIL. `eaKillShips()` asplodes every locally-owned `PlayerShip`
+  the live bin and prints PASS/FAIL -- 27 assertions across 8 scenarios (four lifecycle, two
+  net-layer, and the two collision-pass ones in the bullet above). **Run it from the MAIN
+  MENU.** A few checks are PRECONDITIONS rather than assertions about the code, and a failed
+  one short-circuits the rest of its scenario, so read the FAIL line rather than the tally.
+  The two net scenarios cover `TryAdd`'s landed/diverted contract and the puppet-filter
+  exemption, the latter driven END TO END through the real `NetPuppets.OnSpawn`
+  (`NetPuppets.Enable` needs only a `Game` plus the ServiceHelper bin/score, so no transport
+  and no paired session are required). They SKIP themselves when a co-op session OR any
+  `GameScene` is up -- including the attract demo the menu launches by itself -- because they
+  arm `Purge<AlienDrawableGameComponent>` for real, which near a live world would wipe it.
+  The suite is strictly leave-no-trace and must stay that way: it expires the filter it arms
+  and prunes every scratch component, so back-to-back runs in one tick all read the same
+  tally; a run that leaked state would make the NEXT run report phantom failures.
+  `eaKillShips()` asplodes every locally-owned `PlayerShip`
   through the real `Asplode()`→`Die()` path (remote/friend puppets skipped) — the repeatable
   way to reach a death/reset, since `AllShipsDead` needs BOTH co-op ships down and waiting on
   the `?aiplayer` AI to die is neither timely nor repeatable.
@@ -492,11 +575,25 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     crossing on top of the `bands` cuts and each strip maps through the one cell its midpoint falls
     in — every emitted UV stays inside the logical sheet. Cost: ~4 → ~14 quads/face at the baked
     tiling, one batched call unchanged, tower pass 0.73 → 1.29 ms.
-  - **756-v1 ships with NO mip chain**, so a high `?wallsidetile` minifies with bilinear and
-    nothing else, and the far end of a shaft aliases — weigh it on `preview_wall3d.py --ladder`
-    (one tower per tiling). That tool's `sample()` is bilinear CLAMP on purpose: it models
-    `DrawGeometry3D`'s `LinearClamp` exactly, so it neither invents a moire (point sampling would)
-    nor prettifies the sheet's own 8→0 wrap (wrapping would).
+  - **756-v1 SHIPS A MIP CHAIN** (card `110153c7`); it is the only mipped `.dds` in the project.
+    At the baked `?wallsidetile=4` a shaft spends ~10.8 cells down its length, so its far end
+    minifies hard, and with bilinear alone it aliased — which read as a SHIMMER because the wall
+    scrolls, so no still frame could show it. Nothing engine-side opts in: KNI maps
+    `TextureFilter.Linear` to `LINEAR_MIPMAP_LINEAR` as soon as `LevelCount > 1`, so uploading
+    the levels (`WebContentManager.TryLoadDds`) is the whole change, and `SamplerState.LinearClamp`
+    becomes trilinear by itself. NPOT + mips needs **WebGL 2**, which BlazorGL uses (verified: the
+    canvas holds a `webgl2` context). **The tower TOPS are mipped too**, not just the shafts — they
+    are sprite-drawn at ~5x minification (a 156px cell into a ~32px block), so they pick a level as
+    well; that is a fix, not a regression, but it is why this touched more than the shafts.
+    A/B it live with **`?nomips`** (uploads level 0 only, so every `.dds` falls back to bilinear).
+    Weigh tilings on `preview_wall3d.py --ladder` (bilinear row over trilinear row) and
+    **`--shimmer`**, which scores the aliasing as a number instead of by eye: bilinear worsens with
+    density (4.15 / 6.26 / 8.21 / 9.93 at tile 1/2/4/8) while trilinear stays flat (~1.2-1.8). So
+    mips at tile 4 are steadier than bilinear at tile 1, and **dropping `Wall.DefaultSideTile`
+    toward 2 is NOT the cheaper fix** — it is strictly worse and loses the "reads tall" win.
+    That tool's `sample()` is bilinear CLAMP on purpose: it models `DrawGeometry3D`'s `LinearClamp`
+    exactly, so it neither invents a moire (point sampling would) nor prettifies the sheet's own
+    8→0 wrap (wrapping would); `sample_tri` is the trilinear form layered on top.
   - Lifetime: `Wall.DeathY` defers unload past the bottom edge (a base leads/trails its cap by
     ~154px, so dying at y>600 popped visible towers — this also delays the level's next event
     ~0.6s, intended); `Wall.EntryLead` spawns higher so towers enter base-first (bottom-row grids
@@ -780,7 +877,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v6):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v7):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -788,7 +885,8 @@ interpolation feel, both gated on real-network playtests.
   pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
   `MsgWelcome` handshake (protocol version byte; both sides Hello until paired, opposite
   role replies Welcome; **v5** adds the host-granted primary slot byte -- card 4d904410;
-  **v6** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
+  **v6** appends the peer-identity token to the handshake -- card 0b8a300b;
+  **v7** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
   card b0ab09ec, see the Score/lives bullet).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
@@ -976,6 +1074,58 @@ interpolation feel, both gated on real-network playtests.
     no ship for the first minute). Expect
     `roster=0:Keyboard*,1:Remote,2:Generic*,3:RemoteFriend` on the host and
     `0:Remote,1:Keyboard*,2:RemoteFriend,3:Generic*` on the join side.
+  - **A full RESET with couch players aboard is reached with `eaKillShips()` on both tabs**
+    (card af0eb00a) -- and needs no new tooling, because the "all four ships dead at once"
+    framing is weaker than it looks: `Oracle.AllShipsDead` is `playerShips.Count == 0` and
+    NOTHING respawns until it fires, so **dead ships stay dead** and the two console calls need
+    not land in the same frame. After the second tab fires, each peer's puppets die on their own
+    existing paths (the primary remote on the `alive=false` edge, the couch puppet on the 500ms
+    `FriendTimeoutMs`) and `AllShipsDead` then trips `LoseLife`. Read the result with
+    **`eaNetRoster()`** on both peers either side of the kill: the 5s `[net]` cadence can
+    straddle the whole ~2.7s reset, so a sampled before/after can show nothing. The gate is
+    `resets` +1 on both, `roster=` (the seat map) IDENTICAL across the reset and still mirror-
+    image, and `ships=` back to one entry per seat -- a **missing** owner is a puppet that never
+    re-adopted (frozen on its spawn pose), a **duplicate** owner is a double spawn.
+    **`ships=` alone cannot tell "adopted" from "frozen"** -- a never-adopted puppet still shows
+    as a ship in its seat. That is what the dump's `at=<owner>:<device>@x,y` is for: sample it
+    twice a second or so apart and check (a) the slot MOVES and (b) the two peers agree per slot
+    within interpolation lag. Observed clean: slot 3 read `592,305|592,305` -> `521,283|521,283`
+    -> `389,362|389,362` host|join across the field after a reset. Caveat: right after the reset
+    the purge leaves no enemies, so the `?aiplayer` AI parks every ship on the spawn ladder
+    (`y ~ 120/240/360/480`) for a few seconds -- that is the AI having no target, NOT a frozen
+    puppet. Wait for the spawners to replay before reading motion.
+  - **GOTCHA -- an OCCLUDED window freezes the whole run, and it fails silently.** Chrome marks a
+    fully covered window `visibilityState:'hidden'` (even with `document.hasFocus()` true) and
+    stops rAF entirely, so a peer parked behind another window simply stops ticking; the peers
+    then time each other out and every metric is garbage. Two side-by-side windows is the
+    documented answer, but when the surrounding tooling covers them (an automated run driving
+    Chrome from another app) **add `?fpsuncapped` to BOTH peers** -- it drives the loop off a
+    `MessageChannel` instead of rAF, so both keep ticking while occluded. Verified: an occluded
+    `?fpsuncapped` pair ran a full reset cycle with `drop=0 sgap=0 ordViol=0 seqGap=0`. It is a
+    LOOP flag, so it needs neither the HUD nor `?nofps`. Cost: the client runs far above vsync,
+    which inflates `pupPops`/`dup`/`snapUnk` around id churn -- read those as not comparable to
+    a normal-rate run, while roster/adopt/`resets` assertions stay valid.
+  - **`?netdropgrant` (client) is the only trigger for `ExpireUnclaimedGrants`.** The host holds
+    a granted couch seat as `RemoteFriend` until the peer's first stream for it lands; a client
+    that silently fails to take the grant would otherwise leak that seat for the session (and the
+    game stops being re-listable). `?netlocal` always TAKES its grant, so the expiry path had no
+    trigger at all -- this flag drops **every** `EvSlotGrant` (it is read per grant, not
+    one-shot, so while it is set no couch join completes) after clearing `joinRequestPending`,
+    leaving this side exactly as a genuine failed take does. Expect the host to log
+    `granted peer couch join slot=N` then `released unclaimed couch grant slot=N` ~10s later
+    (`GrantClaimTimeoutMs`), and the seat to leave `roster=` rather than leak.
+  - **`RejectFull` needs `eaNetCouchJoin()`, NOT `?netlocal`.** Reaching it means the host roster
+    is already full when a joiner says hello, which means couch players seated BEFORE pairing --
+    and `TickLocalJoinSim` is deliberately gated behind `PeerUp` (pre-pairing, `AllocateSeat`
+    cannot yet know which seat the joiner's primary will need, the very hazard its comment warns
+    about). So `?netlocal=3` can never fill the roster in time: the joiner is the peer that
+    ungates it, and it already holds a seat by then. `eaNetCouchJoin()` makes the same
+    `TrySeatLocalJoin` call a real gamepad Start makes, which is NOT PeerUp-gated -- call it 3x
+    on a `?net=host` boot to reach `roster=0:Keyboard*,1:Generic*,2:AI*,3:AI* peer=down`, then
+    pair a `?net=join`. Host logs `no free roster slot for the joiner -- rejecting` +
+    `session stop (pairing rejected)`; the joiner logs `peer rejected the pairing (reason=4)`
+    (4 = `RejectFull`) + `session stop (rejected by peer)` -- an explicit reject rather than a
+    bare channel close is what proves the `RejectGraceMs` deferral let the reliable frame out.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
   own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case
@@ -1004,8 +1154,12 @@ interpolation feel, both gated on real-network playtests.
   to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
-  Add `?binlog` to both when the run is about lifecycle (it is the detector for a purge filter
-  or pause freeze eating a puppet/banner). For a death/reset, KEEP `?invuln` on both and call
+  Add `?binlog` to both when the run is about lifecycle (it is the detector for a pause freeze,
+  or for the purge filter eating a BANNER -- no longer for it eating a PUPPET, since card
+  74403f83 exempted the puppet layer from the filter and the bin's divert log sits inside the
+  branch that exemption skips; a puppet add that somehow still gets swallowed prints its own
+  `[net] puppet add was diverted by the bin` line instead). For a death/reset, KEEP `?invuln`
+  on both and call
   `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
   through invulnerability, and leaving the flag on is what keeps the rest of the run from
   dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
@@ -1013,6 +1167,17 @@ interpolation feel, both gated on real-network playtests.
   turn or two while a client claim is in flight, and the client deliberately leaves that id
   dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
   rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
+  **A STRUCTURAL check (roster, slots, who-owns-what) is the one thing two HIDDEN tabs in one
+  window can still do**, which is how the four-seat roster in the `?netlocal` bullet was
+  captured without hand-arranging windows. Two things make it survive: `index.html` falls back
+  to `setTimeout(tickJS, 33)` while `document.hidden` (a REQUESTED ~30Hz -- Chrome clamps
+  hidden-tab timers after ~10s and much harder past 5 min, so treat it as a short window, not a
+  rate you hold), and the roster simply does not depend on cadence -- once `PeerStalled` the
+  friend timeout stretches to `PeerTimeoutMs + PeerGraceMs`, and a timed-out friend **keeps its
+  seat** by design (`NetSession.Friends.cs`). It does NOT extend to anything timing-derived:
+  `pops`/`pupPops`/`buf`/`extrap` off a hidden or unfocused tab are meaningless (the FPS HUD
+  says so on its own readout), so every smoothness or feel verdict still needs two focused
+  windows.
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
@@ -1033,6 +1198,53 @@ interpolation feel, both gated on real-network playtests.
   win trigger lives in the host-only script); the client runs its own `Victory()` from it,
   achievements included. `GameScene.NetActiveScene` (static, set in Initialize / cleared
   in Terminate) is how NetSession reaches the private state machine.
+- **Host kick / kick+block (card 0b8a300b) -- the host's ONLY agency under a remote pause.**
+  A remote pause freezes our world via `ComponentBin.Push`, which disables every collection
+  component **including `GameScene`** -- so the host's own pause trigger never runs, and the
+  drop failsafe can't help either (a held pause widens the timeout to the 120s
+  `PausedPeerTimeoutMs` backstop). Before this card a stranger off the public game browser
+  could freeze someone's run indefinitely.
+  - **`NetKickMenu`** (a `ConfirmationMenu`) replaces `NetPauseOverlay` for the HOST once the
+    pause outlasts `NetSession.KickOfferDelayMs` (4s): `Keep Waiting` / `Kick Player` /
+    `Kick and Block`. It works for the same reason the local pause menu does -- **added AFTER
+    the Push, so it stays `Enabled`**. Entry 0 is `Keep Waiting` and preselected, so a
+    reflexive Enter over a suddenly-appearing menu is harmless. Declining **re-arms** the
+    offer (`NetSession.RearmKickOffer`), so waiting once never forfeits it. The client keeps
+    the plain overlay -- there is nobody for it to kick.
+  - **The offer timer lives in `NetSession.Update`, not `GameScene`** -- `GameScene` is frozen
+    by the Push, so it cannot time its own escape hatch. Real time (`NowMs`), like the rest of
+    the net layer; `gameTime` means nothing in a frozen world.
+  - **`KickPeer(block)` splits the teardown deliberately:** everything visible happens now
+    (unfreeze, `ExplodePuppet`, `oracle.ReleasePlayer(Remote)` + `ReleaseAllFriendPuppets`),
+    but `Stop()` waits out `RejectGraceMs` -- `Stop() -> pc.close()` is ABORTIVE on WebRTC and
+    would discard the still-buffered `EvKick`, leaving the kicked player with a generic
+    "disconnected" instead of a reason. Do NOT collapse it back into one call.
+    The client's `EvKick` handler reuses `EndMatchPeerGone` -> `NetApplyPeerLeft`, which
+    already unwinds its own pause-menu depth (it is almost certainly sitting in it) and exits.
+    A kick applies to EVERY session kind and is never a match end for the KICKER: the host
+    reverts to single-player and plays on (`RevertToSinglePlayer`, shared with JIP peer-loss).
+  - **The block needs an identity, so the handshake gained one -- protocol v5 -> v6.**
+    `eaRtc.peerId` = a random 128-bit token minted once into `localStorage`, FNV-hashed to 8
+    wire bytes (`HelloBytes` 13 -> 21). **It is SELF-REPORTED: a speed bump against casual
+    re-joining, not authentication** -- clearing site data or incognito mints a new one. Never
+    sent to the signaling server, only to an already-connected peer. Don't build anything that
+    must trust it on this. `peerId` 0 (JS could not produce one) is never recorded and never
+    matched, so one broken `localStorage` can't get every such peer refused.
+  - Enforced in `HandleHello` (`RejectBanned`) -- the ONE choke point both rejoin routes pass
+    through (public browser AND a typed room code), and before `PeerConnected`/slot
+    reservation, so a blocked peer re-pairing never touches the world. `blockedPeers`
+    deliberately **survives `NetSession.Stop()`** (a kick stops the session and the host
+    re-lists seconds later; the block must outlive that) and is cleared in
+    `GameScene.Terminate` = the card's "for that session only".
+  - **Verify with `eaKickTest()`** (`Compat/Net/NetKickTest.cs`) -- the block predicate + the
+    v6 codec as DATA, because both dangerous failures are invisible in play: a block that
+    fails to persist across the kick's own `Stop()`, and a wire-layout slip that decodes the
+    wrong bytes as a peer id. It restores the live set, and SKIPS the survives-`Stop()` leg
+    over a live session rather than ending a real match (it says so; a skipped leg is not a
+    pass). `?netkickshot` (pair with `?level=`) parks the menu over a live level for a
+    screenshot. **`?netfakepeer=<s>` is REQUIRED for any two-tab test** -- both dev tabs share
+    one `localStorage`, so they present the SAME peer id and blocking the joiner would block
+    yourself (the `?netfakehash=` trick, same reason).
 - **Pause is a replicated event; the triggers stay local (card 11.3):** the local pause
   push / every resume path sends EvPause on/off. The receiving side freezes via
   `Collection.Push()` under a `NetPauseOverlay` ("OTHER PLAYER PAUSED") -- no interactive
@@ -1101,8 +1313,17 @@ interpolation feel, both gated on real-network playtests.
     that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
     both draw over the menus and poison the next play of that level.
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
-  remote puppet lives (LoseLife triggers on AllShipsDead); roster is exactly two peers;
-  DevCommentEvent commentary is not replicated (profile-local setting). Boss puppets are
+  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS
+  (see the sub-bullet below); DevCommentEvent commentary is not replicated (profile-local
+  setting).
+  - **Two PEERS is not two PLAYERS -- 4-player online co-op already works today** (card
+    2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
+    `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
+    The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
+    `ScoreVisualiser.SlotCount`, slot-keyed `MsgFriendState`, `EvScoreSync`, the claim
+    ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
+    per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
+    connection math) are in `plans/4p-online-coop.md`. Boss puppets are
   best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
   state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
   play on the client -- an attributed remote death removes the puppet). The time-scaling half of

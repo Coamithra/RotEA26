@@ -285,6 +285,26 @@ namespace EvilAliensWeb.Compat
 				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
 		}
 
+		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest'). Runs
+		// Compat/Net/NetKickTest.Run() and returns the PASS/FAIL report.
+		[JSInvokable("debugKickTest")]
+		public static string KickTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
+		}
+
+		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
+		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background
+		// is) through the real Draw, and censuses the live layers. See Compat/BgCullTest.cs --
+		// the cull's correctness is invisible to a screenshot, so it is read as data.
+		[JSInvokable("debugBgCull")]
+		public static string BgCull()
+		{
+			return EvilAliensWeb.Compat.BgCullTest.Run();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's
@@ -321,6 +341,37 @@ namespace EvilAliensWeb.Compat
 				ship.Asplode();
 			}
 			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
+		}
+
+		// JS bridge for the on-demand roster dump (eaNetRoster in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster'). Prints the same roster=
+		// string the 5s [net] metrics line carries, plus resets=, at the instant it is called.
+		// Written for the reset-with-couch-players gate (card af0eb00a): the assertion is
+		// before-vs-after a ~2.7s reset, which the metrics cadence can straddle entirely.
+		[JSInvokable("debugNetRoster")]
+		public static string NetRoster()
+		{
+			return EvilAliensWeb.Compat.Net.NetSession.RosterDump();
+		}
+
+		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin'). Makes the same
+		// NetSession.TrySeatLocalJoin call a real gamepad Start press makes. HOST-SIDE that
+		// works before a peer has paired, which ?netlocal cannot do (TickLocalJoinSim is gated
+		// behind PeerUp -- correctly: pre-pairing, AllocateSeat cannot yet know which seat the
+		// joiner needs). That pre-pairing window is the only way to fill the roster ahead of a
+		// joiner, i.e. the sole trigger for the host's RejectFull path (card af0eb00a). On a
+		// CLIENT it is still PeerUp-gated, because a client seat has to be asked for.
+		[JSInvokable("debugNetCouchJoin")]
+		public static string NetCouchJoin()
+		{
+			if (!EvilAliensWeb.Compat.Net.NetSession.Active)
+			{
+				return "[debug] eaNetCouchJoin: no net session (needs a ?net= boot)";
+			}
+			string outcome = EvilAliensWeb.Compat.Net.NetSession.DebugCouchJoin();
+			return "[debug] eaNetCouchJoin: " + outcome + "\n  "
+				+ EvilAliensWeb.Compat.Net.NetSession.RosterDump();
 		}
 
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,

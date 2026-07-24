@@ -1316,10 +1316,20 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return 0;
             }
+            return OccupiedMask(oracle, exclude: localPrimarySlot);
+        }
+
+        // A roster as a slot mask, optionally with one seat left out. `exclude` is how the client
+        // omits its OWN seat: that is the seat it would move out of, not one that blocks a grant.
+        // Pass -1 to mask every seated slot. Split out so eaSlotTest can drive it against a
+        // scratch Oracle -- the "which seats are in the way" question is the input BOTH sides of
+        // the negotiation run on, so a slip here is a silent bad grant.
+        internal static byte OccupiedMask(Oracle roster, int exclude)
+        {
             byte mask = 0;
             for (int i = 0; i < Oracle.MaxPlayers; i++)
             {
-                if (i != localPrimarySlot && oracle.IsSeated(i))
+                if (i != exclude && roster.IsSeated(i))
                 {
                     mask |= NetProtocol.SlotBit(i);
                 }
@@ -1342,7 +1352,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             if (peerPrimarySlot != NetProtocol.SlotNone)
             {
-                if (!NetProtocol.SlotIsBlocked(peerBlocked, peerPrimarySlot))
+                if (!NetProtocol.SlotInMask(peerBlocked, peerPrimarySlot))
                 {
                     return true;
                 }
@@ -1351,11 +1361,21 @@ namespace EvilAliensWeb.Compat.Net
                 // mask rather than leaving it stranded -- it keeps helloing until its slot
                 // settles, so this converges: we never re-offer a seat the mask still blocks.
                 Console.WriteLine("[net] joiner cannot take granted slot=" + peerPrimarySlot + " -- re-allocating");
+                if (puppet != null)
+                {
+                    // The peer streams as soon as it is PeerUp, which can be BEFORE the slot
+                    // exchange settles -- so a puppet may already be flying in the seat we are
+                    // about to give up. ManagePuppet only re-adopts a ship the scene spawned; it
+                    // never re-stamps a live one's Owner, so leaving it would strand the remote
+                    // player in the old slot while the wire, EvScoreSync and EvBlast all moved to
+                    // the new one. Drop it and let the next stream rebuild it in the right seat.
+                    ExplodePuppet();
+                }
                 oracle.RemovePlayerAt(peerPrimarySlot, ControlDevice.Remote);
                 peerPrimarySlot = NetProtocol.SlotNone;
             }
             int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
-            if (slot >= 0 && NetProtocol.SlotIsBlocked(peerBlocked, slot))
+            if (slot >= 0 && NetProtocol.SlotInMask(peerBlocked, slot))
             {
                 // A Remote registration the joiner cannot use (one that outlived a restarted
                 // session, or was re-seated by SpawnAllPlayers). Free it before re-picking, or we
@@ -1395,15 +1415,7 @@ namespace EvilAliensWeb.Compat.Net
         // convergence asserted) with no oracle, transport or session. eaSlotTest() drives it.
         private static byte HostOccupiedSlots()
         {
-            byte mask = 0;
-            for (int i = 0; i < Oracle.MaxPlayers; i++)
-            {
-                if (oracle.IsSeated(i))
-                {
-                    mask |= NetProtocol.SlotBit(i);
-                }
-            }
-            return mask;
+            return OccupiedMask(oracle, exclude: -1);
         }
 
         // The lowest seat free on OUR roster and not blocked on the peer's, or -1 when there is
@@ -1414,7 +1426,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             for (int i = HostPrimarySlot + 1; i < Oracle.MaxPlayers; i++)
             {
-                if (!NetProtocol.SlotIsBlocked(hostOccupied, i) && !NetProtocol.SlotIsBlocked(peerBlocked, i))
+                if (!NetProtocol.SlotInMask(hostOccupied, i) && !NetProtocol.SlotInMask(peerBlocked, i))
                 {
                     return i;
                 }
@@ -1467,6 +1479,18 @@ namespace EvilAliensWeb.Compat.Net
         // registration AND any live ship move across.
         private static void AdoptGrantedPrimarySlot(byte slot)
         {
+            if (slot >= NetProtocol.MaxSlots)
+            {
+                // Off-the-wire value, so bound it before anything acts on it. An out-of-range
+                // grant is unreachable from our own host code, but taking it on trust would be
+                // the one input the negotiation cannot converge on: LocalBlockedSlots can never
+                // set a bit for a slot that does not exist, so the host would re-offer the same
+                // impossible seat every second forever -- and at the menu we would silently
+                // adopt a slot AddPlayerAt then refuses, leaving our ship in a seat the peer
+                // never addresses.
+                Console.WriteLine("[net] ignoring out-of-range granted slot=" + slot);
+                return;
+            }
             SlotAdopt action = DecideSlotAdopt(localPrimarySlot, slot, peerPrimarySlot,
                 GameScene.NetActiveScene != null, oracle.IsSeated(localPrimarySlot), oracle.IsSeated(slot));
             if (action == SlotAdopt.Settled)

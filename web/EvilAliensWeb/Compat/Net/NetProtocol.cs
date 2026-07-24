@@ -159,7 +159,8 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- handshake ----------------------------------------------------------------
 
-        // v8: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1][peerId:8][blockedSlots:1] = 22 bytes. The
+        // v8: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1][peerId:8]
+        // [blockedSlots:1] = 22 bytes. The
         // build hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
         // the identical published binary" -- a stale-cached client is REJECTED, not subtly
         // desynced. Flags currently carry only the DebugFlags.Active bit (menu-lobby
@@ -188,15 +189,20 @@ namespace EvilAliensWeb.Compat.Net
         public const byte HelloFlagDebugActive = 1 << 0;
         public const int HelloBytes = 22;
 
-        // Bit `slot` of a blockedSlots mask. Slots are 0..3, so the mask always fits a nibble.
+        // Bit `slot` of a slot mask. Slots are 0..MaxSlots-1, so the mask fits a nibble today and
+        // a byte for any plausible MaxSlots. Named for the mask, not for either side's meaning of
+        // it: the same predicate reads the peer's BLOCKED slots and our own OCCUPIED ones.
         public static byte SlotBit(int slot)
         {
             return (byte)(1 << slot);
         }
 
-        public static bool SlotIsBlocked(byte mask, int slot)
+        // Bounded by MaxSlots, not a literal, for the reason its comment gives: the mask builders
+        // iterate Oracle.MaxPlayers, so a raised roster would set bits this predicate then read as
+        // clear -- and the host would hand the joiner an occupied seat, silently.
+        public static bool SlotInMask(byte mask, int slot)
         {
-            return slot >= 0 && slot < 4 && (mask & SlotBit(slot)) != 0;
+            return slot >= 0 && slot < MaxSlots && (mask & SlotBit(slot)) != 0;
         }
 
         public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)

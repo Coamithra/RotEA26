@@ -22,7 +22,9 @@ namespace EvilAliensWeb.Compat.Net
     // PASS as covering them.
     //
     // Leave-no-trace at any point in play: the roster legs run against a SCRATCH Oracle built
-    // with the live one's Game and never added to it, so the real player table is untouched.
+    // with the live one's Game and never added to it, so the real player table is untouched --
+    // and detached again in a finally, because Oracle's constructor subscribes to
+    // Game.Components and would otherwise leave this fixture mirroring the live world for good.
     internal static class NetSlotTest
     {
         public static string Run()
@@ -150,57 +152,89 @@ namespace EvilAliensWeb.Compat.Net
             //
             // The two functions above are only correct if the oracle really behaves the way their
             // inputs assume. Ground that rather than leaving the suite a self-consistent fiction.
-            // A scratch Oracle: its constructor seats a full 4-slot table and it is never added to
-            // the game, so the live roster is untouched.
+            // A scratch Oracle: its constructor ALLOCATES a 4-slot table (it seats nobody) and it
+            // is never added to the game, so the live roster is untouched. Its constructor does
+            // subscribe to Game.Components, hence the DetachFromComponents() in the finally --
+            // without it every run would leak a handler pair and keep mirroring the live world.
             Oracle live = ServiceHelper.Get<IOracleService>()?.Oracle;
             bool oracleLegRan = live != null && live.Game != null;
             if (oracleLegRan)
             {
                 Oracle scratch = new Oracle(live.Game);
-                Check(!scratch.IsSeated(0) && !scratch.IsSeated(1), "a fresh roster seats nobody");
-                scratch.AddPlayerAt(0, ControlDevice.Keyboard);
-                scratch.AddPlayerAt(1, ControlDevice.AI); // the shape an attract demo leaves behind
-                Check(scratch.IsSeated(0) && scratch.IsSeated(1), "the attract-demo roster shape seats 0 and 1");
+                try
+                {
+                    Check(!scratch.IsSeated(0) && !scratch.IsSeated(1), "a fresh roster seats nobody");
+                    scratch.AddPlayerAt(0, ControlDevice.Keyboard);
+                    scratch.AddPlayerAt(1, ControlDevice.AI); // the shape an attract demo leaves behind
+                    Check(scratch.IsSeated(0) && scratch.IsSeated(1), "the attract-demo roster shape seats 0 and 1");
 
-                // THE PREMISE OF THE WHOLE CARD: MovePlayerSlot refuses on the DESTINATION being
-                // occupied, not the source. A joiner in slot 0 with slot 1 free moves fine; it is
-                // the granted seat being taken that bites.
-                Check(!scratch.MovePlayerSlot(0, 1), "MovePlayerSlot refuses when the DESTINATION is seated");
-                Check(scratch.IsSeated(0), "a refused move leaves the source seat alone");
-                Check(scratch.MovePlayerSlot(0, 2), "MovePlayerSlot allows a move to a FREE seat");
-                Check(!scratch.IsSeated(0) && scratch.IsSeated(2), "an allowed move really moves the seat");
+                    // THE PREMISE OF THE WHOLE CARD: MovePlayerSlot refuses on the DESTINATION
+                    // being occupied, not the source. A joiner in slot 0 with slot 1 free moves
+                    // fine; it is the granted seat being taken that bites.
+                    Check(!scratch.MovePlayerSlot(0, 1), "MovePlayerSlot refuses when the DESTINATION is seated");
+                    Check(scratch.IsSeated(0), "a refused move leaves the source seat alone");
 
-                // ...and that a full roster is what FirstMutuallyFreeSlot's -1 leg models.
-                scratch.AddPlayerAt(0, ControlDevice.Keyboard);
-                scratch.AddPlayerAt(3, ControlDevice.AI);
-                Check(scratch.FirstFreeSlot(1) < 0, "a full roster really has no free slot above 0");
+                    // The mask both sides of the negotiation run on, off that same roster. The
+                    // `exclude` rule is the subtle one: the client must NOT report its own seat,
+                    // or it blocks the very slot it is trying to move out of.
+                    Check(NetSession.OccupiedMask(scratch, exclude: -1) == Mask(0, 1),
+                        "OccupiedMask reports every seated slot");
+                    Check(NetSession.OccupiedMask(scratch, exclude: 0) == Mask(1),
+                        "OccupiedMask omits our own seat, so we never block our own move");
+                    Check(NetSession.OccupiedMask(scratch, exclude: 2) == Mask(0, 1),
+                        "excluding an EMPTY slot changes nothing");
+                    // End to end: that mask, handed to the allocator, is what dodges the collision.
+                    Check(NetSession.FirstMutuallyFreeSlot(Mask(0), NetSession.OccupiedMask(scratch, exclude: 0)) == 2,
+                        "the real roster's mask makes the host grant slot 2, not the occupied 1");
+
+                    Check(scratch.MovePlayerSlot(0, 2), "MovePlayerSlot allows a move to a FREE seat");
+                    Check(!scratch.IsSeated(0) && scratch.IsSeated(2), "an allowed move really moves the seat");
+
+                    // ...and that a full roster is what FirstMutuallyFreeSlot's -1 leg models.
+                    scratch.AddPlayerAt(0, ControlDevice.Keyboard);
+                    scratch.AddPlayerAt(3, ControlDevice.AI);
+                    Check(scratch.FirstFreeSlot(1) < 0, "a full roster really has no free slot above 0");
+                    Check(NetSession.FirstMutuallyFreeSlot(NetSession.OccupiedMask(scratch, exclude: -1), 0) == -1,
+                        "a full real roster reaches the RejectFull leg");
+                }
+                finally
+                {
+                    scratch.DetachFromComponents();
+                }
             }
 
             // ---- 4. Legacy control ------------------------------------------------------------
             //
             // A green tick above proves nothing unless the same input is shown to BREAK the old
-            // code (the eaNetScore.test precedent). The old policy, verbatim in shape: settle
-            // peerPrimarySlot FIRST, then bail out of a busy move "staying put".
-            (byte local, byte peer, bool settled) LegacyAdopt(byte localSlot, byte granted, bool localSeated, bool grantedSeated)
+            // code (the eaNetScore.test precedent). This is an inlined restatement of the old
+            // branch -- it cannot share a data path with the new one, because the whole change is
+            // that the decision moved out of the live method -- so it is only worth what the
+            // CONTRAST below is worth: the same six inputs, the two policies, different answers.
+            byte LegacyAdopt(byte localSlot, byte granted, bool localSeated, bool grantedSeated)
             {
-                byte peer = NetSession.HostPrimarySlot; // assigned BEFORE the early return
+                // The old code assigned peerPrimarySlot HERE, before the early return below --
+                // which is what silenced the 1 Hz hello on both peers and made the failure
+                // unrecoverable. It is unconditional, so there is nothing to assert about it; the
+                // observable difference is the slot it ends up with, asserted below.
                 if (localSlot != granted && localSeated && grantedSeated)
                 {
-                    return (localSlot, peer, true); // "staying put" -- and settled anyway
+                    return localSlot; // "staying put"
                 }
-                return (granted, peer, true);
+                return granted;
             }
 
-            // The menu case: the old code left the peers disagreeing (joiner 0, host granted 1)...
-            var legacyMenu = LegacyAdopt(0, 1, localSeated: true, grantedSeated: true);
-            Check(legacyMenu.local != 1, "LEGACY CONTROL: the old policy failed to take the granted slot");
-            // ...and still marked the exchange settled, which is what stopped the 1 Hz hello on
-            // BOTH peers and made it unrecoverable. The new code returns Renegotiate here and
-            // leaves peerPrimarySlot at SlotNone, so the retry survives.
-            Check(legacyMenu.settled, "LEGACY CONTROL: the old policy settled anyway, killing the retry");
-            Check(NetSession.DecideSlotAdopt(0, 1, None, false, true, true) != NetSession.SlotAdopt.Renegotiate
+            // The menu case, on identical inputs. Old: stays at 0 while the host granted 1, i.e.
+            // the permanent disagreement. New: takes the slot, because at the menu that seat is
+            // bookkeeping about to be wiped.
+            Check(LegacyAdopt(0, 1, localSeated: true, grantedSeated: true) == 0,
+                "LEGACY CONTROL: the old policy stayed at slot 0 while the host granted 1");
+            Check(NetSession.DecideSlotAdopt(0, 1, None, false, true, true) == NetSession.SlotAdopt.TakeSlot,
+                "...where the new policy takes slot 1");
+            // Mid-level the two also differ, but the other way: the old one silently carried on in
+            // the wrong slot, the new one refuses to settle so the host can re-grant.
+            Check(LegacyAdopt(0, 1, localSeated: true, grantedSeated: true) == 0
                 && NetSession.DecideSlotAdopt(0, 1, None, true, true, true) == NetSession.SlotAdopt.Renegotiate,
-                "the new policy takes the slot at the menu and renegotiates mid-level");
+                "LEGACY CONTROL: mid-level the old policy carried on, the new one renegotiates");
 
             // The host's side of the control: the pre-v8 allocator could not see the joiner's
             // roster at all, so it granted slot 1 into the exact collision above.
@@ -237,10 +271,10 @@ namespace EvilAliensWeb.Compat.Net
             // The mask helpers themselves, over the full slot range plus the out-of-range guard.
             for (int i = 0; i < Oracle.MaxPlayers; i++)
             {
-                Check(NetProtocol.SlotIsBlocked(NetProtocol.SlotBit(i), i), "slot " + i + " reads back as blocked");
-                Check(!NetProtocol.SlotIsBlocked(0, i), "slot " + i + " is not blocked in an empty mask");
+                Check(NetProtocol.SlotInMask(NetProtocol.SlotBit(i), i), "slot " + i + " reads back as blocked");
+                Check(!NetProtocol.SlotInMask(0, i), "slot " + i + " is not blocked in an empty mask");
             }
-            Check(!NetProtocol.SlotIsBlocked(0xFF, 4) && !NetProtocol.SlotIsBlocked(0xFF, -1),
+            Check(!NetProtocol.SlotInMask(0xFF, 4) && !NetProtocol.SlotInMask(0xFF, -1),
                 "an out-of-range slot is never blocked");
 
             StringBuilder sb = new StringBuilder();

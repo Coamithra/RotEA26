@@ -39,15 +39,22 @@ namespace EvilAliensWeb.Compat.Net
         // The three reasons an entry can be "unknown" (card 48ab9b2f). They used to share one
         // counter, which made the total unreadable: two of them are ordinary traffic and one is
         // a fault, and a JIP pass that logged a big snapUnk could not tell which it had.
-        public long SnapRebuilt;        // never-seen id: the self-heal BUILT it (stream outran the
+        // Named for their log tokens; NetPuppets classifies them as SnapUnknownKind
+        // Rebuilt/LeftDead/Refused respectively, where the descriptive name is what reads well
+        // at the branch.
+        public long SnapNew;            // never-seen id: the self-heal BUILT it (stream outran the
                                         // reliable spawn) -- benign, tracks the world's spawn rate
-        public long SnapLeftDead;       // removed HERE < RecentRemovalWindowMs ago: a death still
+        public long SnapDead;           // removed HERE < RecentRemovalWindowMs ago: a death still
                                         // settling -- benign, tracks the world's TOTAL removal rate
                                         // (host EvDeaths included, NOT just our own clTx claims)
-        public long SnapRefused;        // the rebuild was declined (no descriptor / descriptor
-                                        // returned null / the bin swallowed the add). Counts EVERY
-                                        // turn for as long as the host keeps streaming that id --
-                                        // the one shape here that means something is actually wrong
+        public long SnapBad;            // the rebuild was declined -- the one shape here that means
+                                        // something is actually wrong. An unknown typeIdx (a
+                                        // protocol/registry mismatch) re-counts on EVERY turn the
+                                        // host streams that id; the other two causes -- a descriptor
+                                        // declining, or the bin swallowing the add -- mark the id
+                                        // removed first, so they tick roughly once per
+                                        // RecentRemovalWindowMs with snapDead in between. Any
+                                        // sustained nonzero reading deserves a look either way.
 
         // claims (generous at-least-once)
         public long ClaimsTx;           // client: local deaths claimed
@@ -116,7 +123,7 @@ namespace EvilAliensWeb.Compat.Net
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
                 BufferDepthMs, InterpSamples, Extrapolations, CorrectionPops, MaxPopPx,
                 EventsTx, EventsRx, DupSpawns, OrderViolations, SeqGaps, liveIds, snapTurnMs,
-                SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, SnapRebuilt, SnapLeftDead, SnapRefused, PuppetPops,
+                SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, SnapNew, SnapDead, SnapBad, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
                 BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster) + sc + imp;
         }

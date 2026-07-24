@@ -1053,27 +1053,37 @@ interpolation feel, both gated on real-network playtests.
   remote-ship puppet follows). Characterised in `tools/sim/net_puppet_drive_sim.py`.
   - **`pupPops` is meaningless without `snapTurn`, which the `[net]` line now prints** (card
     48ab9b2f). The snapshot cursor round-robins 16 entries per 60ms packet, so an entity is
-    corrected only every `ceil(live/16)*60ms` (`NetSession.SnapshotTurnMs`) and dead-reckons
+    corrected only every `live/16*60ms` on average (`NetSession.SnapshotTurnMs`) and dead-reckons
     blind in between. A big world stretches that -- 1.2s at 320 entities -- and how much a pop
-    rate SHOULD be expected depends entirely on it.
+    rate SHOULD be expected depends entirely on it. It is the MEAN, deliberately: the cursor
+    wraps continuously instead of restarting per cycle, so rounding up to whole packets would
+    report 120ms for a 17-entity world whose real blind window is 64ms. **The two peers derive
+    it from different counts** -- the host from its authoritative `NetIdRegistry`, the joiner
+    from its own puppet count, which lags during spawn bursts and JIP catch-up; the host's line
+    is the one to trust.
   - **The 200ms dt clamp is what makes a starved client pop, and it is worth knowing about
     before blaming the link.** The clamp is deliberate (a pause Pop or tab refocus must advance
     the world by at most one over-long frame, never a fling), but a client ticking slower than
     5Hz silently loses `gap - 200ms` of real motion EVERY tick; the error integrates and the
-    next snapshot snaps. `--population` measures both effects: at N=128 a client at 60/40/30/10/5
-    Hz logs **0 pops/s**, and at 1Hz (an OCCLUDED window: rAF paused, timers ~1Hz -- JIP trap 1)
-    it logs **128/s**. A merely SLOW client is fine; a starved one is off the scale.
-  - **Population alone is NOT a general excuse for pops, despite the above.** Same sweep, client
-    healthy: a `?flyspiders` swarm logs 0 pops/s at every N from 16 to 2048 (bar one resonance
-    cell at N=512 on Very_Hard). Its swivel is only +/-25px, so a straight-line prediction
-    almost never gets 100px wrong however long the turn grows, and its X drift is exactly
-    linear. **And the swarm is not even big:** `?flyspiders` spawns 5.5/s but they die at
-    `Position.X < -100`, so it settles at a MEASURED `liveIds` 17-19 -- `snapTurn=120ms`, two
-    packets. (It does not accumulate; the "background spiders have Collides=false so they pile
-    up" reasoning is about kills, and off-screen death is what actually bounds them.) So
-    "the swarm was dense" explains nothing -- that was card 48ab9b2f's JIP pass' own guess, and
-    both the sim and the live count refute it. Fast, TURNING movers over a LONG `snapTurn` are
-    what this failure mode needs, and that rig has neither.
+    next snapshot snaps. `--population` measures it: at N=128 a client at 60/40/30/10/5 **and
+    3** Hz logs **0 pops/s** -- 3Hz is already losing 133ms per tick to the clamp and still pops
+    nothing -- while 1Hz logs **128/s**. So the cliff is between 3Hz and 1Hz, i.e. an OCCLUDED
+    or hidden window (rAF paused, timers ~1Hz -- JIP trap 1). A merely SLOW client is fine.
+  - **A long `snapTurn` hurts PERIODIC motion by resonance, not big worlds as such.** Same
+    sweep, client healthy: a `?flyspiders` swarm logs 0 pops/s at every N from 16 to 2048 --
+    flat zero, not a curve -- **except** at N=512, where `snapTurn` (1920ms) lands near half the
+    spiders' 4000ms swivel period, the phase at which a velocity measured by finite difference
+    across the interval is most wrong about where the entity goes next. There it jumps to 7.2/s
+    on Very_Hard and **92.6/s on Inzane**, whose swivel is 20% bigger. Off that resonance the
+    +/-25px swivel is simply too small to miss by 100px however long the turn grows, and the X
+    drift is exactly linear so it costs a healthy client nothing. Worth remembering when a new
+    replicated type moves on a cycle.
+  - **But it was NOT the JIP pass' problem, and "the swarm was dense" explains nothing there.**
+    `?flyspiders` spawns 5.5/s yet they die at `Position.X < -100`, so it settles at a MEASURED
+    `liveIds` 17-19 -- `snapTurn` ~64-71ms, i.e. the floor. (It does not accumulate: the
+    "background spiders have `Collides=false` so they pile up" reasoning is about kills, and
+    off-screen death is what actually bounds them.) That is three orders of N away from the
+    resonance, in the region where the sweep reads a flat zero.
 - **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
   round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
   Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
@@ -1590,12 +1600,12 @@ interpolation feel, both gated on real-network playtests.
     unrelated causes -- now split into `snapNew`/`snapDead`/`snapBad`, and note the old "judge it
     against `clTx`" rule was simply wrong (see the metrics bullet). (b) `?flyspiders` looks like a
     dense-swarm explanation for the pops but is NOT one: `--population` shows that swarm logging
-    0 pops/s at any size on a healthy client, and the rig's live count measures only 17-19
-    (`snapTurn=120ms`) anyway. What DOES produce hundreds is a client ticking
-    below 5Hz -- i.e. trap 1 (an occluded window) intermittently biting, which the rig cannot
-    rule out after the fact. So on a re-measure: read `snapTurn` alongside `pupPops`, keep both
-    windows genuinely visible, and treat a pop rate from a run whose tick rate you did not watch
-    as no evidence at all.
+    0 pops/s across the whole range bar one far-off resonance, and the rig's live count measures
+    only 17-19 (`snapTurn` at its 60ms floor) anyway. What DOES produce hundreds is a client
+    ticking at ~1Hz -- i.e. trap 1 (an occluded window) intermittently biting, which the rig
+    cannot rule out after the fact. So on a re-measure: read `snapTurn` alongside `pupPops`, keep
+    both windows genuinely visible, and treat a pop rate from a run whose tick rate you did not
+    watch as no evidence at all.
   - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
     ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
     best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The

@@ -1058,16 +1058,28 @@ namespace EvilAliensWeb.Compat.Net
         // every puppet's blind dead-reckoning window (card 48ab9b2f). This is the context
         // pupPops cannot be read without -- at 320 entities each puppet only hears from the host
         // every 1.2s, and anything not moving in a straight line then pops on a healthy link.
-        // Reported as snapTurn= on both peers; also the number the population sweep in
-        // tools/sim/net_puppet_drive_sim.py sweeps.
+        //
+        // It is the MEAN interval, deliberately, not the worst case. The cursor wraps
+        // continuously rather than restarting each cycle, so an entity's gap alternates between
+        // floor and ceil of liveCount/SnapshotMaxEntries packets and averages the ratio itself;
+        // rounding UP to whole packets would report 120ms for a 17-entity world whose typical
+        // blind window is 64ms -- nearly 2x, on exactly the small worlds this gets read for.
+        // Floored at one packet interval, since a world that fits in a single packet is fully
+        // refreshed every SnapshotIntervalMs and cannot do better than that.
+        //
+        // Reported as snapTurn= on both peers. NOTE the two peers derive it from different
+        // counts -- the host from its authoritative NetIdRegistry, the join side from its own
+        // puppet count, which lags during spawn bursts, id churn and JIP catch-up (i.e. exactly
+        // when it is interesting). The host's line is the authoritative one.
+        // Also the number the population sweep in tools/sim/net_puppet_drive_sim.py sweeps.
         internal static int SnapshotTurnMs(int liveCount)
         {
             if (liveCount <= 0)
             {
                 return 0;
             }
-            int packets = (liveCount + SnapshotMaxEntries - 1) / SnapshotMaxEntries;
-            return packets * (int)SnapshotIntervalMs;
+            int mean = liveCount * (int)SnapshotIntervalMs / SnapshotMaxEntries;
+            return Math.Max((int)SnapshotIntervalMs, mean);
         }
 
         private static void SendWorldSnapshot(long now)
@@ -2087,13 +2099,14 @@ namespace EvilAliensWeb.Compat.Net
                     // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead are ordinary
                     // traffic -- their rates track the world's spawn and removal rates, so a
                     // busy level logs plenty of both on a perfectly healthy link. Refused is
-                    // the fault shape: it re-counts every turn the host streams that id.
+                    // the fault shape (an unknown typeIdx re-counts every turn; the other two
+                    // causes mark the id removed first and so tick more slowly -- NetMetrics).
                     metrics.SnapUnknownIds++;
                     switch (kind)
                     {
-                    case SnapUnknownKind.Rebuilt:  metrics.SnapRebuilt++; break;
-                    case SnapUnknownKind.LeftDead: metrics.SnapLeftDead++; break;
-                    case SnapUnknownKind.Refused:  metrics.SnapRefused++; break;
+                    case SnapUnknownKind.Rebuilt:  metrics.SnapNew++; break;
+                    case SnapUnknownKind.LeftDead: metrics.SnapDead++; break;
+                    case SnapUnknownKind.Refused:  metrics.SnapBad++; break;
                     }
                 }
             }

@@ -55,12 +55,16 @@ No browser, no game -- pure data, the repo's isolation-sim rule.
 can drive pupPops on a client whose clock is behaving? The JIP two-window pass logged 207 pops
 in ~25s and guessed the dense `?flyspiders` swarm was to blame. The sweep weighs both candidate
 explanations against the real background-FlyingSpider motion and answers, in short: the swarm
-CANNOT (the swivel is only +/-25px, so a straight-line prediction almost never gets 100px wrong
-however long the round-robin turn interval grows), while client TICK STARVATION can and does,
-enormously -- but only below ~5Hz, where NetPuppetDriver's 200ms dt clamp starts silently
-dropping real motion every tick. That is an occluded/hidden window (JIP trap 1), not the ~40fps
-the pass recorded. So neither of the pass' own hypotheses survives, which is why the card put
-its effort into making the counters decidable instead.
+essentially cannot -- 0 pops/s at every size swept except ONE cell, N=512, where the turn
+interval lands near half the spiders' 4000ms swivel period and a finite-difference velocity is
+maximally wrong. That resonance is real and worth knowing about (7.2/s at Very_Hard, 92.6/s at
+Inzane's 20%-larger swivel), but it is not what the rig hit: a live boot measures that world at
+17-19 entities, three orders of N away, where the answer is a flat zero. Meanwhile client TICK
+STARVATION can produce the observed rate and then some. The starvation cliff is between 3Hz and 1Hz: the 200ms dt
+clamp in NetPuppetDriver starts DROPPING real motion at 3Hz (133ms lost per tick) but still pops
+nothing, and by 1Hz it is 128 pops/s. That is an occluded/hidden window (JIP trap 1), not the
+~40fps the pass recorded -- 40Hz is nowhere near it. So neither of the pass' own hypotheses
+survives, which is why the card put its effort into making the counters decidable instead.
 
 The swarm hypothesis fails twice over, in fact: the sweep below shows it popping nothing at ANY
 size, and a live `?level=Level2&flyspiders&net=host` boot measures the rig's actual world at
@@ -258,19 +262,23 @@ def sweep():
 
 # ---- population mode (card 48ab9b2f) ------------------------------------------------------
 # The snapshot cursor round-robins SNAPSHOT_MAX_ENTRIES entries per packet, so an entity's
-# correction interval is ceil(N/16)*60ms -- it grows with the live entity count, and between
-# turns the puppet dead-reckons on a straight line. So pupPops is partly a function of how BIG
-# the world is, with nothing wrong with the link. That is the alternative explanation for the
-# JIP pass' pupPops=207/25s, whose host fight was ?flyspiders: the BACKGROUND flying spiders
-# have Collides=false, so nothing can kill them and they accumulate for the whole run.
+# correction interval averages N/16*60ms -- it grows with the live entity count, and between
+# turns the puppet dead-reckons on a straight line. So pupPops COULD be partly a function of how
+# BIG the world is, with nothing wrong with the link. That was the JIP pass' own explanation for
+# its pupPops=207/25s: its host fight was ?flyspiders, whose BACKGROUND spiders have
+# Collides=false and so cannot be shot down.
 #
 # This sweeps N against the REAL background-FlyingSpider motion to find out whether population
 # actually accounts for the observed rate, or whether it falls short and something else is going
 # on. It is deliberately the honest question, not a confirmation: read the printed verdict.
+# (It falls short -- and note that "cannot be shot down" does not mean unbounded either: they
+# die off-screen at Position.X < -100, and a live boot measures that rig at 17-19 entities.)
 SWIVEL_PERIOD_MS = 4000.0     # FlyingSpider.Setup: swiveltimer.Duration for isbackground
 SWIVEL_BASE_PX = 50.0         # FlyingSpider.Update: 50f * DifficultyModifier * scale
 BG_SCALE = 0.67 * 0.75        # Setup: scale = 0.67f * SizeFactor (DefaultSizeFactor 0.75)
-DIFFICULTY = {"Easy": 0.35, "Medium": 0.6, "Hard": 0.8, "Very_Hard": 1.0}
+# Settings.GetDifficultyValue. Inzane is included because it has the largest swivel amplitude
+# and so is the tier most likely to widen the one resonance cell that does pop.
+DIFFICULTY = {"Easy": 0.35, "Medium": 0.6, "Hard": 0.8, "Very_Hard": 1.0, "Inzane": 1.2}
 OBSERVED_POPS_PER_S = 207 / 25.0   # the JIP pass' reading, for scale
 
 # Horizontal drift, which is where the SECOND candidate explanation lives. Level2.slowdown sets
@@ -436,10 +444,12 @@ def run_population(n_enemies, diff_mod, total_ms=25000.0, client_tick_ms=TICK_MS
 
 
 def snap_turn_ms(n):
-    """NetSession.SnapshotTurnMs -- pinned C#-side by eaNetSnap()."""
+    """NetSession.SnapshotTurnMs -- the MEAN gap between an entity's turns, pinned C#-side by
+    eaNetSnap(). Mean, not whole packets rounded up: the cursor wraps continuously, so a
+    17-entity world averages ~63ms rather than the 120ms a second whole packet would imply."""
     if n <= 0:
         return 0
-    return -(-n // SNAPSHOT_MAX_ENTRIES) * int(SNAPSHOT_INTERVAL_MS)
+    return max(int(SNAPSHOT_INTERVAL_MS), n * int(SNAPSHOT_INTERVAL_MS) // SNAPSHOT_MAX_ENTRIES)
 
 
 def population():
@@ -466,13 +476,17 @@ def population():
         print("".join(row))
     print("\npeak dead-reckoning error, Very_Hard: " + ", ".join(
         f"N={n}: {run_population(n, 1.0, total_ms=secs * 1000.0)[1]:.0f}px" for n in (64, 256, 1024)))
-    print(f"\n  -> worst cell {best_pop:.1f} pops/s vs the pass' {OBSERVED_POPS_PER_S:.1f}/s. "
-          + ("REACHED." if best_pop >= OBSERVED_POPS_PER_S else "NOT reached."))
-    print("     The swivel is only +/-%.0fpx, so a straight-line prediction rarely gets 100px\n"
-          "     wrong however long the turn interval grows; the lone hot cell is a resonance\n"
-          "     (turn ~= half the swivel period, where the finite-difference velocity is most\n"
-          "     wrong). X drift costs a well-fed client nothing -- it is exactly linear."
-          % swivel_amplitude_px(1.0))
+    print(f"\n  -> worst cell {best_pop:.1f} pops/s vs the pass' {OBSERVED_POPS_PER_S:.1f}/s.")
+    print("     Note the shape: this is NOT monotone in N. Every cell is a flat 0 except the\n"
+          "     N=512 column, where snapTurn (%dms) lands near HALF the %.0fms swivel period --\n"
+          "     the phase at which a finite-difference velocity measured across the interval is\n"
+          "     most wrong about where the entity goes next. Off that resonance the swivel is\n"
+          "     only +/-%.0fpx (Very_Hard), too small to miss by 100px however long the turn\n"
+          "     grows, and the X drift is exactly linear so it costs a well-fed client nothing.\n"
+          "     Amplitude decides how hard the resonance bites: Very_Hard 7.2/s, Inzane 92.6/s\n"
+          "     for a 20%% bigger swivel. So a long snapTurn is dangerous for PERIODIC motion\n"
+          "     whose period it happens to straddle -- not for big worlds as such."
+          % (snap_turn_ms(512), SWIVEL_PERIOD_MS, swivel_amplitude_px(1.0)))
 
     # B. The other candidate, and the one the JIP rig actually risks: a starved client.
     print("\n\nB. CLIENT TICK STARVATION, at a fixed N=128 (snapTurn %dms), Very_Hard:\n"
@@ -489,18 +503,33 @@ def population():
         print(f"{hz:>6}Hz {gap:>8.0f}ms {min(gap, DRIVER_MAX_DT_MS):>9.0f}ms "
               f"{lost:>9.0f}ms {pops / secs:>8.1f}/s {peak:>8.0f}")
 
+    # Deliberately an order-of-magnitude bracket, not a `>=` threshold. A mechanism that peaks
+    # at 87% of the observed rate in ONE resonance cell has not been cleanly excluded (the
+    # repo's own rule is that differences under ~30% are noise), and one that overshoots 15x
+    # has not been cleanly confirmed either -- it only says the mechanism is capable.
+    def bracket(best):
+        if best >= 3.0 * OBSERVED_POPS_PER_S:
+            return "AMPLY capable"
+        if best >= 0.5 * OBSERVED_POPS_PER_S:
+            return "borderline -- same order, cannot be cleanly excluded"
+        return "cannot get near it"
+
     print(f"\nVERDICT vs the pass' {OBSERVED_POPS_PER_S:.1f} pops/s over {secs:.0f}s:")
-    print(f"  population alone   : up to {best_pop:.1f}/s  "
-          + ("(sufficient)" if best_pop >= OBSERVED_POPS_PER_S else "(insufficient)"))
-    print(f"  tick starvation    : up to {best_starve:.1f}/s  "
-          + ("(sufficient)" if best_starve >= OBSERVED_POPS_PER_S else "(insufficient)"))
-    print("\nA steady 40fps is NOT enough on its own -- the driver's dt clamp only bites below\n"
-          "5Hz, which is what an OCCLUDED or hidden window does (rAF paused / ~1Hz timers,\n"
-          "JIP-pass trap 1), not what a merely slow one does. So neither the swarm nor the\n"
-          "frame rate the pass recorded explains its reading by itself, and the remaining\n"
-          "candidates -- intermittent occlusion, id churn, a genuine fault -- are separated by\n"
-          "the snapTurn + snapNew/snapDead/snapBad fields now in the [net] line, not by\n"
-          "another undecidable two-window run.")
+    print(f"  population alone   : peaks at {best_pop:>6.1f}/s  -- {bracket(best_pop)}")
+    print(f"  tick starvation    : peaks at {best_starve:>6.1f}/s  -- {bracket(best_starve)}")
+    print("\nRead those carefully. Population only bites in the single N=512 resonance cell and\n"
+          "sits at a flat 0 everywhere else, including the 17-19 entities a live boot of that rig\n"
+          "actually measures -- so it is not the explanation there, but a turn interval that\n"
+          "straddles a periodic motion's half-period is a mechanism worth remembering.\n"
+          "Starvation, meanwhile,\n"
+          "is all-or-nothing: the cliff sits between 3Hz and 1Hz, and note that 3Hz is ALREADY\n"
+          "losing 133ms of motion per tick to the clamp while still popping nothing. So a\n"
+          "steady 40fps -- what the pass recorded -- is nowhere near it; only an OCCLUDED or\n"
+          "hidden window gets there (rAF paused / ~1Hz timers, JIP-pass trap 1).\n"
+          "Neither of the pass' hypotheses explains its reading, and the remaining candidates\n"
+          "-- intermittent occlusion, id churn, a genuine fault -- are separated by the\n"
+          "snapTurn + snapNew/snapDead/snapBad fields now in the [net] line, not by another\n"
+          "undecidable two-window run.")
 
 
 def main():

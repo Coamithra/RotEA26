@@ -122,13 +122,16 @@ namespace EvilAliensWeb.Compat.Net
                 Check("an unbuildable typeIdx reports Refused (was " + kind + ")", kind == SnapUnknownKind.Refused);
                 Check("Refused builds nothing", NetPuppets.LiveCount == 0);
 
-                // 5. ...and it REPEATS. This is the whole reason the split is worth having:
-                //    Rebuilt happens once per id and LeftDead decays after RecentRemovalWindowMs,
-                //    so both are bounded per entity, while Refused re-counts on every snapshot
-                //    turn for as long as the host streams that id. A climbing snapBad is
-                //    therefore the one shape here that means something is genuinely wrong.
+                // 5. ...and for THIS cause it repeats immediately, which is the whole reason the
+                //    split is worth having: Rebuilt happens once per id and LeftDead decays
+                //    after RecentRemovalWindowMs, so both are bounded per entity, while an
+                //    unbuildable typeIdx re-counts on every snapshot turn for as long as the
+                //    host streams that id. (The other two Refused causes mark the id removed
+                //    first, so they tick more slowly -- not covered here, hence the narrow
+                //    assertion name.) A climbing snapBad is the one shape that means trouble.
                 NetPuppets.OnSnapshotEntry(IdRefused, badType, state, noExtras, 0, 0, out popped, out kind);
-                Check("Refused re-counts on the next turn (was " + kind + ")", kind == SnapUnknownKind.Refused);
+                Check("an unbuildable typeIdx re-counts on the very next turn (was " + kind + ")",
+                    kind == SnapUnknownKind.Refused);
             }
             catch (Exception ex)
             {
@@ -154,9 +157,15 @@ namespace EvilAliensWeb.Compat.Net
             // these figures and tools/sim/net_puppet_drive_sim.py sweeps them.
             sb.Append("[netsnap] snapshot turn interval (round-robin cursor)\n");
             Check("no live entities -> 0ms", NetSession.SnapshotTurnMs(0) == 0);
-            Check("1 entity -> one packet, 60ms", NetSession.SnapshotTurnMs(1) == 60);
+            Check("1 entity -> the packet cadence floor, 60ms", NetSession.SnapshotTurnMs(1) == 60);
             Check("a full packet (16) still 60ms", NetSession.SnapshotTurnMs(16) == 60);
-            Check("17 entities spill to a second packet, 120ms", NetSession.SnapshotTurnMs(17) == 120);
+            // The MEAN, not whole packets rounded up: the cursor wraps continuously, so 17
+            // entities average 17/16 of a packet interval (~63ms), NOT the 120ms a second whole
+            // packet would suggest. Getting this wrong overstates the blind window ~2x on
+            // exactly the small worlds it gets read for.
+            Check("17 entities -> the MEAN 63ms, not a whole second packet (120ms)",
+                NetSession.SnapshotTurnMs(17) == 63);
+            Check("32 entities -> 120ms", NetSession.SnapshotTurnMs(32) == 120);
             Check("320 entities -> 1200ms blind between corrections", NetSession.SnapshotTurnMs(320) == 1200);
 
             sb.Append("[netsnap] ").Append(fail == 0 ? "PASS" : "FAIL")

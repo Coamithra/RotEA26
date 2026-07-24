@@ -148,23 +148,23 @@ public class StarMine : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		float num = 250f * Settings.GetInstance().DifficultyFactorized(0.5f);
+		float acquireRange = 250f * Settings.GetInstance().DifficultyFactorized(0.5f);
 		prevposition = base.Position + oracle.BackgroundSpeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 		switch (state)
 		{
 		case MineState.free:
 		{
-			bool flag = false;
+			bool acquired = false;
 			foreach (PlayerShip ship in oracle.GetShips())
 			{
-				Vector2 val2 = ship.Position - base.Position;
-				if ((val2).LengthSquared() <= num * num)
+				Vector2 toShip = ship.Position - base.Position;
+				if ((toShip).LengthSquared() <= acquireRange * acquireRange)
 				{
 					target = ship;
-					flag = true;
+					acquired = true;
 				}
 			}
-			if (flag)
+			if (acquired)
 			{
 				if (!soundtimer.Active)
 				{
@@ -188,20 +188,20 @@ public class StarMine : KillableAlien
 				connectToBackground();
 				break;
 			}
-			float num2 = num + num * 0.08f;
-			Vector2 val3 = target.Position - base.Position;
-			if ((val3).LengthSquared() > 0.25f)
+			float releaseRange = acquireRange + acquireRange * 0.08f;
+			Vector2 pull = target.Position - base.Position;
+			if ((pull).LengthSquared() > 0.25f)
 			{
-				(val3).Normalize();
+				(pull).Normalize();
 			}
-			val3 *= 0.00029999999f;
-			base.SpeedVector += val3 * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+			pull *= 0.00029999999f;
+			base.SpeedVector += pull * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			if (timer.Finished)
 			{
 				Asplode();
 			}
-			Vector2 val4 = target.Position - base.Position;
-			if ((val4).LengthSquared() >= num2 * num2)
+			Vector2 toTarget = target.Position - base.Position;
+			if ((toTarget).LengthSquared() >= releaseRange * releaseRange)
 			{
 				state = MineState.free;
 				connectToBackground();
@@ -216,13 +216,13 @@ public class StarMine : KillableAlien
 				connectToBackground();
 				break;
 			}
-			Vector2 val = boss.Position - base.Position;
-			if ((val).LengthSquared() > 0.25f)
+			Vector2 pull = boss.Position - base.Position;
+			if ((pull).LengthSquared() > 0.25f)
 			{
-				(val).Normalize();
+				(pull).Normalize();
 			}
-			val *= 0.00029999999f;
-			base.SpeedVector += val * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+			pull *= 0.00029999999f;
+			base.SpeedVector += pull * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			break;
 		}
 		}
@@ -258,11 +258,11 @@ public class StarMine : KillableAlien
 
 	private void Fire()
 	{
-		float num = 200f / Settings.GetInstance().DifficultyFactorized(0.4f);
+		float holdFireRange = 200f / Settings.GetInstance().DifficultyFactorized(0.4f);
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
-			Vector2 val = ship.Position - base.Position;
-			if ((val).Length() <= num)
+			Vector2 toShip = ship.Position - base.Position;
+			if ((toShip).Length() <= holdFireRange)
 			{
 				return;
 			}
@@ -304,10 +304,10 @@ public class StarMine : KillableAlien
 			}
 			else
 			{
-				Vector2 val = base.Position - ((Bullet)other).Position;
-				(val).Normalize();
-				val *= 0.036000002f;
-				base.SpeedVector += val;
+				Vector2 knockback = base.Position - ((Bullet)other).Position;
+				(knockback).Normalize();
+				knockback *= 0.036000002f;
+				base.SpeedVector += knockback;
 			}
 		}
 		if (state != MineState.attracted_to_boss && other is Explosion)
@@ -321,33 +321,33 @@ public class StarMine : KillableAlien
 		if (other is StarMine && ((StarMine)other).state == MineState.attracted_to_boss)
 		{
 			StarMine starMine = (StarMine)other;
-			Vector2 val2 = starMine.Position - base.Position;
-			float num = (val2).Length();
-			if (num < r + starMine.r)
+			Vector2 toMine = starMine.Position - base.Position;
+			float distance = (toMine).Length();
+			if (distance < r + starMine.r)
 			{
-				float num2 = r + starMine.r - num;
-				Vector2 val3 = val2;
-				(val3).Normalize();
-				float num3 = scale / (starMine.scale + scale);
-				base.Position -= val3 * num2 * (1f - num3);
-				starMine.Position += val3 * num2 * num3;
+				float overlap = r + starMine.r - distance;
+				Vector2 pushDir = toMine;
+				(pushDir).Normalize();
+				float massShare = scale / (starMine.scale + scale);
+				base.Position -= pushDir * overlap * (1f - massShare);
+				starMine.Position += pushDir * overlap * massShare;
 			}
 		}
 		if (other is JunkBoss)
 		{
 			JunkBoss junkBoss = (JunkBoss)other;
-			Vector2 val4 = junkBoss.GetPosition - base.Position;
-			float num4 = (val4).Length();
-			if (num4 < r + junkBoss.r)
+			Vector2 toBoss = junkBoss.GetPosition - base.Position;
+			float distance = (toBoss).Length();
+			if (distance < r + junkBoss.r)
 			{
 				_ = junkBoss.r;
-				Vector2 val5 = val4;
-				(val5).Normalize();
+				Vector2 pushDir = toBoss;
+				(pushDir).Normalize();
 				// Fidelity (review M4): the spatial grid fires each circle pair once per direction
 				// per frame; the shipped 2008 build's all-pairs scan fired this ungated 1px push-out
 				// twice per frame — the x2 preserves the original net separation rate so
 				// attached StarMines don't sink deeper into the JunkBoss.
-				base.Position -= val5 * 2f;
+				base.Position -= pushDir * 2f;
 			}
 		}
 	}

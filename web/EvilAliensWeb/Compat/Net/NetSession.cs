@@ -656,7 +656,8 @@ namespace EvilAliensWeb.Compat.Net
                 metrics.ImpLagMs = impairment.LagMs;
                 metrics.ImpLossPct = impairment.LossPct;
                 metrics.ImpJitterMs = impairment.JitterMs;
-                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
+                int liveCount = isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount;
+                Console.WriteLine(metrics.Report(isHost, PeerUp, liveCount, SnapshotTurnMs(liveCount),
                     FindLocalShip() != null, puppet != null, RosterReport()));
             }
         }
@@ -1182,6 +1183,35 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- host world snapshot ------------------------------------------------------------
+
+        // How long a single entity waits between world-snapshot corrections, given how many are
+        // live: the cursor round-robins SnapshotMaxEntries per packet, so a big world stretches
+        // every puppet's blind dead-reckoning window (card 48ab9b2f). This is the context
+        // pupPops cannot be read without -- at 320 entities each puppet only hears from the host
+        // every 1.2s, and anything not moving in a straight line then pops on a healthy link.
+        //
+        // It is the MEAN interval, deliberately, not the worst case. The cursor wraps
+        // continuously rather than restarting each cycle, so an entity's gap alternates between
+        // floor and ceil of liveCount/SnapshotMaxEntries packets and averages the ratio itself;
+        // rounding UP to whole packets would report 120ms for a 17-entity world whose typical
+        // blind window is 64ms -- nearly 2x, on exactly the small worlds this gets read for.
+        // Floored at one packet interval, since a world that fits in a single packet is fully
+        // refreshed every SnapshotIntervalMs and cannot do better than that.
+        //
+        // Reported as snapTurn= on both peers. NOTE the two peers derive it from different
+        // counts -- the host from its authoritative NetIdRegistry, the join side from its own
+        // puppet count, which lags during spawn bursts, id churn and JIP catch-up (i.e. exactly
+        // when it is interesting). The host's line is the authoritative one.
+        // Also the number the population sweep in tools/sim/net_puppet_drive_sim.py sweeps.
+        internal static int SnapshotTurnMs(int liveCount)
+        {
+            if (liveCount <= 0)
+            {
+                return 0;
+            }
+            int mean = liveCount * (int)SnapshotIntervalMs / SnapshotMaxEntries;
+            return Math.Max((int)SnapshotIntervalMs, mean);
+        }
 
         private static void SendWorldSnapshot(long now)
         {
@@ -2344,7 +2374,7 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped))
+                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
                 {
                     if (popped)
                     {
@@ -2353,9 +2383,18 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else
                 {
-                    // Not spawned yet (stream outran the reliable lane) or died locally with
-                    // the claim still in flight -- both self-heal; just count it.
+                    // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead are ordinary
+                    // traffic -- their rates track the world's spawn and removal rates, so a
+                    // busy level logs plenty of both on a perfectly healthy link. Refused is
+                    // the fault shape (an unknown typeIdx re-counts every turn; the other two
+                    // causes mark the id removed first and so tick more slowly -- NetMetrics).
                     metrics.SnapUnknownIds++;
+                    switch (kind)
+                    {
+                    case SnapUnknownKind.Rebuilt:  metrics.SnapNew++; break;
+                    case SnapUnknownKind.LeftDead: metrics.SnapDead++; break;
+                    case SnapUnknownKind.Refused:  metrics.SnapBad++; break;
+                    }
                 }
             }
         }

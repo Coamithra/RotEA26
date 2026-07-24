@@ -210,6 +210,7 @@ generate much of the art/audio referenced here.
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
+  `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
   result as data -- see "Content-load diagnostics" above).
@@ -1131,12 +1132,49 @@ interpolation feel, both gated on real-network playtests.
   stall the dead-reckoning or the correction blend, or the puppets fall behind the real-time
   snapshots and repeatedly snap (this was the first-wipe `pupPops` burst; same rule the
   remote-ship puppet follows). Characterised in `tools/sim/net_puppet_drive_sim.py`.
+  - **`pupPops` is meaningless without `snapTurn`, which the `[net]` line now prints** (card
+    48ab9b2f). The snapshot cursor round-robins 16 entries per 60ms packet, so an entity is
+    corrected only every `live/16*60ms` on average (`NetSession.SnapshotTurnMs`) and dead-reckons
+    blind in between. A big world stretches that -- 1.2s at 320 entities -- and how much a pop
+    rate SHOULD be expected depends entirely on it. It is the MEAN, deliberately: the cursor
+    wraps continuously instead of restarting per cycle, so rounding up to whole packets would
+    report 120ms for a 17-entity world whose real blind window is 64ms. **The two peers derive
+    it from different counts** -- the host from its authoritative `NetIdRegistry`, the joiner
+    from its own puppet count, which lags during spawn bursts and JIP catch-up; the host's line
+    is the one to trust.
+  - **The 200ms dt clamp is what makes a starved client pop, and it is worth knowing about
+    before blaming the link.** The clamp is deliberate (a pause Pop or tab refocus must advance
+    the world by at most one over-long frame, never a fling), but a client ticking slower than
+    5Hz silently loses `gap - 200ms` of real motion EVERY tick; the error integrates and the
+    next snapshot snaps. `--population` measures it: at N=128 a client at 60/40/30/10/5 **and
+    3** Hz logs **0 pops/s** -- 3Hz is already losing 133ms per tick to the clamp and still pops
+    nothing -- while 1Hz logs **128/s**. So the cliff is between 3Hz and 1Hz, i.e. an OCCLUDED
+    or hidden window (rAF paused, timers ~1Hz -- JIP trap 1). A merely SLOW client is fine.
+  - **A long `snapTurn` hurts PERIODIC motion by resonance, not big worlds as such.** Same
+    sweep, client healthy: a `?flyspiders` swarm logs 0 pops/s at every N from 16 to 2048 --
+    flat zero, not a curve -- **except** at N=512, where `snapTurn` (1920ms) lands near half the
+    spiders' 4000ms swivel period, the phase at which a velocity measured by finite difference
+    across the interval is most wrong about where the entity goes next. There it jumps to 7.2/s
+    on Very_Hard and **92.6/s on Inzane**, whose swivel is 20% bigger. Off that resonance the
+    +/-25px swivel is simply too small to miss by 100px however long the turn grows, and the X
+    drift is exactly linear so it costs a healthy client nothing. Worth remembering when a new
+    replicated type moves on a cycle.
+  - **But it was NOT the JIP pass' problem, and "the swarm was dense" explains nothing there.**
+    `?flyspiders` spawns 5.5/s yet they die at `Position.X < -100`, so it settles at a MEASURED
+    `liveIds` 17-19 -- `snapTurn` ~64-71ms, i.e. the floor. (It does not accumulate: the
+    "background spiders have `Collides=false` so they pile up" reasoning is about kills, and
+    off-screen death is what actually bounds them.) That is three orders of N away from the
+    resonance, in the region where the sweep reads a flat zero.
 - **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
   round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
   Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
   px/ms, rotation, curframe x64, scale x256, hp) + per-type state extras. A snapshot entry
   for an unknown id self-heals: it REBUILDS the puppet from the snapshot (default spawn
-  extras) unless that id died locally < 3s ago (claim in flight).
+  extras) unless that id was removed locally < 3s ago (a death still settling -- ours OR the
+  host's). Which of those (plus a REFUSED rebuild) happened is reported per entry as a
+  `SnapUnknownKind` and counted separately -- see the `snapNew`/`snapDead`/`snapBad` bullet
+  under "Verify with LOGGED METRICS"; they all return "not applied", so the single total they
+  used to share could not be judged.
 - **Per-type descriptors (`Compat/Net/NetTypeRegistry` + `Compat/Net/Descriptors/`):**
   the wire typeIdx IS the registry order -- append-only, never reorder. A descriptor owns
   (a) puppet CONSTRUCTION: spawn extras pin every random/caller-chosen look (e.g. UFO's
@@ -1415,8 +1453,9 @@ interpolation feel, both gated on real-network playtests.
   `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,
   extrap ~0, pops 0 (pop = a step no ship could physically make: > 2x MaxSpeed x realDt
   + 3px), drop/dup/ordViol/seqGap 0; on the world side, host `snapTx` climbing, client
-  `snapRx/snapEnt` climbing with `snapUnk` small and non-climbing at steady state,
-  `pupPops` near 0, and the claim counters telling the kill story (`clTx` client-side ~=
+  `snapRx/snapEnt` climbing with `snapUnk` small and non-climbing at steady state (but read
+  its split -- see below), `pupPops` near 0 **judged against `snapTurn`** (next bullet),
+  and the claim counters telling the kill story (`clTx` client-side ~=
   `clRx` host-side; `clKill` = claims that settled a live enemy, `clPaid` = generous
   payouts for already-dead enemies -- a nonzero `clPaid` IS the double-claim proof).
   **Two-tab test recipe:** the tabs must BOTH be visible (a backgrounded tab's rAF drops
@@ -1432,10 +1471,27 @@ interpolation feel, both gated on real-network playtests.
   `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
   through invulnerability, and leaving the flag on is what keeps the rest of the run from
   dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
-  **`snapUnk` climbing is not by itself a leak:** the host keeps snapshotting an entity for a
-  turn or two while a client claim is in flight, and the client deliberately leaves that id
-  dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
-  rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
+  **`snapUnk` climbing is not by itself a leak -- read the SPLIT, never the total** (card
+  48ab9b2f). Three unrelated things make a snapshot entry "unknown", and the `[net]` line breaks
+  them out as `snapNew`/`snapDead`/`snapBad` (`snapUnk` remains their sum):
+  - `snapNew` = an id we had never seen, which the self-heal REBUILT from the snapshot. The
+    unreliable stream lane routinely outruns the ordered reliable one, so a fresh spawn's first
+    correction can beat its `EvSpawn`. **Benign, and it tracks the world's SPAWN rate** -- in a
+    continuously spawning fight it never stops climbing, which is not a fault.
+  - `snapDead` = an id removed HERE inside the 3s `RecentRemovalWindowMs`, deliberately left
+    dead. **Benign, and it tracks the world's TOTAL removal rate.** The old note here tied this
+    to `clTx`, which was WRONG and cost card 48ab9b2f's JIP pass its verdict: `MarkRemoved`
+    fires on every local removal, host-authoritative `EvDeath`s included, so an IDLE joiner
+    watching the host's AI clear a field logs plenty of `snapDead` with `clTx` pinned at 0.
+  - `snapBad` = the rebuild was REFUSED (no descriptor for the typeIdx, the descriptor declined,
+    or the bin swallowed the add). **This is the one that means trouble** -- it re-counts on
+    every turn the host streams that id. An unknown typeIdx re-counts on literally every turn;
+    the other two mark the id removed first, so they show as one `snapBad` then `snapDead` for
+    3s, then another retry -- i.e. a slow, steady tick rather than a burst. Any sustained
+    `snapBad` deserves a look.
+  Attribution is pinned by **`eaNetSnap()`** (`Compat/Net/NetSnapshotTest.cs`), which drives the
+  real `OnSnapshotEntry` through all four outcomes from the main menu -- a classification is
+  invisible in any frame, and a second peer tab throttles too hard to show it anyway.
   **A STRUCTURAL check (roster, slots, who-owns-what) is the one thing two HIDDEN tabs in one
   window can still do**, which is how the four-seat roster in the `?netlocal` bullet was
   captured without hand-arranging windows. Two things make it survive: `index.html` falls back
@@ -1711,6 +1767,18 @@ interpolation feel, both gated on real-network playtests.
     (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`), `localShip=1
     remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0,
     **zero `[bin] purge-filter diverted`**, and identical `eaNetBg()` state lines.
+  - **JIP pass trap 6 -- `pupPops`/`snapUnk` from this rig were UNREADABLE until card 48ab9b2f,
+    and the two traps that made them so are still live.** The first pass logged `pupPops 207` /
+    `snapUnk 344` over ~25s and could conclude nothing. (a) `snapUnk` was one counter for three
+    unrelated causes -- now split into `snapNew`/`snapDead`/`snapBad`, and note the old "judge it
+    against `clTx`" rule was simply wrong (see the metrics bullet). (b) `?flyspiders` looks like a
+    dense-swarm explanation for the pops but is NOT one: `--population` shows that swarm logging
+    0 pops/s across the whole range bar one far-off resonance, and the rig's live count measures
+    only 17-19 (`snapTurn` at its 60ms floor) anyway. What DOES produce hundreds is a client
+    ticking at ~1Hz -- i.e. trap 1 (an occluded window) intermittently biting, which the rig
+    cannot rule out after the fact. So on a re-measure: read `snapTurn` alongside `pupPops`, keep
+    both windows genuinely visible, and treat a pop rate from a run whose tick rate you did not
+    watch as no evidence at all.
   - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
     ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
     best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The

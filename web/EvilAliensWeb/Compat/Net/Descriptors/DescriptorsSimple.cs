@@ -35,6 +35,14 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   block; only the sheet pick and the grey/sunk background flag can't be reconstructed from
     //   it, so both go in the spawn extra (fixed at spawn, never changes).
     //   Spawn extra: [flags:1]  bit0=reallyBig, bit1=background, bits2-3=small sheet index (0..3)
+    //
+    //   FlagBackground IS NOW DEAD, deliberately (card 9a3175d0): a SetBackground() asteroid is
+    //   NetCosmeticOnly, so NetIdRegistry never gives it an id and no host can set the bit --
+    //   belt decoration replicates as one AsteroidSpawner beat instead, and each peer spawns its
+    //   own. Kept rather than removed because the spawn-extra layout is append-only and the bit
+    //   costs nothing; if a background asteroid ever DID reach CreatePuppet it would be built as
+    //   a puppet the ComponentAdded seam then refuses to register, i.e. an orphan -- so if this
+    //   branch ever fires again, the opt-out is what to look at.
     internal sealed class AsteroidDescriptor : NetTypeDescriptor<Asteroid>
     {
         private const byte FlagBig = 1;

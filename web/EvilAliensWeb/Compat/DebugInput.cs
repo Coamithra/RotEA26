@@ -388,6 +388,16 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
 		}
 
+		// JS bridge for the decorative-swarm replication (eaNetCosmetic in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCosmetic'). Runs
+		// Compat/Net/NetCosmeticTest.Run() and returns the PASS/FAIL report. Leave-no-trace, so
+		// it is safe at any point in play -- and its apply leg only runs INSIDE a level.
+		[JSInvokable("debugNetCosmetic")]
+		public static string NetCosmetic()
+		{
+			return EvilAliensWeb.Compat.Net.NetCosmeticTest.Run();
+		}
+
 		// JS bridge for the primary-slot negotiation (eaSlotTest in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugSlotTest'). Runs
 		// Compat/Net/NetSlotTest.Run() and returns the PASS/FAIL report.

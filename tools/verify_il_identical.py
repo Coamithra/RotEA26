@@ -35,9 +35,11 @@ under --optimize.
 TWO classes it does NOT cover, both hit by the very card that added it -- do not read the table
 above as a promise that any `|=` collapse hashes equal:
 
-  * an intervening evaluation between the temp and its use. The table's shapes are adjacent; the
-    REAL InputHandler.UpdateKeyPads reads `held` into the temp BEFORE the neighbouring
-    `GamePadButtons b = state.Buttons;` line, whereas `held |= X` reads it AFTER. The optimizer
+  * an intervening evaluation between the temp and its use. The table's shapes are adjacent; as
+    InputHandler.UpdateKeyPads READ AT CARD 0c624f9d (card 7d14a3cd has since inlined those
+    temps, so do not go looking for this shape there today) it read `held` into the temp BEFORE
+    the neighbouring `GamePadButtons b = state.Buttons;` line, whereas `held |= X` reads it
+    AFTER. The optimizer
     will not reorder a local read across a property call it cannot prove pure, so the `ldloc`
     moves and the hash differs -- measured, and benign (a method-local `bool` that
     GamePadState.get_Buttons() cannot observe).

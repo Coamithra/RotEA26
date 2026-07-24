@@ -38,6 +38,11 @@ public abstract class GenericSpawner : GameEvent
 		scaleSpawns = true;
 	}
 
+	// The UNSCALED authored rate (the difficulty / multiplayer factors are applied per tick, not
+	// stored). Online co-op reads it to replicate a decorative spawner as one beat rather than
+	// per entity (card 9a3175d0); the peer applies its own factors to it, exactly as we do.
+	internal float HitsPerSecond => hitsPerSecond;
+
 	protected void SetRandomSpawn(bool value)
 	{
 		random = value;

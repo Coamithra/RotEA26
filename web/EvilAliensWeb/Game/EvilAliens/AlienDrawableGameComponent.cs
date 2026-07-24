@@ -771,6 +771,26 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// chose (a lazer's beam angle) must keep taking the replicated value.
 	internal virtual float NetSpinPerMs => 0f;
 
+	// INSTANCE-level opt-out from replication (card 9a3175d0): this particular instance is pure
+	// scenery, so it gets no NetId, no EvSpawn/EvDeath and no share of the world-snapshot round
+	// robin. The SPAWNER is replicated instead (NetCosmeticKind, one "effect on/off" beat) and
+	// each peer runs its own copy, so the two screens' copies are in different places -- which is
+	// fine by definition for something nothing can interact with.
+	//
+	// It has to be per instance, not per type: the same FlyingSpider type is a real killable
+	// enemy in its foreground form and pure fog in its background one.
+	//
+	// TWO CONDITIONS, both required, and both the caller's job to keep true:
+	//   * the instance can NEVER become collidable -- a puppet that turns into a hazard on one
+	//     screen and not the other is a desync, not a cosmetic divergence;
+	//   * nothing gameplay-visible reads it. Both current users are in Oracle.GetBaddies, which
+	//     is the AI's whole world model, and are invisible to it only because every consumer
+	//     there gates on Collides (PlayerShip.IsAiShootable / the IsAiThreat scan).
+	//
+	// Read at the ComponentAdded seam, so it must be FINAL before ComponentBin.Add -- the same
+	// configure-then-Add rule tools/audit_add_order.py already lints.
+	internal virtual bool NetCosmeticOnly => false;
+
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)
 	{
 	}

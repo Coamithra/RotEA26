@@ -331,6 +331,18 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
 		}
 
+		// JS bridge for the texture-load probe (eaTexProbe in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugTexProbe', 'GFX/Base/756'). Reports which
+		// precompiled sibling shipped, which file the texture ACTUALLY came from, its actual vs
+		// logical size, and its mip level count -- and on failure the whole exception chain,
+		// which is the one thing KNI's own FileNotFoundException throws away. See
+		// Compat/TexProbe.cs.
+		[JSInvokable("debugTexProbe")]
+		public static string TexProbeRun(string assetName)
+		{
+			return EvilAliensWeb.Compat.TexProbe.Run(assetName);
+		}
+
 		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
 		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background

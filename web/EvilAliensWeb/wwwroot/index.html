@@ -270,6 +270,19 @@
             catch (e) { console.warn('[debug] eaBgCull failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: probe the REAL texture load path for one asset (card 35834236).
+        //   eaTexProbe('GFX/Base/756')  ->  .dds, 612x612 actual / 512x512 logical, 1 level
+        // Reports which precompiled sibling the offline build shipped, which file the texture
+        // ACTUALLY came from (a silent .dds -> .png fallback is otherwise undetectable), actual
+        // vs logical size, and the mip level count. On failure it prints the whole exception
+        // chain — KNI's TitleContainer.OpenStream rethrows every cause as a FileNotFoundException
+        // whose Message is only the path, so the tick guard's one-line report ("threw:
+        // Content/gfx/base/756.png") looks like a 404 no matter what really went wrong.
+        window.eaTexProbe = (assetName) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugTexProbe', assetName)); }
+            catch (e) { console.warn('[debug] eaTexProbe failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: asplode every locally-owned PlayerShip through the real death path, so the
         // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
         // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it

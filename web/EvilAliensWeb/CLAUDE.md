@@ -213,6 +213,8 @@ generate much of the art/audio referenced here.
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
+  `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
+  flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
@@ -595,7 +597,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   - **The honest rig is `?flyspidercount=<N>` + `?flyspiderflatten=`.** `?flyspidercount=<N>`
     replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
     grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
-    stays representative. `?flyspiderflatten=per|0|swarm` then varies ONLY the flatten:
+    stays representative. Bench spiders are also forced `Collides = false`, which for the
+    FOREGROUND variant is a real change from live play -- otherwise the player would shoot the
+    pinned population down mid-run and an un-invulned ship could be killed by the grid it is
+    measuring. So a foreground bench sits out the collision pass and is a DRAW-cost rig (GL calls
+    / frame ms), not a whole-frame one; background spiders never collided anyway. `?flyspiderflatten=per|0|swarm` then varies ONLY the flatten:
     `swarm` (the SHIPPED default since this card: `FlyingSpiderSwarm`, one RT round trip for the
     whole population) / `per` (the pre-card path, one RT round trip per spider) / `0` (none).
     `?flyspiderbox=<half>` overrides the flatten bbox

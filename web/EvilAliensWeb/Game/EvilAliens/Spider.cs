@@ -96,8 +96,15 @@ internal class Spider : KillableAlien
 		return spider;
 	}
 
+	// Takes no arguments, but is NOT empty: it is the per-spawn reset seam for an instance that may
+	// have come out of the recycle pool with a previous life's settings on it. Initialize already
+	// resets everything it owns; netForcedColorIndex is written by an OPTIONAL later setter, so it
+	// has to be cleared here or a Spider recycled after serving as a net puppet keeps the host's
+	// forced grey tint in a later local game. SpiderDescriptor.CreatePuppet calls NetForceColor
+	// AFTER this, so the puppet path is unaffected.
 	public void Setup()
 	{
+		netForcedColorIndex = null;
 	}
 
 	public override void Initialize()

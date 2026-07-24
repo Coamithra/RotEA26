@@ -656,7 +656,17 @@ namespace EvilAliensWeb.Compat
 		// population stops drifting. That pin is the whole point: the first numbers on this card
 		// compared two runs whose spider counts were never equal. N=0 is a legal baseline (an
 		// empty Level 2 to subtract). null => the original endless 5.5/s stream.
+		// Holding N also costs the FOREGROUND variant its collidability -- bench spiders are
+		// forced Collides=false (FlyingSpider.ApplyBenchPlacement), or the player would shoot the
+		// population down mid-run and an un-invulned ship could be killed by the grid it is
+		// measuring. So a foreground bench is a DRAW-cost rig (GL calls / frame ms) that sits out
+		// the collision pass; the background variant it is compared against never collided anyway.
 		public static int? FlySpiderCount { get; private set; }
+
+		// Ceiling for ?flyspidercount=. Far above anything the cost curve needs (it was measured
+		// at N=0/40/80 and is linear), and low enough that a fat-fingered extra zero is reported
+		// as a bad value instead of spending the boot building components on the WASM heap.
+		private const int MaxFlySpiderBench = 4096;
 
 		// ?flyspiderbox=<half>: override the group-flatten bounding box half-extent in FlyingSpider
 		// .Draw (baked 200 design px, scaled by the spider's `scale`). This is the DISCRIMINATOR
@@ -1466,6 +1476,16 @@ namespace EvilAliensWeb.Compat
 					{
 						FlySpiderScale = fss;
 					}
+					else
+					{
+						// Reported like its ?flyspidercount=/?flyspiderbox= siblings: a typo'd
+						// value would otherwise run at the baked DefaultSizeFactor while the
+						// session believes it is looking at the size under test.
+						Console.WriteLine("[debug] unknown ?flyspiderscale= value '" + val
+							+ "' (expected a number > 0) -- ignored, staying on "
+							+ (FlySpiderScale ?? EvilAliens.FlyingSpider.DefaultSizeFactor)
+								.ToString(CultureInfo.InvariantCulture));
+					}
 					break;
 				case "wcdiff":
 				case "webcamdiff":
@@ -1951,20 +1971,46 @@ namespace EvilAliensWeb.Compat
 					}
 					else
 					{
+						// Every rejection message below names the setting that is actually IN
+						// FORCE, read back off the property rather than written as a literal --
+						// a repeated flag (?flyspiderbox=250&flyspiderbox=xx) keeps the earlier
+						// valid value, and a diagnostic that can state the wrong condition is
+						// worse than one that states none.
 						Console.WriteLine("[debug] unknown ?flyspiderflatten= value '" + val
-							+ "' (expected per/0/swarm) -- ignored, staying on swarm");
+							+ "' (expected per/0/swarm) -- ignored, staying on " + FlySpiderFlatten);
 					}
 					break;
 				case "flyspidercount":
-					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc) && fsc >= 0)
+					// Reported, never swallowed -- same reason as ?flyspiderflatten= above, and it
+					// bites harder here: a typo'd N silently leaves the endless STREAM running,
+					// so the run has no pinned population at all while being labelled a bench.
+					// The upper bound is rejected for the same reason rather than clamped: one
+					// extra zero would otherwise spend the run building a million components on
+					// the WASM heap, which reads as a hung boot, not as a mislabelled bench.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc)
+						&& fsc >= 0 && fsc <= MaxFlySpiderBench)
 					{
 						FlySpiderCount = fsc;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspidercount= value '" + val
+							+ "' (expected an integer 0.." + MaxFlySpiderBench + ") -- ignored, staying on "
+							+ (FlySpiderCount.HasValue
+								? "the pinned bench of " + FlySpiderCount.Value
+								: "the endless stream"));
 					}
 					break;
 				case "flyspiderbox":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fsb) && fsb > 0f)
 					{
 						FlySpiderBox = fsb;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspiderbox= value '" + val
+							+ "' (expected a number > 0) -- ignored, staying on "
+							+ EvilAliens.FlyingSpider.FlattenBoxHalfDesign.ToString(CultureInfo.InvariantCulture));
 					}
 					break;
 				case "tutorialtraining":
@@ -2250,27 +2296,6 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// A bare flag (?menu) or =1/=true/=yes/=on means ON; =0/=false/=no/=off means OFF.
-		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
-		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
-		// the two and would silently run a typo'd variant on the default path.
-		private static bool IsExplicitlyOff(string val)
-		{
-			if (val == null)
-			{
-				return false;
-			}
-			switch (val.Trim().ToLowerInvariant())
-			{
-			case "0":
-			case "false":
-			case "no":
-			case "off":
-				return true;
-			default:
-				return false;
-			}
-		}
-
 		private static bool IsOn(string val)
 		{
 			if (val == null)
@@ -2284,6 +2309,28 @@ namespace EvilAliensWeb.Compat
 			case "true":
 			case "yes":
 			case "on":
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
+		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
+		// the two and would silently run a typo'd variant on the default path. Note a BARE flag is
+		// not explicitly off (null => false), which is the whole difference from !IsOn().
+		private static bool IsExplicitlyOff(string val)
+		{
+			if (val == null)
+			{
+				return false;
+			}
+			switch (val.Trim().ToLowerInvariant())
+			{
+			case "0":
+			case "false":
+			case "no":
+			case "off":
 				return true;
 			default:
 				return false;

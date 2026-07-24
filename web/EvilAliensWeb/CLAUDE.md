@@ -234,11 +234,31 @@ site now lives under:
   by running the whole pass over the entry-time `count` — a collidable born mid-pass joins the
   NEXT pass, which is what the old deferred birthList did anyway. **Apply the same rule to any
   new phase that indexes a parallel array by collection position.**
+  **The contract is PINNED by `eaBinTest()`** (card bcdc7430), scenarios 5 and 6. The fix
+  froze THREE bounds: the outer fill loop, the all-pairs scan inside it, and the resolution
+  loop. Scenario 6 covers the resolution loop; scenario 5 covers the other two together, and
+  has to — only a non-gridded type's callback runs during the fill phase at all, so its
+  `CollisionMultibox` spawner is the sole way to reach either bound.
+  Neither scenario leans on the `boxes[m]` out-of-range throw: whether it fires depends on the
+  high-water mark `boxes` accumulated from prior play, so such a test would pass on the broken
+  code and its verdict would be a function of session history. Each instead PLANTS the fault's
+  precondition — scenario 5 needs only `List<T>` version-checking its enumerator; scenario 6
+  runs a warm-up pass plus a filler collidable it then removes, so the newborn lands on a stale
+  `boxes` entry the clear loop (`i != count`) skipped — and then ASSERTS the plant took, since a
+  silently-missing plant is the one way it could go quietly vacuous (a busy world can shift the
+  index, which is why the suite is menu-only). Both also carry a positive control.
+  Verified by reverting `DetectCollisions` to its pre-fix form: scenario 5 reports
+  `InvalidOperationException` and scenario 6 reports the newborn participating, in the menu AND
+  mid-level.
 - **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds, and reports how many
   passes `DetectCollisions` carried through a mid-pass collidable add (the condition above —
   it fires in the hundreds during ordinary play, so it is a live proof the path is exercised,
   not a warning); `eaBinTest()` runs the scripted scenario suite (`Compat/BinTest.cs`) against
-  the live bin and prints PASS/FAIL. `eaKillShips()` asplodes every locally-owned `PlayerShip`
+  the live bin and prints PASS/FAIL — 20 assertions across 6 scenarios (the four lifecycle
+  ones plus the two collision-pass ones in the bullet above). A few of those are PRECONDITIONS
+  rather than assertions about the code, and a failed one short-circuits the rest of its
+  scenario, so read the FAIL line rather than the tally. `eaKillShips()` asplodes every
+  locally-owned `PlayerShip`
   through the real `Asplode()`→`Die()` path (remote/friend puppets skipped) — the repeatable
   way to reach a death/reset, since `AllShipsDead` needs BOTH co-op ships down and waiting on
   the `?aiplayer` AI to die is neither timely nor repeatable.

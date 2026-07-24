@@ -62,7 +62,12 @@ namespace EvilAliensWeb.Compat.Net
         // the slots it does not (ScoreVisualiser.SustainCombo). Authored against v8 and merged
         // after c0229c57 had taken it; two independent wire changes cannot share a version, so
         // this took the next one -- the same resolution the v6/v7 note above records.
-        public const byte ProtocolVersion = 9;
+        // v10 (card 9a3175d0): EvCosmeticSwarm -- a purely decorative swarm replicates as one
+        // "effect on/off" beat carrying the spawner's rate, and its entities stop being
+        // replicated individually. A v9 peer would ignore the beat (unknown event type) AND
+        // still expect the per-entity spawns, so it would see empty scenery: a real
+        // incompatibility, hence the version move even though no existing layout changed.
+        public const byte ProtocolVersion = 10;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -129,9 +134,12 @@ namespace EvilAliensWeb.Compat.Net
         // types to the world (ComponentBin.Add checks SuppressWorldSpawn).
         public static bool SuppressLevelScript => IsClient;
 
+        // Card 9a3175d0: IsReplicableInstance, not IsReplicable -- a decorative instance is the
+        // client's OWN to spawn (its spawner is what got replicated), so the bin must let it
+        // through or the joiner's scenery vanishes entirely.
         public static bool SuppressWorldSpawn(GameComponent component)
         {
-            return IsClient && !NetPuppets.Constructing && NetTypeRegistry.IsReplicable(component);
+            return IsClient && !NetPuppets.Constructing && NetTypeRegistry.IsReplicableInstance(component);
         }
 
         // ComponentBin.Pop must not thaw a frozen puppet back into a live AI.
@@ -911,6 +919,25 @@ namespace EvilAliensWeb.Compat.Net
             metrics.BeatsTx++;
         }
 
+        // A decorative swarm turned on or off on the host (card 9a3175d0). Sent as an ordinary
+        // reliable beat, exactly like the Background ops -- the joiner then runs its own spawner
+        // for it and its own scenery, instead of taking one snapshot turn per fog spider.
+        //
+        // The LATCH that a join-in-progress peer catches up from is kept by GameScene, not here:
+        // this early-returns while no peer is connected, which for a listed single-player game is
+        // precisely the window whose beats have to be remembered (same reasoning as Background's
+        // netLast* latches).
+        public static void OnCosmeticSwarm(NetCosmeticKind kind, bool on, float rate)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeCosmeticSwarmEvent(txEventSeq++, (byte)kind, on, rate));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
         // song = -1 replicates a StopMusic. Unlike the other beat hooks (whose primitives
         // only scripts call), PlayMusic is also the MENU's -- gate on a live GameScene so
         // a host navigating menus mid-session can't retune the client. Deliberately fired
@@ -1006,7 +1033,7 @@ namespace EvilAliensWeb.Compat.Net
         // through its real sim, the client on its frozen puppets via local hit-testing).
         public static void NoteKill(AlienDrawableGameComponent comp, ICollidable killer)
         {
-            if (!Active || !NetTypeRegistry.IsReplicable((GameComponent)(object)comp))
+            if (!Active || !NetTypeRegistry.IsReplicableInstance((GameComponent)(object)comp))
             {
                 return;
             }
@@ -2609,6 +2636,17 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 Vector2 v = new Vector2(NetProtocol.ReadF32(data, 5), NetProtocol.ReadF32(data, 9));
                 GameScene.NetActiveScene?.NetApplyBackgroundOp((NetBackgroundOp)data[4], v);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvCosmeticSwarm:
+            {
+                if (isHost || data.Length < 10)
+                {
+                    return;
+                }
+                GameScene.NetActiveScene?.NetApplyCosmeticSwarm(
+                    (NetCosmeticKind)data[4], data[5] != 0, NetProtocol.ReadF32(data, 6));
                 metrics.BeatsRx++;
                 break;
             }

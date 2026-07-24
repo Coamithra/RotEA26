@@ -203,6 +203,8 @@ generate much of the art/audio referenced here.
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
+  `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
+  a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
@@ -1222,7 +1224,11 @@ interpolation feel, both gated on real-network playtests.
   **v8** appends a `blockedSlots` mask to the handshake (HelloBytes 21 -> 22) so the host can
   grant a seat that is free on BOTH rosters -- card c0229c57, see the roster-slots bullet;
   **v9** adds `MsgHudState` (0x12) -- the owner-authoritative per-slot combo + powerup state,
-  card 1a3ad45a, see the per-slot HUD state bullet).
+  card 1a3ad45a, see the per-slot HUD state bullet;
+  **v10** adds `EvCosmeticSwarm` -- a decorative swarm replicates as one on/off beat and its
+  entities stop being replicated individually, card 9a3175d0, see the decorative-swarm bullet.
+  No existing layout changed, but a v9 peer would ignore the beat AND still expect the
+  per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1243,6 +1249,55 @@ interpolation feel, both gated on real-network playtests.
   cross the wire -- plus Powerup). Emits spawn/death events; replays the live set to a
   late-joining peer; tracks per-entity OBSERVED velocity (position deltas between an
   entity's snapshot turns -- Speed/Direction lies for enemies that move Position directly).
+  Minus the per-INSTANCE opt-outs -- see the decorative-swarm bullet below.
+- **Decorative swarms replicate as one "effect on/off" beat, NOT per entity (card 9a3175d0).**
+  Purely cosmetic entities were taking NetIds, `EvSpawn`/`EvDeath` pairs and a share of the
+  16-per-60ms snapshot round robin for nothing: the `?flyspiders` rig measured `liveIds` 17-19,
+  i.e. essentially the WHOLE budget spent on scenery, which directly stretches `snapTurn` --
+  the mean blind dead-reckoning window of every enemy that DOES matter. Two halves:
+  - **`AlienDrawableGameComponent.NetCosmeticOnly`** -- an INSTANCE-level opt-out (the
+    `NetSpinPerMs` idiom), because the same `FlyingSpider` type is a real killable enemy in its
+    foreground form and fog in its background one. Overridden by `FlyingSpider`
+    (`isbackground`) and `Asteroid` (`SetBackground()`'s `DrawOrder == 1` marker). Read at the
+    ComponentAdded seam, so it must be FINAL before `ComponentBin.Add` -- the configure-then-Add
+    rule `tools/audit_add_order.py` already lints.
+    **Two conditions, both required: the instance can never become collidable, and nothing
+    gameplay-visible reads it.** Both members are in `Oracle.GetBaddies` -- the AI's whole world
+    model -- and are invisible to it only because every consumer there gates on `Collides`
+    (`PlayerShip.IsAiShootable` has an explicit `baddy is FlyingSpider && baddy.Collides`).
+  - **`NetTypeRegistry.IsReplicableInstance`** is the predicate the LIVE world asks;
+    `IsReplicable` is just the type table. Every decision site uses it -- and
+    **`NetSession.SuppressWorldSpawn` is the load-bearing one**: with the type-level test there,
+    the bin would divert the CLIENT'S OWN cosmetic spawns into the recycle pool and the joiner
+    would see no scenery at all, with no counter moving anywhere.
+  - **The SPAWNER replicates instead.** `EvCosmeticSwarm` (protocol **v10**,
+    `[kind:1][on:1][rate:f32]`, `NetCosmeticKind` APPEND-ONLY) is announced by
+    `FlyingSpiderEvent` / `AsteroidSpawner` from their first `Update` and from `OnFinished`
+    (Level 2 ends its fog swarm by `LinkWith`, so lifetime alone would never fire). The client
+    builds its own spawner and ticks it in `GameScene.UpdateNormal`, **in the very branch that
+    skips `eventList.Update`** -- which is what gets pause / victory / resetting for free
+    (`UpdateNormal` only runs in `GameState.Normal`, and a pause `Push` disables the scene).
+    The asteroid copy uses the spawner's own `SetBackGroundOnly()` + `startWithBig:false`, so it
+    never produces the collidable ones -- those still arrive as puppets.
+  - **Latched on `GameScene`, replayed from the `EvReady` catch-up seam** next to
+    `Background.NetReplayCatchUp`. Latched at the ANNOUNCE, not off the send path:
+    `NetSession.OnCosmeticSwarm` early-returns with no peer connected, which for a LISTED
+    single-player game is exactly the window a JIP peer must be caught up from (the same
+    reasoning as Background's `netLast*`). Cleared at the checkpoint revert on BOTH peers -- the
+    host's eventList drops active events without terminating them, so no "off" is ever sent --
+    and in `Initialize`/`Terminate` (re-added singletons).
+  - **A rate off the wire is clamped** (`NetCosmeticMaxRate` 32/s; the densest shipped is
+    AsteroidChase's 5) and non-finite/negative refused: it drives `GenericSpawner`'s
+    `while (num >= 1f) DoEvent()` loop, and a publicly listed game has a stranger on the far end.
+  - **Verify with `eaNetCosmetic()`** (`Compat/Net/NetCosmeticTest.cs`) -- codec, the instance
+    predicate (every check beside its positive control, since a predicate answering "not
+    replicated" for everything would pass a fog-spiders-only test and silently stop replicating
+    the whole game), and the client apply path (skipped with a printed SKIP outside a level).
+    **A screenshot diff cannot check this feature at all** -- the two peers' scenery is SUPPOSED
+    to be in different places. `eaNetBg()`'s state line gains `cosmetic=<kind@rate,...>`, which
+    both peers hold (host = latch, client = live spawners) and which IS diffable; `eaNetBgTest()`
+    gained the matching round-trip leg, and `?netscript` fires both kinds so the two-window run
+    covers them.
 - **World authority (card 11.2): the host runs the real sim, a join peer mirrors it.**
   Client sim-split at two choke points: `GameScene.UpdateNormal` skips `eventList.Update`
   (spawners/the level script only act in GameEvent.Update) and `ComponentBin.Add` swallows

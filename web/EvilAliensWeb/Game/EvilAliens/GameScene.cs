@@ -429,6 +429,230 @@ internal abstract class GameScene : Scene
 		}
 	}
 
+	// ---- Online co-op (card 9a3175d0): decorative swarms as one "effect on/off" beat --------
+
+	// One entry per decorative swarm currently running in this level. It means two things at
+	// once, deliberately, because they are the same fact from the two ends of the wire:
+	//   * on the HOST it is the LATCH -- what a join-in-progress peer has to be caught up to
+	//     (Spawner null; the host's real spawner lives in the level script's eventList);
+	//   * on a CLIENT it is the live effect -- our own copy of the spawner, which we tick
+	//     ourselves because the script that owns the host's never runs here.
+	// Sharing the list is what lets NetCatchUpStateLine print the same field on both peers, so
+	// two windows can be diffed for "are we running the same scenery".
+	private struct NetCosmeticEntry
+	{
+		public EvilAliensWeb.Compat.Net.NetCosmeticKind Kind;
+		public float Rate;
+		public GameEvent Spawner;
+	}
+
+	private readonly System.Collections.Generic.List<NetCosmeticEntry> netCosmeticSwarms
+		= new System.Collections.Generic.List<NetCosmeticEntry>();
+
+	// A rate off the wire drives GenericSpawner's `while (num >= 1f) DoEvent()` loop, and a
+	// publicly listed game has a stranger on the other end -- an infinite or absurd rate would
+	// wedge the tick outright. Refused rather than clamped silently at the top end would hide a
+	// protocol slip; clamping is what keeps a hostile peer from being able to do anything worse
+	// than "slightly too many spiders". (Background.NetSetDoodadPos guards NaN for the same
+	// reason.) The ceiling is well above any shipped rate: the densest is AsteroidChase's 5/s.
+	private const float NetCosmeticMaxRate = 32f;
+
+	// Host: our level script just turned a decorative swarm on or off. Latch it, then send it.
+	//
+	// Latching FIRST is the point: NetSession.OnCosmeticSwarm early-returns while no peer is
+	// connected, and for a LISTED single-player game that is exactly the window whose beats a
+	// join-in-progress peer will need replayed. Background's netLast* latches exist for the same
+	// reason, and are kept for the same distance from the send path.
+	internal static void NetNoteCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind kind, bool on, float rate)
+	{
+		// A client's OWN copies of these spawners announce too (they are the same class running
+		// the same Update) -- it must never latch or emit, or its live set would double up with a
+		// latch of itself.
+		if (EvilAliensWeb.Compat.Net.NetSession.IsClient)
+		{
+			return;
+		}
+		NetActiveScene?.NetLatchCosmeticSwarm(kind, on, rate);
+		EvilAliensWeb.Compat.Net.NetSession.OnCosmeticSwarm(kind, on, rate);
+	}
+
+	private void NetLatchCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind kind, bool on, float rate)
+	{
+		NetDropCosmeticSwarm(kind);
+		if (on)
+		{
+			netCosmeticSwarms.Add(new NetCosmeticEntry { Kind = kind, Rate = rate });
+		}
+	}
+
+	// Client: the host turned a decorative swarm on or off -- run (or stop running) our own copy.
+	// Idempotent: a repeated "on" replaces the spawner (the rate may have changed), an "off" for
+	// something we are not running is a no-op. Entities already in flight are left alone, which
+	// is what the host does too -- its spawner stopping does not kill what it already spawned.
+	internal void NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind kind, bool on, float rate)
+	{
+		NetDropCosmeticSwarm(kind);
+		if (!on || !float.IsFinite(rate) || rate <= 0f)
+		{
+			return;
+		}
+		// Clamp ONCE, here, so the entry, the state line and the spawner all report the same
+		// number -- storing the raw rate and clamping only what reaches the spawner would make
+		// eaNetBg()'s two-window diff lie about what is actually running.
+		rate = MathHelper.Min(rate, NetCosmeticMaxRate);
+		GameEvent spawner = NetBuildCosmeticSpawner(kind, rate);
+		if (spawner != null)
+		{
+			// The eventList Resets an event as it activates it (GameEventList.progressList), and
+			// some spawners read constructor-body fields only from Reset -- AsteroidSpawner's
+			// startedWithAReallyBigOne is set from `startBig`, which the base constructor's own
+			// Reset call cannot see yet. Start ours the same way the script would.
+			spawner.Reset();
+			netCosmeticSwarms.Add(new NetCosmeticEntry { Kind = kind, Rate = rate, Spawner = spawner });
+		}
+	}
+
+	private GameEvent NetBuildCosmeticSpawner(EvilAliensWeb.Compat.Net.NetCosmeticKind kind, float rate)
+	{
+		switch (kind)
+		{
+		case EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground:
+			return new FlyingSpiderEvent(base.Game, 0f, rate, isbackground: true);
+		case EvilAliensWeb.Compat.Net.NetCosmeticKind.BackgroundAsteroids:
+		{
+			// startWithBig:false + SetBackGroundOnly() is what makes this copy purely decorative:
+			// the host's spawner emits ONE collidable asteroid (and an opening big one) per event
+			// alongside the two background ones, and those stay replicated as puppets. Spawning
+			// our own would put a real hazard on this screen and nowhere else.
+			AsteroidSpawner asteroids = new AsteroidSpawner(base.Game, 0f, rate, startWithBig: false);
+			asteroids.SetBackGroundOnly();
+			return asteroids;
+		}
+		default:
+			// An unknown kind from a newer peer. The build-hash handshake makes this unreachable
+			// between real builds; ignoring it degrades to "no scenery", never to a crash.
+			return null;
+		}
+	}
+
+	private void NetDropCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind kind)
+	{
+		for (int i = netCosmeticSwarms.Count - 1; i >= 0; i--)
+		{
+			if (netCosmeticSwarms[i].Kind == kind)
+			{
+				netCosmeticSwarms.RemoveAt(i);
+			}
+		}
+	}
+
+	// Both peers, at the checkpoint revert: the host's eventList drops its active events without
+	// terminating them (so no "off" beat is ever sent), and the purge in the same block wipes the
+	// scenery itself. Clearing here keeps the two ends symmetric -- the host's re-activated
+	// spawner re-announces on its next tick, and one that the revert left BEHIND correctly stays
+	// off on both screens.
+	private void NetClearCosmeticSwarms()
+	{
+		netCosmeticSwarms.Clear();
+	}
+
+	// Host: replay the swarms our script already started, for a peer that just came up (EvReady).
+	// `emit` is the sink rather than a hard call to NetSession.OnCosmeticSwarm for the same reason
+	// Background.NetReplayCatchUp takes one -- it is what makes the catch-up testable as a pure
+	// latch -> wire -> apply function in one tab, with no second peer.
+	internal void NetReplayCosmeticSwarms(Action<EvilAliensWeb.Compat.Net.NetCosmeticKind, float> emit)
+	{
+		foreach (NetCosmeticEntry e in netCosmeticSwarms)
+		{
+			emit(e.Kind, e.Rate);
+		}
+	}
+
+	// The client-apply leg of eaNetCosmetic() (card 9a3175d0). It lives here rather than in
+	// NetCosmeticTest because the live swarm set is this scene's, and the leg has to put back
+	// exactly what it found -- entries hold a spawner reference on a client, so restoring them
+	// as a fresh latch would stop the joiner's scenery dead.
+	//
+	// What it proves: a beat off the wire builds the right effect, a repeat REPLACES rather than
+	// stacks (a checkpoint revert re-announces, so this happens in every real run), an off beat
+	// removes it, and a hostile or broken rate cannot reach GenericSpawner's
+	// `while (num >= 1f) DoEvent()` loop -- a NaN or a huge rate there wedges the tick outright,
+	// and a publicly listed game has a stranger on the other end.
+	internal string NetCosmeticSelfTest()
+	{
+		System.Collections.Generic.List<NetCosmeticEntry> saved
+			= new System.Collections.Generic.List<NetCosmeticEntry>(netCosmeticSwarms);
+		System.Collections.Generic.List<string> fails = new System.Collections.Generic.List<string>();
+		int checks = 0;
+		void Check(bool ok, string what)
+		{
+			checks++;
+			if (!ok)
+			{
+				fails.Add(what);
+			}
+		}
+
+		netCosmeticSwarms.Clear();
+		Check(NetCosmeticStateField() == "-", "an empty set prints as '-'");
+
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: true, 5.5f);
+		Check(netCosmeticSwarms.Count == 1 && netCosmeticSwarms[0].Spawner is FlyingSpiderEvent,
+			"an 'on' beat builds the type's real spawner");
+
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.BackgroundAsteroids, on: true, 4f);
+		Check(netCosmeticSwarms.Count == 2, "a second kind runs alongside the first");
+		Check(netCosmeticSwarms[1].Spawner is AsteroidSpawner, "the second kind builds ITS spawner");
+
+		// A repeat is the checkpoint-revert case: the host's re-activated event announces again.
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: true, 3f);
+		Check(netCosmeticSwarms.Count == 2, "a repeated 'on' REPLACES rather than stacking");
+
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: false, 0f);
+		Check(netCosmeticSwarms.Count == 1
+			&& netCosmeticSwarms[0].Kind == EvilAliensWeb.Compat.Net.NetCosmeticKind.BackgroundAsteroids,
+			"an 'off' beat removes only that kind");
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: false, 0f);
+		Check(netCosmeticSwarms.Count == 1, "an 'off' for something we are not running is a no-op");
+
+		// Hostile / broken rates.
+		netCosmeticSwarms.Clear();
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: true, float.NaN);
+		Check(netCosmeticSwarms.Count == 0, "a NaN rate is refused");
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground,
+			on: true, float.PositiveInfinity);
+		Check(netCosmeticSwarms.Count == 0, "an infinite rate is refused");
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: true, -1f);
+		Check(netCosmeticSwarms.Count == 0, "a negative rate is refused");
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: true, 1e9f);
+		Check(netCosmeticSwarms.Count == 1
+			&& netCosmeticSwarms[0].Rate == NetCosmeticMaxRate
+			&& NetCosmeticSpawnerRate(netCosmeticSwarms[0].Spawner) == NetCosmeticMaxRate,
+			"an absurd rate is clamped, in the entry AND the spawner");
+		// Positive control for the clamp: a real rate must pass through untouched, or the check
+		// above would also pass with every rate pinned to the ceiling.
+		netCosmeticSwarms.Clear();
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.FlyingSpiderBackground, on: true, 5.5f);
+		Check(netCosmeticSwarms[0].Rate == 5.5f
+			&& NetCosmeticSpawnerRate(netCosmeticSwarms[0].Spawner) == 5.5f,
+			"a shipped rate reaches the spawner unclamped (positive control)");
+
+		netCosmeticSwarms.Clear();
+		netCosmeticSwarms.AddRange(saved);
+		string report = "apply: " + (fails.Count == 0 ? "PASS" : "FAIL")
+			+ " (" + (checks - fails.Count) + "/" + checks + " checks)";
+		foreach (string f in fails)
+		{
+			report += "\n    FAILED: " + f;
+		}
+		return report;
+	}
+
+	private static float NetCosmeticSpawnerRate(GameEvent spawner)
+	{
+		return spawner is GenericSpawner g ? g.HitsPerSecond : -1f;
+	}
+
 	// Join-in-progress catch-up (card 45a4e48d), host side: bring a peer whose GameScene has
 	// just come up (EvReady) up to the scenery state our level script already reached. The
 	// joiner ran its own Initialize, so it holds the level's INITIAL background + music and --
@@ -438,13 +662,39 @@ internal abstract class GameScene : Scene
 	internal void NetReplayCatchUp()
 	{
 		Background.NetReplayCatchUp(EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp);
+		// Card 9a3175d0: and the decorative swarms, which are the same kind of "already fired,
+		// and the script will never fire it again" state as the background ops.
+		NetReplayCosmeticSwarms((kind, rate) =>
+			EvilAliensWeb.Compat.Net.NetSession.OnCosmeticSwarm(kind, on: true, rate));
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic(base.SoundManager.NetCurrentSong);
 	}
 
 	// The catch-up state as one parseable line, for the eaNetBg() console dump.
 	internal string NetCatchUpStateLine()
 	{
-		return Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong;
+		return Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong
+			+ " cosmetic=" + NetCosmeticStateField();
+	}
+
+	// The decorative swarms as one field. Prints the KIND and RATE only, which both peers hold
+	// (the host as its latch, a client as its live spawners), so two windows can be diffed for
+	// "same scenery running" -- the entities themselves are supposed to be in different places.
+	private string NetCosmeticStateField()
+	{
+		if (netCosmeticSwarms.Count == 0)
+		{
+			return "-";
+		}
+		string s = "";
+		foreach (NetCosmeticEntry e in netCosmeticSwarms)
+		{
+			if (s.Length > 0)
+			{
+				s += ",";
+			}
+			s += e.Kind.ToString() + "@" + e.Rate.ToString(System.Globalization.CultureInfo.InvariantCulture);
+		}
+		return s;
 	}
 
 	// Round-trip self-test for the JIP catch-up (card 45a4e48d), driven by eaNetBgTest() from
@@ -459,16 +709,35 @@ internal abstract class GameScene : Scene
 	// compare the state line. DEBUG ONLY and deliberately destructive: Reset re-runs the
 	// hyperspace entry, so the screen flashes. Run it in a solo tab -- inside a live host
 	// session the replayed ops would also egress to the peer (idempotent, but noise).
+	//
+	// One deliberate residue: replaying the cosmetic leg puts the swarm entries back through the
+	// CLIENT apply path, so on a host they end up holding a spawner object nobody ticks (only the
+	// SuppressLevelScript branch of UpdateNormal ticks them). Kind and rate -- the whole of what
+	// the catch-up replays and what the state line reports -- are unchanged, so a later pairing
+	// still catches a joiner up correctly.
 	internal string NetCatchUpSelfTest()
 	{
 		string before = NetCatchUpStateLine();
 		System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V)> burst
 			= new System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2)>();
 		Background.NetReplayCatchUp((op, v) => burst.Add((op, v)));
+		// Card 9a3175d0: the decorative swarms ride the same catch-up. Captured through the REAL
+		// wire codec rather than by calling the apply path directly -- a byte-layout slip in
+		// EncodeCosmeticSwarmEvent is exactly the class of bug a self-test that skipped the
+		// encode could not see.
+		System.Collections.Generic.List<byte[]> cosmeticBurst = new System.Collections.Generic.List<byte[]>();
+		NetReplayCosmeticSwarms((kind, rate) => cosmeticBurst.Add(
+			EvilAliensWeb.Compat.Net.NetProtocol.EncodeCosmeticSwarmEvent(0, (byte)kind, on: true, rate)));
 		int song = base.SoundManager.NetCurrentSong;
 		Background.NetTestWipe();
+		NetClearCosmeticSwarms();
 		base.SoundManager.NetApplyMusic(-1);
 		string joiner = NetCatchUpStateLine();
+		foreach (byte[] ev in cosmeticBurst)
+		{
+			NetApplyCosmeticSwarm((EvilAliensWeb.Compat.Net.NetCosmeticKind)ev[4], ev[5] != 0,
+				EvilAliensWeb.Compat.Net.NetProtocol.ReadF32(ev, 6));
+		}
 		foreach ((EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V) op in burst)
 		{
 			NetApplyBackgroundOp(op.Op, op.V);
@@ -476,8 +745,12 @@ internal abstract class GameScene : Scene
 		base.SoundManager.NetApplyMusic(song);
 		string after = NetCatchUpStateLine();
 		// Name the ops, not just the count: a leg the level never fired is absent from this list,
-		// so a PASS can't be read as covering more than the run actually exercised.
+		// so a PASS can't be read as covering more than the run actually exercised. The cosmetic
+		// swarms are named the same way and for the same reason -- Level 1's belt fires the
+		// asteroid leg and no spider leg, Level 2 the reverse, so neither run covers both.
 		string ops = burst.Count == 0 ? "(none)" : string.Join(",", burst.ConvertAll(o => o.Op.ToString()));
+		ops += " cosmetic=" + (cosmeticBurst.Count == 0 ? "(none)"
+			: string.Join(",", cosmeticBurst.ConvertAll(e => ((EvilAliensWeb.Compat.Net.NetCosmeticKind)e[4]).ToString())));
 		return "[netbgtest] " + (after == before ? "PASS" : "FAIL") + " ops=" + ops
 			+ "\n  host   : " + before
 			+ "\n  joiner : " + joiner
@@ -725,6 +998,9 @@ internal abstract class GameScene : Scene
 		netLocalPauseUp = false;
 		netRemotePauseHeld = false;
 		netKickMenuUp = false;
+		// Level scenes are re-added singletons, so start every play from an empty decorative-swarm
+		// set. Terminate clears it too; this covers any exit path that never reached Terminate.
+		NetClearCosmeticSwarms();
 		pausestopper.Reset();
 		pausestopper.Stop();
 		Background.Reset();
@@ -942,6 +1218,15 @@ internal abstract class GameScene : Scene
 		};
 		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
+		// Both decorative-swarm kinds (card 9a3175d0), left running for the rest of the script:
+		// the joiner must show scenery of its own from its own spawners, and the ASTEROID one is
+		// the mixed case worth watching -- the two background rocks of each DoEvent stop being
+		// replicated while the real one beside them still arrives as a puppet. A fog swarm over a
+		// space level is not what Level 2 looks like; this is a beat rig, not a look rig.
+		FlyingSpiderEvent netScriptFog = new FlyingSpiderEvent(base.Game, 0f, 5.5f, isbackground: true);
+		eventList.AddEvent(netScriptFog, halting: false);
+		AsteroidSpawner netScriptBelt = new AsteroidSpawner(base.Game, 0f, 2f, startWithBig: false);
+		eventList.AddEvent(netScriptBelt, halting: false);
 		messageEvent = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 2.5f);
 		messageEvent.SetupAsWarning(4.712389f);
 		eventList.AddEvent(messageEvent, halting: true);
@@ -1269,6 +1554,7 @@ internal abstract class GameScene : Scene
 			_timer = TimeSpan.Zero;
 			score.Load();
 			eventList.RevertToCheckpoint();
+			NetClearCosmeticSwarms();
 			Settings.GetInstance().ResetDifficulty();
 			snapshotdelaytimer.Stop();
 			snapshotdelaytimer.Reset();
@@ -1343,6 +1629,22 @@ internal abstract class GameScene : Scene
 		{
 			eventList.Update(gameTime);
 		}
+		else
+		{
+			// ...but the DECORATIVE swarms the host announced are ours to run (card 9a3175d0):
+			// they take no NetIds and no snapshot turns, so nothing replicates them in. Ticking
+			// them HERE rather than from a component of their own is what gets pause, victory
+			// and resetting for free -- UpdateNormal only runs in GameState.Normal, and a pause
+			// Push disables the whole scene. Every one has an infinite lifetime, so none can
+			// Terminate mid-loop and mutate the list underneath it.
+			for (int i = 0; i < netCosmeticSwarms.Count; i++)
+			{
+				// A LATCH entry (host side) carries no spawner. A client cannot make one --
+				// NetNoteCosmeticSwarm refuses to latch here -- but this loop is on the tick path
+				// and the failure would be a hard crash, so it is not worth asserting instead.
+				netCosmeticSwarms[i].Spawner?.Update(gameTime);
+			}
+		}
 		if (oracle.AllShipsDead & spawnPlayerNormally)
 		{
 			LoseLife();
@@ -1367,6 +1669,10 @@ internal abstract class GameScene : Scene
 		// what stops them outliving the host's game entirely, since NetSession.Stop deliberately
 		// does not clear them.
 		EvilAliensWeb.Compat.Net.NetSession.ClearBlockedPeers();
+		// Level scenes are re-added singletons (the stall-banner reasoning above), so a swarm
+		// left in the list would be replayed to a joiner -- or ticked by a client -- on the NEXT
+		// play of this level, where the script never announced it.
+		NetClearCosmeticSwarms();
 		// KEEP THIS ABOVE THE PURGES (card 74403f83). ComponentBin.Add exempts the puppet layer
 		// from the standing purge filter, and the only thing stopping that exemption dropping a
 		// puppet into a scene that is tearing down is that EvSpawn / the snapshot path are gated

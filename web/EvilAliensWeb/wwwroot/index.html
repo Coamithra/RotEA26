@@ -553,6 +553,17 @@
             catch (e) { console.warn('[debug] eaSlotTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: decorative-swarm replication (card 9a3175d0) — the EvCosmeticSwarm codec, the
+        // per-instance "this is scenery, do not replicate it" predicate (each check beside its
+        // positive control), and the client apply path. Prints PASS/FAIL. This feature makes the
+        // two peers' scenery deliberately DIFFERENT, so a screenshot diff can say nothing about
+        // it; this is the check. Leave-no-trace, safe at any point in play — but run it INSIDE a
+        // level to cover the apply leg, which needs a GameScene.
+        window.eaNetCosmetic = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetCosmetic')); }
+            catch (e) { console.warn('[debug] eaNetCosmetic failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
         // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
         // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs

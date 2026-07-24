@@ -635,6 +635,13 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   collisions) dead-reckons `Position += vel*dt`, advances `curframe` at the type's own fps,
   blends snapshot corrections over ~150ms (error > 100px snaps + counts a `pupPops`
   metric), lerps scale, ticks each puppet's `timers` (hit-blink decay), re-applies hp.
+  **The driver ticks on REAL time (`Environment.TickCount64` delta, clamped 200ms), never the
+  turbo/slow-mo/hit-stop-scaled `gameTime` Game1 folds into components** -- the host mirrors
+  its world at its own real pace and stamps every snapshot's observed velocity on real time,
+  so a client time-scale window (the wipe's 180ms death hit-stop, a 1-up slow-motion) must not
+  stall the dead-reckoning or the correction blend, or the puppets fall behind the real-time
+  snapshots and repeatedly snap (this was the first-wipe `pupPops` burst; same rule the
+  remote-ship puppet follows). Characterised in `tools/sim/net_puppet_drive_sim.py`.
 - **World snapshots (`MsgWorldSnapshot` 0x20, stream lane, host->client, 60ms cadence):**
   round-robin cursor over the live NetId set, <=16 length-prefixed entries/packet (~500B).
   Entry = netId + typeIdx + the generic base block (`NetBaseState`: pos, observed vel
@@ -737,8 +744,10 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   (LoseLife triggers on AllShipsDead); roster is exactly two peers; DevCommentEvent
   commentary is not replicated (profile-local setting). Boss puppets are best-effort
   (the harness caveat): deep Update-reached attack poses may diverge until their state
-  extras grow. A one-time `pupPops` burst can appear during the FIRST wipe transition of
-  a session (transient, self-heals, cosmetic under the death FX -- follow-up card).
+  extras grow. The time-scaling half of the old first-wipe `pupPops` burst is FIXED (the
+  puppet driver now dead-reckons on real time, above); if a residual first-wipe burst ever
+  shows, it's the reset/id-churn transition (purge + checkpoint replay), reproducible in the
+  headless two-peer net sim's reset scenario, not the puppet clock.
 
 ### Audio runtime (`SoundManager` / `eaMusic`)
 

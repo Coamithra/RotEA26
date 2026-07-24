@@ -127,7 +127,63 @@ generate much of the art/audio referenced here.
   defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
+  `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
+
+### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
+
+**The loop is rAF-driven, so a frame RATE readout is vsync-capped and near-useless for
+optimization**: at 100Hz a 2ms frame and a 9ms frame both read "100 fps". The HUD therefore
+reports the measured rate AND the numbers that keep moving under the cap -- frame COST in ms and
+`1000/tickMs` HEADROOM fps -- side by side, never conflated. (Same distinction `WallProfiler`
+draws for the tower pass; the two agree on the same fight.)
+
+- **Visible by default in every dev build, invisible in the published one**, keyed off
+  `window.eaBuildHash === 'dev'` (deploy.yml stamps a real fingerprint at publish). That covers
+  Debug AND a local Release publish with no `#if DEBUG`. When hidden, nothing is built, the tick
+  hook stays null and the GL prototypes are unpatched -- zero cost, not just invisible.
+- Compact by default (fps + headroom); click the mode tag to expand to the frame-time sparkline,
+  the per-section ms rows and the GL draw-call count. **The panel is `pointer-events:none`** except
+  that tag and the mode checkboxes -- it sits over a shoot-'em-up where Mouse1 anywhere on the
+  canvas fires, and a clickable panel would eat every shot aimed at that corner.
+- Sections (they sum to the tick; whatever is left shows as `other`): `update` (parent) with
+  `components`/`collision`/`net` sub-rows, `scene` (= `DrawInner`, all components incl. bloom),
+  `post` (slowmo trail + holo-sim), `present` (the letterbox gamma blit), **`swap`** (`EndDraw`).
+  **`swap` matters more than it sounds:** `Game.Tick` presents in `EndDraw`, OUTSIDE the `Draw`
+  override, and WebGL commands are queued -- so a GPU-bound frame's real cost lands there. Add a
+  section in one line: an enum member + `long t = FrameProfiler.Begin(); ... End(Section.X, t)`.
+- **GL draw calls are counted in JS** (`drawElements`/`drawArrays` prototypes are patched), not in
+  `SpriteBatchWrapper`: BlazorGL's cost is per-CALL, and JS sees every source at once (sprite
+  batches, bloom passes, the walls' 3D primitives) with no engine surgery. It is the most
+  actionable single number in this port -- watch it, not the sprite count.
+- **Headroom is CPU-derived and overstates a GPU-bound frame.** Two opt-in modes close that:
+  `?fpsuncapped` (HUD "uncap") drives the loop off a `MessageChannel` instead of rAF so the
+  MEASURED rate stops being vsync-gated (`setTimeout(0)` would not do -- it is clamped to ~4ms,
+  i.e. a fake 250fps ceiling); `?fpsgpu` (HUD "gpu sync") issues `gl.finish()` per tick so GPU
+  execution becomes a measurable wait. Cross-check: uncapped measured 233fps vs 241 derived
+  headroom on the menu, so the derived number is honest there.
+- **These flags are the one group NOT parsed in `DebugFlags.cs`** -- the HUD is JS-owned, so the
+  `eaFps` IIFE regex-reads `location.search` itself (the `eaWalls`/`eaSpider` panel precedent).
+  Nothing about them reaches C#, so they are inherently out of `DebugFlags.Active` and can never
+  make a co-op session reject a peer. `?fpshud` (force on, works on the live site) /
+  `?fpshud=full` (expanded) / `?nofps` (hide in a dev build) / `?fpsuncapped` / `?fpsgpu`.
+  `?fps=` is NOT this (that is the sprite harness' playback rate).
+- **Auto-suppressed on the screenshot-verification pages** (`?harness=`, `?textshot`,
+  `?bulletshot`, `?lazershot`, `?castbrain`, `?castshow`, `?texviewer`, `?gamebrowser`,
+  `?spiderphase=`, `?wcmothershipfreeze=`) -- those scenes draw their own readouts in the same
+  top-left corner, and this project verifies almost everything by screenshot, so relying on
+  someone remembering `?nofps` would put the HUD in every harness capture. `?fpshud` overrides.
+- `?fpsuncapped` / `?fpsgpu` are LOOP flags and apply with or without the panel (so
+  `?nofps&fpsuncapped` is a valid "measure, don't show me" boot).
+- **GOTCHA -- an unfocused window makes every rate reading garbage** and Chrome throttles it to a
+  rate the C#-side staleness test (mean interval > 100ms) does NOT catch: a focused menu read
+  2.5ms/frame, the same page unfocused read 22.8ms. `document.hidden || !document.hasFocus()` is
+  the authoritative signal, so BOTH the HUD and `eaFps.stats()` prefix an UNFOCUSED warning and the
+  HUD re-arms (dropping the poisoned samples) when focus returns.
+- **Verify the window maths as DATA with `eaFps.test(workMs, intervalMs, frames)`** -- it pushes a
+  synthetic series through the real accumulator and asserts the vsync trap itself: `work` ms every
+  `interval` ms must read `1000/interval` fps and `1000/work` headroom. A profiler that reported
+  the work rate as "fps" fails it loudly. (The `eaNetSim.test` idiom; a python mirror would drift.)
 
 ## Component lifecycle (`ComponentBin`) — the spawn/death contract
 
@@ -304,6 +360,15 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   `?harness=blast` overlays the ring (green = damaging) + readout.
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
   (baked `DefaultSizeFactor` 0.85) scales sprite AND box hitbox together; `?flyspiderscale=`.
+  Fast-boot a dense endless swarm with **`?level=Level2&flyspiders`** (background variant, the only
+  user of the group-flatten RT round trip) or **`?flyspiders=fg`** (foreground, same sprites, NO
+  flatten) -- the A/B built for the frame profiler, since the real level only reaches this state
+  minutes in. Measured (frame profiler, focused): background 7.3ms/frame, scene 6.6ms, 98 GL calls,
+  137fps headroom vs foreground 2.8ms/frame, scene 2.1ms, 42 GL calls, 356fps headroom. **Read that
+  as indicative, not a clean per-spider flatten cost** -- background flying spiders have
+  `Collides=false` so they are never killed and accumulate, while foreground ones die on the ship;
+  the populations are not controlled. What the data does show is the mechanism: GL calls per frame
+  roughly double, which is exactly what a per-group RT round trip does on a per-CALL-cost backend.
 - **Laser FX (`Quad.cs` beam + `LazerGenerator` chargeup):** chargeup is a windup animation
   (per-particle scale ramps 1→`DefaultPeakChargeScale` 4) + a layered "energy well" orb (stacked
   additive `lazerglow`: blue halo → cyan-white → white-hot core — the same recipe the ship

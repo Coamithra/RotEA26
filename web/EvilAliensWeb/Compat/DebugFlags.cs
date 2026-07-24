@@ -595,6 +595,18 @@ namespace EvilAliensWeb.Compat
 		// A pure test shortcut, like ?spiderboss. See Level2.PopulateEventList / PopulateSpidersOnly.
 		public static bool Spiders { get; private set; }
 
+		// Fast-boot Level2 straight to a dense, endless FLYING-spider swarm (skips the whole level).
+		// Built for the frame profiler (card 22e655b5): the BACKGROUND flying spider is the only
+		// user of the group-flatten render-target round trip (SpriteBatchWrapper.BeginGroupFlatten),
+		// so measuring what that costs needs a steady swarm on screen -- which the real level only
+		// reaches minutes in. `?flyspiders=fg` runs the FOREGROUND variant instead (same sprites,
+		// no flatten): the A/B that separates the render-target cost from the drawing itself.
+		// Pair with ?level=Level2 (+ ?invuln). See Level2.PopulateFlyingSpidersOnly.
+		public static bool FlySpiders { get; private set; }
+
+		// Set by `?flyspiders=fg` only -- picks the non-flattened foreground variant for the A/B.
+		public static bool FlySpidersForeground { get; private set; }
+
 		// Fast-boot the Tutorial straight to its FINAL power-up training beat (skips the whole
 		// welcome/move/fire/lesson sequence): the eye "punching bag" boss + the PowerUpTrainingEvent
 		// where every powerup streams in and a banner explains its powered-up effect. Built to
@@ -1581,6 +1593,25 @@ namespace EvilAliensWeb.Compat
 				case "spiders":
 					Spiders = IsOn(val);
 					break;
+				case "flyspiders":
+					// Value-carrying: `fg`/`foreground` picks the un-flattened foreground variant;
+					// `bg`/`background` and a bare ?flyspiders pick the group-flatten one under
+					// test. An unrecognised value is NOT silently ignored -- swallowing it would
+					// boot the whole of Level 2 with no hint why the fast-boot did nothing.
+					{
+						bool fg = string.Equals(val, "fg", StringComparison.OrdinalIgnoreCase)
+							|| string.Equals(val, "foreground", StringComparison.OrdinalIgnoreCase);
+						bool bg = string.Equals(val, "bg", StringComparison.OrdinalIgnoreCase)
+							|| string.Equals(val, "background", StringComparison.OrdinalIgnoreCase);
+						FlySpiders = IsOn(val) || fg || bg;
+						FlySpidersForeground = fg;
+						if (!FlySpiders)
+						{
+							Console.WriteLine("[debug] unknown ?flyspiders= value '" + val
+								+ "' (expected fg/bg or a bare ?flyspiders) -- ignored");
+						}
+					}
+					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);
 					break;
@@ -1766,7 +1797,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1779,6 +1810,7 @@ namespace EvilAliensWeb.Compat
 							+ (WallsOnly ? " wallsonly" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
+							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
 						+ (NetScript ? " netscript" : "")

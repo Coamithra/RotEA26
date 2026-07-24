@@ -8,9 +8,9 @@ A joiner going through the real menu path (Online Co-op → Join Online Game) mu
 FLAG-CLEAN: `NetSession.HandleHello` rejects on
 `menuSession && (peer debug bit || DebugFlags.Active)` ([NetSession.cs:1257](web/EvilAliensWeb/Compat/Net/NetSession.cs:1257)),
 and the joiner IS a menu session, so its own `Active` bit rejects its own pairing.
-`?noattract` sits in the `Active` expression
-([DebugFlags.cs:2003](web/EvilAliensWeb/Compat/DebugFlags.cs:2003)), so a joiner cannot pass it —
-and its main menu therefore keeps getting yanked into the idle attract demo mid-navigation.
+`?noattract` SAT in the `Active` expression in `DebugFlags.cs` until this change, so a joiner
+could not pass it — and its main menu therefore kept getting yanked into the idle attract demo
+mid-navigation.
 That is documented as "JIP pass trap 2" in `web/EvilAliensWeb/CLAUDE.md` and made the
 two-window JIP pass substantially harder to drive.
 

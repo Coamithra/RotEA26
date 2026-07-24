@@ -122,6 +122,8 @@ namespace EvilAliensWeb.Compat
 		public static bool AutoStart { get; private set; }
 
 		// Don't wire the main menu's idle timeout to the demo/attract launcher.
+		// Deliberately OUT of Active (card af63f958): it unwires one menu hook and alters no
+		// gameplay, and an ONLINE JOINER -- whose lobby IS a menu -- must be able to pass it.
 		public static bool NoAttract { get; private set; }
 
 		// If set, boot directly into this level (implies SkipSplash + AutoStart).
@@ -1073,7 +1075,13 @@ namespace EvilAliensWeb.Compat
 		// and both sides' [net] metrics tell the JIP story. In Active.
 		public static bool NetJip { get; private set; }
 
-		// True if any debug flag is active (i.e. the boot path was altered).
+		// True if any flag that HIJACKS boot/levels is set -- deliberately NOT "any debug flag":
+		// pure render/feel/diagnostic toggles stay out (?hitboxes, ?metalscore, ?noattract, ...).
+		// This is not just a log line. NetSession (LocalHelloFlags/HandleHello) refuses a menu
+		// session when either peer has it, and NetListing.ComputeEligible refuses to list a
+		// flagged host -- so putting a flag in this expression DISABLES ONLINE PLAY for that
+		// boot. The test for a new flag is "could this change the shared run?", not "is this a
+		// debug flag?".
 		public static bool Active { get; private set; }
 
 		public static void Parse(string query)
@@ -2007,7 +2015,9 @@ namespace EvilAliensWeb.Compat
 			// menu's idle timeout unwired, which alters no gameplay, difficulty, unlock or fairness
 			// -- and a menu-session joiner is rejected on its own Active bit (NetSession.HandleHello),
 			// so keeping it in here made "don't yank my lobby into the attract demo" unaskable for
-			// exactly the peer that needs it most.
+			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
+			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
+			// refuses Demo1/2/3, so it can never advertise an attract demo.
 			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
@@ -2086,10 +2096,11 @@ namespace EvilAliensWeb.Compat
 			return true;
 		}
 
-		// Reached whenever nothing in the `Active` expression is set -- which INCLUDES a boot
-		// carrying only out-of-Active flags (?noattract, ?hitboxes, ?shake=, ?wallfog=, ...),
-		// so it does not say "no debug flags". For an online joiner this line is the useful
-		// verdict: flag-clean, so the menu-session pairing will not reject itself.
+		// Two call sites: an empty/absent query, and the end of Parse when nothing in the
+		// `Active` expression ended up set -- which INCLUDES a boot carrying only out-of-Active
+		// flags (?noattract, ?hitboxes, ?shake=, ?wallfog=, ...), so it does not say "no debug
+		// flags". For an online joiner this line is the useful verdict: flag-clean, so the
+		// menu-session pairing will not reject itself.
 		private static void Hint()
 		{
 			Console.WriteLine("[debug] no boot-hijacking debug flags. URL options: ?menu  ?noattract  "

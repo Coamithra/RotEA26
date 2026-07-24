@@ -146,7 +146,8 @@ generate much of the art/audio referenced here.
   boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
   (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
   **`Active` is not just a log line -- it REFUSES online play**: a menu-session pairing rejects if
-  either peer has it (`NetSession.HandleHello`) and a flagged host won't list (`NetListing`). So
+  either peer has it (`NetSession.HandleHello`) and a flagged host won't list (`NetListing`, unless
+  `?netjip`). So
   the test is "could this flag change the shared run?", not "is this a debug flag?" -- which is
   why `?noattract` is out (card af63f958): it unwires the main menu's idle timeout and nothing
   else, and a joiner needs it precisely because its lobby is a menu. A boot carrying only
@@ -1512,10 +1513,9 @@ interpolation feel, both gated on real-network playtests.
     **`?netsim` is NOT usable on a joiner**: it is parsed only in `index.html`, and that block
     early-returns unless `?net=` is present -- which sets `NetRole` -> `Active` -> rejected. The
     host is fine: `?netjip` drops its debug bit (`LocalHelloFlags`) and the check is
-    `menuSession`-gated, so a `listedSession` host never rejects. **`?noattract` was itself in
-    `Active` until card af63f958** -- so an unattended joiner's menu kept getting pulled into the
-    attract demo mid-navigation. It is out now (it unwires one menu hook and alters no gameplay);
-    **put it on the joiner's URL** rather than driving the lobby against a 20s idle timer.
+    `menuSession`-gated, so a `listedSession` host never rejects. **Put `?noattract` on the
+    joiner's URL** (out of `Active` since card af63f958) rather than driving its lobby against a
+    20s idle timer.
   - **JIP pass trap 3 -- a grant whose TARGET seat is taken desyncs SILENTLY and permanently.**
     `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it is the *granted* slot
     being occupied that bites -- a joiner merely seated in slot 0 with slot 1 free moves across

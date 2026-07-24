@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>aiwallnav</AssemblyName>
+    <RootNamespace>AiWallNavBench</RootNamespace>
+  </PropertyGroup>
+
+  <!-- References the BUILT game assembly rather than its sources: the point of this bench is that
+       the code under test is byte-for-byte the code that ships, so there is nothing to keep in
+       sync. Build the game first (dotnet build web/EvilAliensWeb -c Debug). The game targets plain
+       net8.0 despite the BlazorWebAssembly SDK, which is the whole reason a console host can load
+       it. Do NOT add a ProjectReference: that would drag the Blazor SDK in and defeat this. -->
+  <PropertyGroup>
+    <GameBin>$(MSBuildThisFileDirectory)../../../web/EvilAliensWeb/bin/Debug/net8.0</GameBin>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="EvilAliensWeb">
+      <HintPath>$(GameBin)/EvilAliensWeb.dll</HintPath>
+    </Reference>
+    <Reference Include="Xna.Framework">
+      <HintPath>$(GameBin)/Xna.Framework.dll</HintPath>
+    </Reference>
+    <Reference Include="Xna.Framework.Game">
+      <HintPath>$(GameBin)/Xna.Framework.Game.dll</HintPath>
+    </Reference>
+    <Reference Include="Xna.Framework.Graphics">
+      <HintPath>$(GameBin)/Xna.Framework.Graphics.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

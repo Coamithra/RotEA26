@@ -184,11 +184,22 @@
 
         // Debug: run the online co-op kick/block rule suite (card 0b8a300b) — the block
         // predicate the hello gate uses plus the v6 handshake codec. Prints PASS/FAIL.
-        // Best run from the main menu: over a LIVE session it skips the survives-Stop() leg
-        // rather than ending a real match, and says so in the report.
+        // Best run from the main menu: over a LIVE session it skips the teardown-persistence
+        // leg rather than wiping a real match's state, and says so in the report.
         window.eaKickTest = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest')); }
             catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
+        // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
+        // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs
+        // invisibly on every shipping background, so this reads the decisions as data instead
+        // of trusting a screenshot. Run it from inside a level for part 3 to have anything to
+        // census.
+        window.eaBgCull = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull')); }
+            catch (e) { console.warn('[debug] eaBgCull failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: asplode every locally-owned PlayerShip through the real death path, so the

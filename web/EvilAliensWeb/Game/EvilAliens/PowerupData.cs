@@ -113,19 +113,19 @@ public class PowerupData : DrawableGameComponent
 		animationTimer.Update(gameTime);
 		float difficultyModifier = Settings.GetInstance().DifficultyModifier;
 		progress = MathHelper.Max(0f, progress - difficultyModifier * 0.05f * (float)gameTime.ElapsedGameTime.TotalSeconds);
-		float num = Math.Abs(progress - displayedprogress);
-		num *= 5f;
-		if (num < 0.2f)
+		float chaseSpeed = Math.Abs(progress - displayedprogress);
+		chaseSpeed *= 5f;
+		if (chaseSpeed < 0.2f)
 		{
-			num = 0.2f;
+			chaseSpeed = 0.2f;
 		}
 		if (progress > displayedprogress)
 		{
-			displayedprogress = MathHelper.Min(displayedprogress + (float)gameTime.ElapsedGameTime.TotalSeconds * num, progress);
+			displayedprogress = MathHelper.Min(displayedprogress + (float)gameTime.ElapsedGameTime.TotalSeconds * chaseSpeed, progress);
 		}
 		else if (progress < displayedprogress)
 		{
-			displayedprogress = MathHelper.Max(displayedprogress - (float)gameTime.ElapsedGameTime.TotalSeconds * num, progress);
+			displayedprogress = MathHelper.Max(displayedprogress - (float)gameTime.ElapsedGameTime.TotalSeconds * chaseSpeed, progress);
 		}
 	}
 
@@ -135,15 +135,15 @@ public class PowerupData : DrawableGameComponent
 		{
 			return;
 		}
-		float num = 0.06f;
-		float num2 = (float)Math.Pow(0.6299999952316284, level);
-		float num3 = 1f + 0.019f * (float)combo;
-		if (num3 > 6.348013f)
+		float baseGain = 0.06f;
+		float levelFalloff = (float)Math.Pow(0.6299999952316284, level);
+		float comboBonus = 1f + 0.019f * (float)combo;
+		if (comboBonus > 6.348013f)
 		{
-			num3 = 6.348013f;
+			comboBonus = 6.348013f;
 		}
-		float num4 = 1f / Settings.GetInstance().DifficultyModifier;
-		progress += num * num2 * num3 * num4;
+		float difficultyScale = 1f / Settings.GetInstance().DifficultyModifier;
+		progress += baseGain * levelFalloff * comboBonus * difficultyScale;
 		if (progress >= 1f)
 		{
 			progress = 0f;
@@ -171,18 +171,18 @@ public class PowerupData : DrawableGameComponent
 
 	private void drawPowerbar(GameTime gameTime)
 	{
-		float num = 1f;
-		Vector2 val = position;
+		float scale = 1f;
+		Vector2 drawPos = position;
 		if (tutorialDisplayTimer.Active && tutorialDisplayItem == ScoreVisualiser.ScorePart.Powerbar)
 		{
-			float num2 = ((tutorialDisplayTimer.TimeElapsed <= 1500f) ? (tutorialDisplayTimer.TimeElapsed / 1500f) : ((!(tutorialDisplayTimer.TimeLeft <= 1500f)) ? 1f : (tutorialDisplayTimer.TimeLeft / 1500f)));
-			num = MathHelper.SmoothStep(1f, 3f, num2);
-			val += new Vector2(15f, 15f) * (num - 1f);
+			float zoomT = ((tutorialDisplayTimer.TimeElapsed <= 1500f) ? (tutorialDisplayTimer.TimeElapsed / 1500f) : ((!(tutorialDisplayTimer.TimeLeft <= 1500f)) ? 1f : (tutorialDisplayTimer.TimeLeft / 1500f)));
+			scale = MathHelper.SmoothStep(1f, 3f, zoomT);
+			drawPos += new Vector2(15f, 15f) * (scale - 1f);
 		}
-		Vector2 val2 = default(Vector2);
-		(val2) = new Vector2(-16f, 13f);
+		Vector2 barOffset = default(Vector2);
+		(barOffset) = new Vector2(-16f, 13f);
 		batch.BlendMode = (SpriteBlendMode)1;
-		Color val3 = Powerup.PowerUpColor(type);
+		Color barColor = Powerup.PowerUpColor(type);
 		if (type == Powerup.PowerupType.OneUp)
 		{
 			oneUpColorSliders += oneUpColorSlidersDirection * (float)gameTime.ElapsedGameTime.TotalSeconds * 3.4f;
@@ -222,51 +222,51 @@ public class PowerupData : DrawableGameComponent
 				oneUpColorSlidersDirection.Z = 0f;
 				oneUpColorSlidersDirection.Y = 1f;
 			}
-			(val3) = new Color(oneUpColorSliders);
+			(barColor) = new Color(oneUpColorSliders);
 		}
-		batch.Draw(barUnlit, val + val2, 0f, Vector2.One * num, center: false, new Color(val3, fade));
+		batch.Draw(barUnlit, drawPos + barOffset, 0f, Vector2.One * scale, center: false, new Color(barColor, fade));
 		if (animationTimer.Active || level == 4)
 		{
-			float num3 = 1f;
-			float num4 = animationTimer.Duration / 3f;
-			if (animationTimer.TimeElapsed < num4)
+			float flashAlpha = 1f;
+			float flashRampMs = animationTimer.Duration / 3f;
+			if (animationTimer.TimeElapsed < flashRampMs)
 			{
-				num3 = animationTimer.TimeElapsed / num4;
+				flashAlpha = animationTimer.TimeElapsed / flashRampMs;
 			}
-			if (animationTimer.TimeLeft < num4)
+			if (animationTimer.TimeLeft < flashRampMs)
 			{
-				num3 = animationTimer.TimeLeft / num4;
+				flashAlpha = animationTimer.TimeLeft / flashRampMs;
 			}
-			float num5 = (float)Math.Round(96.0);
-			batch.Draw(barLit, new Rectangle(0, 0, (int)num5, barLit.LogicalHeight()), position + val2, 0f, 1f, center: false, new Color(val3, fade));
-			batch.Draw(barEdge, position + val2 + new Vector2(num5, 0f), 0f, Vector2.One, center: false, new Color(val3, fade));
+			float fullBarWidth = (float)Math.Round(96.0);
+			batch.Draw(barLit, new Rectangle(0, 0, (int)fullBarWidth, barLit.LogicalHeight()), position + barOffset, 0f, 1f, center: false, new Color(barColor, fade));
+			batch.Draw(barEdge, position + barOffset + new Vector2(fullBarWidth, 0f), 0f, Vector2.One, center: false, new Color(barColor, fade));
 			batch.BlendMode = (SpriteBlendMode)2;
-			batch.Draw(barLit, new Rectangle(0, 0, (int)num5, barLit.LogicalHeight()), position + val2, 0f, 1f, center: false, new Color(val3, num3 * fade));
-			batch.Draw(barEdge, position + val2 + new Vector2(num5, 0f), 0f, Vector2.One, center: false, new Color(val3, num3 * fade));
+			batch.Draw(barLit, new Rectangle(0, 0, (int)fullBarWidth, barLit.LogicalHeight()), position + barOffset, 0f, 1f, center: false, new Color(barColor, flashAlpha * fade));
+			batch.Draw(barEdge, position + barOffset + new Vector2(fullBarWidth, 0f), 0f, Vector2.One, center: false, new Color(barColor, flashAlpha * fade));
 			batch.BlendMode = (SpriteBlendMode)1;
 		}
 		else if (displayedprogress > 0f)
 		{
-			float num6 = (float)Math.Round(21f + 75f * displayedprogress);
-			batch.Draw(barLit, new Rectangle(0, 0, (int)num6, barLit.LogicalHeight()), position + val2, 0f, 1f, center: false, new Color(val3, fade));
-			batch.Draw(barEdge, position + val2 + new Vector2(num6, 0f), 0f, Vector2.One, center: false, new Color(val3, fade));
+			float litBarWidth = (float)Math.Round(21f + 75f * displayedprogress);
+			batch.Draw(barLit, new Rectangle(0, 0, (int)litBarWidth, barLit.LogicalHeight()), position + barOffset, 0f, 1f, center: false, new Color(barColor, fade));
+			batch.Draw(barEdge, position + barOffset + new Vector2(litBarWidth, 0f), 0f, Vector2.One, center: false, new Color(barColor, fade));
 		}
 	}
 
 	private void drawEnhancement()
 	{
-		float num = 1f;
-		Vector2 val = position;
+		float scale = 1f;
+		Vector2 drawPos = position;
 		if (tutorialDisplayTimer.Active && tutorialDisplayItem == ScoreVisualiser.ScorePart.Enhancement)
 		{
-			float num2 = ((tutorialDisplayTimer.TimeElapsed <= 1500f) ? (tutorialDisplayTimer.TimeElapsed / 1500f) : ((!(tutorialDisplayTimer.TimeLeft <= 1500f)) ? 1f : (tutorialDisplayTimer.TimeLeft / 1500f)));
-			num = MathHelper.SmoothStep(1f, 3f, num2);
-			val += new Vector2(15f, 15f) * (num - 1f);
+			float zoomT = ((tutorialDisplayTimer.TimeElapsed <= 1500f) ? (tutorialDisplayTimer.TimeElapsed / 1500f) : ((!(tutorialDisplayTimer.TimeLeft <= 1500f)) ? 1f : (tutorialDisplayTimer.TimeLeft / 1500f)));
+			scale = MathHelper.SmoothStep(1f, 3f, zoomT);
+			drawPos += new Vector2(15f, 15f) * (scale - 1f);
 		}
-		batch.DrawString(Powerup.PowerUpString(type), new Vector2(0f, 44f) + val, new Color(Powerup.PowerUpColor(type), fade), 0f, centered: false, 0.75f * num, (SpriteEffects)0, 0f);
+		batch.DrawString(Powerup.PowerUpString(type), new Vector2(0f, 44f) + drawPos, new Color(Powerup.PowerUpColor(type), fade), 0f, centered: false, 0.75f * scale, (SpriteEffects)0, 0f);
 		if (type != Powerup.PowerupType.OneUp)
 		{
-			batch.DrawString(levelDisplayString, new Vector2(17f * num, 44f) + val, new Color(Powerup.PowerUpColor(type), fade), 0f, centered: false, 0.55f * num, (SpriteEffects)0, 0f);
+			batch.DrawString(levelDisplayString, new Vector2(17f * scale, 44f) + drawPos, new Color(Powerup.PowerUpColor(type), fade), 0f, centered: false, 0.55f * scale, (SpriteEffects)0, 0f);
 		}
 	}
 

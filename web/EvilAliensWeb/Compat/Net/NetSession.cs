@@ -2058,6 +2058,19 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     msg.SetWarningDirection(angle);
                 }
+                // A standing Purge<AnimatedMessage> can eat this add (GameScene.UpdateWin /
+                // UpdateResetting arm one, and the rx drain runs later in the same tick), and
+                // that is CORRECT -- do not "fix" it by exempting the add (card 74403f83).
+                // Terminate is already excluded by the NetActiveScene gate above, which it nulls
+                // before its purges. In the two remaining windows, eating the banner is what
+                // MATCHES the host: the level script is host-only and only runs in
+                // GameState.Normal, so the host cannot emit a beat while it is itself in Win or
+                // Resetting, and both peers enter those states from the host's own broadcast. A
+                // banner the host is showing is a banner the host has not purged. Reaching this
+                // would mean the two state machines had already diverged -- a different bug,
+                // which letting the banner through would only mask. Nothing dangles either way:
+                // the banner is one-shot and nothing holds a reference past the Add. ?binlog
+                // logs the divert if it ever does fire.
                 bin.Add((GameComponent)(object)msg);
                 metrics.BeatsRx++;
                 break;
@@ -2093,6 +2106,9 @@ namespace EvilAliensWeb.Compat.Net
                     AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
                     banner.Setup(text, (SoundManager.Texts)speech, AnimatedMessage.MessageType.unlocked);
                     banner.SetUnlockType(ut);
+                    // Same standing-purge analysis as EvMessage above: eating this matches the
+                    // host, and the GRANT (which is what actually matters) already happened
+                    // unconditionally. Card 74403f83.
                     bin.Add((GameComponent)(object)banner);
                 }
                 metrics.BeatsRx++;
@@ -2385,7 +2401,22 @@ namespace EvilAliensWeb.Compat.Net
                 ship = new PlayerShip(game);
             }
             ship.Setup(slot, buffer.Newest.Pos, startup: false, invulnerable: false, 4.712389f);
-            bin.Add((GameComponent)(object)ship);
+            if (!bin.TryAdd((GameComponent)(object)ship))
+            {
+                // A standing Purge<PlayerShip> is live this tick. The one that can actually
+                // reach us is NetApplyReset's, because it purges from inside this very rx
+                // drain; the LoseLife / UpdateWin / UpdateResetting purges run back in
+                // base.Update and their deaths are flushed by collectionHelper.Update() before
+                // the drain, which leaves FindLocalShip() null and the caller's gate shut. The
+                // ship being purged is CORRECT either way (a reset wipes all ships and
+                // SpawnAllPlayers respawns every seated slot), but adopting one that never
+                // entered the world
+                // would leave `puppet` non-null forever and the guard above is `puppet == null`
+                // -- the remote player would stay invisible for the rest of the session. Leave
+                // it clear and retry next tick, once TopOfTickFlush has expired the filter; the
+                // seat we just took is reused via DeviceIsPlaying above (card 74403f83).
+                return;
+            }
             puppet = ship;
             hasLastPuppetPos = false;
             renderMs = double.NaN;

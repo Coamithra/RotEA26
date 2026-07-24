@@ -15,12 +15,6 @@ internal class Parachute : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -63,8 +57,6 @@ internal class Parachute : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		appeartimer.Reset();
 		appeartimer.Start();
@@ -76,12 +68,6 @@ internal class Parachute : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
 		float num = (1f - disappeartimer.Normalized) * 10f;
 		base.Position += new Vector2(num, 0f);
 		base.Draw(gameTime);
@@ -90,9 +76,6 @@ internal class Parachute : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		appeartimer.Update(gameTime);
 		disappeartimer.Update(gameTime);

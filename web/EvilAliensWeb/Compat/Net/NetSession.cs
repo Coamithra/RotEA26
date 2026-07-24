@@ -1151,8 +1151,8 @@ namespace EvilAliensWeb.Compat.Net
                     // Join-in-progress: the joiner paired with our LISTED game while we are
                     // already mid-level. Launch it into our current level+difficulty (it is a
                     // menu-session client that mirrors EvLaunch); its EvReady then triggers the
-                    // live-world replay below, and the 1 Hz EvScoreSync trues up score/lives.
-                    // Deeper mid-level state (background op / music cue) is a known JIP gap.
+                    // live-world replay below plus the deep scenery catch-up (background ops /
+                    // music cue), and the 1 Hz EvScoreSync trues up score/lives.
                     GameScene scene = GameScene.NetActiveScene;
                     if (scene != null)
                     {
@@ -1607,6 +1607,11 @@ namespace EvilAliensWeb.Compat.Net
                 // The client's scene just came up (it may have out-warmed us): replay the
                 // live world so it isn't waiting on snapshot self-heals for spawn extras.
                 NetIdRegistry.ReplayLive();
+                // ...and the deep mid-level scenery our script already ran (card 45a4e48d).
+                // This is the seam, not PeerConnected: a join-in-progress peer has no
+                // GameScene at pairing time, and the Initialize that gives it one would
+                // clobber anything we sent earlier with the level's INITIAL background/music.
+                GameScene.NetActiveScene?.NetReplayCatchUp();
                 break;
             }
             case NetProtocol.EvLeave:

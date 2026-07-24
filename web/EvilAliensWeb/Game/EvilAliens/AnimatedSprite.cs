@@ -69,20 +69,6 @@ public class AnimatedSprite
 
 	public void Draw(int frame, Vector2 position, Color color, float scale, bool center, SpriteEffects e)
 	{
-		//IL_0018: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0029: Expected I4, but got Unknown
-		//IL_0029: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Invalid comparison between Unknown and I4
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0106: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011b: Unknown result type (might be due to invalid IL or missing references)
 		AnimationFrame animationFrame = frames[frame];
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		// The frame coords (minX/maxX, originalWidth, xPos/yPos) are in supersampled atlas
@@ -116,8 +102,6 @@ public class AnimatedSprite
 
 	public void Draw(int frame, Vector2 position, Color color, float scale, bool center)
 	{
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0003: Unknown result type (might be due to invalid IL or missing references)
 		Draw(frame, position, color, scale, center, (SpriteEffects)0);
 	}
 }

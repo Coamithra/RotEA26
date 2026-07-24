@@ -32,7 +32,6 @@ public class AsteroidSpawner : GenericSpawner
 
 	public override void Reset()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		base.Reset();
 		startedWithAReallyBigOne = startBig;
 		asteroidAngle = MyMath.VectorToAngle(new Vector2(800f, 600f));
@@ -44,9 +43,6 @@ public class AsteroidSpawner : GenericSpawner
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
 		if (startedWithAReallyBigOne)
 		{
 			startedWithAReallyBigOne = false;
@@ -87,15 +83,6 @@ public class AsteroidSpawner : GenericSpawner
 
 	protected override void DoEvent(GameTime gameTime)
 	{
-		//IL_007b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0094: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 position;
 		Asteroid asteroid;
 		if (!waitForReallyBigOne.Active & !background)
@@ -119,26 +106,6 @@ public class AsteroidSpawner : GenericSpawner
 
 	private Vector2 CalculateAsteroidStartPos(float n, float offset)
 	{
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0045: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0064: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0076: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0081: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0083: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0094: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0095: Unknown result type (might be due to invalid IL or missing references)
 		float num = asteroidAngle;
 		float num2 = 600f * (float)Math.Sin(num);
 		float num3 = 800f * (float)Math.Cos(num);

@@ -110,8 +110,6 @@ internal class SplashScene : Scene
 	public SplashScene(Game game)
 		: base(game)
 	{
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Expected O, but got Unknown
 		// Web port: load the unpacked web assets (PNG/font) rather than the original
 		// .xnb, which KNI can't read (see Game1's content wiring). The scene keeps its
 		// own manager so it can Unload() the splash textures when it finishes.
@@ -294,10 +292,6 @@ internal class SplashScene : Scene
 
 	protected void fadeBackBufferToBlack(int alpha)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
 		base.SpriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
 	}
@@ -308,7 +302,6 @@ internal class SplashScene : Scene
 	// fade-to-black overlay still rides on top for the whole-block in/out.
 	private void DrawTextSplash()
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		string[] lines = currentLines;
 		double t = stateTimer.TotalMilliseconds;
 
@@ -354,8 +347,6 @@ internal class SplashScene : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		if (state == SplashSceneState.stopped)
 		{

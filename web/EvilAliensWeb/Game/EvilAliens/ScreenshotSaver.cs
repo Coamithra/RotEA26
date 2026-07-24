@@ -104,12 +104,6 @@ public class ScreenshotSaver
 
 	public static void SaveScreenShot(Texture2D Screenshot, Levels level)
 	{
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0063: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Expected O, but got Unknown
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a4: Unknown result type (might be due to invalid IL or missing references)
 		GraphicsDevice graphicsDevice = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
 		lock (Savable.syncObj)
 		{
@@ -176,9 +170,6 @@ public class ScreenshotSaver
 
 	public static void LoadScreenshot(Levels level)
 	{
-		//IL_00f2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fd: Expected O, but got Unknown
 		if (screenshots[(int)level] != null)
 		{
 			((GraphicsResource)screenshots[(int)level]).Dispose();

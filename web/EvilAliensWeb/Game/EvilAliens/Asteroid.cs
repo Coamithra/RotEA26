@@ -12,12 +12,6 @@ internal class Asteroid : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -43,21 +37,16 @@ internal class Asteroid : AlienDrawableGameComponent
 
 	public Vector2 GetSpeed()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		return base.SpeedVector;
 	}
 
 	public void Setup(Vector2 position, float direction, float speed, bool reallyBig)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		Setup(position, direction, speed, reallyBig, randomSpeedOffset: true);
 	}
 
 	public void Setup(Vector2 position, float direction, float speed, bool reallyBig, bool randomSpeedOffset)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
 		// The big level-opening asteroid uses the hi-res large_asteroid (7x texture, drawn at
 		// scale 3). Normal asteroids draw at scale 0.45, where that big sheet would be massively
 		// oversampled, so they use the lower-res AsteroidSmall variants (footprint-matched to the
@@ -114,7 +103,6 @@ internal class Asteroid : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 		rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 		base.Update(gameTime);
 		if (base.Position.X > 1000f)
@@ -125,14 +113,6 @@ internal class Asteroid : AlienDrawableGameComponent
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0031: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
 		if (other is Bullet)
 		{
 			Vector2 speed = ((Bullet)other).GetSpeed();
@@ -146,9 +126,6 @@ internal class Asteroid : AlienDrawableGameComponent
 
 	internal void SetBackground()
 	{
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
 		base.Collides = false;
 		color = new Color(new Vector3(0.3f, 0.3f, 0.3f));
 		scale *= 0.55f;

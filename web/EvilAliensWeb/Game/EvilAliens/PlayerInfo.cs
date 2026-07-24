@@ -16,8 +16,6 @@ public class PlayerInfo
 
 	public PlayerInfo(int NR)
 	{
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		this.NR = NR;
 		hue = -1f;
 		isPlaying = false;

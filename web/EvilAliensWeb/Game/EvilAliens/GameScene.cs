@@ -392,7 +392,65 @@ internal abstract class GameScene : Scene
 		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6:
 			Background.SetAlienBase6();
 			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetDoodadPos:
+			Background.NetSetDoodadPos(v);
+			break;
 		}
+	}
+
+	// Join-in-progress catch-up (card 45a4e48d), host side: bring a peer whose GameScene has
+	// just come up (EvReady) up to the scenery state our level script already reached. The
+	// joiner ran its own Initialize, so it holds the level's INITIAL background + music and --
+	// the script being host-only (11.2 sim-split) -- will never reach those beats itself.
+	// Everything here is an ordinary reliable beat event, so the client applies it through the
+	// same paths the live ops use.
+	internal void NetReplayCatchUp()
+	{
+		Background.NetReplayCatchUp(EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp);
+		EvilAliensWeb.Compat.Net.NetSession.OnMusic(base.SoundManager.NetCurrentSong);
+	}
+
+	// The catch-up state as one parseable line, for the eaNetBg() console dump.
+	internal string NetCatchUpStateLine()
+	{
+		return Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong;
+	}
+
+	// Round-trip self-test for the JIP catch-up (card 45a4e48d), driven by eaNetBgTest() from
+	// the console. The catch-up is a pure function -- host state -> a burst of ops -> client
+	// state -- so it is provable in ONE tab with no peer and no timing, which is the only
+	// honest way to check it: the thing under test is a fly-by whose position changes every
+	// frame, so a screenshot (or a diff of two live windows that tick independently) can never
+	// be exact. This is exact.
+	//
+	// Capture the burst, wipe the scenery back to what a fresh joiner's Initialize leaves
+	// behind (Background.Reset), replay the burst through the REAL client apply path, and
+	// compare the state line. DEBUG ONLY and deliberately destructive: Reset re-runs the
+	// hyperspace entry, so the screen flashes. Run it in a solo tab -- inside a live host
+	// session the replayed ops would also egress to the peer (idempotent, but noise).
+	internal string NetCatchUpSelfTest()
+	{
+		string before = NetCatchUpStateLine();
+		System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V)> burst
+			= new System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2)>();
+		Background.NetReplayCatchUp((op, v) => burst.Add((op, v)));
+		int song = base.SoundManager.NetCurrentSong;
+		Background.NetTestWipe();
+		base.SoundManager.NetApplyMusic(-1);
+		string joiner = NetCatchUpStateLine();
+		foreach ((EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V) op in burst)
+		{
+			NetApplyBackgroundOp(op.Op, op.V);
+		}
+		base.SoundManager.NetApplyMusic(song);
+		string after = NetCatchUpStateLine();
+		// Name the ops, not just the count: a leg the level never fired is absent from this list,
+		// so a PASS can't be read as covering more than the run actually exercised.
+		string ops = burst.Count == 0 ? "(none)" : string.Join(",", burst.ConvertAll(o => o.Op.ToString()));
+		return "[netbgtest] " + (after == before ? "PASS" : "FAIL") + " ops=" + ops
+			+ "\n  host   : " + before
+			+ "\n  joiner : " + joiner
+			+ "\n  caught : " + after;
 	}
 
 	// TeamChallenge overrides this to break its tether on the peer's EvTetherBreak.
@@ -483,9 +541,6 @@ internal abstract class GameScene : Scene
 
 	protected virtual void setPresence(GamerPresenceMode presenceMode)
 	{
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
 		{
@@ -565,10 +620,10 @@ internal abstract class GameScene : Scene
 		((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)Background);
 		((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)Foreground);
 		eventList.Reset();
-		Collection.Add((GameComponent)(object)score);
 		score.Reset();
 		score.Save();
 		score.Lives = -1;
+		Collection.Add((GameComponent)(object)score);
 		Settings.GetInstance().ResetDifficulty();
 		if (oracle.DeviceIsPlaying(ControlDevice.Keyboard))
 		{
@@ -699,13 +754,6 @@ internal abstract class GameScene : Scene
 
 	protected virtual void PreloadGraphicalContent()
 	{
-		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0117: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0278: Unknown result type (might be due to invalid IL or missing references)
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletevil");
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletgood");
@@ -767,6 +815,10 @@ internal abstract class GameScene : Scene
 		{
 			Background.QueueAndromeda();
 			Background.SetSpeed(new Vector2(0f, 1f) / 16.666666f);
+			// Left engaged on purpose: this is the one rig that parks a level in the
+			// belt-slowdown state, which is what gives the JIP catch-up's belt leg (card
+			// 45a4e48d) any coverage at all -- Level 1's real engage sits deep in its script.
+			Background.EngageBeltSlowdown();
 		};
 		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
@@ -822,8 +874,6 @@ internal abstract class GameScene : Scene
 
 	protected void TestBlocks()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		int num = 20;
 		for (int i = 0; i < 800 / num; i++)
 		{
@@ -993,9 +1043,6 @@ internal abstract class GameScene : Scene
 
 	private void SpawnPlayer(ControlDevice controlDevice)
 	{
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a4: Unknown result type (might be due to invalid IL or missing references)
 		PlayerShip playerShip = Collection.Recycle<PlayerShip>();
 		if (playerShip == null)
 		{
@@ -1175,10 +1222,6 @@ internal abstract class GameScene : Scene
 
 	private void checkScreenShot()
 	{
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00eb: Expected O, but got Unknown
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0101: Unknown result type (might be due to invalid IL or missing references)
 		if (snapshotdelaytimer.Finished)
 		{
 			snapshotdelaytimer.Reset();
@@ -1266,9 +1309,6 @@ internal abstract class GameScene : Scene
 
 	private void takeScreenShot()
 	{
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0078: Expected O, but got Unknown
 		Game1.onPostDraw = (Game1.PostDrawEvent)Delegate.Remove(Game1.onPostDraw, game1PostDrawEvent);
 		if (((Collection<IGameComponent>)(object)base.Game.Components).Contains((IGameComponent)(object)this))
 		{
@@ -1343,9 +1383,13 @@ internal abstract class GameScene : Scene
 		}
 		if ((_timer.TotalMilliseconds > 1300.0) & !shipCreated & spawnPlayerNormally)
 		{
-			Collection.Purge<AlienDrawableGameComponent>();
-			Collection.Purge<AnimatedMessage>();
-			Collection.Purge<TutorialMessage>();
+			// standing: false — this is a clear-the-field-and-respawn-NOW purge: the ships
+			// (AlienDrawableGameComponent) and the Get Ready banners (AnimatedMessage, via
+			// ShowStartMessages) are re-added in this same tick and must not be diverted by
+			// the standing purge filter (card 02d9ad67).
+			Collection.Purge<AlienDrawableGameComponent>(standing: false);
+			Collection.Purge<AnimatedMessage>(standing: false);
+			Collection.Purge<TutorialMessage>(standing: false);
 			SpawnAllPlayers(invulnerable: false);
 			shipCreated = true;
 		}
@@ -1358,9 +1402,6 @@ internal abstract class GameScene : Scene
 
 	protected void SpawnAllPlayers(bool invulnerable)
 	{
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f9: Unknown result type (might be due to invalid IL or missing references)
 		if (!isDemo)
 		{
 			score.ShowStartMessages();

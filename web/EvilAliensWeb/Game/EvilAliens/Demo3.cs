@@ -140,15 +140,11 @@ internal class Demo3 : GameScene
 
 	private void waitevent_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 0.2f) / 16.666666f);
 	}
 
 	private void skullspawner_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 4.5f) / 16.666666f);
 	}
 

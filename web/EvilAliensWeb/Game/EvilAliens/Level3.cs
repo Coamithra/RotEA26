@@ -30,7 +30,6 @@ internal class Level3 : GameScene
 
 	protected override void PreloadGraphicalContent()
 	{
-		//IL_0170: Unknown result type (might be due to invalid IL or missing references)
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/blooddrop");
@@ -437,7 +436,6 @@ internal class Level3 : GameScene
 
 	private void spawn1ups(GameEvent sender)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		UFO uFO = UFO.NewUFO(Collection, base.Game);
 		uFO.Setup(new Vector2(400f, -100f), isBig: true, EnemyBehaviour.classic);
 		uFO.SetAsBonus(Powerup.PowerupType.OneUp);
@@ -457,28 +455,21 @@ internal class Level3 : GameScene
 
 	private void slowdown(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 0.2f) / 16.666666f);
 	}
 
 	private void speedup(GameEvent sender)
 	{
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 4.3f * Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty)) / 16.666666f);
 	}
 
 	private void speedupuber1(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 0.72f));
 	}
 
 	private void bossspeed(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 3f) / 16.666666f);
 	}
 

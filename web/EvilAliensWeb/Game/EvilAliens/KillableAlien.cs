@@ -85,8 +85,6 @@ public abstract class KillableAlien : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		dead = false;
 		hittimer.Stop();
@@ -134,9 +132,6 @@ public abstract class KillableAlien : AlienDrawableGameComponent
 
 	protected virtual void HitBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
 		if (hittimer.Active)
 		{
 			return;

@@ -31,10 +31,6 @@ internal class Lazer : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0018: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 			line.Origin = base.Position + lead * MyMath.AngleToVector(base.Direction);
 			line.Length = len - lead;
 			line.Direction = base.Direction;
@@ -51,9 +47,6 @@ internal class Lazer : AlienDrawableGameComponent
 	public Lazer(Game game)
 		: base(game)
 	{
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 		lazor = new Quad(base.Game, base.Position, 0f, 16f, 0f, 0f);
 		base.DrawOrder = 40;
 		line = new CollisionLine(Vector2.Zero, Vector2.Zero);
@@ -83,8 +76,6 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float direction, AlienDrawableGameComponent owner, float lead)
 	{
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0038: Unknown result type (might be due to invalid IL or missing references)
 		issingle = false;
 		this.owner = owner;
 		base.Position = position;
@@ -97,14 +88,11 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public void SetupSingleShot(Vector2 position, float direction, float lead)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		SetupSingleShot(position, direction, lead, playSound: true);
 	}
 
 	public void SetupSingleShot(Vector2 position, float direction, float lead, bool playSound)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
 		issingle = true;
 		base.Position = position;
 		this.lead = lead;
@@ -127,8 +115,6 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public void MoveTo(Vector2 position)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 		lazor.MoveTo(position);
 	}

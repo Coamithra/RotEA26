@@ -32,6 +32,13 @@ namespace EvilAliensWeb.Compat
     public class WebContentManager : ContentManager
     {
         private readonly Dictionary<string, object> _cache = new Dictionary<string, object>();
+        // Which file each cached texture actually came from (".dds"/".rtex"/".png"). A
+        // fallback is otherwise invisible after the fact — the .rtex and .png paths both
+        // yield SurfaceFormat.Color, so nothing about the finished Texture2D can tell them
+        // apart — and "did this asset silently degrade to the PNG path?" is precisely the
+        // question card 35834236 could not answer. One dictionary write per load, on a path
+        // that already runs a Stopwatch and a LoadProfiler call. Read via TexProbe.
+        private readonly Dictionary<string, string> _textureSources = new Dictionary<string, string>();
         private GraphicsDevice _graphicsDevice;
 
         public WebContentManager(IServiceProvider services, string rootDirectory)
@@ -131,7 +138,39 @@ namespace EvilAliensWeb.Compat
                 }
             }
             _cache.Clear();
+            _textureSources.Clear();
             base.Unload();
+        }
+
+        // Flatten an exception chain into one console-friendly line. Exists because the one
+        // exception this port hits most often — KNI's FileNotFoundException from
+        // TitleContainer.OpenStream — puts NOTHING but the path in its own Message and hides
+        // the cause (an HTTP status, a decode error) one level down.
+        internal static string DescribeChain(Exception ex)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (sb.Length > 0)
+                    sb.Append(" <- ");
+                sb.Append(e.GetType().Name).Append(": ").Append(e.Message);
+            }
+            return sb.ToString();
+        }
+
+        // Which precompiled sibling (if any) the offline build shipped for this asset name.
+        // Takes the game's spelling ("GFX/Base/756") and resolves it the way Load<T> does.
+        internal string DescribeSibling(string assetName, out string resolvedKey)
+        {
+            resolvedKey = ResolvePath(assetName);
+            return PrecompiledTextures.Siblings.TryGetValue(resolvedKey, out string sib) ? sib : null;
+        }
+
+        // Which file the cached texture for this resolved key was actually built from, or null
+        // if this manager has never loaded it.
+        internal string TextureSource(string resolvedKey)
+        {
+            return _textureSources.TryGetValue(resolvedKey, out string src) ? src : null;
         }
 
         private Texture2D LoadTexture(string key)
@@ -152,12 +191,34 @@ namespace EvilAliensWeb.Compat
             // Stopwatch is sub-microsecond; harmless in release.
             var sw = System.Diagnostics.Stopwatch.StartNew();
             Texture2D tex = null;
-            if (PrecompiledTextures.Siblings.TryGetValue(key, out string sib))
+            PrecompiledTextures.Siblings.TryGetValue(key, out string sib);
+            if (sib != null)
                 tex = sib == ".dds" ? TryLoadDds(key) : TryLoadRaw(key);
             if (tex == null)
             {
-                using Stream s = TitleContainer.OpenStream(key + ".png");
-                tex = Texture2D.FromStream(GraphicsDevice, s);
+                // KNI's TitleContainer.OpenStream ends in
+                //   catch (Exception inner) { throw new FileNotFoundException(name, inner); }
+                // so the Message of anything it throws is the bare PATH and nothing else — the
+                // real cause is only in InnerException. That exception escapes into TickDotNet,
+                // where index.html's guard prints e.message: a lone "Content/gfx/base/x.png",
+                // which reads like a 404 whatever actually went wrong. Card 35834236 was filed
+                // and investigated on exactly that misreading. Restate it with the cause, which
+                // sibling (if any) was tried before us, and the full inner chain.
+                try
+                {
+                    using Stream s = TitleContainer.OpenStream(key + ".png");
+                    tex = Texture2D.FromStream(GraphicsDevice, s);
+                }
+                catch (Exception ex)
+                {
+                    throw new ContentLoadException(
+                        $"{key}.png failed to load (sibling tried: {sib ?? "none"}) — {DescribeChain(ex)}", ex);
+                }
+                _textureSources[key] = ".png";
+            }
+            else
+            {
+                _textureSources[key] = sib;
             }
             sw.Stop();
             tex.Name = key;
@@ -174,6 +235,12 @@ namespace EvilAliensWeb.Compat
         // problem (missing file, odd header, unsupported format) yields null + the PNG.
         private Texture2D TryLoadDds(string key)
         {
+            // Only reached when PrecompiledTextures.Siblings says a .dds WAS shipped for this
+            // key, so a read failure here is an anomaly, not the ordinary "PNG-only asset" case
+            // — say so. Swallowing it silently (as this did) downgrades the asset to the PNG
+            // path, i.e. unmipped and a StbImageSharp decode on the WASM main thread, leaving no
+            // trace of why; and if the PNG then fails too, the only surviving evidence is the
+            // path in KNI's message. That is the hole card 35834236 fell into.
             byte[] data;
             try
             {
@@ -182,9 +249,10 @@ namespace EvilAliensWeb.Compat
                 s.CopyTo(ms);
                 data = ms.ToArray();
             }
-            catch
+            catch (Exception ex)
             {
-                return null; // no .dds for this asset — normal; use the PNG
+                Console.WriteLine($"[dds] {key}: registered .dds sibling could not be read — {DescribeChain(ex)} — falling back to PNG");
+                return null;
             }
 
             try
@@ -287,9 +355,11 @@ namespace EvilAliensWeb.Compat
                 s.CopyTo(ms);
                 data = ms.ToArray();
             }
-            catch
+            catch (Exception ex)
             {
-                return null; // no .rtex for this asset — normal; use the PNG
+                // Registered sibling; see the matching note in TryLoadDds.
+                Console.WriteLine($"[rtex] {key}: registered .rtex sibling could not be read — {DescribeChain(ex)} — falling back to PNG");
+                return null;
             }
 
             try

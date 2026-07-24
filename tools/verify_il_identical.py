@@ -190,7 +190,7 @@ def main():
     args = ap.parse_args()
 
     root = repo_root()
-    print(f'IL-identity check  (repo {root})')
+    print(f'IL-identity check  (repo {root})', flush=True)
     commit = resolve_ref(root, args.ref)
     label = f'{args.ref} ({commit[:8]})'
 

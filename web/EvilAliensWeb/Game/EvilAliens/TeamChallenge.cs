@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.GamerServices;
 
@@ -72,23 +73,57 @@ internal class TeamChallenge : GameScene
 			oracle.AddPlayer(ControlDevice.Keyboard);
 		}
 		// Online co-op: seat ONLY the local device -- the partner joins as
-		// ControlDevice.Remote through the net layer. Seating the offline PadOne here
-		// would (a) squat the slot the remote puppet needs and (b) trip the
+		// ControlDevice.Remote through the net layer. Seating a local second device here
+		// would (a) squat the slot the remote puppet needs and (b) for a pad, trip the
 		// disconnected-gamepad force-pause every tick (GameScene.Update's PadConnected
 		// check) -- the card's "pause triggers are local devices only" gotcha.
 		if (!EvilAliensWeb.Compat.Net.NetSession.Active)
 		{
-			// ?aiteam (card 9391f95a): seat Generic instead, so the level can be BENCHED at all.
-			// PadOne with no gamepad attached makes GameScene.Update raise pauseRequested every
-			// tick (its !PadConnected(i) check), so an unattended ?aiplayer soak never leaves the
-			// pause menu -- prog=0, no verdict, and nothing in the bench line explaining it.
-			// Generic simply has no connected-check. It gives this slot no DRIVER of its own
-			// (PlayerShip.Update has no Generic case) -- the flag is only ever used with
-			// ?aiplayer, which forces both ships onto the AI branch.
-			oracle.AddPlayer(EvilAliensWeb.Compat.DebugFlags.AiTeam
-				? ControlDevice.Generic
-				: ControlDevice.PadOne);
+			oracle.AddPlayer(ResolvePartnerSeat(base.InputHandler.PadConnected, EvilAliensWeb.Compat.DebugFlags.TeamPartner));
 		}
+	}
+
+	// The partner seat (card e6927ef8). The 2008 build seated ControlDevice.PadOne
+	// UNCONDITIONALLY, which on this port makes the level unplayable for a keyboard-only
+	// player: GameScene.Update raises pauseRequested on every tick a seated pad device reads
+	// !InputHandler.PadConnected(i), so the world is pushed into the pause menu, dismissed, and
+	// re-paused next tick, forever (measured: ticks=0 prog=2/52 over 37 sim-seconds -- the world
+	// never advanced). So the seat is resolved from what is actually PLUGGED IN:
+	//   a connected pad -> that pad, exactly the original two-human co-op;
+	//   nothing         -> ControlDevice.AI, the shipped Mechanical-Friends bot flying as an
+	//                      auto-pilot partner (the level-select briefing says so). It can fly
+	//                      this level: the completion matrix measured ticks=1682 shots=1029 and
+	//                      a VICTORY in 402s with both ships on the AI branch.
+	// INVARIANT: the result is never a pad that is not connected (unless ?teampartner=pad forces
+	// it), which is precisely the force-pause's precondition -- so the loop is unreachable by
+	// construction. GameScene's guard itself stays as it is: for a pad that dies MID-RUN, telling
+	// the player is the wanted behaviour.
+	// Pure (padConnected injected, no oracle/scene state) so eaTeamSeat() can table-drive every
+	// pad mask instead of needing a live level and four physical gamepads -- the OwnsSlotCore idiom.
+	internal static ControlDevice ResolvePartnerSeat(Func<int, bool> padConnected, EvilAliensWeb.Compat.DebugFlags.TeamPartnerSeat forced)
+	{
+		if (forced == EvilAliensWeb.Compat.DebugFlags.TeamPartnerSeat.Ai)
+		{
+			return ControlDevice.AI;
+		}
+		for (int i = 0; i < 4; i++)
+		{
+			if (padConnected(i))
+			{
+				return i switch
+				{
+					0 => ControlDevice.PadOne,
+					1 => ControlDevice.PadTwo,
+					2 => ControlDevice.PadThree,
+					_ => ControlDevice.PadFour,
+				};
+			}
+		}
+		// ?teampartner=pad reproduces the shipped-2008 seating (a pad that is not there) -- the
+		// only deliberate way to reach the disconnected-pad force-pause, i.e. this card's bug.
+		return (forced == EvilAliensWeb.Compat.DebugFlags.TeamPartnerSeat.Pad)
+			? ControlDevice.PadOne
+			: ControlDevice.AI;
 	}
 
 	protected override void UpdateNormal(GameTime gameTime)

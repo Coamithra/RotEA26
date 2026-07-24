@@ -17,6 +17,38 @@ a `blender` exe, the `../animgen` ComfyUI venv, `pymusiclooper`, PyAV. Raw sourc
 gitignored dirs (`new_assets_raw/`, `tools/*/source/`); the committed wwwroot artifacts are the
 products of record.
 
+## Headless logic oracle -- `tools/sim/logic_probe/`
+
+**A PURE static method in the game can be verified with no browser at all** (card e6927ef8).
+`EvilAliensWeb.dll` is ordinary IL and its whole dependency closure (`nkast.*` + the BCL) sits
+next to it in `web/EvilAliensWeb/bin/Debug/net8.0`, so a desktop `net8.0` exe can
+`AssemblyLoadContext`-load it and invoke the method FOR REAL:
+
+```sh
+dotnet build web/EvilAliensWeb -c Debug
+dotnet run --project tools/sim/logic_probe -- web/EvilAliensWeb/bin/Debug/net8.0
+```
+
+Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (renamed/moved).
+
+- **The point is that there is NO MIRROR.** The `tools/sim/*.py` sims re-implement a choreography
+  in python and can drift from the C#; this calls the shipped method itself, so a green run is
+  evidence about the real code. Prefer it for anything shaped like a DECISION (a seating rule, a
+  predicate, a resolver) rather than a picture or a motion.
+- **Limits, and they matter:** anything touching `ServiceHelper` / `Game` / `GraphicsDevice` /
+  content throws or NREs here, and loading a type resolves its base types (a method on a scene
+  class drags the XNA assemblies in -- fine, they are managed, but a static ctor doing engine work
+  would not be). It proves the FUNCTION, never the wiring: that a boot reads the flag, calls it and
+  acts on the result still needs a live pass.
+- **Hold it to the same standard as the IL oracle: sound AND sensitive.** Add a case set as a
+  `Probe*` method, keep the expectation independent of the implementation where you can, and where
+  a restatement is unavoidable add a negative control that runs the OLD behaviour over the same
+  inputs and must FAIL. The TeamChallenge set was mutation-tested (`padConnected(i)` -> `true`
+  turned 7 PASS lines into 4 FAIL), which is what makes its green run mean anything.
+- The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
+  browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
+  exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
+
 ## Refactor oracles — `verify_il_identical.py` / `verify_decompiled_diff.py`
 
 Neither is codegen; both only build + inspect, so they are safe to run any number of times.

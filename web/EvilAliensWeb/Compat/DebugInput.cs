@@ -322,6 +322,17 @@ namespace EvilAliensWeb.Compat
 				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
 		}
 
+		// JS bridge for the world-snapshot unknown-id attribution (eaNetSnap in
+		// wwwroot/index.html, card 48ab9b2f). Drives the real NetPuppets.OnSnapshotEntry so the
+		// three branches that all `return false` -- rebuilt / left dead / refused -- are proved
+		// to report the kind they took, and pins the derived snapTurn arithmetic. A
+		// classification is invisible in any frame, so this is data, not a two-window run.
+		[JSInvokable("debugNetSnapTest")]
+		public static string NetSnapTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetSnapshotTest.Run();
+		}
+
 		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest'). Runs
 		// Compat/Net/NetKickTest.Run() and returns the PASS/FAIL report.

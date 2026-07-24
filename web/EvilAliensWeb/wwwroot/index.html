@@ -259,6 +259,18 @@
             catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: world-snapshot unknown-id attribution (card 48ab9b2f). A snapshot entry with no
+        // puppet takes one of three branches — the self-heal REBUILT it (the stream lane
+        // outrunning the reliable EvSpawn: ordinary), it was LEFT DEAD inside the removal window
+        // (ordinary), or the rebuild was REFUSED (a fault that re-counts every turn). They used
+        // to share one snapUnk counter, so a JIP reading could not be judged; this proves each
+        // branch reports its own kind, and pins the derived snapTurn arithmetic. Prints
+        // PASS/FAIL. Run from the MAIN MENU — it skips itself over a live session or level.
+        window.eaNetSnap = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetSnapTest')); }
+            catch (e) { console.warn('[debug] eaNetSnap failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
         // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
         // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs

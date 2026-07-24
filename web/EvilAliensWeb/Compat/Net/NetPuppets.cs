@@ -5,6 +5,20 @@ using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
 {
+    // Why a snapshot entry had no puppet to apply itself to (card 48ab9b2f). Reported per
+    // entry by NetPuppets.OnSnapshotEntry so NetMetrics can count the three separately -- the
+    // single snapUnk total they used to share is unreadable, since two of them are ordinary
+    // traffic and only the third is a fault.
+    public enum SnapUnknownKind
+    {
+        None = 0,   // the id WAS puppeted; the entry applied normally
+        Rebuilt,    // never-seen id, self-heal built it from the snapshot (stream outran the
+                    // reliable EvSpawn, or a local purge dropped a world the host's still has)
+        LeftDead,   // removed here < RecentRemovalWindowMs ago: a death still settling
+        Refused,    // the rebuild was declined -- no descriptor for the typeIdx, the descriptor
+                    // returned null, or the bin swallowed the add. Re-counts every turn.
+    }
+
     // Client-side world puppets (card 11.2, design: plans/stage11-online-coop.md).
     //
     // Every replicated enemy on a JOIN peer is a real game object built by its own
@@ -203,9 +217,10 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
-        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped)
+        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
         {
             popped = false;
+            kind = SnapUnknownKind.None;
             if (!enabled)
             {
                 return false;
@@ -217,9 +232,21 @@ namespace EvilAliensWeb.Compat.Net
                 // snapshot itself -- default construction extras, so a variant may look
                 // generic until nothing (spawn extras only pick cosmetics). An id that died
                 // HERE moments ago is a claim still in flight: leave it dead.
-                if (!IsRecentlyRemoved(netId))
+                //
+                // WHICH of those three it was is reported to the caller (card 48ab9b2f). They
+                // all return false and used to share one snapUnk counter, but they mean
+                // completely different things: Rebuilt and LeftDead are ordinary traffic whose
+                // rates track the world's spawn/removal rates, while Refused is a fault that
+                // re-counts on every snapshot turn for as long as the host streams that id.
+                if (IsRecentlyRemoved(netId))
                 {
-                    OnSpawn(netId, typeIdx, state, buf, extraOff, 0);
+                    kind = SnapUnknownKind.LeftDead;
+                }
+                else
+                {
+                    kind = OnSpawn(netId, typeIdx, state, buf, extraOff, 0)
+                        ? SnapUnknownKind.Rebuilt
+                        : SnapUnknownKind.Refused;
                 }
                 return false;
             }

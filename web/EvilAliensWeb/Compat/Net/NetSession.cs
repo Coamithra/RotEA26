@@ -620,7 +620,8 @@ namespace EvilAliensWeb.Compat.Net
                 metrics.ImpLagMs = impairment.LagMs;
                 metrics.ImpLossPct = impairment.LossPct;
                 metrics.ImpJitterMs = impairment.JitterMs;
-                Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
+                int liveCount = isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount;
+                Console.WriteLine(metrics.Report(isHost, PeerUp, liveCount, SnapshotTurnMs(liveCount),
                     FindLocalShip() != null, puppet != null, RosterReport()));
             }
         }
@@ -1051,6 +1052,23 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- host world snapshot ------------------------------------------------------------
+
+        // How long a single entity waits between world-snapshot corrections, given how many are
+        // live: the cursor round-robins SnapshotMaxEntries per packet, so a big world stretches
+        // every puppet's blind dead-reckoning window (card 48ab9b2f). This is the context
+        // pupPops cannot be read without -- at 320 entities each puppet only hears from the host
+        // every 1.2s, and anything not moving in a straight line then pops on a healthy link.
+        // Reported as snapTurn= on both peers; also the number the population sweep in
+        // tools/sim/net_puppet_drive_sim.py sweeps.
+        internal static int SnapshotTurnMs(int liveCount)
+        {
+            if (liveCount <= 0)
+            {
+                return 0;
+            }
+            int packets = (liveCount + SnapshotMaxEntries - 1) / SnapshotMaxEntries;
+            return packets * (int)SnapshotIntervalMs;
+        }
 
         private static void SendWorldSnapshot(long now)
         {
@@ -2057,7 +2075,7 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped))
+                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
                 {
                     if (popped)
                     {
@@ -2066,9 +2084,17 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else
                 {
-                    // Not spawned yet (stream outran the reliable lane) or died locally with
-                    // the claim still in flight -- both self-heal; just count it.
+                    // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead are ordinary
+                    // traffic -- their rates track the world's spawn and removal rates, so a
+                    // busy level logs plenty of both on a perfectly healthy link. Refused is
+                    // the fault shape: it re-counts every turn the host streams that id.
                     metrics.SnapUnknownIds++;
+                    switch (kind)
+                    {
+                    case SnapUnknownKind.Rebuilt:  metrics.SnapRebuilt++; break;
+                    case SnapUnknownKind.LeftDead: metrics.SnapLeftDead++; break;
+                    case SnapUnknownKind.Refused:  metrics.SnapRefused++; break;
+                    }
                 }
             }
         }

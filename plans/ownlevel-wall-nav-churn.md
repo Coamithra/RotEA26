@@ -21,30 +21,32 @@ actual `PlayerShip.SteerThroughWall` / `ChooseGapColumn` / `ColumnScore` / `Dist
 Python mirror, so no drift. The game builds to plain `net8.0`, which is what makes this possible.
 
 Ship model: `MaxSpeed` 0.33 px/ms, 29px box, the wall term alone, respawn in a clear cell on
-contact. Scroll swept 0.026 - 0.31 px/ms (the real value both levels use is
-`4.3 * difficultyValue / 16.667` = **0.258** at Very_Hard).
+contact. Scroll is PINNED at the real Very_Hard wall speed: every real wall section in both levels
+runs `Background.SetSpeed(4.3 * difficultyValue / 16.667)` (`Level3.speedup` and
+`OwnLevel.setspeed` are the same expression) = **0.258 px/ms**. `Level3.popTestSlow`'s
+`0.43 * difficultyValue` is NOT a wall speed -- it is `?wallpoptest` only and its own comment
+calls it "10% of the normal wall-section speed".
 
-| grid | w | rows | gapSw/s | clampX/s | contacts | urgency% |
-|---|---|---|---|---|---|---|
-| var0 (Level 3) | 12 | 122 | 0.00 | 0.00 | 0 | 0.1% |
-| var1 (Level 3) | 7 | 106 | 0.09 | 1.60 | 0 | 1.6% |
-| **var2 (OwnLevel)** | 7 | 115 | **0.17** | **2.04** | **7** | **10.2%** |
-| var3 (Level 3) | 9 | 179 | 0.13 | 1.09 | 10 | 1.9% |
-| var4 (Level 3) | 3 | 11 | 0.00 | 0.00 | 0 | 0.0% |
+| grid | w | rows | gapSw/s | latFlip/s | clampX/s | clampUp/s | contact/s | urgency% |
+|---|---|---|---|---|---|---|---|---|
+| var0 (Level 3) | 12 | 122 | 0.03 | 0.00 | 0.00 | 0.00 | 0.00 | 0.8% |
+| var1 (Level 3) | 7 | 106 | 0.27 | 0.15 | 0.50 | 0.44 | 0.00 | 1.9% |
+| **var2 (OwnLevel)** | 7 | 115 | **0.52** | **0.17** | **1.12** | **1.16** | **0.06** | **25.0%** |
+| var3 (Level 3) | 9 | 179 | 0.43 | 0.16 | 0.61 | 0.77 | 0.03 | 4.5% |
+| var4 (Level 3) | 3 | 11 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.0% |
 
 **The card's hypothesis does not survive this.**
 
-- **Gap-column switching is not thrashing.** 0.17/s on OwnLevel -- one switch every six seconds --
-  against 0.13/s on Level 3's var3. A ratio of 1.3x, and nowhere near enough events to produce
-  3-5 heading reversals per second whatever their amplitude.
-- **Wall contacts are not elevated either**: 7 on OwnLevel vs 10 on Level 3's var3.
-- The only genuinely elevated column is `urgency%` (10.2% vs 1.6-1.9%), i.e. OwnLevel's maze does
-  keep a blocked row inside reach far more of the time -- the grid IS tighter, exactly as the card
-  guessed structurally. But that tightness is not converting into switching or contacts.
-- Sweeping the two plausible knobs changes nothing that matters: `WallScanRows` 4 -> 16 and
-  `WallCrossPenalty` 4 -> 0 leave OwnLevel's contacts flat and make Level 3's var3 **worse**;
-  `WallReactionMs` 420 -> 2000 (via the real `?aireact` knob) leaves contacts and `clampX/s` flat
-  on every grid and only inflates `urgency%`. There is no tuning win available here.
+- **Gap-column switching is not thrashing.** 0.52/s on OwnLevel against 0.43/s on Level 3's var3
+  -- 1.2x, one switch every two seconds. The lateral push flips sign 0.17/s vs 0.16/s. Neither is
+  remotely enough to produce 3-5 heading reversals per second, whatever their amplitude.
+- **OwnLevel's grid IS the hardest of the five, but by modest ratios**: `clampX/s` 1.8x var3,
+  `clampUp/s` 1.5x, `contact/s` 2x (on 3 raw contacts against 2). None of these approach 4-7x.
+- The one genuinely large gap is `urgency%` -- **25.0% vs 4.5%** -- so the maze does keep a
+  blocked row inside reach far more of the time, exactly as the card guessed structurally. It
+  simply is not converting that into proportional churn or contacts.
+- `--react=2000` (the real `?aireact` knob) shifts `urgency%` and `clampX/s` around but leaves
+  switching, sign flips and contacts unchanged on every grid. No tuning win in the look-ahead.
 
 ## Why the live 4-7x is real but not about walls
 
@@ -71,17 +73,19 @@ anything unusual.
 
 1. **Ship the bench** as `tools/sim/aiwallnav/` -- a `net8.0` console project that references the
    built `EvilAliensWeb.dll` and drives the real wall-nav methods by reflection. Prints the table
-   above; `--react=`/`--scanrows=`/`--scroll=` sweep the knobs through the real `DebugFlags`
-   properties. This is the instrument card f4d1721f never had, and it is why OwnLevel was never in
+   above; `--react=<ms>` writes the same `DebugFlags` property `?aireact` does, `--grid=<n>`
+   picks one variation and `--ladder` repeats the table at all five difficulty scroll speeds. This is the instrument card f4d1721f never had, and it is why OwnLevel was never in
    that tuning loop.
    - Two rig honesty notes go in its README and its header comment: (a) variation 2 is parsed from
      `level3.txt` by the rig, because `Wall.Setup` reads it through browser-only `TitleContainer`
      and would otherwise silently hand back its 5x19 emergency grid; (b) the ship model is the
      wall term only -- it cannot produce `turn deg/s`, and a verdict about the whole bot still
      needs `?aibench`.
-2. **No AI tuning constant changes.** The bench says there is nothing to win in the wall nav, and
-   every knob tried either did nothing or regressed Level 3. Shipping a tuning change here would
-   be a guess dressed as a fix.
+2. **No AI tuning constant changes.** The bench finds no churn ratio worth chasing and no
+   look-ahead setting that improves one. Shipping a tuning change here would be a guess dressed
+   as a fix. (`WallScanRows`/`WallCrossPenalty` were also swept, but they are `private const`
+   with no `DebugFlags` override, so that sweep needed an edit-and-rebuild and is NOT reproducible
+   with the shipped tool -- its figures are deliberately not quoted anywhere.)
 3. **Document** the bench in `tools/CLAUDE.md` and add the finding to web CLAUDE.md's AI section
    -- specifically that the matrix's OwnLevel caveat ("its churn runs far above the ~70 deg/s the
    parent card settled Level 3 at -- OwnLevel's maze is a harder case") is comparing `?wallsonly`

@@ -821,13 +821,14 @@ the rest are tier-independent.
     making the clamp its own oscillator.
   - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
     It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
-    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or a
-    `?ai*` knob in seconds with no browser. It reports per grid: `ChooseGapColumn` switches/s,
-    lateral sign flips/s, `ClampIntoWallSpace` X-reversals/s, wall contacts and the share of ticks
-    under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the whole steering
-    sum, so a claim about the BOT still needs `?aibench`. This is the instrument card f4d1721f
-    lacked, which is why OwnLevel's grid was never in its tuning loop; see tools/CLAUDE.md and the
-    tool's README for its rig caveats.
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or the
+    `?aireact` knob in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
+    share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
+    whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
+    running it** (it references the built DLL, so an unrebuilt edit is benched in its old form,
+    silently). This is the instrument card f4d1721f lacked, which is why OwnLevel's grid was never
+    in its tuning loop; see tools/CLAUDE.md and the tool's README for the rest of its rig caveats.
 - **Fast movers are dodged by CLOSEST APPROACH, not by current distance** (`EvadeMovingThreat`,
   `DefaultThreatLeadMs` 700). Radial repulsion from something crossing the screen pushes the ship
   ALONG its path -- precisely the spider boss's screen-wide sweep. Slow/static threats keep the
@@ -901,7 +902,9 @@ the rest are tier-independent.
     that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
     either knob to the table without an instrument that can actually see it.
   - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
-    tier (and Level3's wall SCROLL SPEED is `0.43 * GetDifficultyValue`), so an outcome delta
+    tier (and Level3's wall SCROLL SPEED is `4.3 * GetDifficultyValue / 16.667`, i.e. 0.090 px/ms
+    at Easy to 0.310 at Inzane -- the `0.43 *` variant is `Level3.popTestSlow`, `?wallpoptest`
+    only, and is a TENTH of any real wall section), so an outcome delta
     between tiers is unattributable. The non-confounded observation is the `eaAiBench()` line's
     `skill effective=<tier> field= aim=` row, which reports the RESOLVED values; verifying the
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
@@ -990,13 +993,15 @@ before hunting a blind spot in any future stalled-level report.
     the same 4.3x `speedup` OwnLevel uses. So it is walls-alone against walls-plus-a-sustained-
     enemy-stream, and the extra churn belongs to the same sum-of-repulsions problem CrazyGame
     shows at 389-450 deg/s with **no walls at all**, which is the band OwnLevel sits in.
-    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser): on
-    OwnLevel's grid `ChooseGapColumn` switches 0.17/s -- once every six seconds, 1.3x Level 3's
-    var3 -- and wall contacts are LOWER than var3's (7 vs 10). `WallScanRows` 4->16,
-    `WallCrossPenalty` 4->0 and `WallReactionMs` 420->2000 leave OwnLevel flat and some regress
-    Level 3, so there is no tuning win in the wall term. The one genuinely elevated figure is
-    the fraction of ticks with a blocked row inside reach (10.2% vs 1.6-1.9%): OwnLevel's maze
-    IS tighter, it just is not converting that into switching or contacts.
+    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser) at the real
+    Very_Hard wall scroll: on OwnLevel's grid `ChooseGapColumn` switches **0.52/s against var3's
+    0.43/s** -- 1.2x, one switch every two seconds -- and the lateral push flips sign 0.17/s vs
+    0.16/s. Neither can produce 3-5 heading reversals/s. OwnLevel's grid IS the hardest of the
+    five, but by modest ratios: `clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77, `contact/s`
+    0.06 vs 0.03. The one big gap is the share of ticks with a blocked row inside reach --
+    **25.0% vs 4.5%** -- so the maze really is tighter; it just does not convert that into
+    proportional churn. `--react=2000` shifts `urgency%`/`clampX/s` but leaves switching, sign
+    flips and contacts unchanged everywhere, so there is no tuning win in the look-ahead either.
     **Before attributing any churn on a walled level to the walls, match the rigs** -- suppress
     the spawners, or bench the grid offline.
 - **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into

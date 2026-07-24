@@ -36,11 +36,22 @@ internal static class Program
     private const float ShipHalf = 14.5f;       // the ~29px player box
     private const float StartY = 480f;
 
-    // Both Level 3 and OwnLevel drive Background.SetSpeed(4.3 * difficultyValue / 16.667), which
-    // is 0.258 px/ms at Very_Hard; Level 3's earlier sections run the 0.43 variant, ten times
-    // slower. Sweeping the range rather than picking one is what stops a scroll speed being
-    // cherry-picked -- OwnLevel's grid takes every one of its wall contacts at 0.258 and above.
-    private static readonly float[] Scrolls = { 0.026f, 0.10f, 0.18f, 0.258f, 0.31f };
+    // EVERY real wall section in both levels scrolls at Background.SetSpeed(4.3 * difficultyValue
+    // / 16.667) -- Level3.speedup and OwnLevel.setspeed are the same expression -- so the only
+    // speeds a player ever flies a wall at are this ladder, one per difficulty tier. (The 0.43
+    // variant is Level3.popTestSlow, reached only under ?wallpoptest and documented there as "10%
+    // of the normal wall-section speed"; benching it would weight the table with a speed nothing
+    // in play uses.) Default is the Very_Hard rung, which is what the AI matrix is measured at.
+    private static readonly (float Scroll, string Tier)[] SpeedLadder =
+    {
+        (4.3f * 0.35f / 16.666666f, "Easy"),
+        (4.3f * 0.60f / 16.666666f, "Medium"),
+        (4.3f * 0.80f / 16.666666f, "Hard"),
+        (4.3f * 1.00f / 16.666666f, "Very_Hard"),
+        (4.3f * 1.20f / 16.666666f, "Inzane"),
+    };
+
+    private const int VeryHardRung = 3;
 
     // Level 3 flies 0, 1, 3 and 4 (and 1/0/3 under ?wallsonly). OwnLevel flies 2 and nothing else.
     private static readonly (int Variation, string Owner)[] Grids =
@@ -56,16 +67,34 @@ internal static class Program
     private static int Main(string[] args)
     {
         float? react = null;
+        bool ladder = false;
         var only = new List<int>();
         foreach (string a in args)
         {
-            if (a.StartsWith("--react=")) react = Num(a);
-            else if (a.StartsWith("--grid=")) only.Add((int)Num(a));
+            if (a.StartsWith("--react="))
+            {
+                if (!TryNum(a, out float v)) { Console.Error.WriteLine("not a number: " + a); Usage(); return 2; }
+                react = v;
+            }
+            else if (a.StartsWith("--grid="))
+            {
+                if (!TryNum(a, out float v)) { Console.Error.WriteLine("not a number: " + a); Usage(); return 2; }
+                only.Add((int)v);
+            }
+            else if (a == "--ladder") ladder = true;
             else if (a == "--help" || a == "-h") { Usage(); return 0; }
             else { Console.Error.WriteLine("unknown argument: " + a); Usage(); return 2; }
         }
 
-        try { asm = typeof(EvilAliens.CollisionLevelMap).Assembly; }
+        foreach (int v in only)
+        {
+            if (Array.Exists(Grids, g => g.Variation == v)) continue;
+            // Silently printing an empty table would read as "this grid is clean".
+            Console.Error.WriteLine("no such wall variation: " + v + " (have 0, 1, 2, 3, 4)");
+            return 2;
+        }
+
+        try { asm = LoadGameAssembly(); }
         catch (Exception e)
         {
             Console.Error.WriteLine("could not load EvilAliensWeb.dll -- build the game first:");
@@ -92,44 +121,77 @@ internal static class Program
                .SetValue(null, react);
         }
 
-        Console.WriteLine("ai wall-nav bench -- real PlayerShip code, difficulty=Very_Hard, ship box="
+        // Grids are extracted BEFORE the table starts printing: Wall.Setup drives KNI's
+        // TitleContainer, whose loader writes three lines to stdout, and mid-table that noise
+        // travels with any copy-pasted result.
+        var extracted = new List<(string Label, bool[,] Grid)>();
+        TextWriter stdout = Console.Out;
+        Console.SetOut(TextWriter.Null);
+        try
+        {
+            foreach (var (variation, owner) in Grids)
+            {
+                if (only.Count > 0 && !only.Contains(variation)) continue;
+                bool[,] grid = GridForVariation(variation);
+                if (grid == null)
+                {
+                    Console.SetOut(stdout);
+                    Console.Error.WriteLine("var" + variation + ": could not extract grid");
+                    return 1;
+                }
+                extracted.Add(("var" + variation + " (" + owner + ")", grid));
+            }
+        }
+        finally { Console.SetOut(stdout); }
+
+        Console.WriteLine();
+        Console.WriteLine("ai wall-nav bench -- real PlayerShip code, grid difficulty=Very_Hard, ship box="
             + (ShipHalf * 2).ToString(CultureInfo.InvariantCulture) + "px"
             + (react.HasValue ? ", WallReactionMs=" + react.Value.ToString(CultureInfo.InvariantCulture) : ""));
-        Console.WriteLine("scroll sweep: " + string.Join(", ", Array.ConvertAll(Scrolls, f => f.ToString("0.000", CultureInfo.InvariantCulture))) + " px/ms");
-        Console.WriteLine();
-        Console.WriteLine("grid                w  rows | gapSw/s  latFlip/s  clampX/s  contacts | urgency%");
-        Console.WriteLine("--------------------------------------------------------------------------------");
 
-        foreach (var (variation, owner) in Grids)
+        foreach (int rung in ladder ? new[] { 0, 1, 2, 3, 4 } : new[] { VeryHardRung })
         {
-            if (only.Count > 0 && !only.Contains(variation)) continue;
-            bool[,] grid = GridForVariation(variation);
-            if (grid == null) { Console.WriteLine("var" + variation + ": could not extract grid"); continue; }
-            Run("var" + variation + " (" + owner + ")", grid);
+            var (scroll, tier) = SpeedLadder[rung];
+            Console.WriteLine();
+            Console.WriteLine("scroll " + scroll.ToString("0.000", CultureInfo.InvariantCulture)
+                + " px/ms (4.3 * " + tier + ")");
+            Console.WriteLine("grid                w  rows |  secs | gapSw/s latFlip/s clampX/s clampUp/s | contact/s  n | urgency%");
+            Console.WriteLine("-------------------------------------------------------------------------------------------------------");
+            foreach (var (label, grid) in extracted) Run(label, grid, scroll);
         }
 
         Console.WriteLine();
-        Console.WriteLine("gapSw/s   ChooseGapColumn changed its committed column");
-        Console.WriteLine("latFlip/s SteerThroughWall's lateral push changed sign");
-        Console.WriteLine("clampX/s  ClampIntoWallSpace reversed X -- the hard override, written back into aiSteer");
-        Console.WriteLine("contacts  ticks starting inside a blocked tile (the ship respawns in a clear cell)");
-        Console.WriteLine("urgency%  ticks with a blocked row inside the look-ahead reach");
+        Console.WriteLine("gapSw/s    ChooseGapColumn changed its committed column");
+        Console.WriteLine("latFlip/s  SteerThroughWall's lateral push changed sign");
+        Console.WriteLine("clampX/s   ClampIntoWallSpace reversed X (its two horizontal probes)");
+        Console.WriteLine("clampUp/s  ClampIntoWallSpace forced Y down -- the ungated upward probe, 3x the reach");
+        Console.WriteLine("contact/s  ticks starting inside a blocked tile; n is the raw count. Grids differ ~2x in");
+        Console.WriteLine("           length, so only the per-second figure is comparable ACROSS rows.");
+        Console.WriteLine("urgency%   ticks with a blocked row inside the look-ahead reach");
         Console.WriteLine();
         Console.WriteLine("Level 3 flies variations 0/1/3/4 (1/0/3 under ?wallsonly). OwnLevel flies 2 only.");
+        Console.WriteLine("--ladder repeats the table at all five difficulty scroll speeds.");
         return 0;
     }
 
     private static void Usage()
     {
-        Console.WriteLine("usage: dotnet run --project tools/sim/aiwallnav [--react=<ms>] [--grid=<n>]");
-        Console.WriteLine("  --react=<ms>  override PlayerShip's WallReactionMs (the real ?aireact knob)");
+        Console.WriteLine("usage: dotnet run --project tools/sim/aiwallnav [--react=<ms>] [--grid=<n>] [--ladder]");
+        Console.WriteLine("  --react=<ms>  set PlayerShip's WallReactionMs (same DebugFlags property as ?aireact)");
         Console.WriteLine("  --grid=<n>    bench only wall variation n (repeatable)");
+        Console.WriteLine("  --ladder      repeat the table at all five difficulty scroll speeds");
         Console.WriteLine();
         Console.WriteLine("Build the game first: dotnet build web/EvilAliensWeb -c Debug");
     }
 
-    private static float Num(string arg) =>
-        float.Parse(arg.Substring(arg.IndexOf('=') + 1), CultureInfo.InvariantCulture);
+    private static bool TryNum(string arg, out float value) =>
+        float.TryParse(arg.Substring(arg.IndexOf('=') + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+
+    // The typeof lives behind a non-inlined call so a missing//stale EvilAliensWeb.dll surfaces as
+    // the caller's friendly "build the game first" rather than a JIT-time type-load failure while
+    // Main itself is being prepared.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Assembly LoadGameAssembly() => typeof(EvilAliens.CollisionLevelMap).Assembly;
 
     private static bool Bind()
     {
@@ -157,7 +219,10 @@ internal static class Program
             (miSteer, "SteerThroughWall"), (miClamp, "ClampIntoWallSpace"),
             (fiGapCol, "aiGapColumn"), (fiBoundBox, "boundBox"), (fiTL, "TopLeft"), (fiBR, "BottomRight"),
             (fiPos, "_position"), (fiMaxSpeed, "_maximumSpeed"), (fiObsVel, "_observedVelocity"),
-            (fiPlayers, "Oracle.players"),
+            // oracle is required even though NewShip guards on it: SteerThroughWall dereferences
+            // it unconditionally, so a rename would surface as a TargetInvocationException out of
+            // Invoke rather than the clean bind error this guard promises.
+            (fiOracle, "PlayerShip.oracle"), (fiPlayers, "Oracle.players"),
         };
         bool ok = true;
         foreach (var (member, name) in required)
@@ -253,15 +318,14 @@ internal static class Program
         return ship;
     }
 
-    private static void Run(string label, bool[,] grid)
+    private static void Run(string label, bool[,] grid, float scroll)
     {
         int rows = grid.GetLength(0), width = grid.GetLength(1);
         float tile = 800f / width;
 
-        int gapSw = 0, latFlip = 0, clampX = 0, contacts = 0, urgentTicks = 0, ticks = 0;
+        int gapSw = 0, latFlip = 0, clampX = 0, clampUp = 0, contacts = 0, urgentTicks = 0, ticks = 0;
         float sec = 0f;
 
-        foreach (float scroll in Scrolls)
         {
             object ship = NewShip();
             object wall = RuntimeHelpers.GetUninitializedObject(tWall);
@@ -300,6 +364,10 @@ internal static class Program
                     miClamp.Invoke(ship, clampArgs);
                     var clamped = (Vector2)clampArgs[0];
                     if (clamped.X != 0f && Math.Sign(clamped.X) != Math.Sign(dir.X)) clampX++;
+                    // The upward probe is ungated on direction and reaches 3x further, and by the
+                    // game's own comment it is the more dangerous axis -- so it gets its own column
+                    // rather than hiding inside a single "the clamp fired" number.
+                    if (clamped.Y > dir.Y) clampUp++;
                     dir = clamped;
 
                     if (dir != Vector2.Zero)
@@ -340,8 +408,8 @@ internal static class Program
 
         float s = Math.Max(sec, 0.001f);
         Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
-            "{0,-18} {1,2} {2,5} | {3,7:0.00} {4,10:0.00} {5,9:0.00} {6,9} | {7,7:0.0}%",
-            label, width, rows, gapSw / s, latFlip / s, clampX / s, contacts,
-            ticks > 0 ? 100f * urgentTicks / ticks : 0f));
+            "{0,-18} {1,2} {2,5} | {3,5:0.0} | {4,7:0.00} {5,9:0.00} {6,8:0.00} {7,9:0.00} | {8,9:0.00} {9,2} | {10,7:0.0}%",
+            label, width, rows, sec, gapSw / s, latFlip / s, clampX / s, clampUp / s,
+            contacts / s, contacts, ticks > 0 ? 100f * urgentTicks / ticks : 0f));
     }
 }

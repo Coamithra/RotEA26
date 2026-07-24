@@ -335,11 +335,20 @@ namespace EvilAliensWeb.Compat.Net
             for (byte slot = 0; slot < NetProtocol.MaxSlots; slot++)
             {
                 float hostAward = (awards != null && slot < awards.Length) ? awards[slot] : 0f;
+                // ZERO IS "no figure", NOT "you earned nothing" -- NetSession.NoteAward filters
+                // amount <= 0, so the host never books a real zero. The case that matters is both
+                // peers killing one entity: the host's EvDeath carries only ITS killer's award and
+                // pays our slot separately when our claim lands. Settling our provisional against
+                // that zero would debit the whole local credit for a beat; leaving it on the books
+                // would instead double-count it against a host total that already contains the
+                // payout. Retiring it silently does neither -- the display holds our estimate
+                // until the next sync lands on the host's exact number.
                 float delta = scoreLedger.Settle(netId, slot, hostAward, out bool wasProvisional);
                 if (wasProvisional)
                 {
+                    MarkPaid(netId, slot); // a re-delivered EvDeath must not pay this slot again
                     // Correct silently -- the player already saw the floating text for this kill.
-                    if (delta != 0f)
+                    if (hostAward > 0f && delta != 0f)
                     {
                         score.AddScore(delta, false, slot);
                     }
@@ -471,10 +480,11 @@ namespace EvilAliensWeb.Compat.Net
                 sb.Append(ok ? "  PASS " : "  FAIL ").Append(what).Append('\n');
                 if (ok) { pass++; } else { fail++; }
             }
-            // Deliberately far above any id a live session allocates, so a stray real entry
-            // cannot collide with the scenarios below.
+            // Far above any id a session is realistically at (AllocId counts from 1 and only
+            // wraps at 65535), so the scenarios cannot collide with live entries.
             const ushort idA = 60001;
             const ushort idB = 60002;
+            const ushort idC = 60003;
             try
             {
                 // 1. Wire round trip: the award array must survive encode/decode intact.
@@ -510,12 +520,34 @@ namespace EvilAliensWeb.Compat.Net
                 Check(Near(sv.PointScore(0) - s0, 1234.5f),
                     "an over-credited local kill settles DOWN to the host figure (net +1234.5, not +2000)");
                 Check(Near(UnsettledFor(0), 0f), "settled entry leaves the unsettled books (=" + UnsettledFor(0) + ")");
+
+                // 5. A settled entry must not pay again if the EvDeath is re-delivered -- the
+                //    provisional branch has to mark the slot paid, not just consume the entry.
+                s0 = sv.PointScore(0);
+                ApplyAwards(idB, new Vector2(0f, 0f), back);
+                Check(Near(sv.PointScore(0) - s0, 0f), "a re-delivered EvDeath for a SETTLED id pays nothing extra");
+
+                // 6. Expiry: a local credit the host never echoes back (its copy was already
+                //    dead, so it paid our claim without re-broadcasting) must leave the books on
+                //    age alone, WITHOUT touching the score -- the next sync then lands on the
+                //    host's exact number. This is the one branch that drops a credit with no
+                //    compensating score change, so it is worth an explicit case.
+                s0 = sv.PointScore(0);
+                scoreLedger.NoteLocal(idC, 0, 500f,
+                    Environment.TickCount64 - (long)NetScoreLedger.AwardSettleWindowMs - 1);
+                Check(Near(UnsettledFor(0), 0f), "an aged-out provisional is swept off the books");
+                Check(Near(sv.PointScore(0) - s0, 0f), "sweeping an aged-out provisional does not move the score");
             }
             finally
             {
                 paidLedger.Remove(idA);
                 paidLedger.Remove(idB);
-                scoreLedger.Reset();
+                // Settle the synthetic ids individually -- a blanket Reset() would wipe a live
+                // session's real in-flight credits, and CLAUDE.md points people at this test
+                // mid-session to compare two peers.
+                scoreLedger.Settle(idA, 0, 0f, out _);
+                scoreLedger.Settle(idB, 0, 0f, out _);
+                scoreLedger.Settle(idC, 0, 0f, out _);
                 for (int i = 0; i < NetProtocol.MaxSlots; i++)
                 {
                     sv.NetSetScore(i, before[i], 0f);
@@ -528,9 +560,11 @@ namespace EvilAliensWeb.Compat.Net
             return sb.ToString();
         }
 
+        // Relative, not absolute: PointScore is a float, so at a six-figure score the ULP
+        // alone exceeds a fixed 0.05 and a late-run check would report a spurious FAIL.
         private static bool Near(float a, float b)
         {
-            return Math.Abs(a - b) < 0.05f;
+            return Math.Abs(a - b) <= Math.Max(0.05f, Math.Abs(b) * 1e-4f);
         }
 
         // ---- provisional local credits (card b0ab09ec) -----------------------------------------
@@ -545,6 +579,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 scoreLedger.NoteLocal(netId, slot, amount, Environment.TickCount64);
             }
+        }
+
+        // Drop every provisional credit. Called on a replicated reset, where the score reverts
+        // to a checkpoint baseline that pre-revert credits must not be added on top of.
+        internal static void ResetScoreLedger()
+        {
+            scoreLedger.Reset();
         }
 
         // The provisional total still riding on top of the host's authoritative score for a slot.

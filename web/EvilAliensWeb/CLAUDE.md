@@ -780,7 +780,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v2):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v6):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -920,9 +920,12 @@ interpolation feel, both gated on real-network playtests.
     `ScoreVisualiser` (wire offsets, fresh-pay vs settle, at-most-once).
   - `eaScore()` dumps per-slot score/combo/unsettled -- the readable way to compare two peers.
     The `[net]` line gains `scSkew`/`scSkewMax` on the JOIN side only (the host is the
-    authority and never adopts): displayed minus `host + unsettled` at each sync, which should
-    sit at 0. Measured over a two-peer run with 57 client claims: `scSkew=0.0`,
-    `scSkewMax=-13.5` (one kill's correction, negative -- not a growing positive ratchet).
+    authority and never adopts): displayed minus `host + unsettled` at each sync, worst ACROSS
+    the slots, which should sit at 0. (Recording it per slot instead would leave the LAST one
+    standing -- slot 3, unseated in any 2-peer session, so a hard-coded 0.0 that looks like
+    proof.) Measured over a two-peer run: `scSkew=0.0` steady state, and `scSkewMax` held at
+    10.0 while `clTx` grew 20 -> 67 -- i.e. the worst deviation is one kill's correction and
+    does NOT accumulate with kill count, which is exactly the property max() lacked.
   - **GOTCHA -- a two-window co-op run cannot be driven at full rate from this rig.** A
     backgrounded tab throttles to ~1 tick/sec (measured: `txStream` advanced 43 in 40s where
     30Hz would be ~1200), `?fpsuncapped` does NOT defeat it, and two tabs in one window can

@@ -248,12 +248,6 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
-		// JS bridge for the co-op score-reconciliation self-test (eaNetScore in
-		// wwwroot/index.html, card b0ab09ec). Drives NetScoreLedger -- the real policy -- on a
-		// VIRTUAL clock against a synthetic two-peer kill stream, and runs the old max()
-		// adoption over the identical stream first so the drift it fixes is demonstrated, not
-		// asserted. Needs no session, no scene and no second tab: the failure is a slow tally
-		// drift, which two windows cannot show inside a reasonable test.
 		// JS bridge for eaScore() -- the per-slot score/combo dump. Card b0ab09ec's two-window
 		// comparison is "do the peers agree on the tally", which reading HUD pixels answers
 		// badly (the panels are small, chrome-shaded and mid-animation); this prints the
@@ -277,6 +271,13 @@ namespace EvilAliensWeb.Compat
 			return sb.ToString();
 		}
 
+		// JS bridge for the co-op score-reconciliation self-test (eaNetScore in
+		// wwwroot/index.html, card b0ab09ec). Drives NetScoreLedger -- the real policy -- on a
+		// VIRTUAL clock against a synthetic two-peer kill stream, running the old max() adoption
+		// over the identical stream first so the drift it fixes is demonstrated, not asserted;
+		// then round-trips a real EvDeath through ApplyAwards against the live ScoreVisualiser.
+		// Needs no session and no second tab: the failure is a slow tally drift, and a
+		// backgrounded peer tab throttles to ~1 tick/sec so two windows cannot show it anyway.
 		[JSInvokable("debugNetScoreTest")]
 		public static string NetScoreTest(int kills, int comboSkew, int rttMs, int seed)
 		{

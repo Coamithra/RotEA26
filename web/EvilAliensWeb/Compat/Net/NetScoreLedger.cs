@@ -41,7 +41,7 @@ namespace EvilAliensWeb.Compat.Net
     internal sealed class NetScoreLedger
     {
         internal const float AwardSettleWindowMs = 3000f;
-        private const int LedgerCap = 256;
+        private const int PendingCap = 256;
 
         private struct Pending
         {
@@ -72,7 +72,7 @@ namespace EvilAliensWeb.Compat.Net
             // Backstop only -- entries normally clear within an RTT and the age sweep gets the
             // rest. Dropping the oldest keeps a pathological run (host silent mid-level)
             // bounded instead of growing the list without limit.
-            while (pending.Count > LedgerCap)
+            while (pending.Count > PendingCap)
             {
                 DropAt(0);
             }
@@ -192,11 +192,17 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append("  new policy host=").Append(F(finalHost))
               .Append(" client=").Append(F(finalClient))
               .Append(" gap=").Append(F(finalClient - finalHost))
-              .Append(" maxGap=").Append(F(newGap))
+              .Append(" maxInvariantErr=").Append(F(newGap))
               .Append(" worstDownStep=").Append(F(worstStep))
               .Append(" (worst single kill error ").Append(F(maxSingleErr)).Append(")")
               .Append(" maxSyncJump=").Append(F(maxSyncJump))
               .Append(" pendingLeft=").Append(ledger.PendingCount).Append('\n');
+            // maxGap and maxInvariantErr are NOT the same statistic and must not be read as a
+            // before/after pair: the old policy's is max(client - host), this one's is
+            // max|client - host - unsettled|, i.e. how far the ledger's own books drifted from
+            // the score they are supposed to explain. worstDownStep is reported, not asserted
+            // against maxSingleErr -- in this sim those two are the same quantity by
+            // construction, so such a check would be green whatever the ledger did.
 
             // A float score accumulated over thousands of credits carries float32 rounding, so
             // "equal" is a tolerance, not ==. It is FAR below the 1-point display quantum.
@@ -206,14 +212,17 @@ namespace EvilAliensWeb.Compat.Net
             // showing through and says nothing about max().
             bool unbiased = Math.Abs(meanErr) <= meanAbsErr * 0.15f;
             // The old policy must actually FAIL on this stream, or the test proves nothing.
-            bool reproducedBug = legacyFinalClient - legacyFinalHost > meanAbsErr * 4f;
-            // Corrections ARE sometimes downward -- that is unavoidable once the client credits
-            // before it knows the host's number. What must hold is that a correction stays the
-            // size of ONE kill's error and never accumulates: the old policy's failure mode was
-            // an unbounded running total, not a visible step.
-            bool stepBounded = worstStep >= -maxSingleErr * 1.001f;
-            // The sawtooth guard: carrying `unsettled` means the 1Hz adoption is a no-op.
-            bool syncSilent = maxSyncJump <= tol;
+            // The bar is one kill's worth of error, not a multiple of it: the legacy gap is a
+            // random walk reflected at zero, so its size at a given seed is luck -- only its
+            // SIGN is structural. A tighter bar would flake on a caller-supplied seed.
+            bool reproducedBug = legacyFinalClient - legacyFinalHost > meanAbsErr;
+            // Every entry must have been settled and removed -- an accounting leak here is how
+            // the books would silently stop explaining the score.
+            bool drained = ledger.PendingCount == 0;
+            // The sawtooth guard, and the real test of the bookkeeping: `client` is only ever
+            // moved by Settle's returns, so this only stays at zero if Settle matched the right
+            // (netId, slot) with the right amount and Unsettled summed the remainder correctly.
+            bool syncSilent = maxSyncJump <= tol && newGap <= tol;
 
             sb.Append(unbiased ? "  PASS" : "  FAIL")
               .Append(" injected per-kill error is unbiased (|mean| <= 15% of meanAbs)\n");
@@ -221,11 +230,11 @@ namespace EvilAliensWeb.Compat.Net
               .Append(" reproduces the old ratchet: max() drove the client above the host anyway\n");
             sb.Append(converges ? "  PASS" : "  FAIL")
               .Append(" new policy converges on the host tally (|gap| <= ").Append(F(tol)).Append(")\n");
-            sb.Append(stepBounded ? "  PASS" : "  FAIL")
-              .Append(" downward corrections stay within ONE kill's error (never accumulate)\n");
+            sb.Append(drained ? "  PASS" : "  FAIL")
+              .Append(" every provisional entry was settled and removed (no accounting leak)\n");
             sb.Append(syncSilent ? "  PASS" : "  FAIL")
-              .Append(" the 1Hz sync never moves the displayed score (no sawtooth)\n");
-            sb.Append(unbiased && reproducedBug && converges && stepBounded && syncSilent
+              .Append(" the books explain the score at all times, so the 1Hz sync never moves it\n");
+            sb.Append(unbiased && reproducedBug && converges && drained && syncSilent
                 ? "[netscore] PASS" : "[netscore] FAIL");
             return sb.ToString();
         }

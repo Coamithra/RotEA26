@@ -58,9 +58,16 @@ generate much of the art/audio referenced here.
   shader (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
   `[0,1]` frame math in `tc/ContentScale`; the `SpriteBatchWrapper` sets it centrally in
   `BeginCustom`/`DrawCustom` (the render-space custom-effect batch that `ProceduralStarfield`/
-  `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`. **Test harness:**
+  `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`.
+- **The canary is LEFT ON in the shipped `.dds`. That is deliberate -- do NOT "fix" it back to 0.**
   `build_textures.py --padtest <px>` grossly over-pads every `.dds` so any missed padded-vs-logical
-  site shows an obvious ~px artifact in play; ship with `--padtest 0` (minimal mult-of-4 pad).
+  site shows an obvious ~px artifact in play. The committed textures are built at `--padtest 100`
+  (`756-v1.dds` is 1348x1348 for a 1248x1248 logical sheet, and 1248 is already a mult-of-4, so its
+  minimal pad would be zero) even though the flag DEFAULTS to 0 -- so the canary is live in every
+  build, not only during a test run. It costs ~17% in bytes and VRAM across all ~124 `.dds`, and
+  that is the accepted price: a padded-vs-logical slip is runtime-only, easy to miss, and cheap to
+  ship by accident. The over-pad has been mistaken for a build accident and reported as a bug
+  before, hence this note -- if you think you have found stale padtest output, you have found this.
 - **A clamped source rect does NOT stop the filter reaching the pad — hence the 4px edge gutter.**
   `LinearClamp` clamps at the TEXTURE border, not at the source rect, so a destination pixel whose
   centre lands in the last half texel bilinearly blends the last content texel with texel `[LW]`.

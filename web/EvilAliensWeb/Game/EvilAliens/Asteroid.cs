@@ -167,6 +167,14 @@ internal class Asteroid : AlienDrawableGameComponent
 	// SetBackground is the only site that drops DrawOrder to 1 -- a reliable belt-decoration marker.
 	internal bool NetIsBackground => base.DrawOrder == 1;
 
+	// Card 9a3175d0: the belt-decoration copies are pure scenery -- SetBackground clears Collides
+	// and nothing ever sets it again on that instance (only Setup does, and it runs BEFORE
+	// SetBackground at the one spawner that makes them). So they are not replicated per entity;
+	// AsteroidSpawner announces NetCosmeticKind.BackgroundAsteroids instead and the joiner runs
+	// its own background-only copy of the spawner. The real asteroids in the same DoEvent are
+	// unaffected.
+	internal override bool NetCosmeticOnly => NetIsBackground;
+
 	// Client puppet: force the host's exact sheet pick (Setup re-randomises the small variant).
 	internal void NetForceSheet(bool reallyBig, int smallIndex)
 	{

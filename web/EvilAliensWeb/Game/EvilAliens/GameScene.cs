@@ -388,7 +388,61 @@ internal abstract class GameScene : Scene
 		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6:
 			Background.SetAlienBase6();
 			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetDoodadPos:
+			Background.NetSetDoodadPos(v);
+			break;
 		}
+	}
+
+	// Join-in-progress catch-up (card 45a4e48d), host side: bring a peer whose GameScene has
+	// just come up (EvReady) up to the scenery state our level script already reached. The
+	// joiner ran its own Initialize, so it holds the level's INITIAL background + music and --
+	// the script being host-only (11.2 sim-split) -- will never reach those beats itself.
+	// Everything here is an ordinary reliable beat event, so the client applies it through the
+	// same paths the live ops use.
+	internal void NetReplayDeepState()
+	{
+		Background.NetReplayCatchUp(EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp);
+		EvilAliensWeb.Compat.Net.NetSession.OnMusic(base.SoundManager.NetCurrentSong);
+	}
+
+	// The catch-up state as one parseable line, for the eaNetBg() console dump.
+	internal string NetDeepStateLine()
+	{
+		return Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong;
+	}
+
+	// Round-trip self-test for the JIP catch-up (card 45a4e48d), driven by eaNetBgTest() from
+	// the console. The catch-up is a pure function -- host state -> a burst of ops -> client
+	// state -- so it is provable in ONE tab with no peer and no timing, which is the only
+	// honest way to check it: the thing under test is a fly-by whose position changes every
+	// frame, so a screenshot (or a diff of two live windows that tick independently) can never
+	// be exact. This is exact.
+	//
+	// Capture the burst, wipe the scenery back to what a fresh joiner's Initialize leaves
+	// behind (Background.Reset), replay the burst through the REAL client apply path, and
+	// compare the state line. DEBUG ONLY and deliberately destructive: Reset re-runs the
+	// hyperspace entry, so the screen flashes. Run it in a solo tab -- inside a live host
+	// session the replayed ops would also egress to the peer (idempotent, but noise).
+	internal string NetDeepStateSelfTest()
+	{
+		string before = NetDeepStateLine();
+		System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V)> burst
+			= new System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2)>();
+		Background.NetReplayCatchUp((op, v) => burst.Add((op, v)));
+		int song = base.SoundManager.NetCurrentSong;
+		Background.Reset();
+		string joiner = NetDeepStateLine();
+		foreach ((EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V) op in burst)
+		{
+			NetApplyBackgroundOp(op.Op, op.V);
+		}
+		base.SoundManager.NetApplyMusic(song);
+		string after = NetDeepStateLine();
+		return "[netbgtest] " + (after == before ? "PASS" : "FAIL") + " ops=" + burst.Count
+			+ "\n  host   : " + before
+			+ "\n  joiner : " + joiner
+			+ "\n  caught : " + after;
 	}
 
 	// TeamChallenge overrides this to break its tether on the peer's EvTetherBreak.

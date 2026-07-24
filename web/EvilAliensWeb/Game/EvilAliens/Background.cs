@@ -102,6 +102,25 @@ public class Background : Scene
 
 	private bool beltSlowActive;
 
+	// Join-in-progress catch-up (card 45a4e48d): the LAST latching op the level script ran, so a
+	// peer that arrives mid-level can be brought up to the host's scenery instead of the level's
+	// initial one. Tracked HERE rather than sniffed off NetSession's send path because
+	// OnBackgroundOp early-returns while no peer is connected -- for a listed single-player game
+	// that is precisely the window whose ops have to be remembered. null = the script never
+	// touched it, which is NOT the same as "set to the default": before the first SetSpeed,
+	// targetscrollspeed is still zero while the real scrollspeed is whatever SetSpace()/SetMars()
+	// put there at Initialize, so replaying a blind zero would freeze the joiner's starfield.
+	private Vector2? netLastSpeed;
+
+	private EvilAliensWeb.Compat.Net.NetBackgroundOp? netLastAlienBase;
+
+	// Which Queue* op owns the doodad currently crossing. Tracked explicitly rather than
+	// inferred from doodadname, because the holodeck sim-earth (QueueEarthSim) reuses the hero
+	// earth's texture with a different tint/blend and has no wire op of its own -- it sets this
+	// to null so it is simply not replayed, instead of a joiner being handed a white
+	// star-freezing hero earth in a Tutorial/Classic holodeck.
+	private EvilAliensWeb.Compat.Net.NetBackgroundOp? netLastDoodad;
+
 	// Eased 0..1 slowdown amount for the belt: rises to 1 while engaged, falls to 0 while disengaged,
 	// stepped each frame in Update by the ramp durations above.
 	private float beltSlowAmount;
@@ -223,6 +242,7 @@ public class Background : Scene
 		scrollspeedinitial = scrollspeed;
 		scrollspeedchangetimer.Reset();
 		scrollspeedchangetimer.Start();
+		netLastSpeed = speed;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed, speed);
 	}
 
@@ -251,6 +271,7 @@ public class Background : Scene
 			// Milder than the hero earth (small corner planet): slow the stars to ~25%.
 			doodadStarSlowdown = 0.25f;
 			doodadEnterFromTop = true;
+			netLastDoodad = EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueSmallEarth;
 			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueSmallEarth, Vector2.Zero);
 		}
 	}
@@ -301,6 +322,7 @@ public class Background : Scene
 			{
 				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
+			netLastDoodad = EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueEarth;
 			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueEarth, Vector2.Zero);
 		}
 	}
@@ -340,6 +362,7 @@ public class Background : Scene
 			{
 				doodadPos = new Vector2(400f, 600f + (float)doodad.LogicalHeight() * doodadscale / 2f);
 			}
+			netLastDoodad = EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueAndromeda;
 			EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.QueueAndromeda, Vector2.Zero);
 		}
 	}
@@ -563,6 +586,74 @@ public class Background : Scene
 	// so the belt replays: Engage is called again (fine -- the belt IS active again) and the fresh
 	// spawner's OnFinished eventually disengages. INVARIANT: don't place a checkpoint INSIDE the
 	// belt, or a death there would strand beltSlowActive = true with no re-engage to correct it.
+	// Join-in-progress catch-up (card 45a4e48d). A peer arriving mid-level ran its OWN scene
+	// Initialize, so it starts from the level's INITIAL scenery and -- the script being
+	// host-only (11.2 sim-split) -- will never run the ops that already fired. Replay them as
+	// the same reliable NetBackgroundOp events the live path uses, so the client applies them
+	// through the identical GameScene.NetApplyBackgroundOp switch and nothing needs a second
+	// code path. Host-only + peer-gated inside OnBackgroundOp; called once, from the EvReady
+	// handler (the client's scene-up edge) -- NOT at pairing time, when the joiner has no
+	// GameScene yet and its imminent Initialize would clobber the lot.
+	//
+	// Order matters: speed first, because a doodad's entry/exit edge is read off scrollspeed.Y;
+	// doodad kind before its position, because Queue* parks it back at the entry point.
+	//
+	// `emit` is the sink rather than a hard call to NetSession.OnBackgroundOp so the burst can
+	// also be captured into a list -- which is what makes the whole catch-up testable as a pure
+	// encode->apply function in one tab (GameScene.NetDeepStateSelfTest / eaNetBgTest), with no
+	// second peer and no timing.
+	internal void NetReplayCatchUp(Action<EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2> emit)
+	{
+		if (netLastSpeed.HasValue)
+		{
+			emit(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed, netLastSpeed.Value);
+		}
+		if (netLastAlienBase.HasValue)
+		{
+			emit(netLastAlienBase.Value, Vector2.Zero);
+		}
+		if (beltSlowActive)
+		{
+			emit(EvilAliensWeb.Compat.Net.NetBackgroundOp.EngageBeltSlowdown, Vector2.Zero);
+		}
+		if (showdoodad && netLastDoodad.HasValue)
+		{
+			emit(netLastDoodad.Value, Vector2.Zero);
+			emit(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetDoodadPos, doodadPos);
+		}
+	}
+
+	// Catch-up only: place an in-flight doodad where the host has it, so the joiner picks the
+	// fly-by up mid-crossing instead of watching it descend again from the top (and running the
+	// star-freeze envelope for a whole extra crossing). No-op if nothing is showing -- the
+	// preceding Queue* is what decides that, and a client whose own doodad slot was busy
+	// simply keeps its own.
+	internal void NetSetDoodadPos(Vector2 pos)
+	{
+		if (showdoodad)
+		{
+			doodadPos = pos;
+		}
+	}
+
+	// The live catch-up state, for the eaNetBg() verification dump (card 45a4e48d): one
+	// parseable line so a JIP joiner's scenery can be DIFFED against the host's instead of
+	// eyeballed off a screenshot of something that moves every frame.
+	internal string NetStateLine()
+	{
+		string speed = netLastSpeed.HasValue
+			? netLastSpeed.Value.X.ToString("0.####") + "," + netLastSpeed.Value.Y.ToString("0.####")
+			: "-";
+		string doodad = showdoodad
+			? (netLastDoodad.HasValue ? netLastDoodad.Value.ToString() : (doodadname ?? "?") + "(nosync)")
+				+ "@" + doodadPos.X.ToString("0.#") + "," + doodadPos.Y.ToString("0.#")
+			: "-";
+		return "speed=" + speed
+			+ " base=" + (netLastAlienBase.HasValue ? netLastAlienBase.Value.ToString() : "-")
+			+ " belt=" + (beltSlowActive ? "1" : "0")
+			+ " doodad=" + doodad;
+	}
+
 	public void EngageBeltSlowdown()
 	{
 		beltSlowActive = true;
@@ -732,6 +823,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v8");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v8";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6, Vector2.Zero);
 	}
 
@@ -742,6 +834,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v6");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v6";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5, Vector2.Zero);
 	}
 
@@ -752,6 +845,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v4");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v4";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4, Vector2.Zero);
 	}
 
@@ -762,6 +856,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v3");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v3";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3, Vector2.Zero);
 	}
 
@@ -772,6 +867,7 @@ public class Background : Scene
 		backgroundLayers[0].new_textures[0, 0] = Content.Load<Texture2D>("GFX/Base/756-v5");
 		backgroundLayers[0].new_texturenames[0, 0] = "GFX/Base/756-v5";
 		backgroundLayers[0].StartSwitch();
+		netLastAlienBase = EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2;
 		EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2, Vector2.Zero);
 	}
 
@@ -962,6 +1058,12 @@ public class Background : Scene
 		fadeFactor = 0.998f;
 		scrollspeed = scrollspeedreset;
 		scrollspeedmodifier = 10f;
+		// The JIP catch-up latches (above): everything they describe is undone by the lines
+		// above or by the level's own Initialize -- which calls SetAlienBase() BEFORE
+		// base.Initialize() reaches here, so the rebuilt layers outlive any switch we tracked.
+		netLastSpeed = null;
+		netLastAlienBase = null;
+		netLastDoodad = null;
 	}
 
 	// Dispose the procedural starfield (the SpriteBatch it owns) and forget it, so a
@@ -1287,6 +1389,8 @@ public class Background : Scene
 			doodadblendmode = (SpriteBlendMode)2;
 			// Holodeck sim-earth (projected, over the grid starfield) is out of scope — no slowdown.
 			doodadStarSlowdown = 1f;
+			// Not replicable (no wire op, and it shares QueueEarth's texture) -- see netLastDoodad.
+			netLastDoodad = null;
 			if (scrollspeed.Y > 0f)
 			{
 				doodadPos = new Vector2(400f, (float)(-doodad.LogicalHeight()) * doodadscale / 2f);

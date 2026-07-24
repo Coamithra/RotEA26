@@ -105,7 +105,8 @@ generate much of the art/audio referenced here.
   `autocomplete='off'` or Chrome's form restoration re-seeds them post-load and desyncs from the
   defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
-  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`.
+  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
+  `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test).
 
 ## Input
 
@@ -828,10 +829,41 @@ semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX 
   - **Verify:** `server/signal/test_signal.py` (registry/browse/build-filter/ping-relay/full->
     delist, all standalone); `?gamebrowser` for the carousel; the eligibility predicate as data;
     `?netjip` two windows -> `[net]` metrics.
-  - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** deep mid-level
-    background/doodad state beyond the launch; mechanical-friend ships unreplicated (listing
-    refused while `Friends>0`); a mid-boss arrival hits the best-effort puppet limit; public-list
-    abuse surface (rate limiting / hiding a room).
+  - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
+    ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
+    best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The
+    deep mid-level background/doodad gap is CLOSED -- see the catch-up bullet below.)
+- **Deep mid-level scenery catch-up for a late joiner (card 45a4e48d):** a peer arriving
+  mid-level runs its OWN scene Initialize, so it holds the level's INITIAL background + music and
+  -- the script being host-only -- can never reach the beats that already fired. The host replays
+  them once as ordinary reliable `NetBackgroundOp`/`EvMusic` events, so the client applies them
+  through the same paths the live ops use.
+  - **The seam is the `EvReady` handler, NOT `PeerConnected`** (next to the existing
+    `ReplayLive()`). At pairing time a JIP joiner has no `GameScene` at all, and the Initialize
+    that gives it one would clobber anything sent earlier. Being at `EvReady` also covers the
+    menu-lobby launch race and the `?net=` loopback rig for free.
+  - Replayed, in order (order matters -- a doodad's entry/exit edge is read off `scrollspeed.Y`,
+    and `Queue*` parks a doodad back at its entry point): last `SetSpeed`, last `SetAlienBaseN`,
+    `EngageBeltSlowdown` if engaged, any in-flight doodad + `SetDoodadPos` (appended op 11,
+    catch-up only) so the joiner picks the fly-by up MID-CROSSING, then the current song.
+  - **The last-op state is latched by `Background` itself, not sniffed off the send path** --
+    `NetSession.OnBackgroundOp` early-returns while no peer is connected, which for a listed
+    single-player game is exactly the window whose ops must be remembered. The latches are
+    `Vector2?`/`NetBackgroundOp?`: null means "the script never touched it", which is NOT the
+    same as the default (before the first `SetSpeed`, `targetscrollspeed` is still zero while the
+    real `scrollspeed` is whatever `SetSpace()`/`SetMars()` set -- replaying that zero would
+    freeze the joiner's starfield). Cleared in `Background.Reset()`.
+  - `QueueEarthSim` (holodeck) shares `QueueEarth`'s TEXTURE but has no wire op, so the doodad
+    kind is tracked explicitly at queue time rather than inferred from `doodadname`; sim-earth
+    sets the latch to null and is simply not replayed.
+  - **Verify with `eaNetBgTest()`, not two windows:** the subject is a fly-by that moves every
+    frame, so the gate is the one-tab round-trip self-test (capture the burst -> `Background.Reset()`
+    -> replay through the real client apply path -> diff the state line; prints PASS/FAIL plus all
+    three lines). `eaNetBg()` alone dumps the live state for a two-window comparison. Both are
+    console-only; the self-test is destructive (Reset re-runs the hyperspace entry).
+  - Music RATE (`SetMusicRate`, the BrainBoss HP sweep) still does NOT replicate -- it is driven
+    per-tick from a client-frozen boss `Update`, so it belongs to the mid-boss puppet-fidelity
+    follow-up, not here.
 
 ### Audio runtime (`SoundManager` / `eaMusic`)
 

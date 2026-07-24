@@ -1577,10 +1577,23 @@ namespace EvilAliensWeb.Compat
 					Spiders = IsOn(val);
 					break;
 				case "flyspiders":
-					// Value-carrying: `fg` picks the un-flattened foreground variant, anything else
-					// (incl. a bare ?flyspiders) is the background/group-flatten one under test.
-					FlySpiders = IsOn(val) || string.Equals(val, "fg", StringComparison.OrdinalIgnoreCase);
-					FlySpidersForeground = string.Equals(val, "fg", StringComparison.OrdinalIgnoreCase);
+					// Value-carrying: `fg`/`foreground` picks the un-flattened foreground variant;
+					// `bg`/`background` and a bare ?flyspiders pick the group-flatten one under
+					// test. An unrecognised value is NOT silently ignored -- swallowing it would
+					// boot the whole of Level 2 with no hint why the fast-boot did nothing.
+					{
+						bool fg = string.Equals(val, "fg", StringComparison.OrdinalIgnoreCase)
+							|| string.Equals(val, "foreground", StringComparison.OrdinalIgnoreCase);
+						bool bg = string.Equals(val, "bg", StringComparison.OrdinalIgnoreCase)
+							|| string.Equals(val, "background", StringComparison.OrdinalIgnoreCase);
+						FlySpiders = IsOn(val) || fg || bg;
+						FlySpidersForeground = fg;
+						if (!FlySpiders)
+						{
+							Console.WriteLine("[debug] unknown ?flyspiders= value '" + val
+								+ "' (expected fg/bg or a bare ?flyspiders) -- ignored");
+						}
+					}
 					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);

@@ -440,7 +440,7 @@ internal class Level2 : GameScene
 		waitEvent = Wait(0.1f);
 		waitEvent.OnFinished += slowdown;
 		bool background = !EvilAliensWeb.Compat.DebugFlags.FlySpidersForeground;
-		FlyingSpiderEvent swarm = new FlyingSpiderEvent(base.Game, 0f, 5.5f, background);
+		FlyingSpiderEvent swarm = new FlyingSpiderEvent(base.Game, 0f, 5.5f, isbackground: background);
 		eventList.AddEvent(swarm, halting: false);
 	}
 

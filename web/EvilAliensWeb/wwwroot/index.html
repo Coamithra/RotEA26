@@ -314,7 +314,6 @@
         {
             try {
                 window.theInstance.invokeMethod('TickDotNet');
-                if (window.eaFpsAfterTick) window.eaFpsAfterTick();
                 tickFailures = 0;
             } catch (e) {
                 tickFailures++;
@@ -324,6 +323,14 @@
                     showLoopStopped(); // the canvas is frozen; tell the player it's not just slow
                     return; // stop rescheduling: the game is wedged, not just hiccuping
                 }
+            }
+            // Deliberately OUTSIDE the try above, with its own guard: a throw from the debug HUD
+            // must never be reported as "TickDotNet threw" nor block the failure-counter reset --
+            // 30 of those in a row would raise the "unrecoverable error, reload" overlay for a
+            // profiler bug.
+            if (window.eaFpsAfterTick) {
+                try { window.eaFpsAfterTick(); }
+                catch (e) { console.warn('[fps] after-tick hook failed, disabling: ' + ((e && e.message) || e)); window.eaFpsAfterTick = null; }
             }
             scheduleTick();
         }
@@ -2705,13 +2712,24 @@
             var forced = /[?&]fpshud\b/i.test(q);
             var suppressed = /[?&]nofps\b/i.test(q);
             var isDevBuild = String(window.eaBuildHash || 'dev') === 'dev';
-            // ?fpshud beats ?nofps beats the dev-build default.
-            var visible = forced || (isDevBuild && !suppressed);
             var expanded = /[?&]fpshud=full\b/i.test(q);
+
+            // Screenshot-driven verification is how nearly everything in this project is checked
+            // (sprite harness, showcase scenes, the texture viewer), and those scenes draw their
+            // own readouts in the top-left design corner -- exactly where this panel sits. So a
+            // dev build suppresses the HUD on those pages by default; ?fpshud forces it back on.
+            var showcase = /[?&](harness|textshot|bulletshot|lazershot|castbrain|castshow|texviewer|gamebrowser|spiderphase|wcmothershipfreeze)\b/i.test(q);
+            var visible = forced || (isDevBuild && !suppressed && !showcase);
 
             var el = null, armed = false, wasUnfocused = true, poll = null;
             var glCalls = 0, glWindow = [], glPatched = false;
             var gpuMs = 0, gl = null, gpuSync = /[?&]fpsgpu\b/i.test(q);
+            // Shortest frame interval ever observed. Under vsync that converges on the display's
+            // refresh period within a second or two of idling, which is the ONLY honest budget
+            // for the sparkline: the mean interval inflates in lockstep with the work, so using
+            // it would paint an overloaded 25ms frame green against its own 33ms delivery rate.
+            // Monotone, so a bad stretch can never raise it.
+            var minIntervalMs = Infinity, lastFrameAt = 0;
 
             // Draw-call counting. Patch the PROTOTYPES rather than a live context: KNI creates
             // the context itself (nkast.Wasm.Canvas), so this works whichever GL version it
@@ -2751,10 +2769,26 @@
                 glWindow.push(glCalls);
                 if (glWindow.length > 120) { glWindow.shift(); }
                 glCalls = 0;
+                // Track the shortest interval we have ever been delivered (see minIntervalMs).
+                // Only while focused and capped: an unfocused tab's throttled intervals are
+                // garbage, and the uncapped pump's intervals are not a display budget at all.
+                var now = performance.now();
+                if (lastFrameAt && !window.eaFpsUncapped && !document.hidden && document.hasFocus())
+                {
+                    var dt = now - lastFrameAt;
+                    if (dt > 1 && dt < minIntervalMs) { minIntervalMs = dt; }
+                }
+                lastFrameAt = now;
                 if (gpuSync && gl)
                 {
                     var t0 = performance.now();
-                    try { gl.finish(); } catch (e) { gpuSync = false; return; }
+                    try { gl.finish(); }
+                    catch (e)
+                    {
+                        console.warn('[fps] gl.finish() failed, turning gpu sync off: ' + ((e && e.message) || e));
+                        setGpuSync(false);   // route through the setter so the checkbox follows
+                        return;
+                    }
                     // Smoothed, or it reads as noise: the wait is bimodal frame to frame.
                     gpuMs += (performance.now() - t0 - gpuMs) * 0.1;
                 }
@@ -2994,9 +3028,11 @@
 
                 if (!expanded) { return; }
                 renderRows(d.sections || {}, d.otherMs || 0, d.tickMs);
-                // Budget = the interval the loop is actually being delivered at (the refresh
-                // period under vsync). Uncapped there is no budget, so fall back to 60Hz.
-                var budget = window.eaFpsUncapped ? 16.7 : Math.max(d.intervalMs, 1);
+                // Budget = the display's refresh period, estimated as the SHORTEST interval ever
+                // delivered — NOT the current mean. The mean rises with the workload, so a frame
+                // that is blowing the budget would be measured against its own degraded delivery
+                // rate and painted green. Falls back to 60Hz until the estimate has settled.
+                var budget = isFinite(minIntervalMs) ? minIntervalMs : 16.7;
                 renderSpark(d.frames, budget);
                 el.querySelector("#eaf-gl").textContent =
                     Math.round(glMean) + " GL draw calls/frame"
@@ -3025,6 +3061,14 @@
                 if (poll) { clearInterval(poll); poll = null; }
                 try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsProfile', false); } catch (e) { }
                 armed = false;
+                // Hiding must actually STOP the work, not just stop showing it. Left armed, the
+                // per-frame hook keeps counting, gpu sync keeps stalling on gl.finish() every
+                // frame, and — worst — the uncapped pump keeps the loop off vsync at full tilt
+                // with nothing on screen to say so.
+                window.eaFpsAfterTick = null;
+                window.eaFpsUncapped = false;
+                gpuSync = false;
+                gpuMs = 0;
             }
 
             var api = function (arg)
@@ -3070,9 +3114,19 @@
                 catch (e) { return "not booted"; }
             };
 
+            // ?fpsuncapped / ?fpsgpu are LOOP flags, applied whether or not the panel shows:
+            // they change how the game is driven, and wanting the measurement without the
+            // overlay (?nofps&fpsuncapped, or either flag on the published site) is legitimate.
+            // Both need the per-tick hook, so arming them pulls the machinery up on its own.
+            var uncapAsked = /[?&]fpsuncapped\b/i.test(q);
+            if (uncapAsked || gpuSync)
+            {
+                patchGl();
+                window.eaFpsAfterTick = afterTick;
+                window.eaFpsUncapped = uncapAsked;
+            }
             if (visible)
             {
-                if (/[?&]fpsuncapped\b/i.test(q)) { window.eaFpsUncapped = true; }
                 // The runtime isn't up at parse time; showing is cheap and idempotent, and
                 // rearm() retries on every poll until debugFpsProfile stops throwing.
                 show(expanded ? "full" : "compact");

@@ -934,16 +934,16 @@ public class Game1 : Game
 	}
 
 	// The dev-build FPS HUD's "update" row (Compat/FrameProfiler, card 22e655b5). The body
-	// moved into UpdateOuter so the whole of it -- including the settings/achievements pumps
+	// moved into UpdateCore so the whole of it -- including the settings/achievements pumps
 	// and the turbo/slowmo/hit-stop time rescale, not just UpdateInner -- lands inside the
 	// bracket; anything left outside a section shows up as unexplained "other" in the HUD.
-	// try/finally because UpdateOuter has an early return and a rethrow path.
+	// try/finally because UpdateCore has an early return and a rethrow path.
 	protected override void Update(GameTime gameTime)
 	{
 		long profileStart = FrameProfiler.Begin();
 		try
 		{
-			UpdateOuter(gameTime);
+			UpdateCore(gameTime);
 		}
 		finally
 		{
@@ -951,7 +951,7 @@ public class Game1 : Game
 		}
 	}
 
-	private void UpdateOuter(GameTime gameTime)
+	private void UpdateCore(GameTime gameTime)
 	{
 		Settings.GetInstance().Update();
 		Achievements.GetInstance().Update();
@@ -1063,7 +1063,10 @@ public class Game1 : Game
 	{
 		// FPS HUD "scene" row: opened here rather than around DrawInner alone so the scene
 		// target's realloc-check / SetRenderTarget / full clear are attributed to drawing
-		// instead of silently inflating the HUD's "other" remainder.
+		// instead of silently inflating the HUD's "other" remainder. The fullscreen branch
+		// below rethrows, so it closes the section itself before throwing (a try/finally here
+		// would re-indent the whole method for a branch that is dead on web -- KNI's BlazorGL
+		// never reports IsFullScreen).
 		long profScene = FrameProfiler.Begin();
 		if (oracle.Slowmotion == 1f)
 		{
@@ -1126,6 +1129,9 @@ public class Game1 : Game
 				catch (Exception)
 				{
 				}
+				// Close the FPS HUD's scene section before unwinding, so a failed frame is
+				// recorded with the work it actually did instead of silently landing in "other".
+				FrameProfiler.End(FrameSection.DrawScene, profScene);
 				throw new Exception("See inner exception (error.txt): ", innerException);
 			}
 		}

@@ -99,10 +99,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Frame profiler / FPS HUD** (card 22e655b5): shown by default in every DEV build (keyed off
   `window.eaBuildHash === 'dev'`; the published site never shows it). Compact fps + headroom;
   click the mode tag for the per-phase ms breakdown, frame-time sparkline and GL draw calls.
-  `?nofps` hides it (**do that for harness/showcase screenshots**), `?fpshud[=full]` forces it on
-  even on the live site, `?fpsuncapped` unhooks the loop from rAF so the measured rate is not
-  vsync-capped, `?fpsgpu` folds GPU time in via `gl.finish()`. `?fps=` is a DIFFERENT flag (the
-  sprite harness' playback rate). Console: `eaFps()`, `eaFps.stats()`, `eaFps.test()`.
+  Auto-suppressed on the screenshot-verification pages (`?harness=`, `?textshot`, `?texviewer`,
+  ...) so it never lands in a harness capture; `?nofps` hides it anywhere, `?fpshud[=full]`
+  forces it on even on the live site, `?fpsuncapped` unhooks the loop from rAF so the measured
+  rate is not vsync-capped, `?fpsgpu` folds GPU time in via `gl.finish()`. **These are the one
+  flag group parsed in JS (`index.html`), not `DebugFlags.cs`** -- the HUD is JS-owned. `?fps=`
+  is a DIFFERENT flag (the sprite harness' playback rate). Console: `eaFps()`, `eaFps.stats()`,
+  `eaFps.test()`.
   **A frame rate alone is vsync-capped and cannot see a regression -- read the ms and the
   headroom, and only trust either with the window FOCUSED.** Details: web CLAUDE.md.
 - Level fast-boot added with it: `?level=Level2&flyspiders` (dense flying-spider swarm;

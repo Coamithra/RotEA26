@@ -140,9 +140,19 @@ draws for the tower pass; the two agree on the same fight.)
   i.e. a fake 250fps ceiling); `?fpsgpu` (HUD "gpu sync") issues `gl.finish()` per tick so GPU
   execution becomes a measurable wait. Cross-check: uncapped measured 233fps vs 241 derived
   headroom on the menu, so the derived number is honest there.
-- Flags: `?fpshud` (force on, works on the live site) / `?fpshud=full` (expanded) / `?nofps` (hide
-  in a dev build -- **use it for harness/showcase screenshots**) / `?fpsuncapped` / `?fpsgpu`.
-  `?fps=` is NOT this (that is the sprite harness' playback rate). All out of `DebugFlags.Active`.
+- **These flags are the one group NOT parsed in `DebugFlags.cs`** -- the HUD is JS-owned, so the
+  `eaFps` IIFE regex-reads `location.search` itself (the `eaWalls`/`eaSpider` panel precedent).
+  Nothing about them reaches C#, so they are inherently out of `DebugFlags.Active` and can never
+  make a co-op session reject a peer. `?fpshud` (force on, works on the live site) /
+  `?fpshud=full` (expanded) / `?nofps` (hide in a dev build) / `?fpsuncapped` / `?fpsgpu`.
+  `?fps=` is NOT this (that is the sprite harness' playback rate).
+- **Auto-suppressed on the screenshot-verification pages** (`?harness=`, `?textshot`,
+  `?bulletshot`, `?lazershot`, `?castbrain`, `?castshow`, `?texviewer`, `?gamebrowser`,
+  `?spiderphase=`, `?wcmothershipfreeze=`) -- those scenes draw their own readouts in the same
+  top-left corner, and this project verifies almost everything by screenshot, so relying on
+  someone remembering `?nofps` would put the HUD in every harness capture. `?fpshud` overrides.
+- `?fpsuncapped` / `?fpsgpu` are LOOP flags and apply with or without the panel (so
+  `?nofps&fpsuncapped` is a valid "measure, don't show me" boot).
 - **GOTCHA -- an unfocused window makes every rate reading garbage** and Chrome throttles it to a
   rate the C#-side staleness test (mean interval > 100ms) does NOT catch: a focused menu read
   2.5ms/frame, the same page unfocused read 22.8ms. `document.hidden || !document.hasFocus()` is

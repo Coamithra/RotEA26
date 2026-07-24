@@ -68,10 +68,11 @@ namespace EvilAliensWeb.Compat
         private static double _lastFrameAtMs = -1.0;
         private static readonly Stopwatch _wall = Stopwatch.StartNew();
 
-        // Draw calls the GL context saw for the previous frame, pushed in from JS (index.html
-        // patches drawElements/drawArrays). Counted there rather than in SpriteBatchWrapper
-        // because the per-CALL cost is BlazorGL's dominant one and JS sees every source of
-        // calls -- sprite batches, the bloom passes, the walls' 3D primitives -- at once.
+        // MEAN GL draw calls per frame over the HUD's own JS-side window, pushed in at the 4Hz
+        // poll (not per frame -- that much interop would cost more than it measures). Counted in
+        // JS rather than in SpriteBatchWrapper because the per-CALL cost is BlazorGL's dominant
+        // one and JS sees every source of calls -- sprite batches, the bloom passes, the walls'
+        // 3D primitives -- at once.
         private static int _glCalls;
 
         // Scratch for Report(), reused so the 4Hz poll doesn't allocate a fresh builder.
@@ -136,23 +137,40 @@ namespace EvilAliensWeb.Compat
             // so it seeds the clock and is skipped rather than recorded as a 0ms frame.
             if (_lastFrameAtMs >= 0.0)
             {
-                _tickMs[_next] = tickMs;
-                _intervalMs[_next] = now - _lastFrameAtMs;
-                for (int s = 0; s < (int)FrameSection.Count; s++)
-                {
-                    _sectionMs[s, _next] = _thisTick[s];
-                }
-                _next = (_next + 1) % Window;
-                if (_count < Window)
-                {
-                    _count++;
-                }
+                Push(tickMs, now - _lastFrameAtMs);
             }
+            else
+            {
+                ClearThisTick();
+            }
+            _lastFrameAtMs = now;
+        }
+
+        // The ONE place a sample enters the ring. SelfTest drives this too, so the data self-test
+        // exercises the real push -- section capture, accumulator reset, wrap -- instead of a
+        // copy of it that could agree with a broken original.
+        private static void Push(double tickMs, double intervalMs)
+        {
+            _tickMs[_next] = tickMs;
+            _intervalMs[_next] = intervalMs;
+            for (int s = 0; s < (int)FrameSection.Count; s++)
+            {
+                _sectionMs[s, _next] = _thisTick[s];
+            }
+            _next = (_next + 1) % Window;
+            if (_count < Window)
+            {
+                _count++;
+            }
+            ClearThisTick();
+        }
+
+        private static void ClearThisTick()
+        {
             for (int s = 0; s < (int)FrameSection.Count; s++)
             {
                 _thisTick[s] = 0.0;
             }
-            _lastFrameAtMs = now;
         }
 
         private static bool IsStale()
@@ -225,27 +243,19 @@ namespace EvilAliensWeb.Compat
             Num(",\"headroomFps\":", tick > 0.0001 ? 1000.0 / tick : 0.0);
             _sb.Append(",\"glCalls\":").Append(_glCalls.ToString(CultureInfo.InvariantCulture));
             _sb.Append(",\"sections\":{");
-            double sectionSum = 0.0;
             for (int s = 0; s < (int)FrameSection.Count; s++)
             {
                 if (s > 0)
                 {
                     _sb.Append(',');
                 }
-                double v = MeanSection(s);
-                // Update is the parent of the three update sub-sections, so only Update and
-                // the draw sections count toward the "other" remainder below.
-                if (s == (int)FrameSection.Update || s >= (int)FrameSection.DrawScene)
-                {
-                    sectionSum += v;
-                }
                 _sb.Append('"').Append(Labels[s]).Append("\":");
-                AppendNum(v);
+                AppendNum(MeanSection(s));
             }
             _sb.Append('}');
             // Whatever the tick spent outside every bracketed phase: KNI's Game.Tick overhead,
             // the interop hop, GC. A big `other` means the cost is NOT where the rows say.
-            double other = tick - sectionSum;
+            double other = tick - AttributedMs();
             Num(",\"otherMs\":", other > 0.0 ? other : 0.0);
             // The raw window, oldest-first, for the HUD's sparkline. Means hide exactly what a
             // frame graph is for -- a 2ms mean with one 40ms spike per second is a stutter the
@@ -269,6 +279,23 @@ namespace EvilAliensWeb.Compat
         private static int Oldest(int i)
         {
             return (_count < Window) ? i : (_next + i) % Window;
+        }
+
+        // Frame time the bracketed phases account for. Update is the PARENT of the three update
+        // sub-sections, so adding those in would double-count -- only Update and the draw-side
+        // rows are summed. Shared with SelfTest so the "other" remainder is asserted against the
+        // same arithmetic the HUD displays.
+        private static double AttributedMs()
+        {
+            double sum = 0.0;
+            for (int s = 0; s < (int)FrameSection.Count; s++)
+            {
+                if (s == (int)FrameSection.Update || s >= (int)FrameSection.DrawScene)
+                {
+                    sum += MeanSection(s);
+                }
+            }
+            return sum;
         }
 
         // One console line (eaFps.stats()), same information, human-shaped.
@@ -314,7 +341,9 @@ namespace EvilAliensWeb.Compat
         // 1000/workMs as "fps" -- the bug this card exists to avoid -- fails here loudly.
         public static string SelfTest(double workMs, double intervalMs, int frames)
         {
-            if (frames < 2) frames = 2;
+            // Floor of 5, not 2: IsStale() treats a window under 5 samples as not-yet-warm, so a
+            // shorter run would report a FAIL for a profiler that is behaving exactly right.
+            if (frames < 5) frames = 5;
             if (frames > Window * 4) frames = Window * 4;
 
             bool wasEnabled = Enabled;
@@ -325,20 +354,19 @@ namespace EvilAliensWeb.Compat
             double[,] sectionSave = (double[,])_sectionMs.Clone();
             int countSave = _count, nextSave = _next;
             double lastSave = _lastFrameAtMs;
+            int glSave = _glCalls;
 
             Enabled = true;
             Reset();
-            // Virtual clock: the interval is fed in directly rather than slept. EndFrame would
-            // read the real Stopwatch to derive it, which is the one thing a test can't wait
-            // for -- so the samples land in the same ring buffer by the same rules.
+            // Virtual clock: the interval is fed straight to Push rather than slept for. EndFrame
+            // derives it from the real Stopwatch, which is the one thing a test cannot wait on --
+            // everything downstream of that (section capture, accumulator reset, ring wrap) is
+            // the REAL code path, because Push is the same method EndFrame calls.
             for (int i = 0; i < frames; i++)
             {
-                _tickMs[_next] = workMs;
-                _intervalMs[_next] = intervalMs;
-                _sectionMs[(int)FrameSection.DrawScene, _next] = workMs * 0.5;
-                _sectionMs[(int)FrameSection.Update, _next] = workMs * 0.3;
-                _next = (_next + 1) % Window;
-                if (_count < Window) _count++;
+                _thisTick[(int)FrameSection.DrawScene] = workMs * 0.5;
+                _thisTick[(int)FrameSection.Update] = workMs * 0.3;
+                Push(workMs, intervalMs);
             }
 
             double tick = Mean(_tickMs);
@@ -348,19 +376,26 @@ namespace EvilAliensWeb.Compat
             bool stale = IsStale();
             double expFps = intervalMs > 0.0001 ? 1000.0 / intervalMs : 0.0;
             double expHeadroom = workMs > 0.0001 ? 1000.0 / workMs : 0.0;
+            // The injected sections are 0.3 and 0.5 of the tick, so the unattributed remainder
+            // the HUD shows as "other" must come out at exactly 0.2 -- this asserts the
+            // parent-vs-sub-row accounting (adding the update sub-rows in would double-count).
+            double other = tick - AttributedMs();
+            double expOther = workMs * 0.2;
             bool pass = Math.Abs(fps - expFps) < 0.05
                 && Math.Abs(headroom - expHeadroom) < 0.05
                 && Math.Abs(Mean(_tickMs) - workMs) < 0.001
+                && Math.Abs(other - expOther) < 0.001
                 && stale == (intervalMs > 100.0);
 
             string result = string.Format(CultureInfo.InvariantCulture,
                 "[fps.test] {0}ms work every {1}ms x{2} frames -> "
                 + "fps {3:0.00} (expect {4:0.00}) | headroom {5:0.00} (expect {6:0.00}) | "
                 + "tick mean {7:0.000} p95 {8:0.000} | scene {9:0.000} update {10:0.000} | "
-                + "stale {11} (expect {12}) | samples {13} | {14}",
+                + "other {11:0.000} (expect {12:0.000}) | stale {13} (expect {14}) | samples {15} | {16}",
                 workMs, intervalMs, frames, fps, expFps, headroom, expHeadroom,
                 tick, P95(_tickMs),
                 MeanSection((int)FrameSection.DrawScene), MeanSection((int)FrameSection.Update),
+                other, expOther,
                 stale, intervalMs > 100.0, _count, pass ? "PASS" : "FAIL");
 
             Array.Copy(tickSave, _tickMs, Window);
@@ -369,6 +404,7 @@ namespace EvilAliensWeb.Compat
             _count = countSave;
             _next = nextSave;
             _lastFrameAtMs = lastSave;
+            _glCalls = glSave;
             Enabled = wasEnabled;
             return result;
         }

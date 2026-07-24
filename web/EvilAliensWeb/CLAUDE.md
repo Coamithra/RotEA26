@@ -937,14 +937,7 @@ interpolation feel, both gated on real-network playtests.
   `clRx` host-side; `clKill` = claims that settled a live enemy, `clPaid` = generous
   payouts for already-dead enemies -- a nonzero `clPaid` IS the double-claim proof).
   **Two-tab test recipe:** the tabs must BOTH be visible (a backgrounded tab's rAF drops
-  to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side.
-  **Exception, for STRUCTURAL checks only (roster, slots, who-owns-what):** `index.html` falls
-  back to `setTimeout(tickJS, 33)` while `document.hidden`, so two hidden tabs in ONE window do
-  keep ticking at ~30Hz and will pair, hand out slots and print `roster=` lines -- which is how
-  the 4-seat roster above was captured without hand-arranging windows. It does NOT extend to
-  anything timing-derived: `pops`/`pupPops`/`buf`/`extrap` from unfocused tabs are meaningless
-  (the FPS HUD says so on its own readout), so any smoothness or feel verdict still needs two
-  focused windows.
+  to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
   Add `?binlog` to both when the run is about lifecycle (it is the detector for a purge filter
@@ -956,6 +949,17 @@ interpolation feel, both gated on real-network playtests.
   turn or two while a client claim is in flight, and the client deliberately leaves that id
   dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
   rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
+  **A STRUCTURAL check (roster, slots, who-owns-what) is the one thing two HIDDEN tabs in one
+  window can still do**, which is how the four-seat roster in the `?netlocal` bullet was
+  captured without hand-arranging windows. Two things make it survive: `index.html` falls back
+  to `setTimeout(tickJS, 33)` while `document.hidden` (a REQUESTED ~30Hz -- Chrome clamps
+  hidden-tab timers after ~10s and much harder past 5 min, so treat it as a short window, not a
+  rate you hold), and the roster simply does not depend on cadence -- once `PeerStalled` the
+  friend timeout stretches to `PeerTimeoutMs + PeerGraceMs`, and a timed-out friend **keeps its
+  seat** by design (`NetSession.Friends.cs`). It does NOT extend to anything timing-derived:
+  `pops`/`pupPops`/`buf`/`extrap` off a hidden or unfocused tab are meaningless (the FPS HUD
+  says so on its own readout), so every smoothness or feel verdict still needs two focused
+  windows.
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
@@ -1044,13 +1048,17 @@ interpolation feel, both gated on real-network playtests.
     that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
     both draw over the menus and poison the next play of that level.
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
-  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS --
-  which is NOT the same as two players: **4-player online co-op already works today** as two
-  consoles with a couch partner each (measured; the four-seat roster in the `?netlocal` recipe
-  above IS that). What does not exist is 3-4 separate MACHINES -- the feasibility answer, the
-  layer-by-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
-  connection math) are in `plans/4p-online-coop.md`, card 2e0f908b;
-  DevCommentEvent commentary is not replicated (profile-local setting). Boss puppets are
+  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS
+  (see the sub-bullet below); DevCommentEvent commentary is not replicated (profile-local
+  setting).
+  - **Two PEERS is not two PLAYERS -- 4-player online co-op already works today** (card
+    2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
+    `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
+    The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
+    `ScoreVisualiser.SlotCount`, slot-keyed `MsgFriendState`, `EvScoreSync`, the claim
+    ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
+    per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
+    connection math) are in `plans/4p-online-coop.md`. Boss puppets are
   best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
   state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
   play on the client -- an attributed remote death removes the puppet). The time-scaling half of

@@ -114,6 +114,10 @@ public class SoundManager : ISoundManagerService
 	private SoundEffectInstance _narration;
 	private string _currentMusicCue;
 
+	// The Songs value behind _currentMusicCue (-1 = stopped). Kept separately because the wire
+	// carries the enum, and because it is latched even when music is muted or the cue is empty.
+	private int _currentSong = -1;
+
 	SoundManager ISoundManagerService.SoundManager => this;
 
 	public SoundManager(Game game)
@@ -361,8 +365,6 @@ public class SoundManager : ISoundManagerService
 	// NetActiveScene exists (so live replication skips it) yet it is exactly what a later
 	// joiner needs.
 	internal int NetCurrentSong => _currentSong;
-
-	private int _currentSong = -1;
 
 	public void PlayMusic(Songs song)
 	{

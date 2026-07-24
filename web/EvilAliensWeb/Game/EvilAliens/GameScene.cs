@@ -400,14 +400,14 @@ internal abstract class GameScene : Scene
 	// the script being host-only (11.2 sim-split) -- will never reach those beats itself.
 	// Everything here is an ordinary reliable beat event, so the client applies it through the
 	// same paths the live ops use.
-	internal void NetReplayDeepState()
+	internal void NetReplayCatchUp()
 	{
 		Background.NetReplayCatchUp(EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp);
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic(base.SoundManager.NetCurrentSong);
 	}
 
 	// The catch-up state as one parseable line, for the eaNetBg() console dump.
-	internal string NetDeepStateLine()
+	internal string NetCatchUpStateLine()
 	{
 		return Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong;
 	}
@@ -424,22 +424,26 @@ internal abstract class GameScene : Scene
 	// compare the state line. DEBUG ONLY and deliberately destructive: Reset re-runs the
 	// hyperspace entry, so the screen flashes. Run it in a solo tab -- inside a live host
 	// session the replayed ops would also egress to the peer (idempotent, but noise).
-	internal string NetDeepStateSelfTest()
+	internal string NetCatchUpSelfTest()
 	{
-		string before = NetDeepStateLine();
+		string before = NetCatchUpStateLine();
 		System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V)> burst
 			= new System.Collections.Generic.List<(EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2)>();
 		Background.NetReplayCatchUp((op, v) => burst.Add((op, v)));
 		int song = base.SoundManager.NetCurrentSong;
-		Background.Reset();
-		string joiner = NetDeepStateLine();
+		Background.NetTestWipe();
+		base.SoundManager.NetApplyMusic(-1);
+		string joiner = NetCatchUpStateLine();
 		foreach ((EvilAliensWeb.Compat.Net.NetBackgroundOp Op, Vector2 V) op in burst)
 		{
 			NetApplyBackgroundOp(op.Op, op.V);
 		}
 		base.SoundManager.NetApplyMusic(song);
-		string after = NetDeepStateLine();
-		return "[netbgtest] " + (after == before ? "PASS" : "FAIL") + " ops=" + burst.Count
+		string after = NetCatchUpStateLine();
+		// Name the ops, not just the count: a leg the level never fired is absent from this list,
+		// so a PASS can't be read as covering more than the run actually exercised.
+		string ops = burst.Count == 0 ? "(none)" : string.Join(",", burst.ConvertAll(o => o.Op.ToString()));
+		return "[netbgtest] " + (after == before ? "PASS" : "FAIL") + " ops=" + ops
 			+ "\n  host   : " + before
 			+ "\n  joiner : " + joiner
 			+ "\n  caught : " + after;
@@ -792,6 +796,10 @@ internal abstract class GameScene : Scene
 		{
 			Background.QueueAndromeda();
 			Background.SetSpeed(new Vector2(0f, 1f) / 16.666666f);
+			// Left engaged on purpose: this is the one rig that parks a level in the
+			// belt-slowdown state, which is what gives the JIP catch-up's belt leg (card
+			// 45a4e48d) any coverage at all -- Level 1's real engage sits deep in its script.
+			Background.EngageBeltSlowdown();
 		};
 		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();

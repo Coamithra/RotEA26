@@ -575,17 +575,6 @@ public class Background : Scene
 		return MathHelper.Lerp(1f, doodadStarSlowdown, t);
 	}
 
-	// Engage the asteroid-belt star-slowdown (Level 1 sideways belt phase). Called from
-	// Level1.spawner_OnFinished when the belt scroll speed is set; the near stars ramp DOWN over
-	// BeltRampInMs so the fastest star drops below the slowest asteroid. Idempotent.
-	//
-	// Death-mid-belt is self-correcting: GameEventList.RevertToCheckpoint clears active events
-	// WITHOUT terminating them, so a death during the belt drops the AsteroidSpawner's OnFinished
-	// (i.e. Disengage never fires for that run). It's harmless because the ONLY checkpoint reachable
-	// from mid-belt is the pre-belt one (Level1/Demo1 place their checkpoint before the belt gate),
-	// so the belt replays: Engage is called again (fine -- the belt IS active again) and the fresh
-	// spawner's OnFinished eventually disengages. INVARIANT: don't place a checkpoint INSIDE the
-	// belt, or a death there would strand beltSlowActive = true with no re-engage to correct it.
 	// Join-in-progress catch-up (card 45a4e48d). A peer arriving mid-level ran its OWN scene
 	// Initialize, so it starts from the level's INITIAL scenery and -- the script being
 	// host-only (11.2 sim-split) -- will never run the ops that already fired. Replay them as
@@ -595,12 +584,16 @@ public class Background : Scene
 	// handler (the client's scene-up edge) -- NOT at pairing time, when the joiner has no
 	// GameScene yet and its imminent Initialize would clobber the lot.
 	//
-	// Order matters: speed first, because a doodad's entry/exit edge is read off scrollspeed.Y;
-	// doodad kind before its position, because Queue* parks it back at the entry point.
+	// Order matters for the doodad pair only: the kind before its position, because Queue* parks
+	// a fresh doodad back at its entry point and SetDoodadPos then moves it to the host's.
+	// (Speed goes first for readability, NOT for correctness: SetSpeed only retargets a 1333ms
+	// lerp, so scrollspeed -- which is what Queue* reads for its entry/exit edge -- has not moved
+	// by the time the doodad op is applied. The joiner's own Initialize already gave it the same
+	// scroll direction as the host, which is what actually makes the edge agree.)
 	//
 	// `emit` is the sink rather than a hard call to NetSession.OnBackgroundOp so the burst can
 	// also be captured into a list -- which is what makes the whole catch-up testable as a pure
-	// encode->apply function in one tab (GameScene.NetDeepStateSelfTest / eaNetBgTest), with no
+	// encode->apply function in one tab (GameScene.NetCatchUpSelfTest / eaNetBgTest), with no
 	// second peer and no timing.
 	internal void NetReplayCatchUp(Action<EvilAliensWeb.Compat.Net.NetBackgroundOp, Vector2> emit)
 	{
@@ -628,9 +621,30 @@ public class Background : Scene
 	// star-freeze envelope for a whole extra crossing). No-op if nothing is showing -- the
 	// preceding Queue* is what decides that, and a client whose own doodad slot was busy
 	// simply keeps its own.
+	// Debug only (the eaNetBgTest round-trip): put the scenery back to what a peer that just ran
+	// its own scene Initialize would hold, so the replayed burst has something real to restore.
+	// Reset() covers the doodad, the belt and the latches; targetscrollspeed is cleared on top
+	// because Reset() leaves it (it only rewinds the LIVE scrollspeed), and a stale target would
+	// make the speed leg of the diff pass without the burst doing anything.
+	//
+	// What this canNOT wipe is the alien-base tile: Reset() deliberately leaves layer 0 alone and
+	// the level's initial texture name isn't recoverable from here, so a SetAlienBaseN in the
+	// burst is re-applied but reads identical either way. The self-test prints the ops it
+	// replayed precisely so that gap is visible instead of hiding inside a PASS.
+	internal void NetTestWipe()
+	{
+		Reset();
+		targetscrollspeed = Vector2.Zero;
+		scrollspeedchangetimer.Stop();
+	}
+
+	// A hostile peer is on the other end of this once a game is publicly listed, and a NaN would
+	// wedge the doodad forever: BOTH exit tests in Update are false for NaN, so showdoodad never
+	// clears and DoodadStarSlowdownFactor poisons the star modifier -- a permanently frozen
+	// starfield. Cheap to refuse here.
 	internal void NetSetDoodadPos(Vector2 pos)
 	{
-		if (showdoodad)
+		if (showdoodad && float.IsFinite(pos.X) && float.IsFinite(pos.Y))
 		{
 			doodadPos = pos;
 		}
@@ -639,21 +653,50 @@ public class Background : Scene
 	// The live catch-up state, for the eaNetBg() verification dump (card 45a4e48d): one
 	// parseable line so a JIP joiner's scenery can be DIFFED against the host's instead of
 	// eyeballed off a screenshot of something that moves every frame.
+	//
+	// Deliberately reports the state the ops CONSUME, not the netLast* bookkeeping they replay:
+	// printing the latches would make the round-trip self-test a tautology (latch -> wire ->
+	// latch), passing even if SetSpeed/SetAlienBaseN never touched the scenery. speed is the
+	// lerp TARGET rather than the live scrollspeed because SetSpeed only retargets a 1333ms
+	// ramp -- the live value is still mid-flight the instant the burst is applied.
 	internal string NetStateLine()
 	{
-		string speed = netLastSpeed.HasValue
-			? netLastSpeed.Value.X.ToString("0.####") + "," + netLastSpeed.Value.Y.ToString("0.####")
-			: "-";
 		string doodad = showdoodad
 			? (netLastDoodad.HasValue ? netLastDoodad.Value.ToString() : (doodadname ?? "?") + "(nosync)")
 				+ "@" + doodadPos.X.ToString("0.#") + "," + doodadPos.Y.ToString("0.#")
 			: "-";
-		return "speed=" + speed
-			+ " base=" + (netLastAlienBase.HasValue ? netLastAlienBase.Value.ToString() : "-")
+		return "speed=" + targetscrollspeed.X.ToString("0.####") + "," + targetscrollspeed.Y.ToString("0.####")
+			+ " base=" + NetBaseTextureName()
 			+ " belt=" + (beltSlowActive ? "1" : "0")
 			+ " doodad=" + doodad;
 	}
 
+	// The floor tile layer 0 is actually showing (or switching to) -- what SetAlienBaseN really
+	// changes, as opposed to the op we remembered running.
+	private string NetBaseTextureName()
+	{
+		if (backgroundLayers == null || backgroundLayers.Count == 0)
+		{
+			return "-";
+		}
+		BackgroundImage layer = backgroundLayers[0];
+		string[,] names = layer.new_texturenames ?? layer.texturenames;
+		return (names != null && names.GetLength(0) > 0 && names.GetLength(1) > 0)
+			? (names[0, 0] ?? "-")
+			: "-";
+	}
+
+	// Engage the asteroid-belt star-slowdown (Level 1 sideways belt phase). Called from
+	// Level1.spawner_OnFinished when the belt scroll speed is set; the near stars ramp DOWN over
+	// BeltRampInMs so the fastest star drops below the slowest asteroid. Idempotent.
+	//
+	// Death-mid-belt is self-correcting: GameEventList.RevertToCheckpoint clears active events
+	// WITHOUT terminating them, so a death during the belt drops the AsteroidSpawner's OnFinished
+	// (i.e. Disengage never fires for that run). It's harmless because the ONLY checkpoint reachable
+	// from mid-belt is the pre-belt one (Level1/Demo1 place their checkpoint before the belt gate),
+	// so the belt replays: Engage is called again (fine -- the belt IS active again) and the fresh
+	// spawner's OnFinished eventually disengages. INVARIANT: don't place a checkpoint INSIDE the
+	// belt, or a death there would strand beltSlowActive = true with no re-engage to correct it.
 	public void EngageBeltSlowdown()
 	{
 		beltSlowActive = true;
@@ -1058,9 +1101,11 @@ public class Background : Scene
 		fadeFactor = 0.998f;
 		scrollspeed = scrollspeedreset;
 		scrollspeedmodifier = 10f;
-		// The JIP catch-up latches (above): everything they describe is undone by the lines
-		// above or by the level's own Initialize -- which calls SetAlienBase() BEFORE
-		// base.Initialize() reaches here, so the rebuilt layers outlive any switch we tracked.
+		// The JIP catch-up latches (above). Reset() is reached from level entry AND from every
+		// scene setter (SetSpace/SetMars/SetAlienBase/...), including the mid-level scene swaps
+		// InsaneBossI drives -- and EVERY one of those callers rebuilds the layers and the scroll
+		// baseline first. So by the time we get here the tracked ops describe scenery that no
+		// longer exists, whichever path arrived; clearing them is right in all cases.
 		netLastSpeed = null;
 		netLastAlienBase = null;
 		netLastDoodad = null;

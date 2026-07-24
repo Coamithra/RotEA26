@@ -170,19 +170,19 @@ namespace EvilAliensWeb.Compat
 		public static string NetBg()
 		{
 			EvilAliens.GameScene scene = EvilAliens.GameScene.NetActiveScene;
-			return scene == null ? "[netbg] no level" : "[netbg] " + scene.NetDeepStateLine();
+			return scene == null ? "[netbg] no level" : "[netbg] " + scene.NetCatchUpStateLine();
 		}
 
 		// JS bridge for the JIP catch-up round-trip self-test (eaNetBgTest in index.html).
 		// One tab, no peer, no timing: capture the burst, wipe the scenery to a fresh joiner's,
-		// replay through the real client apply path, diff. See GameScene.NetDeepStateSelfTest --
+		// replay through the real client apply path, diff. See GameScene.NetCatchUpSelfTest --
 		// it is destructive (the screen re-runs the hyperspace entry), so it is a console
 		// command, never something a boot flag arms.
 		[JSInvokable("debugNetBgTest")]
 		public static string NetBgTest()
 		{
 			EvilAliens.GameScene scene = EvilAliens.GameScene.NetActiveScene;
-			return scene == null ? "[netbgtest] no level" : scene.NetDeepStateSelfTest();
+			return scene == null ? "[netbgtest] no level" : scene.NetCatchUpSelfTest();
 		}
 
 		// JS bridge for the hitbox debug overlay (eaHitboxes in wwwroot/index.html):

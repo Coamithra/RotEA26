@@ -1507,7 +1507,7 @@ namespace EvilAliensWeb.Compat.Net
                 // This is the seam, not PeerConnected: a join-in-progress peer has no
                 // GameScene at pairing time, and the Initialize that gives it one would
                 // clobber anything we sent earlier with the level's INITIAL background/music.
-                GameScene.NetActiveScene?.NetReplayDeepState();
+                GameScene.NetActiveScene?.NetReplayCatchUp();
                 break;
             }
             case NetProtocol.EvLeave:

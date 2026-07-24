@@ -38,6 +38,8 @@ All of these, re-evaluated whenever they change:
 
 - `Settings.AllowOnlineJoins` is on (new, **default true**).
 - Exactly one active player, slot 2 free. A second *local* player pressing Start delists.
+  (SUPERSEDED by card 4d904410: any free slot is listable now, and a couch player joining no
+  longer delists — local co-op and online co-op coexist.)
 - No cheats (`Settings.CheckForCheats()`) and no `DebugFlags.Active` — a cheating or
   debug-flagged host would change the joiner's game (Turbo is forced to 100 in a net
   session, which would alter the host's own run mid-level).

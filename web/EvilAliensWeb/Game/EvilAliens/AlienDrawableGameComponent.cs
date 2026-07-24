@@ -580,11 +580,20 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			return;
 		}
-		for (int i = 0; i < oracle.Players; i++)
+		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
+		// (card 4d904410), so indexing by loop counter would pay unseated slots and skip real
+		// ones. The FIRST seated player still gets the positional floating text.
+		bool first = true;
+		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
-			if (i == 0)
+			if (!oracle.IsSeated(i))
+			{
+				continue;
+			}
+			if (first)
 			{
 				Score.AddScore(PointValue, combo, Position, i);
+				first = false;
 			}
 			else
 			{

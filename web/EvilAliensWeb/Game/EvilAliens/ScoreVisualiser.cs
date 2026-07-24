@@ -511,7 +511,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		{
 			Color color = Color.Gray;
 			Vector2 startpos = getScorePosition(i, out color);
-			if (i < oracle.Players)
+			// Per SLOT, not `i < Players`: online co-op's roster is host-allocated and sparse, so a
+			// hole would show an empty panel for a seat nobody has and hide a real player's score.
+			if (oracle.IsSeated(i))
 			{
 				drawPlayerScore(i, ref color, ref startpos, gameTime);
 			}

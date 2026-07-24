@@ -108,24 +108,25 @@ public class Oracle : GameComponent, IOracleService
 		return flag;
 	}
 
-	public void AddPlayer(ControlDevice starter)
+	// Returns the slot the player was seated in -- callers that spawn the ship need the real
+	// slot, not `Players - 1` (which only agrees while the table is densely filled; online
+	// co-op's host-allocated roster is sparse).
+	public int AddPlayer(ControlDevice starter)
 	{
 		if (starter != ControlDevice.AI && DeviceIsPlaying(starter))
 		{
 			throw new Exception("device is already playing");
 		}
-		for (int i = 0; i < 4; i++)
+		int slot = FirstFreeSlot();
+		if (slot < 0)
 		{
-			PlayerInfo playerInfo = players[i];
-			if (!playerInfo.isPlaying)
-			{
-				playerInfo.isPlaying = true;
-				playerInfo.controller = starter;
-				players[i] = playerInfo;
-				return;
-			}
+			throw new Exception("maximum players exceeded");
 		}
-		throw new Exception("maximum players exceeded");
+		PlayerInfo playerInfo = players[slot];
+		playerInfo.isPlaying = true;
+		playerInfo.controller = starter;
+		players[slot] = playerInfo;
+		return slot;
 	}
 
 	public void ResetPlayers()
@@ -150,6 +151,70 @@ public class Oracle : GameComponent, IOracleService
 		info.isPlaying = true;
 		info.controller = device;
 		players[slot] = info;
+		return true;
+	}
+
+	// Online co-op (card 4d904410): the host allocates every slot, so the table is SPARSE -- a
+	// hole is normal (a granted slot the peer hasn't filled yet, a friend puppet that died and
+	// freed a low slot). Everything that walks the roster must ask this rather than assume the
+	// seated slots are 0..Players-1.
+	public bool IsSeated(int slot)
+	{
+		return slot >= 0 && slot < 4 && players[slot].isPlaying;
+	}
+
+	// 1-based position of `slot` among the SEATED slots (0 if it isn't seated). The spawn/respawn
+	// spread formulas want "the Nth player present" -- `slot + 1` only agrees while the table is
+	// dense, and with a host-allocated sparse roster it pushes high slots off-screen.
+	public int SeatOrdinal(int slot)
+	{
+		if (!IsSeated(slot))
+		{
+			return 0;
+		}
+		int n = 0;
+		for (int i = 0; i <= slot; i++)
+		{
+			if (players[i].isPlaying)
+			{
+				n++;
+			}
+		}
+		return n;
+	}
+
+	// First free slot at or above `from`, or -1 when the roster is full. The host's slot
+	// allocator (NetSession) -- keeping it here means AddPlayer's own scan and the net
+	// allocator agree on what "free" means.
+	public int FirstFreeSlot(int from = 0)
+	{
+		for (int i = Math.Max(0, from); i < 4; i++)
+		{
+			if (!players[i].isPlaying)
+			{
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	// Online co-op: move a seated slot's registration to another slot, keeping its device and
+	// taking the destination's hue. Only the JOIN peer's primary ever moves, and only in the
+	// dev ?net= flow (it boots into a level at slot 0 and learns its host-granted slot when it
+	// pairs); the caller re-stamps any live ship's Owner. No-op unless `from` is seated and
+	// `to` is free.
+	public bool MovePlayerSlot(int from, int to)
+	{
+		if (from == to || !IsSeated(from) || to < 0 || to >= 4 || players[to].isPlaying)
+		{
+			return false;
+		}
+		ControlDevice device = players[from].controller;
+		players[from].Reset();
+		PlayerInfo info = players[to];
+		info.isPlaying = true;
+		info.controller = device;
+		players[to] = info;
 		return true;
 	}
 

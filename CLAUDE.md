@@ -111,6 +111,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
   Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
+- **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
+  synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
+  press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new
+  `roster=` field must read as mirror images on the two consoles.
 - **Frame profiler / FPS HUD** (card 22e655b5): shown by default in every DEV build (keyed off
   `window.eaBuildHash === 'dev'`; the published site never shows it). Compact fps + headroom;
   click the mode tag for the per-phase ms breakdown, frame-time sparkline and GL draw calls.

@@ -47,7 +47,7 @@ namespace EvilAliensWeb.Compat.Net
     // match for both -- Stop() tears the session down and the menus surface a notice.
     public static partial class NetSession
     {
-        public const byte ProtocolVersion = 4;
+        public const byte ProtocolVersion = 5;
         public const float InterpDelayMs = 100f;
 
         private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
@@ -167,6 +167,36 @@ namespace EvilAliensWeb.Compat.Net
 
         // reliable-event bookkeeping
         private static int lastRxEventSeq = -1;
+
+        // ---- roster slots (card 4d904410) -------------------------------------------------
+        //
+        // The oracle slot IS the wire slot on both peers, and the HOST allocates every one of
+        // them -- so there is no host-relative translation anywhere (the old TranslateSlot 0<->1
+        // mirror and the ApplyJoinHues compensating swap are both gone; per-slot hues now agree
+        // by construction). The host's own primary is always slot 0: it seats itself first in its
+        // own game, and couch players only ever arrive later.
+        private const byte HostPrimarySlot = 0;
+
+        // OUR primary ship's slot. Host: always 0. Client: granted by the host in MsgWelcome
+        // (SlotNone until the handshake completes).
+        private static byte localPrimarySlot = HostPrimarySlot;
+
+        // The PEER's primary slot -- the seat its MsgShipState stream drives. Host: the slot it
+        // granted the client. Client: the host's, i.e. 0.
+        private static byte peerPrimarySlot = NetProtocol.SlotNone;
+
+        // Client only: a couch join is waiting on the host's EvSlotGrant. Holds the device that
+        // pressed Start and whether the scene wanted the ship spawned immediately, so the grant
+        // can finish the join the local path would have done synchronously offline.
+        private static bool joinRequestPending;
+        private static ControlDevice pendingJoinDevice;
+        private static bool pendingJoinSpawn;
+
+        // Host only: slots granted to the peer that it has not streamed into yet -> deadline.
+        // A grant the client silently fails to take would otherwise hold the seat forever.
+        private const long GrantClaimTimeoutMs = 10000;
+        private static readonly Dictionary<byte, long> grantsAwaitingStream = new Dictionary<byte, long>();
+        private static readonly List<byte> grantScratchSlots = new List<byte>(4);
 
         // Kill attribution: who landed the killing blow, recorded just before the per-type
         // death cascades into removal (KillableAlien.HitBy / claim handling), consumed at
@@ -347,6 +377,12 @@ namespace EvilAliensWeb.Compat.Net
             remoteAlive = false;
             puppet = null;
             ResetFriends();
+            localPrimarySlot = HostPrimarySlot;
+            peerPrimarySlot = NetProtocol.SlotNone;
+            joinRequestPending = false;
+            grantsAwaitingStream.Clear();
+            localJoinSimDone = 0;
+            localJoinSimAt = 0;
             txSeq = 0;
             txEventSeq = 0;
             lastStreamTx = 0;
@@ -456,15 +492,21 @@ namespace EvilAliensWeb.Compat.Net
                 return; // the local match ended (menu session) -- Stop() ran
             }
             AdvanceRenderClock();
-            if (!PeerUp)
+            // Keep saying hello until the SLOT exchange has settled too, not just until the peer
+            // is up: whoever hears the other's hello first goes PeerUp immediately, and a client
+            // that fell silent there would never be answered with its slot grant.
+            // `peerPrimarySlot` unset means "not settled" for both roles (the host sets it when
+            // it reserves the joiner's seat, the client when it adopts its own).
+            if (!PeerUp || peerPrimarySlot == NetProtocol.SlotNone)
             {
                 if (now - lastHelloTx >= HelloIntervalMs)
                 {
                     lastHelloTx = now;
-                    transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags()));
+                    transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
+                        isHost ? peerPrimarySlot : NetProtocol.SlotNone));
                 }
             }
-            else
+            if (PeerUp)
             {
                 long quiet = now - lastRxStreamAt;
                 bool paused = RemotePaused || localPaused;
@@ -484,10 +526,8 @@ namespace EvilAliensWeb.Compat.Net
                     if (now - lastStreamTx >= StreamIntervalMs)
                     {
                         SendShipState(now);
-                        if (isHost)
-                        {
-                            SendFriendStates(now); // host AI friends ride the same cadence
-                        }
+                        // Couch players + host AI friends ride the same cadence, both directions.
+                        SendFriendStates(now);
                     }
                     if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
                     {
@@ -499,8 +539,18 @@ namespace EvilAliensWeb.Compat.Net
                     }
                 }
             }
+            // PeerUp is re-tested deliberately: the block above can call PeerLost("timeout"), and
+            // roster bookkeeping must not run against a session that just ended.
+            if (PeerUp)
+            {
+                TickLocalJoinSim(now);
+                if (isHost)
+                {
+                    ExpireUnclaimedGrants(now);
+                }
+            }
             ManagePuppet();
-            TickFriends(); // client: spawn/interpolate/expire the host's AI-friend puppets
+            TickFriends(); // spawn/interpolate/expire the peer's couch + AI-friend puppets
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
                 lastMetricsAt = now;
@@ -510,7 +560,7 @@ namespace EvilAliensWeb.Compat.Net
                 metrics.ImpLossPct = impairment.LossPct;
                 metrics.ImpJitterMs = impairment.JitterMs;
                 Console.WriteLine(metrics.Report(isHost, PeerUp, isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount,
-                    FindLocalShip() != null, puppet != null));
+                    FindLocalShip() != null, puppet != null, RosterReport()));
             }
         }
 
@@ -588,14 +638,23 @@ namespace EvilAliensWeb.Compat.Net
             metrics.StreamTx++;
         }
 
-        // The streamed ship: the primary local player (never the remote puppet, never the
-        // in-game AI "friend" ships -- with ?aiplayer the controller stays Keyboard/pad and
-        // only the Update branch is forced to AI, so this stays correct).
+        // A ship THIS peer simulates: its owner reads real input (or runs the local AI) and
+        // decides its own motion, hits and pickups. The inverse is a network-driven puppet.
+        // With ?aiplayer the controller stays Keyboard/pad and only the Update branch is
+        // forced to AI, so a forced-AI local ship is still correctly "ours".
+        private static bool IsLocallyOwned(PlayerShip s)
+        {
+            return s.Controller != ControlDevice.Remote && s.Controller != ControlDevice.RemoteFriend;
+        }
+
+        // The ship carried by the primary MsgShipState stream: the one in our granted primary
+        // slot. Every OTHER locally-owned ship (couch players, AI friends) rides the slot-tagged
+        // MsgFriendState stream instead.
         private static PlayerShip FindLocalShip()
         {
             foreach (PlayerShip s in oracle.GetShips())
             {
-                if (s.Controller != ControlDevice.Remote && s.Controller != ControlDevice.AI)
+                if (IsLocallyOwned(s) && s.Owner == localPrimarySlot)
                 {
                     return s;
                 }
@@ -603,15 +662,16 @@ namespace EvilAliensWeb.Compat.Net
             return null;
         }
 
-        // Called from PlayerShip.doBlast (bombs are discrete -> the reliable event lane,
-        // not the stream). Only the streamed local ship replicates its blasts.
+        // Called from PlayerShip.doBlast (bombs are discrete -> the reliable event lane, not the
+        // stream). Every locally-owned ship replicates its blasts, slot-tagged so the peer
+        // detonates the right puppet -- a couch player's bomb used to land on our primary.
         public static void OnLocalBlast(PlayerShip ship, Vector2 pos, int level)
         {
-            if (!Active || !PeerUp || ship == null || ship.Controller == ControlDevice.Remote || ship.Controller == ControlDevice.AI)
+            if (!Active || !PeerUp || ship == null || !IsLocallyOwned(ship))
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeBlastEvent(txEventSeq++, pos, level));
+            transport.SendReliable(NetProtocol.EncodeBlastEvent(txEventSeq++, (byte)ship.Owner, pos, level));
             metrics.EventsTx++;
         }
 
@@ -839,19 +899,6 @@ namespace EvilAliensWeb.Compat.Net
             return NetProtocol.KillerNone;
         }
 
-        // Wire player slots are HOST-relative (0 = host ship, 1 = join ship), but each side
-        // numbers its LOCAL ship slot 0 (the join peer's oracle seats its own player first and
-        // the remote puppet second) -- so the JOIN side swaps 0<->1 at the wire boundary, in
-        // both directions. Host-side and KillerNone/AI slots pass through untouched.
-        private static byte TranslateSlot(byte slot)
-        {
-            if (isHost || slot > 1)
-            {
-                return slot;
-            }
-            return (byte)(1 - slot);
-        }
-
         // ---- host NetIdRegistry -> wire ---------------------------------------------------
 
         internal static void OnHostSpawn(NetIdRegistry.Entry e)
@@ -985,10 +1032,16 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- host score sync ------------------------------------------------------------------
 
+        private static readonly float[] scoreSyncScratch = new float[NetProtocol.MaxSlots];
+
         private static void SendScoreSync(long now)
         {
             lastScoreSyncTx = now;
-            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, score.Lives, score.PointScore(0), score.PointScore(1)));
+            for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
+            {
+                scoreSyncScratch[slot] = score.PointScore(slot);
+            }
+            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, score.Lives, scoreSyncScratch));
             metrics.EventsTx++;
         }
 
@@ -1002,7 +1055,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            killerSlot = TranslateSlot(killerSlot); // wire slots are host-relative
+            // No translation: the host allocates every slot, so our oracle slot IS the wire slot.
             transport.SendReliable(NetProtocol.EncodeClaimEvent(txEventSeq++, netId, killerSlot));
             metrics.EventsTx++;
             metrics.ClaimsTx++;
@@ -1061,7 +1114,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte ver = data[1];
             bool peerIsHost = data[2] != 0;
-            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags))
+            if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot))
             {
                 Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion);
                 SendRejectOnce(NetProtocol.RejectVersion);
@@ -1087,14 +1140,323 @@ namespace EvilAliensWeb.Compat.Net
                 SendRejectOnce(NetProtocol.RejectFlags);
                 return;
             }
+            // Slot allocation (card 4d904410). The host reserves the joiner's primary seat the
+            // moment it knows a real peer is there -- BEFORE replying -- so its own couch joins
+            // and AI friends can never be handed the same slot. The client adopts what it is
+            // given. Both are idempotent: hellos repeat at 1 Hz until the pairing settles.
+            if (isHost)
+            {
+                if (!ReserveRemotePrimarySlot())
+                {
+                    return; // refused (roster full) -- SendRejectOnce owns the wind-down
+                }
+            }
+            else if (grantedSlot != NetProtocol.SlotNone)
+            {
+                AdoptGrantedPrimarySlot(grantedSlot);
+            }
             if (welcomeBack)
             {
-                transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags()));
+                transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
+                    isHost ? peerPrimarySlot : NetProtocol.SlotNone));
             }
             if (!PeerUp)
             {
                 PeerConnected();
             }
+        }
+
+        // ---- roster slot allocation (card 4d904410) --------------------------------------
+
+        // HOST: pick (once) the seat the joining peer's primary ship will occupy, and hold it
+        // immediately as a Remote registration so nothing else can take it. Normally slot 1; a
+        // listed game with a couch player already aboard hands out whatever is free instead --
+        // which is exactly why wire slots can no longer be pinned to 0/1.
+        // Returns false when the pairing was REFUSED (roster full) and the caller must stop.
+        private static bool ReserveRemotePrimarySlot()
+        {
+            if (peerPrimarySlot != NetProtocol.SlotNone)
+            {
+                return true;
+            }
+            int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
+            if (slot < 0)
+            {
+                // Never slot 0: that is the host's own primary seat, which in the menu-lobby flow
+                // is still EMPTY at pairing time (the level launches after the peers connect).
+                slot = oracle.FirstFreeSlot(HostPrimarySlot + 1);
+                if (slot < 0)
+                {
+                    // No seat for the joiner. REFUSE -- do not just wait: the joiner would go
+                    // PeerUp, never be granted a slot, keep slot 0 (our own player) and address
+                    // every claim/blast at it.
+                    Console.WriteLine("[net] no free roster slot for the joiner -- rejecting");
+                    SendRejectOnce(NetProtocol.RejectFull);
+                    return false;
+                }
+                if (!oracle.AddPlayerAt(slot, ControlDevice.Remote))
+                {
+                    return true; // lost a race for the seat -- retry on the next hello
+                }
+            }
+            peerPrimarySlot = (byte)slot;
+            Console.WriteLine("[net] granted joiner primary slot=" + slot);
+            return true;
+        }
+
+        // CLIENT: take the seat the host granted. In the menu-lobby and JIP flows our ship isn't
+        // seated yet (EvLaunch -> Game1.MenuFinished reads LocalPrimarySlot), so this is just
+        // bookkeeping. In the dev ?net=join flow we are already mid-level at slot 0, so the
+        // registration AND any live ship move across.
+        private static void AdoptGrantedPrimarySlot(byte slot)
+        {
+            if (localPrimarySlot == slot && peerPrimarySlot != NetProtocol.SlotNone)
+            {
+                return;
+            }
+            peerPrimarySlot = HostPrimarySlot;
+            if (localPrimarySlot != slot && oracle.IsSeated(localPrimarySlot))
+            {
+                // We are already seated somewhere (the dev ?net=join flow boots into a level
+                // before pairing): the registration and the live ship both have to move, and if
+                // they can't, our slot must NOT advance -- claiming a slot our ship isn't in
+                // silently stops the primary stream (FindLocalShip goes null -> alive=false
+                // forever) and re-streams the real ship as a friend the host will refuse.
+                if (!oracle.MovePlayerSlot(localPrimarySlot, slot))
+                {
+                    Console.WriteLine("[net] could not move local primary " + localPrimarySlot + " -> " + slot
+                        + " (slot busy) -- staying put");
+                    return;
+                }
+                foreach (PlayerShip s in oracle.GetShips())
+                {
+                    if (s.Owner == localPrimarySlot)
+                    {
+                        s.NetSetOwner(slot, oracle.Hue(slot));
+                    }
+                }
+                Console.WriteLine("[net] moved local primary slot " + localPrimarySlot + " -> " + slot);
+            }
+            localPrimarySlot = slot;
+        }
+
+        // Which seat our primary ship uses. Read by Game1.MenuFinished / LaunchLevelDirect /
+        // TeamChallenge so a client seats its starter directly in the host-granted slot instead
+        // of grabbing slot 0. Offline and host-side this is 0.
+        public static int LocalPrimarySlot => Active ? localPrimarySlot : 0;
+
+        // ---- couch (local) players joining an online session (card 4d904410) ---------------
+
+        // GameScene.AddPlayer routes here while a session is up: the host allocates its own
+        // couch seat locally, the client has to ask for one. Not seating locally on the client
+        // is the whole point -- both peers used to grab "the next free slot" independently and
+        // land two different players on the same slot number.
+        internal static void TrySeatLocalJoin(ControlDevice device, bool spawnPlayer)
+        {
+            // AI friends are the one device that can seat more than once (several friends share
+            // ControlDevice.AI) -- Oracle.AddPlayer exempts them from the same check.
+            if (!Active || (device != ControlDevice.AI && oracle.DeviceIsPlaying(device)))
+            {
+                return;
+            }
+            if (isHost)
+            {
+                int slot = AllocateSeat();
+                if (slot < 0 || !oracle.AddPlayerAt(slot, device))
+                {
+                    return; // roster full -- Start is a no-op
+                }
+                SeatJoinedShip(slot, device, spawnPlayer);
+                return;
+            }
+            if (!PeerUp)
+            {
+                return; // no host to allocate from yet; press Start again once connected
+            }
+            if (joinRequestPending)
+            {
+                return; // one outstanding request at a time
+            }
+            joinRequestPending = true;
+            pendingJoinDevice = device;
+            pendingJoinSpawn = spawnPlayer;
+            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvJoinRequest));
+            metrics.EventsTx++;
+        }
+
+        // The one seat allocator, used for our own couch joins and for answering the peer's. It
+        // must never hand out the seat the joining peer's PRIMARY ship occupies: in the
+        // menu-lobby flow that reservation is made before the level launches and
+        // Game1.MenuFinished's ResetPlayers() wipes it, and SpawnPuppet only re-asserts it once
+        // the peer's first live sample lands (seconds later). A couch join landing in that window
+        // would take slot 1 and leave the remote player permanently unseatable.
+        private static int AllocateSeat()
+        {
+            for (int slot = oracle.FirstFreeSlot(); slot >= 0; slot = oracle.FirstFreeSlot(slot + 1))
+            {
+                if (slot != peerPrimarySlot && slot != localPrimarySlot)
+                {
+                    return slot;
+                }
+            }
+            return -1;
+        }
+
+        // HOST: a client couch player pressed Start. Allocate a seat and answer; the seat is held
+        // as a RemoteFriend registration right away so the next allocation can't reuse it while
+        // the grant is still in flight.
+        private static void HandleJoinRequest()
+        {
+            int slot = AllocateSeat();
+            if (slot >= 0 && !oracle.AddPlayerAt(slot, ControlDevice.RemoteFriend))
+            {
+                slot = -1;
+            }
+            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvSlotGrant,
+                slot < 0 ? NetProtocol.SlotNone : (byte)slot));
+            metrics.EventsTx++;
+            if (slot >= 0)
+            {
+                // Hold the reservation only until the peer's first stream for it arrives. The
+                // client can silently fail to take a grant (its device got seated meanwhile, its
+                // scene changed), and nothing else would ever release the seat -- one seat fewer
+                // for the rest of the session, and the game stops being re-listable.
+                grantsAwaitingStream[(byte)slot] = NowMs + GrantClaimTimeoutMs;
+            }
+            Console.WriteLine(slot < 0
+                ? "[net] refused peer couch join -- roster full"
+                : "[net] granted peer couch join slot=" + slot);
+        }
+
+        // Release a granted seat the peer never streamed into (see HandleJoinRequest).
+        private static void ExpireUnclaimedGrants(long now)
+        {
+            if (grantsAwaitingStream.Count == 0)
+            {
+                return;
+            }
+            grantScratchSlots.Clear();
+            foreach (KeyValuePair<byte, long> g in grantsAwaitingStream)
+            {
+                if (now > g.Value)
+                {
+                    grantScratchSlots.Add(g.Key);
+                }
+            }
+            foreach (byte slot in grantScratchSlots)
+            {
+                grantsAwaitingStream.Remove(slot);
+                if (!FriendChannelExists(slot))
+                {
+                    oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
+                    Console.WriteLine("[net] released unclaimed couch grant slot=" + slot);
+                }
+            }
+        }
+
+        // CLIENT: the host answered our couch-join request. On a grant, finish the join the
+        // offline path would have done synchronously.
+        private static void HandleSlotGrant(byte slot)
+        {
+            if (!joinRequestPending)
+            {
+                return;
+            }
+            joinRequestPending = false;
+            if (slot == NetProtocol.SlotNone)
+            {
+                Console.WriteLine("[net] couch join refused by host (roster full)");
+                return;
+            }
+            // Same AI exemption as TrySeatLocalJoin: several friends legitimately share
+            // ControlDevice.AI, so "already playing" must not block the second one.
+            if ((pendingJoinDevice != ControlDevice.AI && oracle.DeviceIsPlaying(pendingJoinDevice))
+                || !oracle.AddPlayerAt(slot, pendingJoinDevice))
+            {
+                Console.WriteLine("[net] could not take granted couch slot=" + slot + " device=" + pendingJoinDevice);
+                return; // the host's grant expires on its side and the seat comes back
+            }
+            SeatJoinedShip(slot, pendingJoinDevice, pendingJoinSpawn);
+        }
+
+        private static void SeatJoinedShip(int slot, ControlDevice device, bool spawnPlayer)
+        {
+            Console.WriteLine("[net] couch player joined slot=" + slot + " device=" + device);
+            if (spawnPlayer)
+            {
+                GameScene.NetActiveScene?.SpawnPlayer(device, slot);
+            }
+        }
+
+        // slot:device per seated slot, with a * on the ships WE simulate -- the two peers must
+        // print identical maps (modulo which side owns what), which is the whole point of the
+        // host allocating slots. Cheap enough for the 5s metrics cadence.
+        private static string RosterReport()
+        {
+            string s = "";
+            for (int slot = 0; slot < Oracle.MaxPlayers; slot++)
+            {
+                if (!oracle.IsSeated(slot))
+                {
+                    continue;
+                }
+                ControlDevice device = oracle.Controller(slot);
+                bool ours = device != ControlDevice.Remote && device != ControlDevice.RemoteFriend;
+                s += (s.Length > 0 ? "," : "") + slot + ":" + device + (ours ? "*" : "");
+            }
+            // ...plus the ships actually alive. A seat with no ship, or a ship whose Owner
+            // disagrees with its seat, is precisely the failure this card is about, and it is
+            // invisible from the seat map alone.
+            string ships = "";
+            foreach (PlayerShip p in oracle.GetShips())
+            {
+                ships += (ships.Length > 0 ? "," : "") + p.Owner + ":" + p.Controller;
+            }
+            return (s.Length > 0 ? s : "-")
+                + " pri=" + localPrimarySlot + "/" + (peerPrimarySlot == NetProtocol.SlotNone ? "-" : peerPrimarySlot.ToString())
+                + " ships=" + (ships.Length > 0 ? ships : "-");
+        }
+
+        // ---- ?netlocal=<n>: synthetic couch joins (card 4d904410 verification seam) ----------
+        //
+        // A couch join is a gamepad Start press, which the automated rig cannot produce: there are
+        // no physical pads, and seating a Pad device with none connected trips GameScene's
+        // disconnected-gamepad force-pause every tick. So the sim seats devices that behave like a
+        // couch player WITHOUT needing hardware: `Generic` (the on-screen start device -- a real
+        // human device with no connected-check) first, then `AI` for any extras. Both are locally
+        // owned and therefore stream exactly like a human couch player; with ?aiplayer the Generic
+        // ship flies itself too (it is not a puppet, so EffectiveController forces the AI branch).
+        private const long LocalJoinSimDelayMs = 3000;
+
+        private static int localJoinSimDone;
+        private static long localJoinSimAt;
+
+        private static void TickLocalJoinSim(long now)
+        {
+            if (DebugFlags.NetLocal <= 0 || localJoinSimDone >= DebugFlags.NetLocal)
+            {
+                return;
+            }
+            if (GameScene.NetActiveScene == null || FindLocalShip() == null)
+            {
+                localJoinSimAt = 0; // wait for a settled level + our own ship before joining anyone
+                return;
+            }
+            if (localJoinSimAt == 0)
+            {
+                localJoinSimAt = now + LocalJoinSimDelayMs;
+                return;
+            }
+            if (now < localJoinSimAt || joinRequestPending)
+            {
+                return;
+            }
+            ControlDevice device = localJoinSimDone == 0 ? ControlDevice.Generic : ControlDevice.AI;
+            localJoinSimDone++;
+            localJoinSimAt = now + LocalJoinSimDelayMs; // stagger, so each join is legible in the log
+            Console.WriteLine("[net] ?netlocal: simulating couch join " + localJoinSimDone + "/" + DebugFlags.NetLocal
+                + " device=" + device);
+            TrySeatLocalJoin(device, spawnPlayer: true);
         }
 
         // Refuse the pairing: tell the peer why, then wind our side down after RejectGraceMs so
@@ -1134,6 +1496,12 @@ namespace EvilAliensWeb.Compat.Net
                 return "Update required\nOne of you runs an outdated version\n(reload the page)";
             case NetProtocol.RejectFlags:
                 return "Debug flags are active\nOnline co-op needs a clean boot (no ?flags)";
+            case NetProtocol.RejectFull:
+                // Asymmetric in cause but not in wording: the host ran out of seats (a couch
+                // player took the last one), and there is nothing either side can do but retry.
+                return weSentIt
+                    ? "Game full\nNo free player slot for the other player"
+                    : "Game full\nThat game has no free player slot";
             default:
                 return "Connection refused";
             }
@@ -1167,32 +1535,11 @@ namespace EvilAliensWeb.Compat.Net
                 // alive world instead of starting from a death-before-spawn storm.
                 NetIdRegistry.ReplayLive();
             }
-            else
-            {
-                ApplyJoinHues();
-            }
             if (localPaused)
             {
                 // Re-announce a held pause across a reconnect so the peer re-freezes.
                 transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvPause, 1));
                 metrics.EventsTx++;
-            }
-        }
-
-        // Consistent ship colours across both screens: the host's ship is player-slot-0
-        // white everywhere, the joiner's is player-slot-1 purple everywhere. On the join
-        // side the LOCAL ship sits in slot 0, so swap that slot's hue (and any already-live
-        // ship that read it at Setup).
-        private static void ApplyJoinHues()
-        {
-            oracle.SetHue(300f, 0);
-            oracle.SetHue(-1f, 1);
-            foreach (PlayerShip s in oracle.GetShips())
-            {
-                if (s.Owner < 2)
-                {
-                    s.NetApplyHue(oracle.Hue(s.Owner));
-                }
             }
         }
 
@@ -1276,6 +1623,9 @@ namespace EvilAliensWeb.Compat.Net
                     ExplodePuppet();
                 }
                 oracle.ReleasePlayer(ControlDevice.Remote);
+                // ...and any couch players the joiner brought with it (card 4d904410): our level
+                // keeps running, so nothing else would ever purge their puppets or free the seats.
+                ReleaseAllFriendPuppets();
                 Stop("jip peer lost: " + reason);
                 return;
             }
@@ -1412,7 +1762,7 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
-                byte killer = TranslateSlot(data[6]); // wire slots are host-relative
+                byte killer = data[6]; // wire slot == oracle slot on both peers
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
                 ushort points = NetProtocol.ReadU16(data, 15);
                 NetPuppets.OnRemoteDeath(id, killer, pos, points);
@@ -1433,27 +1783,58 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvScoreSync:
             {
-                if (isHost || data.Length < 13 || GameScene.NetActiveScene == null)
+                if (isHost || data.Length < 5 + 4 * NetProtocol.MaxSlots || GameScene.NetActiveScene == null)
                 {
                     return;
                 }
                 score.Lives = (sbyte)data[4];
-                // Wire order is host-relative: score0 = the host's ship = OUR slot 1, etc.
-                score.NetAdoptScore(TranslateSlot(0), NetProtocol.ReadF32(data, 5));
-                score.NetAdoptScore(TranslateSlot(1), NetProtocol.ReadF32(data, 9));
+                for (int slot = 0; slot < NetProtocol.MaxSlots; slot++)
+                {
+                    score.NetAdoptScore(slot, NetProtocol.ReadF32(data, 5 + 4 * slot));
+                }
                 break;
             }
             case NetProtocol.EvBlast:
             {
-                if (data.Length < 13 || puppet == null)
+                if (data.Length < 14)
                 {
                     return;
                 }
-                int level = data[12];
-                puppet.NetDoBlast(level);
+                if (GameScene.NetActiveScene == null)
+                {
+                    return;
+                }
+                byte blastSlot = data[4];
+                int level = data[13];
+                // Slot-tagged (v5): detonate the puppet that actually bombed -- the peer's
+                // primary or any of its couch/AI ships. Never one of OURS: any slot disagreement
+                // (a reconnect race, a refused move) would otherwise hand the peer a free bomb
+                // on our own player.
+                PlayerShip bomber = oracle.GetPlayerShip(blastSlot);
+                if (bomber == null || IsLocallyOwned(bomber))
+                {
+                    return;
+                }
+                bomber.NetDoBlast(level);
                 if (DebugFlags.NetLog)
                 {
-                    Console.WriteLine("[net] rx blast level=" + level);
+                    Console.WriteLine("[net] rx blast slot=" + blastSlot + " level=" + level);
+                }
+                break;
+            }
+            case NetProtocol.EvJoinRequest:
+            {
+                if (isHost)
+                {
+                    HandleJoinRequest();
+                }
+                break;
+            }
+            case NetProtocol.EvSlotGrant:
+            {
+                if (!isHost && data.Length >= 5)
+                {
+                    HandleSlotGrant(data[4]);
                 }
                 break;
             }
@@ -1626,6 +2007,7 @@ namespace EvilAliensWeb.Compat.Net
                         ExplodePuppet();
                     }
                     oracle.ReleasePlayer(ControlDevice.Remote);
+                    ReleaseAllFriendPuppets(); // and its couch players (card 4d904410)
                     Stop("jip peer left the match");
                     break;
                 }
@@ -1758,13 +2140,15 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void SpawnPuppet()
         {
-            if (!oracle.DeviceIsPlaying(ControlDevice.Remote))
+            // The peer's primary seat was allocated at handshake time (host: it granted it;
+            // client: slot 0), so this only has to fill it -- never pick one.
+            if (peerPrimarySlot == NetProtocol.SlotNone)
             {
-                if (oracle.Players >= Oracle.MaxPlayers)
-                {
-                    return;
-                }
-                oracle.AddPlayer(ControlDevice.Remote);
+                return;
+            }
+            if (!oracle.DeviceIsPlaying(ControlDevice.Remote) && !oracle.AddPlayerAt(peerPrimarySlot, ControlDevice.Remote))
+            {
+                return;
             }
             int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
             PlayerShip ship = bin.Recycle<PlayerShip>();

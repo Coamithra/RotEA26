@@ -588,8 +588,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	{
 		Vector2 val = default(Vector2);
 		Vector2 val2 = default(Vector2);
-		for (int i = 0; i < oracle.Players; i++)
+		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
+		// (card 4d904410), and Oracle.GetPlayerPosition/Controller THROW on an unseated slot.
+		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
+			if (!oracle.IsSeated(i))
+			{
+				continue;
+			}
 			Vibrator vibrator = ServiceHelper.Get<IVibratorService>().Vibrator;
 			(val) = new Vector2(0.35f, 0.35f);
 			(val2) = new Vector2(0.15f, 0.15f);

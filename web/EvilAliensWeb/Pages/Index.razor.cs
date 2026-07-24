@@ -66,6 +66,24 @@ namespace EvilAliensWeb.Pages
             }
         }
 
+        // Distinct tick-throw messages already reported, so a per-frame throw doesn't flood.
+        private static readonly System.Collections.Generic.HashSet<string> _tickThrowsSeen = new System.Collections.Generic.HashSet<string>();
+
+        // tickJS catches the interop exception but can only print `e.message` -- the MANAGED stack
+        // never reaches the console, which makes a WASM tick throw ("Index was out of range")
+        // nearly undiagnosable. An exception FILTER runs before the stack unwinds and, by
+        // returning false, logs without catching: the exception still propagates to tickJS exactly
+        // as before, so the failure counting / loop-keepalive behaviour is unchanged.
+        private static bool LogTickThrow(Exception ex)
+        {
+            string key = ex.GetType().FullName + ": " + ex.Message;
+            if (_tickThrowsSeen.Add(key))
+            {
+                Console.WriteLine("[loop] tick threw (first occurrence, full stack):\n" + ex);
+            }
+            return false;
+        }
+
         [JSInvokable]
         public void TickDotNet()
         {
@@ -84,6 +102,10 @@ namespace EvilAliensWeb.Pages
             try
             {
                 _game.Tick();
+            }
+            catch (Exception ex) when (LogTickThrow(ex))
+            {
+                throw; // never reached -- the filter always returns false
             }
             finally
             {

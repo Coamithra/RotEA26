@@ -5,29 +5,31 @@ using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
 {
-    // Host AI "friend" ship replication -- coverage-gaps follow-up to card 11.2.
+    // Replication of every ship a peer owns BEYOND its primary -- the host's AI "friend" ships
+    // (Mechanical Friends cheat) and, since card 4d904410, either peer's COUCH players.
     //
-    // The "Mechanical Friends" cheat (Settings.Friends 1..3) fills empty slots with AI helper ships.
-    // 11.2 DISABLED that in every net session because an AI friend's bullets would only exist on the
-    // host (invisible on the client). The design doc's "host runs AI friends" is now REALISED: the
-    // host does run them (real AI, real bullets, host-authoritative enemy kills that already
-    // replicate), AND streams each one to the client, which shows it as a ControlDevice.RemoteFriend
-    // puppet whose bullets re-fire locally -- exactly the single remote-ship scheme, generalised to
-    // several ships keyed by slot.
+    // Originally this existed only for AI friends (coverage-gaps follow-up to card 11.2): the host
+    // runs them (real AI, real bullets, host-authoritative enemy kills that already replicate) and
+    // streams each one to the client, which shows it as a ControlDevice.RemoteFriend puppet whose
+    // bullets re-fire locally -- the single remote-ship scheme, generalised to several ships keyed
+    // by slot. That generalisation is exactly what a couch player needs, so card 4d904410 made the
+    // stream BIDIRECTIONAL rather than inventing a second mechanism: `ControlDevice.RemoteFriend`
+    // now means "network-driven extra ship", whoever owns it.
     //
-    // Design (deliberately ISOLATED from the working single-ship remote path so it can't regress it):
-    //   * The client's auto-join stays OFF (GameScene) -- only the host adds AI friends; the client
-    //     receives them. So this whole path is DORMANT unless the cheat is on: no friend streams are
-    //     sent, friendChannels stays empty, and a default co-op session is byte-identical to before.
-    //   * IDENTITY SLOT MAPPING: the client puppet lands in the SAME oracle slot the host runs the
-    //     friend in, so per-slot score/lives (EvScoreSync sends them verbatim) line up. AddPlayerAt /
-    //     RemovePlayerAt guard against ever squatting or freeing a live human/remote slot.
-    //   * A friend that dies / leaves simply STOPS being streamed; a per-slot timeout explodes its
+    // Design (deliberately ISOLATED from the single-ship primary path so it can't regress it):
+    //   * IDENTITY SLOT MAPPING: the puppet lands in the SAME oracle slot its owner runs it in, so
+    //     per-slot score/lives (EvScoreSync sends them verbatim) line up. Since card 4d904410 the
+    //     host allocates every slot, so this holds for the primaries too and there is no
+    //     host-relative translation left anywhere. AddPlayerAt / RemovePlayerAt still guard against
+    //     ever squatting or freeing a live human/remote slot.
+    //   * A ship that dies / leaves simply STOPS being streamed; a per-slot timeout explodes its
     //     puppet (no explicit death event needed), and a later stream re-spawns it.
+    //   * With no AI friends and no couch players the path stays DORMANT: nothing is streamed and
+    //     friendChannels stays empty, so a plain two-player session is unchanged.
     public static partial class NetSession
     {
-        // Per host AI-friend slot: its own jitter buffer + interpolation clock (a copy of the primary
-        // remote's, so the puppet is just as smooth) + latest fire state + the client-side puppet.
+        // Per replicated extra ship: its own jitter buffer + interpolation clock (a copy of the
+        // primary remote's, so the puppet is just as smooth) + latest fire state + the puppet.
         private sealed class FriendChannel
         {
             public readonly ShipStateBuffer Buffer = new ShipStateBuffer();
@@ -47,14 +49,15 @@ namespace EvilAliensWeb.Compat.Net
         private static ushort friendTxSeq; // separate from txSeq so the primary stream's seq stays contiguous
         private static readonly List<byte> friendScratchSlots = new List<byte>(4);
 
-        // ---- host: stream each live AI friend (called on the ship-stream cadence) --------------
+        // ---- stream each live extra ship we own (called on the ship-stream cadence) ------------
         private static void SendFriendStates(long now)
         {
             foreach (PlayerShip s in oracle.GetShips())
             {
-                // Only the REAL AI friends. ?aiplayer forces the LOCAL ship's Update branch to AI but
-                // leaves its Controller (Keyboard/pad), so it is streamed as the primary ship, not here.
-                if (s.Controller != ControlDevice.AI)
+                // Everything we simulate except our primary (which rides MsgShipState): AI friends
+                // and couch players. ?aiplayer forces the LOCAL ship's Update branch to AI but
+                // leaves its Controller (Keyboard/pad), so the primary is still excluded by slot.
+                if (!IsLocallyOwned(s) || s.Owner == localPrimarySlot)
                 {
                     continue;
                 }
@@ -70,13 +73,15 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // ---- client: receive -------------------------------------------------------------------
+        // Is this slot actively streamed to us? (Host-side grant bookkeeping asks.)
+        private static bool FriendChannelExists(byte slot)
+        {
+            return friendChannels.ContainsKey(slot);
+        }
+
+        // ---- receive (either role) --------------------------------------------------------------
         private static void HandleFriendState(byte[] data)
         {
-            if (isHost)
-            {
-                return; // a host never drives friend puppets -- it runs the real AI
-            }
             if (!NetProtocol.TryDecodeFriendState(data, out byte slot, out _, out ShipSample sample, out int shots, out float life))
             {
                 return;
@@ -95,17 +100,25 @@ namespace EvilAliensWeb.Compat.Net
             ch.BulletLife = life;
             ch.LastRxAt = NowMs;
             ch.Buffer.Add(sample);
+            grantsAwaitingStream.Remove(slot); // the peer took the grant -- stop the claim clock
         }
 
-        // ---- client: per-tick puppet management + interpolation clock --------------------------
+        // ---- per-tick puppet management + interpolation clock (either role) --------------------
         private static void TickFriends()
         {
-            if (isHost || friendChannels.Count == 0)
+            if (friendChannels.Count == 0)
             {
                 return;
             }
             long now = NowMs;
-            long timeout = (RemotePaused || localPaused) ? PausedPeerTimeoutMs : FriendTimeoutMs;
+            // While the peer is PAUSED its stream stops entirely; while it is STALLED (card 11.5's
+            // grace window) the link is unwell but the session is deliberately being ridden out --
+            // in neither case may a 500 ms gap blow up the puppets, or a wifi hiccup would kill the
+            // peer's couch players while the run itself survives. Enemy puppets park for the same
+            // reason (NetPuppets' PeerStalled check).
+            long timeout = (RemotePaused || localPaused) ? PausedPeerTimeoutMs
+                : PeerStalled ? PeerTimeoutMs + PeerGraceMs
+                : FriendTimeoutMs;
             friendScratchSlots.Clear();
             foreach (byte slot in friendChannels.Keys)
             {
@@ -125,6 +138,13 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 if (now - ch.LastRxAt > timeout)
                 {
+                    // The stream stopped: mirror the death, but KEEP the seat -- the owning peer
+                    // holds it for the respawn (exactly like the primary remote puppet, whose
+                    // "slot stays reserved" comment says the same). Freeing it here would let the
+                    // host's own next AddPlayer(AI)/couch join take the slot, and the returning
+                    // ship's stream would then be stuck retrying SpawnFriend forever: an
+                    // invisible ship with cross-credited kills, the very bug this card removes.
+                    // Seats are released on peer loss / teardown (ReleaseAllFriendPuppets).
                     if (ch.Puppet != null)
                     {
                         ExplodeFriend(ch, slot);
@@ -132,7 +152,6 @@ namespace EvilAliensWeb.Compat.Net
                     else
                     {
                         friendChannels.Remove(slot);
-                        oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
                     }
                     continue;
                 }
@@ -173,11 +192,23 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void SpawnFriend(FriendChannel ch, byte slot)
         {
-            // Identity slot: seat the puppet in the SAME slot the host runs the friend in (score/lives
-            // sync lines up). AddPlayerAt refuses a busy slot, so this never squats a human/remote ship.
-            if (!oracle.AddPlayerAt(slot, ControlDevice.RemoteFriend))
+            // Identity slot: seat the puppet in the SAME slot its owner runs it in (score/lives sync
+            // lines up). AddPlayerAt refuses a busy slot, so this never squats a human/remote ship --
+            // but the host RESERVES a granted couch slot as RemoteFriend when it answers the join
+            // request, so a seat we already hold for this very puppet is the expected case too.
+            if (!oracle.AddPlayerAt(slot, ControlDevice.RemoteFriend)
+                && !(oracle.IsSeated(slot) && oracle.Controller(slot) == ControlDevice.RemoteFriend))
             {
-                return; // slot busy (host friends are the high slots, so this is not expected) -- retry
+                return; // slot busy with someone else -- retry
+            }
+            // The scene may already have put a ship in this seat (SpawnAllPlayers respawns every
+            // seated slot after a reset) -- adopt it rather than adding a second ship to the slot.
+            PlayerShip existing = oracle.GetPlayerShip(slot);
+            if (existing != null)
+            {
+                ch.Puppet = existing;
+                ch.RenderMs = double.NaN;
+                return;
             }
             PlayerShip ship = bin.Recycle<PlayerShip>();
             if (ship == null)
@@ -190,8 +221,9 @@ namespace EvilAliensWeb.Compat.Net
             Console.WriteLine("[net] friend ship joined slot=" + slot);
         }
 
-        // Mirror the death LOOK locally (explosions + cue) and free the slot. Never Die() -- that would
-        // fire the local respawn-summon for a ship we don't own; a real respawn arrives as a new stream.
+        // Mirror the death LOOK locally (explosions + cue). Never Die() -- that would fire the local
+        // respawn-summon for a ship we don't own; a real respawn arrives as a new stream. The oracle
+        // seat is deliberately NOT freed (see the timeout comment above).
         private static void ExplodeFriend(FriendChannel ch, byte slot)
         {
             PlayerShip p = ch.Puppet;
@@ -206,7 +238,6 @@ namespace EvilAliensWeb.Compat.Net
             bin.Add((GameComponent)(object)explosion);
             sound.PlayCue("expl2");
             bin.Remove((GameComponent)(object)p);
-            oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
             Console.WriteLine("[net] friend ship died slot=" + slot);
         }
 
@@ -227,6 +258,16 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
             }
+            // ADOPT a ship the scene spawned into this slot behind our back -- SpawnAllPlayers
+            // respawns every seated slot after a death/checkpoint reset, puppet slots included.
+            // Without this the re-spawned puppet matches no channel and freezes on its spawn pose
+            // forever (the primary remote path has always adopted; this one didn't).
+            if (ch == null && friendChannels.TryGetValue((byte)ship.Owner, out FriendChannel bySlot))
+            {
+                bySlot.Puppet = ship;
+                bySlot.RenderMs = double.NaN;
+                ch = bySlot;
+            }
             if (ch == null || !ch.Buffer.HasSamples || double.IsNaN(ch.RenderMs))
             {
                 return; // hold the spawn pose until the first sample lands
@@ -234,6 +275,31 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 pos = ch.Buffer.Sample(ch.RenderMs, out _);
             ShipSample newest = ch.Buffer.Newest;
             ship.NetApplyRemoteState(pos, newest.Aim, newest.Firing, ch.ShotsPerSec, ch.BulletLife);
+        }
+
+        // Peer loss in a LISTED session (card 4d904410): the host keeps playing its own level, so
+        // nothing purges the departed joiner's couch puppets -- without this they stay frozen on
+        // screen in seats that never free, and oracle.Players never falls back for re-listing.
+        // (Every other peer-loss path ends the match and the scene teardown does it.)
+        private static void ReleaseAllFriendPuppets()
+        {
+            friendScratchSlots.Clear();
+            foreach (byte slot in friendChannels.Keys)
+            {
+                friendScratchSlots.Add(slot);
+            }
+            foreach (byte slot in friendScratchSlots)
+            {
+                if (friendChannels.TryGetValue(slot, out FriendChannel ch) && ch.Puppet != null)
+                {
+                    ExplodeFriend(ch, slot);
+                }
+                else
+                {
+                    friendChannels.Remove(slot);
+                    oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
+                }
+            }
         }
 
         // Session teardown: puppet COMPONENTS are torn down by the scene's own purge (like the primary

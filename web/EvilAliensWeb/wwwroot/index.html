@@ -300,10 +300,21 @@
         var tickFailures = 0;
         var TICK_MAX_FAILURES = 30;
 
+        // Frame-loop hooks for the dev FPS HUD (card 22e655b5). Declared here, owned by the
+        // eaFps block near the bottom of this file — it fills them in when it arms itself, so
+        // a build with no HUD runs the loop exactly as before (two null checks per frame).
+        //   eaFpsAfterTick  — called right after the tick returns (GPU-sync measurement)
+        //   eaFpsUncapped   — true drives the loop off a MessageChannel instead of rAF, so the
+        //                     frame rate is no longer vsync-gated and the fps readout becomes a
+        //                     real throughput number instead of "your refresh rate".
+        window.eaFpsAfterTick = null;
+        window.eaFpsUncapped = false;
+
         function tickJS()
         {
             try {
                 window.theInstance.invokeMethod('TickDotNet');
+                if (window.eaFpsAfterTick) window.eaFpsAfterTick();
                 tickFailures = 0;
             } catch (e) {
                 tickFailures++;
@@ -332,6 +343,22 @@
             document.body.appendChild(ov);
         }
 
+        // The uncapped pump (eaFpsUncapped). A MessageChannel post schedules a macrotask with
+        // no clamp — setTimeout(0) is floored at ~4ms (≈250fps) by every browser, which would
+        // put a fake ceiling on the very number the uncapped mode exists to measure. It still
+        // yields to the event loop between frames, so the page stays responsive enough to turn
+        // the mode back off.
+        var uncapChannel = null;
+        function pumpUncapped()
+        {
+            if (!uncapChannel)
+            {
+                uncapChannel = new MessageChannel();
+                uncapChannel.port1.onmessage = function () { tickJS(); };
+            }
+            uncapChannel.port2.postMessage(0);
+        }
+
         function scheduleTick()
         {
             // Browsers pause requestAnimationFrame in a backgrounded/hidden tab,
@@ -340,6 +367,8 @@
             // running; use rAF when visible for smooth, vsync-aligned frames.
             if (document.hidden)
                 setTimeout(tickJS, 33);
+            else if (window.eaFpsUncapped)
+                pumpUncapped();
             else
                 window.requestAnimationFrame(tickJS);
         }
@@ -2641,6 +2670,414 @@
                 },
                 hide: function () { if (el) { el.style.display = "none"; } }
             };
+        })();
+    </script>
+
+    <!-- eaFps: the dev-build frame profiler HUD (card 22e655b5).
+
+         WHY IT IS NOT JUST AN FPS COUNTER. The loop is rAF-driven, so the frame RATE is
+         vsync-gated: at 60Hz a 3ms frame and a 15ms frame both read "60 fps", right up until
+         the game falls off the cliff. So the HUD leads with fps but the number that actually
+         moves when you optimize is HEADROOM (1000 / frame work ms) — and under it, the
+         per-phase breakdown from Compat/FrameProfiler that says WHICH part costs the ms.
+
+         Built outside #app so it survives Blazor's mount, and fixed-position top-left: the
+         other panels (eaWalls/eaSpider/...) and the fullscreen button all live top-right, and
+         in a 16:9 window the left letterbox bar is dead space anyway. Fullscreen targets
+         document.documentElement, so it stays visible there too.
+
+         VISIBLE BY DEFAULT IN DEV BUILDS, INVISIBLE IN THE PUBLISHED ONE: keyed off
+         window.eaBuildHash === 'dev' (deploy.yml stamps a real fingerprint at publish). That
+         is exactly "all dev builds" — Debug *and* a local Release publish — with no #if DEBUG
+         and no behavioural divergence between configurations. The C# accumulators are armed by
+         this panel, so a shipped build never touches a stopwatch.
+
+         Flags: ?fpshud force on (works on the live site) · ?fpshud=full force on, expanded ·
+         ?nofps hide in a dev build (keeps harness/showcase screenshots clean) ·
+         ?fpsuncapped boot with the rAF cap off · ?fpsgpu boot with gl.finish() frame sync on.
+         Console: eaFps() toggles compact/expanded/off, eaFps.stats(), eaFps.uncap(b),
+         eaFps.gpu(b), eaFps.test(workMs, intervalMs, frames). ?fps= is NOT this — that is the
+         sprite harness' playback rate. -->
+    <script>
+        window.eaFps = (function ()
+        {
+            var q = window.location.search || "";
+            var forced = /[?&]fpshud\b/i.test(q);
+            var suppressed = /[?&]nofps\b/i.test(q);
+            var isDevBuild = String(window.eaBuildHash || 'dev') === 'dev';
+            // ?fpshud beats ?nofps beats the dev-build default.
+            var visible = forced || (isDevBuild && !suppressed);
+            var expanded = /[?&]fpshud=full\b/i.test(q);
+
+            var el = null, armed = false, wasUnfocused = true, poll = null;
+            var glCalls = 0, glWindow = [], glPatched = false;
+            var gpuMs = 0, gl = null, gpuSync = /[?&]fpsgpu\b/i.test(q);
+
+            // Draw-call counting. Patch the PROTOTYPES rather than a live context: KNI creates
+            // the context itself (nkast.Wasm.Canvas), so this works whichever GL version it
+            // picks and regardless of whether we run before or after creation. The first call
+            // through also hands us the context for gl.finish(). Only installed when the HUD is
+            // up — a shipped build never wraps a hot GL entry point.
+            function patchGl()
+            {
+                if (glPatched) { return; }
+                glPatched = true;
+                ["WebGLRenderingContext", "WebGL2RenderingContext"].forEach(function (name)
+                {
+                    var C = window[name];
+                    if (!C || !C.prototype) { return; }
+                    ["drawElements", "drawArrays", "drawElementsInstanced",
+                     "drawArraysInstanced", "drawRangeElements"].forEach(function (m)
+                    {
+                        var orig = C.prototype[m];
+                        if (typeof orig !== "function") { return; }
+                        C.prototype[m] = function ()
+                        {
+                            glCalls++;
+                            if (!gl) { gl = this; }
+                            return orig.apply(this, arguments);
+                        };
+                    });
+                });
+            }
+
+            // Runs right after each tick returns (window.eaFpsAfterTick, called from tickJS).
+            // Rolls the per-frame draw-call count, and — only in gpu-sync mode — blocks on
+            // gl.finish() to convert the GPU's asynchronous work into a measurable wait.
+            // WebGL commands are QUEUED, so without this the CPU-derived headroom overstates a
+            // GPU-bound frame; the stall is the price of finding that out, hence opt-in.
+            function afterTick()
+            {
+                glWindow.push(glCalls);
+                if (glWindow.length > 120) { glWindow.shift(); }
+                glCalls = 0;
+                if (gpuSync && gl)
+                {
+                    var t0 = performance.now();
+                    try { gl.finish(); } catch (e) { gpuSync = false; return; }
+                    // Smoothed, or it reads as noise: the wait is bimodal frame to frame.
+                    gpuMs += (performance.now() - t0 - gpuMs) * 0.1;
+                }
+                else { gpuMs = 0; }
+            }
+
+            function mean(a)
+            {
+                if (!a.length) { return 0; }
+                var s = 0;
+                for (var i = 0; i < a.length; i++) { s += a[i]; }
+                return s / a.length;
+            }
+
+            function build()
+            {
+                var css = document.createElement("style");
+                css.textContent =
+                    "#ea-fps{position:fixed;top:10px;left:10px;z-index:99998;width:246px;" +
+                    "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                    "background:rgba(10,8,20,.82);border:1px solid rgba(140,170,220,.35);" +
+                    "border-radius:8px;padding:8px 10px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                    "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px);" +
+                    // pointer-events:none is deliberate — this thing sits over a shoot-'em-up
+                    // where Mouse1 anywhere on the canvas fires. A clickable panel would eat
+                    // every shot aimed at that corner. Only the tiny mode tag (the expand/
+                    // collapse button) and the mode checkboxes opt back in below, so the dead
+                    // zone is ~54x14px instead of the whole panel.
+                    "pointer-events:none}" +
+                    "#ea-fps.compact{width:186px}" +
+                    "#ea-fps .hdr{display:flex;align-items:baseline;gap:6px}" +
+                    "#ea-fps .big{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;color:#9ffcd0}" +
+                    "#ea-fps .u{font-size:11px;color:#8a86a0}" +
+                    "#ea-fps .tag{margin-left:auto;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;" +
+                    "color:#8a86a0;border:1px solid rgba(140,170,220,.3);border-radius:4px;padding:1px 5px;" +
+                    "pointer-events:auto;cursor:pointer}" +
+                    "#ea-fps .tag:hover{color:#e8e8f0;border-color:rgba(140,170,220,.7)}" +
+                    "#ea-fps .tag.hot{color:#ffd98f;border-color:rgba(255,217,143,.5)}" +
+                    "#ea-fps .sub{margin-top:2px;font-variant-numeric:tabular-nums;color:#b8d4ff}" +
+                    "#ea-fps .sub b{color:#ffd98f;font-weight:600}" +
+                    "#ea-fps .warn{margin-top:4px;font-size:10.5px;color:#ffb0b0;line-height:1.3}" +
+                    "#ea-fps .body{margin-top:7px;padding-top:7px;border-top:1px solid rgba(140,170,220,.25)}" +
+                    "#ea-fps canvas{display:block;width:100%;height:34px;border-radius:3px;" +
+                    "background:rgba(255,255,255,.04)}" +
+                    "#ea-fps table{width:100%;border-collapse:collapse;margin-top:6px;" +
+                    "font-variant-numeric:tabular-nums}" +
+                    "#ea-fps td{padding:1px 0;font-size:11px}" +
+                    "#ea-fps td.k{color:#b8b4c8}" +
+                    "#ea-fps td.k.sub2{padding-left:9px;color:#8a86a0}" +
+                    "#ea-fps td.v{text-align:right;width:44px;color:#9ffcd0}" +
+                    "#ea-fps td.bar{width:56px;padding-left:6px}" +
+                    "#ea-fps td.bar i{display:block;height:6px;border-radius:2px;background:#6fb0ff;min-width:1px}" +
+                    "#ea-fps td.k.sub2+td+td.bar i{background:#4a7cc0}" +
+                    "#ea-fps .gl{margin-top:6px;font-size:11px;color:#ffd98f;font-variant-numeric:tabular-nums}" +
+                    "#ea-fps .modes{margin-top:7px;display:flex;gap:10px;font-size:10.5px;color:#b8b4c8;" +
+                    "pointer-events:auto}" +
+                    "#ea-fps .modes label{display:flex;gap:4px;align-items:center;cursor:pointer}" +
+                    "#ea-fps .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.35}";
+                document.head.appendChild(css);
+
+                el = document.createElement("div");
+                el.id = "ea-fps";
+                el.innerHTML =
+                    '<div class="hdr"><span class="big" id="eaf-fps">--</span><span class="u">fps</span>' +
+                    '<span class="tag" id="eaf-mode" title="Click to expand / collapse the frame breakdown">vsync</span></div>' +
+                    '<div class="sub"><span id="eaf-cpu">--</span> ms/frame &rarr; <b id="eaf-hr">--</b> fps headroom</div>' +
+                    '<div class="warn" id="eaf-warn" style="display:none"></div>' +
+                    '<div class="body" id="eaf-body">' +
+                    '<canvas id="eaf-spark" width="452" height="68"></canvas>' +
+                    '<table id="eaf-rows"></table>' +
+                    '<div class="gl" id="eaf-gl"></div>' +
+                    '<div class="modes">' +
+                    '<label><input type="checkbox" id="eaf-uncap" autocomplete="off"> uncap</label>' +
+                    '<label><input type="checkbox" id="eaf-gpu" autocomplete="off"> gpu sync</label>' +
+                    '</div>' +
+                    '<div class="hint" id="eaf-hint"></div>' +
+                    '</div>';
+                document.body.appendChild(el);
+
+                el.querySelector("#eaf-mode").addEventListener("click", function ()
+                {
+                    setExpanded(!expanded);
+                });
+
+                var un = el.querySelector("#eaf-uncap");
+                un.checked = window.eaFpsUncapped;
+                un.addEventListener("change", function () { setUncapped(un.checked); });
+                var gp = el.querySelector("#eaf-gpu");
+                gp.checked = gpuSync;
+                gp.addEventListener("change", function () { setGpuSync(gp.checked); });
+
+                setExpanded(expanded);
+            }
+
+            function setExpanded(on)
+            {
+                expanded = !!on;
+                if (!el) { return; }
+                el.classList.toggle("compact", !expanded);
+                el.querySelector("#eaf-body").style.display = expanded ? "block" : "none";
+            }
+
+            function setUncapped(on)
+            {
+                window.eaFpsUncapped = !!on;
+                if (el) { el.querySelector("#eaf-uncap").checked = window.eaFpsUncapped; }
+                // The rate changes the instant the pump does, so the old samples describe a
+                // different loop. Re-arm to drop them rather than average across the switch.
+                rearm();
+            }
+
+            function setGpuSync(on)
+            {
+                gpuSync = !!on;
+                gpuMs = 0;
+                if (el) { el.querySelector("#eaf-gpu").checked = gpuSync; }
+                rearm();
+            }
+
+            function rearm()
+            {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsProfile', true); armed = true; }
+                catch (e) { armed = false; }
+            }
+
+            // The section rows. `update` is the PARENT of the three indented sub-rows, so only
+            // update + the draw rows + other sum to the tick — the sub-rows must never be added
+            // in or the total double-counts.
+            var ROWS = [
+                { k: "update",     label: "update",     sub: false },
+                { k: "components", label: "components", sub: true },
+                { k: "collision",  label: "collision",  sub: true },
+                { k: "net",        label: "net",        sub: true },
+                { k: "scene",      label: "draw scene", sub: false },
+                { k: "post",       label: "post fx",    sub: false },
+                { k: "present",    label: "present",    sub: false },
+                { k: "swap",       label: "swap (gpu)", sub: false }
+            ];
+
+            function renderRows(s, otherMs, tickMs)
+            {
+                var html = "", scale = Math.max(tickMs, 0.001);
+                for (var i = 0; i < ROWS.length; i++)
+                {
+                    var r = ROWS[i], v = s[r.k] || 0;
+                    html += '<tr><td class="k' + (r.sub ? " sub2" : "") + '">' + r.label + '</td>'
+                        + '<td class="v">' + v.toFixed(2) + '</td>'
+                        + '<td class="bar"><i style="width:' + Math.min(100, v / scale * 100).toFixed(1) + '%"></i></td></tr>';
+                }
+                html += '<tr><td class="k">other</td><td class="v">' + otherMs.toFixed(2) + '</td>'
+                    + '<td class="bar"><i style="width:' + Math.min(100, otherMs / scale * 100).toFixed(1) + '%"></i></td></tr>';
+                el.querySelector("#eaf-rows").innerHTML = html;
+            }
+
+            // Frame-time sparkline over the profiler's own 120-frame window. The bar colour is
+            // the budget verdict, not decoration: green under the vsync budget, amber over it,
+            // red over double — a stutter you can see in the graph but never in the mean.
+            function renderSpark(frames, budgetMs)
+            {
+                var c = el.querySelector("#eaf-spark");
+                var ctx = c.getContext("2d");
+                var w = c.width, h = c.height;
+                ctx.clearRect(0, 0, w, h);
+                if (!frames || !frames.length) { return; }
+                var peak = 0;
+                for (var i = 0; i < frames.length; i++) { if (frames[i] > peak) { peak = frames[i]; } }
+                // Never scale to less than the budget, or a healthy flat run looks alarming.
+                var top = Math.max(peak * 1.15, budgetMs * 1.3, 1);
+                var bw = w / frames.length;
+                for (var j = 0; j < frames.length; j++)
+                {
+                    var v = frames[j];
+                    var bh = Math.max(1, (v / top) * h);
+                    ctx.fillStyle = (v > budgetMs * 2) ? "#ff7a7a" : (v > budgetMs ? "#ffd98f" : "#6fe3b0");
+                    ctx.fillRect(j * bw, h - bh, Math.max(1, bw - 0.5), bh);
+                }
+                // The budget line (one vsync interval): bars crossing it are dropped frames.
+                var y = h - (budgetMs / top) * h;
+                if (y > 0 && y < h)
+                {
+                    ctx.strokeStyle = "rgba(184,212,255,.55)";
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(w, y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+
+            function refresh()
+            {
+                if (!el) { return; }
+                // document.hidden / hasFocus is the AUTHORITATIVE throttle signal: a backgrounded
+                // tab still delivers ~1 rAF/second, which no timing test inside the game can tell
+                // apart from a very slow frame. Re-arm on regaining focus so the throttled garbage
+                // is dropped instead of poisoning the average for the next two seconds.
+                var unfocused = document.hidden || !document.hasFocus();
+                var warn = el.querySelector("#eaf-warn");
+                if (!armed || (wasUnfocused && !unfocused)) { rearm(); }
+                wasUnfocused = unfocused;
+                if (unfocused)
+                {
+                    warn.style.display = "block";
+                    warn.textContent = "⚠ unfocused — a background tab throttles rAF, readings are meaningless";
+                    return;
+                }
+
+                var raw;
+                try { raw = DotNet.invokeMethod('EvilAliensWeb', 'debugFpsStats'); }
+                catch (e) { warn.style.display = "block"; warn.textContent = "waiting for the runtime…"; return; }
+                var d;
+                try { d = JSON.parse(raw); } catch (e) { return; }
+                if (!d.on) { rearm(); return; }
+                if (d.stale)
+                {
+                    warn.style.display = "block";
+                    warn.textContent = "collecting samples…";
+                    return;
+                }
+                warn.style.display = "none";
+
+                var glMean = mean(glWindow);
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsGlCalls', Math.round(glMean)); }
+                catch (e) { /* runtime went away between calls — the next poll retries */ }
+
+                // Headroom is CPU-derived; in gpu-sync mode the measured GPU wait is added in,
+                // which is the whole reason that mode exists. Label which one is on screen.
+                var cost = d.tickMs + (gpuSync ? gpuMs : 0);
+                var headroom = gpuSync ? (cost > 0.0001 ? 1000 / cost : 0) : d.headroomFps;
+                el.querySelector("#eaf-fps").textContent = d.fps.toFixed(1);
+                el.querySelector("#eaf-cpu").textContent = cost.toFixed(2);
+                el.querySelector("#eaf-hr").textContent = headroom.toFixed(0);
+                var mode = el.querySelector("#eaf-mode");
+                mode.textContent = window.eaFpsUncapped ? "uncapped" : "vsync";
+                mode.classList.toggle("hot", !!window.eaFpsUncapped);
+
+                if (!expanded) { return; }
+                renderRows(d.sections || {}, d.otherMs || 0, d.tickMs);
+                // Budget = the interval the loop is actually being delivered at (the refresh
+                // period under vsync). Uncapped there is no budget, so fall back to 60Hz.
+                var budget = window.eaFpsUncapped ? 16.7 : Math.max(d.intervalMs, 1);
+                renderSpark(d.frames, budget);
+                el.querySelector("#eaf-gl").textContent =
+                    Math.round(glMean) + " GL draw calls/frame"
+                    + (gpuSync ? "  ·  gpu wait " + gpuMs.toFixed(2) + " ms" : "");
+                el.querySelector("#eaf-hint").textContent =
+                    "p95 " + d.tickP95Ms.toFixed(2) + " ms"
+                    + (window.eaFpsUncapped
+                        ? "  ·  uncapped: fps is real throughput"
+                        : "  ·  fps is vsync-capped; headroom is not");
+            }
+
+            function show(mode)
+            {
+                if (!el) { patchGl(); build(); window.eaFpsAfterTick = afterTick; }
+                el.style.display = "block";
+                if (mode === "full") { setExpanded(true); }
+                else if (mode === "compact") { setExpanded(false); }
+                rearm();
+                if (!poll) { poll = setInterval(refresh, 250); }
+                refresh();
+            }
+
+            function hide()
+            {
+                if (el) { el.style.display = "none"; }
+                if (poll) { clearInterval(poll); poll = null; }
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugFpsProfile', false); } catch (e) { }
+                armed = false;
+            }
+
+            var api = function (arg)
+            {
+                if (arg === false || arg === "off") { hide(); return "fps hud off"; }
+                if (arg === "full" || arg === true) { show("full"); return "fps hud: expanded"; }
+                if (arg === "compact") { show("compact"); return "fps hud: compact"; }
+                // No argument: cycle compact -> expanded -> off, so one repeated call from the
+                // console reaches every state.
+                if (!el || el.style.display === "none") { show("compact"); return "fps hud: compact"; }
+                if (!expanded) { setExpanded(true); return "fps hud: expanded"; }
+                hide();
+                return "fps hud off";
+            };
+
+            // The console one-liner carries the SAME focus guard as the HUD. C# can't see
+            // document.hasFocus(), and an unfocused-but-visible window gets its rAF throttled to
+            // a rate the C#-side staleness test (mean interval > 100ms) does NOT catch — so the
+            // profiler would report a confident, badly wrong frame cost. Prefixing here is what
+            // stops a reading taken while you were tabbed away from being believed.
+            api.stats = function ()
+            {
+                try
+                {
+                    var line = DotNet.invokeMethod('EvilAliensWeb', 'debugFpsStatsLine');
+                    if (document.hidden || !document.hasFocus())
+                    {
+                        return "[UNFOCUSED — readings are meaningless, focus the window] " + line;
+                    }
+                    return line;
+                }
+                catch (e) { return "not booted"; }
+            };
+            api.uncap = function (on) { setUncapped(on !== false); return "uncapped: " + window.eaFpsUncapped; };
+            api.gpu = function (on) { setGpuSync(on !== false); return "gpu sync: " + gpuSync; };
+            // Data self-test for the window maths — the vsync trap as an assertion: `work` ms of
+            // work delivered every `interval` ms MUST read 1000/interval fps and 1000/work
+            // headroom. A profiler that reported the work rate as "fps" fails this loudly.
+            api.test = function (workMs, intervalMs, frames)
+            {
+                var w = Number(workMs) || 5, iv = Number(intervalMs) || 16.7, n = Number(frames) || 120;
+                try { return DotNet.invokeMethod('EvilAliensWeb', 'debugFpsSelfTest', w, iv, n); }
+                catch (e) { return "not booted"; }
+            };
+
+            if (visible)
+            {
+                if (/[?&]fpsuncapped\b/i.test(q)) { window.eaFpsUncapped = true; }
+                // The runtime isn't up at parse time; showing is cheap and idempotent, and
+                // rearm() retries on every poll until debugFpsProfile stops throwing.
+                show(expanded ? "full" : "compact");
+            }
+            return api;
         })();
     </script>
 </body>

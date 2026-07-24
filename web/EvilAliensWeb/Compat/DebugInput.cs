@@ -160,6 +160,49 @@ namespace EvilAliensWeb.Compat
 			return WallProfiler.Report();
 		}
 
+		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).
+		// FpsProfile(on) arms the per-phase accumulators, FpsStats() returns the HUD's JSON
+		// payload and FpsStatsLine() the one-line console form. Same polling contract as the
+		// wall meter above — the HUD reads this ~4x/second, never per frame.
+		[JSInvokable("debugFpsProfile")]
+		public static void FpsProfile(bool on)
+		{
+			FrameProfiler.SetEnabled(on);
+		}
+
+		[JSInvokable("debugFpsStats")]
+		public static string FpsStats()
+		{
+			return FrameProfiler.Report();
+		}
+
+		[JSInvokable("debugFpsStatsLine")]
+		public static string FpsStatsLine()
+		{
+			return FrameProfiler.StatsLine();
+		}
+
+		// Mean GL draw calls per frame, pushed from JS (the HUD patches drawElements/drawArrays
+		// — see index.html eaFps). Counted there because BlazorGL's cost is per-CALL and JS sees
+		// every source of them at once (sprite batches, bloom passes, the walls' 3D primitives)
+		// without touching SpriteBatchWrapper. The HUD renders its own copy; this push exists so
+		// the console one-liner is complete, and rides the 4Hz poll — NOT per frame, which would
+		// cost more interop than the thing being measured.
+		[JSInvokable("debugFpsGlCalls")]
+		public static void FpsGlCalls(int calls)
+		{
+			FrameProfiler.NoteGlCalls(calls);
+		}
+
+		// eaFps.test(): run the frame-window maths over a synthetic frame series and report
+		// measured vs expected. The point is the vsync trap itself — `work` ms of work
+		// delivered every `interval` ms must read as 1000/interval fps and 1000/work headroom.
+		[JSInvokable("debugFpsSelfTest")]
+		public static string FpsSelfTest(double workMs, double intervalMs, int frames)
+		{
+			return FrameProfiler.SelfTest(workMs, intervalMs, frames);
+		}
+
 		// JS bridge for the hitbox debug overlay (eaHitboxes in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitboxes', on). Toggles the ?hitboxes
 		// overlay at runtime (draws every collidable's collision shape colour-coded by kind);

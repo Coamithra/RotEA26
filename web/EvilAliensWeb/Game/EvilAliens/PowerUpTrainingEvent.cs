@@ -84,7 +84,6 @@ internal class PowerUpTrainingEvent : GameEvent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		timer.Update(gameTime);
 		messageShowTime.Update(gameTime);

@@ -55,9 +55,6 @@ internal class MarsBoss : KillableAlien
 	{
 		get
 		{
-			//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0048: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.Width *= 0.90999997f;
 			collisionBox.Height *= 0.48999998f;
@@ -131,7 +128,6 @@ internal class MarsBoss : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		fps = 16f;
 		interpolationOptions = InterpolationOptions.never;
@@ -156,35 +152,6 @@ internal class MarsBoss : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_013f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01be: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ab: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_030d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0312: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0317: Unknown result type (might be due to invalid IL or missing references)
-		//IL_031c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_033f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0344: Unknown result type (might be due to invalid IL or missing references)
-		//IL_035a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03f7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b2: Unknown result type (might be due to invalid IL or missing references)
 		fps = MathHelper.Lerp(32f, 16f, base.HitPointsNormalized);
 		float num = curframe;
 		base.Update(gameTime);
@@ -294,19 +261,6 @@ internal class MarsBoss : KillableAlien
 
 	private Vector2 AimGenerator(float lazeroffset)
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0062: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0067: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
 		target = oracle.GetRandomPlayerShip();
 		Vector2 val = ((target == null) ? (new Vector2(400f, 300f) - base.Position) : (target.GetPosition() - base.Position));
 		(val).Normalize();
@@ -316,7 +270,6 @@ internal class MarsBoss : KillableAlien
 
 	private void CreateGenerator()
 	{
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
 		stateTimer.Duration = MathHelper.Lerp(1000f, 6000f, (float)base.HitPoints / 150f);
 		stateTimer.Reset();
 		stateTimer.Start();
@@ -362,8 +315,6 @@ internal class MarsBoss : KillableAlien
 
 	private void MiniExplosion()
 	{
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(base.Position, 2f, 1.3f, base.Speed * 0.9f, base.Direction);
 		collection.Add((GameComponent)(object)explosion);
@@ -375,9 +326,6 @@ internal class MarsBoss : KillableAlien
 
 	private void Explode()
 	{
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a6: Unknown result type (might be due to invalid IL or missing references)
 		Die();
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(base.Position, 2f, 1.3f, base.Speed * 0.9f, base.Direction);
@@ -415,5 +363,38 @@ internal class MarsBoss : KillableAlien
 		{
 			texture = firstHalfOfSpritesheet;
 		}
+	}
+
+	// The charge-up `lazerGenerator` energy well is a child the host draws by hand (see Draw). On a
+	// JOIN peer this puppet is frozen, so the descriptor replicates the charge state and
+	// NetDriveExtras rebuilds a local silent copy into the same `lazerGenerator` field (Draw + the
+	// OnComponentRemoved Free() then cover it unchanged). See Compat/Net/NetChargeGlow.
+	private bool netCharging;
+
+	private Vector2 netChargeOffset;
+
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 2f;
+
+	internal bool NetCharging => lazerGenerator != null;
+
+	internal Vector2 NetChargeOffset => lazerGenerator != null ? lazerGenerator.Position - base.Position : Vector2.Zero;
+
+	internal float NetChargeWindup => lazerGenerator != null ? lazerGenerator.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => lazerGenerator != null ? lazerGenerator.NetSize : 2f;
+
+	internal void NetApplyCharge(bool charging, Vector2 offset, float windup, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windup;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
 	}
 }

@@ -454,9 +454,6 @@ internal abstract class GameScene : Scene
 
 	protected virtual void setPresence(GamerPresenceMode presenceMode)
 	{
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
 		{
@@ -670,13 +667,6 @@ internal abstract class GameScene : Scene
 
 	protected virtual void PreloadGraphicalContent()
 	{
-		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0117: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0278: Unknown result type (might be due to invalid IL or missing references)
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletevil");
 		contentManager.Load<Texture2D>("GFX/Sprites/bulletgood");
@@ -793,8 +783,6 @@ internal abstract class GameScene : Scene
 
 	protected void TestBlocks()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		int num = 20;
 		for (int i = 0; i < 800 / num; i++)
 		{
@@ -964,9 +952,6 @@ internal abstract class GameScene : Scene
 
 	private void SpawnPlayer(ControlDevice controlDevice)
 	{
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a4: Unknown result type (might be due to invalid IL or missing references)
 		PlayerShip playerShip = Collection.Recycle<PlayerShip>();
 		if (playerShip == null)
 		{
@@ -1079,9 +1064,19 @@ internal abstract class GameScene : Scene
 			checkScreenShot();
 		}
 		AIJoinTimer.Update(gameTime);
-		// Online co-op: AI friend ships aren't replicated yet (their slots would fire
-		// invisible bullets on the other peer), so no auto-join in any net session.
-		if (AIJoinTimer.Finished && AllowAIFriends && !EvilAliensWeb.Compat.Net.NetSession.Active && oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
+		// Online co-op: the HOST runs AI "friend" ships (Mechanical Friends cheat) and streams
+		// each one to the client, which shows it as a ControlDevice.RemoteFriend puppet whose
+		// bullets re-fire locally (coverage-gaps follow-up -- see Compat/Net/NetSession.Friends).
+		// The client must NOT auto-join AI friends of its own (they'd be host-authoritative
+		// duplicates); its budget is filled by the host's replicated puppets instead.
+		// In a net session, only the HOST adds AI friends, and only AFTER the client's Remote ship
+		// has taken its slot: that pins the roster order (local, remote, then friends) so a friend's
+		// oracle slot is the same index on both peers (identity mapping in NetSession.Friends keeps
+		// per-slot score/lives sync consistent, and the client's high slots stay free for the puppets).
+		bool aiFriendsAllowedHere = !EvilAliensWeb.Compat.Net.NetSession.Active
+			|| (EvilAliensWeb.Compat.Net.NetSession.IsHost && oracle.DeviceIsPlaying(ControlDevice.Remote));
+		if (AIJoinTimer.Finished && AllowAIFriends && aiFriendsAllowedHere
+			&& oracle.Players < Settings.GetInstance().Friends + 1 && oracle.Players < 4)
 		{
 			AddPlayer(ControlDevice.AI, spawnPlayerNormally);
 		}
@@ -1128,10 +1123,6 @@ internal abstract class GameScene : Scene
 
 	private void checkScreenShot()
 	{
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00eb: Expected O, but got Unknown
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0101: Unknown result type (might be due to invalid IL or missing references)
 		if (snapshotdelaytimer.Finished)
 		{
 			snapshotdelaytimer.Reset();
@@ -1219,9 +1210,6 @@ internal abstract class GameScene : Scene
 
 	private void takeScreenShot()
 	{
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0078: Expected O, but got Unknown
 		Game1.onPostDraw = (Game1.PostDrawEvent)Delegate.Remove(Game1.onPostDraw, game1PostDrawEvent);
 		if (((Collection<IGameComponent>)(object)base.Game.Components).Contains((IGameComponent)(object)this))
 		{
@@ -1315,9 +1303,6 @@ internal abstract class GameScene : Scene
 
 	protected void SpawnAllPlayers(bool invulnerable)
 	{
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f9: Unknown result type (might be due to invalid IL or missing references)
 		if (!isDemo)
 		{
 			score.ShowStartMessages();

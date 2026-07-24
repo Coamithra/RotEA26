@@ -34,10 +34,12 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   (curframe, a base field) which ALTERNATES between the mothershipA / mothershipB halves
     //   each 16-frame wrap in Update; that A/B swap is NOT a base field, so it is the one piece
     //   of state carried. HP-driven colorize redden tracks via the base Hp block (NetApplyHp).
-    //   The charge-up LazerGenerator glow is host-only (never created on a frozen puppet) so it
-    //   is not shown on the client; the fired Lazer itself replicates as its own puppet.
+    //   The charge-up LazerGenerator glow is a child the host draws by hand; it is replicated as a
+    //   charge state extra and rebuilt locally on the client (Compat/Net/NetChargeGlow) so the windup
+    //   telegraph shows before the beam. The fired Lazer itself replicates as its own puppet.
     // Spawn extras: [bossPosition:1]   (0 = left, 1 = right)
-    // State extras: [flags:1]          (bit0 = showing the mothershipB / second sheet half)
+    // State extras: [flags:1] (bit0 = mothershipB / second sheet half, bit1 = charging) + the 7-byte
+    //   NetChargeWire block while charging.
     internal sealed class MarsBossDescriptor : NetTypeDescriptor<MarsBoss>
     {
         private const byte FlagSecondSheet = 1;
@@ -58,12 +60,21 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
 
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
+            MarsBoss m = C(c);
             byte flags = 0;
-            if (C(c).NetSecondHalf)
+            if (m.NetSecondHalf)
             {
                 flags |= FlagSecondSheet;
             }
+            if (m.NetCharging)
+            {
+                flags |= NetChargeWire.FlagChargingBit1;
+            }
             buf[off++] = flags;
+            if (m.NetCharging)
+            {
+                off = NetChargeWire.Encode(buf, off, m.NetChargeOffset, m.NetChargeWindup, m.NetChargeSize);
+            }
             return off;
         }
 
@@ -73,7 +84,17 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             {
                 return;
             }
-            C(c).NetSetSpritesheetHalf((buf[off] & FlagSecondSheet) != 0);
+            MarsBoss m = C(c);
+            m.NetSetSpritesheetHalf((buf[off] & FlagSecondSheet) != 0);
+            if ((buf[off] & NetChargeWire.FlagChargingBit1) != 0 && len >= 1 + NetChargeWire.Bytes)
+            {
+                NetChargeWire.Decode(buf, off + 1, out Vector2 chargeOffset, out float windup, out float size);
+                m.NetApplyCharge(true, chargeOffset, windup, size);
+            }
+            else
+            {
+                m.NetApplyCharge(false, Vector2.Zero, 2.5f, 2f);
+            }
         }
     }
 

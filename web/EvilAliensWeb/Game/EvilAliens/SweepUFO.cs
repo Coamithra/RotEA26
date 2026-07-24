@@ -33,12 +33,6 @@ internal class SweepUFO : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -96,7 +90,6 @@ internal class SweepUFO : KillableAlien
 
 	public void Setup(bool targetplayer, int number, int total)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
 		this.targetplayer = targetplayer;
 		float num = 520f / (float)(total - 1);
 		base.Position = new Vector2(-100f, (float)number * num);
@@ -122,18 +115,6 @@ internal class SweepUFO : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_021f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0229: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0078: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0181: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0186: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		switch (state)
 		{
@@ -196,16 +177,6 @@ internal class SweepUFO : KillableAlien
 
 	private Vector2 GetLazerSpawnSpot()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 targetPosition = GetTargetPosition();
 		Vector2 val = targetPosition - base.Position;
 		(val).Normalize();
@@ -214,11 +185,6 @@ internal class SweepUFO : KillableAlien
 
 	private Vector2 GetTargetPosition()
 	{
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0045: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0029: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 position = default(Vector2);
 		if (targetplayer)
 		{
@@ -256,8 +222,6 @@ internal class SweepUFO : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
 		Die();
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(base.Position, 3.5f, 2.5f, base.Speed * 0.3f, base.Direction);
@@ -270,5 +234,42 @@ internal class SweepUFO : KillableAlien
 		{
 			AwardScore(isComboGenerator, other);
 		}
+	}
+
+	// ---- Online co-op replication seams (Compat/Net, coverage-gaps follow-up) ----------------
+	// The charge swarm `g` is a child LazerGenerator the host draws by hand (see Draw). On a JOIN
+	// peer this puppet is frozen, so it never spawns `g`; the descriptor replicates the charge state
+	// and NetDriveExtras rebuilds a local silent copy into the same `g` field (so Draw + the
+	// OnComponentRemoved Free() cover it unchanged). See Compat/Net/NetChargeGlow.
+	private bool netCharging;
+
+	private Vector2 netChargeOffset;
+
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 1f;
+
+	// Host encode: read live off the real generator (non-null only during the charge state).
+	internal bool NetCharging => g != null;
+
+	internal Vector2 NetChargeOffset => g != null ? g.Position - base.Position : Vector2.Zero;
+
+	internal float NetChargeWindup => g != null ? g.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => g != null ? g.NetSize : 1f;
+
+	// Client apply: record the replicated charge state (draw-relevant only; the child spawn happens
+	// in NetDriveExtras, never here -- the descriptor contract forbids spawning from ApplyStateExtra).
+	internal void NetApplyCharge(bool charging, Vector2 offset, float windup, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windup;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref g, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
 	}
 }

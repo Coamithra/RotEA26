@@ -233,13 +233,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 		get
 		{
-			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 			return _position;
 		}
 		set
 		{
-			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0002: Unknown result type (might be due to invalid IL or missing references)
 			_position = value;
 		}
 	}
@@ -260,13 +257,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 		get
 		{
-			//IL_000c: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0011: Unknown result type (might be due to invalid IL or missing references)
 			return _speed * MyMath.AngleToVector(_direction);
 		}
 		set
 		{
-			//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 			_speed = (value).Length();
 			_direction = MyMath.VectorToAngle(value);
 		}
@@ -336,12 +330,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 		get
 		{
-			//IL_0006: Unknown result type (might be due to invalid IL or missing references)
 			return MyMath.AngleToVector(_direction);
 		}
 		set
 		{
-			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 			_direction = MyMath.VectorToAngle(value);
 		}
 	}
@@ -351,9 +343,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	public AlienDrawableGameComponent(Game game)
 		: base(game)
 	{
-		//IL_0018: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0031: Unknown result type (might be due to invalid IL or missing references)
 		input = ServiceHelper.Get<IInputHandlerService>().InputHandler;
 		spriteBatch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		collection = ServiceHelper.Get<IComponentBinService>().ComponentBin;
@@ -365,10 +354,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	protected bool OffScreen(float buffer)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0029: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
 		if (!(Position.X > 800f + buffer) && !(Position.X < 0f - buffer) && !(Position.Y > 600f + buffer))
 		{
 			return Position.Y < 0f - buffer;
@@ -396,10 +381,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	protected CollisionBox retrieveBoundsFromTexture()
 	{
-		//IL_008b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0095: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
 		if (collisionBox == null)
 		{
 			collisionBox = new CollisionBox();
@@ -417,8 +398,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public void LoadAnimation(AnimationData animationData)
 	{
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
 		texture = content.Load<Texture2D>(animationData.TextureName);
 		texturename = animationData.TextureName;
 		rows = animationData.rows;
@@ -434,9 +413,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	protected void Move(Vector2 direction, GameTime gameTime)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		if (direction != Vector2.Zero)
 		{
 			Move((float?)MyMath.VectorToAngle(direction), gameTime);
@@ -454,26 +430,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	protected void Move(float? direction, GameTime gameTime)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0068: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0090: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0091: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0092: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0097: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
 		float num = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
 		float direction2 = _direction;
 		Vector2 val = MyMath.AngleToVector(direction2) * _speed;
@@ -486,14 +442,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0064: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0067: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
 		foreach (Timer timer in timers)
 		{
 			timer.Update(gameTime);
@@ -512,10 +460,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0090: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = blendMode;
 		if (columns > 1 || rows > 1)
 		{
@@ -548,13 +492,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private void drawWithoutInterpolation()
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0070: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0083: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0058: Unknown result type (might be due to invalid IL or missing references)
 		bool flag = spriteBatch.colorizeEffect.Enabled || spriteBatch.lightenEffect.Enabled;
 		Rectangle frameRectangle = getFrameRectangle((int)curframe);
 		if (flag)
@@ -571,7 +508,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private Rectangle getFrameRectangle(int framenr)
 	{
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
 		int num = framenr / columns;
 		int num2 = framenr % columns;
 		int num3 = texture.LogicalWidth() - (columns - 1) * separatingspace;
@@ -585,32 +521,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private void drawWithInterpolation()
 	{
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0073: Expected I4, but got Unknown
-		//IL_0148: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0165: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01be: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00be: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00eb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ed: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ff: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0102: Unknown result type (might be due to invalid IL or missing references)
 		int num = (int)curframe;
 		float num2 = curframe % 1f;
 		if (!spriteBatch.colorizeEffect.Enabled)
@@ -657,7 +567,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public void AwardScore(bool combo, ICollidable other)
 	{
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 		if ((!awarded & (PointValue > 0f)) && other is IAlienKiller && ((IAlienKiller)other).Player() >= 0)
 		{
 			Score.AddScore(PointValue, combo, Position, ((IAlienKiller)other).Player());
@@ -667,7 +576,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	public void AwardScoreToAll(bool combo)
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
 		if (!(!awarded & (PointValue > 0f)))
 		{
 			return;
@@ -790,6 +698,16 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			timer.Update(gameTime);
 		}
+	}
+
+	// Per-tick client-puppet hook, called by NetPuppetDriver once per frame (UPDATE phase, not
+	// Draw/snapshot) after the base dead-reckon. Default no-op. A type overrides it when a frozen
+	// puppet needs to manage a live CHILD component the host draws by hand -- e.g. the enemy
+	// laser-charge glow (a LazerGenerator the frozen Update would normally spawn); the descriptor's
+	// ApplyStateExtra only records the replicated charge state, and the actual child spawn/free
+	// happens HERE, so the descriptor contract's "never spawn from ApplyStateExtra" holds.
+	internal virtual void NetDriveExtras(GameTime gameTime)
+	{
 	}
 
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)

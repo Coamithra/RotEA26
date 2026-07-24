@@ -75,16 +75,21 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         }
     }
 
-    // SweepUFO (SweepUFO.cs) -- BASE-ONLY.
+    // SweepUFO (SweepUFO.cs) -- CHARGE-STATE ONLY.
     //   State surface: single fixed sheet "GFX/Sprites/mediumship"; KillableAlien, so hit-blink is
     //   a `timers` entry the driver ticks and HP rides the base block (NetApplyHp). Setup(targetplayer,
     //   number, total) uses number/total ONLY to compute the entry Position (which NetBaseState
-    //   carries) and targetplayer ONLY to aim the lazer -- but the LazerGenerator/Lazer are spawned
-    //   inside the frozen Update and never exist on the puppet (Draw's `if (g != null)` is always
-    //   false), and the damaging beam is its own replicated Lazer entity (registry #11). So no Setup
-    //   arg affects the puppet's Draw. Nothing to pin beyond the base fields.
+    //   carries) and targetplayer ONLY to aim the lazer -- so no Setup arg affects the puppet's Draw.
+    //   The damaging beam is its own replicated Lazer entity (registry #11). The ONE Draw ingredient
+    //   the frozen Update would otherwise spawn is the charge-swarm glow (`g`, a child LazerGenerator
+    //   the host draws by hand) -- replicated as a charge state extra + rebuilt locally on the client
+    //   (Compat/Net/NetChargeGlow) so the windup telegraph shows before the beam.
+    // Spawn extras: none. State extras: [flags:1] (bit0 = charging) + the 7-byte NetChargeWire block
+    //   while charging.
     internal sealed class SweepUfoDescriptor : NetTypeDescriptor<SweepUFO>
     {
+        private const byte FlagCharging = 1;
+
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
             SweepUFO u = SweepUFO.NewSweepUFO(bin, game);
@@ -92,6 +97,39 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             // Setup-computed Position is overwritten by NetBaseState on the spawn snapshot anyway.
             u.Setup(false, 0, 2);
             return u;
+        }
+
+        public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
+        {
+            SweepUFO u = C(c);
+            if (u.NetCharging)
+            {
+                buf[off++] = FlagCharging;
+                off = NetChargeWire.Encode(buf, off, u.NetChargeOffset, u.NetChargeWindup, u.NetChargeSize);
+            }
+            else
+            {
+                buf[off++] = 0;
+            }
+            return off;
+        }
+
+        public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
+        {
+            if (len < 1)
+            {
+                return;
+            }
+            SweepUFO u = C(c);
+            if ((buf[off] & FlagCharging) != 0 && len >= 1 + NetChargeWire.Bytes)
+            {
+                NetChargeWire.Decode(buf, off + 1, out Vector2 chargeOffset, out float windup, out float size);
+                u.NetApplyCharge(true, chargeOffset, windup, size);
+            }
+            else
+            {
+                u.NetApplyCharge(false, Vector2.Zero, 2.5f, 1f);
+            }
         }
     }
 

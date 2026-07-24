@@ -43,7 +43,7 @@ namespace EvilAliensWeb.Compat.Net
     // triggers a live-world replay once the client's scene is up), and match-end
     // semantics for menu sessions: any player leaving (EvLeave / peer loss) ends the
     // match for both -- Stop() tears the session down and the menus surface a notice.
-    public static class NetSession
+    public static partial class NetSession
     {
         public const byte ProtocolVersion = 4;
         public const float InterpDelayMs = 100f;
@@ -328,6 +328,7 @@ namespace EvilAliensWeb.Compat.Net
             lastRxEventSeq = -1;
             remoteAlive = false;
             puppet = null;
+            ResetFriends();
             txSeq = 0;
             txEventSeq = 0;
             lastStreamTx = 0;
@@ -456,6 +457,10 @@ namespace EvilAliensWeb.Compat.Net
                     if (now - lastStreamTx >= StreamIntervalMs)
                     {
                         SendShipState(now);
+                        if (isHost)
+                        {
+                            SendFriendStates(now); // host AI friends ride the same cadence
+                        }
                     }
                     if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
                     {
@@ -468,6 +473,7 @@ namespace EvilAliensWeb.Compat.Net
                 }
             }
             ManagePuppet();
+            TickFriends(); // client: spawn/interpolate/expire the host's AI-friend puppets
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
                 lastMetricsAt = now;
@@ -974,6 +980,9 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 case NetProtocol.MsgShipState:
                     HandleShipState(data);
+                    break;
+                case NetProtocol.MsgFriendState:
+                    HandleFriendState(data);
                     break;
                 case NetProtocol.MsgEvent:
                     HandleEvent(data);

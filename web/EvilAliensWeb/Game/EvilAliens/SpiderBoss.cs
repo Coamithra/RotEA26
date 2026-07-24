@@ -125,33 +125,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_00c8: Unknown result type (might be due to invalid IL or missing references)
-			//IL_02e2: Unknown result type (might be due to invalid IL or missing references)
-			//IL_02ff: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0304: Unknown result type (might be due to invalid IL or missing references)
-			//IL_035f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_03c4: Unknown result type (might be due to invalid IL or missing references)
-			//IL_03e1: Unknown result type (might be due to invalid IL or missing references)
-			//IL_03e6: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0200: Unknown result type (might be due to invalid IL or missing references)
-			//IL_021d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0222: Unknown result type (might be due to invalid IL or missing references)
-			//IL_027d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_00df: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0563: Unknown result type (might be due to invalid IL or missing references)
-			//IL_010f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_00ec: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0135: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0140: Unknown result type (might be due to invalid IL or missing references)
-			//IL_019b: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0483: Unknown result type (might be due to invalid IL or missing references)
-			//IL_048e: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0493: Unknown result type (might be due to invalid IL or missing references)
-			//IL_04dd: Unknown result type (might be due to invalid IL or missing references)
-			//IL_04fa: Unknown result type (might be due to invalid IL or missing references)
-			//IL_04ff: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0504: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0506: Unknown result type (might be due to invalid IL or missing references)
 			if (boxes == null)
 			{
 				boxes = new CollisionMultibox();
@@ -232,8 +205,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	public SpiderBoss(Game game)
 		: base(game)
 	{
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		base.DrawOrder = 20;
 		interpolationOptions = InterpolationOptions.never;
 		scale = 1f;
@@ -282,8 +253,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	public void Setup(bool intro)
 	{
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
 		if (intro)
 		{
 			state = SpiderBossState.flyleft;
@@ -300,7 +269,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private float randomYPosition()
 	{
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
 		int num = RandomHelper.Random.Next(3);
 		if (RandomHelper.RandomNextFloat(0f, 1f) <= 0.5f * Settings.GetInstance().DifficultyModifier)
 		{
@@ -318,8 +286,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
 		{
@@ -366,19 +332,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_00ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ff: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0145: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0151: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d1: Unknown result type (might be due to invalid IL or missing references)
 		if (hittimer.Active)
 		{
 			spriteBatch.lightenEffect.Enable();
@@ -424,58 +377,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_00f6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0114: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0129: Unknown result type (might be due to invalid IL or missing references)
-		//IL_023d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_025b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0265: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0270: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0329: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0334: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0351: Unknown result type (might be due to invalid IL or missing references)
-		//IL_035c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_043f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_044a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0467: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0472: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04d3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0500: Unknown result type (might be due to invalid IL or missing references)
-		//IL_050a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0574: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0584: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05ab: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04af: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05c4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05cf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_039a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03d8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0640: Unknown result type (might be due to invalid IL or missing references)
-		//IL_064b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0658: Unknown result type (might be due to invalid IL or missing references)
-		//IL_065d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0672: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0677: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0693: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06b3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0705: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0191: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_031c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_071e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0744: Unknown result type (might be due to invalid IL or missing references)
-		//IL_075c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0767: Unknown result type (might be due to invalid IL or missing references)
 		if (isPreload)
 		{
 			return;
@@ -685,20 +586,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private void rumble(Vector2 Position)
 	{
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0046: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00de: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = default(Vector2);
 		Vector2 val2 = default(Vector2);
 		for (int i = 0; i < oracle.Players; i++)
@@ -740,18 +627,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_009d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0146: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0180: Unknown result type (might be due to invalid IL or missing references)
 		base.CollidesWith(other);
 		if (!(other is Lazer) || alreadyHitBy.Contains((Lazer)other))
 		{
@@ -834,12 +709,6 @@ internal class SpiderBoss : AlienDrawableGameComponent
 
 	private void Bleed(float size)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
 		BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 		FindSpawnSpot(out var angle, out var range);
 		Vector2 position = MyMath.AngleToVector(angle) * range + base.Position;
@@ -917,5 +786,82 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		// (severing this handler) before either object is recycled, so this never nulls a recycled
 		// boss's fresh helper ref.
 		helper = null;
+	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// SpiderBoss draws `currentAnimation` (one of four AnimatedSprites) at `animationProgress` (its
+	// own clock), with a horizontal flip + draw offset that depend on `state` -- all reached only by
+	// the frozen Update. So a puppet needs three things beyond the base fields: the state (for the
+	// Draw flip/offset AND the state-keyed collision box), which of the four sprites is current, and
+	// the animation frame. It draws Color.White (no HP redden), so the base Hp is unused here. The
+	// `dead` debris burst never crosses the wire -- an attributed remote death removes the puppet.
+	internal byte NetState
+	{
+		get
+		{
+			return (byte)state;
+		}
+		set
+		{
+			// Never adopt `dead` from the wire (a dead boss is removed, never snapshotted); clamp
+			// any stray value to a live state so the state-keyed CollisionType/Draw stay in range.
+			SpiderBossState s = (SpiderBossState)value;
+			if (s == SpiderBossState.dead)
+			{
+				s = SpiderBossState.standing;
+			}
+			state = s;
+		}
+	}
+
+	// 0 = fly, 1 = stand, 2 = jump, 3 = land. currentAnimation is not 1:1 with state (the sprite
+	// swaps lag the state transitions), so it is streamed independently. A null target sprite (before
+	// LoadContent) leaves the current pick untouched.
+	internal byte NetAnimIndex
+	{
+		get
+		{
+			if (currentAnimation == spiderStand)
+			{
+				return 1;
+			}
+			if (currentAnimation == spiderJump)
+			{
+				return 2;
+			}
+			if (currentAnimation == spiderLand)
+			{
+				return 3;
+			}
+			return 0;
+		}
+		set
+		{
+			AnimatedSprite target = value switch
+			{
+				1 => spiderStand,
+				2 => spiderJump,
+				3 => spiderLand,
+				_ => spiderFly,
+			};
+			if (target != null)
+			{
+				currentAnimation = target;
+			}
+		}
+	}
+
+	// (int)animationProgress; always < currentAnimation.Frames on the host (Update mods it), so the
+	// streamed byte is a valid index for whichever sprite NetAnimIndex just selected.
+	internal byte NetAnimFrame
+	{
+		get
+		{
+			return (byte)(int)animationProgress;
+		}
+		set
+		{
+			animationProgress = value;
+		}
 	}
 }

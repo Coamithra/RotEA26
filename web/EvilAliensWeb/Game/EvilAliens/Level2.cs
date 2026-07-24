@@ -428,8 +428,6 @@ internal class Level2 : GameScene
 
 	private void halt(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-0.2f, 0f) / 16.666666f);
 	}
 
@@ -503,23 +501,17 @@ internal class Level2 : GameScene
 
 	private void slowdown(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-3f, 0f) / 16.666666f);
 	}
 
 	private void slowDownBasedOnDifficulty(GameEvent sender)
 	{
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
 		float num = -1f + Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty) * -4f;
 		Background.SetSpeed(new Vector2(num, 0f) / 16.666666f);
 	}
 
 	private void speedup(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-10f, 0f) / 16.666666f);
 	}
 

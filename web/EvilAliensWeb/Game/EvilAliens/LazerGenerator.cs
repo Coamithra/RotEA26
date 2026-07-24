@@ -56,10 +56,6 @@ internal class LazerGenerator : AlienDrawableGameComponent
 	public LazerGenerator(Game game)
 		: base(game)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
 		base.Collides = false;
 		LoadAnimation(new AnimationData("GFX/Menu/star"));
 		base.DrawOrder = 40;
@@ -92,10 +88,6 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float size, float lifetime, float impulse, float direction)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
 		silent = false;
 		base.Position = position;
 		this.size = size;
@@ -106,7 +98,6 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		LazerGeneratorData[] array = particles;
 		foreach (LazerGeneratorData lazerGeneratorData in array)
 		{
@@ -141,13 +132,6 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0088: Unknown result type (might be due to invalid IL or missing references)
 		float progress = Progress();
 		// Per-particle scale ramp: 1 -> peak over the windup, ease-out (near-linear).
 		float ramp = 1f + (PeakChargeScale - 1f) * (1f - (float)System.Math.Pow(1f - progress, ChargeEase));
@@ -239,7 +223,6 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
 		elapsed += (float)gameTime.ElapsedGameTime.TotalSeconds;
 		if (freed)
 		{
@@ -273,7 +256,6 @@ internal class LazerGenerator : AlienDrawableGameComponent
 
 	public void SetPosition(Vector2 vector2)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = vector2;
 	}
 
@@ -286,4 +268,14 @@ internal class LazerGenerator : AlienDrawableGameComponent
 	{
 		silent = true;
 	}
+
+	// ---- Online co-op replication seams (Compat/Net, coverage-gaps follow-up) ----------------
+	// This charge-swarm/energy-well is a CHILD component the emitter (SweepUFO/MarsBoss/
+	// SpiderHelperMothership) owns + draws by hand (Visible=false). On a JOIN peer the emitter is a
+	// frozen puppet whose Update never spawns it, so the puppet re-creates a local, silent copy and
+	// lets it self-animate (see NetChargeGlow). The host reads these to tell the client the live
+	// windup duration + swarm size so the client's copy ramps + spreads identically.
+	internal float NetWindupSeconds => windupSeconds;
+
+	internal float NetSize => size;
 }

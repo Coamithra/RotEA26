@@ -27,9 +27,6 @@ public static class Storage
 
 	public static void Init(Game game, PlayerIndex player)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
 		activePlayer = player;
 		started = true;
 		busy = true;
@@ -75,7 +72,6 @@ public static class Storage
 
 	public static void ShowLoadError(string message)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 		try
 		{
 			if (!Guide.IsVisible)
@@ -90,7 +86,6 @@ public static class Storage
 
 	public static void ShowSaveError(string message)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 		try
 		{
 			if (!Guide.IsVisible)
@@ -115,7 +110,6 @@ public static class Storage
 
 	public static void Update(GameTime gameTime, Game1 game)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
 		// Web/PC port: this is the Xbox "active player signed OUT -> reset to start"
 		// check. SignedInGamers is empty on the web (no sign-in / no sign-out), so only
 		// run it when a gamer actually exists, guarding the indexer against the empty

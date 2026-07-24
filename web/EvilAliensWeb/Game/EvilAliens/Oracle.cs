@@ -33,8 +33,6 @@ public class Oracle : GameComponent, IOracleService
 	{
 		get
 		{
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 			if (background != null)
 			{
 				return background.ScrollSpeed;
@@ -138,6 +136,34 @@ public class Oracle : GameComponent, IOracleService
 		}
 	}
 
+	// Online co-op (coverage-gaps follow-up): seat a network-driven puppet in a SPECIFIC slot,
+	// so a client's AI-friend puppet lands in the SAME slot index the host runs it in (keeping
+	// per-slot score/lives attribution consistent). Returns false if the slot is out of range or
+	// already occupied -- the caller must never squat a live human/remote slot.
+	public bool AddPlayerAt(int slot, ControlDevice device)
+	{
+		if (slot < 0 || slot >= 4 || players[slot].isPlaying)
+		{
+			return false;
+		}
+		PlayerInfo info = players[slot];
+		info.isPlaying = true;
+		info.controller = device;
+		players[slot] = info;
+		return true;
+	}
+
+	// Release a slot seated by AddPlayerAt (the friend left / died); a no-op on a slot that is
+	// not playing or holds a different device, so it can never free a live human/remote slot.
+	public void RemovePlayerAt(int slot, ControlDevice device)
+	{
+		if (slot < 0 || slot >= 4 || !players[slot].isPlaying || players[slot].controller != device)
+		{
+			return;
+		}
+		players[slot].Reset();
+	}
+
 	// Release a SINGLE seated slot mid-level (card 2001fbd8): when a join-in-progress peer
 	// leaves, its Remote slot must be freed so the host reverts to single-player (Players == 1
 	// again, so NetListing re-lists + the empty-slot beacon returns). ResetPlayers can't be
@@ -189,8 +215,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public void SetPlayerPosition(int player, Vector2 position)
 	{
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
 		PlayerInfo playerInfo = players[player];
 		playerInfo.position = position;
 		players[player] = playerInfo;
@@ -257,8 +281,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public Vector2 GetRandomPlayerPosition()
 	{
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
 		if (playerShips.Count > 0)
 		{
 			int index = RandomHelper.Random.Next(playerShips.Count);
@@ -269,7 +291,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public Vector2 GetPlayerPosition(int index)
 	{
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
 		if (!players[index].isPlaying)
 		{
 			throw new Exception("Player " + index + " is not playing!");
@@ -299,8 +320,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<AlienDrawableGameComponent> GetBaddies()
 	{
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Expected O, but got Unknown
 		baddies.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -315,8 +334,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<ParatrooperBrain> GetParatrooperBrains()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Expected O, but got Unknown
 		paratrooperBrains.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -331,8 +348,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<Powerup> GetPowerups()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Expected O, but got Unknown
 		powerups.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -347,8 +362,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public List<StarMine> GetStarMines()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Expected O, but got Unknown
 		starmines.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
@@ -363,8 +376,6 @@ public class Oracle : GameComponent, IOracleService
 
 	public int NrOfShipConnectors()
 	{
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Expected O, but got Unknown
 		int num = 0;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{

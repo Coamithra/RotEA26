@@ -140,10 +140,6 @@ internal class BrainBoss : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0070: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		GamerCollectionEnumerator<SignedInGamer> enumerator = ((GamerCollection<SignedInGamer>)(object)Gamer.SignedInGamers).GetEnumerator();
 		try
@@ -190,80 +186,13 @@ internal class BrainBoss : KillableAlien
 		// spawning a wave (BossState.spawnstuff), calm otherwise. The sprite harness freezes
 		// Update (state stays `entry`), so force it on there to keep the pods inspectable.
 		bool spawnActive = state == BossState.spawnstuff
+			|| netVenting
 			|| EvilAliensWeb.Compat.DebugFlags.Harness != null;
 		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.LogicalWidth(), texture.LogicalHeight(), color, gameTime, spawnActive);
 	}
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0552: Unknown result type (might be due to invalid IL or missing references)
-		//IL_055e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00be: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_057a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0589: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0180: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0187: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0192: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0197: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0604: Unknown result type (might be due to invalid IL or missing references)
-		//IL_060a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_060f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_061e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02a9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02b6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02bb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_030a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0311: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0317: Unknown result type (might be due to invalid IL or missing references)
-		//IL_031c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0321: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0338: Unknown result type (might be due to invalid IL or missing references)
-		//IL_038b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0392: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0398: Unknown result type (might be due to invalid IL or missing references)
-		//IL_039d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0224: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0231: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0236: Unknown result type (might be due to invalid IL or missing references)
-		//IL_023b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_023f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0413: Unknown result type (might be due to invalid IL or missing references)
-		//IL_041f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_042e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0433: Unknown result type (might be due to invalid IL or missing references)
-		//IL_043f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_044e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0453: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0473: Unknown result type (might be due to invalid IL or missing references)
-		//IL_087c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0883: Unknown result type (might be due to invalid IL or missing references)
-		//IL_088a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_088f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0894: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a55: Unknown result type (might be due to invalid IL or missing references)
-		//IL_09d6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a28: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0918: Unknown result type (might be due to invalid IL or missing references)
-		//IL_08e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a6e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a75: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a7c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0a81: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0979: Unknown result type (might be due to invalid IL or missing references)
-		//IL_096c: Unknown result type (might be due to invalid IL or missing references)
 		UpdateMusic();
 		pulsetimer.Duration = MathHelper.Lerp(700f, 1600f, base.HitPointsNormalized);
 		float num = MathHelper.Lerp(0.1f, 0.04f, base.HitPointsNormalized);
@@ -554,10 +483,6 @@ internal class BrainBoss : KillableAlien
 
 	private void UberExplosion(Vector2 p)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00be: Unknown result type (might be due to invalid IL or missing references)
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(p, 2f, 1.3f, 0f, 0f);
 		collection.Add((GameComponent)(object)explosion);
@@ -596,7 +521,6 @@ internal class BrainBoss : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(base.Position, 3.5f, 2.5f, 0f, 0f);
 		collection.Add((GameComponent)(object)explosion);
@@ -614,5 +538,27 @@ internal class BrainBoss : KillableAlien
 		collection.Purge<Lazer>();
 		collection.Purge<PlasmaBall>();
 		sound.StopMusic();
+	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
+	// The huge boss body is a single static frame tinted by `color` (reddens on low HP -- Colorize),
+	// so scale + the redden ride the base state (Scale, and Hp -> NetApplyHp; initialhitpoints is a
+	// fixed 1700 either side, so the redden matches exactly). The animated overlays + the BrainAura
+	// child both run off gameTime in Draw (not Update), so they animate correctly on a frozen puppet
+	// (the aura is respawned by the puppet's own Initialize). The one Draw ingredient a puppet can't
+	// reach is the "exhaust pods" vent gate, which the host keys off BossState.spawnstuff -- streamed
+	// here as a single bit so the pods vent on the client while the host is spawning a wave.
+	private bool netVenting;
+
+	internal bool NetVenting
+	{
+		get
+		{
+			return state == BossState.spawnstuff;
+		}
+		set
+		{
+			netVenting = value;
+		}
 	}
 }

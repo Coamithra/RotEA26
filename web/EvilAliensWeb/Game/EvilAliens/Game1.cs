@@ -208,12 +208,6 @@ public class Game1 : Game
 
 	public Game1()
 	{
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001e: Expected O, but got Unknown
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Expected O, but got Unknown
-		//IL_01d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e1: Expected O, but got Unknown
 		instance = this;
 		ServiceHelper.Game = (Game)(object)this;
 		graphics = new GraphicsDeviceManager((Game)(object)this);
@@ -514,13 +508,6 @@ public class Game1 : Game
 
 	protected override void LoadContent()
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Expected O, but got Unknown
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0058: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0063: Expected O, but got Unknown
 		base.LoadContent();
 		spriteBatch = new SpriteBatch(base.GraphicsDevice);
 		blackPixel = base.Content.Load<Texture2D>("Content/GFX/Splash/blank");
@@ -839,6 +826,12 @@ public class Game1 : Game
 			collectionHelper.ClearCache();
 			oracle.ResetPlayers();
 			oracle.AddPlayer(ControlDevice.Keyboard);
+			// ?aifriends=<n> verification seam: seed the Mechanical Friends cheat on a direct
+			// ?level= boot so AI helper ships auto-join (two-tab AI-friend replication testing).
+			if (EvilAliensWeb.Compat.DebugFlags.AiFriends > 0)
+			{
+				Settings.GetInstance().Friends = EvilAliensWeb.Compat.DebugFlags.AiFriends;
+			}
 			bragScene.StoreCompletionProgress();
 			AddLevelComponent(selectedLevel);
 		});
@@ -1311,23 +1304,6 @@ public class Game1 : Game
 		// Stage 13: feed the chrome-sheen glint clock once per frame so every DrawMetalString
 		// call site (the bespoke menu renderers) animates without needing GameTime in scope.
 		spriteBatchWrapper.MetalTime = (float)gameTime.TotalGameTime.TotalSeconds;
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0124: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0129: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0179: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0199: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01f4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_021c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0221: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0244: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		spriteBatchWrapper.Flush();
 		if (onPostDraw != null)

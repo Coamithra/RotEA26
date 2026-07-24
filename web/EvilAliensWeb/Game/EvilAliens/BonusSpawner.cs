@@ -14,8 +14,6 @@ internal class BonusSpawner : GenericSpawner
 
 	protected override void DoEvent(GameTime gameTime)
 	{
-		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
 		UFO uFO = UFO.NewUFO(collectionHelper, game);
 		if (!mars)
 		{

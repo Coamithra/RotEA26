@@ -64,7 +64,6 @@ internal class Level1 : GameScene
 
 	protected override void PopulateEventList()
 	{
-		//IL_02cf: Unknown result type (might be due to invalid IL or missing references)
 		if (EvilAliensWeb.Compat.DebugFlags.NetScript)
 		{
 			PopulateNetScriptTest();
@@ -289,23 +288,17 @@ internal class Level1 : GameScene
 
 	private void waitevent_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 0.2f) / 16.666666f);
 	}
 
 	private void waitevent_OnFinished2(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 7.6f) / 16.666666f);
 		Collection.ClearCache();
 	}
 
 	private void spawner_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0.25f, 0.6f) / 16.666666f);
 		// Card "asteroid field animation": as the sideways belt starts scrolling, slow the near
 		// stars so the fastest star reads clearly slower than the slowest asteroid (the same

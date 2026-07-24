@@ -7,7 +7,10 @@ Two standing rules:
   loop points, `menufont.fnt`, favicons, ...). Re-run the owning tool.
 - **Never re-run the codegen scripts** (`fix_apis*.py`, `fix_ctors.py`, `fixup_transforms.py`,
   `fix_quad.py`, ...) — they DERIVED `web/EvilAliensWeb/Game/` from `src_decompiled/` once and
-  would clobber every hand edit since. Edit `Game/` directly.
+  would clobber every hand edit since. Edit `Game/` directly. The one exception is
+  `strip_il_comments.py` (it deleted the 4020 ILSpy `//IL_<hex>: ...` warning comments the
+  decompile sprayed across `Game/`) — it self-guards on `'//IL_' in src`, which nothing matches
+  any more, so re-running it is a verified no-op rather than a landmine.
 
 Heavy dev-box-only deps (all fine to be absent in CI/fresh clones): `texconv.exe` (gitignored),
 a `blender` exe, the `../animgen` ComfyUI venv, `pymusiclooper`, PyAV. Raw sources live in

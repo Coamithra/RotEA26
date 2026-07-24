@@ -165,7 +165,6 @@ internal class ClassicAliens : GameScene
 
 	private void spawnbonus(GameEvent sender)
 	{
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
 		Powerup powerup = Powerup.NewPowerup(Collection, base.Game);
 		powerup.Setup(new Vector2(RandomHelper.RandomNextFloat(10f, 790f), 624f));
 		switch (RandomHelper.Random.Next(2))

@@ -89,6 +89,15 @@ namespace EvilAliensWeb.Compat.Net
                 new Descriptors.SweepUfoDescriptor(),       // 18
                 new Descriptors.PunchingBagDescriptor(),    // 19
                 new Descriptors.PowerupDescriptor(),        // 20
+                // --- card "world-authority coverage gaps": types 11.2 left host-only ---
+                new Descriptors.PlasmaBallDescriptor(),             // 21
+                new Descriptors.ParatrooperAlienDescriptor(),       // 22
+                new Descriptors.ParatrooperBrainDescriptor(),       // 23
+                new Descriptors.ParachuteDescriptor(),              // 24
+                new Descriptors.FakeBossDescriptor(),               // 25
+                new Descriptors.SpiderHelperMothershipDescriptor(), // 26
+                new Descriptors.SpiderBossDescriptor(),             // 27
+                new Descriptors.BrainBossDescriptor(),              // 28
             };
         }
 

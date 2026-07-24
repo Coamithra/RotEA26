@@ -12,13 +12,10 @@ public class ColorizeEffect : MySpriteEffect
 	{
 		get
 		{
-			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 			return _param;
 		}
 		set
 		{
-			//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0002: Unknown result type (might be due to invalid IL or missing references)
 			_param = value;
 		}
 	}
@@ -61,18 +58,12 @@ public class ColorizeEffect : MySpriteEffect
 
 	public ColorizeEffect()
 	{
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
 		_param = new Vector3(0f, 0f, 0f);
 		_oldparam = new Vector3(0f, 0f, 0f);
 	}
 
 	public override bool hasStateChanged()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		if (!base.hasStateChanged())
 		{
 			if (base.Enabled)
@@ -86,8 +77,6 @@ public class ColorizeEffect : MySpriteEffect
 
 	public override void SaveState()
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
 		base.SaveState();
 		_oldparam = _param;
 	}

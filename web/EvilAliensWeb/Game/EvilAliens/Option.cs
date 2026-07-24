@@ -25,12 +25,6 @@ internal class Option : KillableAlien, IAlienKiller
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -69,7 +63,6 @@ internal class Option : KillableAlien, IAlienKiller
 
 	public void Setup(PlayerShip owner, float angle, int layer, int player)
 	{
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
 		this.player = player;
 		radius = 20 + 20 * layer;
 		prevangle = angle;
@@ -96,7 +89,6 @@ internal class Option : KillableAlien, IAlienKiller
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
 		if (oracle.Hue(player) != -1f)
 		{
 			spriteBatch.colorizeEffect.Enable();
@@ -108,10 +100,6 @@ internal class Option : KillableAlien, IAlienKiller
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_012e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0134: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0144: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		rotation -= (float)Math.PI * 2f * (float)gameTime.ElapsedGameTime.TotalSeconds / 5f;
 		float num = ((!startuptimer.Active) ? radius : ((1f - startuptimer.Normalized) * radius));
@@ -139,8 +127,6 @@ internal class Option : KillableAlien, IAlienKiller
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_00e0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010c: Unknown result type (might be due to invalid IL or missing references)
 		base.CollidesWith(other);
 		if (other is EvilBullet)
 		{

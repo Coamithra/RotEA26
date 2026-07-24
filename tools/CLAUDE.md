@@ -45,6 +45,17 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   a restatement is unavoidable add a negative control that runs the OLD behaviour over the same
   inputs and must FAIL. The TeamChallenge set was mutation-tested (`padConnected(i)` -> `true`
   turned 7 PASS lines into 4 FAIL), which is what makes its green run mean anything.
+- **Second case set: the `?flyspider*` value-carrying flags** (card 6eb8dc9e), driven through the
+  real `DebugFlags.Parse` -- pure string -> static property, so it reaches here. A bench flag fails
+  by producing a run that measures the DEFAULT path while being labelled as the variant under test,
+  which no picture can show, so what is asserted is that a malformed value is rejected, is
+  REPORTED, and that the "staying on ..." clause names the setting actually in force. Note the
+  statics persist across `Parse` calls in one process exactly as they do across a repeated flag in
+  one query, which is what makes that last property testable at all. Also mutation-tested:
+  restoring the hardcoded `DefaultFlattenBoxHalf` in the message turns the box line FAIL while a
+  prior `?flyspiderbox=250` is in force. It additionally pins the `IsOn`/`IsExplicitlyOff` truth
+  table (that card reordered them), including the row that matters -- a BARE flag is ON but is NOT
+  explicitly off, so `!IsOn` and `IsExplicitlyOff` are genuinely different predicates.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

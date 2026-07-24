@@ -129,7 +129,8 @@ generate much of the art/audio referenced here.
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
-  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
+  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
+  `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -215,8 +216,25 @@ site now lives under:
   added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
   `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
   the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
-- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds; `eaBinTest()` runs the
-  scripted scenario suite (`Compat/BinTest.cs`) against the live bin and prints PASS/FAIL.
+- **A pass that walks a live collection must FREEZE its count first.** Instant births mean any
+  callback that spawns (a kill's asteroid split / powerup drop, a wall-hit explosion) grows
+  `Game.Components` — and every mirror list fed by `ComponentAdded` — *while* the pass is
+  running. `CollisionHandler.DetectCollisions` sized its `boxes` list to a count taken at entry
+  but re-read `collidables.Count` in its later loops, so a mid-pass spawn indexed `boxes` out of
+  range (an intermittent `IndexOutOfRange` swallowed by the `tickJS` guard, i.e. a dropped
+  frame, not a visible crash) and could read a previous frame's cells; the inner all-pairs
+  `foreach` over the same live list was one spawn away from `InvalidOperationException`. Fixed
+  by running the whole pass over the entry-time `count` — a collidable born mid-pass joins the
+  NEXT pass, which is what the old deferred birthList did anyway. **Apply the same rule to any
+  new phase that indexes a parallel array by collection position.**
+- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds, and reports how many
+  passes `DetectCollisions` carried through a mid-pass collidable add (the condition above —
+  it fires in the hundreds during ordinary play, so it is a live proof the path is exercised,
+  not a warning); `eaBinTest()` runs the scripted scenario suite (`Compat/BinTest.cs`) against
+  the live bin and prints PASS/FAIL. `eaKillShips()` asplodes every locally-owned `PlayerShip`
+  through the real `Asplode()`→`Die()` path (remote/friend puppets skipped) — the repeatable
+  way to reach a death/reset, since `AllShipsDead` needs BOTH co-op ships down and waiting on
+  the `?aiplayer` AI to die is neither timely nor repeatable.
 
 ## Input
 
@@ -848,6 +866,15 @@ interpolation feel, both gated on real-network playtests.
   to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
+  Add `?binlog` to both when the run is about lifecycle (it is the detector for a purge filter
+  or pause freeze eating a puppet/banner). For a death/reset, KEEP `?invuln` on both and call
+  `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
+  through invulnerability, and leaving the flag on is what keeps the rest of the run from
+  dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
+  **`snapUnk` climbing is not by itself a leak:** the host keeps snapshotting an entity for a
+  turn or two while a client claim is in flight, and the client deliberately leaves that id
+  dead, so `snapUnk` tracks `clTx` at roughly 1.1-1.4 per claim. Judge it against the claim
+  rate -- flat `clTx` with climbing `snapUnk` is the shape that means trouble.
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their

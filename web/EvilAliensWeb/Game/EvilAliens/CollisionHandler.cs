@@ -40,6 +40,17 @@ public class CollisionHandler
 
 	private List<ICollidable> colliders = new List<ICollidable>();
 
+	private const long growthReportIntervalMs = 2000;
+
+	// Diagnostic for the instant-add lifecycle (card 02d9ad67): how many passes ended with
+	// `collidables` longer than the frozen count they ran over, i.e. a collision callback
+	// spawned a collidable mid-pass. That is the condition that used to index `boxes` out of
+	// range, so reporting it under ?binlog lets a run PROVE the path is exercised instead of
+	// only showing an absence of crashes.
+	private int midPassGrowthPasses;
+
+	private long lastGrowthReportMs;
+
 	// Live set of registered collidables (kept in sync by the ComponentAdded/Removed
 	// events below). Exposed read-only so the ?hitboxes debug overlay (HitboxOverlay,
 	// drawn from Game1.DrawInner) can iterate every hitbox at present time.
@@ -89,6 +100,19 @@ public class CollisionHandler
 
 	public void DetectCollisions()
 	{
+		// The whole pass runs over a FROZEN count. Bin adds are instant (card 02d9ad67), so a
+		// collision callback that spawns a collidable (asteroid split, powerup drop, wall-hit
+		// explosion) grows `collidables` through Components_ComponentAdded WHILE this runs.
+		// Re-reading .Count mid-pass indexes `boxes` past the entries this pass sized and
+		// filled (IndexOutOfRange), and the entries between the old and new count still hold
+		// the previous frame's cells. A collidable born during the pass joins the NEXT one --
+		// exactly what the old deferred birthList did, since it wasn't in Game.Components
+		// until the flush.
+		// Indexing against the frozen count is only safe because `collidables` can GROW but
+		// never shrink mid-pass: removals go through ComponentBin.Remove -> deathList and are
+		// flushed at the tick boundaries, and the direct Game.Components.Remove sites (scene
+		// swaps, NetPuppets.Disable, the harness) are unreachable from a CollidesWith callback.
+		// Keep it that way -- a mid-pass removal would shift every later index.
 		int count = collidables.Count;
 		for (int i = 0; i < boxes.Count && i != count; i++)
 		{
@@ -105,7 +129,7 @@ public class CollisionHandler
 				fieldMatrix[j, k].Clear();
 			}
 		}
-		for (int l = 0; l < collidables.Count; l++)
+		for (int l = 0; l < count; l++)
 		{
 			ICollidable collidable = collidables[l];
 			if (collidable.GetCollisionType() is CollisionBox)
@@ -132,8 +156,9 @@ public class CollisionHandler
 			}
 			// Remaining non-gridded types (CollisionMultibox / CollisionLevelMap — level walls,
 			// at most one per level) keep the original all-pairs scan with both callbacks.
-			foreach (ICollidable collidable2 in collidables)
+			for (int n = 0; n < count; n++)
 			{
+				ICollidable collidable2 = collidables[n];
 				if ((IsActive(collidable2) & IsActive(collidable)) && collidable2 != collidable && collidable.DetectCollision(collidable2))
 				{
 					collidable2.CollidesWith(collidable);
@@ -141,7 +166,7 @@ public class CollisionHandler
 				}
 			}
 		}
-		for (int m = 0; m < collidables.Count; m++)
+		for (int m = 0; m < count; m++)
 		{
 			colliders.Clear();
 			foreach (BoxInfo item in boxes[m])
@@ -160,6 +185,17 @@ public class CollisionHandler
 				{
 					collidables[m].CollidesWith(collider);
 				}
+			}
+		}
+		if (EvilAliensWeb.Compat.DebugFlags.BinLog && collidables.Count > count)
+		{
+			midPassGrowthPasses++;
+			long nowMs = System.Environment.TickCount64;
+			if (nowMs - lastGrowthReportMs >= growthReportIntervalMs)
+			{
+				lastGrowthReportMs = nowMs;
+				System.Console.WriteLine("[bin] " + midPassGrowthPasses
+					+ " collision pass(es) held their frozen count through a mid-pass collidable add");
 			}
 		}
 	}

@@ -182,6 +182,15 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: asplode every locally-owned PlayerShip through the real death path, so the
+        // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
+        // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it
+        // bites through ?invuln, so leave the flag on and keep the rest of the run stable.
+        window.eaKillShips = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
+            catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
         // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
         // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>

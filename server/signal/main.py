@@ -31,11 +31,12 @@ MAX_BROWSERS = 200
 MAX_MESSAGE_BYTES = 64 * 1024
 SWEEP_INTERVAL_SECONDS = 30
 RELAY_TYPES = {"sdp", "ice"}
-# Ping abuse bound: a browser legitimately pings every listed room once per
-# refresh (<= MAX_ROOMS), a few times a minute. This ceiling per rolling
-# window is far above that but caps a socket that just floods pings.
+# Ping abuse bound: a browser re-pings every listed room on each browse refresh
+# (~15/min at BROWSE_REFRESH_MS=4s in webrtc.js), so a full list of MAX_ROOMS
+# rooms is 200 pings x ~3 refreshes = ~600 legit pings per window. This ceiling
+# leaves headroom above that yet still caps a socket that just floods pings.
 PING_RATE_WINDOW = 10.0
-PING_RATE_MAX = 600
+PING_RATE_MAX = 1200
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("rotea.signal")
@@ -110,15 +111,16 @@ rooms: dict[str, Room] = {}
 
 # Browser sockets (card 2001fbd8) -- a third role that belongs to no room and
 # only lists + pings. Keyed by an opaque server-assigned id so a host can be
-# told which browser to route a pong back to without learning anything about it.
+# told which browser to route a pong back to without learning anything about it
+# (a random token, not a counter, so it leaks neither identity nor a count).
 browsers: dict[int, WebSocket] = {}
-_browser_seq = 0
 
 
 def _new_browser_id() -> int:
-    global _browser_seq
-    _browser_seq += 1
-    return _browser_seq
+    while True:
+        bid = secrets.randbits(53)  # <= 2**53, so it survives the JS number round-trip
+        if bid not in browsers:
+            return bid
 
 
 async def _send_json(ws: WebSocket, payload: dict) -> None:
@@ -313,7 +315,8 @@ async def ws_endpoint(ws: WebSocket):
                     await bad()
                 else:
                     ref = msg.get("ref")
-                    target_ws = browsers.get(ref) if isinstance(ref, int) else None
+                    # bool is a subclass of int -- reject it so {"ref": true} can't map to id 1.
+                    target_ws = browsers.get(ref) if (isinstance(ref, int) and not isinstance(ref, bool)) else None
                     if target_ws is not None:
                         await _send_json(target_ws, {"t": "pong", "id": msg.get("id")})
 

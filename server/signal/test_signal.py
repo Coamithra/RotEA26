@@ -277,6 +277,46 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         record("a full room is delisted from browse", False, repr(e))
 
+    # 15. host-only messages from a non-hosting socket -> bad (and the socket survives)
+    try:
+        stray = await websockets.connect(url)
+        all_bad = True
+        for m in ({"t": "list"}, {"t": "beat"}, {"t": "unlist"}, {"t": "pong", "ref": 1}):
+            await send(stray, m)
+            r = await recv_json(stray)
+            if r != {"t": "error", "reason": "bad"}:
+                all_bad = False
+        record("list/beat/unlist/pong require hosting -> bad", all_bad)
+        await stray.close()
+    except Exception as e:
+        record("list/beat/unlist/pong require hosting -> bad", False, repr(e))
+
+    # 16. two browsers pinging one host each get THEIR OWN pong (ref routing, not hard-wired)
+    try:
+        host, code = await host_room(url)
+        await send(host, {"t": "list", "level": 1, "difficulty": 0,
+                          "players": 1, "proto": "4", "hash": "h1"})
+        ba, _ = await browse(url, proto="4", hash="h1")
+        bb, _ = await browse(url, proto="4", hash="h1")
+        await send(ba, {"t": "ping", "code": code, "id": "AA"})
+        p1 = await recv_json(host)   # A's ping, forwarded
+        await send(bb, {"t": "ping", "code": code, "id": "BB"})
+        p2 = await recv_json(host)   # B's ping, forwarded
+        await send(host, {"t": "pong", "id": p1.get("id"), "ref": p1.get("ref")})
+        await send(host, {"t": "pong", "id": p2.get("id"), "ref": p2.get("ref")})
+        ra = await recv_json(ba)
+        rb = await recv_json(bb)
+        ok = (p1.get("ref") != p2.get("ref")
+              and ra == {"t": "pong", "id": "AA"}
+              and rb == {"t": "pong", "id": "BB"})
+        record("pongs route to the browser that pinged", ok,
+               f"p1={p1} p2={p2} ra={ra} rb={rb}")
+        await ba.close()
+        await bb.close()
+        await host.close()
+    except Exception as e:
+        record("pongs route to the browser that pinged", False, repr(e))
+
 
 async def main_async() -> int:
     unit_tests()

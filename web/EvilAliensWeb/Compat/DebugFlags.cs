@@ -917,6 +917,37 @@ namespace EvilAliensWeb.Compat
 		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
 		public static bool AIPlayer { get; private set; }
 
+		// ?aibench (card f4d1721f): AI telemetry -- wall contacts (counted even under ?invuln),
+		// the heading-reversal jitter rate, fire-decision idleness and the level-script progress
+		// + run verdict. Pair with ?aiplayer. Console: eaAiBench(). See Compat/AiBench.cs.
+		public static bool AiBench { get; private set; }
+
+		// ?aiff=<2-64> (card f4d1721f): run the game's Update N times per rendered frame with the
+		// SAME dt, so an AI soak covers a whole level in a fraction of the wall-clock time without
+		// changing the sim it is measuring. Deliberately NOT Settings.Turbo, which scales dt --
+		// that changes per-tick physics (and so the very steering behaviour under test).
+		// Suppressed inside a net session (both peers must run at one pace) and while a level
+		// launch is warming. 0/1 = off.
+		public static int AiFastForward { get; private set; }
+
+		// AI steering/targeting knobs (card f4d1721f -- Game/EvilAliens/PlayerShip.cs). Null =>
+		// the baked PlayerShip.Default* consts, so a shipped build is byte-identical. A/B them
+		// against the ?aibench counters, then bake a settled value into the const.
+		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
+		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
+		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
+		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
+		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
+		public static float? AiSteerSmoothMs { get; private set; }
+
+		public static float? AiWallReactionMs { get; private set; }
+
+		public static float? AiGapSwitchMargin { get; private set; }
+
+		public static float? AiThreatLeadMs { get; private set; }
+
+		public static float? AiPriorityBias { get; private set; }
+
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
 		// ops, checkpoints, music switch, victory) -- the purpose-built two-tab
@@ -1576,6 +1607,45 @@ namespace EvilAliensWeb.Compat
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
+				case "aibench":
+					AiBench = IsOn(val);
+					break;
+				case "aismooth":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aism) && aism >= 0f)
+					{
+						AiSteerSmoothMs = MathHelper.Min(aism, 1000f);
+					}
+					break;
+				case "aireact":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aire) && aire >= 0f)
+					{
+						AiWallReactionMs = MathHelper.Min(aire, 3000f);
+					}
+					break;
+				case "aigapmargin":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigm) && aigm >= 0f)
+					{
+						AiGapSwitchMargin = MathHelper.Min(aigm, 20f);
+					}
+					break;
+				case "aithreatlead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
+					{
+						AiThreatLeadMs = MathHelper.Min(aitl, 3000f);
+					}
+					break;
+				case "aibossbias":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibb) && aibb > 0f)
+					{
+						AiPriorityBias = MathHelper.Min(aibb, 1f);
+					}
+					break;
+				case "aiff":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aiff))
+					{
+						AiFastForward = (int)MathHelper.Clamp(aiff, 0, 64);
+					}
+					break;
 				case "netscript":
 					NetScript = IsOn(val);
 					break;
@@ -1830,7 +1900,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1846,6 +1916,8 @@ namespace EvilAliensWeb.Compat
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
+								+ (AiBench ? " aibench" : "")
+								+ (AiFastForward > 1 ? " aiff=" + AiFastForward : "")
 						+ (NetScript ? " netscript" : "")
 						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
 						+ (Harness != null

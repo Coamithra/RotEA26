@@ -383,13 +383,24 @@ public class Oracle : GameComponent, IOracleService
 		return null;
 	}
 
+	// The AI's whole world model: PlayerShip's DoAIMove/DoAIFire/doAIBomb see ONLY what this
+	// returns, so a type missing here is a type the bot can neither shoot nor dodge. Card
+	// f4d1721f added the second group below for exactly that reason -- BrainBoss and FakeBoss
+	// gate the end of Level 3 and were invisible, so the AI stood next to the boss it was
+	// supposed to kill; SpiderBoss and PlasmaBall were invisible as HAZARDS, which is why the
+	// spider-boss fight read as "no idea what it's doing" (it wasn't dodging a boss it couldn't
+	// see). Keep this a superset of both consumer contracts -- PlayerShip.IsAiThreat (mirrors
+	// PlayerShip.CollidesWith) and PlayerShip.IsAiShootable (mirrors Bullet.CollidesWith) --
+	// and let those two predicates, not this list, decide what to do with each entry.
+	// (TutorialLevel.killboss also walks this, but only ever looks for PunchingBag.)
 	public List<AlienDrawableGameComponent> GetBaddies()
 	{
 		baddies.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
 			GameComponent val = item;
-			if (val is EvilBullet || val is UFO || val is Asteroid || val is Braineroid || val is JunkBoss || val is Ball || val is Boss || val is Spider || val is StationaryBoss || val is MarsBoss || val is EvilSkull || val is Lazer || val is ClassicBoss || val is DeathStar || val is Wall || val is BattleSkull || val is FlyingSpider || (val is Explosion && ((Explosion)(object)val).Collides) || val is StarMine || val is SweepUFO || val is PunchingBag)
+			if (val is EvilBullet || val is UFO || val is Asteroid || val is Braineroid || val is JunkBoss || val is Ball || val is Boss || val is Spider || val is StationaryBoss || val is MarsBoss || val is EvilSkull || val is Lazer || val is ClassicBoss || val is DeathStar || val is Wall || val is BattleSkull || val is FlyingSpider || (val is Explosion && ((Explosion)(object)val).Collides) || val is StarMine || val is SweepUFO || val is PunchingBag
+				|| val is BrainBoss || val is FakeBoss || val is SpiderBoss || val is PlasmaBall || val is ParatrooperAlien || val is ParatrooperBrain || val is Parachute)
 			{
 				baddies.Add((AlienDrawableGameComponent)(object)val);
 			}

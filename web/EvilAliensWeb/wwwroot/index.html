@@ -182,6 +182,50 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: dump the AI telemetry (card f4d1721f) — wall contacts (counted even under
+        // ?invuln), the heading-reversal jitter rate, fire idleness, level progress and the run
+        // verdict. Only meaningful on a ?aibench boot, e.g.
+        //   ?level=Level3&wallsonly&aiplayer&invuln&aibench&aiff=8
+        // eaAiBench.reset() rearms the counters mid-run to score one section at a time.
+        window.eaAiBench = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBench')); }
+            catch (e) { console.warn('[debug] eaAiBench failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaAiBench.reset = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchReset')); }
+            catch (e) { console.warn('[debug] eaAiBench.reset failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaAiBench.world = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchWorld')); }
+            catch (e) { console.warn('[debug] eaAiBench.world failed: ' + e.message); }
+        };
+        // eaAiBench.soak(simSeconds) — run the AI headless: tick the real game loop at a fixed
+        // 60Hz dt with NO Draw, in bounded chunks, until simSeconds elapse or the level ends.
+        // This is the only reliable way to soak from automation — a background tab throttles rAF
+        // (and MessageChannel) to ~1Hz, so a rendered run measures almost nothing. Resolves with
+        // the final report. Chunked with a yield between so the page stays responsive.
+        window.eaAiBench.soak = async (simSeconds, chunk) => {
+            const total = simSeconds || 120, step = chunk || 10;
+            let done = 0, verdict = 'running';
+            while (done < total && verdict === 'running') {
+                let r;
+                try { r = DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchRun', Math.min(step, total - done)); }
+                catch (e) { console.warn('[debug] eaAiBench.soak failed: ' + e.message); return; }
+                const parts = r.split(' ');
+                const ran = parseFloat(parts[0]);
+                verdict = parts.slice(1).join(' ');
+                if (!(ran > 0)) { console.warn('[aibench] soak stopped: ' + verdict); break; }
+                done += ran;
+                // Yield via MessageChannel, NOT setTimeout: Chrome applies "intensive throttling"
+                // to timers in a backgrounded tab after ~5 minutes, dropping them to ~1/minute --
+                // which silently stalls a long soak and reads as "the AI stopped progressing".
+                // A message-port callback is not a timer and is not throttled that way.
+                await new Promise(r2 => { const c = new MessageChannel(); c.port1.onmessage = () => r2(); c.port2.postMessage(0); });
+            }
+            console.log('[aibench] soak ran ' + done.toFixed(1) + 's sim -> ' + verdict);
+            window.eaAiBench();
+        };
+
         // Debug: asplode every locally-owned PlayerShip through the real death path, so the
         // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
         // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it

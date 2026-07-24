@@ -86,6 +86,123 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private int optionLevel;
 
+	// ---- AI tuning (card f4d1721f) ---------------------------------------------------------
+	// Repo convention: baked Default* consts + nullable ?ai* overrides in DebugFlags, so a
+	// shipped build with no query string is byte-identical to one with these consts inlined.
+
+	// Low-pass time constant for the AI's steering vector. THE anti-jitter lever: DoAIMove sums
+	// a dozen competing terms and Move() consumes only the resulting ANGLE, so when the big
+	// terms nearly cancel a tiny residual used to swing the heading right round -- measured at
+	// ~1050 deg/s (about three revolutions per second) inside a Level-3 wall. Smoothing the
+	// VECTOR (not the angle) is what damps that: two opposing commands blend toward zero and the
+	// ship coasts, while a sustained command still converges within a few frames. Rate-limiting
+	// the angle instead would force a genuine 180 reversal to sweep the long way round.
+	public const float DefaultSteerSmoothMs = 90f;
+
+	// Below this the smoothed steer is noise, not a decision (the pre-existing 0.2 deadzone).
+	private const float SteerDeadzone = 0.2f;
+
+	// How far ahead the wall logic looks, as MILLISECONDS of closing travel rather than a fixed
+	// pixel count. The 2008 code probed `41.67 * MaxSpeed` = ~13.75px against wall tiles that are
+	// 800/gridWidth = 67..267px wide -- roughly one ship-width of warning, which is why the bot
+	// clipped so much. Closing speed is ship speed plus the wall's own scroll.
+	public const float DefaultWallReactionMs = 420f;
+
+	// A gap must beat the COMMITTED one by this many tiles of cost before the AI switches. The
+	// old code re-decided left-vs-right every tick, so a wall scrolling by one row could swap the
+	// cheaper side and reverse the ship mid-approach, forever. Hysteresis is what turns a gap
+	// choice into a plan.
+	public const float DefaultGapSwitchMargin = 1.5f;
+
+	// How far ahead a moving threat is projected when judging it. Radial "how far is it right
+	// now" repulsion pushes the ship ALONG the path of anything crossing the screen -- which is
+	// exactly the spider boss's screen-wide sweep. Steering by closest approach instead moves the
+	// ship off the line before it arrives.
+	public const float DefaultThreatLeadMs = 700f;
+
+	// A level-halting boss competes at this fraction of its true distance when the AI picks a
+	// target, so it outranks the trash the boss itself keeps spawning.
+	public const float DefaultPriorityTargetBias = 0.45f;
+
+	private static float SteerSmoothMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothMs ?? DefaultSteerSmoothMs;
+
+	private static float WallReactionMs => EvilAliensWeb.Compat.DebugFlags.AiWallReactionMs ?? DefaultWallReactionMs;
+
+	private static float GapSwitchMargin => EvilAliensWeb.Compat.DebugFlags.AiGapSwitchMargin ?? DefaultGapSwitchMargin;
+
+	private static float ThreatLeadMs => EvilAliensWeb.Compat.DebugFlags.AiThreatLeadMs ?? DefaultThreatLeadMs;
+
+	private static float PriorityTargetBias => EvilAliensWeb.Compat.DebugFlags.AiPriorityBias ?? DefaultPriorityTargetBias;
+
+	// Bullet travel per ms of its lifetime -- i.e. `bulletlifetime * this` is how far a shot
+	// reaches. The 0.78 factor is the 2008 range test in DoAIFire, named here because the
+	// boss-approach standoff has to agree with it or the ship closes to somewhere it still
+	// cannot shoot from.
+	private const float BulletRangePerMs = 0.78f;
+
+	// Where to sit relative to a halting boss: a fraction of gun range, clamped so a short-lived
+	// bullet does not demand ramming distance and a long-lived one does not park off-screen.
+	private const float BossStandoffFraction = 0.6f;
+
+	private const float BossStandoffMinPx = 130f;
+
+	private const float BossStandoffMaxPx = 300f;
+
+	// Below this (px/ms) a threat is not a "mover" and the plain radial repulsion models it
+	// better. The player ship's own MaxSpeed is 0.33 px/ms, so this is about a third of that.
+	private const float ThreatMinSpeed = 0.1f;
+
+	// Clearance the AI wants past the threat's own half-extent when judging a predicted miss.
+	private const float ThreatMissMargin = 90f;
+
+	// Even a far-off but dead-on collision course deserves some steer, or the AI would ignore
+	// everything until it was nearly too late.
+	private const float ThreatUrgencyFloor = 0.35f;
+
+	// An impact this close, this centred, gets a steer strong enough to beat every other term.
+	private const float ThreatPanicMs = 260f;
+
+	private const float ThreatPanicMissFraction = 0.55f;
+
+	private const float ThreatPanicStrength = 16f;
+
+	// Wall steering weights. These sit well above the generic steer terms (maxSteerStrength 4)
+	// on purpose: inside a wall the gap is the only survivable place to be, and a stray powerup
+	// pull must not drift the ship out of the slot it is threading.
+	private const float WallLateralIdle = 3f;
+
+	private const float WallLateralUrgent = 14f;
+
+	// Downward hold-off while a blocked row closes and the ship is still off its gap -- buying
+	// the time the lateral move needs. Positive Y is down (screen coords).
+	private const float WallBackOff = 6f;
+
+	// Rows of grid looked at when judging a column. Four rows is 267..1067px of wall depending
+	// on grid width -- past that the wall has usually scrolled into a different shape anyway.
+	private const int WallScanRows = 4;
+
+	// Cost added per blocked column the ship would have to cross to reach a gap.
+	private const float WallCrossPenalty = 4f;
+
+	// Weight of one row of clearance in ColumnScore, relative to one tile of sideways travel.
+	// Deliberately large: crossing the whole screen is worth it to be somewhere survivable.
+	private const float WallRowWeight = 8f;
+
+	// The emergency clamp's horizontal reach, in ms of travel: about one tick at 60Hz, which is
+	// the range where a hard reversal is genuinely right and cannot alternate.
+	private const float WallClampMs = 42f;
+
+	// The clamp reaches further UP, because the wall closes on the ship whether or not the ship
+	// is moving toward it (the 2008 code used the same 3x factor).
+	private const float WallClampUpFactor = 3f;
+
+	// Smoothed steering vector (see DefaultSteerSmoothMs) and the committed wall gap.
+	private Vector2 aiSteer = Vector2.Zero;
+
+	private int aiGapColumn = -1;
+
+	private float aiGapCost;
+
 	public int Owner => player;
 
 	public ControlDevice Controller => controller;
@@ -557,6 +674,55 @@ public class PlayerShip : AlienDrawableGameComponent
 		hue = newHue;
 	}
 
+	// What a bullet can actually DAMAGE -- the AI's target set (card f4d1721f). This MIRRORS the
+	// type list in Bullet.CollidesWith; the two must be changed together, and a type present
+	// there but missing here is a target the AI is blind to. That drift is what stalled the bot:
+	// BrainBoss and FakeBoss gate the end of Level 3, StationaryBoss sits mid-Level-2, and none
+	// of them were listed -- so the AI parked next to a halting boss and shot at nothing.
+	// Three deliberate exclusions from the bullet list:
+	//   SpiderBoss              bullets DEFLECT off it by design (only a Lazer hurts it), so
+	//                           aiming at it is pure wasted uptime -- see SpiderBoss.CollidesWith.
+	//   SpiderHelperMothership  the thing that kills the spider boss for you. It is fake-killable
+	//                           with an enormous HP pool, so targeting it would swallow the AI's
+	//                           aim for the whole fight.
+	//   Asteroid                killable, but it does not sustain combo, shooting one splits it,
+	//                           and the belt is meant to be flown through, not cleared.
+	private static bool IsAiShootable(AlienDrawableGameComponent baddy)
+	{
+		return baddy is UFO || baddy is Boss || baddy is Braineroid || (baddy is Ball && ((Ball)baddy).IsConnected())
+			|| baddy is JunkBoss || (baddy is EvilSkull && !((EvilSkull)baddy).Fading) || baddy is DeathStar
+			|| baddy is ClassicBoss || baddy is BattleSkull || baddy is Spider || baddy is StationaryBoss
+			|| baddy is MarsBoss || baddy is StarMine || baddy is BrainBoss || (baddy is FlyingSpider && baddy.Collides)
+			|| baddy is FakeBoss || baddy is SweepUFO || baddy is ParatrooperAlien || baddy is Parachute
+			|| baddy is ParatrooperBrain || baddy is PunchingBag;
+	}
+
+	// What can actually KILL the ship -- the AI's avoidance set. Mirrors the type list in
+	// PlayerShip.CollidesWith (the branch that reaches Asplode/AsplodeWall). Wall and Lazer are
+	// excluded here only because DoAIMove handles them with dedicated, better-shaped logic
+	// (a tile-map gap search and a distance-to-line steer) before this predicate is reached.
+	// Gating avoidance on this rather than on `Collides` alone stops the bot dodging things that
+	// cannot hurt it -- a Parachute is shootable but harmless, and swerving around one costs
+	// exactly the positioning that gets a ship killed by something that is not.
+	private static bool IsAiThreat(AlienDrawableGameComponent baddy)
+	{
+		return baddy is UFO || baddy is Boss || baddy is Braineroid || baddy is EvilBullet || baddy is Asteroid
+			|| baddy is Ball || baddy is JunkBoss || baddy is DeathStar || baddy is ClassicBoss
+			|| baddy is StationaryBoss || baddy is Spider || baddy is MarsBoss || baddy is BattleSkull
+			|| baddy is FlyingSpider || baddy is Explosion || baddy is StarMine || baddy is PlasmaBall
+			|| baddy is BrainBoss || baddy is FakeBoss || baddy is SweepUFO || baddy is SpiderBoss
+			|| baddy is PunchingBag || (baddy is EvilSkull && !((EvilSkull)baddy).Fading);
+	}
+
+	// Bosses that HALT the level script: until one dies nothing else advances, so at comparable
+	// range it outranks trash that respawns forever. Without this the AI happily spends a boss
+	// fight plinking at the skulls the boss keeps spawning.
+	private static bool IsAiPriorityTarget(AlienDrawableGameComponent baddy)
+	{
+		return baddy is BrainBoss || baddy is FakeBoss || baddy is MarsBoss || baddy is JunkBoss
+			|| baddy is ClassicBoss || baddy is Boss || baddy is StationaryBoss || baddy is BattleSkull;
+	}
+
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = (float)Math.PI / 12f;
@@ -564,26 +730,46 @@ public class PlayerShip : AlienDrawableGameComponent
 		// after the loop turns it into a real distance for the range test.
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent alienDrawableGameComponent = null;
+		// A level-halting boss is worth reaching past a lot of trash, so it competes on a
+		// DISCOUNTED distance rather than by raw proximity. Scored in the same squared space the
+		// loop compares in, hence the squared factor.
+		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (baddy is UFO || baddy is Braineroid || (baddy is Ball && ((Ball)baddy).IsConnected()) || baddy is JunkBoss || baddy is Boss || baddy is Spider || baddy is MarsBoss || baddy is DeathStar || baddy is ClassicBoss || baddy is BattleSkull || (baddy is FlyingSpider && baddy.Collides) || baddy is StarMine || (baddy is EvilSkull && !((EvilSkull)baddy).Fading) || baddy is SweepUFO)
+			if (IsAiShootable(baddy))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
-				if ((toBaddy).LengthSquared() < nearestDist && baddy.Position.X > 0f && baddy.Position.X < 800f && baddy.Position.Y > 0f && baddy.Position.Y < 600f)
+				float scoreSq = (toBaddy).LengthSquared();
+				if (IsAiPriorityTarget(baddy))
 				{
-					Vector2 toNearest = baddy.Position - base.Position;
-					nearestDist = (toNearest).LengthSquared();
+					scoreSq *= priorityBiasSq;
+				}
+				if (scoreSq < nearestDist && baddy.Position.X > 0f && baddy.Position.X < 800f && baddy.Position.Y > 0f && baddy.Position.Y < 600f)
+				{
+					nearestDist = scoreSq;
 					alienDrawableGameComponent = baddy;
 				}
 			}
 		}
-		nearestDist = (float)Math.Sqrt(nearestDist);
+		// Undo the bias before the range test: the discount decides WHICH target wins, never
+		// whether a bullet can actually reach it.
+		if (alienDrawableGameComponent != null)
+		{
+			Vector2 toChosen = alienDrawableGameComponent.Position - base.Position;
+			nearestDist = (toChosen).Length();
+		}
+		else
+		{
+			nearestDist = float.MaxValue;
+		}
+		bool fired = false;
 		if (nearestDist <= bulletlifetime * 0.78f)
 		{
+			fired = true;
 			if (alienDrawableGameComponent is JunkBoss)
 			{
 				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position));
@@ -593,6 +779,10 @@ public class PlayerShip : AlienDrawableGameComponent
 				FireAt(MyMath.VectorToAngle(alienDrawableGameComponent.Position - base.Position) + RandomHelper.RandomNextFloat(0f - aimSpread, aimSpread));
 			}
 		}
+		// AI bench (card f4d1721f): "there was something on screen I could have killed and I did
+		// not shoot" is the signature of a target the AI cannot see -- the shape of the Level 3
+		// stall, where the boss that gates the level was never in the list above.
+		EvilAliensWeb.Compat.AiBench.NoteFireDecision(this, alienDrawableGameComponent != null, fired);
 		doAIBomb(baddies);
 	}
 
@@ -675,6 +865,8 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			dodgeAngle = -(float)Math.PI / 6f;
 		}
+		AlienDrawableGameComponent haltingBoss = null;
+		float haltingBossDistSq = float.MaxValue;
 		Vector2 delta;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
@@ -693,75 +885,26 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				position = baddy.Position;
 			}
+			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
+			// it is out of gun range (below). The 2008 code only ever did this for JunkBoss, so
+			// against any other boss the AI hovered at its default station and fired only when the
+			// boss happened to drift within range -- measured as 55% of ticks with a shootable
+			// target and no shot fired, against a BrainBoss parked at the top of the screen.
+			if (IsAiPriorityTarget(baddy) && IsAiShootable(baddy))
+			{
+				Vector2 toBoss = baddy.Position - base.Position;
+				float bossDistSq = (toBoss).LengthSquared();
+				if (bossDistSq < haltingBossDistSq)
+				{
+					haltingBossDistSq = bossDistSq;
+					haltingBoss = baddy;
+				}
+			}
 			if (baddy is Wall)
 			{
 				hasWall = true;
-				float wallProbeStep = 1.2f * (float)gameTime.ElapsedGameTime.TotalMilliseconds * base.MaxSpeed;
-				float wallNudge = 0f;
-				if (player == 0)
-				{
-					wallNudge = 8f;
-				}
-				if (player == 1)
-				{
-					wallNudge = 4f;
-				}
-				if (player == 2)
-				{
-					wallNudge = 6f;
-				}
-				if (player == 3)
-				{
-					wallNudge = 10f;
-				}
 				collisionLevelMap = (CollisionLevelMap)((Wall)baddy).GetCollisionType();
-				CollisionBox collisionBox = (CollisionBox)GetCollisionType();
-				int x = 0;
-				int y = 0;
-				collisionLevelMap.GetMapCoords(ref x, ref y, base.Position);
-				int target_x = 0;
-				int target_y = 0;
-				findNextTileOnMap(x, y, ref target_x, ref target_y, collisionLevelMap);
-				if (target_y < y)
-				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - wallProbeStep, base.Position.Y));
-					if (collisionLevelMap.TileIsOccupied(x, y - 1))
-					{
-						direction += new Vector2(wallNudge, 0f);
-					}
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + wallProbeStep, base.Position.Y));
-					if (collisionLevelMap.TileIsOccupied(x, y - 1))
-					{
-						direction += new Vector2(0f - wallNudge, 0f);
-					}
-				}
-				else if (target_x > x)
-				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - wallProbeStep, base.Position.Y));
-					if (collisionLevelMap.TileIsOccupied(x, y - 1))
-					{
-						direction += new Vector2(wallNudge, 0f);
-					}
-					if (collisionLevelMap.TileIsOccupied(target_x, y - 1))
-					{
-						direction += new Vector2(0f, wallNudge);
-					}
-				}
-				else if (target_x < x)
-				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + wallProbeStep, base.Position.Y));
-					if (collisionLevelMap.TileIsOccupied(x, y - 1))
-					{
-						direction += new Vector2(0f - wallNudge, 0f);
-					}
-					if (collisionLevelMap.TileIsOccupied(target_x, y - 1))
-					{
-						direction += new Vector2(0f, wallNudge);
-					}
-				}
-				else if (target_x != x)
-				{
-				}
+				SteerThroughWall(ref direction, (Wall)baddy, collisionLevelMap);
 			}
 			else if (baddy is Lazer)
 			{
@@ -778,10 +921,22 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			else
 			{
-				if (!baddy.Collides)
+				// Card f4d1721f: dodge only what can actually KILL the ship. Steering around a
+				// harmless-but-collidable object (a Parachute) costs exactly the positioning that
+				// gets a ship killed by something that is not harmless.
+				if (!baddy.Collides || !IsAiThreat(baddy))
 				{
 					continue;
 				}
+				// A fast mover is judged by where it is GOING, not where it is. Radial repulsion
+				// from something crossing the screen pushes the ship ALONG its path -- which is
+				// precisely the spider boss's screen-wide sweep, and why that fight read as "no
+				// idea what it's doing". See EvadeMovingThreat.
+				// This ADDS to the distance-based repulsion below rather than replacing it: the
+				// prediction is only as good as the assumption that both keep their present
+				// course, and letting it suppress the proximity term entirely means one wrong
+				// prediction leaves the ship with no avoidance at all.
+				EvadeMovingThreat(ref direction, baddy, dodgeAngle, minSteerStrength, maxSteerStrength);
 				float dist;
 				if (baddy.GetCollisionType() is CollisionBox)
 				{
@@ -860,6 +1015,23 @@ public class PlayerShip : AlienDrawableGameComponent
 					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, (toPowerup4).Length() / steerRange);
 				}
 				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(powerup.Position - base.Position));
+			}
+		}
+		// Close on a level-halting boss that is out of gun range (card f4d1721f). Nothing else in
+		// the level advances until it dies, so hovering at the default station waiting for it to
+		// drift into range is not a strategy -- it is the stall. The standoff point keeps the
+		// ship's current bearing on the boss and only closes the distance, so this asks to get in
+		// RANGE, never to ram it; the threat repulsion above still owns how close is too close.
+		// Placed after the powerup pass so a boss fight outranks a pickup detour.
+		if (haltingBoss != null)
+		{
+			float gunRange = bulletlifetime * BulletRangePerMs;
+			Vector2 fromBoss = base.Position - haltingBoss.Position;
+			float bossDist = (fromBoss).Length();
+			float standoff = MathHelper.Clamp(gunRange * BossStandoffFraction, BossStandoffMinPx, BossStandoffMaxPx);
+			if (bossDist > standoff && bossDist > 0.001f)
+			{
+				position = haltingBoss.Position + (fromBoss / bossDist) * standoff;
 			}
 		}
 		foreach (PlayerShip ship2 in oracle.GetShips())
@@ -960,120 +1132,355 @@ public class PlayerShip : AlienDrawableGameComponent
 				direction += push * new Vector2(0f, -1f);
 			}
 		}
+		// Low-pass the summed steer (card f4d1721f). Everything above votes with a vector, Move()
+		// consumes only the resulting ANGLE, and nothing damped how fast that angle could move --
+		// so near-cancelling votes used to spin the heading at ~1050 deg/s inside a wall. Blending
+		// the VECTOR makes opposing votes cancel toward zero (the ship coasts, which is the right
+		// answer) while a sustained vote still converges in a few frames. Exponential in dt so the
+		// smoothing is framerate-independent.
+		float smoothMs = SteerSmoothMs;
+		if (smoothMs > 0f)
+		{
+			float blend = 1f - (float)Math.Exp(0f - gameTime.ElapsedGameTime.TotalMilliseconds / smoothMs);
+			aiSteer = Vector2.Lerp(aiSteer, direction, MathHelper.Clamp(blend, 0f, 1f));
+			direction = aiSteer;
+		}
+		// The emergency wall clamp is applied AFTER the smoothing, deliberately: it is a hard
+		// "do not fly into that" override, and low-passing it (as an earlier revision did) turns a
+		// full reversal into a gentle suggestion -- which measured as 46 wall contacts against the
+		// old code's 8.
 		if (hasWall)
 		{
-			CollisionBox collisionBox2 = (CollisionBox)GetCollisionType();
-			float wallProbeReach = 41.666668f * base.MaxSpeed;
-			if (direction.X > 0f)
-			{
-				int x2 = 0;
-				int y2 = 0;
-				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.BottomRight + new Vector2(wallProbeReach, 0f));
-				if (collisionLevelMap.TileIsOccupied(x2, y2))
-				{
-					direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
-				}
-				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.TopRight + new Vector2(wallProbeReach, 0f));
-				if (collisionLevelMap.TileIsOccupied(x2, y2))
-				{
-					direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
-				}
-			}
-			else if (direction.X < 0f)
-			{
-				int x3 = 0;
-				int y3 = 0;
-				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.BottomLeft + new Vector2(0f - wallProbeReach, 0f));
-				if (collisionLevelMap.TileIsOccupied(x3, y3))
-				{
-					direction.X = 0f + MathHelper.Max(Math.Abs(direction.Y), 1f);
-				}
-				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.TopLeft + new Vector2(0f - wallProbeReach, 0f));
-				if (collisionLevelMap.TileIsOccupied(x3, y3))
-				{
-					direction.X = 0f + MathHelper.Max(Math.Abs(direction.Y), 1f);
-				}
-			}
-			int x4 = 0;
-			int y4 = 0;
-			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopLeft + new Vector2(0f, -3f * wallProbeReach));
-			if (collisionLevelMap.TileIsOccupied(x4, y4))
-			{
-				direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
-			}
-			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopRight + new Vector2(0f, -3f * wallProbeReach));
-			if (collisionLevelMap.TileIsOccupied(x4, y4))
-			{
-				direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
-			}
+			ClampIntoWallSpace(ref direction, collisionLevelMap);
+			// ...and the override is REMEMBERED. Leaving aiSteer untouched here means the very
+			// next tick blends back toward the pre-clamp heading, so a probe that flickers clear
+			// snaps the ship straight back at the wall -- the clamp becomes its own oscillator.
+			// Committing it makes the escape the new baseline to smooth from.
+			aiSteer = direction;
 		}
-		if ((direction).Length() <= 0.2f)
+		if ((direction).Length() <= SteerDeadzone)
 		{
 			direction = Vector2.Zero;
 		}
+		// AI bench (card f4d1721f): this is the AI's decision for the tick, and Move() consumes
+		// only its ANGLE -- so the heading measured here is exactly what the ship will fly.
+		EvilAliensWeb.Compat.AiBench.NoteSteer(this, direction, gameTime);
 	}
 
-	private void findNextTileOnMap(int x, int y, ref int target_x, ref int target_y, CollisionLevelMap map)
+	// Steer off the PATH of a threat that is closing fast, rather than radially away from where
+	// it happens to be (card f4d1721f). Returns false for anything slow or already receding, so
+	// the original distance-based repulsion below still handles the static/drifting majority.
+	//
+	// Why this exists: the SpiderBoss's flyleft/flyright states cross the entire screen width at
+	// a fixed Y. Radial repulsion from a boss directly to the ship's left pushes the ship RIGHT
+	// -- straight down the boss's own track -- and only starts pushing at all inside 150px, by
+	// which time a mover that size cannot be avoided. Steering perpendicular to its travel moves
+	// the ship off the line while there is still time, which is what a player does.
+	private bool EvadeMovingThreat(ref Vector2 direction, AlienDrawableGameComponent baddy, float dodgeAngle, float minSteerStrength, float maxSteerStrength)
 	{
-		if (!map.TileIsOccupied(x, y - 1))
+		// RELATIVE velocity: the question is "on our present courses, does this hit me", and the
+		// ship is moving too. Using the threat's velocity alone mispredicts every case where the
+		// ship is closing on the threat's path -- which is most near-misses turning into hits.
+		// ObservedVelocity, not SpeedVector, for the threat: the latter is derived from
+		// _speed/_direction and reads zero for everything that writes Position directly --
+		// including the spider boss's fly states, i.e. exactly the case this method exists for.
+		Vector2 rel = baddy.ObservedVelocity - SpeedVector;
+		float speed = (rel).Length();
+		// Below this it is not a "mover" in any meaningful sense and the radial term is a better
+		// model. The player ship's own MaxSpeed is 0.33 px/ms, so this is ~a third of that.
+		if (speed < ThreatMinSpeed)
 		{
-			target_x = x;
-			target_y = y - 1;
-			return;
+			return false;
 		}
-		int scanX = x - 1;
-		int leftCost = 0;
-		while (map.TileIsOccupied(scanX, y) || map.TileIsOccupied(scanX, y - 1))
+		Vector2 toShip = base.Position - baddy.Position;
+		// Time of closest approach along the threat's own velocity (the ship's motion is left out
+		// deliberately -- the ship is what we are choosing, so treating it as stationary asks the
+		// right question: "if I stay here, does this hit me?").
+		float t = Vector2.Dot(toShip, rel) / (speed * speed);
+		if (t <= 0f)
 		{
-			leftCost++;
-			scanX--;
-			if (scanX < 0)
+			// Closest approach is behind it: already past, nothing to dodge.
+			return false;
+		}
+		float lead = ThreatLeadMs;
+		if (t > lead)
+		{
+			// Too far out in time to be worth bending the flight path for -- and acting on it
+			// now would just be noise added to whatever the ship is actually doing.
+			return false;
+		}
+		Vector2 miss = toShip - rel * t;
+		float missDist = (miss).Length();
+		float margin = ThreatMissMargin + ThreatRadius(baddy);
+		if (missDist > margin)
+		{
+			return false;
+		}
+		// Push perpendicular to the threat's travel, on the side the ship is already closer to.
+		Vector2 side = (missDist > 0.001f) ? (miss / missDist) : new Vector2(0f - rel.Y, rel.X) / speed;
+		// Full strength at a dead-on collision course, tapering to nothing at the margin, and
+		// again by how soon it lands -- an impact 100ms away deserves more than one 700ms away.
+		float byMiss = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, missDist / margin);
+		float byTime = MathHelper.Clamp(1f - t / lead, 0f, 1f);
+		float strength = byMiss * (ThreatUrgencyFloor + (1f - ThreatUrgencyFloor) * byTime);
+		// Panic: a dead-on hit about to land RIGHT NOW has to outrank every other steering term,
+		// not merely tie with them. Without this the evade is one vote of at most maxSteerStrength
+		// (4) against a boss-approach pull, a powerup pull and the edge pushes -- and the ship
+		// takes the hit while politely averaging its options.
+		if (t < ThreatPanicMs && missDist < margin * ThreatPanicMissFraction)
+		{
+			strength = MathHelper.Max(strength, ThreatPanicStrength);
+		}
+		direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
+		return true;
+	}
+
+	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more
+	// room than a bullet. Mirrors the collision-type switch the radial branch uses.
+	private static float ThreatRadius(AlienDrawableGameComponent baddy)
+	{
+		ICollisionType type = baddy.GetCollisionType();
+		if (type is CollisionBox)
+		{
+			return ((CollisionBox)type).Width / 2f;
+		}
+		if (type is CollisionMultibox)
+		{
+			return ((CollisionMultibox)type).Items[0].Width / 2f;
+		}
+		if (type is CollisionSimpleCircle)
+		{
+			return ((CollisionSimpleCircle)type).Radius;
+		}
+		return 0f;
+	}
+
+	// ---- Level-3 wall navigation (card f4d1721f, rewritten) --------------------------------
+	//
+	// The wall is a scrolling bool grid (CollisionLevelMap). Its rows come DOWN at the ship, so
+	// in wall-local coords the ship is climbing: row y-1 is what arrives next. Touching any
+	// occupied tile is AsplodeWall() -- instant death -- so this is the one place the AI cannot
+	// afford to be approximate.
+	//
+	// What the 2008 code did, and why it jittered (all three measured with ?aibench):
+	//   * it probed a fixed `41.67 * MaxSpeed` = ~13.75px ahead, against tiles 67..267px wide --
+	//     about one ship-width of warning at full closing speed;
+	//   * on a hit it SLAMMED the steer (`direction.X = -max(|direction.Y|, 1)`), a full reversal
+	//     rather than a push, so the next tick's clear probe threw it straight back;
+	//   * it re-picked left-vs-right every single tick, and a wall scrolling on by one row can
+	//     swap which side is cheaper, reversing the ship mid-approach.
+	// Together those spun the commanded heading at ~1050 deg/s. This version looks ahead by
+	// TIME, pushes proportionally, and commits to a gap.
+
+	// Steer toward the committed gap in this wall, and away from tiles that are close in the
+	// direction of travel. Called once per Wall in the steering loop; only ever adds to
+	// `direction`, so it composes with every other steering term like they compose with each
+	// other. The hard "do not fly into that" clamp is ClampIntoWallSpace, applied last.
+	private void SteerThroughWall(ref Vector2 direction, Wall wall, CollisionLevelMap map)
+	{
+		CollisionBox box = (CollisionBox)GetCollisionType();
+		int x = 0;
+		int y = 0;
+		map.GetMapCoords(ref x, ref y, base.Position);
+		float tile = map.TileSize;
+		int column = ChooseGapColumn(x, y, map, box.Width);
+		float dx = map.ColumnCentreX(column) - base.Position.X;
+		// How much room the ship has in ITS OWN column. Measured in PIXELS to the face of the
+		// first blocked row, not in rows: a row count cannot distinguish "a slab is 60px above
+		// me" from "a slab is 1000px above me", and treating those alike makes the avoidance push
+		// either permanent (it was -- the ship pinned itself against the bottom of the screen and
+		// stopped steering entirely) or far too late. Closing speed is the ship's own top speed
+		// plus the wall's scroll, so `reach` is the distance it can actually still react within.
+		float closing = base.MaxSpeed + (wall.ObservedVelocity).Length();
+		float reach = MathHelper.Max(closing * WallReactionMs, box.Height);
+		float gapPx = DistanceToBlockedRow(x, y, map);
+		float urgency = 1f - MathHelper.Clamp(gapPx / MathHelper.Max(reach, 1f), 0f, 1f);
+		if (Math.Abs(dx) > tile * 0.15f)
+		{
+			// A committed lateral move is worth pressing: the gap is the only survivable place to
+			// be, and the wall puts a deadline on getting there. Scaled well above the generic steer
+			// terms (maxSteerStrength 4) so a stray powerup pull cannot drift the ship out of the
+			// slot it is threading.
+			float lateral = MathHelper.Lerp(WallLateralIdle, WallLateralUrgent, urgency);
+			direction += new Vector2((float)Math.Sign(dx) * lateral, 0f);
+		}
+		// Back off downward while a blocked row is genuinely closing -- that buys the time the
+		// lateral move needs, and it is the only thing that helps when the ship is directly under
+		// a slab. NOT gated on dx: under a block with nowhere better to be, retreating is still
+		// the right answer. Positive Y is down (screen coords).
+		if (urgency > 0f)
+		{
+			direction += new Vector2(0f, WallBackOff * urgency);
+		}
+	}
+
+	// Pixels from the ship to the bottom face of the first blocked row above it in its own
+	// column, or float.MaxValue when nothing is blocked within the scan. This is the number the
+	// urgency ramp needs -- see the SteerThroughWall comment for what using a row COUNT here did.
+	private float DistanceToBlockedRow(int x, int y, CollisionLevelMap map)
+	{
+		int clear = RowsClearAhead(x, y, map);
+		if (clear >= WallScanRows)
+		{
+			return float.MaxValue;
+		}
+		// Rows above the ship are y-1, y-2, ...; the first blocked one is y-clear-1, and the face
+		// that reaches the ship is its bottom edge.
+		return MathHelper.Max(base.Position.Y - map.RowBottomY(y - clear - 1), 0f);
+	}
+
+	// How many clear rows sit above the ship in `column`-agnostic terms: the distance, in rows,
+	// to the first occupied tile straight ahead. Caps out -- past the look-ahead the exact number
+	// stops mattering and scanning further is wasted work.
+	private static int RowsClearAhead(int x, int y, CollisionLevelMap map)
+	{
+		for (int i = 1; i <= WallScanRows; i++)
+		{
+			if (map.TileIsOccupied(x, y - i))
 			{
-				leftCost = 1000;
-				break;
+				return i - 1;
 			}
 		}
-		scanX = x + 1;
-		int rightCost = 0;
-		while (map.TileIsOccupied(scanX, y) || map.TileIsOccupied(scanX, y - 1))
+		return WallScanRows;
+	}
+
+	// Pick the column to thread, and STICK to it. Replaces findNextTileOnMap, whose per-tick
+	// left-vs-right re-decision was one of the three jitter sources. Two rules make it a plan
+	// rather than a twitch:
+	//   * a candidate must be wide enough for the ship (`shipWidth`), not merely a free tile;
+	//   * the committed column is only abandoned when a rival beats it by GapSwitchMargin tiles,
+	//     or when it stops being passable at all.
+	private int ChooseGapColumn(int x, int y, CollisionLevelMap map, float shipWidth)
+	{
+		int span = MathHelper.Max((int)Math.Ceiling(shipWidth / map.TileSize), 1);
+		int best = x;
+		float bestScore = float.MinValue;
+		for (int c = 0; c < map.Width; c++)
 		{
-			rightCost++;
-			scanX++;
-			if (scanX >= map.Width)
+			float score = ColumnScore(c, x, y, map, span);
+			if (score > bestScore)
 			{
-				rightCost = 1000;
-				break;
+				bestScore = score;
+				best = c;
 			}
 		}
-		if (leftCost < rightCost)
+		// Hysteresis: only abandon the committed column when a rival beats it by a margin. The
+		// 2008 search re-decided left-vs-right EVERY tick, and a wall scrolling on by one row can
+		// swap which side is cheaper -- so the ship reversed mid-approach, forever. This is what
+		// turns a gap choice into a plan.
+		if (aiGapColumn >= 0 && aiGapColumn < map.Width)
 		{
-			target_x = x - 1;
-			target_y = y;
+			float heldScore = ColumnScore(aiGapColumn, x, y, map, span);
+			if (heldScore >= bestScore - GapSwitchMargin)
+			{
+				aiGapCost = heldScore;
+				return aiGapColumn;
+			}
+		}
+		aiGapColumn = best;
+		aiGapCost = bestScore;
+		return best;
+	}
+
+	// How good a column is to be in, as a single comparable number. GRADED rather than a
+	// pass/fail test on purpose: inside a dense maze section there is often no column that is
+	// clear for the full look-ahead, and a boolean "passable" test then reports nothing passable
+	// -- which in an earlier revision of this code made the AI hold station and let the wall
+	// scroll into it. There is always a least-bad column, and the AI must always be heading for
+	// one.
+	//   + rows of clearance ahead (dominant: being alive next second beats being efficient)
+	//   - how far the ship must travel sideways
+	//   - a penalty per blocked column it would have to cross to get there
+	// A column whose own row is blocked scores far below everything else: the ship cannot be
+	// there at all.
+	private static float ColumnScore(int c, int x, int y, CollisionLevelMap map, int span)
+	{
+		int half = span / 2;
+		for (int col = c - half; col <= c + half; col++)
+		{
+			if (map.TileIsOccupied(col, y))
+			{
+				return float.MinValue / 2f;
+			}
+		}
+		// Clearance of the narrowest point across the ship's full width -- checking the ship's
+		// real footprint is what stops the AI committing to a slot it physically cannot fit
+		// through, which the old single-tile test could not see.
+		int clearance = WallScanRows;
+		for (int col = c - half; col <= c + half; col++)
+		{
+			clearance = Math.Min(clearance, RowsClearAhead(col, y, map));
+		}
+		return (float)clearance * WallRowWeight
+			- (float)Math.Abs(c - x)
+			- (float)BlockedBetween(x, c, y, map) * WallCrossPenalty;
+	}
+
+	// Blocked columns strictly between `from` and `to` on the ship's own row and the one above --
+	// the cells it would have to pass through to get there.
+	private static int BlockedBetween(int from, int to, int y, CollisionLevelMap map)
+	{
+		int lo = Math.Min(from, to);
+		int hi = Math.Max(from, to);
+		int blocked = 0;
+		for (int c = lo + 1; c < hi; c++)
+		{
+			if (map.TileIsOccupied(c, y) || map.TileIsOccupied(c, y - 1))
+			{
+				blocked++;
+			}
+		}
+		return blocked;
+	}
+
+	// The last-resort "do not fly into that" clamp, applied after every other steering term.
+	// Unlike the 2008 override this fires only when a tile is within roughly ONE TICK of travel,
+	// where the reversal is genuinely correct and cannot alternate -- at that range the probe
+	// stays hit until the ship is actually clear. Everything further out is handled by the
+	// proportional steer in SteerThroughWall.
+	private void ClampIntoWallSpace(ref Vector2 direction, CollisionLevelMap map)
+	{
+		if (map == null)
+		{
 			return;
 		}
-		if (leftCost > rightCost)
+		CollisionBox box = (CollisionBox)GetCollisionType();
+		float reach = base.MaxSpeed * WallClampMs;
+		int cx = 0;
+		int cy = 0;
+		if (direction.X > 0f)
 		{
-			target_x = x + 1;
-			target_y = y;
-			return;
+			map.GetMapCoords(ref cx, ref cy, box.BottomRight + new Vector2(reach, 0f));
+			bool hit = map.TileIsOccupied(cx, cy);
+			map.GetMapCoords(ref cx, ref cy, box.TopRight + new Vector2(reach, 0f));
+			hit |= map.TileIsOccupied(cx, cy);
+			if (hit)
+			{
+				direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
+			}
 		}
-		if (player == 0)
+		else if (direction.X < 0f)
 		{
-			target_x = x - 1;
+			map.GetMapCoords(ref cx, ref cy, box.BottomLeft + new Vector2(0f - reach, 0f));
+			bool hit = map.TileIsOccupied(cx, cy);
+			map.GetMapCoords(ref cx, ref cy, box.TopLeft + new Vector2(0f - reach, 0f));
+			hit |= map.TileIsOccupied(cx, cy);
+			if (hit)
+			{
+				direction.X = MathHelper.Max(Math.Abs(direction.Y), 1f);
+			}
 		}
-		if (player == 1)
+		// Upward is the dangerous axis: the wall closes on the ship whether or not it is moving,
+		// so this probe is not gated on direction.Y and reaches further.
+		float up = reach * WallClampUpFactor;
+		map.GetMapCoords(ref cx, ref cy, box.TopLeft + new Vector2(0f, 0f - up));
+		bool above = map.TileIsOccupied(cx, cy);
+		map.GetMapCoords(ref cx, ref cy, box.TopRight + new Vector2(0f, 0f - up));
+		above |= map.TileIsOccupied(cx, cy);
+		if (above)
 		{
-			target_x = x + 1;
+			direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
 		}
-		if (player == 2)
-		{
-			target_x = x - 1;
-		}
-		if (player == 3)
-		{
-			target_x = x + 1;
-		}
-		target_y = y;
 	}
 
 	private void getDistanceToLine(AlienDrawableGameComponent alien, out float d, out Vector2 shortestpoint)
@@ -1219,6 +1626,15 @@ public class PlayerShip : AlienDrawableGameComponent
 				ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Coop);
 			}
 		}
+		// AI bench (card f4d1721f): score the wall touch BEFORE the invulnerability gate below.
+		// A wall touch is AsplodeWall(), i.e. instant death, so an honest run ends at the first
+		// mistake and measures one wall section; ?invuln lets the soak cover all six -- but only
+		// if the clip is still counted here, or the run that survives everything is exactly the
+		// run that reports zero mistakes.
+		if (other is Wall && !hasWon && EffectiveController() == ControlDevice.AI)
+		{
+			EvilAliensWeb.Compat.AiBench.NoteWallContact(this);
+		}
 		if ((other is UFO || other is Lazer || other is Boss || other is Braineroid || other is EvilBullet || other is Asteroid || other is Ball || other is JunkBoss || other is DeathStar || other is ClassicBoss || other is StationaryBoss || other is Spider || other is MarsBoss || other is BattleSkull || other is Wall || other is FlyingSpider || other is Explosion || other is StarMine || other is PlasmaBall || other is BrainBoss || other is FakeBoss || other is SweepUFO || other is SpiderBoss || other is PunchingBag || (other is EvilSkull && !((EvilSkull)other).Fading)) && (!invulnerabilityTimer.Active & !hasWon))
 		{
 			if (connectors.Count > 0)
@@ -1323,6 +1739,7 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void AsplodeWall()
 	{
+		EvilAliensWeb.Compat.AiBench.NoteDeath(this);
 		// Game juice: the player's own death is the biggest impact in the game — a real
 		// freeze-frame + extra trauma on top of what the two explosions below add.
 		EvilAliensWeb.Compat.Juice.AddHitStop(0.18f);
@@ -1344,6 +1761,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	{
 		if (!base.IsDead)
 		{
+			EvilAliensWeb.Compat.AiBench.NoteDeath(this);
 			// Game juice: same death punch as AsplodeWall — freeze-frame + extra trauma on
 			// top of the two explosions' own shake.
 			EvilAliensWeb.Compat.Juice.AddHitStop(0.18f);

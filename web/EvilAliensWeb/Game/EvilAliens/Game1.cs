@@ -956,6 +956,40 @@ public class Game1 : Game
 
 	private void UpdateCore(GameTime gameTime)
 	{
+		// AI bench fast-forward (?aiff=<n>, card f4d1721f): run the sim n times per rendered frame
+		// so an unattended AI soak covers a whole level in a fraction of the wall clock, WITHOUT
+		// changing the per-tick physics it is measuring (which Settings.Turbo, a dt scale, would).
+		// Each repeat gets a synthesised 60Hz dt, NOT the frame's own: IsFixedTimeStep is false
+		// here, so drawing one frame per n sims inflates the real delta by ~n and repeating THAT
+		// would be a giant timestep -- worse than the dt scaling this exists to avoid.
+		// Never in a net session: both peers must run at one pace.
+		int repeats = EvilAliensWeb.Compat.DebugFlags.AiFastForward;
+		if (repeats > 1 && !EvilAliensWeb.Compat.Net.NetSession.Active)
+		{
+			TimeSpan step = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 60L);
+			TimeSpan total = gameTime.TotalGameTime;
+			for (int i = 0; i < repeats; i++)
+			{
+				total += step;
+				UpdateScaled(new GameTime(total, step));
+				// A launch warm is one decode per tick and must not be raced through -- the point
+				// of the warm is that the browser paints between decodes.
+				if (pendingLevelLaunch != null)
+				{
+					break;
+				}
+			}
+			return;
+		}
+		UpdateScaled(gameTime);
+	}
+
+	// The real per-tick path: global singletons, the turbo/slow-mo/hit-stop time scale, then the
+	// world. Split out of UpdateCore so the ?aiff fast-forward above and the headless AI soak
+	// (AiBench.RunHeadless via BenchTick) both drive the SAME code a normal frame does -- a
+	// second hand-rolled copy of the scaling would silently drift from the game being measured.
+	private void UpdateScaled(GameTime gameTime)
+	{
 		Settings.GetInstance().Update();
 		Achievements.GetInstance().Update();
 		Unlockables.GetInstance().Update();
@@ -1006,6 +1040,14 @@ public class Game1 : Game
 		UpdateInner(gameTime);
 	}
 
+	// AI bench headless soak seam (card f4d1721f): one full game tick at a caller-chosen dt with
+	// NO Draw. Rendering is the expensive half and a soak does not need it -- and a background
+	// tab throttles rAF (and MessageChannel) to ~1 Hz, so a rendered soak measures nothing.
+	internal void BenchTick(GameTime gameTime)
+	{
+		UpdateScaled(gameTime);
+	}
+
 	private void UpdateInner(GameTime gameTime)
 	{
 		if (!wantExit)
@@ -1041,6 +1083,9 @@ public class Game1 : Game
 			// join-in-progress pairing). A plain boot has no GameScene up, so it early-returns.
 			EvilAliensWeb.Compat.Net.NetListing.Tick((Game)(object)this);
 			FrameProfiler.End(FrameSection.UpdNet, profNet);
+			// AI telemetry (card f4d1721f): advance the run clock, latch level progress + verdict,
+			// print the periodic summary. A single branch when ?aibench is off.
+			EvilAliensWeb.Compat.AiBench.Update(gameTime, (Game)(object)this);
 			// A pending level launch takes warm priority (and excludes the other
 			// queues that tick, so a tick never pays two decodes).
 			if (pendingLevelLaunch != null)

@@ -248,6 +248,43 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for the AI telemetry (eaAiBench in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugAiBench'). Returns Compat/AiBench's report
+		// -- wall contacts, the heading-reversal jitter rate, fire idleness, level progress and
+		// the run verdict. Only meaningful on a ?aibench boot (card f4d1721f).
+		[JSInvokable("debugAiBench")]
+		public static string AiBench()
+		{
+			return EvilAliensWeb.Compat.AiBench.Report();
+		}
+
+		// eaAiBench.reset() -- rearm the counters mid-run (e.g. to score one wall section
+		// rather than the whole soak). Does not touch the game.
+		[JSInvokable("debugAiBenchReset")]
+		public static string AiBenchReset()
+		{
+			EvilAliensWeb.Compat.AiBench.Reset();
+			return "[aibench] counters reset";
+		}
+
+		// eaAiBench.world() -- census of the live components vs what the AI's world model
+		// (Oracle.GetBaddies) actually contains. The answer to "the level is stalled and the bot
+		// is shooting something -- what is it blind to?".
+		[JSInvokable("debugAiBenchWorld")]
+		public static string AiBenchWorld()
+		{
+			return EvilAliensWeb.Compat.AiBench.World();
+		}
+
+		// eaAiBench.soak(seconds) -- headless AI soak: tick the real game loop at a fixed 60Hz
+		// dt with no Draw, in bounded chunks. The ONLY way to soak the AI reliably from
+		// automation: a background tab throttles rAF to ~1Hz, so a rendered run measures nothing.
+		[JSInvokable("debugAiBenchRun")]
+		public static string AiBenchRun(double chunkSeconds)
+		{
+			return EvilAliensWeb.Compat.AiBench.RunHeadless(chunkSeconds);
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's

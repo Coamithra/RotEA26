@@ -100,6 +100,17 @@ internal static class BinTest
 		bin.Remove((GameComponent)(object)e);
 		bin.Update();
 
+		// Leave no trace: every removed/diverted scratch component landed in the recycle
+		// pool (ComponentRemoved -> idleList, filter diverts -> idleList) — prune them so
+		// repeated runs don't accumulate pooled TestAliens (each is an IComponentWatcher,
+		// so they'd otherwise sit in the notify multiset forever).
+		bin.PruneIdle((GameComponent)(object)a);
+		bin.PruneIdle((GameComponent)(object)b);
+		bin.PruneIdle((GameComponent)(object)c);
+		bin.PruneIdle((GameComponent)(object)d);
+		bin.PruneIdle((GameComponent)(object)d2);
+		bin.PruneIdle((GameComponent)(object)e);
+
 		sb.Append("[bin] " + pass + " passed, " + fail + " failed");
 		return sb.ToString();
 	}

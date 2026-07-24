@@ -68,9 +68,9 @@ public class ComponentBin : IComponentBinService
 	}
 
 	// Rebuild the persistent watcher list from scratch (the multiset the notify path iterates:
-	// collection + idleList + Σinactive; birthList is iterated separately at notify time). Cheap
-	// because it only runs at the rare reset/cache-clear boundaries — it also re-syncs `watchers`
-	// so any incremental drift can't survive past a level load.
+	// collection + idleList + Σinactive). Cheap because it only runs at the rare
+	// reset/cache-clear boundaries — it also re-syncs `watchers` so any incremental drift
+	// can't survive past a level load.
 	private void RebuildWatchers()
 	{
 		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
@@ -287,6 +287,11 @@ public class ComponentBin : IComponentBinService
 
 	private void FlushDeaths()
 	{
+		if (EvilAliensWeb.Compat.DebugFlags.BinLog)
+		{
+			test(deathList, "deathList");
+			test(idleList, "idleList");
+		}
 		deathListCopy.Clear();
 		foreach (GameComponent death in deathList)
 		{
@@ -362,7 +367,13 @@ public class ComponentBin : IComponentBinService
 		if (((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))
 		{
 			component.Initialize();
-			component.Enabled = true;
+			// Same pause rule as the fresh-add path below: a live world object re-added
+			// while the world is pushed stays frozen (it already sits in a pause layer,
+			// so Pop is what re-enables it) — re-enabling here would break the freeze.
+			if (!(inactive.Count > 0 && component is AlienDrawableGameComponent))
+			{
+				component.Enabled = true;
+			}
 			return;
 		}
 		// Instant add: enters Game.Components NOW (KNI runs Initialize inside this call and
@@ -400,6 +411,16 @@ public class ComponentBin : IComponentBinService
 		{
 			idleList.Add(component);
 			WatcherAdd(component);
+		}
+	}
+
+	// Drop a component from the recycle pool (watcher bookkeeping included). Only the
+	// eaBinTest suite uses this — its scratch components must not accumulate in the pool.
+	internal void PruneIdle(GameComponent component)
+	{
+		if (idleList.Remove(component))
+		{
+			WatcherRemove(component);
 		}
 	}
 

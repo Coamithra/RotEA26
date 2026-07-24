@@ -533,10 +533,10 @@ internal abstract class GameScene : Scene
 		((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)Background);
 		((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)Foreground);
 		eventList.Reset();
-		Collection.Add((GameComponent)(object)score);
 		score.Reset();
 		score.Save();
 		score.Lives = -1;
+		Collection.Add((GameComponent)(object)score);
 		Settings.GetInstance().ResetDifficulty();
 		if (oracle.DeviceIsPlaying(ControlDevice.Keyboard))
 		{
@@ -1284,9 +1284,13 @@ internal abstract class GameScene : Scene
 		}
 		if ((_timer.TotalMilliseconds > 1300.0) & !shipCreated & spawnPlayerNormally)
 		{
-			Collection.Purge<AlienDrawableGameComponent>();
-			Collection.Purge<AnimatedMessage>();
-			Collection.Purge<TutorialMessage>();
+			// standing: false — this is a clear-the-field-and-respawn-NOW purge: the ships
+			// (AlienDrawableGameComponent) and the Get Ready banners (AnimatedMessage, via
+			// ShowStartMessages) are re-added in this same tick and must not be diverted by
+			// the standing purge filter (card 02d9ad67).
+			Collection.Purge<AlienDrawableGameComponent>(standing: false);
+			Collection.Purge<AnimatedMessage>(standing: false);
+			Collection.Purge<TutorialMessage>(standing: false);
 			SpawnAllPlayers(invulnerable: false);
 			shipCreated = true;
 		}

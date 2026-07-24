@@ -105,7 +105,40 @@ generate much of the art/audio referenced here.
   `autocomplete='off'` or Chrome's form restoration re-seeds them post-load and desyncs from the
   defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
-  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`.
+  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
+  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
+
+## Component lifecycle (`ComponentBin`) — the spawn/death contract
+
+Card 02d9ad67 hardened the 2008 deferred birth/death lists. The contract every spawn/despawn
+site now lives under:
+
+- **Births are INSTANT.** `ComponentBin.Add` puts the component straight into `Game.Components`
+  (KNI journals the update/draw registrations, so it never Updates before the next tick, but it
+  IS immediately visible to collisions, `Oracle.Get*` scans and purges — there is no hidden
+  "pending spawn" world). **KNI runs `Initialize()` synchronously inside the Add**, so a call
+  site must fully configure the object (Setup/Make*/property writes) BEFORE `Add` —
+  `tools/audit_add_order.py` is the lint (run it after adding spawn sites; the repo is clean).
+  Event subscriptions (`OnDeath +=`) after Add are fine.
+- **Deaths stay QUEUED** (`Remove` → deathList) — instant removal would corrupt the collision
+  pass and change within-tick gameplay — but the list flushes TWICE per tick: the original
+  mid-tick point (after component updates, before collisions) AND `TopOfTickFlush` (before any
+  component updates), so a collision-phase kill never gets one more "zombie" Update (the
+  fires-from-the-grave / final-bullet-across-the-paused-screen bug class).
+- **`Purge<T>` arms a standing filter** until the next top-of-tick flush: any `Add` of a T in
+  that window (a component updating later the same tick, a kill side effect in that tick's
+  collision phase) is diverted to the recycle pool — a clear-all followed by a late same-tick
+  spawn now actually clears all. **Opt out with `Purge<T>(standing: false)` ONLY for a
+  clear-the-field-and-respawn-NOW purge** whose own call chain re-adds a T in the same tick
+  (sole current case: `GameScene.UpdateStartup`'s pre-spawn clear — the ships and Get Ready
+  banners follow in the same tick; the filter would eat them, which is exactly the no-ship
+  regression `?binlog` caught during development).
+- **Adds while the world is `Push`ed (paused) join the freeze**: an `AlienDrawableGameComponent`
+  added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
+  `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
+  the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
+- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds; `eaBinTest()` runs the
+  scripted scenario suite (`Compat/BinTest.cs`) against the live bin and prints PASS/FAIL.
 
 ## Input
 

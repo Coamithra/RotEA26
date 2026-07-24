@@ -247,7 +247,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 			float num = RandomHelper.RandomNextFloat((float)Math.PI / 32f, (float)Math.PI / 4f);
 			base.Direction += num;
 			Bullet bullet = NewBullet(collection, base.Game);
-			collection.Add((GameComponent)(object)bullet);
 			bullet.Setup(base.Position, base.Direction - num * 2f, lifetime, player);
 			bullet.SetSplit(split);
 			bullet.SetBouncing(bouncing);
@@ -256,6 +255,7 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 			{
 				bullet.SetBounceTimerInitiallyEnabled();
 			}
+			collection.Add((GameComponent)(object)bullet);
 		}
 	}
 

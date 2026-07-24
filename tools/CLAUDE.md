@@ -188,3 +188,7 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   verification style — see the root CLAUDE.md rules.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight
   alpha — the basis for the project-wide straight-alpha rule).
+- **`tools/audit_add_order.py`**: lint for the ComponentBin instant-add contract (card 02d9ad67)
+  — flags any `ComponentBin.Add` call site that still configures the object (Setup/Make*/property
+  write) AFTER the Add; KNI runs `Initialize()` synchronously inside the Add, so config must come
+  first. Run after adding spawn sites; exit 0 = clean. See web CLAUDE.md "Component lifecycle".

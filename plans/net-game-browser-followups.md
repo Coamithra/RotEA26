@@ -27,11 +27,6 @@ They are documented here because the board CLI runs only on the author's machine
    list is fully open. Add a hide/report path + tighter server-side bounds (per-IP room caps,
    listing rate limits).
 
-## Additional v1 limitation (fold into card 1 or its own card)
-
-- **JIP joiner-leaves-mid-game leaves a ghost slot.** `NetSession` (listedSession) reverts the
-  host to single-player on peer loss (explode the puppet + `Stop`), but the remote player slot
-  added by `oracle.AddPlayer(Remote)` is not removed (Oracle has no per-player remove), so
-  `oracle.Players` stays 2 -- the host keeps playing but the game will NOT re-list (eligibility
-  needs `Players == 1`) and the departed slot's frozen score lingers in the HUD. Add an
-  `Oracle.RemovePlayer` (or clear the remote slot's `isPlaying`) in the listedSession teardown.
+(A fifth gap -- the JIP joiner leaving left the host's Remote player slot seated, so the game
+never re-listed -- was fixed in review via `Oracle.ReleasePlayer(ControlDevice.Remote)` in the
+listedSession teardown, so it is NOT a follow-up.)

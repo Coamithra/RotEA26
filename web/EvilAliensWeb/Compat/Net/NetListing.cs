@@ -64,7 +64,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 int lvl = (int)scene.Level;
                 int diff = (int)Settings.GetInstance().CurrentDifficulty;
-                int players = Players(scene);
+                int players = Players();
                 if (!open)
                 {
                     if (NowMs < retryAfter)
@@ -145,10 +145,10 @@ namespace EvilAliensWeb.Compat.Net
                     return false;
                 }
             }
-            return Players(scene) == 1;                    // exactly one active player, slot 2 free
+            return Players() == 1;                         // exactly one active player, slot 2 free
         }
 
-        private static int Players(GameScene scene)
+        private static int Players()
         {
             IOracleService svc = ServiceHelper.Get<IOracleService>();
             return svc?.Oracle?.Players ?? 0;

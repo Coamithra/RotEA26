@@ -73,7 +73,18 @@ namespace EvilAliensWeb.Compat.Net
             if (!subscribed)
             {
                 subscribed = true;
-                WebRtcInterop.OnPhase += (p, d) => phaseQueue.Enqueue((p, d));
+                // Only enqueue while this lobby is in an active flow. eaRtc's OnPhase is shared
+                // with the in-level game-listing flow (card 2001fbd8: NetListing drives eaRtc
+                // on the same channel), so a listed game's phases arrive here while Phase==Idle;
+                // dropping them at enqueue keeps the queue from growing between lobby visits and
+                // stops a listed game's 'connected' from ever starting a spurious menu session.
+                WebRtcInterop.OnPhase += (p, d) =>
+                {
+                    if (Phase != LobbyPhase.Idle)
+                    {
+                        phaseQueue.Enqueue((p, d));
+                    }
+                };
                 WebRtcInterop.OnCodeEntry += c => codeQueue.Enqueue(c);
             }
         }
@@ -120,12 +131,10 @@ namespace EvilAliensWeb.Compat.Net
             while (phaseQueue.Count > 0)
             {
                 (string p, string detail) = phaseQueue.Dequeue();
-                // eaRtc's phase channel is shared with the in-level game LISTING flow
-                // (card 2001fbd8: NetListing drives eaRtc.list on the same OnPhase). When
-                // this lobby isn't in an active flow, any phase it sees belongs to the
-                // listing (or is stale) -- discard it so a listed game's 'connected' can't
-                // start a spurious menu session here. NetListing owns those.
-                if (Phase == LobbyPhase.Idle)
+                // Belt-and-braces alongside the enqueue gate above: a phase enqueued during an
+                // active flow that then went Idle (Cancel) -- or any phase while a session is
+                // already up (the transport owns byes then) -- is not this lobby's to act on.
+                if (Phase == LobbyPhase.Idle || NetSession.Active)
                 {
                     continue;
                 }

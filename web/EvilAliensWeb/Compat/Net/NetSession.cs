@@ -1118,12 +1118,15 @@ namespace EvilAliensWeb.Compat.Net
             if (listedSession)
             {
                 // The JIP joiner dropped: revert the host to plain single-player. Explode the
-                // puppet ship, tear the session down; the host keeps playing its level and
-                // NetListing re-lists next tick. No force-exit -- the host was here first.
+                // puppet ship AND free the Remote player slot (else oracle.Players stays 2 and
+                // the host is never re-listed + a phantom score lingers), tear the session down.
+                // The host keeps playing its level; NetListing re-lists next tick. No
+                // force-exit -- the host was here first.
                 if (puppet != null)
                 {
                     ExplodePuppet();
                 }
+                oracle.ReleasePlayer(ControlDevice.Remote);
                 Stop("jip peer lost: " + reason);
                 return;
             }
@@ -1462,11 +1465,13 @@ namespace EvilAliensWeb.Compat.Net
                 if (listedSession)
                 {
                     // A JIP joiner left the match: revert the host to single-player (explode
-                    // the puppet), keep the host in its level. NetListing re-lists next tick.
+                    // the puppet + free the Remote slot so Players==1 again), keep the host in
+                    // its level. NetListing re-lists next tick.
                     if (puppet != null)
                     {
                         ExplodePuppet();
                     }
+                    oracle.ReleasePlayer(ControlDevice.Remote);
                     Stop("jip peer left the match");
                     break;
                 }

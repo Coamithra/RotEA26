@@ -44,6 +44,8 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 	}
 
 	// Snapshot the live browser list; rebuild the menu entries only when the code set changes.
+	// (Re-copied every frame regardless so the entries point at the current objects, whose
+	// PingMs fills in live; the per-frame alloc is trivial for a transient menu.)
 	private void RefreshGames()
 	{
 		IReadOnlyList<NetGameBrowser.GameEntry> live = NetGameBrowser.Games;
@@ -59,18 +61,36 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 				}
 			}
 		}
-		games = new List<NetGameBrowser.GameEntry>(live);
-		if (changed)
+		if (!changed)
 		{
-			RemoveAllEntries();
+			games = new List<NetGameBrowser.GameEntry>(live);
+			return;
+		}
+		// Keep the highlight on the SAME room across a refresh (by code, not index), so a room
+		// dropping off the list doesn't silently move the selection to a different game.
+		string selectedCode = (selectedEntry >= 0 && selectedEntry < games.Count)
+			? games[selectedEntry].Code
+			: null;
+		games = new List<NetGameBrowser.GameEntry>(live);
+		RemoveAllEntries();
+		for (int i = 0; i < games.Count; i++)
+		{
+			AddEntry(LevelArt.Title((Levels)games[i].Level));
+			AddEntryEvent(entrySelected);
+			EnsureArt((Levels)games[i].Level);
+		}
+		if (selectedCode != null)
+		{
 			for (int i = 0; i < games.Count; i++)
 			{
-				AddEntry(LevelArt.Title((Levels)games[i].Level));
-				AddEntryEvent(entrySelected);
-				EnsureArt((Levels)games[i].Level);
+				if (games[i].Code == selectedCode)
+				{
+					selectedEntry = i;
+					break;
+				}
 			}
-			SyncCarouselToSelection();
 		}
+		SyncCarouselToSelection();
 	}
 
 	private void entrySelected(MenuSub1 sender)

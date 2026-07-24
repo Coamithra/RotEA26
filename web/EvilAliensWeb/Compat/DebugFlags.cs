@@ -971,8 +971,6 @@ namespace EvilAliensWeb.Compat
 		//                    (JunkBoss excepted -- it always gets exact aim)
 		public static float? AiSteerSmoothMs { get; private set; }
 
-		public static float? AiAimSpreadRad { get; private set; }
-
 		public static float? AiWallReactionMs { get; private set; }
 
 		public static float? AiGapSwitchMargin { get; private set; }
@@ -981,9 +979,11 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiPriorityBias { get; private set; }
 
+		public static float? AiAimSpreadRad { get; private set; }
+
 		// The AI's personal-space field around a threat (PlayerShip.ThreatFieldRange /
 		// ThreatFieldStrength):
-		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull
+		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull            [per-tier]
 		//   ?aifieldsize=<f>   extra clearance per pixel of the threat's own half-extent
 		//   ?aifieldfall=<p>   exponent of the (1-t)^p falloff; higher = bites later and harder
 		// A big field with a FAST falloff is the point: the bot keeps well clear of something
@@ -1690,11 +1690,13 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "aiaim":
-					// Radians. Capped at a quarter turn: past that the "aimed" shot carries less
-					// information than firing in a random direction, which is not a skill setting.
+					// Radians, applied as RandomNextFloat(-aiaim, +aiaim) -- so this is the HALF
+					// width of the error arc and Pi (a full turn of spread) is a genuinely random
+					// shot. Capped there rather than lower because "fires in a random direction" is
+					// a legitimate skill FLOOR to A/B a tier row against, not a nonsense value.
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaim) && aiaim >= 0f)
 					{
-						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.PiOver2);
+						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.Pi);
 					}
 					break;
 				case "aigapmargin":

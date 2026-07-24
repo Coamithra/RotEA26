@@ -400,10 +400,15 @@ internal static class AiBench
 		// during an attract demo (locks Hard) and the tutorial (locks Very_Hard), which is exactly
 		// the case that would otherwise be silently wrong. Values are post-override, so a ?ai*
 		// flag shows up here too.
+		// A trailing * marks a value that came from a ?ai* override rather than the tier row --
+		// without it `?difficulty=Inzane&aifieldpx=150` prints exactly what the Easy row prints,
+		// and the line stops answering the one question it exists to answer.
 		PlayerShip.GetAiSkillReadout(out float fieldPx, out float aimRad);
 		sb.Append("  skill effective=").Append(Settings.GetInstance().EffectiveDifficulty);
 		sb.Append(" field=").Append(Fmt(fieldPx, 0)).Append("px");
-		sb.Append(" aim=").Append(Fmt(MathHelper.ToDegrees(aimRad), 1)).Append("deg\n");
+		sb.Append((DebugFlags.AiThreatFieldPx.HasValue ? "*" : ""));
+		sb.Append(" aim=").Append(Fmt(MathHelper.ToDegrees(aimRad), 1)).Append("deg");
+		sb.Append((DebugFlags.AiAimSpreadRad.HasValue ? "*" : "")).Append('\n');
 		return sb.ToString();
 	}
 

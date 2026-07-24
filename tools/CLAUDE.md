@@ -55,10 +55,15 @@ collapsed ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated
 `x.Position - y.Position` temporaries. It left the neighbouring
 `GamePadButtons buttonsN = (state).Buttons;` temps in `InputHandler.UpdateKeyPads` alone — inlining
 them renumbers the method's local slots, so the byte-identical hash oracle cannot cover it. Card
-`7d14a3cd` did it anyway, BOUNDED by `verify_decompiled_diff.py --ref main` instead, which is the
-tool for exactly that class: 24 temporaries inlined, the case-block braces dropped with them, and
-that one method's redundant parens cleared in passing.
-**Still deliberately not done:** the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead
+`7d14a3cd` did it anyway, BOUNDING it with `verify_decompiled_diff.py --ref main` instead, which
+is the tool for exactly that class — and that came back IDENTICAL, i.e. not merely confined to the
+edited method but invisible to ILSpy altogether. 24 temporaries inlined, the case-block braces
+dropped with them, and that one method's redundant parens cleared in passing.
+
+**Still deliberately not done.** That card was scoped to `UpdateKeyPads` ALONE, so the SAME temp
+shape survives four more times in the same file — `GamePadThumbSticks thumbSticksN =
+(stateN).ThumbSticks;` in `InputHandler.LeftStick`/`RightStick`. The struct-temporary class is NOT
+finished. Likewise untouched: the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead
 initializers (~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
 everywhere else. Each is its own artifact class and its own card; don't fold them into an
 unrelated change.

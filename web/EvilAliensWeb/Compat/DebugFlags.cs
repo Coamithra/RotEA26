@@ -388,6 +388,12 @@ namespace EvilAliensWeb.Compat
 		//   ?wallfogcolor=<hex>  the haze colour shafts dissolve into (rrggbb; sampled from the
 		//                        alien-base ground + its additive fog layers).
 		//   ?wallsidedark=<f>    brightness of the shaft at its cap (1 = as bright as the top face).
+		//   ?wallsidetile=<f>    how densely the sheet tiles DOWN a shaft, as a multiple of the top
+		//                        face's own texel density (1 = a side texel is the same world size as
+		//                        a top-face one, i.e. the shaft's true height in block footprints --
+		//                        2.70 cells at the shipped numbers). Baked at 4: honest scale reads
+		//                        short, because a steeply foreshortened shaft compresses most of its
+		//                        length into its far few pixels. See Wall.DefaultSideTile.
 		//   ?wallfacelight=<0..1> per-face shading contrast, so tower CORNERS read (0 = flat-shaded).
 		//                        Vertical faces darken, horizontal ones don't; each wall quad is one
 		//                        face, so this is just its vertex colour.
@@ -410,6 +416,8 @@ namespace EvilAliensWeb.Compat
 
 		public static float? WallSideDark { get; private set; }
 
+		public static float? WallSideTile { get; private set; }
+
 		public static float? WallFaceLight { get; private set; }
 
 		public static float? WallFaceAngle { get; private set; }
@@ -426,12 +434,13 @@ namespace EvilAliensWeb.Compat
 		// eaWalls() in index.html, shown on ?level=Level3&wallsonly / a bare ?walltune). Wall.Draw
 		// re-reads every knob each frame, so a drag re-projects the towers on the next Draw. Same
 		// effect as the ?wall* URL flags, live. `towers` doubles as the kill switch.
-		internal static void SetWallsOverride(bool towers, float? depth, float? fog, float? sideDark, float? faceLight, float? faceAngle, float? topLift, float? bands, float? wisps, float? wispSpeed)
+		internal static void SetWallsOverride(bool towers, float? depth, float? fog, float? sideDark, float? sideTile, float? faceLight, float? faceAngle, float? topLift, float? bands, float? wisps, float? wispSpeed)
 		{
 			WallTowers = towers;
 			WallDepth = depth;
 			WallFog = fog;
 			WallSideDark = sideDark;
+			WallSideTile = sideTile;
 			WallFaceLight = faceLight;
 			WallFaceAngle = faceAngle;
 			WallTopLift = topLift;
@@ -1186,6 +1195,12 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wsd) && wsd >= 0f)
 					{
 						WallSideDark = wsd;
+					}
+					break;
+				case "wallsidetile":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wst) && wst > 0f)
+					{
+						WallSideTile = wst;
 					}
 					break;
 				case "wallfacelight":

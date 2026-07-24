@@ -14,14 +14,23 @@ Two things are proven:
 
 2. IMAGE. Rasterise the side faces the way the GPU will: for each pixel solve the ruled
    surface p(s,d) = VP + (lerp(A,B,s) - VP) * d for (s, d) -- which is precisely what
-   perspective-correct interpolation computes -- then sample the block's real 8x8 cell at
-   (u,v), shade it by the wall's face factor, and lerp it toward the haze with the same
-   distance fog BasicEffect applies. Blocks are painter-sorted by distance from the VP (see
-   verify_tower_order.py); top faces are painted last, as in Wall.Draw.
+   perspective-correct interpolation computes -- then sample the sheet at (u,v), shade it by
+   the wall's face factor, and lerp it toward the haze with the same distance fog BasicEffect
+   applies. Blocks are painter-sorted by distance from the VP (see verify_tower_order.py);
+   top faces are painted last, as in Wall.Draw.
 
-Run:  python tools/walls/preview_wall3d.py
-Writes tools/walls/_preview_wall3d.png (gitignored).
+   The down-the-shaft coordinate is a walk in CELL units continuing OUT of the block's cell
+   (card 0f7fc977), spanning the shaft's true height in block footprints -- see Wall.AddFace.
+   Wall.cs has to cut the face at every cell crossing because the GPU interpolates UVs
+   linearly between vertices and the sheet has to wrap inside the LOGICAL (unpadded) region;
+   here the UV is solved per pixel, so the same thing is one `c % 8`. `--mirror` reproduces
+   the pre-card look (one cell, retraced backwards) for an A/B.
+
+Run:  python tools/walls/preview_wall3d.py [--tile <f>] [--mirror]
+Writes tools/walls/_preview_wall3d.png + _preview_wall3d_compare.png (both gitignored).
 """
+import sys
+
 import numpy as np
 from PIL import Image
 
@@ -33,6 +42,10 @@ NEAR_FRAC = 0.9
 BANDS_NOTE = "bands only quantise the bottom dissolve; geometry, UV and fog are exact here"
 
 SIDE_DARK = 0.7
+# Mirrors Wall.DefaultSideTile: cells of sheet spent down a shaft, as a multiple of the top
+# face's own texel density. 1 = a side texel is the same world size as a top-face texel; baked
+# at 4 because honest scale reads short on a steeply foreshortened shaft (see Wall.cs).
+SIDE_TILE = 4.0
 FOG_AMOUNT = 0.55
 FOG_COLOR = np.array([46.0, 125.0, 201.0])
 DISSOLVE = 0.18
@@ -162,10 +175,20 @@ def solve_sd(A, B, px, py):
 
 
 def sample(tex, u, v):
+    """BILINEAR, like the GPU sampler -- point sampling would show a moire the game does not.
+    It matters most at high ?wallsidetile, where the shaft minifies hard (756-v1 ships with no
+    mip chain, so this is genuinely all the filtering there is). Wraps rather than clamps: the
+    caller already folds the cell walk into [0,1), and wrapping keeps the seam honest."""
     th, tw = tex.shape[:2]
-    xi = np.clip((u * tw).astype(int), 0, tw - 1)
-    yi = np.clip((v * th).astype(int), 0, th - 1)
-    return tex[yi, xi]
+    x = u * tw - 0.5
+    y = v * th - 0.5
+    x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    fx, fy = (x - x0)[..., None], (y - y0)[..., None]
+    x0, x1 = x0 % tw, (x0 + 1) % tw
+    y0, y1 = y0 % th, (y0 + 1) % th
+    top = tex[y0, x0] * (1 - fx) + tex[y0, x1] * fx
+    bot = tex[y1, x0] * (1 - fx) + tex[y1, x1] * fx
+    return top * (1 - fy) + bot * fy
 
 
 def grid_from_level3(path):
@@ -183,7 +206,7 @@ def grid_from_level3(path):
     return g
 
 
-def render(blocks, pos, tex):
+def render(blocks, pos, tex, side_tile=SIDE_TILE, mirror=False):
     h, w = blocks.shape
     bw = bh = 800.0 / w
     cw, ch = tex.shape[1] // 8, tex.shape[0] // 8
@@ -208,6 +231,13 @@ def render(blocks, pos, tex):
     shaftH = shaft_height(DEPTH)
     n_f, s_f, e_f, w_f = face_factors(FACE_LIGHT, FACE_ANGLE)
 
+    # Cells of sheet spent down the shaft = its true height in block footprints, so a side texel
+    # is the world size of a top-face one. `mirror` reproduces the pre-card look: exactly one
+    # cell, retraced back ACROSS the block's own cell (hence `walk` flipping the direction).
+    rep_u = 1.0 if mirror else side_tile * shaftH / bw
+    rep_v = 1.0 if mirror else side_tile * shaftH / bh
+    walk = 1.0 if mirror else -1.0
+
     def free(jj, ii):
         """Mirrors Wall.isfree EXACTLY, asymmetry included: out-of-range x reads SOLID (the wall
         spans the full screen width, so its leftmost/rightmost columns sit at x=0/800 and their
@@ -223,20 +253,23 @@ def render(blocks, pos, tex):
         x0 = bw * j + pos[0]
         y0 = bh * i + pos[1]
         x1, y1 = x0 + bw, y0 + bh
-        u0, u1 = (j % 8) / 8, (j % 8 + 1) / 8
-        v0, v1 = (i % 8) / 8, (i % 8 + 1) / 8
+        jc, ic = j % 8, i % 8
+        u0, u1 = jc / 8, (jc + 1) / 8
+        v0, v1 = ic / 8, (ic + 1) / 8
 
-        # (A, B, alongA, alongB, down0, down1, alongIsX) -- along-edge follows the axis the edge
+        # (A, B, alongA, alongB, cCap, cBase, alongIsX) -- along-edge follows the axis the edge
         # runs along (vertical edge spans rows -> v; horizontal edge spans columns -> u), which is
-        # what makes coplanar neighbouring walls continue instead of seaming. See Wall.cs.
+        # what makes coplanar neighbouring walls continue instead of seaming. Down the shaft is a
+        # CELL coordinate starting at the edge the wall hangs from and running AWAY from the cell,
+        # so the sheet continues past the rim instead of mirroring it. See Wall.cs.
         # Emitted only when the side is an OUTER edge (no neighbouring block) AND faces the eye.
         faces = []
-        if x0 > VANISH[0] and free(j - 1, i): faces.append((np.array([x0, y0]), np.array([x0, y1]), v0, v1, u0, u1, False, w_f))
-        if x1 < VANISH[0] and free(j + 1, i): faces.append((np.array([x1, y1]), np.array([x1, y0]), v1, v0, u1, u0, False, e_f))
-        if y0 > VANISH[1] and free(j, i - 1): faces.append((np.array([x1, y0]), np.array([x0, y0]), u1, u0, v0, v1, True, n_f))
-        if y1 < VANISH[1] and free(j, i + 1): faces.append((np.array([x0, y1]), np.array([x1, y1]), u0, u1, v1, v0, True, s_f))
+        if x0 > VANISH[0] and free(j - 1, i): faces.append((np.array([x0, y0]), np.array([x0, y1]), v0, v1, jc, jc + walk * rep_u, False, w_f))
+        if x1 < VANISH[0] and free(j + 1, i): faces.append((np.array([x1, y1]), np.array([x1, y0]), v1, v0, jc + 1, jc + 1 - walk * rep_u, False, e_f))
+        if y0 > VANISH[1] and free(j, i - 1): faces.append((np.array([x1, y0]), np.array([x0, y0]), u1, u0, ic, ic + walk * rep_v, True, n_f))
+        if y1 < VANISH[1] and free(j, i + 1): faces.append((np.array([x0, y1]), np.array([x1, y1]), u0, u1, ic + 1, ic + 1 - walk * rep_v, True, s_f))
 
-        for (A, B, alongA, alongB, down0, down1, along_is_x, shade) in faces:
+        for (A, B, alongA, alongB, c_cap, c_base, along_is_x, shade) in faces:
             r = solve_sd(A, B, px, py)
             if r is None:
                 continue
@@ -247,7 +280,10 @@ def render(blocks, pos, tex):
             z = EYE * (1.0 / np.clip(d, 1e-6, None) - 1.0)
             f = np.clip(z / shaftH, 0.0, 1.0)
             along = alongA + (alongB - alongA) * s
-            down = down0 + (down1 - down0) * f
+            # The cell walk, wrapped into the sheet. Wall.AddFace has to CUT the face at every
+            # integer crossing (the GPU lerps UVs between vertices, and the wrap has to stay
+            # inside the logical region of a padded .dds); solving per pixel here, it is one mod.
+            down = ((c_cap + (c_base - c_cap) * f) % 8.0) / 8.0
             u, v = (along, down) if along_is_x else (down, along)
             texel = sample(tex, u, v).astype(float)
             src = texel * (SIDE_DARK * shade)
@@ -273,6 +309,11 @@ def render(blocks, pos, tex):
 
 
 if __name__ == "__main__":
+    tile = SIDE_TILE
+    if "--tile" in sys.argv:
+        tile = float(sys.argv[sys.argv.index("--tile") + 1])
+    mirror = "--mirror" in sys.argv
+
     matrix_check()
     tex = np.array(Image.open(WALL_PNG).convert("RGB"))
     print(f"[image] {BANDS_NOTE}")
@@ -281,14 +322,27 @@ if __name__ == "__main__":
     # the lean-toward-the-VP / painter's-order behaviour can be read by eye.
     iso = np.zeros((9, 9), dtype=bool)
     iso[::2, ::2] = True
-    row1 = [render(iso, np.array([0.0, py]), tex) for py in (-150.0, -40.0, 60.0)]
+    row1 = [render(iso, np.array([0.0, py]), tex, tile, mirror) for py in (-150.0, -40.0, 60.0)]
 
     # Row 2: the real level3.txt, where blocks are contiguous and the towers merge into masses.
     g = grid_from_level3(LEVEL3)
-    row2 = [render(g, np.array([0.0, py]), tex) for py in (-260.0, -120.0, 20.0)]
+    row2 = [render(g, np.array([0.0, py]), tex, tile, mirror) for py in (-260.0, -120.0, 20.0)]
 
     sheet = Image.fromarray(np.concatenate([np.concatenate(row1, axis=1),
                                             np.concatenate(row2, axis=1)], axis=0))
     sheet.save("tools/walls/_preview_wall3d.png")
     print(f"[image] wrote tools/walls/_preview_wall3d.png  ({sheet.size[0]}x{sheet.size[1]})")
     print("[image]   row 1: isolated towers (3 scroll positions)   row 2: real level3.txt")
+    print(f"[image]   sideTile={tile}" + ("   MIRROR (pre-card look)" if mirror else ""))
+
+    # A/B: the same three framings before and after card 0f7fc977. Top row is the old side
+    # texturing (one cell, mirrored about the rim); bottom row is the tile continuing out of the
+    # cell for the shaft's real height. This is the sheet that shows the card is fixed.
+    cases = [(iso, -40.0), (g, -260.0), (g, 20.0)]
+    old = [render(bl, np.array([0.0, py]), tex, tile, True) for (bl, py) in cases]
+    new = [render(bl, np.array([0.0, py]), tex, tile, False) for (bl, py) in cases]
+    cmp_sheet = Image.fromarray(np.concatenate([np.concatenate(old, axis=1),
+                                                np.concatenate(new, axis=1)], axis=0))
+    cmp_sheet.save("tools/walls/_preview_wall3d_compare.png")
+    print(f"[image] wrote tools/walls/_preview_wall3d_compare.png  ({cmp_sheet.size[0]}x{cmp_sheet.size[1]})")
+    print(f"[image]   row 1: BEFORE (1 cell, mirrored)   row 2: AFTER (continues, sideTile={tile})")

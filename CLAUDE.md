@@ -73,23 +73,41 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     real static method, so the decision is verified with no browser, no WASM and no rig (add a
     `Probe*` case set per card; details + limits in tools/CLAUDE.md);
   - tuning values → the matching **live slider panel** (`?wctune`, `?lazershot`, `eaWalls`, ...);
-  - ANY of the above without a browser at all → the **headless host**,
-    `dotnet build tools/headless -c Debug` then
-    `tools/headless/bin/Debug/net8.0/eahl.exe --flags "?harness=spider&frame=3" --frames 150 --out shot.png`:
-    it links the same `Game/` + `Compat/` sources into a desktop exe (KNI SDL2, hidden window),
-    takes the **URL query verbatim** so every debug flag/harness/showcase scene above is reachable,
-    and writes PNGs — no Chrome, no dev server, no rAF, safe to leave running in the background.
-    `--repl` boots once then takes `step`/`shot`/`eval` lines, where `eval` reflects into
-    `DebugInput`'s console surface (`Press`, `AiBench`, `TexProbe`, ...). **Settle ~150 frames
-    before shooting** — the intro white fade (details in tools/CLAUDE.md). It does NOT replace the
-    Chrome pass: trimming, IndexedDB saves, WebGL-specific shaders, the `index.html` JS layer and
-    real WebRTC only fail there. Details: `tools/headless/README.md`;
   - a change that should alter NOTHING (rename, reformat, decompiler-artifact cleanup) → the
     **IL-identity oracle**, `python tools/verify_il_identical.py` — see below.
   If no tool covers the change, BUILD one — that is part of the fix, not extra scope. Boot the real
   game only for (a) the FINAL smoke check (boots, change in, zero console errors) after a tool
   already proved it, or (b) boot/menu/scene-flow changes themselves — and even then use fast-boot
   flags to land next to the thing under test.
+- **RUN that tool HEADLESSLY FIRST — `tools/headless/` (`eahl`) is the DEFAULT, Chrome is the
+  exception.** The list above is *which* tool; this is *how you run it*. `eahl` is a desktop exe
+  that links the same `Game/` + `Compat/` sources (KNI SDL2, hidden window) and takes the **URL
+  query verbatim**, so every flag, harness and showcase scene above is reachable with **no Chrome,
+  no dev server, no rAF** — and it writes the PNG straight to disk:
+  ```sh
+  dotnet build tools/headless -c Debug
+  tools/headless/bin/Debug/net8.0/eahl.exe --flags "?harness=spider&frame=3" --frames 150 --out shot.png
+  ```
+  Reach for it before `preview_start` + claude-in-chrome, because it is strictly better on the
+  four things that make browser verification painful here: it can't paint black from a
+  backgrounded tab, it needs no dev server or cache-busting, it is ~3x real time rendered and ~17x
+  with `--nodraw` (so an `eaAiBench.soak`-style run that needed a FOREGROUNDED tab now just runs in
+  the background while the user works), and it is scriptable — `--repl` boots once then takes
+  `step`/`shot`/`eval` lines, where `eval` reflects into `DebugInput`'s console surface (`Press`,
+  `AiBench`, `TexProbe`, `TeamSeat`, ...), i.e. everything `eaPress(...)` and friends give you in
+  devtools. `--script <file>` makes that a repeatable probe that exits non-zero on the first
+  failure. Full options + the design: `tools/headless/README.md`.
+  - **It does NOT replace the Chrome pass, and is not evidence about the shipped build.** It runs
+    the same C# on desktop GL, not WASM on WebGL. Trimming, IndexedDB saves, WebGL-specific
+    shader behaviour, the `index.html` JS layer (incl. the FPS HUD and the whole `ea*` JS facade)
+    and real WebRTC can ONLY fail in the browser — as can a case-sensitive `Content/` path, which
+    a local filesystem happily resolves. The Phase-5 gate (foreground Chrome, zero console
+    exceptions) is unchanged; `eahl` is what you use to get the frame or the number *before* it.
+  - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
+    scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
+    `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first
+    (`--frames 150`, or `step 150 nodraw`). It prints a `NOTE` on a near-white frame inside that
+    window; don't lean on it. This cost a full investigation once.
 - **A no-op refactor is PROVEN, not spot-checked — `python tools/verify_il_identical.py`.** Local
   variable names live only in the PDB, so a build with `-p:DebugType=none -p:Deterministic=true`
   must produce a **byte-identical `EvilAliensWeb.dll`** for any change that is genuinely cosmetic.
@@ -119,11 +137,12 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   must see it live, build a break/pause (`DebugFlags` seam) that freezes at the moment of interest.
 - **A clean `dotnet build` does NOT mean it runs.** WASM runtime errors only appear in the
   **browser console** — always verify visually AND read the console.
-- **Verify in real Chrome (`claude-in-chrome` MCP), not `preview_screenshot`** — the built-in
-  preview wedges when its tab is backgrounded (the rAF loop pauses, so it never paints). Flow:
-  `preview_start` → Chrome `navigate` to `http://localhost:5280` → `wait` ~10s for WASM →
-  screenshot + `read_console_messages`. Automated input: `eaPress(...)` from the console, not
-  synthetic key events (web CLAUDE.md → Input).
+- **When you DO need a browser, use real Chrome (`claude-in-chrome` MCP), not `preview_screenshot`**
+  — the built-in preview wedges when its tab is backgrounded (the rAF loop pauses, so it never
+  paints). Reach for this once `eahl` has taken you as far as it can (see the headless rule above),
+  and always for the final smoke check. Flow: `preview_start` → Chrome `navigate` to
+  `http://localhost:5280` → `wait` ~10s for WASM → screenshot + `read_console_messages`. Automated
+  input: `eaPress(...)` from the console, not synthetic key events (web CLAUDE.md → Input).
 
 ## Debug boot shortcuts (URL flags)
 

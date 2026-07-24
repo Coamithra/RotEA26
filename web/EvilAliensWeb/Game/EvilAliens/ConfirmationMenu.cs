@@ -27,6 +27,13 @@ internal class ConfirmationMenu : MenuSub1
 		this.text = text;
 	}
 
+	// Card 11.4: the net lobby status menu re-texts one instance per phase (room code /
+	// waiting / failure notices).
+	public void SetText(string newText)
+	{
+		text = newText;
+	}
+
 	public override void Reset()
 	{
 		base.Reset();

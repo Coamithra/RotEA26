@@ -15,8 +15,11 @@ namespace EvilAliensWeb.Compat.Net
     //      EvBlast from either peer, EvClaim from clients, EvScoreSync from the host).
     public static class NetProtocol
     {
+        // 0x00 is RESERVED: webrtc.js uses a 1-byte 0x00 frame as its JS-level "bye"
+        // (consumed in JS, never surfaced to C#). Message types must start at 0x01.
         public const byte MsgHello = 0x01;
         public const byte MsgWelcome = 0x02;
+        public const byte MsgReject = 0x03;
         public const byte MsgShipState = 0x10;
         public const byte MsgWorldSnapshot = 0x20;
         public const byte MsgEvent = 0x30;
@@ -37,6 +40,10 @@ namespace EvilAliensWeb.Compat.Net
         public const byte EvVictory = 12;     // host Victory() -> client Victory()
         public const byte EvPause = 13;       // either peer's local pause/resume (payload on/off)
         public const byte EvTetherBreak = 14; // either peer broke the TeamChallenge tether
+        // Card 11.4: menu-lobby session flow.
+        public const byte EvLaunch = 15;      // host -> client: [level:1][difficulty:1] -- mirror the launch
+        public const byte EvReady = 16;       // client -> host: my GameScene is up, replay the live world
+        public const byte EvLeave = 17;       // either peer quit the match -> the match ends for both
 
         public const byte ShipFlagAlive = 1 << 0;
         public const byte ShipFlagFiring = 1 << 1;
@@ -89,15 +96,73 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- handshake ----------------------------------------------------------------
 
-        // [type][protocolVersion][isHost]
-        public static byte[] EncodeHello(byte protocolVersion, bool isHost)
+        // v4: [type][protocolVersion][isHost][buildHash:8][flags:1] = 12 bytes. The build
+        // hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
+        // the identical published binary" -- a stale-cached client is REJECTED, not subtly
+        // desynced. Flags currently carry only the DebugFlags.Active bit (menu-lobby
+        // sessions refuse gameplay-hijacking flags; the ?net= dev path is anything-goes).
+        public const byte HelloFlagDebugActive = 1 << 0;
+        public const int HelloBytes = 12;
+
+        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags)
         {
-            return new byte[] { MsgHello, protocolVersion, (byte)(isHost ? 1 : 0) };
+            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags);
         }
 
-        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost)
+        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags)
         {
-            return new byte[] { MsgWelcome, protocolVersion, (byte)(isHost ? 1 : 0) };
+            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags);
+        }
+
+        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags)
+        {
+            byte[] b = new byte[HelloBytes];
+            b[0] = type;
+            b[1] = protocolVersion;
+            b[2] = (byte)(isHost ? 1 : 0);
+            WriteU32(b, 3, (uint)buildHash);
+            WriteU32(b, 7, (uint)(buildHash >> 32));
+            b[11] = flags;
+            return b;
+        }
+
+        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags)
+        {
+            version = 0;
+            isHost = false;
+            buildHash = 0;
+            flags = 0;
+            if (b.Length < HelloBytes)
+            {
+                return false;
+            }
+            version = b[1];
+            isHost = b[2] != 0;
+            buildHash = ReadU32(b, 3) | ((ulong)ReadU32(b, 7) << 32);
+            flags = b[11];
+            return true;
+        }
+
+        // MsgReject: [type][reason] -- the pairing is refused; both sides surface a
+        // human-readable notice and end the session.
+        public const byte RejectVersion = 1; // protocol version mismatch
+        public const byte RejectBuild = 2;   // build hash mismatch ("update required")
+        public const byte RejectFlags = 3;   // gameplay debug flags active in a menu session
+
+        public static byte[] EncodeReject(byte reason)
+        {
+            return new byte[] { MsgReject, reason };
+        }
+
+        // FNV-1a 64 over the eaBuildHash string -- cheap, stable, and 8 wire bytes.
+        public static ulong HashBuildString(string s)
+        {
+            ulong h = 14695981039346656037UL;
+            foreach (char c in s ?? "")
+            {
+                h = (h ^ c) * 1099511628211UL;
+            }
+            return h;
         }
 
         // ---- reliable events ------------------------------------------------------------
@@ -366,6 +431,16 @@ namespace EvilAliensWeb.Compat.Net
         public static byte[] EncodeEmptyEvent(ushort eventSeq, byte eventType)
         {
             return EventHeader(eventType, eventSeq, 0);
+        }
+
+        // EvLaunch (host -> client, card 11.4): [level:1][difficulty:1] -- the menu-lobby
+        // host picked; the client mirrors the launch with the host's locked difficulty.
+        public static byte[] EncodeLaunchEvent(ushort eventSeq, byte level, byte difficulty)
+        {
+            byte[] b = EventHeader(EvLaunch, eventSeq, 2);
+            b[4] = level;
+            b[5] = difficulty;
+            return b;
         }
 
         // EvBlast: [posX:4][posY:4][level]

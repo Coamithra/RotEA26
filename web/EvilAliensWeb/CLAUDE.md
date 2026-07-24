@@ -492,8 +492,10 @@ completely (input read untouched, zero added latency); the wire carries ship STA
 inputs; the other peer's ship is an interpolated puppet. Code lives in `Compat/Net/`.
 Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback),
 card 11.2 (host world authority: client enemy puppets, world snapshots, generous claims,
-score sync) and card 11.3 (level-script beat replication, host-broadcast reset/victory,
-replicated pause, TeamChallenge soft tether); WebRTC (card 11.4) builds on these seams.
+score sync), card 11.3 (level-script beat replication, host-broadcast reset/victory,
+replicated pause, TeamChallenge soft tether) and card 11.4 (real WebRTC transport, room-code
+signaling on the shared VPS, menu-driven Host/Join lobby, build-hash handshake, match-end
+semantics). Remaining: card 11.5 (hardening: TURN decision, reconnect/grace, UX polish).
 
 - **Flags:** `?net=host` / `?net=join` opt a session in (in `Active`); `?room=<name>` picks
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
@@ -502,16 +504,26 @@ replicated pause, TeamChallenge soft tether); WebRTC (card 11.4) builds on these
   soak tests; `?netscript` (pair with `?level=Level1`) replaces the level's event list with
   a compressed ~60s script firing every replicated beat type (message, warning, background
   ops, checkpoints, music switch, victory) -- the purpose-built two-tab verification for
-  script replication (`GameScene.PopulateNetScriptTest`); `?netlag=<ms>` / `?netloss=<0-100>`
-  impair INBOUND traffic (see the impairment bullet below). **No `?net` flag = the net layer is
-  never constructed -- a plain boot is byte-identical single-player. Hard invariant; keep it.**
+  script replication (`GameScene.PopulateNetScriptTest`). Card 11.4 adds `?rtc` (a
+  `?net=` boot uses the REAL WebRtcTransport: host prints its room code to the console,
+  join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
+  a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
+  `?signal=ws://localhost:8091/ws`). Card 40334a8f adds `?netlag=<ms>` / `?netloss=<0-100>`
+  (impair INBOUND traffic -- see the impairment bullet below). **No `?net` flag = the net layer is never constructed
+  -- a plain boot is byte-identical single-player, and single-player NEVER contacts any
+  server. Hard invariants; keep them.**
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
   (unreliable-class -- consumers must tolerate drops/reorder) + a RELIABLE lane (ordered,
   guaranteed), `OnData`/`OnPeerBye` events. Impl #1 `BroadcastChannelTransport` ->
   `NetInterop` ([JSInvokable] shim, the WebcamInterop pattern) -> `eaNet` in `index.html`
-  (channel only constructed when opened). **Card 11.4 drops a `webrtc.js` + WebRtcTransport
-  behind this same interface** (unreliable+unordered DataChannel for the stream lane,
-  reliable channel for events); nothing above the interface may assume loopback reliability.
+  (channel only constructed when opened; still the default dev rig). Impl #2 (card 11.4)
+  `WebRtcTransport` -> `WebRtcInterop` -> `eaRtc` in `wwwroot/webrtc.js`: JS owns the
+  RTCPeerConnection + signaling WS + the join-code overlay; two DataChannels map to the
+  lanes ("s" unordered `maxRetransmits:0`, "r" reliable). A 1-byte `0x00` reliable frame
+  is the JS-level pagehide "bye" (0x00 is reserved -- C# msg types start at 0x01). STUN =
+  free Google servers, NO TURN in v1 (~10-15% of NAT pairs get a clean "could not
+  connect"; 11.5 owns the TURN decision). Nothing above the interface may assume loopback
+  reliability.
 - **Artificial impairment (`Compat/Net/NetImpairment`, card 40334a8f) is what makes the
   drop-tolerance paths testable at all.** BroadcastChannel never loses or reorders a packet, so
   until this landed the interpolation underrun, the snapshot unknown-id self-heal, the claim
@@ -545,6 +557,38 @@ replicated pause, TeamChallenge soft tether); WebRTC (card 11.4) builds on these
     Written in place of a `tools/sim/` python mirror on purpose: the policy is small enough that
     a mirror would drift from the C# and prove nothing. Reliable lane must read `drop=0
     reorder=0` in every configuration, including `loss=100`.
+- **Signaling (card 11.4): room codes on the shared Hetzner VPS** (root CLAUDE.md has the
+  box details). `server/signal/` in THIS repo = a FastAPI/uvicorn dumb relay (mints 5-char
+  codes, no 0/O/1/I; relays SDP/ICE between exactly 2 peers; room TTL 10 min; `python
+  test_signal.py` covers the protocol). Deployed at `/opt/rotea` (unit `rotea`, port
+  8091 localhost) behind nginx `location /rotea/ws` in the `notzelda.haraldmaassen.com`
+  443 vhost (existing cert; health check: `https://notzelda.haraldmaassen.com/rotea/health`).
+  Deploy = scp `server/signal/*.py` + `requirements.txt` to `/opt/rotea/server`,
+  `systemctl restart rotea` (full first-install steps: `server/signal/README.md`). The
+  signaling WS closes once the DataChannels connect -- gameplay is pure P2P.
+- **Menu lobby (card 11.4):** main menu "Online Co-op" -> Host Game (shows the room code
+  + "waiting") / Join Game (HTML code-entry overlay outside `#app` -- `eaRtc.promptCode`).
+  `Compat/Net/NetLobby` owns the pre-session flow (JS phase queue drained by
+  `MenuScene.NetUpdate` on the game tick; `NetStatusMenu` = the re-textable
+  ConfirmationMenu panel). On connect the HOST picks level+difficulty through the NORMAL
+  select screens (netPickMenu -> the shared selectors; their OnExit reroutes in net mode;
+  WebcamAliens selection no-ops) and `EvLaunch` mirrors the launch on the client
+  (`MenuScene.NetLaunchMirror` -- same fade/warm path, difficulty locked, starter
+  Keyboard). Turbo is forced to 100 while a session is Active (`Game1.Update`).
+- **v4 handshake + match-end (card 11.4):** hello/welcome carry an 8-byte build hash
+  (FNV-1a of `window.eaBuildHash`; deploy.yml stamps a sha256 of `blazor.boot.json` at
+  publish, dev builds read 'dev') + a flags byte. Hash mismatch -> `MsgReject` -> "Update
+  required" notice both sides (a stale-cached client can never desync a session); menu
+  sessions also reject if EITHER side has `DebugFlags.Active` (dev `?net=` sessions are
+  anything-goes). Match-end: any player leaving a MENU session (quit, tab close, drop,
+  victory/game-over wind-down) ends it for both -- scene-down edge or `PeerLost` sends
+  `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
+  restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
+  Victory/GameOver, which finish locally), and the menus surface `TakeMenuNotice()`.
+  `EvReady` (client scene-up edge -> host `ReplayLive`) covers the lobby launch race
+  where one peer out-warms the other; world messages are gated client-side while no
+  GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
+  loss, reconnect works).
 - **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v2):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the

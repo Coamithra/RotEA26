@@ -1,0 +1,12 @@
+[Unit]
+Description=RotEA online co-op signaling server (FastAPI)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/rotea/server
+ExecStart=/opt/rotea/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8091
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target

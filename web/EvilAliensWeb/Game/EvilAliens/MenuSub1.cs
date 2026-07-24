@@ -127,8 +127,6 @@ internal class MenuSub1 : Scene
 	public MenuSub1(Game game)
 		: base(game)
 	{
-		//IL_0023: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
 		base.DrawOrder = 2;
 		controller = null;
 	}
@@ -470,8 +468,6 @@ internal class MenuSub1 : Scene
 
 	protected override void LoadContent()
 	{
-		//IL_005c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0066: Expected O, but got Unknown
 		base.LoadContent();
 		brainPulsate = Content.Load<Curve>("GFX/Effects/BrainCurve");
 		font = Content.Load<SpriteFont>("GFX/Menu/menufont");
@@ -511,15 +507,6 @@ internal class MenuSub1 : Scene
 
 	public virtual void DrawMenu(GameTime gameTime, float yoffset)
 	{
-		//IL_0100: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0105: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0151: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a2: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 position = default(Vector2);
 		if (isScrolling)
 		{
@@ -595,11 +582,6 @@ internal class MenuSub1 : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0132: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.SpriteBatch.Flush();
 		EnsureRenderTarget();

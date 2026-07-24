@@ -42,8 +42,10 @@ generate much of the art/audio referenced here.
 - **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
   BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
   multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
-  (transparent, bottom/right only — content keeps its top-left coords) and stamps the original
+  (bottom/right only — content keeps its top-left coords) and stamps the original
   ("logical") size into the DDS header's reserved dwords (offsets 32/36 + `"LOGD"` marker).
+  The pad is transparent EXCEPT its first 4 px, which replicate the logical edge — see the
+  edge-gutter bullet below; that gutter is load-bearing, don't "clean it up".
   `WebContentManager.TryLoadDds` reads it back and registers it in a `ConditionalWeakTable`; the
   extension methods **`Texture2D.LogicalWidth()/LogicalHeight()/LogicalBounds()`** return it (and
   fall through to real `.Width/.Height` for unpadded png/rtex/render targets — a safe no-op). **The
@@ -59,6 +61,25 @@ generate much of the art/audio referenced here.
   `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`. **Test harness:**
   `build_textures.py --padtest <px>` grossly over-pads every `.dds` so any missed padded-vs-logical
   site shows an obvious ~px artifact in play; ship with `--padtest 0` (minimal mult-of-4 pad).
+- **A clamped source rect does NOT stop the filter reaching the pad — hence the 4px edge gutter.**
+  `LinearClamp` clamps at the TEXTURE border, not at the source rect, so a destination pixel whose
+  centre lands in the last half texel bilinearly blends the last content texel with texel `[LW]`.
+  While that texel was transparent black, the final ~1px of every tile lost up to 50% of its RGB
+  **and alpha** — a hairline at every tile boundary, dark over the opaque Mars sky, bright where the
+  `marshills` silhouettes sit over it (Trello `4ddcd13f`; measured -64 luminance in the sky band).
+  `build_textures.py`'s `edge_gutter()` therefore replicates the logical edge into the first 4 px of
+  the pad (last column right, last row down, corner), which makes the filtered result identical to a
+  true clamp at **any** pad size, and keeps the sampled 4×4 BC3 blocks free of transparent-black
+  endpoints on non-mult-of-4 art (`marsloop*` are 1587/1588 wide). Only 4 px are filled so the
+  `--padtest` canary keeps its transparent hole. Guard: `tools/textures/check_pad_bleed.py` (asserts
+  the gutter matches the edge on every shipped `.dds`) — **re-run it after any `build_textures.py`
+  rebuild**. Watch for this any time a texture is TILED or stretched far past its native size.
+- **`?bgfreeze=<designX>`** stops every background/foreground layer scrolling and parks a tile
+  BOUNDARY of each at that design column (`Background.Update`). The Mars/alien-base layers scroll at
+  six different speeds, so a tiling/wrap/parallax artifact can only be inspected once it holds
+  still. Caveat: sub-pixel artifacts like the pad bleed vary in strength with where the boundary
+  falls relative to render-target pixel centres, so sweep the FRACTIONAL part to cover phases — one
+  frozen frame is one phase, not the worst case.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
@@ -106,7 +127,8 @@ generate much of the art/audio referenced here.
   defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
-  `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`.
+  `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
+  `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -162,6 +184,38 @@ draws for the tower pass; the two agree on the same fight.)
   synthetic series through the real accumulator and asserts the vsync trap itself: `work` ms every
   `interval` ms must read `1000/interval` fps and `1000/work` headroom. A profiler that reported
   the work rate as "fps" fails it loudly. (The `eaNetSim.test` idiom; a python mirror would drift.)
+
+## Component lifecycle (`ComponentBin`) — the spawn/death contract
+
+Card 02d9ad67 hardened the 2008 deferred birth/death lists. The contract every spawn/despawn
+site now lives under:
+
+- **Births are INSTANT.** `ComponentBin.Add` puts the component straight into `Game.Components`
+  (KNI journals the update/draw registrations, so it never Updates before the next tick, but it
+  IS immediately visible to collisions, `Oracle.Get*` scans and purges — there is no hidden
+  "pending spawn" world). **KNI runs `Initialize()` synchronously inside the Add**, so a call
+  site must fully configure the object (Setup/Make*/property writes) BEFORE `Add` —
+  `tools/audit_add_order.py` is the lint (run it after adding spawn sites; the repo is clean).
+  Event subscriptions (`OnDeath +=`) after Add are fine.
+- **Deaths stay QUEUED** (`Remove` → deathList) — instant removal would corrupt the collision
+  pass and change within-tick gameplay — but the list flushes TWICE per tick: the original
+  mid-tick point (after component updates, before collisions) AND `TopOfTickFlush` (before any
+  component updates), so a collision-phase kill never gets one more "zombie" Update (the
+  fires-from-the-grave / final-bullet-across-the-paused-screen bug class).
+- **`Purge<T>` arms a standing filter** until the next top-of-tick flush: any `Add` of a T in
+  that window (a component updating later the same tick, a kill side effect in that tick's
+  collision phase) is diverted to the recycle pool — a clear-all followed by a late same-tick
+  spawn now actually clears all. **Opt out with `Purge<T>(standing: false)` ONLY for a
+  clear-the-field-and-respawn-NOW purge** whose own call chain re-adds a T in the same tick
+  (sole current case: `GameScene.UpdateStartup`'s pre-spawn clear — the ships and Get Ready
+  banners follow in the same tick; the filter would eat them, which is exactly the no-ship
+  regression `?binlog` caught during development).
+- **Adds while the world is `Push`ed (paused) join the freeze**: an `AlienDrawableGameComponent`
+  added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
+  `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
+  the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
+- **Diagnostics:** `?binlog` logs filter diverts + pause-frozen adds; `eaBinTest()` runs the
+  scripted scenario suite (`Compat/BinTest.cs`) against the live bin and prints PASS/FAIL.
 
 ## Input
 

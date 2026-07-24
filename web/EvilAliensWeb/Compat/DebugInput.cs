@@ -214,6 +214,15 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
+		// JS bridge for the ComponentBin lifecycle scenario suite (eaBinTest in
+		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest'). Runs
+		// Compat/BinTest.Run() against the live bin and returns the PASS/FAIL report.
+		[JSInvokable("debugBinTest")]
+		public static string BinTest()
+		{
+			return EvilAliensWeb.Compat.BinTest.Run();
+		}
+
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
 		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull

@@ -10,12 +10,6 @@ internal class DeathStar : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -46,7 +40,6 @@ internal class DeathStar : KillableAlien
 
 	public void Setup(Vector2 position, EnemyBehaviour behaviour)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
 		this.behaviour = behaviour;
 		base.Position = position;
 	}
@@ -64,16 +57,6 @@ internal class DeathStar : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010d: Unknown result type (might be due to invalid IL or missing references)
 		float value = MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position);
 		Move((float?)value, gameTime);
 		if (behaviour == EnemyBehaviour.classic)
@@ -107,7 +90,6 @@ internal class DeathStar : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 		Die();
 		AwardScore(isComboGenerator, other);
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);

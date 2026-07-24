@@ -75,8 +75,6 @@ internal class OwnLevel : GameScene
 
 	private void setspeed(GameEvent sender)
 	{
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0f, 4.3f * Settings.GetInstance().GetDifficultyValue(Settings.GetInstance().CurrentDifficulty)) / 16.666666f);
 	}
 

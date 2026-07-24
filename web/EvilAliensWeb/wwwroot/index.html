@@ -174,6 +174,14 @@
             catch (e) { console.warn('[debug] eaHitboxes failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: run the ComponentBin lifecycle scenario suite (instant births, deferred
+        // deaths, purge filter, pause-aware adds — card 02d9ad67). Prints PASS/FAIL per
+        // scenario. Best run from the main menu (the pause scenario Push/Pops the world).
+        window.eaBinTest = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest')); }
+            catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the BattleSkull colorize hue band/target (the ?harness=battleskull
         // tuner). Drives Compat/DebugInput.SetHue so the slider panel below (and the console)
         // can retune without a page reload. trackHp=true => Target follows HP; cycle=true =>

@@ -42,11 +42,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 			collisionLine.Set(prevpos, base.Position + base.DirectionalVector * 20f);
 			return collisionLine;
 		}
@@ -55,10 +50,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 	public Bullet(Game game)
 		: base(game)
 	{
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Sprites/bulletgood"));
 		base.DrawOrder = 800;
 		timers.Add(bouncedTimer);
@@ -77,9 +68,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	public void Setup(Vector2 position, float direction, float lifetime, int player)
 	{
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		this.player = player;
 		asploding = false;
 		bouncing = 0;
@@ -94,12 +82,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	public override void Initialize()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007a: Unknown result type (might be due to invalid IL or missing references)
 		color = Color.White;
 		base.Speed = 0.78f;
 		base.MaxSpeed = 0.78f;
@@ -124,7 +106,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	private void Bullet_OnDeath(object sender)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
 		if (asploding)
 		{
 			Blast blast = Blast.NewBlast(collection, base.Game);
@@ -140,23 +121,11 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	public bool OffScreen()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
 		return (base.Position.X < -200f) | (base.Position.X > 1000f) | (base.Position.Y < -200f) | (base.Position.Y > 800f);
 	}
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0045: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0076: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c5: Unknown result type (might be due to invalid IL or missing references)
 		lifetime -= (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 		if (lifetime < 100f)
 		{
@@ -180,33 +149,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_023c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0271: Unknown result type (might be due to invalid IL or missing references)
-		//IL_027c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0287: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0148: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03ea: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03ef: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02e1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02f2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02f8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0308: Unknown result type (might be due to invalid IL or missing references)
-		//IL_030d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0331: Unknown result type (might be due to invalid IL or missing references)
-		//IL_033d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0348: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_036c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0378: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0382: Unknown result type (might be due to invalid IL or missing references)
 		bool flag = true;
 		// Asteroids + loose (unconnected) Balls don't sustain a combo. (The helper mothership used to be
 		// excluded here too, as an immortal fake-damage target -- it's now killable, so it keeps the combo
@@ -299,14 +241,12 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	private void createClone(bool resetBounceTimer)
 	{
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
 		if (split > 0)
 		{
 			split--;
 			float num = RandomHelper.RandomNextFloat((float)Math.PI / 32f, (float)Math.PI / 4f);
 			base.Direction += num;
 			Bullet bullet = NewBullet(collection, base.Game);
-			collection.Add((GameComponent)(object)bullet);
 			bullet.Setup(base.Position, base.Direction - num * 2f, lifetime, player);
 			bullet.SetSplit(split);
 			bullet.SetBouncing(bouncing);
@@ -315,6 +255,7 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 			{
 				bullet.SetBounceTimerInitiallyEnabled();
 			}
+			collection.Add((GameComponent)(object)bullet);
 		}
 	}
 
@@ -325,7 +266,6 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 
 	public Vector2 GetSpeed()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		return base.SpeedVector;
 	}
 

@@ -141,10 +141,6 @@ public class MousePointer : DrawableGameComponent, IMousePointerService
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
 		// Menus / non-aiming scenes: the OS arrow is the pointer, nothing to draw.
 		if (!base.Visible)
 		{

@@ -259,15 +259,11 @@ internal class Demo2 : GameScene
 
 	private void slowdown(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-3f, 0f) / 16.666666f);
 	}
 
 	private void speedup(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(-10f, 0f) / 16.666666f);
 	}
 

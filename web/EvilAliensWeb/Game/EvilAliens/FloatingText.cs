@@ -29,27 +29,22 @@ public class FloatingText
 
 	public FloatingText(Vector2 position, ShowType type, string suffix)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 		Reset(position, type, suffix);
 	}
 
 	public FloatingText(int amount, Vector2 position, ShowType type, string suffix)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
 		Reset(amount, position, type, suffix);
 	}
 
 	public void Reset(Vector2 position, ShowType type, string suffix)
 	{
-		//IL_0003: Unknown result type (might be due to invalid IL or missing references)
 		Reset(100, position, type, suffix);
 		text = suffix;
 	}
 
 	public void Reset(int amount, Vector2 position, ShowType type, string suffix)
 	{
-		//IL_001c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		showType = type;
 		text = amount + suffix;
 		this.position = position;
@@ -90,27 +85,6 @@ public class FloatingText
 
 	public void Draw(SpriteFont font, SpriteBatchWrapper wrapper)
 	{
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0094: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0152: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0157: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0191: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0196: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019d: Unknown result type (might be due to invalid IL or missing references)
 		if (!done)
 		{
 			switch (showType)

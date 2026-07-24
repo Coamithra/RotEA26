@@ -215,10 +215,6 @@ public class Background : Scene
 	// (SetSpace/SetMars/...) are not hooked: both peers run their own scene Initialize.
 	public void SetSpeed(Vector2 speed)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0002: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
 		targetscrollspeed = speed;
 		scrollspeedinitial = scrollspeed;
 		scrollspeedchangetimer.Reset();
@@ -228,13 +224,6 @@ public class Background : Scene
 
 	public void QueueSmallEarth()
 	{
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			// Minor "earth in the corner" appearance uses a dedicated small texture
@@ -257,18 +246,6 @@ public class Background : Scene
 
 	public void QueueEarth()
 	{
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0071: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			doodadname = "GFX/Sprites/earth";
@@ -307,15 +284,6 @@ public class Background : Scene
 
 	public void QueueAndromeda()
 	{
-		//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0096: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			doodadcolor = Color.White;
@@ -346,10 +314,6 @@ public class Background : Scene
 
 	protected void fadeBackBufferToWhite(float factor)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0047: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
 		factor = MathHelper.Clamp(factor, 0f, 1f);
 		int num = Convert.ToInt16(factor * 255f);
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
@@ -358,9 +322,6 @@ public class Background : Scene
 
 	protected void fadeBackBufferToBlack(float factor)
 	{
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
 		factor = MathHelper.Clamp(factor, 0f, 1f);
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.SpriteBatch.Draw(blank, new Rectangle(0, 0, 800, 600), new Color(new Vector4(0f, 0f, 0f, factor)));
@@ -368,21 +329,6 @@ public class Background : Scene
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0049: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01fe: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0213: Unknown result type (might be due to invalid IL or missing references)
-		//IL_021e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_025a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_027a: Unknown result type (might be due to invalid IL or missing references)
 		timer += gameTime.ElapsedGameTime;
 		if (showdoodad)
 		{
@@ -421,15 +367,37 @@ public class Background : Scene
 		// currently deeper and never stacks them, so the composition is correct on both paths.
 		float starSlowdown = MathHelper.Min(DoodadStarSlowdownFactor(), BeltStarSlowdownFactor());
 		float effectiveModifier = scrollspeedmodifier * starSlowdown;
+		// ?bgfreeze=<designX>: hold every layer still with a tile BOUNDARY parked at that design
+		// column (boundaries sit at position.X + k*realsize.X, so position.X = designX mod realsize.X
+		// puts one there). The layers scroll at six different speeds, so a tiling artifact can only
+		// be screenshotted comparably before/after if it stops moving. position.Y is deliberately
+		// left alone -- the marsloop floor sits at 300 by design.
+		bool frozen = DebugFlags.BgFreeze.HasValue;
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
-			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			if (frozen)
+			{
+				backgroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, backgroundLayer.realsize.X);
+			}
+			else
+			{
+				backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			}
 		}
 		foreach (BackgroundImage foregroundLayer in foregroundLayers)
 		{
-			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			if (frozen)
+			{
+				foregroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, foregroundLayer.realsize.X);
+			}
+			else
+			{
+				foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			}
 		}
-		Vector2 starDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
+		Vector2 starDelta = frozen
+			? Vector2.Zero
+			: scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
 		if (starfield != null)
 		{
 			starfield.Advance(starDelta);
@@ -610,9 +578,6 @@ public class Background : Scene
 
 	public void DrawForeground(GameTime gameTime)
 	{
-		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
 		if (XFade.Active && rendertarget != null)
 		{
 			// Normalized counts DOWN (1 -> 0, fraction of the fade REMAINING), so
@@ -633,10 +598,6 @@ public class Background : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0081: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0098: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0156: Unknown result type (might be due to invalid IL or missing references)
 		if (XFade.Active)
 		{
 			base.SpriteBatch.Flush();
@@ -777,17 +738,6 @@ public class Background : Scene
 
 	public void SetAlienBase()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0295: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029a: Unknown result type (might be due to invalid IL or missing references)
 		BackgroundImage backgroundImage = new BackgroundImage();
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
@@ -837,17 +787,6 @@ public class Background : Scene
 
 	public void SetSpace()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0295: Unknown result type (might be due to invalid IL or missing references)
-		//IL_029a: Unknown result type (might be due to invalid IL or missing references)
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
 		isHolodeck = false;
@@ -872,8 +811,6 @@ public class Background : Scene
 
 	public void SetSimpleSpace()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
 		// Holodeck / trial-simulation chamber. Space here is PROJECTED, not real: the stars
 		// stay (a space-combat sim that showed no stars would be dull AND a poor simulation)
 		// but are cool-tinted + dimmed so they read as part of the projection, while the grid
@@ -952,8 +889,6 @@ public class Background : Scene
 
 	public void Reset()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 		XFade.Stop();
 		showdoodad = false;
 		beltSlowActive = false;
@@ -982,17 +917,6 @@ public class Background : Scene
 
 	internal void SetMars()
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0022: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03d7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04ab: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04b0: Unknown result type (might be due to invalid IL or missing references)
 		backgroundLayers.Clear();
 		foregroundLayers.Clear();
 		isHolodeck = false;
@@ -1075,8 +999,6 @@ public class Background : Scene
 
 	protected override void LoadContent()
 	{
-		//IL_00d9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Expected O, but got Unknown
 		base.LoadContent();
 		if (doodadname != null)
 		{
@@ -1133,9 +1055,6 @@ public class Background : Scene
 
 	public void SetSpaceClassic()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
 		SetSpace();
 		scrollspeedreset = new Vector2(0f, -0.2f) / 16.666666f;
 		Reset();
@@ -1229,7 +1148,6 @@ public class Background : Scene
 	// design space (scaled by RenderScale.Matrix), like the fade overlays.
 	private void DrawHoloPulse()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
 		if (!isHolodeck || !pulseActive)
 		{
 			return;
@@ -1250,9 +1168,6 @@ public class Background : Scene
 
 	public void SetSimpleSpaceClassic()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
 		SetSimpleSpace();
 		scrollspeedreset = new Vector2(0f, -0.2f) / 16.666666f;
 		Reset();
@@ -1260,18 +1175,6 @@ public class Background : Scene
 
 	public void QueueEarthSim()
 	{
-		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0021: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
 		if (!showdoodad)
 		{
 			doodadname = "GFX/Sprites/earth";

@@ -46,9 +46,6 @@ public class Debugger : DrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003d: Unknown result type (might be due to invalid IL or missing references)
 		float num = 0f;
 		try
 		{

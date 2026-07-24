@@ -41,8 +41,6 @@ internal class TrailerScene : Scene
 
 	protected override void LoadContent()
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0011: Expected O, but got Unknown
 		base.LoadContent();
 		player = new VideoPlayer();
 	}
@@ -71,7 +69,6 @@ internal class TrailerScene : Scene
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_008d: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		bool flag = false;
 		flag |= base.InputHandler.Pressed(MyKeys.Enter) || base.InputHandler.Pressed(MyKeys.Esc);
@@ -97,11 +94,6 @@ internal class TrailerScene : Scene
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_00e4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00af: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c1: Unknown result type (might be due to invalid IL or missing references)
 		base.Draw(gameTime);
 		videoTexture = player.GetTexture();
 		if (videoTexture == null)

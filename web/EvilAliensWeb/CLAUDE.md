@@ -210,12 +210,18 @@ generate much of the art/audio referenced here.
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
+  `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
+  a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
+  `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
+  so it needs neither a level nor a gamepad),
+  `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
+  flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
@@ -422,6 +428,54 @@ site now lives under:
   toggle. The corner fullscreen button + touch overlay (D-pad/FIRE/BACK, touch devices only) live in
   `index.html` **outside `#app`** so they survive Blazor's mount — any new HUD/overlay button
   follows the same pattern.
+- **Local co-op needs a SECOND DEVICE, and TeamChallenge is the only level that seats one for you
+  (card e6927ef8).** Every other seat comes from `GameScene.CheckPlayerJoins`, which needs a real
+  `Start` press, so its device is present by construction. `TeamChallenge.Initialize` seats the
+  partner itself, and the 2008 code seated `ControlDevice.PadOne` unconditionally -- which on this
+  port made the level UNPLAYABLE for a keyboard-only player: `GameScene.Update` raises
+  `pauseRequested` on every tick a seated pad reads `!InputHandler.PadConnected(i)`, so the world
+  sat in the pause menu forever (`ticks=0 prog=2/52` over 37 sim-seconds).
+  - **Both seats are resolved by pure functions now, and neither can hold a pad that is absent.**
+    `ResolvePrimarySeat` seats slot 0 with the device that LAUNCHED the level when it can drive a
+    ship (the 2008 code hard-seated `Keyboard`, which hands a pad-only player a ship they cannot
+    steer), falling back to `Keyboard` otherwise -- including for a pad that has gone away since
+    the menu, which would otherwise pause-loop just as badly. `ResolvePartnerSeat` then takes the
+    lowest-indexed connected pad THE PRIMARY IS NOT USING (the original two-human co-op --
+    gamepads do work here, KNI ships `nkast.Wasm.Dom/js/Gamepad.*.js`), else `ControlDevice.AI` as
+    an auto-pilot partner. The level-select briefing says so; an in-level banner has nowhere safe
+    to live (added during `Startup` it is eaten by `UpdateStartup`'s 1300ms
+    `Purge<AnimatedMessage>`, added in `Normal` it collides with the script's own "Get ready!"
+    beat).
+  - **A pad Start press TAKES OVER the bot's seat -- and without that, two-human co-op would be
+    broken by this fix.** The browser Gamepad API only exposes a pad after a button is pressed on
+    it IN THE PAGE, so player two's idle pad reads DISCONNECTED while `Initialize` resolves the
+    seats: the AI takes the seat and their later Start press would seat a THIRD player, which the
+    tether (always `GetShips()[0]/[1]`) leaves flying free while the bot stays bolted to player
+    one. `GameScene.AddPlayer` therefore consults a new `protected virtual TryAdoptJoinDevice`
+    hook first; `TeamChallenge` claims a joining PAD for the seat the bot holds
+    (`Oracle.SetController` re-points the seat, `PlayerShip.AdoptController` the live ship, so the
+    slot keeps its score and its place in the tether). Only while the bot holds it -- a second pad
+    joining a genuine two-human game still adds a player.
+  - **How good the bot partner is remains unmeasured.** The completion matrix's TeamChallenge row
+    is a TIMEOUT at ~90 deaths with both ships bot-driven; the only clean run (VICTORY 402s, 0
+    deaths) was an `?invuln` CONTROL. So the auto-pilot makes the level playable and reachable, not
+    provably finishable -- worth a look before promising more.
+  - **INVARIANT: the resolved device is never a pad that is not connected** -- exactly the
+    force-pause's precondition, so the loop is unreachable by construction. `GameScene`'s guard
+    itself is deliberately UNTOUCHED: a pad dying MID-RUN should still say so.
+  - The net-session branch is untouched (online the partner is the remote peer, and seating a
+    local pad would both squat the puppet's slot and trip that guard).
+  - **`ControlDevice.Generic` is NOT the fix and cannot be** until it has an input case: it is a
+    first-class device in the menus, `CheckPlayerJoins`, the pause guard and `PlayerSettingsMenu`,
+    but `PlayerShip.Update` has no `Generic` case AND **no key produces `MyKeys.Generic_Start` on
+    this port** (`InputHandler.keysToCheck[8]` is an empty array), so it is unreachable outside
+    `eaPress`. A real second KEYBOARD player -- that case plus a key map, i.e. keyboard local co-op
+    on every level, which this port has never had -- is its own follow-up card.
+  - Flags/verification: `?teampartner=ai|pad` (`pad` = the old unconditional `PadOne`, the
+    deliberate bug reproduction) and console **`eaTeamSeat()`** -- all 16 pad masks x 3 overrides
+    through the REAL resolver, plus the pre-card always-`PadOne` policy as the negative control
+    (the `eaNetScore.test()` rule). Seating is a decision, not a picture: a screenshot cannot show
+    it, and covering it live would need four physical gamepads.
 
 ## Rendering / text
 
@@ -550,7 +604,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   - **The honest rig is `?flyspidercount=<N>` + `?flyspiderflatten=`.** `?flyspidercount=<N>`
     replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
     grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
-    stays representative. `?flyspiderflatten=per|0|swarm` then varies ONLY the flatten:
+    stays representative. Bench spiders are also forced `Collides = false`, which for the
+    FOREGROUND variant is a real change from live play -- otherwise the player would shoot the
+    pinned population down mid-run and an un-invulned ship could be killed by the grid it is
+    measuring. So a foreground bench sits out the collision pass and is a DRAW-cost rig (GL calls
+    / frame ms), not a whole-frame one; background spiders never collided anyway. `?flyspiderflatten=per|0|swarm` then varies ONLY the flatten:
     `swarm` (the SHIPPED default since this card: `FlyingSpiderSwarm`, one RT round trip for the
     whole population) / `per` (the pre-card path, one RT round trip per spider) / `0` (none).
     `?flyspiderbox=<half>` overrides the flatten bbox
@@ -826,6 +884,16 @@ the rest are tier-independent.
     hard "do not fly into that" override; low-passing it turns a full reversal into a suggestion
     (measured 46 wall contacts vs the old code's 8). Writing it back stops a flickering probe
     making the clamp its own oscillator.
+  - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
+    It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or the
+    `?aireact` knob in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
+    share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
+    whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
+    running it** (it references the built DLL, so an unrebuilt edit is benched in its old form,
+    silently). This is the instrument card f4d1721f lacked, which is why OwnLevel's grid was never
+    in its tuning loop; see tools/CLAUDE.md and the tool's README for the rest of its rig caveats.
 - **Fast movers are dodged by CLOSEST APPROACH, not by current distance** (`EvadeMovingThreat`,
   `DefaultThreatLeadMs` 700). Radial repulsion from something crossing the screen pushes the ship
   ALONG its path -- precisely the spider boss's screen-wide sweep. Slow/static threats keep the
@@ -899,12 +967,14 @@ the rest are tier-independent.
     that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
     either knob to the table without an instrument that can actually see it.
   - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
-    tier (and Level3's wall SCROLL SPEED is `0.43 * GetDifficultyValue`), so an outcome delta
+    tier (and Level3's wall SCROLL SPEED is `4.3 * GetDifficultyValue / 16.667`, i.e. 0.090 px/ms
+    at Easy to 0.310 at Inzane -- the `0.43 *` variant is `Level3.popTestSlow`, `?wallpoptest`
+    only, and is a TENTH of any real wall section), so an outcome delta
     between tiers is unattributable. The non-confounded observation is the `eaAiBench()` line's
     `skill effective=<tier> field= aim=` row, which reports the RESOLVED values; verifying the
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
-- Flags: `?aibench` · `?aiteam` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
+- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
   ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
@@ -943,6 +1013,14 @@ inferred.
 | InsaneBossI | GAME OVER 22/50 / 6 | GAME OVER 32/50 / 8 | GAME OVER 6/50 / 6 | **fail** |
 | TeamChallenge | TIMEOUT 14/52 / 91 | TIMEOUT 14/52 / 89 | TIMEOUT 14/52 / 87 | **fail** |
 
+**TeamChallenge's row still stands after card e6927ef8, and the reason is worth knowing.** It was
+run with `?aiteam`, which seated the partner as `ControlDevice.Generic` -- a device
+`PlayerShip.Update` has no case for -- but the switch is on `EffectiveController()`, and the sweep
+always passes `?aiplayer`, which returns `AI` for every non-puppet. So BOTH ships were bot-driven
+then, and both are bot-driven now that the seat resolves to `ControlDevice.AI` directly: the two
+seatings are bench-equivalent and the numbers carry over. (Its 91/89/87 deaths and `prog` pinned at
+14/52 across all three runs are the AI failing to survive a tethered pair, not an inert partner.)
+
 **The `?invuln` control is what makes that diagnosis, and it is the cheapest one available here:
 re-run a failing level with `?invuln` and the AI wins ALL THREE** -- ClassicAliens 341s,
 TeamChallenge 402s, InsaneBossI 660s (which kills the BrainBoss), every one at 0 deaths. So the
@@ -979,28 +1057,43 @@ before hunting a blind spot in any future stalled-level report.
     bullet-hell attempt.
   - **OwnLevel is the only challenge with WALLS** and the only one scoring `contacts` (13/1/4).
     Its churn (`turn` 254-477 deg/s) runs far above the ~70 deg/s the parent card settled Level 3
-    at -- the wall-nav work was tuned on Level 3's grids, and OwnLevel's `Walls(game, 2)` maze is
-    a harder case that was never in that loop.
+    at. **That 4-7x gap is NOT a wall-nav defect, and reading it as one cost card b4972696 its
+    premise** -- the two figures come from rigs that differ by more than the grid. The ~70 deg/s
+    baseline is from **`?wallsonly`**, i.e. `Level3.PopulateWallsOnly`, whose own comment says it
+    runs the wall sections "with nothing else spawning"; OwnLevel's 254-477 is the WHOLE level,
+    where `Walls(game, 2)` runs concurrently with a continuous `SkullSpawner(0f, 2f, maze: true)`
+    and (Very_Hard+) a `StarMineSpawner`. Scroll speed is NOT the confounder -- `?wallsonly` calls
+    the same 4.3x `speedup` OwnLevel uses. So it is walls-alone against walls-plus-a-sustained-
+    enemy-stream, and the extra churn belongs to the same sum-of-repulsions problem CrazyGame
+    shows at 389-450 deg/s with **no walls at all**, which is the band OwnLevel sits in.
+    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser) at the real
+    Very_Hard wall scroll: on OwnLevel's grid `ChooseGapColumn` switches **0.52/s against var3's
+    0.43/s** -- 1.2x, one switch every two seconds -- and the lateral push flips sign 0.17/s vs
+    0.16/s. Neither can produce 3-5 heading reversals/s. OwnLevel's grid IS the hardest of the
+    five, but by modest ratios: `clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77, `contact/s`
+    0.06 vs 0.03. The one big gap is the share of ticks with a blocked row inside reach --
+    **25.0% vs 4.5%** -- so the maze really is tighter; it just does not convert that into
+    proportional churn. `--react=2000` shifts `urgency%`/`clampX/s` but leaves switching, sign
+    flips and contacts unchanged everywhere, so there is no tuning win in the look-ahead either.
+    **Before attributing any churn on a walled level to the walls, match the rigs** -- suppress
+    the spawners, or bench the grid offline.
 - **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into
   `Oracle.GetBaddies`.** Its `LooksLikeEnemy` is a deliberately name-shaped heuristic, so it
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),
   the player's own `Bullet`, and `BrainAura` (the BrainBoss's cosmetic aura). All three are
   correctly outside the AI's world model.
-- **`?aiteam` -- TeamChallenge cannot be BENCHED without it.** `TeamChallenge.Initialize` seats
-  the second slot as `ControlDevice.PadOne`, and `GameScene.Update` raises `pauseRequested`
+- **TeamChallenge needed `?aiteam` to be BENCHED at all; card e6927ef8 fixed the underlying
+  GAMEPLAY bug instead, so the flag is gone.** `TeamChallenge.Initialize` used to seat the second
+  slot as `ControlDevice.PadOne` unconditionally, and `GameScene.Update` raises `pauseRequested`
   every tick a seated pad device reads `!InputHandler.PadConnected(i)`. With no gamepad attached
-  the world is frozen in the pause menu permanently: measured `ticks=0 noship=1 prog=2/52` over
-  37 sim-seconds, versus `ticks=1682 shots=1029 prog=6/52` with the flag. The flag swaps in
-  `ControlDevice.Generic`, which has no connected-check, so the force-pause never arms.
-  **It is DEBUG-ONLY and shipped behaviour is unchanged.**
-  - **`?aiteam` only works PAIRED WITH `?aiplayer`, and it is not a fix for human play.**
-    `PlayerShip.Update`'s controller switch has **no `ControlDevice.Generic` case at all** (the
-    device appears only in menu/pause/join paths), so a Generic-seated ship never steers and
-    never fires. What makes the second ship move is `?aiplayer` forcing every local ship onto
-    the AI branch via `EffectiveController`. `?aiteam` alone leaves it inert.
-  - So **TeamChallenge really is unplayable on this port without a gamepad** (permanent
-    force-pause), and this flag does NOT address that -- a real fix needs a `Generic` case in
-    the ship's input switch, or a different seating decision. Separate gameplay bug, own card.
+  the world was frozen in the pause menu permanently: measured `ticks=0 noship=1 prog=2/52` over
+  37 sim-seconds, versus `ticks=1682 shots=1029 prog=6/52` with the old flag (which swapped in
+  `ControlDevice.Generic` -- no connected-check, so the force-pause never armed). See the
+  partner-seat bullet under "Input" for the fix; for benching, `?level=TeamChallenge&aiplayer` is
+  now enough. **The matrix numbers carry over unchanged**: `PlayerShip.Update` switches on
+  `EffectiveController()`, so under `?aiplayer` the `Generic`-seated ship was already flying the AI
+  branch -- the old and new seatings are bench-equivalent. `?teampartner=pad` restores the pre-card
+  seating verbatim if the force-pause itself is what you want to reach.
 - **Sweep it with `eaAiBench.matrix(levels, simSeconds, runs, difficulty)`** (`index.html`;
   `.results()` `.status()` `.stop()`). ONE FRESH PAGE LOAD PER RUN, plan carried in
   `sessionStorage` and resumed at boot -- not an in-process relaunch, because a level
@@ -1229,7 +1322,11 @@ interpolation feel, both gated on real-network playtests.
   **v8** appends a `blockedSlots` mask to the handshake (HelloBytes 21 -> 22) so the host can
   grant a seat that is free on BOTH rosters -- card c0229c57, see the roster-slots bullet;
   **v9** adds `MsgHudState` (0x12) -- the owner-authoritative per-slot combo + powerup state,
-  card 1a3ad45a, see the per-slot HUD state bullet).
+  card 1a3ad45a, see the per-slot HUD state bullet;
+  **v10** adds `EvCosmeticSwarm` -- a decorative swarm replicates as one on/off beat and its
+  entities stop being replicated individually, card 9a3175d0, see the decorative-swarm bullet.
+  No existing layout changed, but a v9 peer would ignore the beat AND still expect the
+  per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1250,6 +1347,73 @@ interpolation feel, both gated on real-network playtests.
   cross the wire -- plus Powerup). Emits spawn/death events; replays the live set to a
   late-joining peer; tracks per-entity OBSERVED velocity (position deltas between an
   entity's snapshot turns -- Speed/Direction lies for enemies that move Position directly).
+  Minus the per-INSTANCE opt-outs -- see the decorative-swarm bullet below.
+- **Decorative swarms replicate as one "effect on/off" beat, NOT per entity (card 9a3175d0).**
+  Purely cosmetic entities were taking NetIds, `EvSpawn`/`EvDeath` pairs and a share of the
+  16-per-60ms snapshot round robin for nothing: the `?flyspiders` rig measured `liveIds` 17-19,
+  i.e. essentially the WHOLE budget spent on scenery, which directly stretches `snapTurn` --
+  the mean blind dead-reckoning window of every enemy that DOES matter. Two halves:
+  - **`AlienDrawableGameComponent.NetCosmeticOnly`** -- an INSTANCE-level opt-out (the
+    `NetSpinPerMs` idiom), because the same `FlyingSpider` type is a real killable enemy in its
+    foreground form and fog in its background one. Overridden by `FlyingSpider`
+    (`isbackground`) and `Asteroid` (`SetBackground()`'s `DrawOrder == 1` marker). Read at the
+    ComponentAdded seam, so it must be FINAL before `ComponentBin.Add` -- the configure-then-Add
+    rule `tools/audit_add_order.py` already lints.
+    **Two conditions, both required: the instance can never become collidable, and nothing
+    gameplay-visible reads it.** Both members are in `Oracle.GetBaddies` -- the AI's whole world
+    model -- and are invisible to it only because of `Collides`: `PlayerShip.IsAiShootable` has
+    an explicit `baddy is FlyingSpider && baddy.Collides` and excludes `Asteroid` outright, and
+    the threat scan gates at its CALL SITE (`PlayerShip.cs` `if (!baddy.Collides ||
+    !IsAiThreat(baddy))`) rather than inside `IsAiThreat` -- so a future caller of `IsAiThreat`
+    that forgets the gate would start dodging fog.
+  - **`NetTypeRegistry.IsReplicableInstance`** is the predicate the LIVE world asks;
+    `IsReplicable` is just the type table. Every decision site uses it -- and
+    **`NetSession.SuppressWorldSpawn` is the load-bearing one**: with the type-level test there,
+    the bin would divert the CLIENT'S OWN cosmetic spawns into the recycle pool and the joiner
+    would see no scenery at all, with no counter moving anywhere.
+  - **The SPAWNER replicates instead.** `EvCosmeticSwarm` (protocol **v10**,
+    `[kind:1][on:1][rate:f32]`, `NetCosmeticKind` APPEND-ONLY) is announced by
+    `FlyingSpiderEvent` / `AsteroidSpawner` from their first `Update` and from `OnFinished`
+    (Level 2 ends its fog swarm by `LinkWith`, so lifetime alone would never fire). The client
+    builds its own spawner and ticks it in `GameScene.UpdateNormal`, **in the very branch that
+    skips `eventList.Update`** -- which is what gets pause / victory / resetting for free
+    (`UpdateNormal` only runs in `GameState.Normal`, and a pause `Push` disables the scene).
+    The asteroid copy uses the spawner's own `SetBackGroundOnly()` + `startWithBig:false`, so it
+    never produces the collidable ones -- those still arrive as puppets.
+  - **Latched on `GameScene`, replayed from the `EvReady` catch-up seam** next to
+    `Background.NetReplayCatchUp`. Latched at the ANNOUNCE, not off the send path:
+    `NetSession.OnCosmeticSwarm` early-returns with no peer connected, which for a LISTED
+    single-player game is exactly the window a JIP peer must be caught up from (the same
+    reasoning as Background's `netLast*`). Cleared at the checkpoint revert on BOTH peers -- the
+    host's eventList drops active events without terminating them, so no "off" is ever sent --
+    and in `Initialize`/`Terminate` (re-added singletons).
+  - **The latch is REFCOUNTED per kind** and only emits on the 0<->1 edge. The beat is per kind
+    but each spawner tracks its own announce, so two overlapping spawners of one kind (nothing
+    ships that, but a level script is one line from it) would otherwise have the first one's
+    `Terminate` send an "off" while the second still spawns -- the joiner's scenery gone for the
+    rest of the level, silently, with the host's own screen full.
+  - **A rate off the wire is clamped** (`NetCosmeticMaxRate` 12/s) and non-finite/negative
+    refused: it drives `GenericSpawner`'s `while (num >= 1f) DoEvent()` loop, and a publicly
+    listed game has a stranger on the far end. The ceiling bounds the AUTHORED rate, which is not
+    the rate in flight -- `GenericSpawner` multiplies by `DifficultyModifier` and
+    `MultiPlayerDifficultyModifier` per tick -- so it sits near the shipped rates (5.5/s fog,
+    5/s belt), not at a round big number.
+  - **KNOWN LIMIT (asteroids only), accepted:** `AsteroidSpawner` sweeps its entry HEADING on its
+    own timers from `Reset`, so a peer's grey rocks fly parallel to the replicated real ones only
+    while the two cycles stay in phase. A live pairing starts them within an RTT; a
+    JOIN-IN-PROGRESS peer starts its cycle when the catch-up beat lands and is out of phase for
+    the rest of that belt. Keeping them aligned would mean streaming the angle -- the per-entity
+    cost this card exists to remove -- so it is a decoration-vs-decoration mismatch taken on
+    purpose.
+  - **Verify with `eaNetCosmetic()`** (`Compat/Net/NetCosmeticTest.cs`) -- codec, the instance
+    predicate (every check beside its positive control, since a predicate answering "not
+    replicated" for everything would pass a fog-spiders-only test and silently stop replicating
+    the whole game), and the client apply path (skipped with a printed SKIP outside a level).
+    **A screenshot diff cannot check this feature at all** -- the two peers' scenery is SUPPOSED
+    to be in different places. `eaNetBg()`'s state line gains `cosmetic=<kind@rate,...>`, which
+    both peers hold (host = latch, client = live spawners) and which IS diffable; `eaNetBgTest()`
+    gained the matching round-trip leg, and `?netscript` fires both kinds so the two-window run
+    covers them.
 - **World authority (card 11.2): the host runs the real sim, a join peer mirrors it.**
   Client sim-split at two choke points: `GameScene.UpdateNormal` skips `eventList.Update`
   (spawners/the level script only act in GameEvent.Update) and `ComponentBin.Add` swallows

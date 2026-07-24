@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Deliberately NOT referencing web/EvilAliensWeb: that project targets browser-wasm and
+       cannot be referenced by a desktop exe. The game assembly is loaded at RUNTIME by path
+       (see Program.cs), which is also what keeps this tool from ever affecting the shipped
+       build: nothing in web/ knows it exists, and CI only publishes web/EvilAliensWeb. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>logic_probe</AssemblyName>
+    <RootNamespace>LogicProbe</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

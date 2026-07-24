@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.GamerServices;
 
@@ -64,31 +65,143 @@ internal class TeamChallenge : GameScene
 		base.SoundManager.PlayMusic(SoundManager.ClassicForDifficulty());
 		base.Initialize();
 		Settings.GetInstance().LockDifficulty();
+		// The device that launched the level, BEFORE ResetPlayers wipes the roster. Every other
+		// scene just plays whatever Game1.MenuFinished seated; this one re-seats its own slots
+		// (it needs two), and seating slot 0 as Keyboard REGARDLESS -- what the 2008 build did --
+		// hands a pad-only player a ship they cannot steer.
+		int primarySlot = EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot;
+		ControlDevice starter = oracle.IsSeated(primarySlot) ? oracle.Controller(primarySlot) : ControlDevice.Keyboard;
 		oracle.ResetPlayers();
+		ControlDevice primary = ResolvePrimarySeat(starter, base.InputHandler.PadConnected);
 		// Online co-op (card 4d904410): the host allocates every slot, so seat our primary in
 		// the slot we were granted (offline / host-side that is 0, exactly as before).
-		if (!oracle.AddPlayerAt(EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot, ControlDevice.Keyboard))
+		if (!oracle.AddPlayerAt(primarySlot, primary))
 		{
-			oracle.AddPlayer(ControlDevice.Keyboard);
+			oracle.AddPlayer(primary);
 		}
 		// Online co-op: seat ONLY the local device -- the partner joins as
-		// ControlDevice.Remote through the net layer. Seating the offline PadOne here
-		// would (a) squat the slot the remote puppet needs and (b) trip the
+		// ControlDevice.Remote through the net layer. Seating a local second device here
+		// would (a) squat the slot the remote puppet needs and (b) for a pad, trip the
 		// disconnected-gamepad force-pause every tick (GameScene.Update's PadConnected
 		// check) -- the card's "pause triggers are local devices only" gotcha.
 		if (!EvilAliensWeb.Compat.Net.NetSession.Active)
 		{
-			// ?aiteam (card 9391f95a): seat Generic instead, so the level can be BENCHED at all.
-			// PadOne with no gamepad attached makes GameScene.Update raise pauseRequested every
-			// tick (its !PadConnected(i) check), so an unattended ?aiplayer soak never leaves the
-			// pause menu -- prog=0, no verdict, and nothing in the bench line explaining it.
-			// Generic simply has no connected-check. It gives this slot no DRIVER of its own
-			// (PlayerShip.Update has no Generic case) -- the flag is only ever used with
-			// ?aiplayer, which forces both ships onto the AI branch.
-			oracle.AddPlayer(EvilAliensWeb.Compat.DebugFlags.AiTeam
-				? ControlDevice.Generic
-				: ControlDevice.PadOne);
+			oracle.AddPlayer(ResolvePartnerSeat(primary, base.InputHandler.PadConnected, EvilAliensWeb.Compat.DebugFlags.TeamPartner));
 		}
+	}
+
+	// ---- Who sits where (card e6927ef8) -------------------------------------------------
+	// The 2008 build seated Keyboard + PadOne flat, and on this port that made the level
+	// UNPLAYABLE for a keyboard-only player: GameScene.Update raises pauseRequested on every tick
+	// a seated pad device reads !InputHandler.PadConnected(i), so the world was pushed into the
+	// pause menu, dismissed, and re-paused next tick, forever (measured: ticks=0 prog=2/52 over
+	// 37 sim-seconds -- the world never advanced at all).
+	// Both seats are now resolved from what is actually THERE, by two pure functions so
+	// eaTeamSeat() / tools/sim/logic_probe can table-drive every case instead of needing a live
+	// level and four physical gamepads (the NetSession.OwnsSlotCore idiom).
+	// THE INVARIANT BOTH UPHOLD: neither seat is ever a pad that is not connected -- precisely
+	// the force-pause's precondition, so the loop is unreachable by construction. GameScene's
+	// guard itself is deliberately untouched: a pad dying MID-RUN should still say so.
+
+	// Slot 0: the device that launched the level, if it can actually drive a ship. A pad-only
+	// player navigated the menu with their pad, and handing them a Keyboard ship (the 2008
+	// behaviour) leaves them steering nothing. Anything that is not a live local ship driver --
+	// Generic (no input case AND no key bound to Generic_Start on this port), AI, the net
+	// puppets, or a pad that has gone away since the menu -- falls back to Keyboard, which is
+	// always drivable here (mouse aim included).
+	internal static ControlDevice ResolvePrimarySeat(ControlDevice starter, Func<int, bool> padConnected)
+	{
+		int pad = PadIndexOf(starter);
+		return (pad >= 0 && padConnected(pad)) ? starter : ControlDevice.Keyboard;
+	}
+
+	// Slot 1: the partner. A connected pad THE PRIMARY IS NOT USING means a second human is
+	// there, which is the level's original two-human co-op; otherwise ControlDevice.AI flies it
+	// as an auto-pilot partner (the level-select briefing says so, and TryAdoptJoinDevice below
+	// hands the seat over the moment a real pad joins).
+	// How WELL the bot plays this level is not established: the completion matrix's TeamChallenge
+	// row is a TIMEOUT at ~90 deaths with both ships bot-driven, and its one clean run (VICTORY
+	// 402s, 0 deaths) was an ?invuln control. The bot makes the level reachable and playable, which
+	// beats a permanent pause menu; do not read it as "the bot can finish it for you".
+	internal static ControlDevice ResolvePartnerSeat(ControlDevice primary, Func<int, bool> padConnected, EvilAliensWeb.Compat.DebugFlags.TeamPartnerSeat forced)
+	{
+		if (forced == EvilAliensWeb.Compat.DebugFlags.TeamPartnerSeat.Ai)
+		{
+			return ControlDevice.AI;
+		}
+		// ?teampartner=pad restores the pre-card seating VERBATIM -- an unconditional PadOne,
+		// connected or not. It is the deliberate way to reach the force-pause this card removed,
+		// i.e. the negative control, so it must not be softened by the checks below.
+		if (forced == EvilAliensWeb.Compat.DebugFlags.TeamPartnerSeat.Pad)
+		{
+			return ControlDevice.PadOne;
+		}
+		for (int i = 0; i < 4; i++)
+		{
+			if (padConnected(i) && PadDeviceAt(i) != primary)
+			{
+				return PadDeviceAt(i);
+			}
+		}
+		return ControlDevice.AI;
+	}
+
+	private static ControlDevice PadDeviceAt(int i)
+	{
+		return i switch
+		{
+			0 => ControlDevice.PadOne,
+			1 => ControlDevice.PadTwo,
+			2 => ControlDevice.PadThree,
+			3 => ControlDevice.PadFour,
+			_ => throw new Exception()
+		};
+	}
+
+	// The pad index a device reads, or -1 for anything that is not a pad.
+	internal static int PadIndexOf(ControlDevice device)
+	{
+		return device switch
+		{
+			ControlDevice.PadOne => 0,
+			ControlDevice.PadTwo => 1,
+			ControlDevice.PadThree => 2,
+			ControlDevice.PadFour => 3,
+			_ => -1
+		};
+	}
+
+	// A real pad pressing Start TAKES OVER the auto-pilot's seat instead of adding a third ship.
+	// This is what keeps two-human co-op working at all: the browser Gamepad API only exposes a
+	// pad AFTER a button is pressed on it in the page, so player two's idle pad reads
+	// DISCONNECTED while Initialize is resolving the seats -- their pad is essentially invisible
+	// until they join. Without this, that Start press would seat a third player, and the tether
+	// only ever links GetShips()[0]/[1], so the partner they meant to be would fly free while a
+	// bot stayed bolted to player one.
+	// The same seat, so the slot keeps its score, lives and place in the tether; only the driver
+	// changes. Pads only (Keyboard/Generic can never reach here -- slot 0 holds the keyboard, and
+	// a Generic join needs a key that is not bound on this port), and only while the AI holds the
+	// seat, so a second pad joining a genuine two-human game still goes through the normal path.
+	protected override bool TryAdoptJoinDevice(ControlDevice device)
+	{
+		if (EvilAliensWeb.Compat.Net.NetSession.Active || PadIndexOf(device) < 0)
+		{
+			return false;
+		}
+		int slot = oracle.GetPlayerIndex(ControlDevice.AI);
+		if (slot < 0 || !oracle.SetController(slot, device))
+		{
+			return false;
+		}
+		foreach (PlayerShip ship in oracle.GetShips())
+		{
+			if (ship.Owner == slot)
+			{
+				ship.AdoptController(device);
+			}
+		}
+		Console.WriteLine("[teamchallenge] " + device + " took over the auto-pilot partner seat " + slot);
+		return true;
 	}
 
 	protected override void UpdateNormal(GameTime gameTime)

@@ -41,6 +41,11 @@ internal class FlyingSpider : KillableAlien
 	private static float SizeFactor =>
 		EvilAliensWeb.Compat.DebugFlags.FlySpiderScale ?? DefaultSizeFactor;
 
+	// The bottom of the fog band: a BACKGROUND spider's rest height is held above this, so the
+	// distant layer stays up near the Mars hills instead of wandering down over the play field.
+	// Foreground spiders use the full 475 height.
+	private const float BackgroundBandBottom = 350f;
+
 	private bool isbackground;
 
 	private Texture2D wing;
@@ -109,9 +114,21 @@ internal class FlyingSpider : KillableAlien
 		return flyingSpider;
 	}
 
+	// The per-spawn reset seam: every spawn path calls this before bin.Add, and the instance may
+	// have come out of the recycle pool with a previous life's settings still on it. So anything
+	// an OPTIONAL later setter writes has to be cleared here, not just defaulted at construction:
+	// a spider recycled out of a ?flyspidercount= bench would otherwise keep benchIndex and be
+	// re-pinned by Initialize -- and a pinned spider can neither cross off-screen nor be shot
+	// (Speed 0, Collides false), so a later Level 2 inherits permanently frozen immortal scenery.
+	// netForcedColorIndex is the same shape (a recycled net puppet keeping the host's forced tint
+	// in a local game). Both setters that can follow -- SetupBench and NetForceColor -- run AFTER
+	// this call on every path.
 	public void Setup(bool isbackground)
 	{
 		this.isbackground = isbackground;
+		benchIndex = null;
+		benchCount = 0;
+		netForcedColorIndex = null;
 	}
 
 	// ?flyspidercount= bench (card 9c92962e): pin this spider to slot `index` of `count` instead of
@@ -160,7 +177,7 @@ internal class FlyingSpider : KillableAlien
 			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 			base.Speed = (backgroundSpeed).Length() * 1.11f;
 			base.DrawOrder = 1;
-			startheight = MathHelper.Min(350f, startheight);
+			startheight = MathHelper.Min(BackgroundBandBottom, startheight);
 			swiveltimer.Duration = 4000f;
 		}
 		else
@@ -193,6 +210,14 @@ internal class FlyingSpider : KillableAlien
 		}
 		base.Speed = 0f;
 		base.MaxSpeed = 0f;
+		// Pinning N also means nothing may REMOVE a bench spider, and a foreground one is
+		// shootable (Initialize sets Collides=true for that variant) -- the player would decay N
+		// mid-measurement, and an un-invulned ship could be killed by the grid it is measuring.
+		// Background spiders are already Collides=false, so this only ever changes the foreground
+		// bench, and it changes it into what the background one always was. Consequence, and it is
+		// the right trade for what this rig measures: a foreground bench sits out the collision
+		// pass, so it is a DRAW-cost bench (GL calls / frame ms), not a whole-frame one.
+		base.Collides = false;
 		int i = benchIndex.Value;
 		int n = Math.Max(1, benchCount);
 		// Widest grid that stays roughly square, so the same N always lands the same way and the
@@ -201,12 +226,20 @@ internal class FlyingSpider : KillableAlien
 		int rows = (int)Math.Ceiling((double)n / cols);
 		int col = i % cols;
 		int row = i / cols;
+		// Scale the rows to the band the variant actually occupies. Spreading the grid over the
+		// full 475 and letting Initialize's fog-band clamp bite instead would fold every row below
+		// the band onto one line -- 12 of 40 spiders stacked on y=350 -- which is both the opposite
+		// of the spread this grid exists for and a pile of extra overlap for the flatten to chew
+		// on. Update drives the drawn Y off startheight, not off Position.Y, so that clamp is what
+		// decides where a background spider is SEEN; keeping the rows inside the band means the
+		// grid is the only thing placing them.
+		float ySpan = isbackground ? BackgroundBandBottom : 475f;
 		// Inset half a cell so nothing sits on the screen edge, where it would be part-clipped and
 		// draw less than a whole spider.
 		float x = 800f * (col + 0.5f) / cols;
-		float y = 475f * (row + 0.5f) / rows;
+		float y = ySpan * (row + 0.5f) / rows;
 		base.Position = new Vector2(x, y);
-		startheight = isbackground ? MathHelper.Min(350f, y) : y;
+		startheight = y;
 	}
 
 	// Baked half-extent of the per-spider group-flatten box, in DESIGN px before `scale`. Generous
@@ -383,6 +416,14 @@ internal class FlyingSpider : KillableAlien
 	// state extra. Foreground spiders take a random grey tint, forced via netForcedColorIndex.
 
 	internal bool NetIsBackground => isbackground;
+
+	// Card 9a3175d0: the background form is fog. It spawns Collides=false and Initialize is the
+	// only thing that ever writes Collides (including its ApplyBenchPlacement tail, which only
+	// ever writes false as well), so it can never turn into a hazard; the swarm is
+	// replicated as one NetCosmeticKind.FlyingSpiderBackground beat instead and the joiner runs
+	// its own spawner. `isbackground` is pinned by Setup before bin.Add, which is when this is
+	// read. The FOREGROUND form is a real killable enemy and stays fully replicated.
+	internal override bool NetCosmeticOnly => isbackground;
 
 	internal byte NetColorIndex
 	{

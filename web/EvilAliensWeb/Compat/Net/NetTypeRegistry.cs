@@ -136,5 +136,18 @@ namespace EvilAliensWeb.Compat.Net
         {
             return c != null && indexByType.ContainsKey(c.GetType());
         }
+
+        // Type-level replicable AND not an instance that has opted out as pure scenery (card
+        // 9a3175d0). This is the predicate the LIVE world asks; IsReplicable is the type table.
+        //
+        // Every site that decides whether a component participates in replication must use this
+        // one, not IsReplicable -- most obviously NetSession.SuppressWorldSpawn, where getting it
+        // wrong is silent and total: the client's own cosmetic spawns would be diverted into the
+        // recycle pool by the bin and the joiner would see no scenery at all, with no counter
+        // moving anywhere.
+        public static bool IsReplicableInstance(GameComponent c)
+        {
+            return IsReplicable(c) && !(c is AlienDrawableGameComponent a && a.NetCosmeticOnly);
+        }
     }
 }

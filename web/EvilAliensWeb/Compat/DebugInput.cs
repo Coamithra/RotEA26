@@ -388,6 +388,16 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
 		}
 
+		// JS bridge for the decorative-swarm replication (eaNetCosmetic in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCosmetic'). Runs
+		// Compat/Net/NetCosmeticTest.Run() and returns the PASS/FAIL report. Leave-no-trace, so
+		// it is safe at any point in play -- and its apply leg only runs INSIDE a level.
+		[JSInvokable("debugNetCosmetic")]
+		public static string NetCosmetic()
+		{
+			return EvilAliensWeb.Compat.Net.NetCosmeticTest.Run();
+		}
+
 		// JS bridge for the primary-slot negotiation (eaSlotTest in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugSlotTest'). Runs
 		// Compat/Net/NetSlotTest.Run() and returns the PASS/FAIL report.
@@ -418,6 +428,17 @@ namespace EvilAliensWeb.Compat
 		public static string BgCull()
 		{
 			return EvilAliensWeb.Compat.BgCullTest.Run();
+		}
+
+		// JS bridge for TeamChallenge's partner-seat oracle (eaTeamSeat in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugTeamSeat'). Drives the real
+		// TeamChallenge.ResolvePartnerSeat over every pad-connection mask, so the fix for card
+		// e6927ef8 is verified without four physical gamepads, and runs the pre-card
+		// always-PadOne policy as the negative control. See Compat/TeamSeatTest.cs.
+		[JSInvokable("debugTeamSeat")]
+		public static string TeamSeat()
+		{
+			return EvilAliensWeb.Compat.TeamSeatTest.Run();
 		}
 
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):

@@ -656,7 +656,17 @@ namespace EvilAliensWeb.Compat
 		// population stops drifting. That pin is the whole point: the first numbers on this card
 		// compared two runs whose spider counts were never equal. N=0 is a legal baseline (an
 		// empty Level 2 to subtract). null => the original endless 5.5/s stream.
+		// Holding N also costs the FOREGROUND variant its collidability -- bench spiders are
+		// forced Collides=false (FlyingSpider.ApplyBenchPlacement), or the player would shoot the
+		// population down mid-run and an un-invulned ship could be killed by the grid it is
+		// measuring. So a foreground bench is a DRAW-cost rig (GL calls / frame ms) that sits out
+		// the collision pass; the background variant it is compared against never collided anyway.
 		public static int? FlySpiderCount { get; private set; }
+
+		// Ceiling for ?flyspidercount=. Far above anything the cost curve needs (it was measured
+		// at N=0/40/80 and is linear), and low enough that a fat-fingered extra zero is reported
+		// as a bad value instead of spending the boot building components on the WASM heap.
+		private const int MaxFlySpiderBench = 4096;
 
 		// ?flyspiderbox=<half>: override the group-flatten bounding box half-extent in FlyingSpider
 		// .Draw (baked 200 design px, scaled by the spider's `scale`). This is the DISCRIMINATOR
@@ -987,18 +997,26 @@ namespace EvilAliensWeb.Compat
 		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
 		public static bool AIPlayer { get; private set; }
 
-		// ?aiteam (card 9391f95a): seat TeamChallenge's SECOND slot as ControlDevice.Generic
-		// instead of ControlDevice.PadOne, so the level can be BENCHED. GameScene.Update raises
-		// pauseRequested every tick a seated pad device reads !InputHandler.PadConnected(i), so
-		// with no gamepad attached an unattended soak sits in the pause menu forever at prog=0
-		// with nothing saying why; Generic has no such connected-check.
-		// PAIR IT WITH ?aiplayer -- this flag does NOT by itself give that slot a driver.
-		// PlayerShip.Update's controller switch has no ControlDevice.Generic case (the device
-		// only appears in menu/pause/join paths), so a Generic-seated ship never steers and never
-		// fires; what moves it is ?aiplayer forcing every local ship onto the AI branch through
-		// EffectiveController. It is therefore a bench seam, NOT a fix for TeamChallenge being
-		// unplayable without a pad -- that needs a real input case and has its own card. In Active.
-		public static bool AiTeam { get; private set; }
+		// ?teampartner=ai|pad (card e6927ef8): override how TeamChallenge seats its SECOND slot.
+		// Normally (None) TeamChallenge.ResolvePartnerSeat picks the first CONNECTED pad, or
+		// ControlDevice.AI when nothing is plugged in -- so the level plays either way.
+		//   ai  -- force the auto-pilot AI partner even with a pad connected.
+		//   pad -- force ControlDevice.PadOne even with NOTHING connected, i.e. reproduce the
+		//          shipped-2008 seating: the only deliberate way to reach GameScene.Update's
+		//          disconnected-pad force-pause (the bug this card fixed), and so the negative
+		//          control for the fix.
+		// In Active -- it changes which devices drive a shared run.
+		// This REPLACES ?aiteam (card 9391f95a), which seated ControlDevice.Generic purely so the
+		// level could be BENCHED at all; that is obsolete now the no-pad seat drives itself, so
+		// ?level=TeamChallenge&aiplayer benches with no special flag.
+		public static TeamPartnerSeat TeamPartner { get; private set; } = TeamPartnerSeat.None;
+
+		public enum TeamPartnerSeat
+		{
+			None,
+			Ai,
+			Pad
+		}
 
 		// ?aibench (card f4d1721f): AI telemetry -- wall contacts (counted even under ?invuln),
 		// the heading-reversal jitter rate, fire-decision idleness and the level-script progress
@@ -1459,6 +1477,16 @@ namespace EvilAliensWeb.Compat
 					{
 						FlySpiderScale = fss;
 					}
+					else
+					{
+						// Reported like its ?flyspidercount=/?flyspiderbox= siblings: a typo'd
+						// value would otherwise run at the baked DefaultSizeFactor while the
+						// session believes it is looking at the size under test.
+						Console.WriteLine("[debug] unknown ?flyspiderscale= value '" + val
+							+ "' (expected a number > 0) -- ignored, staying on "
+							+ (FlySpiderScale ?? EvilAliens.FlyingSpider.DefaultSizeFactor)
+								.ToString(CultureInfo.InvariantCulture));
+					}
 					break;
 				case "wcdiff":
 				case "webcamdiff":
@@ -1739,8 +1767,30 @@ namespace EvilAliensWeb.Compat
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
-				case "aiteam":
-					AiTeam = IsOn(val);
+				case "teampartner":
+					// Bare ?teampartner (no value) means the AI partner -- the case someone
+					// reaching for this flag wants. An off spelling resolves to None (the normal
+					// connected-pad-then-AI resolution) rather than silently forcing the AI.
+					// An unrecognised value is REPORTED and ignored, for the ?flyspiderflatten
+					// reason: a typo would otherwise quietly run the other arm of the A/B while
+					// the run is labelled as the variant under test.
+					if (val == null || val.Trim().Length == 0 || val.Trim().ToLowerInvariant() == "ai")
+					{
+						TeamPartner = TeamPartnerSeat.Ai;
+					}
+					else if (val.Trim().ToLowerInvariant() == "pad")
+					{
+						TeamPartner = TeamPartnerSeat.Pad;
+					}
+					else if (IsExplicitlyOff(val))
+					{
+						TeamPartner = TeamPartnerSeat.None;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?teampartner= value '" + val
+							+ "' (expected ai/pad) -- ignored, seats resolve normally");
+					}
 					break;
 				case "aibench":
 					AiBench = IsOn(val);
@@ -1922,20 +1972,46 @@ namespace EvilAliensWeb.Compat
 					}
 					else
 					{
+						// Every rejection message below names the setting that is actually IN
+						// FORCE, read back off the property rather than written as a literal --
+						// a repeated flag (?flyspiderbox=250&flyspiderbox=xx) keeps the earlier
+						// valid value, and a diagnostic that can state the wrong condition is
+						// worse than one that states none.
 						Console.WriteLine("[debug] unknown ?flyspiderflatten= value '" + val
-							+ "' (expected per/0/swarm) -- ignored, staying on swarm");
+							+ "' (expected per/0/swarm) -- ignored, staying on " + FlySpiderFlatten);
 					}
 					break;
 				case "flyspidercount":
-					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc) && fsc >= 0)
+					// Reported, never swallowed -- same reason as ?flyspiderflatten= above, and it
+					// bites harder here: a typo'd N silently leaves the endless STREAM running,
+					// so the run has no pinned population at all while being labelled a bench.
+					// The upper bound is rejected for the same reason rather than clamped: one
+					// extra zero would otherwise spend the run building a million components on
+					// the WASM heap, which reads as a hung boot, not as a mislabelled bench.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc)
+						&& fsc >= 0 && fsc <= MaxFlySpiderBench)
 					{
 						FlySpiderCount = fsc;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspidercount= value '" + val
+							+ "' (expected an integer 0.." + MaxFlySpiderBench + ") -- ignored, staying on "
+							+ (FlySpiderCount.HasValue
+								? "the pinned bench of " + FlySpiderCount.Value
+								: "the endless stream"));
 					}
 					break;
 				case "flyspiderbox":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fsb) && fsb > 0f)
 					{
 						FlySpiderBox = fsb;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspiderbox= value '" + val
+							+ "' (expected a number > 0) -- ignored, staying on "
+							+ EvilAliens.FlyingSpider.FlattenBoxHalfDesign.ToString(CultureInfo.InvariantCulture));
 					}
 					break;
 				case "tutorialtraining":
@@ -2141,7 +2217,7 @@ namespace EvilAliensWeb.Compat
 			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
 			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
 			// refuses Demo1/2/3, so it can never advertise an attract demo.
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || AiTeam || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2157,7 +2233,7 @@ namespace EvilAliensWeb.Compat
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
-								+ (AiTeam ? " aiteam" : "")
+								+ (TeamPartner != TeamPartnerSeat.None ? " teampartner=" + TeamPartner.ToString().ToLowerInvariant() : "")
 								+ (AiBench ? " aibench" : "")
 								+ (AiFastForward > 1 ? " aiff=" + AiFastForward : "")
 						+ (NetScript ? " netscript" : "")
@@ -2232,27 +2308,6 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// A bare flag (?menu) or =1/=true/=yes/=on means ON; =0/=false/=no/=off means OFF.
-		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
-		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
-		// the two and would silently run a typo'd variant on the default path.
-		private static bool IsExplicitlyOff(string val)
-		{
-			if (val == null)
-			{
-				return false;
-			}
-			switch (val.Trim().ToLowerInvariant())
-			{
-			case "0":
-			case "false":
-			case "no":
-			case "off":
-				return true;
-			default:
-				return false;
-			}
-		}
-
 		private static bool IsOn(string val)
 		{
 			if (val == null)
@@ -2266,6 +2321,28 @@ namespace EvilAliensWeb.Compat
 			case "true":
 			case "yes":
 			case "on":
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
+		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
+		// the two and would silently run a typo'd variant on the default path. Note a BARE flag is
+		// not explicitly off (null => false), which is the whole difference from !IsOn().
+		private static bool IsExplicitlyOff(string val)
+		{
+			if (val == null)
+			{
+				return false;
+			}
+			switch (val.Trim().ToLowerInvariant())
+			{
+			case "0":
+			case "false":
+			case "no":
+			case "off":
 				return true;
 			default:
 				return false;

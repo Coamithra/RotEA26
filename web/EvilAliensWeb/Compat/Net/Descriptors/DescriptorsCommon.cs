@@ -196,6 +196,12 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     // grey tint (background ones are forced to the fog colour), forced onto the host's pick.
     // Spawn extras: [flags:1]  (bit0 = isbackground, bits1-2 = colorIdx for foreground)
     // State extras: none -- everything continuous rides base fields + self-driven timers.
+    //
+    // Only the FOREGROUND form reaches this descriptor now (card 9a3175d0): a background spider
+    // is NetCosmeticOnly, so NetIdRegistry never gives it an id and bit0 can no longer be set by
+    // any host -- the fog swarm replicates as one FlyingSpiderEvent beat and each peer runs its
+    // own. The bit is kept because the spawn-extra layout is append-only and it costs nothing;
+    // see AsteroidDescriptor for the same note and what it would mean if it ever fired again.
     internal sealed class FlyingSpiderDescriptor : NetTypeDescriptor<FlyingSpider>
     {
         private const byte FlagBackground = 1;

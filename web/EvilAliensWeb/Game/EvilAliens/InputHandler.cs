@@ -228,128 +228,82 @@ public class InputHandler : IInputHandlerService
 		for (int i = 0; i < 4; i++)
 		{
 			GamePadState state = GamePad.GetState((PlayerIndex)i);
-			padConnected[i] = (state).IsConnected;
+			padConnected[i] = state.IsConnected;
 			for (int j = 0; j < padKeysValues.Count; j++)
 			{
 				bool held = false;
 				switch (j)
 				{
 				case 9:
-				{
-					GamePadButtons buttons5 = (state).Buttons;
-					held = (int)(buttons5).A == 1;
+					held = (int)state.Buttons.A == 1;
 					break;
-				}
 				case 10:
-				{
-					GamePadButtons buttons = (state).Buttons;
-					held = (int)(buttons).B == 1;
+					held = (int)state.Buttons.B == 1;
 					break;
-				}
 				case 5:
-				{
-					GamePadButtons buttons3 = (state).Buttons;
-					held = (int)(buttons3).Back == 1;
+					held = (int)state.Buttons.Back == 1;
 					break;
-				}
 				case 4:
-				{
-					GamePadButtons buttons8 = (state).Buttons;
-					held = (int)(buttons8).Start == 1;
+					held = (int)state.Buttons.Start == 1;
 					break;
-				}
 				case 8:
-				{
-					GamePadButtons buttons6 = (state).Buttons;
-					held |= (int)(buttons6).LeftShoulder == 1;
-					GamePadButtons buttons7 = (state).Buttons;
-					held |= (int)(buttons7).RightShoulder == 1;
-					GamePadTriggers triggers3 = (state).Triggers;
-					held |= (triggers3).Left > 0.5f;
-					GamePadTriggers triggers4 = (state).Triggers;
-					held |= (triggers4).Right > 0.5f;
+					held |= (int)state.Buttons.LeftShoulder == 1;
+					held |= (int)state.Buttons.RightShoulder == 1;
+					held |= state.Triggers.Left > 0.5f;
+					held |= state.Triggers.Right > 0.5f;
 					break;
-				}
 				case 6:
-				{
-					GamePadButtons buttons2 = (state).Buttons;
-					held |= (int)(buttons2).LeftShoulder == 1;
-					GamePadTriggers triggers = (state).Triggers;
-					held |= (triggers).Left > 0.5f;
+					held |= (int)state.Buttons.LeftShoulder == 1;
+					held |= state.Triggers.Left > 0.5f;
 					break;
-				}
 				case 7:
-				{
-					GamePadButtons buttons4 = (state).Buttons;
-					held |= (int)(buttons4).RightShoulder == 1;
-					GamePadTriggers triggers2 = (state).Triggers;
-					held |= (triggers2).Right > 0.5f;
+					held |= (int)state.Buttons.RightShoulder == 1;
+					held |= state.Triggers.Right > 0.5f;
 					break;
-				}
 				case 2:
-				{
 					if (padkeysdown[i][j])
 					{
-						GamePadThumbSticks thumbSticks3 = (state).ThumbSticks;
-						held |= (thumbSticks3).Left.X < -0.42000002f;
+						held |= state.ThumbSticks.Left.X < -0.42000002f;
 					}
 					else
 					{
-						GamePadThumbSticks thumbSticks4 = (state).ThumbSticks;
-						held |= (thumbSticks4).Left.X < -0.58f;
+						held |= state.ThumbSticks.Left.X < -0.58f;
 					}
-					GamePadDPad dPad2 = (state).DPad;
-					held |= (int)(dPad2).Left == 1;
+					held |= (int)state.DPad.Left == 1;
 					break;
-				}
 				case 3:
-				{
 					if (padkeysdown[i][j])
 					{
-						GamePadThumbSticks thumbSticks7 = (state).ThumbSticks;
-						held |= (thumbSticks7).Left.X > 0.42000002f;
+						held |= state.ThumbSticks.Left.X > 0.42000002f;
 					}
 					else
 					{
-						GamePadThumbSticks thumbSticks8 = (state).ThumbSticks;
-						held |= (thumbSticks8).Left.X > 0.58f;
+						held |= state.ThumbSticks.Left.X > 0.58f;
 					}
-					GamePadDPad dPad4 = (state).DPad;
-					held |= (int)(dPad4).Right == 1;
+					held |= (int)state.DPad.Right == 1;
 					break;
-				}
 				case 0:
-				{
 					if (padkeysdown[i][j])
 					{
-						GamePadThumbSticks thumbSticks5 = (state).ThumbSticks;
-						held |= (thumbSticks5).Left.Y > 0.42000002f;
+						held |= state.ThumbSticks.Left.Y > 0.42000002f;
 					}
 					else
 					{
-						GamePadThumbSticks thumbSticks6 = (state).ThumbSticks;
-						held |= (thumbSticks6).Left.Y > 0.58f;
+						held |= state.ThumbSticks.Left.Y > 0.58f;
 					}
-					GamePadDPad dPad3 = (state).DPad;
-					held |= (int)(dPad3).Up == 1;
+					held |= (int)state.DPad.Up == 1;
 					break;
-				}
 				case 1:
-				{
 					if (padkeysdown[i][j])
 					{
-						GamePadThumbSticks thumbSticks = (state).ThumbSticks;
-						held |= (thumbSticks).Left.Y < -0.42000002f;
+						held |= state.ThumbSticks.Left.Y < -0.42000002f;
 					}
 					else
 					{
-						GamePadThumbSticks thumbSticks2 = (state).ThumbSticks;
-						held |= (thumbSticks2).Left.Y < -0.58f;
+						held |= state.ThumbSticks.Left.Y < -0.58f;
 					}
-					GamePadDPad dPad = (state).DPad;
-					held |= (int)(dPad).Down == 1;
+					held |= (int)state.DPad.Down == 1;
 					break;
-				}
 				}
 				if (held)
 				{

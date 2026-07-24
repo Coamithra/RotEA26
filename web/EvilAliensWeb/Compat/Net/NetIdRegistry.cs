@@ -13,7 +13,9 @@ namespace EvilAliensWeb.Compat.Net
     // round-robins over (card 11.2).
     //
     // The replication set is NetTypeRegistry's descriptor table (11.1's Oracle.GetBaddies
-    // enemy types minus Explosion, plus Powerup -- cosmetics never cross the wire).
+    // enemy types minus Explosion, plus Powerup -- cosmetics never cross the wire), minus the
+    // per-INSTANCE opt-outs (card 9a3175d0: a decorative background swarm replicates as one
+    // spawner beat, so its entities never take an id or a snapshot turn here).
     internal static class NetIdRegistry
     {
         internal sealed class Entry
@@ -96,7 +98,8 @@ namespace EvilAliensWeb.Compat.Net
         private static void Components_ComponentAdded(object src, GameComponentCollectionEventArgs args)
         {
             if (args.GameComponent is GameComponent gc && !entries.ContainsKey(gc)
-                && gc is AlienDrawableGameComponent comp && NetTypeRegistry.TryGet(gc, out byte typeIdx, out INetTypeDescriptor desc))
+                && gc is AlienDrawableGameComponent comp && !comp.NetCosmeticOnly
+                && NetTypeRegistry.TryGet(gc, out byte typeIdx, out INetTypeDescriptor desc))
             {
                 Entry e = new Entry
                 {

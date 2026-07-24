@@ -24,6 +24,12 @@ internal class Level2 : GameScene
 	// removed on finish.
 	private FlyingSpiderSwarm flyingSpiderSwarm;
 
+	// ?flyspidercount= bench parameters, latched by PopulateFlyingSpidersOnly for the deferred
+	// spawnFlyingSpiderBench beat to read. Debug-only; both are inert on a normal boot.
+	private bool benchBackground;
+
+	private int benchCount;
+
 	public Level2(Game game)
 		: base(game, Levels.Level2)
 	{
@@ -174,11 +180,15 @@ internal class Level2 : GameScene
 		{
 			// DEBUG (?flyspiders): skip the level and run a dense continuous FLYING-spider swarm.
 			// Built for the frame profiler (card 22e655b5): the background variant is the only
-			// user of SpriteBatchWrapper.BeginGroupFlatten/EndGroupFlatten -- a per-swarm render
+			// user of SpriteBatchWrapper.BeginGroupFlatten/EndGroupFlatten -- a group render
 			// target round trip -- so "is the group flatten expensive?" needs the swarm on screen
 			// and steady, which the real level only reaches minutes in. ?flyspiders=fg runs the
-			// FOREGROUND variant instead (identical sprites, NO flatten), which is the A/B that
-			// isolates the render-target cost from the drawing itself.
+			// FOREGROUND variant instead (identical sprites, NO flatten).
+			// ?flyspiders=fg is NOT the flatten A/B, whatever it looks like (card 9c92962e): the
+			// two variants differ in SIX things (flatten, Collides, Speed, scale, alpha,
+			// DrawOrder) and the streamed populations were never equalised, so most of the gap it
+			// showed was population. The honest rig is ?flyspidercount=<N> (a pinned bench, below)
+			// with ?flyspiderflatten=per|0|swarm, which varies ONLY the flatten.
 			PopulateFlyingSpidersOnly();
 			return;
 		}
@@ -478,10 +488,6 @@ internal class Level2 : GameScene
 		FlyingSpiderEvent swarm = new FlyingSpiderEvent(base.Game, 0f, 5.5f, isbackground: background);
 		eventList.AddEvent(swarm, halting: false);
 	}
-
-	private bool benchBackground;
-
-	private int benchCount;
 
 	// One-shot bench spawn for ?flyspidercount=. Deliberately fired from a WaitEvent rather than
 	// straight out of PopulateEventList: the spiders read oracle.BackgroundSpeed in Initialize, and

@@ -300,7 +300,13 @@ internal class MenuScene : Scene
 		challengeSelector.AddEntryData("GFX/Screenshots/InsaneBossI", "Defeat the Alien bosses for great victory", Levels.InsaneBossI);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Team Challenge", Unlockables.Items.TeamChallenge);
-		challengeSelector.AddEntryData("GFX/Screenshots/teamchallengess", "Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players", Levels.TeamChallenge);
+		// The "two players" line is the 2008 briefing; the second sentence is the web port's
+		// (card e6927ef8). The partner seat resolves to the first CONNECTED gamepad, or to an
+		// auto-pilot AI partner when there is none -- said HERE because this is where the player
+		// decides to launch, and because an in-level banner has nowhere safe to live (one added
+		// during Startup is eaten by UpdateStartup's 1300ms Purge<AnimatedMessage>, one added in
+		// Normal collides with the script's own "Get ready!" beat).
+		challengeSelector.AddEntryData("GFX/Screenshots/teamchallengess", "Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players -- plug in a gamepad for player two,\nor an auto-pilot partner takes the second seat.", Levels.TeamChallenge);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		// Web-port addition, deliberately UNGATED (no Unlockables item): the remake of
 		// the 2004 webcam game the "I made this!" splash is from. The screenshot is the

@@ -54,7 +54,7 @@ internal class Ball : AlienDrawableGameComponent
 	{
 		get
 		{
-			float num = state switch
+			float radiusFactor = state switch
 			{
 				BallState.startup => 0.8f, 
 				BallState.connected => 1f, 
@@ -63,7 +63,7 @@ internal class Ball : AlienDrawableGameComponent
 				_ => 1f, 
 			};
 			collisionSimpleCircle.Position = base.Position;
-			collisionSimpleCircle.Radius = num * r;
+			collisionSimpleCircle.Radius = radiusFactor * r;
 			return collisionSimpleCircle;
 		}
 	}
@@ -178,18 +178,18 @@ internal class Ball : AlienDrawableGameComponent
 		case BallState.startup:
 		{
 			rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
-			float num4 = r;
-			if (base.Position.Y > 600f + num4 + ybuffer / 3f)
+			float radius = r;
+			if (base.Position.Y > 600f + radius + ybuffer / 3f)
 			{
-				base.Position = new Vector2(base.Position.X, -2f * ybuffer / 3f - num4);
+				base.Position = new Vector2(base.Position.X, -2f * ybuffer / 3f - radius);
 			}
-			if (base.Position.X < 0f - num4)
+			if (base.Position.X < 0f - radius)
 			{
-				base.Position = new Vector2(800f + num4, base.Position.Y);
+				base.Position = new Vector2(800f + radius, base.Position.Y);
 			}
-			if (base.Position.X > 800f + num4)
+			if (base.Position.X > 800f + radius)
 			{
-				base.Position = new Vector2(0f - num4, base.Position.Y);
+				base.Position = new Vector2(0f - radius, base.Position.Y);
 			}
 			if (!starttimer.Active)
 			{
@@ -205,9 +205,9 @@ internal class Ball : AlienDrawableGameComponent
 		}
 		case BallState.connected:
 		{
-			float num2 = MyMath.VectorToAngle(owner.GetPosition - base.Position);
-			float num3 = MyMath.Mod(num2 - rotation, (float)Math.PI * 2f);
-			if (num3 < (float)Math.PI)
+			float angleToOwner = MyMath.VectorToAngle(owner.GetPosition - base.Position);
+			float angleDelta = MyMath.Mod(angleToOwner - rotation, (float)Math.PI * 2f);
+			if (angleDelta < (float)Math.PI)
 			{
 				rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			}
@@ -223,8 +223,8 @@ internal class Ball : AlienDrawableGameComponent
 		{
 			rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			Move((float?)null, gameTime);
-			float num = 400f;
-			if ((base.Position.X > 800f + num) | (base.Position.X < 0f - num) | (base.Position.Y < 0f - num) | (base.Position.Y > 600f + num))
+			float despawnMargin = 400f;
+			if ((base.Position.X > 800f + despawnMargin) | (base.Position.X < 0f - despawnMargin) | (base.Position.Y < 0f - despawnMargin) | (base.Position.Y > 600f + despawnMargin))
 			{
 				Die();
 			}
@@ -270,33 +270,33 @@ internal class Ball : AlienDrawableGameComponent
 			if (other is Ball && ((Ball)other).state == BallState.connected)
 			{
 				Ball ball = (Ball)other;
-				Vector2 val = ball.Position - base.Position;
-				float num = (val).Length();
-				if (num < r + ball.r)
+				Vector2 toBall = ball.Position - base.Position;
+				float distance = (toBall).Length();
+				if (distance < r + ball.r)
 				{
-					float num2 = r + ball.r - num;
-					Vector2 val2 = val;
-					(val2).Normalize();
-					float num3 = scale / (ball.scale + scale);
-					base.Position -= val2 * num2 * (1f - num3);
-					ball.Position += val2 * num2 * num3;
+					float overlap = r + ball.r - distance;
+					Vector2 pushDir = toBall;
+					(pushDir).Normalize();
+					float ownScaleShare = scale / (ball.scale + scale);
+					base.Position -= pushDir * overlap * (1f - ownScaleShare);
+					ball.Position += pushDir * overlap * ownScaleShare;
 				}
 			}
 			if (other is JunkBoss)
 			{
 				JunkBoss junkBoss = (JunkBoss)other;
-				Vector2 val3 = junkBoss.GetPosition - base.Position;
-				float num4 = (val3).Length();
-				if (num4 < r + junkBoss.r)
+				Vector2 toBoss = junkBoss.GetPosition - base.Position;
+				float distance = (toBoss).Length();
+				if (distance < r + junkBoss.r)
 				{
 					_ = junkBoss.r;
-					Vector2 val4 = val3;
-					(val4).Normalize();
+					Vector2 pushDir = toBoss;
+					(pushDir).Normalize();
 					// Fidelity (review M4): the spatial grid fires each circle pair once per direction
 					// per frame; the shipped 2008 build's all-pairs scan fired this ungated 1px push-out
 					// twice per frame — the x2 preserves the original net separation rate so
 					// connected Balls don't sink deeper into the JunkBoss.
-					base.Position -= val4 * 2f;
+					base.Position -= pushDir * 2f;
 				}
 			}
 			break;

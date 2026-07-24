@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -8,6 +9,34 @@ namespace EvilAliens;
 
 internal class BackgroundImage
 {
+	// One tile visit recorded by the cull trace: where it landed, its TRUE on-screen extent
+	// (always LogicalWidth/Height * size, whatever the predicate under test measured), and
+	// whether the cull kept it. Compat/BgCullTest reads these.
+	internal struct TracedTile
+	{
+		public float X;
+
+		public float Y;
+
+		public float W;
+
+		public float H;
+
+		public bool Drawn;
+	}
+
+	// Cull instrumentation (card 5216412d), armed only by eaBgCull(). Unlike the FrameProfiler
+	// these seams are NOT compiled out when idle: every build pays one static read per tile
+	// (the null test here, plus the CullTraceDryRun test at each of the four cull sites and
+	// twice in Draw). That is a handful of predictable branches on a path whose worst case is
+	// the holodeck grid's ~150 tiles/frame, against a draw call each -- the ?binlog /
+	// ?walltrace / LoadProfiler idiom. Nothing allocates while the log is null.
+	internal static List<TracedTile> CullTraceLog;
+
+	// While set, Draw walks and records every tile but touches no graphics state at all, so
+	// a scenario layer can be exercised through the REAL draw path with a null SpriteBatch.
+	internal static bool CullTraceDryRun;
+
 	public Color color;
 
 	public string[,] texturenames;
@@ -44,6 +73,38 @@ internal class BackgroundImage
 		color = Color.White;
 		switchTimer.Stop();
 		switchTimer.Reset();
+	}
+
+	// A tile at (x,y) covers [x, x + tileW*scale) x [y, y + tileH*scale) in 800x600 design
+	// space, so it only needs drawing when that rect overlaps the screen. ONE predicate on
+	// purpose: this replaced four hand-maintained copies of the condition, and they had
+	// drifted apart -- two measured the tile's WIDTH along Y, and the two mirrorX ones had
+	// lost the * size factor entirely, so at any size != 1 they culled against unscaled
+	// pixel extents (card 5216412d).
+	//
+	// Both slips cull tiles that are VISIBLE (a missing strip at the screen edge), not merely
+	// draw spare ones: measuring width along Y under-tests a TALL tile, and dropping * size
+	// under-tests any layer drawn bigger than its art. Neither could show on a shipped
+	// background -- nothing sets mirrorX/mirrorY and every live tile is square or wider than
+	// tall -- which is exactly why eaBgCull() reads the decisions as data.
+	internal static bool TileOnScreen(float x, float y, int tileW, int tileH, float scale)
+	{
+		return x + (float)tileW * scale >= 0f && x < 800f && y + (float)tileH * scale >= 0f && y < 600f;
+	}
+
+	private void NoteTile(bool drawn, float x, float y, Texture2D tile)
+	{
+		if (CullTraceLog != null)
+		{
+			CullTraceLog.Add(new TracedTile
+			{
+				X = x,
+				Y = y,
+				W = (float)tile.LogicalWidth() * size,
+				H = (float)tile.LogicalHeight() * size,
+				Drawn = drawn
+			});
+		}
 	}
 
 	private int UpperDiv(float a, float b)
@@ -92,7 +153,10 @@ internal class BackgroundImage
 		origin -= realsize;
 		origin += drawOffset;
 		Vector2 cursor = origin;
-		spriteBatch.BlendMode = blendMode;
+		if (!CullTraceDryRun)
+		{
+			spriteBatch.BlendMode = blendMode;
+		}
 		float fade = 1f;
 		if (switchTimer.Active)
 		{
@@ -112,7 +176,10 @@ internal class BackgroundImage
 		{
 			origin = position - realsize + drawOffset;
 			cursor = origin;
-			spriteBatch.BlendMode = (SpriteBlendMode)2;
+			if (!CullTraceDryRun)
+			{
+				spriteBatch.BlendMode = (SpriteBlendMode)2;
+			}
 			for (int k = 0; k < UpperDiv(800f, realsize.X) + 1; k++)
 			{
 				for (int l = 0; l < UpperDiv(600f, realsize.Y) + 1; l++)
@@ -123,6 +190,11 @@ internal class BackgroundImage
 				cursor.Y = origin.Y;
 				cursor.X += realsize.X;
 			}
+		}
+		// A dry run must observe the layer, never advance it.
+		if (CullTraceDryRun)
+		{
+			return;
 		}
 		switchTimer.Update(gameTime);
 		if (switchTimer.Finished)
@@ -160,7 +232,9 @@ internal class BackgroundImage
 			offset.Y = 0f;
 			for (int j = 0; j < tiles.GetLength(1); j++)
 			{
-				if ((position.X + offset.X + (float)tiles[i, j].LogicalWidth() * size >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[i, j].LogicalWidth() * size >= 0f) & (position.Y + offset.Y < 600f))
+				bool onScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[i, j].LogicalWidth(), tiles[i, j].LogicalHeight(), size);
+				NoteTile(onScreen, position.X + offset.X, position.Y + offset.Y, tiles[i, j]);
+				if (onScreen && !CullTraceDryRun)
 				{
 					spriteBatch.Draw(tiles[i, j], position + offset, 0f, size, center: false, tint);
 				}
@@ -170,7 +244,9 @@ internal class BackgroundImage
 			{
 				for (int mirrorRow = tiles.GetLength(1) - 1; mirrorRow >= 0; mirrorRow--)
 				{
-					if ((position.X + offset.X + (float)tiles[i, mirrorRow].LogicalWidth() * size >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[i, mirrorRow].LogicalWidth() * size >= 0f) & (position.Y + offset.Y < 600f))
+					bool mirrorRowOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[i, mirrorRow].LogicalWidth(), tiles[i, mirrorRow].LogicalHeight(), size);
+					NoteTile(mirrorRowOnScreen, position.X + offset.X, position.Y + offset.Y, tiles[i, mirrorRow]);
+					if (mirrorRowOnScreen && !CullTraceDryRun)
 					{
 						spriteBatch.Draw(tiles[i, mirrorRow], position + offset, 0f, size, center: false, tint, (SpriteEffects)256);
 					}
@@ -188,7 +264,9 @@ internal class BackgroundImage
 			offset.Y = 0f;
 			for (int k = 0; k < tiles.GetLength(1); k++)
 			{
-				if ((position.X + offset.X + (float)tiles[mirrorCol, k].LogicalWidth() >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[mirrorCol, k].LogicalWidth() >= 0f) & (position.Y + offset.Y < 600f))
+				bool mirrorColOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, k].LogicalWidth(), tiles[mirrorCol, k].LogicalHeight(), size);
+				NoteTile(mirrorColOnScreen, position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, k]);
+				if (mirrorColOnScreen && !CullTraceDryRun)
 				{
 					spriteBatch.Draw(tiles[mirrorCol, k], position + offset, 0f, size, center: false, tint, (SpriteEffects)1);
 				}
@@ -198,7 +276,9 @@ internal class BackgroundImage
 			{
 				for (int mirrorRow = tiles.GetLength(1) - 1; mirrorRow >= 0; mirrorRow--)
 				{
-					if ((position.X + offset.X + (float)tiles[mirrorCol, mirrorRow].LogicalWidth() >= 0f) & (position.X + offset.X < 800f) & (position.Y + offset.Y + (float)tiles[mirrorCol, mirrorRow].LogicalWidth() >= 0f) & (position.Y + offset.Y < 600f))
+					bool mirrorBothOnScreen = TileOnScreen(position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, mirrorRow].LogicalWidth(), tiles[mirrorCol, mirrorRow].LogicalHeight(), size);
+					NoteTile(mirrorBothOnScreen, position.X + offset.X, position.Y + offset.Y, tiles[mirrorCol, mirrorRow]);
+					if (mirrorBothOnScreen && !CullTraceDryRun)
 					{
 						spriteBatch.Draw(tiles[mirrorCol, mirrorRow], position + offset, 0f, size, center: false, tint, (SpriteEffects)257);
 					}

@@ -103,6 +103,11 @@ namespace EvilAliensWeb.Compat.Net
             enabled = false;
             game.Components.ComponentRemoved -= Components_ComponentRemoved;
             game.Components.Remove(driver);
+            // ComponentBin's ComponentRemoved handler pools EVERY departing component, so the
+            // dead driver would sit in the recycle pool (and the watcher multiset) for the rest
+            // of the process -- one per session, and one per eaBinTest() run. Nothing else can
+            // reach it once `driver` is nulled, so drop it here.
+            bin.PruneIdle(driver);
             driver = null;
             byId.Clear();
             idByComp.Clear();
@@ -141,6 +146,7 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             AlienDrawableGameComponent comp;
+            bool landed;
             constructing = true;
             try
             {
@@ -153,11 +159,28 @@ namespace EvilAliensWeb.Compat.Net
                     MarkRemoved(netId);
                     return false;
                 }
-                bin.Add((GameComponent)(object)comp);
+                landed = bin.TryAdd((GameComponent)(object)comp);
             }
             finally
             {
                 constructing = false;
+            }
+            if (!landed)
+            {
+                // The bin swallowed it. `Constructing` exempts us from the standing purge
+                // filter, so this should be unreachable -- but registering the id anyway is
+                // what turns a swallowed add into a permanent GHOST: never drawn, never
+                // collidable, and invisible to the self-heal below, which only rebuilds ids
+                // that are NOT in byId. Take the same path as a declining descriptor instead,
+                // so the id stays unknown and a later snapshot turn retries it once the
+                // RecentRemovalWindowMs suppression expires (card 74403f83). Logged
+                // unconditionally: it is defence in depth with no reachable trigger today, so
+                // if it ever does fire that is news, and ?binlog cannot report it (the bin's
+                // own divert log sits inside the branch the exemption skips).
+                Console.WriteLine("[net] puppet add was diverted by the bin, id=" + netId
+                    + " type=" + typeIdx + " -- retrying after the removal window");
+                MarkRemoved(netId);
+                return false;
             }
             comp.Enabled = false; // frozen from the first tick (bin.Add force-enables)
             PuppetInfo info = new PuppetInfo

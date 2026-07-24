@@ -182,6 +182,17 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: background tile-cull oracle (card 5216412d). Sweeps the real cull predicate,
+        // dry-runs scenario layers (mirrored / TALL — shapes no shipped background uses) through
+        // the real Draw, then censuses the live layers. Prints PASS/FAIL. The cull errs
+        // invisibly on every shipping background, so this reads the decisions as data instead
+        // of trusting a screenshot. Run it from inside a level for part 3 to have anything to
+        // census.
+        window.eaBgCull = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull')); }
+            catch (e) { console.warn('[debug] eaBgCull failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: asplode every locally-owned PlayerShip through the real death path, so the
         // scene's AllShipsDead check fires LoseLife (host) / the host's EvReset mirrors
         // (client). The repeatable way to reach a death/reset in a two-tab co-op run — it

@@ -248,6 +248,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.BinTest.Run();
 		}
 
+		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
+		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background
+		// is) through the real Draw, and censuses the live layers. See Compat/BgCullTest.cs --
+		// the cull's correctness is invisible to a screenshot, so it is read as data.
+		[JSInvokable("debugBgCull")]
+		public static string BgCull()
+		{
+			return EvilAliensWeb.Compat.BgCullTest.Run();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's

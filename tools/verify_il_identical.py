@@ -19,8 +19,8 @@ rename silently broke the game.
 --optimize is for a refactor that DELETES a local rather than renaming it. The default build has
 no Optimize property, so Roslyn keeps every local for the debugger and a deleted one changes the
 IL -- the oracle would report DIFFERENT for a change that is provably behaviour-preserving.
-Optimizing folds the dead temporary away, which is exactly what makes the two shapes converge.
-Measured on a scratch assembly (card 0c624f9d, ILSpy's `held |= X` artifact):
+Optimizing folds the dead temporary away, which is what makes the two shapes converge WHEN THEY
+STAND ALONE. Measured on a scratch assembly (card 0c624f9d, ILSpy's `held |= X` artifact):
 
                                         default        --optimize
   bool num = held; held = num | a;      3378ea0f...    0d3f9784...
@@ -29,12 +29,24 @@ Measured on a scratch assembly (card 0c624f9d, ILSpy's `held |= X` artifact):
 It is opt-in because it is a strictly WEAKER oracle: it also folds away dead stores and other
 differences a rename could never introduce, so use the default for a pure rename and reach for
 this only when the change removes a local. Still sensitive to real edits -- its own negative
-control (a 0.58f threshold nudged to 0.59f) reports DIFFERENT under --optimize.
+control (a 0.58f threshold nudged to 0.59f, on an otherwise-IDENTICAL tree) reports DIFFERENT
+under --optimize.
 
-It cannot cover a refactor that changes how many times a PROPERTY is read (e.g. collapsing four
-`x.Position - y.Position` recomputations into one local): Roslyn cannot prove a property getter
-is pure, so it never CSEs the calls away and the IL legitimately differs. That class needs the
-getter read by hand plus an ilspycmd diff bounding which methods moved.
+TWO classes it does NOT cover, both hit by the very card that added it -- do not read the table
+above as a promise that any `|=` collapse hashes equal:
+
+  * an intervening evaluation between the temp and its use. The table's shapes are adjacent; the
+    REAL InputHandler.UpdateKeyPads reads `held` into the temp BEFORE the neighbouring
+    `GamePadButtons b = state.Buttons;` line, whereas `held |= X` reads it AFTER. The optimizer
+    will not reorder a local read across a property call it cannot prove pure, so the `ldloc`
+    moves and the hash differs -- measured, and benign (a method-local `bool` that
+    GamePadState.get_Buttons() cannot observe).
+  * a change to how many times a PROPERTY is read (e.g. collapsing four `x.Position - y.Position`
+    recomputations into one local): Roslyn cannot prove a getter is pure, so it never CSEs the
+    calls away.
+
+For both, the question stops being "is it identical" and becomes "is the difference confined to
+the methods I edited" -- that is tools/verify_decompiled_diff.py, not this script.
 
 Deliberately NOT codegen: unlike its fix_*.py / fix_ctors.py neighbours (which regenerated
 Game/ from src_decompiled/ and must never be re-run), this only ever builds and hashes. It is
@@ -256,6 +268,13 @@ def main():
     print('    now resolves to a different variable/field/parameter;')
     print('  * a substitution escaped its method and hit a field or another method;')
     print('  * a real edit (constant, operator, control flow) rode along with the rename.')
+    if not args.optimize:
+        print('  * the change DELETED a local -- this build keeps every local for the')
+        print('    debugger, so try --optimize (see the module docstring).')
+    else:
+        print('  * the change is one --optimize still cannot hide: a temp with an intervening')
+        print('    evaluation, or a changed number of property reads. Both are expected to')
+        print('    differ -- bound them with tools/verify_decompiled_diff.py instead.')
     print('Bisect by reverting files until it goes identical again.')
     return EXIT_DIFFERENT
 

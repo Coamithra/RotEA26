@@ -45,6 +45,19 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
     `verify_il_identical.py` answers the latter. It also decompiles the dll IN PLACE so ILSpy can
     resolve references; copying it somewhere isolated first yields noisier unresolved-type output
     (`((GamePadState)(ref state)).Buttons`) with the transforms disabled.
+  - Its per-member attribution is the whole contract ("a member you did not touch appearing here
+    is the finding"), so it has **`--selftest`** (no build, no git — run it after touching the
+    regexes). At least one modifier is REQUIRED in the member pattern: relax it and `else if (…)`
+    parses as a member named `if`, and every later hunk files under it.
+
+**Decompiler-artifact cleanup: what has deliberately NOT been done.** Card `0c624f9d` collapsed
+ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated `x.Position - y.Position`
+temporaries. It left the neighbouring `GamePadButtons buttonsN = (state).Buttons;` temps in
+`InputHandler.UpdateKeyPads` alone — inlining them was tried and reverted, because removing those
+locals renumbers the slots and yields yet another non-identical hash for a bigger diff and no
+proof. Same for the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead initializers
+(~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`). Each is its
+own artifact class and its own card; don't fold them into an unrelated change.
 
 ## Shaders — `tools/shaders/`
 

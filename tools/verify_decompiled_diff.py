@@ -70,12 +70,37 @@ import verify_il_identical as ili
 # anything above them in the method changes size, so they are pure noise for this comparison.
 IL_COMMENT_RE = re.compile(r'^\s*//IL_[0-9a-fA-F]+')
 # `} // end of method Class::Name` does not exist in C# output; types/methods are found instead
-# by the decompiler's own declaration lines.
+# by the decompiler's own declaration lines. Attribution has to cover CONSTRUCTORS, PROPERTIES
+# and EXPLICIT INTERFACE IMPLEMENTATIONS as well as plain methods: a `modifiers returnType Name(`
+# pattern alone matches none of those, so a changed line inside one gets blamed on whichever
+# method happened to be declared above it -- which turns the report's headline rule ("a member
+# you did not touch appearing here is the finding") into either a false alarm or, worse, a real
+# change hiding behind a familiar name.
+MODIFIERS = (r'(?:public|private|protected|internal|static|virtual|override|sealed|abstract|'
+             r'partial|readonly|unsafe|extern|async|new|const|volatile)')
+# At least ONE modifier is REQUIRED, and that is load-bearing, not incidental: it is the only
+# thing separating a member declaration from an ordinary statement. Relaxing it to zero-or-more
+# makes `else if (...)` parse as a member named `if`, and every hunk downstream gets filed under
+# it. ILSpy writes an explicit access modifier on virtually everything, so requiring one costs
+# almost no coverage.
 MEMBER_RE = re.compile(
-    r'^\s*(?:(?:public|private|protected|internal|static|virtual|override|sealed|abstract|'
-    r'partial|readonly|unsafe|extern|async|new)\s+)+[\w<>\[\],.?]+\s+([\w<>]+)\s*\(')
-TYPE_RE = re.compile(r'^\s*(?:public|private|protected|internal|sealed|abstract|static|partial|'
-                     r'\s)*(?:class|struct|record|interface|enum)\s+([\w<>]+)')
+    r'^(?P<indent>\s*)(?:' + MODIFIERS + r'\s+)+'
+    r'(?:'
+    # method / property / expression-bodied member: returnType Name
+    r'[\w<>\[\],.?]+\s+(?P<name>[\w<>]+)\s*(?:\(|\{|=>|$)'
+    r'|'
+    # constructor / finalizer: no return type, name is the enclosing type
+    r'~?(?P<ctor>[\w<>]+)\s*\('
+    r')')
+# Explicit interface implementations carry no access modifier, so they need their own pattern.
+# The mandatory dotted qualifier is what keeps this from matching a statement.
+EXPLICIT_IMPL_RE = re.compile(
+    r'^(?P<indent>\s*)[\w<>\[\],.?]+\s+[\w<>]+(?:\.[\w<>]+)*\.(?P<name>[\w<>]+)\s*(?:\(|\{|=>)')
+TYPE_RE = re.compile(r'^(?P<indent>\s*)(?:public|private|protected|internal|sealed|abstract|'
+                     r'static|partial|\s)*(?:class|struct|record|interface|enum)\s+([\w<>]+)')
+# A closing brace at or above the member's own indent ends it, so the next changed line is not
+# still attributed to the member that happened to precede it.
+CLOSE_RE = re.compile(r'^(?P<indent>\s*)\}')
 
 EXIT_IDENTICAL = 0
 EXIT_DIFFERENT = 1
@@ -115,26 +140,116 @@ def enclosing(lines):
     out = []
     cur_type = '<none>'
     cur_member = '<declarations>'
+    member_indent = None
     for line in lines:
         t = TYPE_RE.match(line)
         if t:
-            cur_type, cur_member = t.group(1), '<declarations>'
-        else:
-            m = MEMBER_RE.match(line)
-            if m:
-                cur_member = m.group(1)
+            cur_type, cur_member, member_indent = t.group(2), '<declarations>', None
+            out.append(f'{cur_type}.{cur_member}')
+            continue
+        if member_indent is not None:
+            c = CLOSE_RE.match(line)
+            if c and len(c.group('indent')) <= len(member_indent):
+                out.append(f'{cur_type}.{cur_member}')
+                cur_member, member_indent = '<declarations>', None
+                continue
+        m = MEMBER_RE.match(line) or EXPLICIT_IMPL_RE.match(line)
+        if m:
+            cur_member = m.group('name') or m.groupdict().get('ctor')
+            member_indent = m.group('indent')
         out.append(f'{cur_type}.{cur_member}')
     return out
+
+
+SELFTEST_SOURCE = '''\
+public class Widget
+{
+\tprivate int count;
+
+\tpublic int Count => count;
+
+\tpublic string Name
+\t{
+\t\tget
+\t\t{
+\t\t\treturn "w";
+\t\t}
+\t}
+
+\tpublic Widget(int n)
+\t{
+\t\tcount = n;
+\t}
+
+\tpublic void Step()
+\t{
+\t\tif (count > 0)
+\t\t{
+\t\t\tcount--;
+\t\t}
+\t\telse if (count < 0)
+\t\t{
+\t\t\tcount++;
+\t\t}
+\t}
+
+\tvoid IDisposable.Dispose()
+\t{
+\t\tcount = 0;
+\t}
+}
+'''
+
+SELFTEST_EXPECT = {
+    'count = n;': 'Widget.Widget',
+    'count--;': 'Widget.Step',
+    'count++;': 'Widget.Step',
+    'count = 0;': 'Widget.Dispose',
+    'return "w";': 'Widget.Name',
+}
+
+
+def selftest():
+    """Attribution IS this tool's contract, so it gets a test that does not need a build.
+
+    Guards the specific ways it has already been broken: a zero-or-more modifier prefix makes
+    `else if (...)` parse as a member named `if`, and constructors / properties / explicit
+    interface implementations match no `modifiers returnType Name(` pattern at all.
+    """
+    lines = SELFTEST_SOURCE.split('\n')
+    where = enclosing(lines)
+    failures = []
+    for needle, expected in SELFTEST_EXPECT.items():
+        hits = [w for l, w in zip(lines, where) if l.strip() == needle]
+        if not hits:
+            failures.append(f'  {needle!r}: never found in the fixture')
+        elif hits[0] != expected:
+            failures.append(f'  {needle!r}: attributed to {hits[0]}, expected {expected}')
+    bogus = sorted({w for w in where if w.split('.')[-1] in ('if', 'else', 'return', 'get')})
+    if bogus:
+        failures.append(f'  a statement keyword parsed as a member: {bogus}')
+    if failures:
+        print('SELFTEST FAILED:')
+        print('\n'.join(failures))
+        return EXIT_DIFFERENT
+    print(f'SELFTEST PASSED -- {len(SELFTEST_EXPECT)} member attributions correct, '
+          f'no statement parsed as a member.')
+    return EXIT_IDENTICAL
 
 
 def main():
     ap = argparse.ArgumentParser(
         description='Diff the decompiled C# of a refactor against its branch point.')
+    ap.add_argument('--selftest', action='store_true',
+                    help='check member attribution against a fixture; no build, no git')
     ap.add_argument('--ref', default='HEAD', help='git ref to compare against (default HEAD)')
     ap.add_argument('--full', action='store_true',
                     help='print the entire unified diff, not just the per-method summary')
     ap.add_argument('--context', type=int, default=3, help='diff context lines (default 3)')
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
 
     # Same reason as verify_il_identical --optimize: unoptimized output keeps every dead store.
     ili.BUILD_FLAGS.append('-p:Optimize=true')
@@ -161,11 +276,16 @@ def main():
             ili.run(['git', 'worktree', 'remove', '--force', ref_tree], cwd=root, check=False)
             ili.run(['git', 'worktree', 'prune'], cwd=root, check=False)
 
-        work_dll = build_dll(root, 'working tree')
-        work_cs = decompile(work_dll, os.path.join(scratch, 'work'), 'working tree')
-        # This build emitted no PDB; leaving it in place would hand the dev server a binary with
-        # no stack traces. Same cleanup verify_il_identical does, and same reason.
-        ili.msbuild(root, ['-t:Clean'])
+        # The Clean must be in a finally: decompile() can die (ilspycmd missing is the documented
+        # prerequisite, so it is the LIKELY path), and this build emitted no PDB. Leaving that
+        # assembly behind hands the dev server a binary with no stack traces -- in the one place
+        # WASM errors actually surface -- and MSBuild's incremental check will not recompile it,
+        # because only a property changed. Same cleanup verify_il_identical does, same reason.
+        try:
+            work_dll = build_dll(root, 'working tree')
+            work_cs = decompile(work_dll, os.path.join(scratch, 'work'), 'working tree')
+        finally:
+            ili.msbuild(root, ['-t:Clean'])
 
         if ref_cs == work_cs:
             print('\nIDENTICAL -- the decompiled C# is unchanged.')

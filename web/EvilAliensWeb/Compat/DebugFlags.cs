@@ -629,6 +629,46 @@ namespace EvilAliensWeb.Compat
 		// Set by `?flyspiders=fg` only -- picks the non-flattened foreground variant for the A/B.
 		public static bool FlySpidersForeground { get; private set; }
 
+		// How the BACKGROUND (fog) flying spiders get flattened. The three-way A/B of card
+		// 9c92962e -- background-vs-foreground was never a flatten A/B at all, because the two
+		// variants differ in six things (flatten, Collides, Speed, scale, alpha, DrawOrder), so
+		// most of the measured gap was population, not the render-target round trip.
+		//   ?flyspiderflatten=swarm  (default, SHIPPED since this card) ONE RT round trip for the
+		//                            whole swarm (FlyingSpiderSwarm). Measured ~1 GL call total
+		//                            regardless of population vs +1.97 calls PER SPIDER for the
+		//                            per-spider bracket, at the identical pinned bench.
+		//   ?flyspiderflatten=per    the pre-card path: one RT round trip PER SPIDER. Kept as the
+		//                            A/B baseline (also what a non-Level2 scene with no swarm
+		//                            driver still uses -- see FlyingSpider.Draw's fallback).
+		//   ?flyspiderflatten=0|off  no flatten at all: body+wings drawn straight at fog alpha,
+		//                            so the overlaps double-brighten (what the flatten exists to
+		//                            stop). Also the "drop it for the fog layer" option's look.
+		// Holding population/scale/alpha fixed with ?flyspidercount=, this is the ONLY variable.
+		public enum FlySpiderFlattenMode { PerSpider, None, Swarm }
+
+		public static FlySpiderFlattenMode FlySpiderFlatten { get; private set; } =
+			FlySpiderFlattenMode.Swarm;
+
+		// ?flyspidercount=<N>: turn the ?flyspiders fast-boot from an endless STREAM into a pinned
+		// bench -- spawn exactly N flying spiders once, on a deterministic grid, frozen in X
+		// (Speed 0) so none ever crosses off-screen and dies. The swivel/flap timers still tick,
+		// so wings flap and bodies bob and the per-frame DRAW work stays representative; only the
+		// population stops drifting. That pin is the whole point: the first numbers on this card
+		// compared two runs whose spider counts were never equal. N=0 is a legal baseline (an
+		// empty Level 2 to subtract). null => the original endless 5.5/s stream.
+		public static int? FlySpiderCount { get; private set; }
+
+		// ?flyspiderbox=<half>: override the group-flatten bounding box half-extent in FlyingSpider
+		// .Draw (baked 200 design px, scaled by the spider's `scale`). This is the DISCRIMINATOR
+		// between the two candidate costs: a per-CALL / per-FBO-bind cost is flat in the box size,
+		// while a FILL cost scales with its area (the RT Clear is whole-RT and the composite quad
+		// is the whole box). The baked 200 is generous -- the drawn union needs about 105 (body
+		// half-extent ~80x89 design px; the 92x26 wing swings +-90 deg about an origin 82 along it,
+		// anchored ~21 off the body centre) -- so if it IS fill, ~3.6x of it is free.
+		// NOTE the RT is grow-only and its Clear is whole-RT, so compare box sizes on FRESH page
+		// loads: within one session the largest box ever flattened sets every later clear's cost.
+		public static float? FlySpiderBox { get; private set; }
+
 		// Fast-boot the Tutorial straight to its FINAL power-up training beat (skips the whole
 		// welcome/move/fire/lesson sequence): the eye "punching bag" boss + the PowerUpTrainingEvent
 		// where every powerup streams in and a banner explains its powered-up effect. Built to
@@ -1861,6 +1901,42 @@ namespace EvilAliensWeb.Compat
 						}
 					}
 					break;
+				case "flyspiderflatten":
+					// Value-carrying like ?flyspiders: an unrecognised value is reported, never
+					// silently swallowed -- a typo would otherwise measure the DEFAULT path while
+					// the run is labelled as the variant under test, which is the exact class of
+					// mistake this card exists to correct.
+					if (string.Equals(val, "swarm", StringComparison.OrdinalIgnoreCase))
+					{
+						FlySpiderFlatten = FlySpiderFlattenMode.Swarm;
+					}
+					else if (string.Equals(val, "per", StringComparison.OrdinalIgnoreCase)
+						|| string.Equals(val, "perspider", StringComparison.OrdinalIgnoreCase))
+					{
+						FlySpiderFlatten = FlySpiderFlattenMode.PerSpider;
+					}
+					else if (IsExplicitlyOff(val))
+					{
+						FlySpiderFlatten = FlySpiderFlattenMode.None;
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?flyspiderflatten= value '" + val
+							+ "' (expected per/0/swarm) -- ignored, staying on swarm");
+					}
+					break;
+				case "flyspidercount":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fsc) && fsc >= 0)
+					{
+						FlySpiderCount = fsc;
+					}
+					break;
+				case "flyspiderbox":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var fsb) && fsb > 0f)
+					{
+						FlySpiderBox = fsb;
+					}
+					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);
 					break;
@@ -2144,6 +2220,27 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// A bare flag (?menu) or =1/=true/=yes/=on means ON; =0/=false/=no/=off means OFF.
+		// The complement of IsOn for the VALUE-CARRYING flags, which must tell "the author wrote
+		// off" apart from "the author wrote something we don't understand" -- !IsOn() conflates
+		// the two and would silently run a typo'd variant on the default path.
+		private static bool IsExplicitlyOff(string val)
+		{
+			if (val == null)
+			{
+				return false;
+			}
+			switch (val.Trim().ToLowerInvariant())
+			{
+			case "0":
+			case "false":
+			case "no":
+			case "off":
+				return true;
+			default:
+				return false;
+			}
+		}
+
 		private static bool IsOn(string val)
 		{
 			if (val == null)

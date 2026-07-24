@@ -50,6 +50,12 @@ namespace EvilAliensWeb.Compat
                 // ?spider* and Spider.HarnessApplyPhase.
                 ["spiderjump"] = (bin, g, p) => { var s = Spider.NewSpider(bin, g); s.Setup(); return s; },
                 ["flyingspider"] = (bin, g, p) => { var f = FlyingSpider.NewFlyingSpider(bin, g); f.Setup(false); return f; },
+                // The BACKGROUND (fog) variant -- alpha 0.2, smaller, and the only user of the
+                // group flatten. Frozen here so the flatten's effect (body + wings fading as ONE
+                // silhouette instead of the overlaps double-brightening) can be A/B'd as a still
+                // against ?flyspiderflatten=0, which live play cannot do: at alpha 0.2 over
+                // scrolling Mars dust the difference is invisible in a moving screenshot.
+                ["flyingspiderbg"] = (bin, g, p) => { var f = FlyingSpider.NewFlyingSpider(bin, g); f.Setup(true); return f; },
                 ["ufo"] = (bin, g, p) => { var u = UFO.NewUFO(bin, g); u.Setup(p, true, EnemyBehaviour.normal); return u; },
                 ["ufobig"] = (bin, g, p) => { var u = UFO.NewUFO(bin, g); u.Setup(p, true, EnemyBehaviour.normal); return u; },
                 ["ufosmall"] = (bin, g, p) => { var u = UFO.NewUFO(bin, g); u.Setup(p, false, EnemyBehaviour.normal); return u; },

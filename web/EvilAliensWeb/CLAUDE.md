@@ -448,7 +448,22 @@ site now lives under:
 - **Group-flatten for translucent multi-part sprites** (`SpriteBatchWrapper.BeginGroupFlatten`/
   `EndGroupFlatten`): overlapping straight-alpha sprites at partial alpha double-brighten; bracket
   their draws to flatten opaque into a shared RT (premultiplied capture), composite once at group
-  alpha. Used by the background-fog `FlyingSpider` (body+wings fade as one silhouette).
+  alpha. Used by the background-fog `FlyingSpider` (body+wings fade as one silhouette) -- which
+  since card 9c92962e ships on the SWARM variant: `FlyingSpiderSwarm` (owned by `Level2` like
+  `floor`) brackets ONE flatten around the whole population per frame, and the per-spider bracket
+  in `FlyingSpider.Draw` is only the `?flyspiderflatten=per` A/B override plus the fallback for a
+  scene with no driver (the sprite harness).
+  **Measured cost (card 9c92962e): +2.0 GL draw calls per flattened GROUP** -- it roughly DOUBLES
+  the calls the group would otherwise cost (a fog spider is ~2.0 calls unflattened, ~4.0
+  flattened), and BlazorGL's cost is per-CALL. Perfectly linear in the group count (pinned bench,
+  N=0/40/80: 20.2 / 180.4 / 340.1 calls per frame vs 20.2 / 102.8 / -- unflattened). So the flatten
+  is cheap for a handful of groups and expensive for a swarm; **if you are about to bracket
+  something that exists in the dozens, flatten the whole POPULATION as one group instead** --
+  `FlyingSpiderSwarm` does exactly that and measures at ~1 call TOTAL regardless of N (N=40/80:
+  102.1 / 183.0, i.e. the same slope as no flatten at all), which is why it is the shipped default.
+  GOTCHA: the shared `groupRT` is **grow-only** and `BeginGroupFlatten`'s `Clear` is whole-RT, so
+  the largest group ever flattened in a session sets the clear cost of every later one. Compare box
+  sizes on FRESH page loads, and don't mix a swarm-sized group with per-sprite ones in one scene.
 - **Verify flattened-text changes with `?textshot`** (`Compat/TextShowcaseScene.cs` — frozen
   score/combo/pop rows, plain + chrome, live animation phases), not live screenshots.
 
@@ -516,16 +531,43 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   `DefaultHitRadiusFactor` 0.8-of-visible. `?blastactive=`/`?blasthit=` override live;
   `?harness=blast` overlays the ring (green = damaging) + readout.
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
-  (baked `DefaultSizeFactor` 0.85) scales sprite AND box hitbox together; `?flyspiderscale=`.
+  (baked `DefaultSizeFactor` 0.75) scales sprite AND box hitbox together; `?flyspiderscale=`.
   Fast-boot a dense endless swarm with **`?level=Level2&flyspiders`** (background variant, the only
   user of the group-flatten RT round trip) or **`?flyspiders=fg`** (foreground, same sprites, NO
-  flatten) -- the A/B built for the frame profiler, since the real level only reaches this state
-  minutes in. Measured (frame profiler, focused): background 7.3ms/frame, scene 6.6ms, 98 GL calls,
-  137fps headroom vs foreground 2.8ms/frame, scene 2.1ms, 42 GL calls, 356fps headroom. **Read that
-  as indicative, not a clean per-spider flatten cost** -- background flying spiders have
-  `Collides=false` so they are never killed and accumulate, while foreground ones die on the ship;
-  the populations are not controlled. What the data does show is the mechanism: GL calls per frame
-  roughly double, which is exactly what a per-group RT round trip does on a per-CALL-cost backend.
+  flatten).
+  - **`?flyspiders=fg` is NOT a flatten A/B and never was** (card 9c92962e corrects the earlier
+    reading). Background and foreground spiders differ in SIX things -- the flatten, `Collides`
+    (background ones are never killed, so they accumulate), `Speed` (x1.11 vs x1.35, so background
+    ones linger ~22% longer), `scale`, alpha and `DrawOrder` -- and the populations were never
+    equalised, so the old "background 7.3ms vs foreground 2.8ms" gap was mostly POPULATION.
+  - **The honest rig is `?flyspidercount=<N>` + `?flyspiderflatten=`.** `?flyspidercount=<N>`
+    replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
+    grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
+    stays representative. `?flyspiderflatten=per|0|swarm` then varies ONLY the flatten:
+    `swarm` (the SHIPPED default since this card: `FlyingSpiderSwarm`, one RT round trip for the
+    whole population) / `per` (the pre-card path, one RT round trip per spider) / `0` (none).
+    `?flyspiderbox=<half>` overrides the flatten bbox
+    half-extent (baked `FlyingSpider.DefaultFlattenBoxHalf` 200 design px) -- a per-call cost is
+    flat in the box size, a fill cost scales with its area, so the sweep tells the two apart.
+    Console `eaFlySpiders()` prints the live count split background/foreground plus the settings
+    in force, so a figure never travels without its conditions.
+  - **Measured (pinned bench, GL draw calls per frame):** N=0 baseline 20.2; per-spider flatten
+    180.4 (N=40) / 340.1 (N=80) = **3.99 calls/spider**; no flatten 102.8 (N=40) = 2.07
+    calls/spider; swarm 102.1 (N=40) / 183.0 (N=80) = 2.02 calls/spider. So the per-spider flatten
+    costs **+1.97 GL calls per background spider** and the swarm flatten costs **~1 call total**,
+    at identical population.
+  - **The flatten earns its keep visually** -- verify with `?harness=flyingspiderbg` (the fog
+    variant, frozen) against `&flyspiderflatten=0`: with it off the wings read visibly more solid
+    than the body (they composite to ~0.36 over a 0.2 body), with it on the silhouette fades as
+    one. The harness pins the flap/swivel phase (`Initialize` skips `Randomize()` while
+    `DebugFlags.Harness` is set) precisely so the two boots are the same pose and therefore
+    comparable; live play keeps the randomization. The swarm variant preserves the per-spider
+    silhouette exactly (identical body+wing math); it differs only where two SPIDERS overlap,
+    which also stops double-brightening -- at alpha 0.2 over Mars dust that is not perceptible,
+    which is what let it ship as the default.
+  - In-game the fog layer draws at alpha 0.2 over bright Mars dust, where the spiders are already
+    near-invisible -- **do not try to judge the flatten from a live Level 2 screenshot**, use the
+    harness stills.
 - **Laser FX (`Quad.cs` beam + `LazerGenerator` chargeup):** chargeup is a windup animation
   (per-particle scale ramps 1→`DefaultPeakChargeScale` 4) + a layered "energy well" orb (stacked
   additive `lazerglow`: blue halo → cyan-white → white-hot core — the same recipe the ship

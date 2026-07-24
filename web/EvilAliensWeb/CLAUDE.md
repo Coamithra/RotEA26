@@ -1263,8 +1263,11 @@ interpolation feel, both gated on real-network playtests.
     rule `tools/audit_add_order.py` already lints.
     **Two conditions, both required: the instance can never become collidable, and nothing
     gameplay-visible reads it.** Both members are in `Oracle.GetBaddies` -- the AI's whole world
-    model -- and are invisible to it only because every consumer there gates on `Collides`
-    (`PlayerShip.IsAiShootable` has an explicit `baddy is FlyingSpider && baddy.Collides`).
+    model -- and are invisible to it only because of `Collides`: `PlayerShip.IsAiShootable` has
+    an explicit `baddy is FlyingSpider && baddy.Collides` and excludes `Asteroid` outright, and
+    the threat scan gates at its CALL SITE (`PlayerShip.cs` `if (!baddy.Collides ||
+    !IsAiThreat(baddy))`) rather than inside `IsAiThreat` -- so a future caller of `IsAiThreat`
+    that forgets the gate would start dodging fog.
   - **`NetTypeRegistry.IsReplicableInstance`** is the predicate the LIVE world asks;
     `IsReplicable` is just the type table. Every decision site uses it -- and
     **`NetSession.SuppressWorldSpawn` is the load-bearing one**: with the type-level test there,
@@ -1286,9 +1289,24 @@ interpolation feel, both gated on real-network playtests.
     reasoning as Background's `netLast*`). Cleared at the checkpoint revert on BOTH peers -- the
     host's eventList drops active events without terminating them, so no "off" is ever sent --
     and in `Initialize`/`Terminate` (re-added singletons).
-  - **A rate off the wire is clamped** (`NetCosmeticMaxRate` 32/s; the densest shipped is
-    AsteroidChase's 5) and non-finite/negative refused: it drives `GenericSpawner`'s
-    `while (num >= 1f) DoEvent()` loop, and a publicly listed game has a stranger on the far end.
+  - **The latch is REFCOUNTED per kind** and only emits on the 0<->1 edge. The beat is per kind
+    but each spawner tracks its own announce, so two overlapping spawners of one kind (nothing
+    ships that, but a level script is one line from it) would otherwise have the first one's
+    `Terminate` send an "off" while the second still spawns -- the joiner's scenery gone for the
+    rest of the level, silently, with the host's own screen full.
+  - **A rate off the wire is clamped** (`NetCosmeticMaxRate` 12/s) and non-finite/negative
+    refused: it drives `GenericSpawner`'s `while (num >= 1f) DoEvent()` loop, and a publicly
+    listed game has a stranger on the far end. The ceiling bounds the AUTHORED rate, which is not
+    the rate in flight -- `GenericSpawner` multiplies by `DifficultyModifier` and
+    `MultiPlayerDifficultyModifier` per tick -- so it sits near the shipped rates (5.5/s fog,
+    5/s belt), not at a round big number.
+  - **KNOWN LIMIT (asteroids only), accepted:** `AsteroidSpawner` sweeps its entry HEADING on its
+    own timers from `Reset`, so a peer's grey rocks fly parallel to the replicated real ones only
+    while the two cycles stay in phase. A live pairing starts them within an RTT; a
+    JOIN-IN-PROGRESS peer starts its cycle when the catch-up beat lands and is out of phase for
+    the rest of that belt. Keeping them aligned would mean streaming the angle -- the per-entity
+    cost this card exists to remove -- so it is a decoration-vs-decoration mismatch taken on
+    purpose.
   - **Verify with `eaNetCosmetic()`** (`Compat/Net/NetCosmeticTest.cs`) -- codec, the instance
     predicate (every check beside its positive control, since a predicate answering "not
     replicated" for everything would pass a fog-spiders-only test and silently stop replicating

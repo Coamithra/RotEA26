@@ -54,7 +54,7 @@ public class AsteroidSpawner : GenericSpawner
 	public override void Update(GameTime gameTime)
 	{
 		// Announced from Update, not Reset: Reset is also called from the GameEvent constructor,
-		// before this class's own fields exist, and being ticked is what actually means "this
+		// before `background` is even assigned, and being ticked is what actually means "this
 		// effect is running now".
 		if (!background && !netAnnounced)
 		{

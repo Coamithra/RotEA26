@@ -68,15 +68,23 @@ namespace EvilAliensWeb.Compat.Net
 
             // Built with `new` rather than the NewX factories on purpose: those Recycle<T>() out
             // of the bin's idle pool, and this test never Adds, so it would consume a pooled
-            // instance the game meant to reuse. The construction that MATTERS -- each type's own
-            // Setup/SetBackground, which is what decides the flag -- is identical either way.
+            // instance the game meant to reuse. Those factories are recycle-or-new and nothing
+            // else, so what the live world actually does to these objects -- ctor,
+            // Setup/SetBackground, then Initialize -- is reproduced exactly below.
             ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
             Game game = bin.Game;
 
+            // Initialize() as well as Setup(): Setup only stores the flag, and everything the
+            // flag DECIDES -- Collides, scale, DrawOrder, the fog tint -- is written in
+            // Initialize, which the live world reaches through ComponentBin.Add. Asserting over a
+            // Setup-only instance would read `Collides` at its `true` field default and describe
+            // an object the game never has.
             FlyingSpider fog = new FlyingSpider(game);
             fog.Setup(isbackground: true);
+            fog.Initialize();
             FlyingSpider realSpider = new FlyingSpider(game);
             realSpider.Setup(isbackground: false);
+            realSpider.Initialize();
 
             Check(!NetTypeRegistry.IsReplicableInstance((GameComponent)(object)fog),
                 "a background FlyingSpider is NOT replicated per entity");
@@ -86,8 +94,10 @@ namespace EvilAliensWeb.Compat.Net
             Asteroid decoration = new Asteroid(game);
             decoration.Setup(Vector2.Zero, 0f, 0.38f, reallyBig: false);
             decoration.SetBackground();
+            decoration.Initialize();
             Asteroid realRock = new Asteroid(game);
             realRock.Setup(Vector2.Zero, 0f, 0.38f, reallyBig: false);
+            realRock.Initialize();
 
             Check(!NetTypeRegistry.IsReplicableInstance((GameComponent)(object)decoration),
                 "a SetBackground() Asteroid is NOT replicated per entity");
@@ -111,7 +121,11 @@ namespace EvilAliensWeb.Compat.Net
 
             // ---- 3. the client apply path (needs a level) --------------------------------
 
-            string applyReport = GameScene.NetActiveScene?.NetCosmeticSelfTest();
+            // Runs through the SAME Check, so its failures reach the one verdict on the first
+            // line. A leg that reported its own separate PASS/FAIL underneath a green header
+            // would be read as a pass by anyone who stopped at line one.
+            bool applyRan = GameScene.NetActiveScene != null;
+            GameScene.NetActiveScene?.NetCosmeticSelfTest(Check);
 
             StringBuilder sb = new StringBuilder();
             sb.Append("[cosmetictest] ").Append(fails.Count == 0 ? "PASS" : "FAIL")
@@ -120,11 +134,11 @@ namespace EvilAliensWeb.Compat.Net
             {
                 sb.Append("\n  FAILED: ").Append(f);
             }
-            sb.Append("\n  covers: the EvCosmeticSwarm codec + the instance opt-out predicate.");
-            sb.Append(applyReport != null
-                ? "\n  " + applyReport
+            sb.Append("\n  covers: the EvCosmeticSwarm codec + the instance opt-out predicate");
+            sb.Append(applyRan
+                ? " + the client apply path."
                 // A skipped leg must never read as a passed one.
-                : "\n  SKIPPED (no level up): the client apply path. Re-run from inside a level to cover it.");
+                : ".\n  SKIPPED (no level up): the client apply path. Re-run from inside a level to cover it.");
             sb.Append("\n  NOT covered (two-window run): the beat actually reaching the peer, and"
                 + "\n    the host's liveIds / snapTurn dropping. Read those off the [net] line.");
             return sb.ToString();

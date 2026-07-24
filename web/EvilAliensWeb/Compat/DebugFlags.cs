@@ -393,14 +393,21 @@ namespace EvilAliensWeb.Compat
 		//   ?wallfogcolor=<hex>  the haze colour shafts dissolve into (rrggbb; sampled from the
 		//                        alien-base ground + its additive fog layers).
 		//   ?wallsidedark=<f>    brightness of the shaft at its cap (1 = as bright as the top face).
+		//   ?wallsidetile=<f>    how densely the sheet tiles DOWN a shaft, as a multiple of the top
+		//                        face's own texel density (1 = a side texel is the same world size as
+		//                        a top-face one, i.e. the shaft's true height in block footprints --
+		//                        2.70 cells at the shipped numbers). Baked at 4: honest scale reads
+		//                        short, because a steeply foreshortened shaft compresses most of its
+		//                        length into its far few pixels. See Wall.DefaultSideTile.
 		//   ?wallfacelight=<0..1> per-face shading contrast, so tower CORNERS read (0 = flat-shaded).
 		//                        Vertical faces darken, horizontal ones don't; each wall quad is one
 		//                        face, so this is just its vertex colour.
 		//   ?wallfaceangle=<deg> light azimuth, screen space (0 = from +x, 90 = from +y; 225 = upper left).
 		//   ?walltoplift=<f>     lift the tower TOPS above the gameplay plane, as a fraction of depth
 		//                        (0 = flush). Cosmetic only -- the hitbox does not move with it.
-		//   ?wall3dbands=<n>     vertical strips a side face is tessellated into (default 4). Geometry
-		//                        and fog are exact at 1; the bands only resolve the smoothstep bottom
+		//   ?wall3dbands=<n>     dissolve cuts down a side face (default 4) -- NOT the strip count,
+		//                        which is this plus one per cell crossing of ?wallsidetile. Geometry
+		//                        and fog are exact at 1; the cuts only resolve the smoothstep bottom
 		//                        dissolve, which rides per-vertex alpha.
 		//   ?wallwisps=<0..1>    alpha of the additive fog wisps drawn across the shafts (0 = off).
 		//   ?wallwispspeed=<f>   the wisps' scroll modifier vs the wall (default 0.8 = the near fog
@@ -414,6 +421,8 @@ namespace EvilAliensWeb.Compat
 		public static Color? WallFogColor { get; private set; }
 
 		public static float? WallSideDark { get; private set; }
+
+		public static float? WallSideTile { get; private set; }
 
 		public static float? WallFaceLight { get; private set; }
 
@@ -431,12 +440,13 @@ namespace EvilAliensWeb.Compat
 		// eaWalls() in index.html, shown on ?level=Level3&wallsonly / a bare ?walltune). Wall.Draw
 		// re-reads every knob each frame, so a drag re-projects the towers on the next Draw. Same
 		// effect as the ?wall* URL flags, live. `towers` doubles as the kill switch.
-		internal static void SetWallsOverride(bool towers, float? depth, float? fog, float? sideDark, float? faceLight, float? faceAngle, float? topLift, float? bands, float? wisps, float? wispSpeed)
+		internal static void SetWallsOverride(bool towers, float? depth, float? fog, float? sideDark, float? sideTile, float? faceLight, float? faceAngle, float? topLift, float? bands, float? wisps, float? wispSpeed)
 		{
 			WallTowers = towers;
 			WallDepth = depth;
 			WallFog = fog;
 			WallSideDark = sideDark;
+			WallSideTile = sideTile;
 			WallFaceLight = faceLight;
 			WallFaceAngle = faceAngle;
 			WallTopLift = topLift;
@@ -1217,6 +1227,12 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wsd) && wsd >= 0f)
 					{
 						WallSideDark = wsd;
+					}
+					break;
+				case "wallsidetile":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wst) && wst > 0f && wst <= 32f)
+					{
+						WallSideTile = wst;
 					}
 					break;
 				case "wallfacelight":

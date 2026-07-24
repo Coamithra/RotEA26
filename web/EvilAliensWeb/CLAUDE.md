@@ -470,6 +470,24 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     axes** — along-edge must follow the axis the edge runs along, down-the-shaft must start at the
     cell edge the wall hangs from (reverses west vs east). NO half-texel inset (adjacent atlas
     cells are the correct continuation).
+  - **Down the shaft the sheet CONTINUES out of the block's cell — it must not run back across it**
+    (card 0f7fc977). Starting at the hanging edge is the rim-seam fix and stays; running *into* the
+    cell made every side face a mirror of its own cap, legible as a mirror precisely because the
+    sheet tiles and could have carried on. How far it runs is `?wallsidetile` × the shaft's true
+    height in block footprints (1 = a side texel the world size of a top-face one = 2.70 cells at
+    the shipped numbers; **baked at 4** — honest scale reads short because a steeply foreshortened
+    shaft buries most of its length in its far few pixels).
+  - **The wrap is walked on the CPU in `AddFace`, never by a wrapping sampler.** `.dds` are padded
+    to a mult-of-4 with content top-left, so GPU wrap would wrap at the PADDED edge and run every
+    shaft into transparent pad (and 756-v1 is NPOT besides). So the face is cut at every cell
+    crossing on top of the `bands` cuts and each strip maps through the one cell its midpoint falls
+    in — every emitted UV stays inside the logical sheet. Cost: ~4 → ~14 quads/face at the baked
+    tiling, one batched call unchanged, tower pass 0.73 → 1.29 ms.
+  - **756-v1 ships with NO mip chain**, so a high `?wallsidetile` minifies with bilinear and
+    nothing else, and the far end of a shaft aliases — weigh it on `preview_wall3d.py --ladder`
+    (one tower per tiling). That tool's `sample()` is bilinear CLAMP on purpose: it models
+    `DrawGeometry3D`'s `LinearClamp` exactly, so it neither invents a moire (point sampling would)
+    nor prettifies the sheet's own 8→0 wrap (wrapping would).
   - Lifetime: `Wall.DeathY` defers unload past the bottom edge (a base leads/trails its cap by
     ~154px, so dying at y>600 popped visible towers — this also delays the level's next event
     ~0.6s, intended); `Wall.EntryLead` spawns higher so towers enter base-first (bottom-row grids
@@ -483,7 +501,8 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     (additive `2331-v5`) tile by position, never a drifting source rect (null samplerState =
     LinearClamp — an out-of-bounds window clamps).
   - Flags: `?walltowers=0` (exact flat look) · `?walldepth= ?wallfog= ?wallfogcolor= ?wallsidedark=
-    ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps= ?wallwispspeed=` ·
+    ?wallsidetile= ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps=
+    ?wallwispspeed=` ·
     fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
     POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
     COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check

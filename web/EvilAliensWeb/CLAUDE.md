@@ -42,8 +42,10 @@ generate much of the art/audio referenced here.
 - **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
   BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
   multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
-  (transparent, bottom/right only — content keeps its top-left coords) and stamps the original
+  (bottom/right only — content keeps its top-left coords) and stamps the original
   ("logical") size into the DDS header's reserved dwords (offsets 32/36 + `"LOGD"` marker).
+  The pad is transparent EXCEPT its first 4 px, which replicate the logical edge — see the
+  edge-gutter bullet below; that gutter is load-bearing, don't "clean it up".
   `WebContentManager.TryLoadDds` reads it back and registers it in a `ConditionalWeakTable`; the
   extension methods **`Texture2D.LogicalWidth()/LogicalHeight()/LogicalBounds()`** return it (and
   fall through to real `.Width/.Height` for unpadded png/rtex/render targets — a safe no-op). **The
@@ -59,6 +61,25 @@ generate much of the art/audio referenced here.
   `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`. **Test harness:**
   `build_textures.py --padtest <px>` grossly over-pads every `.dds` so any missed padded-vs-logical
   site shows an obvious ~px artifact in play; ship with `--padtest 0` (minimal mult-of-4 pad).
+- **A clamped source rect does NOT stop the filter reaching the pad — hence the 4px edge gutter.**
+  `LinearClamp` clamps at the TEXTURE border, not at the source rect, so a destination pixel whose
+  centre lands in the last half texel bilinearly blends the last content texel with texel `[LW]`.
+  While that texel was transparent black, the final ~1px of every tile lost up to 50% of its RGB
+  **and alpha** — a hairline at every tile boundary, dark over the opaque Mars sky, bright where the
+  `marshills` silhouettes sit over it (Trello `4ddcd13f`; measured -64 luminance in the sky band).
+  `build_textures.py`'s `edge_gutter()` therefore replicates the logical edge into the first 4 px of
+  the pad (last column right, last row down, corner), which makes the filtered result identical to a
+  true clamp at **any** pad size, and keeps the sampled 4×4 BC3 blocks free of transparent-black
+  endpoints on non-mult-of-4 art (`marsloop*` are 1587/1588 wide). Only 4 px are filled so the
+  `--padtest` canary keeps its transparent hole. Guard: `tools/textures/check_pad_bleed.py` (asserts
+  the gutter matches the edge on every shipped `.dds`) — **re-run it after any `build_textures.py`
+  rebuild**. Watch for this any time a texture is TILED or stretched far past its native size.
+- **`?bgfreeze=<designX>`** stops every background/foreground layer scrolling and parks a tile
+  BOUNDARY of each at that design column (`Background.Update`). The Mars/alien-base layers scroll at
+  six different speeds, so a tiling/wrap/parallax artifact can only be inspected once it holds
+  still. Caveat: sub-pixel artifacts like the pad bleed vary in strength with where the boundary
+  falls relative to render-target pixel centres, so sweep the FRACTIONAL part to cover phases — one
+  frozen frame is one phase, not the worst case.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read

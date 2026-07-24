@@ -421,15 +421,37 @@ public class Background : Scene
 		// currently deeper and never stacks them, so the composition is correct on both paths.
 		float starSlowdown = MathHelper.Min(DoodadStarSlowdownFactor(), BeltStarSlowdownFactor());
 		float effectiveModifier = scrollspeedmodifier * starSlowdown;
+		// ?bgfreeze=<designX>: hold every layer still with a tile BOUNDARY parked at that design
+		// column (boundaries sit at position.X + k*realsize.X, so position.X = designX mod realsize.X
+		// puts one there). The layers scroll at six different speeds, so a tiling artifact can only
+		// be screenshotted comparably before/after if it stops moving. position.Y is deliberately
+		// left alone -- the marsloop floor sits at 300 by design.
+		bool frozen = DebugFlags.BgFreeze.HasValue;
 		foreach (BackgroundImage backgroundLayer in backgroundLayers)
 		{
-			backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			if (frozen)
+			{
+				backgroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, backgroundLayer.realsize.X);
+			}
+			else
+			{
+				backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			}
 		}
 		foreach (BackgroundImage foregroundLayer in foregroundLayers)
 		{
-			foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			if (frozen)
+			{
+				foregroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, foregroundLayer.realsize.X);
+			}
+			else
+			{
+				foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+			}
 		}
-		Vector2 starDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
+		Vector2 starDelta = frozen
+			? Vector2.Zero
+			: scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
 		if (starfield != null)
 		{
 			starfield.Advance(starDelta);

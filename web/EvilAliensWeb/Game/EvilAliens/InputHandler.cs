@@ -260,114 +260,94 @@ public class InputHandler : IInputHandlerService
 				}
 				case 8:
 				{
-					bool num17 = held;
 					GamePadButtons buttons6 = (state).Buttons;
-					held = num17 | ((int)(buttons6).LeftShoulder == 1);
-					bool num18 = held;
+					held |= (int)(buttons6).LeftShoulder == 1;
 					GamePadButtons buttons7 = (state).Buttons;
-					held = num18 | ((int)(buttons7).RightShoulder == 1);
-					bool num19 = held;
+					held |= (int)(buttons7).RightShoulder == 1;
 					GamePadTriggers triggers3 = (state).Triggers;
-					held = num19 | ((triggers3).Left > 0.5f);
-					bool num20 = held;
+					held |= (triggers3).Left > 0.5f;
 					GamePadTriggers triggers4 = (state).Triggers;
-					held = num20 | ((triggers4).Right > 0.5f);
+					held |= (triggers4).Right > 0.5f;
 					break;
 				}
 				case 6:
 				{
-					bool num7 = held;
 					GamePadButtons buttons2 = (state).Buttons;
-					held = num7 | ((int)(buttons2).LeftShoulder == 1);
-					bool num8 = held;
+					held |= (int)(buttons2).LeftShoulder == 1;
 					GamePadTriggers triggers = (state).Triggers;
-					held = num8 | ((triggers).Left > 0.5f);
+					held |= (triggers).Left > 0.5f;
 					break;
 				}
 				case 7:
 				{
-					bool num12 = held;
 					GamePadButtons buttons4 = (state).Buttons;
-					held = num12 | ((int)(buttons4).RightShoulder == 1);
-					bool num13 = held;
+					held |= (int)(buttons4).RightShoulder == 1;
 					GamePadTriggers triggers2 = (state).Triggers;
-					held = num13 | ((triggers2).Right > 0.5f);
+					held |= (triggers2).Right > 0.5f;
 					break;
 				}
 				case 2:
 				{
 					if (padkeysdown[i][j])
 					{
-						bool num4 = held;
 						GamePadThumbSticks thumbSticks3 = (state).ThumbSticks;
-						held = num4 | ((thumbSticks3).Left.X < -0.42000002f);
+						held |= (thumbSticks3).Left.X < -0.42000002f;
 					}
 					else
 					{
-						bool num5 = held;
 						GamePadThumbSticks thumbSticks4 = (state).ThumbSticks;
-						held = num5 | ((thumbSticks4).Left.X < -0.58f);
+						held |= (thumbSticks4).Left.X < -0.58f;
 					}
-					bool num6 = held;
 					GamePadDPad dPad2 = (state).DPad;
-					held = num6 | ((int)(dPad2).Left == 1);
+					held |= (int)(dPad2).Left == 1;
 					break;
 				}
 				case 3:
 				{
 					if (padkeysdown[i][j])
 					{
-						bool num14 = held;
 						GamePadThumbSticks thumbSticks7 = (state).ThumbSticks;
-						held = num14 | ((thumbSticks7).Left.X > 0.42000002f);
+						held |= (thumbSticks7).Left.X > 0.42000002f;
 					}
 					else
 					{
-						bool num15 = held;
 						GamePadThumbSticks thumbSticks8 = (state).ThumbSticks;
-						held = num15 | ((thumbSticks8).Left.X > 0.58f);
+						held |= (thumbSticks8).Left.X > 0.58f;
 					}
-					bool num16 = held;
 					GamePadDPad dPad4 = (state).DPad;
-					held = num16 | ((int)(dPad4).Right == 1);
+					held |= (int)(dPad4).Right == 1;
 					break;
 				}
 				case 0:
 				{
 					if (padkeysdown[i][j])
 					{
-						bool num9 = held;
 						GamePadThumbSticks thumbSticks5 = (state).ThumbSticks;
-						held = num9 | ((thumbSticks5).Left.Y > 0.42000002f);
+						held |= (thumbSticks5).Left.Y > 0.42000002f;
 					}
 					else
 					{
-						bool num10 = held;
 						GamePadThumbSticks thumbSticks6 = (state).ThumbSticks;
-						held = num10 | ((thumbSticks6).Left.Y > 0.58f);
+						held |= (thumbSticks6).Left.Y > 0.58f;
 					}
-					bool num11 = held;
 					GamePadDPad dPad3 = (state).DPad;
-					held = num11 | ((int)(dPad3).Up == 1);
+					held |= (int)(dPad3).Up == 1;
 					break;
 				}
 				case 1:
 				{
 					if (padkeysdown[i][j])
 					{
-						bool num = held;
 						GamePadThumbSticks thumbSticks = (state).ThumbSticks;
-						held = num | ((thumbSticks).Left.Y < -0.42000002f);
+						held |= (thumbSticks).Left.Y < -0.42000002f;
 					}
 					else
 					{
-						bool num2 = held;
 						GamePadThumbSticks thumbSticks2 = (state).ThumbSticks;
-						held = num2 | ((thumbSticks2).Left.Y < -0.58f);
+						held |= (thumbSticks2).Left.Y < -0.58f;
 					}
-					bool num3 = held;
 					GamePadDPad dPad = (state).DPad;
-					held = num3 | ((int)(dPad).Down == 1);
+					held |= (int)(dPad).Down == 1;
 					break;
 				}
 				}

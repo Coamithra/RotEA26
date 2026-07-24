@@ -16,6 +16,26 @@ What it does NOT check: whether a new name is a GOOD name. A misleading-but-comp
 hashes identically. Name quality stays a human judgement -- this only removes the risk that a
 rename silently broke the game.
 
+--optimize is for a refactor that DELETES a local rather than renaming it. The default build has
+no Optimize property, so Roslyn keeps every local for the debugger and a deleted one changes the
+IL -- the oracle would report DIFFERENT for a change that is provably behaviour-preserving.
+Optimizing folds the dead temporary away, which is exactly what makes the two shapes converge.
+Measured on a scratch assembly (card 0c624f9d, ILSpy's `held |= X` artifact):
+
+                                        default        --optimize
+  bool num = held; held = num | a;      3378ea0f...    0d3f9784...
+  held |= a;                            d5fb8cde...    0d3f9784...
+
+It is opt-in because it is a strictly WEAKER oracle: it also folds away dead stores and other
+differences a rename could never introduce, so use the default for a pure rename and reach for
+this only when the change removes a local. Still sensitive to real edits -- its own negative
+control (a 0.58f threshold nudged to 0.59f) reports DIFFERENT under --optimize.
+
+It cannot cover a refactor that changes how many times a PROPERTY is read (e.g. collapsing four
+`x.Position - y.Position` recomputations into one local): Roslyn cannot prove a property getter
+is pure, so it never CSEs the calls away and the IL legitimately differs. That class needs the
+getter read by hand plus an ilspycmd diff bounding which methods moved.
+
 Deliberately NOT codegen: unlike its fix_*.py / fix_ctors.py neighbours (which regenerated
 Game/ from src_decompiled/ and must never be re-run), this only ever builds and hashes. It is
 safe to run any number of times, and it never writes inside the repo -- the reference worktree
@@ -32,6 +52,7 @@ Usage, from anywhere in the repo:
     python tools/verify_il_identical.py                # uncommitted edits vs HEAD
     python tools/verify_il_identical.py --ref main     # a whole branch vs its branch point
     python tools/verify_il_identical.py --no-cache     # rebuild the reference too
+    python tools/verify_il_identical.py --optimize     # for a refactor that DELETES a local
 
 Use the first form while editing and the second once the work is committed -- after a commit,
 "vs HEAD" would compare a commit against itself, so the script refuses that instead of
@@ -187,10 +208,20 @@ def main():
         description='Prove a refactor compiles to a byte-identical assembly.')
     ap.add_argument('--ref', default='HEAD', help='git ref to compare against (default HEAD)')
     ap.add_argument('--no-cache', action='store_true', help='rebuild the reference too')
+    ap.add_argument('--optimize', action='store_true',
+                    help='build optimized, so a DELETED local still hashes equal (weaker oracle)')
     args = ap.parse_args()
 
+    # Both sides of the comparison must build the same way, and the cache key already hashes
+    # BUILD_FLAGS -- so appending here is enough to keep an optimized baseline from ever being
+    # served to a default run, or vice versa.
+    if args.optimize:
+        BUILD_FLAGS.append('-p:Optimize=true')
+
     root = repo_root()
-    print(f'IL-identity check  (repo {root})', flush=True)
+    print(f'IL-identity check  (repo {root})'
+          f'{"  [optimized -- weaker oracle, see module docstring]" if args.optimize else ""}',
+          flush=True)
     commit = resolve_ref(root, args.ref)
     label = f'{args.ref} ({commit[:8]})'
 
@@ -215,6 +246,9 @@ def main():
     if reference == current:
         print('IDENTICAL -- the change is provably behaviour-preserving.')
         print('(Name QUALITY is not checked; only that nothing semantic moved.)')
+        if args.optimize:
+            print('(Optimized: dead stores and unused locals were folded away before hashing,')
+            print(' so this says nothing about a change that only moved one of those.)')
         return EXIT_IDENTICAL
     print('DIFFERENT -- the working tree does NOT compile to the same assembly.')
     print('Something semantic changed. Usual causes, in order of likelihood:')

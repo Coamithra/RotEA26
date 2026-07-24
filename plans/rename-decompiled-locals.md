@@ -46,17 +46,24 @@ New `tools/verify_il_identical.py` (a *verification* script — **not** codegen,
 `fix_*.py` / `strip_il_comments.py` neighbours; safe and meant to be re-run):
 
 ```
-python tools/verify_il_identical.py --baseline    # stash edits, build, record hash
-python tools/verify_il_identical.py --check       # rebuild current tree, compare
+python tools/verify_il_identical.py             # uncommitted edits vs HEAD
+python tools/verify_il_identical.py --ref main  # a whole branch vs its branch point
 ```
 
-- Builds `dotnet build web/EvilAliensWeb -c Debug -p:DebugType=none -p:Deterministic=true`.
-- Records the SHA-256 of `bin/Debug/net8.0/EvilAliensWeb.dll` into a gitignored sidecar.
-- `--baseline` takes its reading from a clean `git stash` of the working tree so the baseline
-  is genuinely "before my edits", then restores.
-- Exits non-zero on mismatch and prints what to do (the diff is semantic, not cosmetic).
-- Documents the one caveat: baseline and check must run **in the same directory** (the
-  deterministic hash embeds normalized paths), which the per-card worktree flow guarantees.
+- Builds both sides with `-c Debug -p:DebugType=none -p:Deterministic=true -t:Rebuild` and
+  compares the SHA-256 of `bin/Debug/net8.0/EvilAliensWeb.dll`.
+- The reference builds in a throwaway git worktree, which is sound because the hash turned out
+  to be **path-independent** (same commit, two directories, same SHA-256) — so you can baseline
+  at any point, including after you have already started editing.
+- Exits 0 identical / 1 differs / 2 build-or-plumbing failure, and prints the likely causes.
+
+Three things it must get right, each of which silently defeats the whole method:
+
+| Trap | Why it breaks the oracle |
+|---|---|
+| `-p:IncludeSourceRevisionInInformationalVersion=false` | the SDK otherwise stamps the git sha into `AssemblyInformationalVersion`, so two *different commits* can never hash equal — a permanent false DIFFERENT in the mode you most want |
+| `-t:Rebuild` | MSBuild does not re-run the compiler for a property-only change, so a preceding ordinary build leaves a stale assembly; the dangerous direction is a stale DLL that *matches* |
+| `--ref` → merge-base, not tip | several worktrees merge into `main` concurrently here, so comparing against the tip drags in other people's commits |
 
 ### 2. Rename slice 1 — five core files, 625 of 3032 refs (21%)
 

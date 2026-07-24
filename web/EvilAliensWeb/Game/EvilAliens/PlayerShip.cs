@@ -557,6 +557,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = (float)Math.PI / 12f;
+		// Squared while the loop scans (it is compared against LengthSquared); the Math.Sqrt
+		// after the loop turns it into a real distance for the range test.
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent alienDrawableGameComponent = null;
 		foreach (AlienDrawableGameComponent baddy in baddies)
@@ -648,9 +650,9 @@ public class PlayerShip : AlienDrawableGameComponent
 		CollisionLevelMap collisionLevelMap = null;
 		bool hasWall = false;
 		bool altSteering = false;
-		float avoidRange = 150f;
-		float minAvoidStrength = 0f;
-		float maxAvoidStrength = 4f;
+		float steerRange = 150f;
+		float minSteerStrength = 0f;
+		float maxSteerStrength = 4f;
 		Vector2 position = default(Vector2);
 		(position) = new Vector2(float.MaxValue, float.MaxValue);
 		float dodgeAngle = 0f;
@@ -691,7 +693,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			if (baddy is Wall)
 			{
 				hasWall = true;
-				float probeAhead = 1.2f * (float)gameTime.ElapsedGameTime.TotalMilliseconds * base.MaxSpeed;
+				float wallProbeStep = 1.2f * (float)gameTime.ElapsedGameTime.TotalMilliseconds * base.MaxSpeed;
 				float wallNudge = 0f;
 				if (player == 0)
 				{
@@ -719,12 +721,12 @@ public class PlayerShip : AlienDrawableGameComponent
 				findNextTileOnMap(x, y, ref target_x, ref target_y, collisionLevelMap);
 				if (target_y < y)
 				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - probeAhead, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
 						direction += new Vector2(wallNudge, 0f);
 					}
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + probeAhead, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
 						direction += new Vector2(0f - wallNudge, 0f);
@@ -732,7 +734,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				else if (target_x > x)
 				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - probeAhead, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Left - wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
 						direction += new Vector2(wallNudge, 0f);
@@ -744,7 +746,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				else if (target_x < x)
 				{
-					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + probeAhead, base.Position.Y));
+					collisionLevelMap.GetMapCoords(ref x, ref y, new Vector2(collisionBox.Right + wallProbeStep, base.Position.Y));
 					if (collisionLevelMap.TileIsOccupied(x, y - 1))
 					{
 						direction += new Vector2(0f - wallNudge, 0f);
@@ -761,12 +763,12 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
-				if (d <= avoidRange)
+				if (d <= steerRange)
 				{
-					float strength = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, d / avoidRange);
+					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, d / steerRange);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, d / avoidRange);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / steerRange);
 					}
 					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}
@@ -799,12 +801,12 @@ public class PlayerShip : AlienDrawableGameComponent
 					Vector2 toBaddy = base.Position - baddy.Position;
 					dist = (toBaddy).Length();
 				}
-				if (dist <= avoidRange)
+				if (dist <= steerRange)
 				{
-					float strength = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, dist / avoidRange);
+					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, dist / steerRange);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, dist / avoidRange);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / steerRange);
 					}
 					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
@@ -845,14 +847,14 @@ public class PlayerShip : AlienDrawableGameComponent
 				position = powerup.Position;
 			}
 			Vector2 toPowerup2 = powerup.Position - base.Position;
-			if ((toPowerup2).Length() <= avoidRange)
+			if ((toPowerup2).Length() <= steerRange)
 			{
 				Vector2 toPowerup3 = powerup.Position - base.Position;
-				float pull = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, (toPowerup3).Length() / avoidRange);
+				float pull = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, (toPowerup3).Length() / steerRange);
 				if (altSteering)
 				{
 					Vector2 toPowerup4 = powerup.Position - base.Position;
-					pull = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, (toPowerup4).Length() / avoidRange);
+					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, (toPowerup4).Length() / steerRange);
 				}
 				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(powerup.Position - base.Position));
 			}
@@ -908,7 +910,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				direction += 0.8f * MyMath.AngleToVector(MyMath.VectorToAngle(position - base.Position));
 			}
 		}
-		float edgeMargin = avoidRange;
+		float edgeMargin = steerRange;
 		float bottomEdge = 600f;
 		if (collection.ContainsType<Floor>())
 		{
@@ -918,37 +920,37 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			if (base.Position.X < edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, base.Position.X / edgeMargin);
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.X / edgeMargin);
 				if (altSteering)
 				{
-					push = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, base.Position.X / edgeMargin);
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.X / edgeMargin);
 				}
 				direction += push * new Vector2(1f, 0f);
 			}
 			if (base.Position.X > 800f - edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
 				if (altSteering)
 				{
-					push = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
 				}
 				direction += push * new Vector2(-1f, 0f);
 			}
 			if (base.Position.Y < edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, base.Position.Y / edgeMargin);
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.Y / edgeMargin);
 				if (altSteering)
 				{
-					push = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, base.Position.Y / edgeMargin);
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.Y / edgeMargin);
 				}
 				direction += push * new Vector2(0f, 1f);
 			}
 			if (base.Position.Y > bottomEdge - edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxAvoidStrength, minAvoidStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
+				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				if (altSteering)
 				{
-					push = MathHelper.Lerp(maxAvoidStrength, minAvoidStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
+					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				}
 				direction += push * new Vector2(0f, -1f);
 			}
@@ -956,17 +958,17 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (hasWall)
 		{
 			CollisionBox collisionBox2 = (CollisionBox)GetCollisionType();
-			float probeDist = 41.666668f * base.MaxSpeed;
+			float wallProbeReach = 41.666668f * base.MaxSpeed;
 			if (direction.X > 0f)
 			{
 				int x2 = 0;
 				int y2 = 0;
-				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.BottomRight + new Vector2(probeDist, 0f));
+				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.BottomRight + new Vector2(wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x2, y2))
 				{
 					direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
 				}
-				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.TopRight + new Vector2(probeDist, 0f));
+				collisionLevelMap.GetMapCoords(ref x2, ref y2, collisionBox2.TopRight + new Vector2(wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x2, y2))
 				{
 					direction.X = 0f - MathHelper.Max(Math.Abs(direction.Y), 1f);
@@ -976,12 +978,12 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				int x3 = 0;
 				int y3 = 0;
-				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.BottomLeft + new Vector2(0f - probeDist, 0f));
+				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.BottomLeft + new Vector2(0f - wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x3, y3))
 				{
 					direction.X = 0f + MathHelper.Max(Math.Abs(direction.Y), 1f);
 				}
-				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.TopLeft + new Vector2(0f - probeDist, 0f));
+				collisionLevelMap.GetMapCoords(ref x3, ref y3, collisionBox2.TopLeft + new Vector2(0f - wallProbeReach, 0f));
 				if (collisionLevelMap.TileIsOccupied(x3, y3))
 				{
 					direction.X = 0f + MathHelper.Max(Math.Abs(direction.Y), 1f);
@@ -989,12 +991,12 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			int x4 = 0;
 			int y4 = 0;
-			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopLeft + new Vector2(0f, -3f * probeDist));
+			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopLeft + new Vector2(0f, -3f * wallProbeReach));
 			if (collisionLevelMap.TileIsOccupied(x4, y4))
 			{
 				direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
 			}
-			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopRight + new Vector2(0f, -3f * probeDist));
+			collisionLevelMap.GetMapCoords(ref x4, ref y4, collisionBox2.TopRight + new Vector2(0f, -3f * wallProbeReach));
 			if (collisionLevelMap.TileIsOccupied(x4, y4))
 			{
 				direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
@@ -1081,6 +1083,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			d = (toStart).Length();
 			return;
 		}
+		// One decompiled slot serving two roles: `t` holds the raw dot product on this line and
+		// only becomes the normalised 0..1 position along the segment after the divide below.
 		float t = (position.X - start.X) * (end.X - start.X) + (position.Y - start.Y) * (end.Y - start.Y);
 		float dot = t;
 		Vector2 segment = end - start;
@@ -1224,7 +1228,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			// startScreen_OnFinished comment for the history of that bug).
 			// A Remote puppet never takes damage locally: under distributed authority its OWNER
 			// decides when it was hit (you never die to something you dodged on your screen) --
-			// its death arrives via the ship stream's alive hasHumanPlayer instead (Compat/Net/NetSession).
+			// its death arrives via the ship stream's alive flag instead (Compat/Net/NetSession).
 			else if (!Settings.GetInstance().Invulnerability && !DebugFlags.Invuln && !IsNetPuppet)
 			{
 				if (other is Wall)

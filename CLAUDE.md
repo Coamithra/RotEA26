@@ -77,10 +77,12 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
 - **A no-op refactor is PROVEN, not spot-checked — `python tools/verify_il_identical.py`.** Local
   variable names live only in the PDB, so a build with `-p:DebugType=none -p:Deterministic=true`
   must produce a **byte-identical `EvilAliensWeb.dll`** for any change that is genuinely cosmetic.
-  The script builds the working tree and a throwaway worktree at `--ref` (default `HEAD`) and
-  compares SHA-256s; the hash is path-independent, so you can baseline at any point, even after
-  you have started editing. Sound AND sensitive: 19 locals renamed across a 160-line method hashed
-  identically, while flipping one constant `128`→`129` did not. It covers the WHOLE assembly, so a
+  Run it bare while editing (uncommitted work vs `HEAD`) and `--ref main` once committed (the
+  whole branch vs its **merge-base** — not the tip, since worktrees merge into `main`
+  concurrently here); it refuses the vacuous clean-tree-vs-`HEAD` case rather than returning a
+  meaningless green tick. The hash is path-independent, so you can baseline at any point, even
+  after you have started editing. Sound AND sensitive: 19 locals renamed across a 160-line method
+  hashed identically, while flipping one constant `128`→`129` did not. It covers the WHOLE assembly, so a
   stray edit in an unrelated file is caught too. Use it for renames, reformatting and decompiler-
   artifact cleanup — a harness or screenshot cannot prove what the hash proves, so don't build one
   for this class of change. It does **not** judge whether a new name is a *good* name; a

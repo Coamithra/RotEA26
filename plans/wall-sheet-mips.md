@@ -95,7 +95,9 @@ Per the repo rule, the game is the *last* check, not the first.
 
 1. **`check_pad_bleed.py`** over the rebuilt sheet — clean at every level; and shown failing on a
    naive `-m 0` build so the guard is proven to bite.
-2. **`preview_wall3d.py --ladder` gains a mip-aware sampler.** Today its `sample()` is bilinear
+2. **`preview_wall3d.py --ladder` gains a mip-aware sampler.** (Post-review: trilinear is the
+   tool DEFAULT and `--nomips` is the opt-out, mirroring the game flag; `--shimmer` scores SHAFT
+   pixels only, since the tops jitter equally in both modes and diluted the first numbers.) Today its `sample()` is bilinear
    clamp and the tool "deliberately models no mips", so it cannot show the fix. Add trilinear:
    per-pixel LOD from screen-space UV derivatives (finite-difference the UV at `px+1`/`py+1`,
    `lod = log2(max(|d(uv)/dx|, |d(uv)/dy|) * texsize)`), sample two levels, lerp.

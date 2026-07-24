@@ -508,7 +508,7 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     A/B it live with **`?nomips`** (uploads level 0 only, so every `.dds` falls back to bilinear).
     Weigh tilings on `preview_wall3d.py --ladder` (bilinear row over trilinear row) and
     **`--shimmer`**, which scores the aliasing as a number instead of by eye: bilinear worsens with
-    density (4.55 / 5.57 / 6.56 / 7.38 at tile 1/2/4/8) while trilinear stays flat (~3.1-3.4). So
+    density (4.15 / 6.26 / 8.21 / 9.93 at tile 1/2/4/8) while trilinear stays flat (~1.2-1.8). So
     mips at tile 4 are steadier than bilinear at tile 1, and **dropping `Wall.DefaultSideTile`
     toward 2 is NOT the cheaper fix** — it is strictly worse and loses the "reads tall" win.
     That tool's `sample()` is bilinear CLAMP on purpose: it models `DrawGeometry3D`'s `LinearClamp`

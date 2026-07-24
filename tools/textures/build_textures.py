@@ -174,6 +174,11 @@ def compress_one(img, base, out_dir):
     r = subprocess.run([TEXCONV, "-nologo", "-y", "-m", "1", "-f", "BC3_UNORM",
                         "-o", out_dir, tmp],
                        capture_output=True, text=True)
+    # Check the exit code BEFORE probing for output: out_dir is usually the Content dir, where the
+    # previously committed <base>.dds already exists, so a failed texconv would otherwise resolve
+    # to that stale file and get re-stamped and reported as a fresh build.
+    if r.returncode != 0:
+        fail(f"texconv failed for {base} (exit {r.returncode})\n" + r.stdout + r.stderr)
     produced = None
     for ext in (".dds", ".DDS"):
         p = os.path.join(out_dir, base + ext)
@@ -312,7 +317,14 @@ def parse_config(path):
                 # It is opt-in per asset: mipping everything would cost ~33% more bytes across all
                 # ~124 .dds and soften every minified sprite, for the benefit of the one sheet that
                 # is tiled far past its native size.
-                mip = "mip" in (p.lower() for p in parts[2:])
+                # Reject anything we don't recognise rather than ignoring it: a typo ("mips",
+                # "Mipmap") would otherwise build an unmipped sheet with no diagnostic, and the
+                # only symptom is a shimmering wall in game. Loud failure is the convention here
+                # (unknown format fails; a stale asset line aborts the whole run).
+                for p in parts[2:]:
+                    if not p.isdigit() and p != "mip":
+                        fail(f"{path}:{ln}: unknown dxt option '{p}' (expected 'mip' or cols/rows)")
+                mip = "mip" in parts[2:]
                 # Optional trailing "cols rows" are parsed but now IGNORED by the build (pad4 no
                 # longer needs the grid — the game owns frame layout via its own AnimationData).
                 # Still accepted so existing config lines and the ?texviewer Save path don't error.
@@ -380,8 +392,8 @@ def main():
     ap.add_argument("--only", metavar="GLOB",
                     help="rebuild only assets whose Content-relative name matches GLOB (e.g. "
                          "'gfx/base/756-v1'). The manifest still covers the whole config. Keeps a "
-                         "one-texture change from rewriting all ~124 committed .dds "
-                         "(same flag as build_texviewer.py).")
+                         "one-texture change from rewriting all ~124 committed .dds. Matching "
+                         "nothing is an error, not a silent no-op.")
     ap.add_argument("--manifest-only", action="store_true",
                     help="regenerate Compat/PrecompiledTextures.cs only; skip the texture builds "
                          "(no texconv/Pillow needed)")

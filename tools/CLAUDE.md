@@ -167,15 +167,20 @@ step/min/max in sync with `MousePointer` if `SIZES` changes.
   0f7fc977 side texturing (one cell, mirrored about the rim), `--tile <f>` previews a candidate
   `Wall.DefaultSideTile`, `--compare` writes the before/after A/B and `--ladder` one tower per
   tiling, bilinear-only on top and trilinear below — both opt-in, each roughly doubles the run.
-  **`--mips` samples trilinear over a mip pyramid** (what the shipped mipped `756-v1.dds` gets);
-  its LOD comes from screen-space UV derivatives, and those MUST be taken on the *unwrapped* cell
+  **Trilinear over the mip pyramid is now the DEFAULT** -- that is what the shipped mipped
+  `756-v1.dds` gets, so a bare run models the real game; **`--nomips`** gives the pre-card
+  bilinear-only look, named and polarised to match the game's own `?nomips` flag.
+  Its LOD comes from screen-space UV derivatives, and those MUST be taken on the *unwrapped* cell
   walk: differencing after the `% 8` wrap steps a whole sheet at every crossing and would slam
   that pixel row to the coarsest level, which looks exactly like a seam.
   **`--shimmer` measures aliasing as a NUMBER** (mean per-pixel temporal stddev over a sub-pixel
   scroll sweep, per tiling, with and without mips). The card's complaint is a shimmer *under
   scroll*, which no still frame can show, so this is the honest read. Measured: bilinear worsens
-  with density (4.55 / 5.57 / 6.56 / 7.38 at tile 1/2/4/8) while trilinear stays flat (~3.1-3.4),
-  i.e. mips at the baked tile 4 beat bilinear at *any* tiling.
+  with density (4.15 / 6.26 / 8.21 / 9.93 at tile 1/2/4/8) while trilinear stays flat (~1.2-1.8),
+  i.e. mips at the baked tile 4 beat bilinear at *any* tiling. **Score SHAFT pixels only** -- the
+  tops are an axis-aligned blit that snaps to whole pixels, so they jitter by an equal,
+  mode-independent amount that would dilute the measurement (`render(want_mask=True)`), and pass
+  the SAME mask to both modes.
   Its `sample()` is BILINEAR CLAMP, modelling `DrawGeometry3D`'s `LinearClamp` exactly: point
   sampling would invent a moire the GPU does not show, wrapping would prettify the sheet's own
   8→0 wrap. `SIDE_TILE` mirrors `Wall.DefaultSideTile`; re-bake one, update the other.

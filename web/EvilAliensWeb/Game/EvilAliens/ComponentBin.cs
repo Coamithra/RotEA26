@@ -60,8 +60,6 @@ public class ComponentBin : IComponentBinService
 	// so any incremental drift can't survive past a level load.
 	private void RebuildWatchers()
 	{
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Expected O, but got Unknown
 		watchers.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
 		{
@@ -109,8 +107,6 @@ public class ComponentBin : IComponentBinService
 
 	public void Purge<T>() where T : GameComponent
 	{
-		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001a: Expected O, but got Unknown
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
 		{
 			GameComponent val = item;
@@ -134,8 +130,6 @@ public class ComponentBin : IComponentBinService
 
 	public void Push()
 	{
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Expected O, but got Unknown
 		List<GameComponent> list = new List<GameComponent>();
 		inactive.Enqueue(list);
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
@@ -184,8 +178,6 @@ public class ComponentBin : IComponentBinService
 
 	private void Components_ComponentAdded(object src, GameComponentCollectionEventArgs args)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0019: Expected O, but got Unknown
 		if (args.GameComponent is GameComponent item)
 		{
 			// The component just entered `collection`; if it was sitting in idleList (a re-add
@@ -202,8 +194,6 @@ public class ComponentBin : IComponentBinService
 
 	private void Components_ComponentRemoved(object src, GameComponentCollectionEventArgs args)
 	{
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0019: Expected O, but got Unknown
 		if (args.GameComponent is GameComponent item)
 		{
 			// The component left `collection` and (per the original) joins idleList — a net-zero
@@ -316,8 +306,6 @@ public class ComponentBin : IComponentBinService
 
 	public bool ContainsType<T>() where T : GameComponent
 	{
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		//IL_001c: Expected O, but got Unknown
 		bool flag = false;
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
 		{

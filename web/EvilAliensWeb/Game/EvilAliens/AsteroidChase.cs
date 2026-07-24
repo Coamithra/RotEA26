@@ -23,7 +23,6 @@ internal class AsteroidChase : GameScene
 
 	protected override void PopulateEventList()
 	{
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
 		WaitEvent waitEvent = new WaitEvent(base.Game, 2f);
 		waitEvent.OnFinished += wait_OnFinished;
 		eventList.AddEvent(waitEvent, halting: true);
@@ -64,7 +63,6 @@ internal class AsteroidChase : GameScene
 
 	private void wait_OnFinished(GameEvent sender)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		Background.SetSpeed(new Vector2(0.3f, 0.72f));
 	}
 }

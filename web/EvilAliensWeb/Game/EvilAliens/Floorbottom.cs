@@ -27,8 +27,6 @@ public class Floorbottom : DrawableGameComponent, ICollidable
 
 	public ICollisionType GetCollisionType()
 	{
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 		b.TopLeft = new Vector2(-500f, bottom);
 		b.BottomRight = new Vector2(1300f, 1100f);
 		return b;

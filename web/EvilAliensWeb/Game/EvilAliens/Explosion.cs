@@ -41,7 +41,6 @@ internal class Explosion : AlienDrawableGameComponent
 	{
 		get
 		{
-			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
 			c.Position = base.Position;
 			c.Radius = 70f;
 			return c;
@@ -60,9 +59,6 @@ internal class Explosion : AlienDrawableGameComponent
 	public Explosion(Game game)
 		: base(game)
 	{
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
 		base.DrawOrder = 40;
 		particles = new ExplosionData[5];
 		smokeparticles = new ExplosionData[2];
@@ -90,10 +86,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float size, float lifetime, float impulse, float direction, bool noShake = false)
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
 		base.Position = position;
 		this.size = size;
 		this.lifetime = lifetime;
@@ -117,9 +109,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		//IL_001f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0067: Unknown result type (might be due to invalid IL or missing references)
 		ExplosionData[] array = particles;
 		foreach (ExplosionData explosionData in array)
 		{
@@ -151,22 +140,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	private void Vibrate()
 	{
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0086: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00da: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011c: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 val = default(Vector2);
 		for (int i = 0; i < oracle.Players; i++)
 		{
@@ -215,20 +188,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0038: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0065: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0091: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0121: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0128: Unknown result type (might be due to invalid IL or missing references)
-		//IL_012d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0141: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		ExplosionData[] array = particles;
 		foreach (ExplosionData explosionData in array)
@@ -246,13 +205,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public void DrawSmoke(GameTime gameTime)
 	{
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0059: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		ExplosionData[] array = smokeparticles;
 		foreach (ExplosionData explosionData in array)
@@ -268,9 +220,6 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
 		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
 		base.Speed = MathHelper.Lerp((backgroundSpeed).Length() * 0.45f, 0f, backgroundimpulsetimer.Normalized);
 		base.Direction = MyMath.VectorToAngle(oracle.BackgroundSpeed);

@@ -73,12 +73,6 @@ public class UFO : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -135,22 +129,6 @@ public class UFO : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_004a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0067: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0172: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0194: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0200: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0210: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0222: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		scale = 1f;
 		stationarySprite = content.Load<Texture2D>(stationarySpriteName);
@@ -227,7 +205,6 @@ public class UFO : KillableAlien
 
 	public void Setup(Vector2 position, bool isBig, EnemyBehaviour behaviour)
 	{
-		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
 		directionIsPreset = false;
 		flyawaytimer.Duration = 7000f;
 		invincibilityTimer.Reset();
@@ -266,7 +243,6 @@ public class UFO : KillableAlien
 
 	public void SetAsBonus(Powerup.PowerupType powerupType)
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
 		hasbonus = true;
 		bonus = Powerup.NewPowerup(collection, base.Game);
 		bonus.Setup(Vector2.Zero);
@@ -275,7 +251,6 @@ public class UFO : KillableAlien
 
 	public void SetAsBonus()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
 		hasbonus = true;
 		bonus = Powerup.NewPowerup(collection, base.Game);
 		bonus.Setup(Vector2.Zero);
@@ -283,9 +258,6 @@ public class UFO : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0125: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0083: Unknown result type (might be due to invalid IL or missing references)
 		if (!stationary)
 		{
 			if (hasbonus)
@@ -325,66 +297,11 @@ public class UFO : KillableAlien
 
 	public bool OffScreen()
 	{
-		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
 		return (base.Position.X < 0f) | (base.Position.X > 800f) | (base.Position.Y < 0f) | (base.Position.Y > 600f);
 	}
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0255: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0264: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0274: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0289: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06ca: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06d0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06d5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06da: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06b3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_031b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0320: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02bf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d1: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02e4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02f7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06e9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06f4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_06f9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0110: Unknown result type (might be due to invalid IL or missing references)
-		//IL_078c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0792: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0797: Unknown result type (might be due to invalid IL or missing references)
-		//IL_079c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_076e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0774: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0779: Unknown result type (might be due to invalid IL or missing references)
-		//IL_077e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0144: Unknown result type (might be due to invalid IL or missing references)
-		//IL_037f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_07a5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_07aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0518: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03b6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_041e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_044f: Unknown result type (might be due to invalid IL or missing references)
 		invincibilityTimer.Update(gameTime);
 		// NOTE: inert by design, preserved faithful to the 2008 Xbox build. bonusrandomizer
 		// is never AddTimer'd (see the ctor), so it is never Update'd and .Finished never
@@ -568,14 +485,6 @@ public class UFO : KillableAlien
 
 	private void FireBullet()
 	{
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0082: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0088: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009c: Unknown result type (might be due to invalid IL or missing references)
 		float num = 200f / Settings.GetInstance().DifficultyFactorized(0.4f);
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
@@ -593,10 +502,6 @@ public class UFO : KillableAlien
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0070: Unknown result type (might be due to invalid IL or missing references)
 		if ((other is Asteroid || other is Ball) | (other is Lazer && ((Lazer)other).owner != this))
 		{
 			HitBy(other, isComboGenerator: false);
@@ -671,20 +576,6 @@ public class UFO : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_006f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0121: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0124: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ae: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01dc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01eb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01f0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0230: Unknown result type (might be due to invalid IL or missing references)
-		//IL_023f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0244: Unknown result type (might be due to invalid IL or missing references)
 		if (!(other is Lazer) && !(other is Floorbottom) && !(other is Asteroid) && !(other is Spider) && !(other is FlyingSpider))
 		{
 			AwardScore(isComboGenerator, other);

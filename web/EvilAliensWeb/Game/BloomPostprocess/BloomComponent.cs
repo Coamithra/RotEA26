@@ -93,8 +93,6 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 	public BloomComponent(Game game)
 		: base(game)
 	{
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Expected O, but got Unknown
 		if (game == null)
 		{
 			throw new ArgumentNullException("game");
@@ -107,19 +105,6 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	protected override void LoadContent()
 	{
-		//IL_000d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Expected O, but got Unknown
-		//IL_008a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a5: Expected O, but got Unknown
-		//IL_00b7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c2: Expected O, but got Unknown
-		//IL_00cc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d7: Expected O, but got Unknown
 		base.LoadContent();
 		spriteBatch = new SpriteBatch(base.GraphicsDevice);
 		bloomExtractEffect = content.Load<Effect>("BloomExtract");
@@ -187,8 +172,6 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0172: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0177: Unknown result type (might be due to invalid IL or missing references)
 		batch.Flush();
 		EnsureTargets();
 		EnsureBlurKernel();
@@ -242,7 +225,6 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 	// effect, so they must be re-marshalled each pass regardless).
 	private void EnsureBlurKernel()
 	{
-		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
 		int w = ((Texture2D)renderTarget1).Width;
 		int h = ((Texture2D)renderTarget1).Height;
 		float blur = Settings.BlurAmount;
@@ -276,7 +258,6 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	private void FillSampleOffsets(Vector2[] dst, float dx, float dy, int count)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
 		ref Vector2 reference = ref dst[0];
 		reference = new Vector2(0f);
 		for (int i = 0; i < count / 2; i++)

@@ -42,12 +42,6 @@ internal class EvilSkull : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -97,8 +91,6 @@ internal class EvilSkull : KillableAlien
 
 	public void Setup(Vector2 startposition, EnemyBehaviour behaviour)
 	{
-		//IL_005a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0097: Unknown result type (might be due to invalid IL or missing references)
 		this.behaviour = behaviour;
 		launched = false;
 		hasbonus = false;
@@ -125,8 +117,6 @@ internal class EvilSkull : KillableAlien
 
 	public void SetMaze()
 	{
-		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0018: Unknown result type (might be due to invalid IL or missing references)
 		isInMaze = true;
 		base.Position = new Vector2(base.Position.X, -45f);
 		fadeintimer.Duration = 10f;
@@ -147,7 +137,6 @@ internal class EvilSkull : KillableAlien
 
 	public void SetupLaunch(Vector2 startposition, float direction)
 	{
-		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
 		behaviour = EnemyBehaviour.normal;
 		base.Position = startposition;
 		base.Direction = direction;
@@ -162,7 +151,6 @@ internal class EvilSkull : KillableAlien
 
 	public void MakeBonus()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
 		hasbonus = true;
 		bonus = Powerup.NewPowerup(collection, base.Game);
 		bonus.Setup(Vector2.Zero);
@@ -170,20 +158,6 @@ internal class EvilSkull : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0136: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0148: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_017f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0192: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01eb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01fb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020d: Unknown result type (might be due to invalid IL or missing references)
 		base.Initialize();
 		color = Color.White;
 		base.Acceleration = 6.0000002E-05f;
@@ -232,16 +206,6 @@ internal class EvilSkull : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0089: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0077: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0081: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010b: Unknown result type (might be due to invalid IL or missing references)
 		if (fadeintimer.Active)
 		{
 			float num = 1f - fadeintimer.Normalized;
@@ -271,49 +235,6 @@ internal class EvilSkull : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_04b0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04b5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_04ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0520: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0103: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0554: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0237: Unknown result type (might be due to invalid IL or missing references)
-		//IL_024c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0262: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0267: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01f9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0204: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0219: Unknown result type (might be due to invalid IL or missing references)
-		//IL_021e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0588: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0272: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05b5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05c6: Unknown result type (might be due to invalid IL or missing references)
-		//IL_05cb: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02d3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02e8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02f8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0325: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0337: Unknown result type (might be due to invalid IL or missing references)
-		//IL_034a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_035d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03ad: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03b3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_03bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_040f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_041a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0420: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0425: Unknown result type (might be due to invalid IL or missing references)
 		if (!hitwall)
 		{
 			justspawned = false;
@@ -466,9 +387,6 @@ internal class EvilSkull : KillableAlien
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
 		base.CollidesWith(other);
 		if (other is Wall || other is PlayerShip)
 		{
@@ -496,13 +414,6 @@ internal class EvilSkull : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_006b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0070: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0099: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00af: Unknown result type (might be due to invalid IL or missing references)
-		//IL_007f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0084: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
 		Die();
 		AwardScore(isComboGenerator, other);
 		if (hasbonus)

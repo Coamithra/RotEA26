@@ -9,12 +9,6 @@ internal class ParatrooperAlien : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0014: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002b: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft += base.Position;
 			collisionBox.BottomRight += base.Position;
@@ -47,8 +41,6 @@ internal class ParatrooperAlien : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
 		base.Speed = 0.24f;
 		base.Initialize();
 		if (RandomHelper.Random.Next(2) == 1)
@@ -72,11 +64,6 @@ internal class ParatrooperAlien : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0083: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		if (OffScreen(100f))
 		{
@@ -97,7 +84,6 @@ internal class ParatrooperAlien : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		float direction = 0f;
 		if (base.Direction == 0f)

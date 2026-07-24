@@ -19,7 +19,6 @@ internal class SingleEnemySpawner : GameEvent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		if (!spawned)
 		{

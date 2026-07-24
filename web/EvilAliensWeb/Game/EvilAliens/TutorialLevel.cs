@@ -245,7 +245,6 @@ internal class TutorialLevel : GameScene
 
 	private void messageEvent_OnFinished(GameEvent sender)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
 		Asteroid asteroid = Asteroid.NewAsteroid(Collection, base.Game);
 		asteroid.Setup(new Vector2(400f, -80f), (float)Math.PI / 2f, 0.4f, reallyBig: false, randomSpeedOffset: false);
 		Collection.Add((GameComponent)(object)asteroid);

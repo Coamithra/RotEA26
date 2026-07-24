@@ -44,14 +44,6 @@ internal class Braineroid : KillableAlien
 	{
 		get
 		{
-			//IL_0009: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0013: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0019: Unknown result type (might be due to invalid IL or missing references)
-			//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-			//IL_002a: Unknown result type (might be due to invalid IL or missing references)
-			//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003a: Unknown result type (might be due to invalid IL or missing references)
-			//IL_003f: Unknown result type (might be due to invalid IL or missing references)
 			CollisionBox collisionBox = retrieveBoundsFromTexture();
 			collisionBox.TopLeft = collisionBox.TopLeft * 0.9f + base.Position;
 			collisionBox.BottomRight = collisionBox.BottomRight * 0.9f + base.Position;
@@ -97,19 +89,6 @@ internal class Braineroid : KillableAlien
 
 	public void Setup(Vector2 position, BrainSize size, float initialrotation, bool wrapping)
 	{
-		//IL_0010: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0049: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ba: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00cf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0080: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0093: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ec: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00fc: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010e: Unknown result type (might be due to invalid IL or missing references)
 		hasbonus = false;
 		this.wrapping = wrapping;
 		base.Position = position;
@@ -134,12 +113,6 @@ internal class Braineroid : KillableAlien
 
 	public override void Initialize()
 	{
-		//IL_0189: Unknown result type (might be due to invalid IL or missing references)
-		//IL_018e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0198: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01a8: Unknown result type (might be due to invalid IL or missing references)
 		// Baseline 1 (not 0): Update overwrites this before the first in-game Draw, but
 		// the sprite harness never runs Update — pulsate 0 there would draw scale*0 = nothing.
 		pulsate = 1f;
@@ -197,8 +170,6 @@ internal class Braineroid : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0045: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008d: Unknown result type (might be due to invalid IL or missing references)
 		float num = scale;
 		scale = num * pulsate;
 		if (hasbonus)
@@ -224,7 +195,6 @@ internal class Braineroid : KillableAlien
 	// Braineroid, enabled colorize — so the glow gets hue-shifted with the brain.
 	private void DrawGlow(GameTime gameTime)
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
 		if (glowTexture == null)
 		{
 			return;
@@ -240,30 +210,6 @@ internal class Braineroid : KillableAlien
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_015d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0171: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_019e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0189: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0193: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00d8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01df: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01ee: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01d4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0108: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0220: Unknown result type (might be due to invalid IL or missing references)
-		//IL_022f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0215: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0129: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0138: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0245: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0256: Unknown result type (might be due to invalid IL or missing references)
 		_time += (float)gameTime.ElapsedGameTime.TotalSeconds;
 		pulsate = 1f + (1f + (float)Math.Sin(_time * pulsatespeed)) * 0.07f;
 		Move(gameTime);
@@ -316,10 +262,6 @@ internal class Braineroid : KillableAlien
 
 	public override void CollidesWith(ICollidable other)
 	{
-		//IL_001e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0046: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
 		if (other is Lazer)
 		{
 			HitBy(other, isComboGenerator: false);
@@ -334,12 +276,6 @@ internal class Braineroid : KillableAlien
 
 	protected override void KilledBy(ICollidable other, bool isComboGenerator)
 	{
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00aa: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e3: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0214: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0146: Unknown result type (might be due to invalid IL or missing references)
 		if (hasbonus)
 		{
 			collection.Add((GameComponent)(object)bonus);
@@ -416,7 +352,6 @@ internal class Braineroid : KillableAlien
 
 	internal void MakeBonus()
 	{
-		//IL_0024: Unknown result type (might be due to invalid IL or missing references)
 		hasbonus = true;
 		bonus = Powerup.NewPowerup(collection, base.Game);
 		bonus.Setup(Vector2.Zero);

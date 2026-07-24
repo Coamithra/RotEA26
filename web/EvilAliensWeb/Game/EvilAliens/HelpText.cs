@@ -67,8 +67,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 	public HelpText(Game game)
 		: base(game)
 	{
-		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Expected O, but got Unknown
 		base.DrawOrder = 2000;
 		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
 		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
@@ -179,39 +177,12 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 
 	protected void fadeBackBufferToBlack(int alpha)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-		//IL_000b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0028: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0032: Unknown result type (might be due to invalid IL or missing references)
 		// Stage 10: full-screen fade in 800x600 design space (scaled by RenderScale.Matrix).
 		spriteBatch.Draw(blankTexture, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)alpha));
 	}
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0055: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_009a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b4: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ea: Unknown result type (might be due to invalid IL or missing references)
-		//IL_010a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0148: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_015a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0164: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0243: Unknown result type (might be due to invalid IL or missing references)
-		//IL_026c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0271: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0280: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028a: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c9: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02dd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02e7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02f6: Unknown result type (might be due to invalid IL or missing references)
 		if (visibility > 0f)
 		{
 			fadeBackBufferToBlack((byte)(visibility * 200f));
@@ -309,17 +280,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 
 	private void ExplainPowerup(Powerup.PowerupType powerupType, float y, string p)
 	{
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0039: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0041: Unknown result type (might be due to invalid IL or missing references)
-		//IL_004c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0051: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0088: Unknown result type (might be due to invalid IL or missing references)
-		//IL_008d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0093: Unknown result type (might be due to invalid IL or missing references)
 		Color color = default(Color);
 		(color) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;

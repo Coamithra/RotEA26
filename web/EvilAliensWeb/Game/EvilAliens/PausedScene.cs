@@ -48,14 +48,6 @@ internal class PausedScene : MenuSub1
 
 	public override void DrawMenu(GameTime gameTime, float yoffset)
 	{
-		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_003e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0064: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0073: Unknown result type (might be due to invalid IL or missing references)
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		base.DrawMenu(gameTime, yoffset + 75f);
 		Vector2 val = font.MeasureString("Paused..") / 2f + new Vector2(0f, 60f);
@@ -73,7 +65,6 @@ internal class PausedScene : MenuSub1
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
 		_ = base.GraphicsDevice.Viewport;
 		base.Draw(gameTime);
 	}

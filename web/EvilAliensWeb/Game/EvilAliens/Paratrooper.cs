@@ -78,7 +78,6 @@ internal class Paratrooper : GameScene
 
 	public override void Initialize()
 	{
-		//IL_0035: Unknown result type (might be due to invalid IL or missing references)
 		setPresence((GamerPresenceMode)14);
 		score.DisableCombos();
 		Collection.Add((GameComponent)(object)floor);
@@ -92,7 +91,6 @@ internal class Paratrooper : GameScene
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
 		base.Update(gameTime);
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
@@ -102,10 +100,6 @@ internal class Paratrooper : GameScene
 
 	protected override void UpdateNormal(GameTime gameTime)
 	{
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0127: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0145: Unknown result type (might be due to invalid IL or missing references)
 		base.UpdateNormal(gameTime);
 		brainzleft.Clear();
 		brainzright.Clear();

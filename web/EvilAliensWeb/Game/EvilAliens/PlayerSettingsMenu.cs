@@ -35,8 +35,6 @@ internal class PlayerSettingsMenu : MenuSub1
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
-		//IL_002d: Unknown result type (might be due to invalid IL or missing references)
 		if (darken)
 		{
 			base.SpriteBatch.Draw(black, new Rectangle(0, 0, 800, 600), new Color((byte)0, (byte)0, (byte)0, (byte)128));
@@ -55,11 +53,6 @@ internal class PlayerSettingsMenu : MenuSub1
 
 	private void drawPlayerSettings(int i, GameTime gameTime)
 	{
-		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0058: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00c5: Unknown result type (might be due to invalid IL or missing references)
 		float num = (General.SafeZone).Left;
 		float num2 = (float)((General.SafeZone).Right - (General.SafeZone).Left) / 4f;
 		num += num2 * ((float)i + 0.5f);
@@ -191,15 +184,6 @@ internal class PlayerSettingsMenu : MenuSub1
 
 	private float drawSetting(float x, float scale, float ystep, float y, string name, bool? value, bool selected, GameTime gameTime)
 	{
-		//IL_0063: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0068: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0011: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b0: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00b5: Unknown result type (might be due to invalid IL or missing references)
 		Color color;
 		if (selected)
 		{

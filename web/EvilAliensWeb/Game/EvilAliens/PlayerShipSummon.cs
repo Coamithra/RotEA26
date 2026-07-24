@@ -33,8 +33,6 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	public PlayerShipSummon(Game game)
 		: base(game)
 	{
-		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0017: Unknown result type (might be due to invalid IL or missing references)
 		LoadAnimation(new AnimationData("GFX/Game/blank"));
 		base.DrawOrder = 20;
 		timers.Add(countdowntimer);
@@ -64,8 +62,6 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 	public void Setup(int player, float spawndirection, Vector2 position, int respawntimebonus)
 	{
-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0033: Unknown result type (might be due to invalid IL or missing references)
 		this.spawndirection = spawndirection;
 		this.player = player;
 		base.Position = position;
@@ -90,13 +86,6 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		//IL_001d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0027: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0031: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0036: Unknown result type (might be due to invalid IL or missing references)
-		//IL_005b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0060: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006a: Unknown result type (might be due to invalid IL or missing references)
 		((DrawableGameComponent)effect).Draw(gameTime);
 		Vector2 origin = font.MeasureString(countdown.ToString()) * 1.2f / 2f;
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
@@ -105,16 +94,6 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		//IL_0042: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0095: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00bd: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00e5: Unknown result type (might be due to invalid IL or missing references)
-		//IL_016f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0133: Unknown result type (might be due to invalid IL or missing references)
-		//IL_013d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01b8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01c2: Unknown result type (might be due to invalid IL or missing references)
 		if (countdowntimer.Finished)
 		{
 			bool flag = true;

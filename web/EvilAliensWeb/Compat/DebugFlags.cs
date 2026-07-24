@@ -960,13 +960,20 @@ namespace EvilAliensWeb.Compat
 		public static int AiFastForward { get; private set; }
 
 		// AI steering/targeting knobs (card f4d1721f -- Game/EvilAliens/PlayerShip.cs). Null =>
-		// the baked PlayerShip.Default* consts, so a shipped build is byte-identical. A/B them
-		// against the ?aibench counters, then bake a settled value into the const.
+		// the baked value, so a shipped build is byte-identical. A/B them against the ?aibench
+		// counters, then bake a settled value in.
+		// NOTE (card c10e3e7f): "the baked value" is no longer always a single const. TWO knobs
+		// -- ?aifieldpx and ?aiaim -- resolve through PlayerShip.AiSkillByDifficulty, so their
+		// default depends on the tier the fight is being run at. An override here is still
+		// ABSOLUTE and wins over the tier row, which is what makes a per-tier A/B possible (and
+		// is how that table's values were chosen): pair it with ?difficulty=<tier>.
 		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
 		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
 		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
 		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
 		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
+		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
+		//                    (JunkBoss excepted -- it always gets exact aim)
 		public static float? AiSteerSmoothMs { get; private set; }
 
 		public static float? AiWallReactionMs { get; private set; }
@@ -977,9 +984,11 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiPriorityBias { get; private set; }
 
+		public static float? AiAimSpreadRad { get; private set; }
+
 		// The AI's personal-space field around a threat (PlayerShip.ThreatFieldRange /
 		// ThreatFieldStrength):
-		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull
+		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull            [per-tier]
 		//   ?aifieldsize=<f>   extra clearance per pixel of the threat's own half-extent
 		//   ?aifieldfall=<p>   exponent of the (1-t)^p falloff; higher = bites later and harder
 		// A big field with a FAST falloff is the point: the bot keeps well clear of something
@@ -1689,6 +1698,16 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aire) && aire >= 0f)
 					{
 						AiWallReactionMs = MathHelper.Min(aire, 3000f);
+					}
+					break;
+				case "aiaim":
+					// Radians, applied as RandomNextFloat(-aiaim, +aiaim) -- so this is the HALF
+					// width of the error arc and Pi (a full turn of spread) is a genuinely random
+					// shot. Capped there rather than lower because "fires in a random direction" is
+					// a legitimate skill FLOOR to A/B a tier row against, not a nonsense value.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaim) && aiaim >= 0f)
+					{
+						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.Pi);
 					}
 					break;
 				case "aigapmargin":

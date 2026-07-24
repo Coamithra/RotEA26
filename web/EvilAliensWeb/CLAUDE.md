@@ -728,8 +728,8 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
 
 One bot drives three things: the attract demos, the Mechanical-Friends cheat and `?aiplayer`.
 It lives entirely in `PlayerShip`: `DoAIFire` (target pick + `doAIBomb`), `DoAIMove` (steering),
-and the wall-navigation helpers. It is **difficulty-blind** by design -- it plays the same on Easy
-and Inzane; per-tier skill scaling is a separate follow-up.
+and the wall-navigation helpers. Two of its knobs are **difficulty-scaled** (card c10e3e7f, below);
+the rest are tier-independent.
 
 - **`Oracle.GetBaddies()` IS the AI's entire world model.** A type missing from that list is a type
   the bot can neither shoot nor dodge, silently. That was the root cause of two of the three
@@ -822,8 +822,40 @@ and Inzane; per-tier skill scaling is a separate follow-up.
   and pins the ship on the ceiling to be exploded by something spawning on it.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
+- **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
+  `CurrentDifficulty`.** `Demo1/2/3` call `LockDifficulty(Hard)` and `TutorialLevel` locks
+  `Very_Hard`; `LockDifficulty` only redirects `DifficultyModifier` (what the ENEMIES scale by)
+  while `CurrentDifficulty` keeps reporting the player's menu choice. Keying off the latter flies
+  an Easy-tier pilot against a Hard-tier attract demo for anyone whose saved setting is Easy --
+  invisible until someone changes their menu setting and wonders why the demo got worse. Anything
+  picking a tier for the LIVE fight wants `EffectiveDifficulty`; menus and the save file want
+  `CurrentDifficulty`. `DifficultyModifier` is wrong for this too: it ramps with elapsed play time
+  and adapts on death, so a bot keyed to it would silently get smarter the longer a run went on
+  and every `?aibench` number would become a function of run length.
+  - `PlayerShip.AiSkillByDifficulty[]` -- ABSOLUTE final values per tier (the
+    `WebcamLevel.Tunings[]` idiom: no modifier divisor, no within-run ramp). The **Very_Hard row
+    IS the `Default*` consts**, so the configuration card f4d1721f measured stays exactly where it
+    was measured. `?ai*` overrides still win over the row.
+  - The spread is deliberately **subtle**: a Mechanical Friend that visibly cannot play defeats
+    the point of having one. Expect the gradient to show in the readout and NOT to the eye.
+  - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
+    candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
+    not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
+    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`; but
+    **`?aireact` `420 -> 80ms` moved nothing** (contacts `0 -> 0`, turn `22 -> 18 deg/s`, progress
+    `7/8 -> 7/8`) and **`?aithreatlead` `700 -> 80ms` moved nothing** (deaths `11 -> 10`). Both
+    were dropped from the table rather than shipped as dials that do nothing.
+    **`contacts` cannot see wall look-ahead at all** -- `ClampIntoWallSpace` is a hard override
+    that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
+    either knob to the table without an instrument that can actually see it.
+  - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
+    tier (and Level3's wall SCROLL SPEED is `0.43 * GetDifficultyValue`), so an outcome delta
+    between tiers is unattributable. The non-confounded observation is the `eaAiBench()` line's
+    `skill effective=<tier> field= aim=` row, which reports the RESOLVED values; verifying the
+    attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
+    `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
-  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.world()`, `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.

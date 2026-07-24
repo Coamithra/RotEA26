@@ -87,6 +87,17 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   artifact cleanup — a harness or screenshot cannot prove what the hash proves, so don't build one
   for this class of change. It does **not** judge whether a new name is a *good* name; a
   misleading-but-compiling rename hashes identically, so name quality stays a human review job.
+- **A refactor that DELETES a local is a different problem — the hash oracle may not cover it.**
+  The default build keeps every local for the debugger, so removing one changes the IL.
+  `--optimize` folds dead temporaries away and restores the byte-identical claim for some of that
+  class, but not all: collapsing `bool num = held; held = num | X;` to `held |= X` moves the
+  `ldloc` across the neighbouring property read, and collapsing repeated `x.Position - y.Position`
+  recomputations removes real `get_Position` calls (Roslyn never CSEs a property call). For those,
+  the question is **"is the difference confined to the methods I edited"** — answered by
+  `python tools/verify_decompiled_diff.py --ref main`, which decompiles both assemblies and diffs
+  the C#. Caveat: ILSpy NORMALISES, so an absent method means "same construct", not "identical IL".
+  Never read a raw IL diff of such a change directly — deleting a local renumbers every later slot
+  and the diff mispairs them, inventing changes in code you never touched. Details: tools/CLAUDE.md.
 - **Never verify motion with timed live screenshots.** A raw screenshot is only valid for STATIC
   appearance; anything time-varying needs a parked/scrubbed frame or a data sim. If you genuinely
   must see it live, build a break/pause (`DebugFlags` seam) that freezes at the moment of interest.

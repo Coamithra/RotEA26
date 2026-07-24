@@ -169,13 +169,13 @@ public class CollisionHandler
 		for (int m = 0; m < count; m++)
 		{
 			colliders.Clear();
-			foreach (BoxInfo item in boxes[m])
+			foreach (BoxInfo cell in boxes[m])
 			{
-				foreach (ICollidable item2 in fieldMatrix[item.x, item.y])
+				foreach (ICollidable occupant in fieldMatrix[cell.x, cell.y])
 				{
-					if (!colliders.Contains(item2) && item2 != collidables[m])
+					if (!colliders.Contains(occupant) && occupant != collidables[m])
 					{
-						colliders.Add(item2);
+						colliders.Add(occupant);
 					}
 				}
 			}

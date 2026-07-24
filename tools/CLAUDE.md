@@ -17,6 +17,48 @@ a `blender` exe, the `../animgen` ComfyUI venv, `pymusiclooper`, PyAV. Raw sourc
 gitignored dirs (`new_assets_raw/`, `tools/*/source/`); the committed wwwroot artifacts are the
 products of record.
 
+## Refactor oracles — `verify_il_identical.py` / `verify_decompiled_diff.py`
+
+Neither is codegen; both only build + inspect, so they are safe to run any number of times.
+
+- **`verify_il_identical.py`** — the strong oracle: a cosmetic change must produce a byte-identical
+  `EvilAliensWeb.dll`. Covers renames. Full rules in root `CLAUDE.md`. **`--optimize`** (card
+  `0c624f9d`) additionally folds away dead stores and unused locals, which is what a refactor that
+  DELETES a local needs — the default Debug build keeps every local for the debugger, so a deleted
+  one changes the IL and the oracle would report DIFFERENT for a provably behaviour-preserving
+  change. It is strictly WEAKER (it also hides differences a rename could never introduce), so use
+  the default for a pure rename. Its own negative control: a clean tree plus one flipped constant
+  reports DIFFERENT under `--optimize`.
+- **`verify_decompiled_diff.py`** — the companion for changes the compiler legitimately DOES see:
+  collapsing `bool num = held; held = num | X;` to `held |= X` (the `ldloc` moves), or collapsing
+  four `x.Position - y.Position` recomputations into one local (Roslyn cannot CSE a property call).
+  It decompiles both assemblies and diffs the C#, reporting which members changed. The question it
+  answers is "is the difference CONFINED to what I edited", not "is it identical".
+  - **Read a raw IL diff of such a change at your peril** — deleting a local renumbers every later
+    slot, so `diff` mispairs `ldloc.s 53` with `ldloc.s 51` and drags in untouched code (measured:
+    317 bogus lines in `PlayerShip.DoAIMove`). Decompiling first makes slot numbers vanish.
+    If you do diff IL directly, normalise `// Method begins at RVA 0x…` away first — removing code
+    shifts every later method's RVA and otherwise reports thousands of false positives.
+  - **GOTCHA — ILSpy normalises, so this tool can hide a real difference.** Both `|=` shapes
+    decompile to the same C#, so that method simply does not appear in the report. An absent
+    method means "ILSpy considers these the same construct", NOT "the IL is identical" — only
+    `verify_il_identical.py` answers the latter. It also decompiles the dll IN PLACE so ILSpy can
+    resolve references; copying it somewhere isolated first yields noisier unresolved-type output
+    (`((GamePadState)(ref state)).Buttons`) with the transforms disabled.
+  - Its per-member attribution is the whole contract ("a member you did not touch appearing here
+    is the finding"), so it has **`--selftest`** (no build, no git — run it after touching the
+    regexes). At least one modifier is REQUIRED in the member pattern: relax it and `else if (…)`
+    parses as a member named `if`, and every later hunk files under it.
+
+**Decompiler-artifact cleanup: what has deliberately NOT been done.** Card `0c624f9d` collapsed
+ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated `x.Position - y.Position`
+temporaries. It left the neighbouring `GamePadButtons buttonsN = (state).Buttons;` temps in
+`InputHandler.UpdateKeyPads` alone — inlining them was tried and reverted, because removing those
+locals renumbers the slots and yields yet another non-identical hash for a bigger diff and no
+proof. Same for the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead initializers
+(~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`). Each is its
+own artifact class and its own card; don't fold them into an unrelated change.
+
 ## Shaders — `tools/shaders/`
 
 The lost `.fx` were rewritten in `src/` and compile offline to MGFX v10 GLSL `.mgfxo` via

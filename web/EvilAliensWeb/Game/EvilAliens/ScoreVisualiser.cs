@@ -146,7 +146,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	private Timer showPressStartTimer = new Timer(5000f, repeating: true);
 
-	private bool showPressStart = true;
+	// Empty-slot prompt rotation (was a bool "Player X" <-> "Press Start"). Card 2001fbd8
+	// makes it an index so a LISTED game can inject a third string "Room code: XYZAB" -- the
+	// beacon. Drawn as promptPhase % (listed ? 3 : 2); free-running mod 6 so both cycle cleanly.
+	private int promptPhase;
 
 	private int showPressStartTimes;
 
@@ -461,7 +464,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	{
 		oracle = ServiceHelper.Get<IOracleService>().Oracle;
 		base.Initialize();
-		showPressStart = true;
+		promptPhase = 0;
 		showPressStartTimes = 0;
 		showPressStartTimer.Reset();
 		showPressStartTimer.Stop();
@@ -601,13 +604,23 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			(color) = new Color(Vector4.Lerp(val, (aliceBlue).ToVector4(), num));
 			string text = i switch
 			{
-				0 => "Player 1", 
-				1 => "Player 2", 
-				2 => "Player 3", 
-				3 => "Player 4", 
-				_ => "Gah?", 
+				0 => "Player 1",
+				1 => "Player 2",
+				2 => "Player 3",
+				3 => "Player 4",
+				_ => "Gah?",
 			};
-			string str = ((!showPressStart) ? "Press Start" : text);
+			// Card 2001fbd8 beacon: while the game is listed online the rotation gains a third
+			// string carrying the room code, so a streamer can read it out on any cycle.
+			string code = EvilAliensWeb.Compat.Net.NetListing.RoomCode;
+			bool listed = EvilAliensWeb.Compat.Net.NetListing.Listed && !string.IsNullOrEmpty(code);
+			int phase = promptPhase % (listed ? 3 : 2);
+			string str = phase switch
+			{
+				1 => "Press Start",
+				2 => "Room code: " + code,
+				_ => text,
+			};
 			// Inactive-slot prompt: static chrome, never a sweep (no score to roll over). Shares the
 			// slot's primary-line cache key with the active-player score (only one is drawn per slot
 			// per frame; the dirty check rebuilds when a slot flips between prompt and score).
@@ -723,12 +736,22 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	public override void Update(GameTime gameTime)
 	{
+		// Beacon (card 2001fbd8): while listed online, keep the empty-slot prompt cycling
+		// forever (it carries the room code). ShowStartMessages normally stops it after 4
+		// cycles; if that already fired, restart it here the moment the game becomes listed.
+		bool listed = EvilAliensWeb.Compat.Net.NetListing.Listed;
+		if (listed && !showPressStartTimer.Active)
+		{
+			showPressStartTimes = 0;
+			showPressStartTimer.Reset();
+			showPressStartTimer.Start();
+		}
 		showPressStartTimer.Update(gameTime);
 		if (showPressStartTimer.Finished)
 		{
-			showPressStart = !showPressStart;
+			promptPhase = (promptPhase + 1) % 6;
 			showPressStartTimes++;
-			if (showPressStartTimes >= 4)
+			if (showPressStartTimes >= 4 && !listed)
 			{
 				showPressStartTimer.Stop();
 			}
@@ -811,7 +834,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	public void ShowStartMessages()
 	{
-		showPressStart = true;
+		promptPhase = 0;
 		showPressStartTimes = 0;
 		showPressStartTimer.Reset();
 		showPressStartTimer.Start();

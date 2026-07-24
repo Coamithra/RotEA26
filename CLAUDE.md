@@ -93,6 +93,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Level fast-boots** (replace a level's event list with one fight/section): `?spiderboss` ·
   `?spiders` · `?wallsonly` · `?brainboss` (bypasses the Hard+ gate). Pair with `?invuln`.
   e.g. `…:5280/?level=Level3&brainboss&invuln`.
+- **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
+  Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
+  so a debug-booted host still LISTS its game for the two-window join-in-progress test.
 - Dozens more per-feature tuning/diagnostic flags exist — see web CLAUDE.md ("Debug flags &
   tuning conventions" + each feature's bullet).
 

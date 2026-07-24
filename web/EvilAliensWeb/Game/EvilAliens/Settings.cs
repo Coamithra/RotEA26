@@ -80,6 +80,15 @@ public class Settings : Savable
 	// an existing Settings.xml without it deserializes to false.
 	public bool WebcamScreenshot;
 
+	// Public game browser (card 2001fbd8): while ON, starting/hosting an eligible game
+	// registers it with the signaling server so strangers can find + join it (see
+	// Compat/Net/NetListing). Cheekily DEFAULT ON. Because the field initializer runs in
+	// the constructor XmlSerializer calls, an existing Settings.xml without this element
+	// deserializes back to true (unlike WebcamScreenshot above, which has no initializer).
+	// This is the one place a single-player game now opens a socket to the server; the
+	// Options toggle + the pause-menu "Listed online" indicator are the mitigation.
+	public bool AllowOnlineJoins = true;
+
 	public float Scale = 1f;
 
 	public float Gamma = 1f;

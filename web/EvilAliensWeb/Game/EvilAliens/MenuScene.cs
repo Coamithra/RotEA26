@@ -144,6 +144,12 @@ internal class MenuScene : Scene
 
 	private MenuSub1 netPickMenu;
 
+	// Public game browser (card 2001fbd8): the "Join Online Game" carousel. browsingGames =
+	// the carousel is up and driving NetGameBrowser (before any game is picked).
+	private SubMenuOnlineGames onlineGamesMenu;
+
+	private bool browsingGames;
+
 	private bool netMode;
 
 	private bool netStatusShown;
@@ -307,6 +313,10 @@ internal class MenuScene : Scene
 		// the player's camera image, so it's off by default). See General.ScreenshotEnabled.
 		optionsMenu.AddEntry("Webcam Screenshots: " + boolToGameString(Settings.GetInstance().WebcamScreenshot));
 		optionsMenu.AddEntryEvent(optionsMenu_WebcamScreenshotSelected);
+		// Card 2001fbd8: while ON (default), an eligible game is listed online so strangers can
+		// join it (Compat/Net/NetListing). Easy to find + the pause menu shows the listed state.
+		optionsMenu.AddEntry("Allow Online Joins: " + boolToGameString(Settings.GetInstance().AllowOnlineJoins));
+		optionsMenu.AddEntryEvent(optionsMenu_AllowOnlineJoinsSelected);
 		// Reticle render mode: On = the reticle IS the OS cursor (zero-lag hardware); Off = the
 		// reticle is a sprite drawn in-game following the mouse. There's a reticle either way.
 		// See MousePointer / Settings.HWMouse. (Handler: optionsMenu_HWMouseSelected.)
@@ -384,11 +394,17 @@ internal class MenuScene : Scene
 		netMenu = new MenuSub1(base.Game);
 		netMenu.AddEntry("Host Game");
 		netMenu.AddEntryEvent(netMenu_HostSelected);
-		netMenu.AddEntry("Join Game");
+		netMenu.AddEntry("Join by Code");
 		netMenu.AddEntryEvent(netMenu_JoinSelected);
+		// Card 2001fbd8: browse + join OPEN games without needing a code over a call.
+		netMenu.AddEntry("Join Online Game");
+		netMenu.AddEntryEvent(netMenu_JoinOnlineSelected);
 		netMenu.AddEntry("Back");
 		netMenu.AddEntryEvent(netMenu_BackSelected);
 		netMenu.OnExit += netMenu_BackSelected;
+		onlineGamesMenu = new SubMenuOnlineGames(base.Game);
+		onlineGamesMenu.OnGameSelected += onlineGames_GameSelected;
+		onlineGamesMenu.OnExit += onlineGames_BackSelected;
 		netStatusMenu = new NetStatusMenu(base.Game, "");
 		netStatusMenu.AddEntry("Cancel");
 		netStatusMenu.AddEntryEvent(netStatus_CancelSelected);
@@ -716,6 +732,12 @@ internal class MenuScene : Scene
 		sender.SetEntry("Webcam Screenshots: " + boolToGameString(Settings.GetInstance().WebcamScreenshot));
 	}
 
+	private void optionsMenu_AllowOnlineJoinsSelected(MenuSub1 sender)
+	{
+		Settings.GetInstance().AllowOnlineJoins = !Settings.GetInstance().AllowOnlineJoins;
+		sender.SetEntry("Allow Online Joins: " + boolToGameString(Settings.GetInstance().AllowOnlineJoins));
+	}
+
 	private void optionsMenu_MusicSelected(MenuSub1 sender)
 	{
 		Settings.GetInstance().PlayMusic = !Settings.GetInstance().PlayMusic;
@@ -990,6 +1012,46 @@ internal class MenuScene : Scene
 		mainMenu.Show();
 	}
 
+	// Card 2001fbd8: open the public game browser. NetGameBrowser opens the browse socket;
+	// the carousel reads its list. NetUpdate ticks the browser and skips the lobby-status
+	// logic until a game is picked (browsingGames).
+	private void netMenu_JoinOnlineSelected(MenuSub1 sender)
+	{
+		netMenu.Remove();
+		browsingGames = true;
+		EvilAliensWeb.Compat.Net.NetGameBrowser.Start();
+		onlineGamesMenu.Show();
+	}
+
+	// A game was picked from the carousel: join its code through the normal 11.4 flow (the
+	// host is mid-level, so it becomes join-in-progress). Leaving browse mode lets NetUpdate's
+	// lobby-status logic take over.
+	private void onlineGames_GameSelected(string code)
+	{
+		browsingGames = false;
+		EvilAliensWeb.Compat.Net.NetGameBrowser.Stop();
+		onlineGamesMenu.RemoveInstantly();
+		EvilAliensWeb.Compat.Net.NetLobby.JoinWithCode(base.Game, code);
+		ShowNetStatus("Connecting...");
+	}
+
+	private void onlineGames_BackSelected(MenuSub1 sender)
+	{
+		browsingGames = false;
+		EvilAliensWeb.Compat.Net.NetGameBrowser.Stop();
+		onlineGamesMenu.Remove();
+		if (DebugFlags.GameBrowser)
+		{
+			// The ?gamebrowser boot has no netMenu behind it -- return to the main menu.
+			netMode = false;
+			mainMenu.Show();
+		}
+		else
+		{
+			netMenu.Show();
+		}
+	}
+
 	private void netStatus_CancelSelected(MenuSub1 sender)
 	{
 		HideNetStatus();
@@ -1051,9 +1113,12 @@ internal class MenuScene : Scene
 		HideNetStatus();
 		netMenu.RemoveInstantly();
 		netPickMenu.RemoveInstantly();
+		onlineGamesMenu.RemoveInstantly();
 		levelSelector.RemoveInstantly();
 		challengeSelector.RemoveInstantly();
 		difficultyMenu.RemoveInstantly();
+		EvilAliensWeb.Compat.Net.NetGameBrowser.Stop();
+		browsingGames = false;
 		EvilAliensWeb.Compat.Net.WebRtcInterop.ClosePrompt();
 	}
 
@@ -1081,6 +1146,13 @@ internal class MenuScene : Scene
 		}
 		if (!netMode || netNoticeUp)
 		{
+			return;
+		}
+		if (browsingGames)
+		{
+			// The carousel owns the screen: drain the browser's room list + pings. The lobby
+			// status logic below stays parked until a game is picked (onlineGames_GameSelected).
+			EvilAliensWeb.Compat.Net.NetGameBrowser.Tick();
 			return;
 		}
 		EvilAliensWeb.Compat.Net.NetLobby.Tick();
@@ -1302,7 +1374,16 @@ internal class MenuScene : Scene
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
 		currentBackdropSize = MathHelper.Max(800f / (float)backdrop.LogicalWidth(), 600f / (float)backdrop.LogicalHeight());
 		originalBackdropSize = currentBackdropSize;
-		if (!hidemainmenu)
+		if (DebugFlags.GameBrowser)
+		{
+			// ?gamebrowser: boot straight into the online-game carousel with injected fake
+			// entries (no server, no WebRTC) so its appearance can be screenshotted.
+			EvilAliensWeb.Compat.Net.NetGameBrowser.InjectFakeGames();
+			netMode = true;
+			browsingGames = true;
+			onlineGamesMenu.Show();
+		}
+		else if (!hidemainmenu)
 		{
 			Collection.Add((GameComponent)(object)mainMenu);
 		}

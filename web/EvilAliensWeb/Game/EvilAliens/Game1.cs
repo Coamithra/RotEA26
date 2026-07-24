@@ -994,6 +994,10 @@ public class Game1 : Game
 			// tick (never from JS callbacks). Placed before the level-warm early-return so
 			// heartbeats keep flowing while a launch is warming. A single branch when inactive.
 			EvilAliensWeb.Compat.Net.NetSession.Update();
+			// Card 2001fbd8: keep the public-game listing in step with the running game
+			// (open/update/close the listing, drain its phase callbacks, start a session on a
+			// join-in-progress pairing). A plain boot has no GameScene up, so it early-returns.
+			EvilAliensWeb.Compat.Net.NetListing.Tick((Game)(object)this);
 			// A pending level launch takes warm priority (and excludes the other
 			// queues that tick, so a tick never pays two decodes).
 			if (pendingLevelLaunch != null)

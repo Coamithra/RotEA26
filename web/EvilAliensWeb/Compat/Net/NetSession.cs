@@ -175,6 +175,12 @@ namespace EvilAliensWeb.Compat.Net
 
         // Card 11.4 session-flow state.
         private static bool menuSession;      // started from the menu lobby (match-end semantics apply)
+        // Card 2001fbd8: a HOST session that spun up mid-level when a stranger joined our
+        // LISTED single-player game (join-in-progress). Like a menu session it is exactly two
+        // peers with a clean end, but its peer-loss is different: the joiner leaving reverts
+        // the host to plain single-player (NetListing re-lists) rather than force-exiting the
+        // host's own level. Always host-side (the joiner is a normal menu-session client).
+        private static bool listedSession;
         private static ulong localBuildHash;
         // Reject-in-progress (see RejectGraceMs): NowMs deadline at which we Stop() after
         // having queued a reliable MsgReject, and the notice to surface then. 0 = not
@@ -205,7 +211,7 @@ namespace EvilAliensWeb.Compat.Net
             INetTransport t = DebugFlags.NetRtc
                 ? (INetTransport)new WebRtcTransport(attachOnly: false)
                 : new BroadcastChannelTransport();
-            StartWith(g, DebugFlags.NetRole == NetRole.Host, t, DebugFlags.NetRoom, asMenuSession: false);
+            StartWith(g, DebugFlags.NetRole == NetRole.Host, t, DebugFlags.NetRoom, asMenuSession: false, asListedSession: false);
         }
 
         // Menu-lobby path (card 11.4) -- called by NetLobby once the DataChannels are up.
@@ -215,10 +221,24 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            StartWith(g, host, t, room, asMenuSession: true);
+            StartWith(g, host, t, room, asMenuSession: true, asListedSession: false);
         }
 
-        private static void StartWith(Game g, bool host, INetTransport t, string room, bool asMenuSession)
+        // Join-in-progress path (card 2001fbd8) -- called by NetListing when a stranger pairs
+        // with our LISTED single-player game. Always the HOST, mid-level: the running
+        // GameScene is already up (NetActiveScene set), so PeerConnected sends the joiner an
+        // EvLaunch into our level + replays the live world; the joiner is a normal menu-session
+        // client that mirrors the launch.
+        public static void StartListedSession(Game g, INetTransport t, string room)
+        {
+            if (Active)
+            {
+                return;
+            }
+            StartWith(g, host: true, t, room, asMenuSession: false, asListedSession: true);
+        }
+
+        private static void StartWith(Game g, bool host, INetTransport t, string room, bool asMenuSession, bool asListedSession)
         {
             game = g;
             oracle = ServiceHelper.Get<IOracleService>().Oracle;
@@ -227,6 +247,7 @@ namespace EvilAliensWeb.Compat.Net
             score = ServiceHelper.Get<IScoreService>().Score;
             isHost = host;
             menuSession = asMenuSession;
+            listedSession = asListedSession;
             // ?netfakehash=<s> makes this tab disagree with its peer on the build hash, driving
             // the real peerHash-mismatch -> SendRejectOnce path on the dev rig (both dev tabs
             // otherwise read 'dev'). Null/empty = the genuine published fingerprint. Dev-only.
@@ -264,7 +285,7 @@ namespace EvilAliensWeb.Compat.Net
             Console.WriteLine("[net] session start role=" + (isHost ? "host" : "join")
                 + " room=" + room + " protocol=v" + ProtocolVersion
                 + " transport=" + (t is BroadcastChannelTransport ? "BroadcastChannel" : "WebRTC")
-                + (menuSession ? " (menu lobby)" : ""));
+                + (menuSession ? " (menu lobby)" : listedSession ? " (join-in-progress)" : ""));
         }
 
         // End the session entirely (card 11.4): match over, peer rejected, or lobby
@@ -320,6 +341,7 @@ namespace EvilAliensWeb.Compat.Net
             recentDeathOrder.Clear();
             pendingLaunchHas = false;
             peerByeQueued = false;
+            listedSession = false;
             pendingStopAt = 0;
             pendingStopNotice = null;
             if (notice != null)
@@ -461,7 +483,11 @@ namespace EvilAliensWeb.Compat.Net
 
         private static byte LocalHelloFlags()
         {
-            return DebugFlags.Active ? NetProtocol.HelloFlagDebugActive : (byte)0;
+            // ?netjip is a deliberate two-window JIP test bypass: a host booted with ?level=
+            // has DebugFlags.Active, which a clean menu-session joiner would reject -- so a
+            // ?netjip boot presents as clean. Every real listed host has no debug flags anyway
+            // (NetListing's eligibility refuses them unless ?netjip is set).
+            return (DebugFlags.Active && !DebugFlags.NetJip) ? NetProtocol.HelloFlagDebugActive : (byte)0;
         }
 
         // GameScene lifecycle edges (card 11.4): the client announces its scene coming up
@@ -485,8 +511,11 @@ namespace EvilAliensWeb.Compat.Net
                     metrics.EventsTx++;
                 }
             }
-            else if (menuSession)
+            else if (menuSession || listedSession)
             {
+                // Our own level ended / we quit: tell the peer and end the match. For a JIP
+                // host this fires when its level finishes; the joiner (menu session) then
+                // exits to its menu with a notice.
                 if (PeerUp)
                 {
                     transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvLeave));
@@ -1052,6 +1081,23 @@ namespace EvilAliensWeb.Compat.Net
             Console.WriteLine("[net] peer connected (" + (isHost ? "join" : "host") + " side is up)");
             if (isHost)
             {
+                if (listedSession)
+                {
+                    // Join-in-progress: the joiner paired with our LISTED game while we are
+                    // already mid-level. Launch it into our current level+difficulty (it is a
+                    // menu-session client that mirrors EvLaunch); its EvReady then triggers the
+                    // live-world replay below, and the 1 Hz EvScoreSync trues up score/lives.
+                    // Deeper mid-level state (background op / music cue) is a known JIP gap.
+                    GameScene scene = GameScene.NetActiveScene;
+                    if (scene != null)
+                    {
+                        transport.SendReliable(NetProtocol.EncodeLaunchEvent(txEventSeq++,
+                            (byte)scene.Level, (byte)Settings.GetInstance().CurrentDifficulty));
+                        metrics.EventsTx++;
+                        Console.WriteLine("[net] jip launch level=" + scene.Level
+                            + " difficulty=" + Settings.GetInstance().CurrentDifficulty);
+                    }
+                }
                 // Late joiner: replay the live NetId set so it can construct the already-
                 // alive world instead of starting from a death-before-spawn storm.
                 NetIdRegistry.ReplayLive();
@@ -1103,6 +1149,21 @@ namespace EvilAliensWeb.Compat.Net
                 bool normalEnd = scene != null && scene.NetEndingNormally;
                 Stop("peer lost: " + reason, normalEnd ? null : "The other player disconnected\nMatch ended");
                 scene?.NetApplyPeerLeft();
+                return;
+            }
+            if (listedSession)
+            {
+                // The JIP joiner dropped: revert the host to plain single-player. Explode the
+                // puppet ship AND free the Remote player slot (else oracle.Players stays 2 and
+                // the host is never re-listed + a phantom score lingers), tear the session down.
+                // The host keeps playing its level; NetListing re-lists next tick. No
+                // force-exit -- the host was here first.
+                if (puppet != null)
+                {
+                    ExplodePuppet();
+                }
+                oracle.ReleasePlayer(ControlDevice.Remote);
+                Stop("jip peer lost: " + reason);
                 return;
             }
             remoteAlive = false;
@@ -1437,6 +1498,19 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvLeave:
             {
+                if (listedSession)
+                {
+                    // A JIP joiner left the match: revert the host to single-player (explode
+                    // the puppet + free the Remote slot so Players==1 again), keep the host in
+                    // its level. NetListing re-lists next tick.
+                    if (puppet != null)
+                    {
+                        ExplodePuppet();
+                    }
+                    oracle.ReleasePlayer(ControlDevice.Remote);
+                    Stop("jip peer left the match");
+                    break;
+                }
                 // A shared victory/game-over also lands here (whichever scene terminates
                 // first sends the leave) -- that's a normal end, not a walk-out; no notice.
                 GameScene scene = GameScene.NetActiveScene;

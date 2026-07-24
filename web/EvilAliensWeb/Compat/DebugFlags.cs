@@ -939,6 +939,14 @@ namespace EvilAliensWeb.Compat
 		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
 		public static int NetLocal { get; private set; }
 
+		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop the next EvSlotGrant the
+		// host answers a couch join with, instead of seating it. That is the one state the host's
+		// ExpireUnclaimedGrants path exists for (the client can silently fail to take a grant: its
+		// device got seated meanwhile, its scene changed) and the ONLY thing that reaches it --
+		// ?netlocal always takes its grant, so without this flag the expiry has no trigger at all
+		// and the seat-leak it guards against is untestable. Shipped builds are unchanged.
+		public static bool NetDropGrant { get; private set; }
+
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
 		// INBOUND traffic by Compat/Net/NetImpairment so the drop-tolerance paths cards
 		// 11.1-11.3 built actually get exercised. ?netlag=<ms> (0-500) delays both lanes;
@@ -1591,6 +1599,9 @@ namespace EvilAliensWeb.Compat
 						NetLocal = (int)MathHelper.Clamp(nloc, 0, 3);
 					}
 					break;
+				case "netdropgrant":
+					NetDropGrant = IsOn(val);
+					break;
 				case "gamebrowser":
 					GameBrowser = IsOn(val);
 					if (GameBrowser)
@@ -1848,6 +1859,7 @@ namespace EvilAliensWeb.Compat
 							+ (AIPlayer ? " aiplayer" : "")
 						+ (NetScript ? " netscript" : "")
 						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
+						+ (NetDropGrant ? " netdropgrant" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

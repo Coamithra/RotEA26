@@ -286,6 +286,36 @@ namespace EvilAliensWeb.Compat
 			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
 		}
 
+		// JS bridge for the on-demand roster dump (eaNetRoster in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster'). Prints the same roster=
+		// string the 5s [net] metrics line carries, plus resets=, at the instant it is called.
+		// Written for the reset-with-couch-players gate (card af0eb00a): the assertion is
+		// before-vs-after a ~2.7s reset, which the metrics cadence can straddle entirely.
+		[JSInvokable("debugNetRoster")]
+		public static string NetRoster()
+		{
+			return EvilAliensWeb.Compat.Net.NetSession.RosterDump();
+		}
+
+		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin'). Makes the same
+		// NetSession.TrySeatLocalJoin call a real gamepad Start press makes, so it works
+		// BEFORE a peer has paired -- which ?netlocal cannot do, being gated behind PeerUp
+		// (correctly: pre-pairing, AllocateSeat cannot yet know which seat the joiner needs).
+		// That pre-pairing window is the only way to fill the roster before a joiner arrives,
+		// i.e. the sole trigger for the host's RejectFull path (card af0eb00a).
+		[JSInvokable("debugNetCouchJoin")]
+		public static string NetCouchJoin()
+		{
+			if (!EvilAliensWeb.Compat.Net.NetSession.Active)
+			{
+				return "[debug] eaNetCouchJoin: no net session (needs a ?net= boot)";
+			}
+			EvilAliensWeb.Compat.Net.NetSession.DebugCouchJoin();
+			return "[debug] eaNetCouchJoin requested -- "
+				+ EvilAliensWeb.Compat.Net.NetSession.RosterDump();
+		}
+
 		// JS bridge for the live colorize-tuner slider panel (eaHue in wwwroot/index.html,
 		// shown on the ?harness=battleskull page): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetHue', start, end, target, trackHp, cycle, loop). Overrides the BattleSkull

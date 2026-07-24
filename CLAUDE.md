@@ -159,6 +159,18 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   still win, which is how the per-tier values were chosen. Very_Hard == the previous constants.
   Details + the AI's own gotchas (its world model is `Oracle.GetBaddies`; a low jitter score
   alone can mean the bot is wedged, not smooth): web CLAUDE.md.
+- **AI completion sweep** (card 9391f95a): **`eaAiBench.matrix()`** runs the whole "can the bot
+  finish it" matrix unattended — one FRESH page load per run (plan in `sessionStorage`, resumed
+  at boot), so no run inherits another's locked difficulty, lives or RNG. `.results()`
+  `.status()` `.stop()`; never `await` it (each run outlives a single devtools eval).
+  **`?aiteam`** seats TeamChallenge's second slot as `Generic` instead of `PadOne` — without it
+  that level cannot be BENCHED at all, because a seated-but-disconnected pad makes
+  `GameScene.Update` force-pause every tick. Pair it with `?aiplayer`: `PlayerShip` has no
+  `Generic` input case, so the flag alone leaves that ship inert (it is a bench seam, not a fix
+  for TeamChallenge being unplayable without a gamepad — that is its own card). **Eight of the
+  nine challenge levels run with `score.Lives = -1`, so `GAME OVER` is unreachable on them** —
+  failure shows up as the sweep's third verdict, `TIMEOUT`, never as a bad verdict. Keep the tab
+  FOREGROUNDED (each run's boot is rAF-paced). Matrix + per-level caveats: web CLAUDE.md.
 
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live

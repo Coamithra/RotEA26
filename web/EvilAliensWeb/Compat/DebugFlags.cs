@@ -946,6 +946,19 @@ namespace EvilAliensWeb.Compat
 		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
 		public static bool AIPlayer { get; private set; }
 
+		// ?aiteam (card 9391f95a): seat TeamChallenge's SECOND slot as ControlDevice.Generic
+		// instead of ControlDevice.PadOne, so the level can be BENCHED. GameScene.Update raises
+		// pauseRequested every tick a seated pad device reads !InputHandler.PadConnected(i), so
+		// with no gamepad attached an unattended soak sits in the pause menu forever at prog=0
+		// with nothing saying why; Generic has no such connected-check.
+		// PAIR IT WITH ?aiplayer -- this flag does NOT by itself give that slot a driver.
+		// PlayerShip.Update's controller switch has no ControlDevice.Generic case (the device
+		// only appears in menu/pause/join paths), so a Generic-seated ship never steers and never
+		// fires; what moves it is ?aiplayer forcing every local ship onto the AI branch through
+		// EffectiveController. It is therefore a bench seam, NOT a fix for TeamChallenge being
+		// unplayable without a pad -- that needs a real input case and has its own card. In Active.
+		public static bool AiTeam { get; private set; }
+
 		// ?aibench (card f4d1721f): AI telemetry -- wall contacts (counted even under ?invuln),
 		// the heading-reversal jitter rate, fire-decision idleness and the level-script progress
 		// + run verdict. Pair with ?aiplayer. Console: eaAiBench(). See Compat/AiBench.cs.
@@ -1685,6 +1698,9 @@ namespace EvilAliensWeb.Compat
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
+				case "aiteam":
+					AiTeam = IsOn(val);
+					break;
 				case "aibench":
 					AiBench = IsOn(val);
 					break;
@@ -2037,7 +2053,7 @@ namespace EvilAliensWeb.Compat
 			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
 			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
 			// refuses Demo1/2/3, so it can never advertise an attract demo.
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || AiTeam || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2053,6 +2069,7 @@ namespace EvilAliensWeb.Compat
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
+								+ (AiTeam ? " aiteam" : "")
 								+ (AiBench ? " aibench" : "")
 								+ (AiFastForward > 1 ? " aiff=" + AiFastForward : "")
 						+ (NetScript ? " netscript" : "")

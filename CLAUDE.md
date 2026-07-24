@@ -129,6 +129,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   headroom, and only trust either with the window FOCUSED.** Details: web CLAUDE.md.
 - Level fast-boot added with it: `?level=Level2&flyspiders` (dense flying-spider swarm;
   `=fg` for the un-flattened foreground variant).
+- **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
+  mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
+  A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.
 - Dozens more per-feature tuning/diagnostic flags exist — see web CLAUDE.md ("Debug flags &
   tuning conventions" + each feature's bullet).
 

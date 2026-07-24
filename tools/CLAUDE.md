@@ -69,6 +69,18 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   border and not at the (correctly clamped) source rect, so bilinear still reaches one texel past
   it; a transparent texel there is a hairline seam on every tiled sprite (web CLAUDE.md, Trello
   `4ddcd13f`). Every entry needs a real source PNG — a stale line aborts the whole run.
+  **A trailing `mip` on a `dxt` config line adds a full mip chain** (card `110153c7`; only
+  `gfx/base/756-v1` takes it — a tower shaft spends ~10.8 cells of it, so its far end minifies
+  hard and bilinear alone shimmers as the wall scrolls). It is opt-in because mipping all ~124
+  `.dds` would cost ~33% more bytes and soften every minified sprite. **The chain is built PER
+  LEVEL, not by `texconv -m 0`** — each level downsamples the LOGICAL image, pads *that* to the
+  level's padded size and re-runs `edge_gutter()`, then the levels are compressed separately and
+  spliced. Handing texconv the padded canvas instead filters the pad along WITH the content, so
+  the levels blend real pixels into transparent pad near the logical edge: measured on 756-v1, a
+  4 px gutter survives `log2(4)=2` levels and then fails hard (alpha delta 0/0/0 at levels 0–2,
+  then 127/191/223 at 3/4/5). The full chain must be shipped — KNI allocates every level and GL
+  needs a mipmap-COMPLETE texture, so a short chain renders black.
+  **Rebuild one asset with `--only <glob>`** rather than rewriting all ~124 committed `.dds`.
   **Rebuild with `--padtest 100`, not the bare default.** The shipped `.dds` deliberately carry the
   over-pad canary (web CLAUDE.md, "The canary is LEFT ON"), but `--padtest` DEFAULTS TO 0 — so a
   plain `python tools/textures/build_textures.py` silently strips it off every texture it touches
@@ -78,7 +90,10 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   asserts the texel just outside the logical edge still matches the edge (alpha-weighted, and
   calibrated per texture against its own column-to-column step, so BC3 noise doesn't cry wolf).
   **Run it after every `build_textures.py` rebuild** — a pass means bilinear at the logical edge is
-  indistinguishable from a true clamp, so no pad-bleed seam is possible at any pad size.
+  indistinguishable from a true clamp, so no pad-bleed seam is possible at any pad size. It checks
+  **every mip level**, not just level 0 (decoding a level by re-heading its blocks as a standalone
+  single-level DDS, so Pillow's decoder is reused verbatim); that is what catches a chain built the
+  naive `-m 0` way, which passes levels 0–2 and fails from level 3.
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,
@@ -151,7 +166,21 @@ step/min/max in sync with `MousePointer` if `SIZES` changes.
   live wall scrolls; a backgrounded tab's canvas is black). `--mirror` reproduces the pre-card
   0f7fc977 side texturing (one cell, mirrored about the rim), `--tile <f>` previews a candidate
   `Wall.DefaultSideTile`, `--compare` writes the before/after A/B and `--ladder` one tower per
-  tiling (how the no-mip aliasing grows with density) — both opt-in, each roughly doubles the run.
+  tiling, bilinear-only on top and trilinear below — both opt-in, each roughly doubles the run.
+  **Trilinear over the mip pyramid is now the DEFAULT** -- that is what the shipped mipped
+  `756-v1.dds` gets, so a bare run models the real game; **`--nomips`** gives the pre-card
+  bilinear-only look, named and polarised to match the game's own `?nomips` flag.
+  Its LOD comes from screen-space UV derivatives, and those MUST be taken on the *unwrapped* cell
+  walk: differencing after the `% 8` wrap steps a whole sheet at every crossing and would slam
+  that pixel row to the coarsest level, which looks exactly like a seam.
+  **`--shimmer` measures aliasing as a NUMBER** (mean per-pixel temporal stddev over a sub-pixel
+  scroll sweep, per tiling, with and without mips). The card's complaint is a shimmer *under
+  scroll*, which no still frame can show, so this is the honest read. Measured: bilinear worsens
+  with density (4.15 / 6.26 / 8.21 / 9.93 at tile 1/2/4/8) while trilinear stays flat (~1.2-1.8),
+  i.e. mips at the baked tile 4 beat bilinear at *any* tiling. **Score SHAFT pixels only** -- the
+  tops are an axis-aligned blit that snaps to whole pixels, so they jitter by an equal,
+  mode-independent amount that would dilute the measurement (`render(want_mask=True)`), and pass
+  the SAME mask to both modes.
   Its `sample()` is BILINEAR CLAMP, modelling `DrawGeometry3D`'s `LinearClamp` exactly: point
   sampling would invent a moire the GPU does not show, wrapping would prettify the sheet's own
   8→0 wrap. `SIDE_TILE` mirrors `Wall.DefaultSideTile`; re-bake one, update the other.

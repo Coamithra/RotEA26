@@ -167,7 +167,8 @@ namespace EvilAliensWeb.Compat
 
         // Load a precompiled DXT/BCn texture from <key>.dds if one was shipped, else
         // return null so the caller falls back to the .png. Built offline by
-        // tools/textures/build_dxt.py (texconv, BC3_UNORM, no mips, straight alpha).
+        // tools/textures/build_textures.py (texconv, BC3_UNORM, straight alpha; mips only for
+        // assets whose config line carries the "mip" keyword — see the level loop below).
         // Parses only the legacy FourCC DDS header (DXT1/3/5 -> a Dxt SurfaceFormat) and
         // uploads the block bytes straight to the GPU via the compressed path. Any
         // problem (missing file, odd header, unsupported format) yields null + the PNG.
@@ -201,8 +202,53 @@ namespace EvilAliensWeb.Compat
                     _ => throw new NotSupportedException($"DDS FourCC 0x{fourcc:X8} (need DXT1/3/5, no DX10 header)")
                 };
                 const int headerLen = 128; // legacy DDS_HEADER; we never emit the DX10 extension
-                var tex = new Texture2D(GraphicsDevice, width, height, false, fmt);
-                tex.SetData(0, null, data, headerLen, data.Length - headerLen);
+                // Mip chain (build_textures.py's "mip" config keyword). dwMipMapCount is 0 or 1
+                // on the unmipped siblings, which keeps the original single-level path exactly.
+                // KNI derives the GL min filter from LevelCount > 1, so uploading the levels is
+                // all trilinear needs — SamplerState.LinearClamp already maps Linear to
+                // LINEAR_MIPMAP_LINEAR once the texture has them. NPOT + mips needs WebGL 2,
+                // which BlazorGL uses.
+                int levels = Math.Max(1, BitConverter.ToInt32(data, 28));
+                if (DebugFlags.NoMips)
+                    levels = 1;
+                // A PARTIAL chain is worse than none: KNI allocates CalculateMipLevels(w,h) levels
+                // whenever mipMap is true, and GL only samples a mipmap-COMPLETE texture, so
+                // uploading fewer would render solid black rather than degrade. Demand the full
+                // chain or fall back to the PNG.
+                if (levels > 1)
+                {
+                    int full = 1;
+                    for (int m = Math.Max(width, height); m > 1; m /= 2)
+                        full++;
+                    if (levels != full)
+                        throw new InvalidDataException(
+                            $"mip chain has {levels} levels, need the full {full} for {width}x{height}");
+                }
+                int blockBytes = fmt == SurfaceFormat.Dxt1 ? 8 : 16;
+                var tex = new Texture2D(GraphicsDevice, width, height, levels > 1, fmt);
+                try
+                {
+                    int offset = headerLen;
+                    for (int level = 0; level < levels; level++)
+                    {
+                        // Level dims are floor-halved with a floor of 1 (TextureHelpers.GetSizeForLevel),
+                        // and each level's payload is exactly ceil(w/4)*ceil(h/4) blocks — the DDS
+                        // layout, which is also what Texture2D.SetData validates elementCount against.
+                        int lw = Math.Max(width >> level, 1);
+                        int lh = Math.Max(height >> level, 1);
+                        int bytes = ((lw + 3) / 4) * ((lh + 3) / 4) * blockBytes;
+                        if (offset + bytes > data.Length)
+                            throw new InvalidDataException(
+                                $"truncated mip chain: level {level} ({lw}x{lh}) needs {bytes} B at {offset}, file is {data.Length} B");
+                        tex.SetData(level, null, data, offset, bytes);
+                        offset += bytes;
+                    }
+                }
+                catch
+                {
+                    tex.Dispose();   // else a half-uploaded GPU texture leaks on the PNG fallback
+                    throw;
+                }
                 // build_textures.py pads dxt siblings up to a mult-of-4 and stamps the logical
                 // (pre-pad) size into reserved1[0..2] (offsets 32/36 = w/h, 40 = "LOGD" marker).
                 // Register it so every consumer uses the logical size, not the padded upload size.

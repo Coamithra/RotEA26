@@ -145,6 +145,17 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   headroom, and only trust either with the window FOCUSED.** Details: web CLAUDE.md.
 - Level fast-boot added with it: `?level=Level2&flyspiders` (dense flying-spider swarm;
   `=fg` for the un-flattened foreground variant).
+- **AI bench** (card f4d1721f): `?aibench` turns on telemetry for the `ControlDevice.AI` ships —
+  wall contacts (counted even under `?invuln`), the heading-reversal jitter pair, `idle%`,
+  level progress and the run verdict. **Soak it HEADLESSLY with `eaAiBench.soak(<simSeconds>)`**
+  (ticks the real loop at a fixed 60Hz dt with no Draw) — a backgrounded tab throttles rAF *and*
+  MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
+  fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
+  `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aithreatlead= ?aibossbias=
+  ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with `?aiplayer`.
+  Details + the AI's own gotchas (its world model is `Oracle.GetBaddies`; a low jitter score
+  alone can mean the bot is wedged, not smooth): web CLAUDE.md.
+
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

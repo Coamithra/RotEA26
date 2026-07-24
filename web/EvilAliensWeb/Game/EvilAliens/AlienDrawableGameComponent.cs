@@ -197,6 +197,15 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	private Vector2 _position = Vector2.Zero;
 
+	// See the Update() comment: measured movement per ms, the AI's only trustworthy velocity.
+	private Vector2 _prevPosition;
+
+	private Vector2 _observedVelocity;
+
+	private bool _hasPrevPosition;
+
+	internal Vector2 ObservedVelocity => _observedVelocity;
+
 	private float _minimumSpeed;
 
 	private float _maximumSpeed;
@@ -446,7 +455,22 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 			timer.Update(gameTime);
 		}
-		Vector2 step = MyMath.AngleToVector(_direction) * _speed * Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
+		// Observed velocity (card f4d1721f): how far this thing ACTUALLY moved last tick, in
+		// px/ms. SpeedVector is derived from _speed/_direction and lies for every type that
+		// writes Position directly -- which includes SpiderBoss's screen-crossing fly states, the
+		// single most important thing for the AI to predict. Sampled at the TOP of Update so it
+		// covers a whole previous tick regardless of whether the mover ran before or after
+		// base.Update. (Same reasoning as the net layer's observed velocity, kept independent of
+		// it because the AI must work with no session up. A frozen net puppet never Updates, so
+		// this stays zero for one -- correct, since its owner drives it.)
+		float dtMs = Convert.ToSingle(gameTime.ElapsedGameTime.TotalMilliseconds);
+		if (_hasPrevPosition && dtMs > 0f)
+		{
+			_observedVelocity = (_position - _prevPosition) / dtMs;
+		}
+		_prevPosition = _position;
+		_hasPrevPosition = true;
+		Vector2 step = MyMath.AngleToVector(_direction) * _speed * dtMs;
 		_position += step;
 		float span = ActiveLastFrame - FirstFrame;
 		if (span <= 0f)

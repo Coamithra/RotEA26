@@ -181,6 +181,14 @@ internal class GameEventList
 		}
 	}
 
+	// AI bench (card f4d1721f): how far the script has walked, and how long it is. `pos` is the
+	// index progressList() has consumed up to, so it is exactly "how far the level got" — the
+	// number that says whether the AI finished a level or stalled on a halting boss it never
+	// damaged. Read-only, only ever called behind ?aibench.
+	internal int BenchPos => pos;
+
+	internal int BenchCount => eventList.Count;
+
 	public void MakeConditional(GameEvent a_event, Settings.DifficultyLevel minDifficulty, Settings.DifficultyLevel maxDifficulty)
 	{
 		DifficultyRange value = default(DifficultyRange);

@@ -23,6 +23,13 @@ public class UFO : KillableAlien
 
 	public bool IsBig;
 
+	// True while a big UFO is winding up its laser but has not fired yet (UFOState.lazor, the
+	// 2500ms charge). The AI needs this for the spider-boss fight: the beam is aimed at the
+	// PLAYER and its direction is locked at the moment it fires, so standing on the far side of
+	// the boss during the windup walks the beam straight through the boss -- which is the only
+	// thing besides the helper mothership that can hurt it. See PlayerShip.DoAIMove.
+	internal bool AiChargingLazer => state == UFOState.lazor && lazer == null;
+
 	public static int Nr;
 
 	private int thisNr;

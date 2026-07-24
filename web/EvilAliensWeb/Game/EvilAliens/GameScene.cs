@@ -1141,6 +1141,22 @@ internal abstract class GameScene : Scene
 	// the "player left" notice.
 	internal bool NetEndingNormally => _state == GameState.Victory || _state == GameState.GameOver;
 
+	// ---- AI bench seams (card f4d1721f) -- read-only, only called behind ?aibench ----------
+
+	internal int BenchEventPos => eventList.BenchPos;
+
+	internal int BenchEventCount => eventList.BenchCount;
+
+	// The run verdict, or null while the level is still being played. These two states are the
+	// only terminal ones -- everything else (Startup/Nothing/Normal/Resetting) is "still going",
+	// including a mid-level death, which costs a life but is not the end of the run.
+	internal string BenchVerdict => _state switch
+	{
+		GameState.Victory => "VICTORY",
+		GameState.GameOver => "GAME OVER",
+		_ => null
+	};
+
 	internal void NetApplyPeerLeft()
 	{
 		if (NetEndingNormally)

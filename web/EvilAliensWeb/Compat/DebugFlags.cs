@@ -941,6 +941,59 @@ namespace EvilAliensWeb.Compat
 		// layer's "which ship is local" logic are untouched. Remote puppets are never forced.
 		public static bool AIPlayer { get; private set; }
 
+		// ?aibench (card f4d1721f): AI telemetry -- wall contacts (counted even under ?invuln),
+		// the heading-reversal jitter rate, fire-decision idleness and the level-script progress
+		// + run verdict. Pair with ?aiplayer. Console: eaAiBench(). See Compat/AiBench.cs.
+		public static bool AiBench { get; private set; }
+
+		// ?aiff=<2-64> (card f4d1721f): run the game's Update N times per rendered frame with the
+		// SAME dt, so an AI soak covers a whole level in a fraction of the wall-clock time without
+		// changing the sim it is measuring. Deliberately NOT Settings.Turbo, which scales dt --
+		// that changes per-tick physics (and so the very steering behaviour under test).
+		// Suppressed inside a net session (both peers must run at one pace) and while a level
+		// launch is warming. 0/1 = off.
+		public static int AiFastForward { get; private set; }
+
+		// AI steering/targeting knobs (card f4d1721f -- Game/EvilAliens/PlayerShip.cs). Null =>
+		// the baked PlayerShip.Default* consts, so a shipped build is byte-identical. A/B them
+		// against the ?aibench counters, then bake a settled value into the const.
+		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
+		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
+		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
+		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
+		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
+		public static float? AiSteerSmoothMs { get; private set; }
+
+		public static float? AiWallReactionMs { get; private set; }
+
+		public static float? AiGapSwitchMargin { get; private set; }
+
+		public static float? AiThreatLeadMs { get; private set; }
+
+		public static float? AiPriorityBias { get; private set; }
+
+		// The AI's personal-space field around a threat (PlayerShip.ThreatFieldRange /
+		// ThreatFieldStrength):
+		//   ?aifieldpx=<px>    clearance wanted beyond ANY threat's hull
+		//   ?aifieldsize=<f>   extra clearance per pixel of the threat's own half-extent
+		//   ?aifieldfall=<p>   exponent of the (1-t)^p falloff; higher = bites later and harder
+		// A big field with a FAST falloff is the point: the bot keeps well clear of something
+		// the size of the spider boss, while the outer half of the field stays cheap enough that
+		// it can still dive in to shoot and to weave through bullets.
+		// ?aismoothurgent=<ms> the smoothing floor used when the push is strong, and
+		// ?aipark=<demand>     the total push at or below which the ship parks instead of
+		//                      thrusting. Together these are the "damp when calm, fly when not"
+		//                      balance -- see PlayerShip.DoAIMove.
+		public static float? AiSteerSmoothUrgentMs { get; private set; }
+
+		public static float? AiParkDemand { get; private set; }
+
+		public static float? AiThreatFieldPx { get; private set; }
+
+		public static float? AiThreatFieldSize { get; private set; }
+
+		public static float? AiThreatFieldFalloff { get; private set; }
+
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
 		// ops, checkpoints, music switch, victory) -- the purpose-built two-tab
@@ -1612,6 +1665,75 @@ namespace EvilAliensWeb.Compat
 				case "aiplayer":
 					AIPlayer = IsOn(val);
 					break;
+				case "aibench":
+					AiBench = IsOn(val);
+					break;
+				case "aismooth":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aism) && aism >= 0f)
+					{
+						AiSteerSmoothMs = MathHelper.Min(aism, 1000f);
+					}
+					break;
+				case "aireact":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aire) && aire >= 0f)
+					{
+						AiWallReactionMs = MathHelper.Min(aire, 3000f);
+					}
+					break;
+				case "aigapmargin":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigm) && aigm >= 0f)
+					{
+						AiGapSwitchMargin = MathHelper.Min(aigm, 20f);
+					}
+					break;
+				case "aithreatlead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
+					{
+						AiThreatLeadMs = MathHelper.Min(aitl, 3000f);
+					}
+					break;
+				case "aismoothurgent":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisu) && aisu >= 0f)
+					{
+						AiSteerSmoothUrgentMs = MathHelper.Min(aisu, 1000f);
+					}
+					break;
+				case "aipark":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aipk) && aipk >= 0f)
+					{
+						AiParkDemand = MathHelper.Min(aipk, 20f);
+					}
+					break;
+				case "aifieldpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp >= 0f)
+					{
+						AiThreatFieldPx = MathHelper.Min(aifp, 800f);
+					}
+					break;
+				case "aifieldsize":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifs) && aifs >= 0f)
+					{
+						AiThreatFieldSize = MathHelper.Min(aifs, 10f);
+					}
+					break;
+				case "aifieldfall":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiff2) && aiff2 > 0f)
+					{
+						AiThreatFieldFalloff = MathHelper.Min(aiff2, 12f);
+					}
+					break;
+				case "aibossbias":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibb) && aibb > 0f)
+					{
+						AiPriorityBias = MathHelper.Min(aibb, 1f);
+					}
+					break;
+				case "aiff":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aiff))
+					{
+						AiFastForward = (int)MathHelper.Clamp(aiff, 0, 64);
+					}
+					break;
 				case "netscript":
 					NetScript = IsOn(val);
 					break;
@@ -1878,7 +2000,7 @@ namespace EvilAliensWeb.Compat
 			// The level fast-boots belong here (not with the render/feel toggles that stay OUT): they
 			// REPLACE a level's whole event list, and `?brainboss` alone -- reaching Level 3 from the
 			// menu rather than via ?level= -- would otherwise hijack the level with nothing in the log.
-			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot;
+			Active = SkipSplash || AutoStart || NoAttract || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -1894,6 +2016,8 @@ namespace EvilAliensWeb.Compat
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")
+								+ (AiBench ? " aibench" : "")
+								+ (AiFastForward > 1 ? " aiff=" + AiFastForward : "")
 						+ (NetScript ? " netscript" : "")
 						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
 						+ (NetDropGrant ? " netdropgrant" : "")

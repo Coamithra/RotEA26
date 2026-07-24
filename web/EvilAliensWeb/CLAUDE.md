@@ -679,6 +679,118 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   straight through by design. The cue's owner is `tools/audio/pick_channelswap.py` (see
   tools/CLAUDE.md).
 
+### The AI player (`ControlDevice.AI`) + the AI bench (card f4d1721f)
+
+One bot drives three things: the attract demos, the Mechanical-Friends cheat and `?aiplayer`.
+It lives entirely in `PlayerShip`: `DoAIFire` (target pick + `doAIBomb`), `DoAIMove` (steering),
+and the wall-navigation helpers. It is **difficulty-blind** by design -- it plays the same on Easy
+and Inzane; per-tier skill scaling is a separate follow-up.
+
+- **`Oracle.GetBaddies()` IS the AI's entire world model.** A type missing from that list is a type
+  the bot can neither shoot nor dodge, silently. That was the root cause of two of the three
+  reported symptoms: `BrainBoss` and `FakeBoss` (which gate the end of Level 3) were absent, so the
+  AI parked next to a halting boss shooting nothing; `SpiderBoss` and `PlasmaBall` were absent as
+  HAZARDS, so the spider-boss fight was unwinnable-looking because the bot was not dodging a boss
+  it could not see. **Adding an enemy type to the game means adding it here too.**
+- **Two predicates decide what to DO with each entry, and each mirrors a contract elsewhere.**
+  `PlayerShip.IsAiShootable` mirrors the type list in **`Bullet.CollidesWith`** (what a bullet can
+  damage); `PlayerShip.IsAiThreat` mirrors the damage branch of **`PlayerShip.CollidesWith`** (what
+  can kill the ship). Change the mirrored list and you must change the predicate -- the drift
+  between them is what stalled the bot. `IsAiShootable` deliberately EXCLUDES three of the bullet
+  types: `SpiderBoss` (bullets deflect off it by design -- only a `Lazer` hurts it), the
+  `SpiderHelperMothership` (fake-killable with an enormous HP pool, and it is the thing that kills
+  the spider boss for you), and `Asteroid` (no combo, splits when shot, the belt is to be flown
+  through). `IsAiPriorityTarget` then discounts a level-HALTING boss's distance so it outranks the
+  trash that boss keeps spawning.
+- **`AlienDrawableGameComponent.ObservedVelocity`** is measured from real position deltas, sampled
+  at the top of `Update`. Use it, not `SpeedVector`, for anything predicting where an enemy is
+  going: `SpeedVector` is derived from `_speed`/`_direction` and reads ZERO for every type that
+  writes `Position` directly -- including the spider boss's screen-crossing fly states. (Same idea
+  as the net layer's observed velocity, kept independent because the AI must work with no session.)
+- **Steering is low-passed as a VECTOR (`DefaultSteerSmoothMs` 90).** `DoAIMove` sums a dozen
+  competing terms and `Move()` consumes only the resulting ANGLE, so when the big terms nearly
+  cancelled a tiny residual swung the heading right round -- measured at ~1050 deg/s inside a
+  Level-3 wall versus ~20 deg/s on an open screen. Smoothing the vector makes opposing votes cancel
+  toward zero (the ship coasts, which is correct) while a sustained vote still converges in a few
+  frames. Rate-limiting the ANGLE instead is wrong: it forces a genuine 180 reversal the long way
+  round.
+- **Wall navigation is look-ahead-by-TIME + a COMMITTED gap.** The 2008 code probed a fixed
+  `41.67 * MaxSpeed` = ~13.75px against tiles 67..267px wide, SLAMMED the steer on a hit
+  (`direction.X = -max(|direction.Y|,1)`), and re-picked left-vs-right every tick. Now:
+  `WallReactionMs` (baked 420) times the real closing speed (`MaxSpeed` + the wall's own
+  `ObservedVelocity`); `ColumnScore` grades every column by clearance/travel/columns-to-cross and
+  `GapSwitchMargin` stops it flip-flopping; the steer is proportional.
+  - **`ColumnScore` is GRADED, never a pass/fail `IsPassable`.** In a dense maze section no column
+    is clear for the full look-ahead, so a boolean test reports "nothing passable" -- and an
+    earlier revision then held station and let the wall scroll into the ship. There is always a
+    least-bad column and the AI must always be heading for one.
+  - **Urgency is measured in PIXELS to the blocking row (`DistanceToBlockedRow`), never in row
+    COUNTS.** A row count cannot tell "a slab 60px above me" from "a slab 1000px above me"; using
+    it made the avoidance push permanent and pinned the ship against the bottom of the screen.
+  - **`ClampIntoWallSpace` runs AFTER the smoothing and writes back into `aiSteer`.** It is the
+    hard "do not fly into that" override; low-passing it turns a full reversal into a suggestion
+    (measured 46 wall contacts vs the old code's 8). Writing it back stops a flickering probe
+    making the clamp its own oscillator.
+- **Fast movers are dodged by CLOSEST APPROACH, not by current distance** (`EvadeMovingThreat`,
+  `DefaultThreatLeadMs` 700). Radial repulsion from something crossing the screen pushes the ship
+  ALONG its path -- precisely the spider boss's screen-wide sweep. Slow/static threats keep the
+  original distance-based repulsion; `Lazer` keeps its own distance-to-line case.
+- **Verify AI changes as DATA with `?aibench`** (`Compat/AiBench.cs`), never by watching it play.
+  Counters: `contacts` (wall touches, counted in `PlayerShip.CollidesWith` **before** the
+  invulnerability gate so a `?invuln` run still scores every clip AND survives to measure all six
+  wall sections), `revs/s` + `turn` (the jitter pair), `coast%`/`ticks`/`pos`/`steer`,
+  `idle%` (had a shootable on screen and did not shoot -- the signature of a target the AI is blind
+  to), `prog=<event>/<total>` and the run verdict.
+  **A low jitter score alone proves nothing** -- a bot wedged in a corner scores a perfect
+  `revs/s=0.0 turn=0deg/s`, which happened during this card; that is why `coast%`/`ticks`/`pos`
+  are in the line.
+- **Soak headlessly with `eaAiBench.soak(simSeconds)`.** It ticks the real loop
+  (`Game1.BenchTick`) at a fixed 60Hz dt with NO Draw, in chunks. This is the only reliable way to
+  soak from automation: a **backgrounded tab throttles rAF *and* MessageChannel to ~1Hz**, so
+  `?aiff` (or anything else rAF-driven) measures almost nothing unless the window is focused.
+  `?aiff=<n>` runs n sims per rendered frame for a WATCHABLE fast-forward, each with a synthesised
+  60Hz dt -- not the frame's own, which `IsFixedTimeStep=false` inflates by ~n.
+- **Damping is DEMAND-DRIVEN, and both halves matter.** `Move()` discards the steer's magnitude
+  and thrusts at full acceleration along its ANGLE, so a weak-but-nonzero steer is not a gentle
+  nudge -- it is full throttle. Hence: **park** below `DefaultSteerParkDemand` (just above the
+  0.8 station pull), so an idle ship coasts to a stop instead of sailing past its station and
+  back forever; and **smooth adaptively**, collapsing the time constant from
+  `DefaultSteerSmoothMs` toward `DefaultSteerSmoothUrgentMs` as the push grows, because heavy
+  damping is exactly wrong when something is bearing down. Two things were tried against the same
+  idle-fidget symptom and are documented in place as REVERTED -- don't re-derive them: a
+  velocity-damped "arrive" at the station (it contains `-SpeedVector`, so it brakes every real
+  manoeuvre: coast 28% -> 59%, spider-boss deaths 24 -> 70) and a tighter deadzone alone.
+- **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
+  is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
+  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
+  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
+  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
+  manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
+  the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
+  lane (UFOs enter from the top) and LEFT out of a landing.
+- **`SpiderBoss`'s landing now sweeps to the right screen edge -- a deliberate GAMEPLAY change,
+  not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
+  that trivialised the landing; the AI found it instantly and parked there. Marked as such in
+  `SpiderBoss.cs`. It affects human players too.
+- **The top screen edge gets its own strong push** (`TopEdgeAvoidStrength`): it is where UFOs
+  spawn, and the stock edge term caps at `maxSteerStrength` 4, which loses to a lane escape (18)
+  and pins the ship on the ceiling to be exploded by something spawning on it.
+- **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
+  flat push across a band fights the screen bounds instead of easing off once the ship is clear.
+- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
+  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
+  Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.world()`, `eaAiBench.reset()`. Pair
+  with `?aiplayer` and `?difficulty=Very_Hard`.
+- **Where it stands (card f4d1721f, Very Hard unless noted).** Spider boss 36 deaths and the
+  fight never resolving -> 17 and resolving; Level 3 stalled forever at event 53/60 -> kills the
+  BrainBoss; wall heading churn ~1050 deg/s -> 70, reversals 6.5/s -> 1.3. It does NOT clear a
+  story level on Very Hard (L1 game over at event 19/64, L2 at 45/104, L3 at 19/60) -- it dies to
+  sustained bullet fire, and the sum-of-repulsions model is the wrong shape for bullet hell;
+  "pick the safest reachable spot" is the next move. Level 1 on Medium is a VICTORY with 1 death.
+  The challenge levels are unmeasured. **Single runs of a stochastic fight vary a lot -- differences
+  under ~30% are noise, which misled this card more than once.**
+
 ### Webcam challenge "I Made This!" (`Levels.WebcamAliens`)
 
 The player's segmented camera image is the ship. **JS owns everything camera** (`wwwroot/webcam.js`:

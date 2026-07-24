@@ -11,6 +11,29 @@ public class CollisionLevelMap : ICollisionType
 
 	public int Width => map.GetLength(1);
 
+	// Design-space width of one tile. GetMapCoords divides by this, so anything reasoning about
+	// the grid in world units (the AI's wall navigation) needs the same number rather than a
+	// second copy of the 800/width formula.
+	public float TileSize => 800f / (float)map.GetLength(1);
+
+	// World X of column `x`'s centre -- the inverse of GetMapCoords' X mapping. The grid's
+	// `offset` scrolls and is private, so a caller that wants to FLY to a column (rather than
+	// ask which column it is in) cannot derive this itself.
+	public float ColumnCentreX(int x)
+	{
+		return offset.X + ((float)x + 0.5f) * TileSize;
+	}
+
+	// World Y of row `y`'s BOTTOM edge -- the face that arrives first as the grid scrolls down.
+	// GetMapCoords uses the same tile size on both axes, so this is the Y counterpart of
+	// ColumnCentreX. The AI needs the distance in PIXELS to the row that will block it; a row
+	// COUNT cannot say whether that row is 60px away or 1000px away, and treating those the same
+	// makes an avoidance push either permanent or far too late.
+	public float RowBottomY(int y)
+	{
+		return offset.Y + ((float)y + 1f) * TileSize;
+	}
+
 	public bool TileIsOccupied(int x, int y)
 	{
 		if (y < 0 || y >= map.GetLength(0))

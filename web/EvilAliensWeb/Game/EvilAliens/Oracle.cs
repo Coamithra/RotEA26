@@ -383,13 +383,24 @@ public class Oracle : GameComponent, IOracleService
 		return null;
 	}
 
+	// The AI's whole world model: PlayerShip's DoAIMove/DoAIFire/doAIBomb see ONLY what this
+	// returns, so a type missing here is a type the bot can neither shoot nor dodge. Card
+	// f4d1721f added the second group below for exactly that reason -- BrainBoss and FakeBoss
+	// gate the end of Level 3 and were invisible, so the AI stood next to the boss it was
+	// supposed to kill; SpiderBoss and PlasmaBall were invisible as HAZARDS, which is why the
+	// spider-boss fight read as "no idea what it's doing" (it wasn't dodging a boss it couldn't
+	// see). Keep this a superset of both consumer contracts -- PlayerShip.IsAiThreat (mirrors
+	// PlayerShip.CollidesWith) and PlayerShip.IsAiShootable (mirrors Bullet.CollidesWith) --
+	// and let those two predicates, not this list, decide what to do with each entry.
+	// (TutorialLevel.killboss also walks this, but only ever looks for PunchingBag.)
 	public List<AlienDrawableGameComponent> GetBaddies()
 	{
 		baddies.Clear();
 		foreach (GameComponent item in (Collection<IGameComponent>)(object)base.Game.Components)
 		{
 			GameComponent component = item;
-			if (component is EvilBullet || component is UFO || component is Asteroid || component is Braineroid || component is JunkBoss || component is Ball || component is Boss || component is Spider || component is StationaryBoss || component is MarsBoss || component is EvilSkull || component is Lazer || component is ClassicBoss || component is DeathStar || component is Wall || component is BattleSkull || component is FlyingSpider || (component is Explosion && ((Explosion)(object)component).Collides) || component is StarMine || component is SweepUFO || component is PunchingBag)
+			if (component is EvilBullet || component is UFO || component is Asteroid || component is Braineroid || component is JunkBoss || component is Ball || component is Boss || component is Spider || component is StationaryBoss || component is MarsBoss || component is EvilSkull || component is Lazer || component is ClassicBoss || component is DeathStar || component is Wall || component is BattleSkull || component is FlyingSpider || (component is Explosion && ((Explosion)(object)component).Collides) || component is StarMine || component is SweepUFO || component is PunchingBag
+				|| component is BrainBoss || component is FakeBoss || component is SpiderBoss || component is PlasmaBall || component is ParatrooperAlien || component is ParatrooperBrain || component is Parachute)
 			{
 				baddies.Add((AlienDrawableGameComponent)(object)component);
 			}

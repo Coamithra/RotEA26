@@ -320,6 +320,16 @@ public class Oracle : GameComponent, IOracleService
 		game.Components.ComponentRemoved += Components_ComponentRemoved;
 	}
 
+	// Undo the constructor's subscription. The game's own oracle lives as long as the game and
+	// never needs this -- it exists for a SCRATCH oracle built purely as a roster fixture
+	// (Compat/Net/NetSlotTest), which would otherwise keep mirroring the live world's ships and
+	// leak a handler pair per construction. Idempotent: -= on an unsubscribed handler is a no-op.
+	internal void DetachFromComponents()
+	{
+		base.Game.Components.ComponentAdded -= Components_ComponentAdded;
+		base.Game.Components.ComponentRemoved -= Components_ComponentRemoved;
+	}
+
 	private void Components_ComponentRemoved(object sender, GameComponentCollectionEventArgs e)
 	{
 		if (e.GameComponent is PlayerShip)

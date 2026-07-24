@@ -43,8 +43,11 @@ import os
 import subprocess
 import sys
 
-# Reuse build_textures' constants + the pitch-preserving mult-of-4 helper so the preview crop
-# matches exactly what a shipped .dds would get.
+# Reuse build_textures' constants, the pitch-preserving mult-of-4 helper and the pad gutter, so a
+# preview is compressed the same way a shipped .dds is. It is NOT byte-identical to one: the
+# shipped path always pad4()s, while previews still crop via mult4_preserving_pitch where they can.
+# That only shifts which edge texels exist, and ?texviewer samples PointClamp/PointWrap, so the
+# comparison it is there to make (BC3 artifacts vs the PNG) is unaffected.
 import build_textures as bt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -105,6 +108,7 @@ def build_dds_preview(png_path, asset, cols, rows, dry):
     else:
         canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
         canvas.paste(im, (0, 0))
+        bt.edge_gutter(canvas, w, h, tw, th)   # same pad gutter the shipped .dds gets
         canvas.save(tmp)
     r = subprocess.run([bt.TEXCONV, "-nologo", "-y", "-m", "1", "-f", "BC3_UNORM",
                         "-o", os.path.dirname(out_dds), tmp],

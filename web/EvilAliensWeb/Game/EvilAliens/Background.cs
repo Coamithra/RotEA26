@@ -402,31 +402,27 @@ public class Background : Scene
 		// be screenshotted comparably before/after if it stops moving. position.Y is deliberately
 		// left alone -- the marsloop floor sits at 300 by design.
 		bool frozen = DebugFlags.BgFreeze.HasValue;
-		foreach (BackgroundImage backgroundLayer in backgroundLayers)
+		Vector2 layerDelta = scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
+		void Advance(BackgroundImage layer)
 		{
 			if (frozen)
 			{
-				backgroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, backgroundLayer.realsize.X);
+				layer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, layer.realsize.X);
 			}
 			else
 			{
-				backgroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
+				layer.Move(layerDelta);
 			}
+		}
+		foreach (BackgroundImage backgroundLayer in backgroundLayers)
+		{
+			Advance(backgroundLayer);
 		}
 		foreach (BackgroundImage foregroundLayer in foregroundLayers)
 		{
-			if (frozen)
-			{
-				foregroundLayer.position.X = MyMath.Mod(DebugFlags.BgFreeze.Value, foregroundLayer.realsize.X);
-			}
-			else
-			{
-				foregroundLayer.Move(scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier);
-			}
+			Advance(foregroundLayer);
 		}
-		Vector2 starDelta = frozen
-			? Vector2.Zero
-			: scrollspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds * effectiveModifier;
+		Vector2 starDelta = frozen ? Vector2.Zero : layerDelta;
 		if (starfield != null)
 		{
 			starfield.Advance(starDelta);

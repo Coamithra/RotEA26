@@ -78,9 +78,12 @@ def pad4(x):
     return ((x + 3) // 4) * 4
 
 
-# How far the logical edge is replicated into the pad (see edge_gutter). One 4x4 BC3 block is
-# both necessary and sufficient: bilinear can only ever reach ONE texel past the source rect, and
-# a full block keeps that texel out of any block that also holds transparent pad.
+# How far the logical edge is replicated into the pad (see edge_gutter). ONE texel is all
+# correctness needs -- bilinear can never reach further past the source rect. 4 rounds that up to a
+# full BC3 block so that under a large pad no block the sampler can touch also holds transparent
+# pad -- which is the case that ships, since the committed .dds are --padtest 100 builds (web
+# CLAUDE.md, "The canary is LEFT ON"). At a minimal mult-of-4 pad (0-3 px) the whole pad is filled
+# and the rounding is moot.
 GUTTER = 4
 
 
@@ -113,8 +116,11 @@ def edge_gutter(canvas, w, h, tw, th):
     Only GUTTER px are filled -- the rest of the pad stays transparent so the --padtest canary
     (Trello f2621e52) still shows an obvious hole for code that uses the padded size by mistake.
     """
-    gw = min(GUTTER, tw - w)          # 0 when the width already was a multiple of 4
-    gh = min(GUTTER, th - h)
+    # max(0, ...) because build_texviewer sizes with mult4_preserving_pitch, which can CROP one
+    # axis while the other pads; a negative gutter is truthy and would reach resize() as a
+    # negative dimension. No shipped asset hits that today -- the ship path only ever pad4()s.
+    gw = max(0, min(GUTTER, tw - w))
+    gh = max(0, min(GUTTER, th - h))
     if gw:
         col = canvas.crop((w - 1, 0, w, h))
         for x in range(w, w + gw):
@@ -427,6 +433,16 @@ def main():
             build_dxt(e[1], args.dry_run, args.padtest, mip=e[4])
         else:
             build_raw(e[1], args.dry_run)
+    # Gate the build on the pad gutter surviving compression -- a silent regression here is a
+    # hairline seam on every tiled sprite, which is exactly the class of bug nobody re-checks by
+    # hand. Nothing was written on --dry-run/--manifest-only, so there is nothing to verify there.
+    # The guard sweeps EVERY shipped .dds, not just what this run wrote, so under --only the
+    # failure need not be in the asset you just rebuilt -- read the BLEED lines for which it is.
+    if not args.dry_run:
+        sys.path.insert(0, HERE)   # sibling module, whichever way this file was invoked
+        import check_pad_bleed
+        if not check_pad_bleed.run():
+            fail("a shipped .dds does not replicate its logical edge (see above)")
     print("done.")
 
 

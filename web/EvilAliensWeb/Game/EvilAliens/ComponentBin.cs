@@ -412,7 +412,12 @@ public class ComponentBin : IComponentBinService
 	public bool TryAdd(GameComponent component)
 	{
 		Add(component);
-		return ((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component);
+		// Membership alone isn't enough: Add's purge-filter branch returns early for a
+		// component that is ALREADY in the collection without clearing its deathList entry
+		// (that is the "purged instance stays dead" rule), so it would read as landed and then
+		// vanish at the next flush. "Landed" has to mean live NEXT tick.
+		return ((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component)
+			&& !deathList.Contains(component);
 	}
 
 	private void DivertToIdle(GameComponent component)
@@ -425,8 +430,10 @@ public class ComponentBin : IComponentBinService
 		}
 	}
 
-	// Drop a component from the recycle pool (watcher bookkeeping included). Only the
-	// eaBinTest suite uses this — its scratch components must not accumulate in the pool.
+	// Drop a component from the recycle pool (watcher bookkeeping included), for the two callers
+	// whose components must not accumulate there: the eaBinTest suite's scratch components, and
+	// NetPuppets.Disable's driver (every removal is pooled, and a dead driver is unreachable
+	// once the field is nulled).
 	internal void PruneIdle(GameComponent component)
 	{
 		if (idleList.Remove(component))

@@ -271,7 +271,8 @@ site now lives under:
   required). They SKIP themselves if a co-op session is live rather than tearing it down. The
   suite is strictly leave-no-trace and must stay that way -- it expires the filter it arms and
   prunes every scratch component, so back-to-back runs in one tick all read 15/15; a run that
-  leaked state would make the NEXT run report phantom failures. `eaKillShips()` asplodes every locally-owned `PlayerShip`
+  leaked state would make the NEXT run report phantom failures.
+  `eaKillShips()` asplodes every locally-owned `PlayerShip`
   through the real `Asplode()`→`Die()` path (remote/friend puppets skipped) — the repeatable
   way to reach a death/reset, since `AllShipsDead` needs BOTH co-op ships down and waiting on
   the `?aiplayer` AI to die is neither timely nor repeatable.
@@ -973,8 +974,12 @@ interpolation feel, both gated on real-network playtests.
   to ~1Hz and its peer times out / crawls) -- use two Chrome WINDOWS side by side:
   `?level=Level1&net=host&aiplayer&invuln&room=<r>` + same with `net=join`; both ships play
   themselves via `?aiplayer`, then read both consoles. `?room=` must be fresh per test pair.
-  Add `?binlog` to both when the run is about lifecycle (it is the detector for a purge filter
-  or pause freeze eating a puppet/banner). For a death/reset, KEEP `?invuln` on both and call
+  Add `?binlog` to both when the run is about lifecycle (it is the detector for a pause freeze,
+  or for the purge filter eating a BANNER -- no longer for it eating a PUPPET, since card
+  74403f83 exempted the puppet layer from the filter and the bin's divert log sits inside the
+  branch that exemption skips; a puppet add that somehow still gets swallowed prints its own
+  `[net] puppet add was diverted by the bin` line instead). For a death/reset, KEEP `?invuln`
+  on both and call
   `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
   through invulnerability, and leaving the flag on is what keeps the rest of the run from
   dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.

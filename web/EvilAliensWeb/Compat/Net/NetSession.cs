@@ -2175,10 +2175,14 @@ namespace EvilAliensWeb.Compat.Net
             ship.Setup(slot, buffer.Newest.Pos, startup: false, invulnerable: false, 4.712389f);
             if (!bin.TryAdd((GameComponent)(object)ship))
             {
-                // A standing Purge<PlayerShip> is live this tick -- LoseLife and NetApplyReset
-                // both arm one, and NetApplyReset does it from inside this very rx drain. The
-                // ship being purged is CORRECT (a reset wipes all ships and SpawnAllPlayers
-                // respawns every seated slot), but adopting one that never entered the world
+                // A standing Purge<PlayerShip> is live this tick. The one that can actually
+                // reach us is NetApplyReset's, because it purges from inside this very rx
+                // drain; the LoseLife / UpdateWin / UpdateResetting purges run back in
+                // base.Update and their deaths are flushed by collectionHelper.Update() before
+                // the drain, which leaves FindLocalShip() null and the caller's gate shut. The
+                // ship being purged is CORRECT either way (a reset wipes all ships and
+                // SpawnAllPlayers respawns every seated slot), but adopting one that never
+                // entered the world
                 // would leave `puppet` non-null forever and the guard above is `puppet == null`
                 // -- the remote player would stay invisible for the rest of the session. Leave
                 // it clear and retry next tick, once TopOfTickFlush has expired the filter; the

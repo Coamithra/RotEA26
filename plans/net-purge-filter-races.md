@@ -143,9 +143,14 @@ New scenarios (`eaBinTest()`, run from the main menu):
    descriptor, and assert the puppet **is** in `Game.Components` and `LiveCount` counted it.
    *This scenario fails on the current code and passes after the fix* — the reproducing case the
    card said was missing.
-2. **R1 no-ghost invariant.** Same setup with the exemption defeated (a purge of a type the
-   exemption cannot cover — asserting the registry never holds a component that isn't in the
-   world). Guards change (2) independently of change (1).
+2. ~~**R1 no-ghost invariant.** Same setup with the exemption defeated…~~ **DROPPED — deviation
+   from this plan, recorded deliberately.** With `Constructing` set there is no longer any divert
+   path to trigger, so the scenario could only be written by adding a test-only seam to defeat
+   the exemption — more production surface than the branch it guards. What shipped instead: the
+   weaker but honest invariant (`registry agrees with the world`, scenario 3 below) plus an
+   unconditional `[net] puppet add was diverted by the bin` log on the `!landed` branch, so the
+   defence-in-depth path is *observable* rather than *asserted*. Stated as an untested branch in
+   the code comment and in the card's closing note.
 3. **R2/R2b primitive.** `TryAdd` returns **false** under an armed filter and **true** once the
    filter has expired at `TopOfTickFlush` — the exact contract both spawn sites now branch on.
 4. Existing scenarios must keep passing (the filter still eats ordinary late spawns —

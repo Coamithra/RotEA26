@@ -12,9 +12,10 @@ namespace EvilAliensWeb.Compat.Net
         // stream lane
         public long StreamTx;
         public long StreamRx;
-        // Per-slot HUD state (card 1a3ad45a). HudRx counts ENTRIES adopted, not packets: a peer
-        // with a couch partner sends two slots per packet, and a stalled HudRx against a climbing
-        // peer HudTx is what "the other player's combo/powerup readout is frozen" looks like.
+        // Per-slot HUD state (card 1a3ad45a). BOTH count ENTRIES (slot-updates), not packets, so
+        // the two peers' figures are directly comparable even when one has a couch partner and
+        // puts several slots in one packet. A stalled HudRx against a climbing peer HudTx is what
+        // "the other player's combo/powerup readout is frozen" looks like.
         public long HudTx;
         public long HudRx;
         public long StreamDropped;      // out-of-order / duplicate samples the buffer refused

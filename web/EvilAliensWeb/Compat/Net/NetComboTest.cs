@@ -60,7 +60,9 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" [1] wire round trip (EncodeHudState / TryDecodeHudState)\n");
 
             byte[] slots = { 1, 3, 0, 0 };
-            int[] combos = { 37, 400, 0, 0 };            // 400 must saturate at 255
+            // 400 is the case a byte-wide field would have silently capped at 255 and underpaid
+            // (the host spends this figure -- see EncodeHudState); 90000 proves the ushort clamp.
+            int[] combos = { 37, 400, 90000, 0 };
             byte[] types = { (byte)Powerup.PowerupType.Range, NetProtocol.HudPowerupNone, 0, 0 };
             float[] progress = { 0.5f, 0.75f, 0f, 0f };
             int[][] levels =
@@ -71,11 +73,11 @@ namespace EvilAliensWeb.Compat.Net
                 new int[NetProtocol.HudLevelCount]
             };
 
-            byte[] packet = NetProtocol.EncodeHudState(slots, combos, types, progress, levels, 2);
-            check("packet is [type][count] + 2 x HudSlotBytes",
-                packet.Length == 2 + 2 * NetProtocol.HudSlotBytes && packet[0] == NetProtocol.MsgHudState && packet[1] == 2);
+            byte[] packet = NetProtocol.EncodeHudState(slots, combos, types, progress, levels, 3);
+            check("packet is [type][count] + 3 x HudSlotBytes",
+                packet.Length == 2 + 3 * NetProtocol.HudSlotBytes && packet[0] == NetProtocol.MsgHudState && packet[1] == 3);
             check("declared count validates against the byte length",
-                NetProtocol.TryDecodeHudCount(packet, out int count) && count == 2);
+                NetProtocol.TryDecodeHudCount(packet, out int count) && count == 3);
 
             int[] rx = new int[NetProtocol.HudLevelCount];
             bool got0 = NetProtocol.TryDecodeHudState(packet, 0, rx, out byte s0, out int c0, out byte t0, out float p0);
@@ -93,11 +95,15 @@ namespace EvilAliensWeb.Compat.Net
             bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx, out byte s1, out int c1, out byte t1, out _);
             check("entry 1 decodes independently (slot 3, no active powerup)",
                 got1 && s1 == 3 && t1 == NetProtocol.HudPowerupNone);
-            check("combo saturates at 255 rather than wrapping", got1 && c1 == 255);
+            // A byte-wide field would have returned 255 here and underpaid the slot's boss share.
+            check("a combo past 255 survives the wire intact", got1 && c1 == 400);
             check("out-of-range level clamps to 4", got1 && rx[NetProtocol.HudLevelCount - 1] == 4);
 
+            bool got2 = NetProtocol.TryDecodeHudState(packet, 2, rx, out _, out int c2, out _, out _);
+            check("a combo past ushort saturates rather than wrapping", got2 && c2 == ushort.MaxValue);
+
             check("index past the declared count is rejected",
-                !NetProtocol.TryDecodeHudState(packet, 2, rx, out _, out _, out _, out _));
+                !NetProtocol.TryDecodeHudState(packet, 3, rx, out _, out _, out _, out _));
             byte[] truncated = new byte[packet.Length - 1];
             Array.Copy(packet, truncated, truncated.Length);
             check("a truncated packet is rejected whole", !NetProtocol.TryDecodeHudCount(truncated, out _));
@@ -110,9 +116,14 @@ namespace EvilAliensWeb.Compat.Net
             check("a short level buffer is refused rather than over-written",
                 !NetProtocol.TryDecodeHudState(packet, 0, new int[NetProtocol.HudLevelCount - 1], out _, out _, out _, out _));
 
-            // Apply for real against the live ScoreVisualiser. Slot 3 is used deliberately: it is
-            // unseated in every 2-peer session, so its panel is not drawn and this cannot disturb
-            // a run in progress. Prior state is restored below regardless.
+            // Apply for real against the live ScoreVisualiser, on the LAST slot -- unseated in
+            // every 2-peer session, so its panel is not drawn.
+            //
+            // If it IS seated (a 4-player couch game) this leg must not run: NetSetHudState drives
+            // PlayerShip.PowerUp on that slot's real ship, whose effects are MathHelper.Max
+            // accumulations the restore path explicitly cannot walk back -- it would permanently
+            // power up player 4 mid-run. Skipping is the honest outcome; a skipped leg is not a
+            // passed one.
             ScoreVisualiser sv = ServiceHelper.Get<IScoreService>()?.Score;
             if (sv == null)
             {
@@ -120,6 +131,13 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             const int scratchSlot = ScoreVisualiser.SlotCount - 1;
+            Oracle oracle = ServiceHelper.Get<IOracleService>()?.Oracle;
+            if (oracle != null && oracle.IsSeated(scratchSlot))
+            {
+                sb.Append("  SKIP apply-to-live-ScoreVisualiser (slot ").Append(scratchSlot)
+                  .Append(" is seated -- powering up a live player is not reversible)\n");
+                return;
+            }
             int[] before = new int[NetProtocol.HudLevelCount];
             sv.NetReadHudState(scratchSlot, before, out int beforeCombo, out byte beforeType, out float beforeProgress);
 
@@ -161,10 +179,12 @@ namespace EvilAliensWeb.Compat.Net
         // owner's, and a peer's derived from the same fight but with the hit sequencing shifted
         // the way a ~100ms interpolation lag shifts it. Both legs see the IDENTICAL stream.
         //
-        // What is real: PowerupData.AddExp, its level-up threshold and its onLevelUp event.
-        // What is modelled: the gate itself, applied here exactly as ScoreVisualiser.increasecombo
-        // applies it (`powerupactive && OwnsSlot`) -- increasecombo is private, and calling
-        // SustainCombo on the live visualiser would mutate a running game's HUD.
+        // What is real: PowerupData.AddExp, its level-up threshold and its onLevelUp event, AND
+        // the gate's own decision -- the "after" leg asks NetSession.OwnsSlotCore for a slot held
+        // by a Remote ship in a live session, exactly the question ScoreVisualiser.SustainCombo
+        // asks. Invert or delete that predicate and this section goes red.
+        // What is modelled: the surrounding loop (SustainCombo is driven by bullet collisions, and
+        // calling it on the live visualiser would mutate a running game's HUD).
         private static void DivergenceSection(StringBuilder sb, Action<string, bool> check)
         {
             sb.Append(" [2] non-owned slot progression (old ungated vs the OwnsSlot gate)\n");
@@ -191,10 +211,18 @@ namespace EvilAliensWeb.Compat.Net
                 peerCombo[i] = i >= 6 ? ownerCombo[i - 6] : 0;
             }
 
-            // Blast/Option/FirePower/Range: the level is what reaches the puppet's weapon.
-            int oldLevel = RunExp(game, Powerup.PowerupType.Range, peerCombo, gated: false, out _);
-            int newLevel = RunExp(game, Powerup.PowerupType.Range, peerCombo, gated: true, out _);
-            int ownerLevel = RunExp(game, Powerup.PowerupType.Range, ownerCombo, gated: false, out _);
+            // The gate's real answers, for a slot held by the other peer's ship in a live session
+            // (`false` = do not simulate) and for our own seated slot (`true` = do).
+            bool gateForTheirSlot = NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.Remote);
+            bool gateForOurSlot = NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.Keyboard);
+            check("PRECONDITION: the gate answers false for a Remote-held slot", !gateForTheirSlot);
+            check("PRECONDITION: the gate answers true for our own seated slot", gateForOurSlot);
+
+            // Blast/Option/FirePower/Range: the level is what reaches the puppet's weapon. The
+            // "after" leg runs iff the REAL predicate says to, so it is not a hard-coded skip.
+            int oldLevel = RunExp(game, Powerup.PowerupType.Range, peerCombo, simulate: true, out _);
+            int newLevel = RunExp(game, Powerup.PowerupType.Range, peerCombo, simulate: gateForTheirSlot, out _);
+            int ownerLevel = RunExp(game, Powerup.PowerupType.Range, ownerCombo, simulate: gateForOurSlot, out _);
             sb.Append("  owner slot reaches Range level ").Append(ownerLevel)
               .Append("; the non-owning peer simulated level ").Append(oldLevel)
               .Append(" before this card, ").Append(newLevel).Append(" after\n");
@@ -207,8 +235,8 @@ namespace EvilAliensWeb.Compat.Net
             // OneUp is the one that is not merely cosmetic: PlayerShip.PowerUp's OneUp case is
             // Oracle.SetSlowmotion(12f), a whole-sim time scale. Every bar fill on a non-owned
             // slot was one unilateral 12-second slow motion on this peer alone.
-            RunExp(game, Powerup.PowerupType.OneUp, peerCombo, gated: false, out int oldTriggers);
-            RunExp(game, Powerup.PowerupType.OneUp, peerCombo, gated: true, out int newTriggers);
+            RunExp(game, Powerup.PowerupType.OneUp, peerCombo, simulate: true, out int oldTriggers);
+            RunExp(game, Powerup.PowerupType.OneUp, peerCombo, simulate: gateForTheirSlot, out int newTriggers);
             sb.Append("  OneUp bar fills on the non-owning peer: ").Append(oldTriggers)
               .Append(" before (each one a unilateral 12s Oracle.SetSlowmotion), ")
               .Append(newTriggers).Append(" after\n");
@@ -230,16 +258,16 @@ namespace EvilAliensWeb.Compat.Net
             check("PRECONDITION: the two local combo simulations genuinely disagree", diverged > steps / 2);
         }
 
-        // One powerup's exp curve over a combo stream, through the REAL PowerupData. `gated`
-        // mirrors increasecombo's `powerupactive && OwnsSlot` for a slot we do not own: false =
-        // the pre-card behaviour, true = the gate (so AddExp is never reached). Returns the level
-        // reached; `triggers` counts onLevelUp firings, which for OneUp is the slow-motion count.
-        private static int RunExp(Game game, Powerup.PowerupType type, int[] combos, bool gated, out int triggers)
+        // One powerup's exp curve over a combo stream, through the REAL PowerupData. `simulate` is
+        // what SustainCombo's gate decides -- pass the predicate's real answer, never a literal,
+        // for any leg meant to prove the gate works. Returns the level reached; `triggers` counts
+        // onLevelUp firings, which for OneUp is the slow-motion count.
+        private static int RunExp(Game game, Powerup.PowerupType type, int[] combos, bool simulate, out int triggers)
         {
             int fired = 0;
             var data = new PowerupData(game, Vector2.Zero, type);
             data.onLevelUp += (t, lvl, sender) => fired++;
-            if (!gated)
+            if (simulate)
             {
                 foreach (int combo in combos)
                 {
@@ -252,35 +280,60 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- 3. the ownership predicate ----------------------------------------------------
         //
-        // OwnsSlot decides, for every slot, whether this peer simulates it at all. Its OFFLINE
-        // answer is the one that matters most: it must be true for everything, or single-player
-        // silently stops levelling powerups.
+        // OwnsSlot decides, for every slot, whether this peer simulates it at all. Table-driven
+        // over OwnsSlotCore because the interesting cases (a slot held by the other peer, an
+        // unseated one) cannot be reached through the live Oracle without seating and unseating
+        // players in a running match -- and offline the predicate is unconditionally true, so a
+        // live-roster-only test could never cover them at all.
         private static void OwnershipSection(StringBuilder sb, Action<string, bool> check)
         {
             sb.Append(" [3] NetSession.OwnsSlot\n");
 
+            // Offline: everything is ours, whatever the seat says. This is what keeps
+            // single-player and local co-op byte-identical -- get it wrong and powerups silently
+            // stop levelling in the shipped game.
+            check("offline an unseated slot is still ours",
+                NetSession.OwnsSlotCore(sessionActive: false, seatedDevice: null));
+            check("offline even a Remote-marked seat is ours (there is no peer)",
+                NetSession.OwnsSlotCore(sessionActive: false, seatedDevice: ControlDevice.Remote));
+
+            // In a session, ownership follows the seat's device.
+            check("in-session our own keyboard seat is ours",
+                NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.Keyboard));
+            check("in-session a couch player's pad seat is ours",
+                NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.PadTwo));
+            check("in-session a local AI friend is ours",
+                NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.AI));
+            check("in-session the peer's primary (Remote) is NOT ours",
+                !NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.Remote));
+            check("in-session the peer's extra ship (RemoteFriend) is NOT ours",
+                !NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: ControlDevice.RemoteFriend));
+            check("in-session an unseated slot is NOT ours",
+                !NetSession.OwnsSlotCore(sessionActive: true, seatedDevice: null));
+
+            // And the live wrapper must not throw on a slot index off either end -- `slot` reaches
+            // it from a raw wire byte.
+            bool answered = true;
+            try
+            {
+                NetSession.OwnsSlot(-1);
+                NetSession.OwnsSlot(ScoreVisualiser.SlotCount + 10);
+            }
+            catch (Exception)
+            {
+                answered = false;
+            }
+            check("an out-of-range slot is answered without throwing", answered);
+
             if (NetSession.Active)
             {
-                // In a live session the roster belongs to the match; asserting against it would
-                // mean seating and unseating players mid-game. Report what it says instead -- a
-                // reported leg is not a passed one.
                 var seen = new StringBuilder("  live session roster: ");
                 for (int i = 0; i < ScoreVisualiser.SlotCount; i++)
                 {
                     seen.Append('s').Append(i).Append('=').Append(NetSession.OwnsSlot(i) ? "ours" : "theirs/empty").Append(' ');
                 }
-                sb.Append(seen).Append("\n  SKIP the offline assertions (a session is up)\n");
-                return;
+                sb.Append(seen).Append('\n');
             }
-
-            bool allOwned = true;
-            for (int i = 0; i < ScoreVisualiser.SlotCount; i++)
-            {
-                allOwned &= NetSession.OwnsSlot(i);
-            }
-            check("offline every slot is ours (single-player must be unchanged)", allOwned);
-            check("offline an out-of-range slot is still answered without throwing",
-                NetSession.OwnsSlot(-1) && NetSession.OwnsSlot(ScoreVisualiser.SlotCount + 10));
         }
     }
 }

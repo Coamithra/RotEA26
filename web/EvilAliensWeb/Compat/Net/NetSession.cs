@@ -172,8 +172,8 @@ namespace EvilAliensWeb.Compat.Net
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
         private static readonly byte[] extraScratch = new byte[ExtraScratchBytes];
-        // Per-slot HUD state scratch (card 1a3ad45a) -- reused every send/receive so a 10 Hz
-        // readout stream allocates nothing.
+        // Per-slot HUD state gather buffers (card 1a3ad45a) -- reused every send/receive, so only
+        // the encoder's own packet allocates (as in every other encoder here).
         private static readonly byte[] hudTxSlots = new byte[NetProtocol.MaxSlots];
         private static readonly int[] hudTxCombos = new int[NetProtocol.MaxSlots];
         private static readonly byte[] hudTxTypes = new byte[NetProtocol.MaxSlots];
@@ -761,7 +761,9 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxTypes, hudTxProgress, hudTxLevels, count));
-            metrics.HudTx++;
+            // Counted in ENTRIES, matching HudRx -- a peer with a couch partner puts two slots in
+            // one packet, so counting packets here would make the two sides incomparable.
+            metrics.HudTx += count;
         }
 
         private static void HandleHudState(byte[] data)
@@ -807,16 +809,24 @@ namespace EvilAliensWeb.Compat.Net
         // byte-identical: with no session there is nobody else to own anything.
         public static bool OwnsSlot(int slot)
         {
-            if (!Active)
+            bool seated = Active && oracle != null && oracle.IsSeated(slot);
+            return OwnsSlotCore(Active, seated ? oracle.Controller(slot) : null);
+        }
+
+        // The decision itself, with the live roster lookup lifted out so eaNetCombo.test can
+        // table-drive every case. Offline the predicate cannot discriminate at all (correctly --
+        // there is nobody else to own anything), so a test that could only reach it through the
+        // live Oracle would be structurally unable to cover Remote/RemoteFriend/unseated.
+        // `seatedDevice` is null for an unseated slot.
+        internal static bool OwnsSlotCore(bool sessionActive, ControlDevice? seatedDevice)
+        {
+            if (!sessionActive)
             {
                 return true;
             }
-            if (oracle == null || !oracle.IsSeated(slot))
-            {
-                return false;
-            }
-            ControlDevice d = oracle.Controller(slot);
-            return d != ControlDevice.Remote && d != ControlDevice.RemoteFriend;
+            return seatedDevice.HasValue
+                && seatedDevice.Value != ControlDevice.Remote
+                && seatedDevice.Value != ControlDevice.RemoteFriend;
         }
 
         // The ship carried by the primary MsgShipState stream: the one in our granted primary
@@ -1034,10 +1044,15 @@ namespace EvilAliensWeb.Compat.Net
 
         // The other peer collected a powerup: drive THEIR HUD panel here. The local pickup
         // path (PlayerShip.CollidesWith) is the only SetPowerup caller and it is gated to the
-        // local ship, so without this a remote pickup settles as a bare despawn -- the
-        // claimant's powerup icon never changes, and because ScoreVisualiser.increasecombo
-        // only feeds AddExp while that slot's powerupactive is set, their powerup LEVEL never
-        // advances either. Both symptoms read as "the powerup always goes to player 1".
+        // local ship, so without this a remote pickup settles as a bare despawn and the
+        // claimant's powerup icon never changes -- which reads as "the powerup always goes to
+        // player 1".
+        //
+        // Card 1a3ad45a moved the LEVEL half of this elsewhere: that slot's progression is its
+        // owner's alone now (ScoreVisualiser.SustainCombo is gated on OwnsSlot), and its real
+        // level arrives over MsgHudState -- which also re-asserts the indicator, making the
+        // SetPowerup below a redundant-but-immediate head start on the next ~10 Hz packet. The
+        // sound cue is what only this path can do: it belongs to the pickup INSTANT.
         // Idempotent: the collector's own side already ran the local path and never reaches
         // a settle branch for its own pickup (its entity is gone before the echo arrives).
         internal static void ApplyRemotePowerup(Powerup powerup, byte slot)

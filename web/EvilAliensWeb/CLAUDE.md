@@ -162,7 +162,7 @@ generate much of the art/audio referenced here.
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
-  `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test  card 1a3ad45a),
+  `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
@@ -1153,20 +1153,32 @@ interpolation feel, both gated on real-network playtests.
     unilaterally on one peer**, off an invented combo. `Option` spawned a real extra Option ship;
     `FirePower`/`Range` gave the puppet a weapon its owner did not have; `checkPowerupAchievement`
     could grant `FullPower` off another slot's simulated progress.
-  - **`NetSession.OwnsSlot(slot)` is the gate**, and it asks the ROSTER, not a live ship -- a
-    slot's combo and levels outlive its ship (they persist across a death and respawn), so a
-    ship-keyed test would flip while the player waits to come back. **Offline it is true for
-    every slot**, which is what keeps single-player and local co-op byte-identical.
+  - **`NetSession.OwnsSlot(slot)` is the gate, and it sits on `SustainCombo` -- the whole
+    simulation, not just the `AddExp` branch.** Gating only `AddExp` leaves `AddCombo`
+    incrementing between the owner's 100ms packets and the 1s `combotimer` zeroing a live combo
+    whenever OUR re-fired bullets miss, i.e. the replicated value fighting a local one.
+    `NetSetHudState` therefore also refreshes that slot's `combotimer` while the owner reports a
+    live combo, because the readout's alpha is driven by its `TimeLeft`.
+    It asks the ROSTER, not a live ship -- a slot's combo and levels outlive its ship (they
+    persist across a death and respawn), so a ship-keyed test would flip while the player waits
+    to come back. **Offline it is true for every slot**, which is what keeps single-player and
+    local co-op byte-identical. The decision is split into a pure `OwnsSlotCore(active, seat)`
+    so the test can table-drive `Remote`/`RemoteFriend`/unseated -- offline the predicate is
+    unconditionally true, so a live-roster-only test could never reach those cases at all.
   - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
-    `[type][count]` then `[slot][combo][activeType][progress][level x 5]` per owned slot.
-    Protocol **v8**. Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
+    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5]` per owned slot.
+    Protocol **v8**. **combo is a USHORT and that is load-bearing** -- the host SPENDS the
+    adopted figure (`AwardScoreToAll` -> `comboModify`), so a byte would cap a client's real
+    400x combo at 255 and underpay it; combos past 255 are expected (1000 precached combo
+    strings, an explicit `>= 1000` draw fallback). Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
     pinned at 3 and never increments, so the wire index IS the enum value and a NEW TYPE MUST GO
     AFTER `OneUp` (or widen `HudLevelCount` and bump the version). Stream lane because it is a
     readout: a dropped packet only means one interval of staleness.
   - Received state applies only to slots we do NOT own (a peer claiming one of ours is ignored,
     not trusted), bounded against `ScoreVisualiser.SlotCount` like `ApplyRemotePowerup`. The
-    combo is **display-only** there: it cannot reach `AddExp` (the gate) and the score is already
-    reconciled by `EvScoreSync` + the unsettled ledger, so it never re-derives an award.
+    receiving peer never re-derives its OWN awards from the adopted combo (its score is
+    reconciled by `EvScoreSync` + the unsettled ledger) -- but the HOST does spend it, which is
+    the point of the side effect below.
     Levels go through the real `PlayerShip.PowerUp(..., doEffect: false)` one step at a time, so
     the puppet's re-fired bullets match its owner's actual loadout. **`OneUp` is unreachable
     there and must stay so** -- slow motion is deliberately local, which is the same reason the

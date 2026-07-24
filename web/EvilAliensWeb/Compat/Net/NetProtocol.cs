@@ -170,16 +170,21 @@ namespace EvilAliensWeb.Compat.Net
         // makes the enum append-only for this message too: a new type must go AFTER OneUp, or
         // widen this and bump ProtocolVersion.
         public const int HudLevelCount = 5;
-        public const int HudSlotBytes = 4 + HudLevelCount;  // slot+combo+activeType+progress+levels
+        public const int HudSlotBytes = 5 + HudLevelCount;  // slot+combo:2+activeType+progress+levels
         // 0xFF = "this slot has no powerup active", so the receiver blanks the bar instead of
         // leaving a stale one lit. A real Powerup.PowerupType is 0..5 and can never collide.
         public const byte HudPowerupNone = 0xFF;
 
         // MsgHudState: [0x12][count:1] then `count` fixed-width HudSlotBytes entries:
-        //   [slot:1][combo:1][activeType:1][progress:1][level x HudLevelCount]
-        // combo saturates at 255 (the readout is the only consumer -- it is display-only on the
-        // receiving peer by design; see ScoreVisualiser.NetSetHudState) and progress is the active
-        // bar's 0..1 fill quantised to a byte.
+        //   [slot:1][combo:2][activeType:1][progress:1][level x HudLevelCount]
+        //
+        // combo is a USHORT, not a byte, and that is load-bearing rather than generous: the host
+        // pays every slot's boss share with THAT slot's own multiplier (AwardScoreToAll ->
+        // comboModify = amount * (1 + combo/20)), so the figure it adopts here is spent, not just
+        // drawn. A byte would silently cap a client's real 400x combo at 255 and underpay it --
+        // and combos well past 255 are expected (ScoreVisualiser precaches 1000 combo strings and
+        // drawPlayerScore has an explicit >= 1000 fallback). Saturation at ushort is unreachable
+        // in play. progress is the active bar's 0..1 fill quantised to a byte.
         public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int count)
         {
             byte[] b = new byte[2 + HudSlotBytes * count];
@@ -189,7 +194,8 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < count; i++)
             {
                 b[off++] = slots[i];
-                b[off++] = (byte)Math.Clamp(combos[i], 0, 255);
+                WriteU16(b, off, (ushort)Math.Clamp(combos[i], 0, ushort.MaxValue));
+                off += 2;
                 b[off++] = activeTypes[i];
                 b[off++] = (byte)Math.Clamp((int)MathF.Round(progress[i] * 255f), 0, 255);
                 for (int t = 0; t < HudLevelCount; t++)
@@ -214,12 +220,12 @@ namespace EvilAliensWeb.Compat.Net
             }
             int off = 2 + HudSlotBytes * index;
             slot = b[off];
-            combo = b[off + 1];
-            activeType = b[off + 2];
-            progress = b[off + 3] / 255f;
+            combo = ReadU16(b, off + 1);
+            activeType = b[off + 3];
+            progress = b[off + 4] / 255f;
             for (int t = 0; t < HudLevelCount; t++)
             {
-                levels[t] = b[off + 4 + t];
+                levels[t] = b[off + 5 + t];
             }
             return true;
         }

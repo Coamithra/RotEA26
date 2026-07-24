@@ -939,8 +939,9 @@ namespace EvilAliensWeb.Compat
 		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
 		public static int NetLocal { get; private set; }
 
-		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop the next EvSlotGrant the
-		// host answers a couch join with, instead of seating it. That is the one state the host's
+		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop EVERY EvSlotGrant the
+		// host answers a couch join with (not just the first: the flag is read on each grant, so
+		// while it is set no couch join can complete), instead of seating them. That is the one state the host's
 		// ExpireUnclaimedGrants path exists for (the client can silently fail to take a grant: its
 		// device got seated meanwhile, its scene changed) and the ONLY thing that reaches it --
 		// ?netlocal always takes its grant, so without this flag the expiry has no trigger at all

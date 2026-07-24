@@ -1130,8 +1130,16 @@ internal abstract class GameScene : Scene
 		}
 	}
 
+	// Whether a Start press RIGHT NOW would spawn the joiner's ship itself, or only seat the
+	// slot and leave the spawning to SpawnAllPlayers. Each state passes its own verdict below
+	// (false while Resetting/GameOver, shipCreated during Startup, spawnPlayerNormally in
+	// Normal), so it cannot be derived from outside -- latched here for the eaNetCouchJoin
+	// debug seam, which must take the same branch a real pad press would.
+	internal bool JoinWouldSpawnNow { get; private set; }
+
 	private void CheckPlayerJoins(bool spawnPlayer)
 	{
+		JoinWouldSpawnNow = spawnPlayer;
 		if (base.InputHandler.Pressed(MyKeys.Enter) & !oracle.DeviceIsPlaying(ControlDevice.Keyboard))
 		{
 			AddPlayer(ControlDevice.Keyboard, spawnPlayer);

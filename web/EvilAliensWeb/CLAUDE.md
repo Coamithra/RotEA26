@@ -949,9 +949,11 @@ interpolation feel, both gated on real-network playtests.
     a granted couch seat as `RemoteFriend` until the peer's first stream for it lands; a client
     that silently fails to take the grant would otherwise leak that seat for the session (and the
     game stops being re-listable). `?netlocal` always TAKES its grant, so the expiry path had no
-    trigger at all -- this flag drops the next `EvSlotGrant` after clearing `joinRequestPending`,
+    trigger at all -- this flag drops **every** `EvSlotGrant` (it is read per grant, not
+    one-shot, so while it is set no couch join completes) after clearing `joinRequestPending`,
     leaving this side exactly as a genuine failed take does. Expect the host to log
-    `released unclaimed couch grant slot=` and the seat to leave `roster=`.
+    `granted peer couch join slot=N` then `released unclaimed couch grant slot=N` ~10s later
+    (`GrantClaimTimeoutMs`), and the seat to leave `roster=` rather than leak.
   - **`RejectFull` needs `eaNetCouchJoin()`, NOT `?netlocal`.** Reaching it means the host roster
     is already full when a joiner says hello, which means couch players seated BEFORE pairing --
     and `TickLocalJoinSim` is deliberately gated behind `PeerUp` (pre-pairing, `AllocateSeat`

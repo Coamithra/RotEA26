@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using EvilAliens;
 using Microsoft.Xna.Framework;
 
@@ -1370,7 +1369,10 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             // ?netdropgrant: fail to take the grant on purpose, the way a real client can (its
-            // device got seated meanwhile, its scene changed). Dropped AFTER clearing
+            // device got seated meanwhile, its scene changed). Read per grant, so while the flag
+            // is set NO couch join completes -- deliberately not one-shot, since a latch would
+            // need clearing on session restart and a missed reset there is the silent
+            // stale-state bug this seam exists to hunt. Dropped AFTER clearing
             // joinRequestPending so this side is left exactly as a genuine failed take leaves it
             // -- no outstanding request, no seat -- and the host is the only one holding the
             // reservation. That is the state ExpireUnclaimedGrants exists to clean up.
@@ -1435,7 +1437,7 @@ namespace EvilAliensWeb.Compat.Net
         // the whole transition and show nothing. Called by hand on both peers either side of an
         // eaKillShips() reset, this makes the comparison exact instead. Same string the metrics
         // line builds, plus the reset counter the assertion is against.
-        public static string RosterDump()
+        internal static string RosterDump()
         {
             if (!Active)
             {
@@ -1445,14 +1447,14 @@ namespace EvilAliensWeb.Compat.Net
             // re-adopted after a reset still SHOWS as a ship in its seat, and only its pose
             // distinguishes "driven by the peer's stream" from "frozen where SpawnAllPlayers put
             // it". Sampled twice a second apart, a live slot moves and a frozen one does not.
+            // ';' between entries, ',' only inside a coordinate -- the whole [net] family is meant
+            // to be parseable, and a single separator for both would make the field ambiguous.
             string at = "";
             foreach (PlayerShip p in oracle.GetShips())
             {
                 Vector2 pos = p.GetPosition();
-                at += (at.Length > 0 ? "," : "")
-                    + p.Owner + ":" + p.Controller + "@"
-                    + ((int)pos.X).ToString(CultureInfo.InvariantCulture) + ","
-                    + ((int)pos.Y).ToString(CultureInfo.InvariantCulture);
+                at += (at.Length > 0 ? ";" : "")
+                    + p.Owner + ":" + p.Controller + "@" + (int)pos.X + "," + (int)pos.Y;
             }
             return "[net] roster=" + RosterReport()
                 + " at=" + (at.Length > 0 ? at : "-")
@@ -1467,13 +1469,33 @@ namespace EvilAliensWeb.Compat.Net
         // anyone pairs -- the only state in which a later joiner finds no seat and gets
         // RejectFull. Device choice mirrors the sim (Generic first, then AI for extras) so the
         // two seams seat the same kinds of player.
-        internal static void DebugCouchJoin()
+        internal static string DebugCouchJoin()
         {
+            if (!Active)
+            {
+                return "no net session"; // oracle is only assigned once a session starts
+            }
             ControlDevice device = oracle.DeviceIsPlaying(ControlDevice.Generic)
                 ? ControlDevice.AI
                 : ControlDevice.Generic;
-            Console.WriteLine("[net] eaNetCouchJoin: seating couch player device=" + device);
-            TrySeatLocalJoin(device, spawnPlayer: true);
+            // Take the branch a pad press would take THIS tick: seating during the reset window
+            // or a scripted no-ship phase must leave the spawn to SpawnAllPlayers, or we hand the
+            // slot a ship the very next purge eats -- a seated slot with no ship, which is the
+            // "missing owner" artifact this card's own gate reads as a failure.
+            bool spawn = GameScene.NetActiveScene?.JoinWouldSpawnNow ?? false;
+            // TrySeatLocalJoin has five silent early returns (device already playing, roster full,
+            // client not yet paired, a request already outstanding), so report what actually
+            // happened rather than what was asked for: on the host the seat appears synchronously,
+            // on the client the grant is a round trip and "requested" is the honest answer.
+            int before = oracle.Players;
+            TrySeatLocalJoin(device, spawn);
+            string outcome = oracle.Players > before
+                ? "seated device=" + device + " spawn=" + (spawn ? "now" : "deferred")
+                : isHost ? "refused (roster full or device already playing)"
+                : PeerUp ? "requested from host (grant is a round trip)"
+                : "ignored (client, no host paired yet)";
+            Console.WriteLine("[net] eaNetCouchJoin: " + outcome);
+            return outcome;
         }
 
         // ---- ?netlocal=<n>: synthetic couch joins (card 4d904410 verification seam) ----------

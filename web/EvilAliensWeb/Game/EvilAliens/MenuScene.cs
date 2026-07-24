@@ -884,8 +884,8 @@ internal class MenuScene : Scene
 	{
 		// Online co-op excludes the webcam challenge (the camera IS the controller and
 		// the mask is wall-clock local -- see plans/stage11-online-coop.md). The entry
-		// stays visible; selecting it in a net lobby just doesn't respond (11.5 polish
-		// may add a proper message).
+		// stays visible and unselectable; SubMenuLevelChoice.DrawCarouselOverlay swaps its
+		// briefing for the reason, so this refusal is explained rather than silent.
 		if (netMode && ((SubMenuLevelChoice)sender).GetSelectedLevel() == Levels.WebcamAliens)
 		{
 			return;

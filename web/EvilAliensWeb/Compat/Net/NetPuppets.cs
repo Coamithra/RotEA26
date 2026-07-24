@@ -280,6 +280,16 @@ namespace EvilAliensWeb.Compat.Net
                         bin.Remove((GameComponent)(object)comp); // dead-guarded NetKill no-op
                     }
                 }
+                else if (killerSlot != NetProtocol.KillerNone && comp is Powerup pu)
+                {
+                    // A powerup is a PICKUP, not a kill -- it must not take the generic-burst
+                    // branch below (an explosion where the other player collected). Drive the
+                    // collector's HUD slot instead; see NetSession.ApplyRemotePowerup.
+                    MarkPaid(netId, killerSlot);
+                    pu.taken = true;
+                    NetSession.ApplyRemotePowerup(pu, killerSlot);
+                    bin.Remove((GameComponent)(object)comp);
+                }
                 else if (killerSlot != NetProtocol.KillerNone)
                 {
                     // Non-killable replicable (Asteroid/EvilBullet/...): approximate the

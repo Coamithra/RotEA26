@@ -53,6 +53,14 @@ namespace EvilAliensWeb.Compat.Net
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
         private const long PeerTimeoutMs = 3000;
+        // Card 11.5 grace: stream silence past PeerStallMs raises the "waiting for other
+        // player" banner, but the match is not called until PeerTimeoutMs + PeerGraceMs of
+        // continuous silence. Ending a run on the first 3s hiccup was the complaint; the
+        // stream is ~30 Hz, so PeerStallMs is already ~36 missed packets -- long enough that
+        // ordinary jitter never flashes the banner, short enough that the player learns why
+        // their co-op partner stopped moving before the match ends under them.
+        private const long PeerStallMs = 1200;
+        private const long PeerGraceMs = 5000;
         // Grace between refusing a pairing (SendRejectOnce) and tearing the transport down.
         // A reject sends a reliable MsgReject then Stop()s -- but Stop()->transport.Close()->
         // pc.close() is ABORTIVE on WebRTC and discards a still-buffered reliable frame, so
@@ -84,6 +92,10 @@ namespace EvilAliensWeb.Compat.Net
 
         public static bool Active { get; private set; }
         public static bool PeerUp { get; private set; }
+
+        // Peer stream quiet past PeerStallMs but not yet past the drop verdict -- the grace
+        // window. Drives the "waiting for other player" banner; never freezes the world.
+        public static bool PeerStalled { get; private set; }
 
         public static bool IsHost => Active && isHost;
         public static bool IsClient => Active && !isHost;
@@ -319,6 +331,7 @@ namespace EvilAliensWeb.Compat.Net
                 RemotePaused = false;
                 GameScene.NetActiveScene?.NetSetRemotePaused(false);
             }
+            ClearPeerStalled(); // never leave the banner up over a session that no longer exists
             localPaused = false;
             rxQueue.Clear();
             buffer.Clear();
@@ -448,12 +461,21 @@ namespace EvilAliensWeb.Compat.Net
             }
             else
             {
-                if (now - lastRxStreamAt > (RemotePaused || localPaused ? PausedPeerTimeoutMs : PeerTimeoutMs))
+                long quiet = now - lastRxStreamAt;
+                bool paused = RemotePaused || localPaused;
+                if (quiet > (paused ? PausedPeerTimeoutMs : PeerTimeoutMs + PeerGraceMs))
                 {
                     PeerLost("timeout");
                 }
                 else
                 {
+                    // Grace window (card 11.5): past PeerStallMs the link is visibly unwell,
+                    // but the verdict is deferred by PeerGraceMs and we keep streaming
+                    // throughout, so a wifi hiccup or a backgrounded tab's burst-send recovers
+                    // instead of ending the run. A PAUSED peer is an explicit "here but
+                    // frozen" state whose own overlay already says so -- no stall banner on
+                    // top of it, and its much wider backstop still applies.
+                    SetPeerStalled(!paused && quiet > PeerStallMs);
                     if (now - lastStreamTx >= StreamIntervalMs)
                     {
                         SendShipState(now);
@@ -770,6 +792,28 @@ namespace EvilAliensWeb.Compat.Net
             if (Active && playerSlot >= 0 && playerSlot < 8)
             {
                 NoteKillSlot(powerup, (byte)playerSlot);
+            }
+        }
+
+        // The other peer collected a powerup: drive THEIR HUD panel here. The local pickup
+        // path (PlayerShip.CollidesWith) is the only SetPowerup caller and it is gated to the
+        // local ship, so without this a remote pickup settles as a bare despawn -- the
+        // claimant's powerup icon never changes, and because ScoreVisualiser.increasecombo
+        // only feeds AddExp while that slot's powerupactive is set, their powerup LEVEL never
+        // advances either. Both symptoms read as "the powerup always goes to player 1".
+        // Idempotent: the collector's own side already ran the local path and never reaches
+        // a settle branch for its own pickup (its entity is gone before the echo arrives).
+        internal static void ApplyRemotePowerup(Powerup powerup, byte slot)
+        {
+            if (slot == NetProtocol.KillerNone || slot >= 8)
+            {
+                return;
+            }
+            score.SetPowerup(powerup.type, slot);
+            sound.PlayCue("powerup"); // local co-op plays it for either collector too
+            if (DebugFlags.NetLog)
+            {
+                Console.WriteLine("[net] remote powerup " + powerup.type + " -> slot " + slot);
             }
         }
 
@@ -1140,6 +1184,50 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // Card 11.5: THE one match-end path for a departed peer. A clean exit (EvLeave), a
+        // drop verdict (stream timeout) and a closed tab (pagehide 'bye') are the same
+        // outcome -- the match is over and both players go back to the menu -- so they share
+        // this code instead of three near-copies that drift. Only the notice differs, because
+        // "they left" and "the link died" are genuinely different information for the player;
+        // a normal victory/game-over wind-down passes none (it is not a walk-out).
+        private static void EndMatchPeerGone(string reason, string notice)
+        {
+            ClearPeerStalled();
+            GameScene scene = GameScene.NetActiveScene;
+            bool normalEnd = scene != null && scene.NetEndingNormally;
+            Stop(reason, normalEnd ? null : notice);
+            scene?.NetApplyPeerLeft();
+        }
+
+        // Drop the banner with no verdict attached -- used by the teardown paths, where the
+        // peer did NOT recover and saying so would be a lie.
+        private static void ClearPeerStalled()
+        {
+            if (!PeerStalled)
+            {
+                return;
+            }
+            PeerStalled = false;
+            GameScene.NetActiveScene?.NetSetPeerStalled(false);
+        }
+
+        private static void SetPeerStalled(bool on)
+        {
+            if (on == PeerStalled)
+            {
+                return;
+            }
+            if (!on)
+            {
+                ClearPeerStalled();
+                Console.WriteLine("[net] peer recovered");
+                return;
+            }
+            PeerStalled = true;
+            Console.WriteLine("[net] peer stalled (stream quiet > " + PeerStallMs + "ms) -- grace running");
+            GameScene.NetActiveScene?.NetSetPeerStalled(true);
+        }
+
         private static void PeerLost(string reason)
         {
             if (!PeerUp)
@@ -1151,15 +1239,11 @@ namespace EvilAliensWeb.Compat.Net
             if (menuSession)
             {
                 // Card 11.4 match-end semantics: any player leaving ends the match --
-                // menu-lobby sessions have no reconnect flow. Force-exit a running level
-                // (unless it's already in its victory/game-over wind-down) and surface a
-                // notice to the menus.
-                GameScene scene = GameScene.NetActiveScene;
-                bool normalEnd = scene != null && scene.NetEndingNormally;
-                Stop("peer lost: " + reason, normalEnd ? null : "The other player disconnected\nMatch ended");
-                scene?.NetApplyPeerLeft();
+                // menu-lobby sessions have no reconnect flow.
+                EndMatchPeerGone("peer lost: " + reason, "The other player disconnected\nMatch ended");
                 return;
             }
+            ClearPeerStalled();
             if (listedSession)
             {
                 // The JIP joiner dropped: revert the host to plain single-player. Explode the
@@ -1521,14 +1605,11 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 // A shared victory/game-over also lands here (whichever scene terminates
-                // first sends the leave) -- that's a normal end, not a walk-out; no notice.
-                GameScene scene = GameScene.NetActiveScene;
-                // (scene == null here = the lobby/warm phase -- a walk-out, notice shown;
-                // our OWN finished level can't reach this: its scene-down edge already
-                // stopped the session.)
-                bool normalEnd = scene != null && scene.NetEndingNormally;
-                Stop("peer left the match", normalEnd ? null : "The other player left\nMatch ended");
-                scene?.NetApplyPeerLeft();
+                // first sends the leave) -- EndMatchPeerGone treats that as a normal end and
+                // shows no notice. (A null scene there = the lobby/warm phase, i.e. a real
+                // walk-out, so the notice does show; our OWN finished level can't reach this
+                // -- its scene-down edge already stopped the session.)
+                EndMatchPeerGone("peer left the match", "The other player left\nMatch ended");
                 break;
             }
             }
@@ -1561,6 +1642,7 @@ namespace EvilAliensWeb.Compat.Net
                     if (e.Comp is Powerup p)
                     {
                         p.taken = true;
+                        ApplyRemotePowerup(p, killerSlot);
                         // Lives are host-authoritative (EvScoreSync sends them verbatim), so a
                         // client-collected extra life must be applied HERE or the next sync
                         // silently reverts it. Other powerup effects are per-ship on the collector.

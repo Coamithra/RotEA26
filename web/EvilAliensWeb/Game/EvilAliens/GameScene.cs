@@ -152,6 +152,10 @@ internal abstract class GameScene : Scene
 
 	private EvilAliensWeb.Compat.Net.NetPauseOverlay netPauseOverlay;
 
+	private EvilAliensWeb.Compat.Net.NetWaitOverlay netWaitOverlay;
+
+	private bool netPeerStalled;
+
 	public Levels Level => level;
 
 	protected bool spawnPlayerNormally
@@ -430,6 +434,31 @@ internal abstract class GameScene : Scene
 			base.SoundManager.SetPauseMuffle(on: false);
 			pausestopper.Start();
 			pausestopper.Reset();
+		}
+	}
+
+	// Peer stream has gone quiet, but the drop verdict has not been called yet (card 11.5).
+	// Banner only -- unlike a remote PAUSE this does NOT push the collection: the world keeps
+	// running (the host stays authoritative, a client dead-reckons) because the overwhelmingly
+	// common cause is a backgrounded tab burst-sending, which self-heals in under a second.
+	internal void NetSetPeerStalled(bool on)
+	{
+		if (on == netPeerStalled)
+		{
+			return;
+		}
+		netPeerStalled = on;
+		if (on)
+		{
+			if (netWaitOverlay == null)
+			{
+				netWaitOverlay = new EvilAliensWeb.Compat.Net.NetWaitOverlay(base.Game);
+			}
+			Collection.Add((GameComponent)(object)netWaitOverlay);
+		}
+		else
+		{
+			Collection.Remove((GameComponent)(object)netWaitOverlay);
 		}
 	}
 

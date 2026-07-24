@@ -245,7 +245,8 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- handshake ----------------------------------------------------------------
 
-        // v6: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1][peerId:8] = 21 bytes. The
+        // v8: [type][protocolVersion][isHost][buildHash:8][flags:1][primarySlot:1][peerId:8]
+        // [blockedSlots:1] = 22 bytes. The
         // build hash (FNV-1a 64 of the eaBuildHash string deploy.yml stamps) enforces "peers run
         // the identical published binary" -- a stale-cached client is REJECTED, not subtly
         // desynced. Flags currently carry only the DebugFlags.Active bit (menu-lobby
@@ -262,20 +263,45 @@ namespace EvilAliensWeb.Compat.Net
         // already connected to P2P. It is SELF-REPORTED, so it is a speed bump against casual
         // griefing, not authentication: clearing site data mints a new one. Do not build
         // anything that needs to trust it on top of this.
+        //
+        // blockedSlots (v8, card c0229c57) is the CLIENT telling the host which slots it cannot
+        // seat its primary ship in, so the host can grant one that is free on BOTH rosters
+        // instead of guessing from its own. Without it the host's grant was a guess, and a guess
+        // that landed on a seat the joiner already held desynced the pairing silently and
+        // permanently. Host -> client the byte is always 0: the host allocates, so it has no
+        // constraint to report. A bit mask (slots 0..3) rather than "the slot I refused" so the
+        // negotiation resolves in ONE round and prevents the bad grant instead of recovering
+        // from it.
         public const byte HelloFlagDebugActive = 1 << 0;
-        public const int HelloBytes = 21;
+        public const int HelloBytes = 22;
 
-        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId)
+        // Bit `slot` of a slot mask. Slots are 0..MaxSlots-1, so the mask fits a nibble today and
+        // a byte for any plausible MaxSlots. Named for the mask, not for either side's meaning of
+        // it: the same predicate reads the peer's BLOCKED slots and our own OCCUPIED ones.
+        public static byte SlotBit(int slot)
         {
-            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot, peerId);
+            return (byte)(1 << slot);
         }
 
-        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId)
+        // Bounded by MaxSlots, not a literal, for the reason its comment gives: the mask builders
+        // iterate Oracle.MaxPlayers, so a raised roster would set bits this predicate then read as
+        // clear -- and the host would hand the joiner an occupied seat, silently.
+        public static bool SlotInMask(byte mask, int slot)
         {
-            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot, peerId);
+            return slot >= 0 && slot < MaxSlots && (mask & SlotBit(slot)) != 0;
         }
 
-        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId)
+        public static byte[] EncodeHello(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)
+        {
+            return EncodeHandshake(MsgHello, protocolVersion, isHost, buildHash, flags, primarySlot, peerId, blockedSlots);
+        }
+
+        public static byte[] EncodeWelcome(byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)
+        {
+            return EncodeHandshake(MsgWelcome, protocolVersion, isHost, buildHash, flags, primarySlot, peerId, blockedSlots);
+        }
+
+        private static byte[] EncodeHandshake(byte type, byte protocolVersion, bool isHost, ulong buildHash, byte flags, byte primarySlot, ulong peerId, byte blockedSlots)
         {
             byte[] b = new byte[HelloBytes];
             b[0] = type;
@@ -287,10 +313,11 @@ namespace EvilAliensWeb.Compat.Net
             b[12] = primarySlot;
             WriteU32(b, 13, (uint)peerId);
             WriteU32(b, 17, (uint)(peerId >> 32));
+            b[21] = blockedSlots;
             return b;
         }
 
-        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot, out ulong peerId)
+        public static bool TryDecodeHandshake(byte[] b, out byte version, out bool isHost, out ulong buildHash, out byte flags, out byte primarySlot, out ulong peerId, out byte blockedSlots)
         {
             version = 0;
             isHost = false;
@@ -298,6 +325,7 @@ namespace EvilAliensWeb.Compat.Net
             flags = 0;
             primarySlot = SlotNone;
             peerId = 0;
+            blockedSlots = 0;
             if (b.Length < HelloBytes)
             {
                 return false;
@@ -308,6 +336,7 @@ namespace EvilAliensWeb.Compat.Net
             flags = b[11];
             primarySlot = b[12];
             peerId = ReadU32(b, 13) | ((ulong)ReadU32(b, 17) << 32);
+            blockedSlots = b[21];
             return true;
         }
 

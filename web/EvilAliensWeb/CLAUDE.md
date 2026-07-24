@@ -39,6 +39,39 @@ generate much of the art/audio referenced here.
   the WASM main thread is the stutter — a cold multi-MP sheet is hundreds of ms). Shaders load via
   `new Effect(gd, bytes)` from offline-compiled `.mgfxo`; effects apply via
   `SpriteBatch.Begin(effect)` (XNA 4.0 model), not `effect.Begin()`.
+- **Content-load diagnostics -- KNI's own exception tells you NOTHING, so don't read it as a 404**
+  (card 35834236). `TitleContainer.OpenStream` ends in
+  `catch (Exception inner) { throw new FileNotFoundException(name, inner); }`, so its `Message`
+  is the bare PATH whatever actually failed (HTTP status, decode error, OOM, genuinely missing
+  file) and the real cause is only in `InnerException`. index.html's tick guard prints
+  `e.message`, so such a failure surfaces as a lone `[loop] TickDotNet threw (1/30):
+  Content/gfx/base/756.png` -- which reads like a missing asset and is not one. A whole card was
+  filed and investigated on that misreading. Two things now prevent the repeat:
+  - **Every** `Load*` path opens through `WebContentManager.OpenOrThrow`, which rethrows as a
+    `FlattenedContentLoadException` whose message carries the extension, the sibling it tried
+    and the FLATTENED inner chain -- so the tick guard's one-liner names the cause. Textures,
+    fonts, effects, sounds and curves alike; a bare `TitleContainer.OpenStream` added anywhere
+    in that class reintroduces the trap for that asset kind. It must stay flattened INTO the
+    message -- `e.message` is all the JS guard can see, and the wrapper's own TYPE is what tells
+    a reader the message is already flattened (the `ContentLoadException` base would also match
+    one raised elsewhere, and printing only ITS outer line is the very loss being fixed).
+  - A registered sibling that fails to open is logged (`[dds]`/`[rtex] <key>: registered ...
+    sibling could not be read -- <chain> -- falling back to PNG`). `PrecompiledTextures.Siblings`
+    already said the file was shipped, so a failure there is an anomaly, NOT the ordinary
+    PNG-only case -- the old bare `catch { return null; }` silently downgraded the asset to the
+    unmipped/StbImageSharp path with no trace. Keep the two cases distinct.
+  **Verify with `eaTexProbe('<asset>')`** (`Compat/TexProbe.cs`), not by booting and squinting:
+  it drives the real `WebContentManager` path and reports the resolved key, the registered
+  sibling, which file the texture ACTUALLY came from (`_textureSources` -- a silent .dds->.png
+  fallback is otherwise undetectable, since .rtex and .png both yield `SurfaceFormat.Color`),
+  actual vs logical size, and `LevelCount`. `eaTexProbe('GFX/Base/756')` reads 612x612/512x512,
+  1 level, Dxt5; `eaTexProbe('GFX/Base/756-v1')` reads 1348x1348/1248x1248, 11 levels -- the
+  mipped-vs-unmipped distinction that card conflated, in one call. **Its negative control needs
+  no broken asset:** `eaTexProbe('GFX/Base/nope')` drives the rethrow end to end and must end in
+  the real cause (`IOException: HTTP request failed. Status:404`), not a bare path -- that is the
+  one-call check that the diagnostics still work. Caveat: the probe uses the SHARED manager, so
+  an asset owned by a scene-local one (HelpText, Bloom, Credits) cannot be inspected -- probing
+  it decodes a second copy and reports on that, not on the one being drawn.
 - **DXT textures are PADDED to a mult-of-4; every consumer uses the LOGICAL size (`TextureDims.cs`).**
   BC3/`.dds` blocks are 4×4 and Chrome/ANGLE→D3D11 rejects a block texture whose W/H isn't a
   multiple of 4 (renders black). So `build_textures.py` pads each `.dds` up to a mult-of-4
@@ -145,6 +178,13 @@ generate much of the art/audio referenced here.
 - `DebugFlags.Active` (the `[debug] flags active` console line) lists only flags that hijack
   boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
   (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
+  **`Active` is not just a log line -- it REFUSES online play**: a menu-session pairing rejects if
+  either peer has it (`NetSession.HandleHello`) and a flagged host won't list (`NetListing`, unless
+  `?netjip`). So
+  the test is "could this flag change the shared run?", not "is this a debug flag?" -- which is
+  why `?noattract` is out (card af63f958): it unwires the main menu's idle timeout and nothing
+  else, and a joiner needs it precisely because its lobby is a menu. A boot carrying only
+  out-of-`Active` flags prints the `no boot-hijacking debug flags` hint instead.
 - **Live slider panels** are HTML built in `index.html` OUTSIDE `#app`, only constructed on their
   trigger page (a normal boot has no extra DOM). Pattern: `window.eaXxx(...)` →
   `Compat/DebugInput.SetXxx` ([JSInvokable]) → `DebugFlags.SetXxxOverride`, read every Draw/tick;
@@ -165,10 +205,14 @@ generate much of the art/audio referenced here.
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
+  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
+  so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
-  `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does).
+  `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
+  `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
+  result as data -- see "Content-load diagnostics" above).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -990,7 +1034,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v8):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v9):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -1001,7 +1045,9 @@ interpolation feel, both gated on real-network playtests.
   **v6** appends the peer-identity token to the handshake -- card 0b8a300b;
   **v7** widens EvDeath's trailing `points:u16` into an `f32 x MaxSlots` AWARD array --
   card b0ab09ec, see the Score/lives bullet;
-  **v8** adds `MsgHudState` (0x12) -- the owner-authoritative per-slot combo + powerup state,
+  **v8** appends a `blockedSlots` mask to the handshake (HelloBytes 21 -> 22) so the host can
+  grant a seat that is free on BOTH rosters -- card c0229c57, see the roster-slots bullet;
+  **v9** adds `MsgHudState` (0x12) -- the owner-authoritative per-slot combo + powerup state,
   card 1a3ad45a, see the per-slot HUD state bullet).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
@@ -1167,7 +1213,7 @@ interpolation feel, both gated on real-network playtests.
     unconditionally true, so a live-roster-only test could never reach those cases at all.
   - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
     `[type][count]` then `[slot][combo:2][activeType][progress][level x 5]` per owned slot.
-    Protocol **v8**. **combo is a USHORT and that is load-bearing** -- the host SPENDS the
+    Protocol **v9**. **combo is a USHORT and that is load-bearing** -- the host SPENDS the
     adopted figure (`AwardScoreToAll` -> `comboModify`), so a byte would cap a client's real
     400x combo at 255 and underpay it; combos past 255 are expected (1000 precached combo
     strings, an explicit `>= 1000` draw fallback). Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
@@ -1213,6 +1259,25 @@ interpolation feel, both gated on real-network playtests.
   its own `AddPlayer(AI)` / a later grant can't reuse it. Host-side couch joins allocate
   locally. `GameScene.AddPlayer` routes to `NetSession.TrySeatLocalJoin` while a session is up;
   offline behaviour is byte-identical.
+  - **The primary grant is a NEGOTIATION, not a guess (card c0229c57, protocol v8).** The host
+    allocates out of its OWN free slots and cannot see the joiner's, so it used to grant a seat
+    the joiner might already hold -- which desynced the pairing silently and permanently (JIP
+    pass trap 3 has the full story). The client's hello now carries a `blockedSlots` mask of the
+    slots it cannot seat its primary in, and `NetSession.FirstMutuallyFreeSlot(hostOccupied,
+    peerBlocked)` picks one free on both. Three rules hold it together:
+    - **The mask is only non-zero while a `GameScene` is up.** At the menu -- where BOTH the
+      menu-lobby and the join-in-progress joiner hello from -- the roster is leftover
+      bookkeeping from the last level or attract demo, which the launch path's `ResetPlayers()`
+      wipes before seating us. Reporting it would refuse seats for no reason.
+    - **`peerPrimarySlot` is assigned ONLY on a settled adoption.** `Update`'s retry condition
+      is `!PeerUp || peerPrimarySlot == SlotNone`, so setting it on a FAILED adopt silences the
+      1 Hz hello on both peers and the pairing can never recover. This is the bug the card was
+      about; treat it as an invariant of `AdoptGrantedPrimarySlot`, not a fact about one branch.
+    - **It terminates.** Each round either seats the joiner or adds a slot to the mask, and the
+      host never re-offers a blocked seat; when nothing works on both sides it sends
+      `RejectFull` ("Game full"). The host's own game SURVIVES that -- `Stop()` does not exit a
+      level and `NetListing.ComputeEligible` needs `!NetSession.Active`, so a listed host drops
+      back to single-player and re-lists. Verify with `eaSlotTest()`.
   - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
     slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
     tab pairs WHILE it boots, so the grant can land before the seat is taken) and
@@ -1561,24 +1626,40 @@ interpolation feel, both gated on real-network playtests.
   - **JIP pass trap 2 -- the joiner must boot FLAG-CLEAN.** The reject is
     `menuSession && (peer debug bit || DebugFlags.Active)` (`NetSession.cs`), and the joiner IS a
     menu session, so its OWN `Active` bit rejects the pairing. The net-relevant flags still open
-    to it are `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are in the
-    `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
+    to it are `?noattract`, `?signal=`, `?binlog`, `?netlog`, `?netlag=` and `?netloss=` (none are
+    in the `Active` expression), plus the JS-owned `?fpsuncapped`/`?nofps`, which never reach C#.
     **`?netsim` is NOT usable on a joiner**: it is parsed only in `index.html`, and that block
     early-returns unless `?net=` is present -- which sets `NetRole` -> `Active` -> rejected. The
     host is fine: `?netjip` drops its debug bit (`LocalHelloFlags`) and the check is
-    `menuSession`-gated, so a `listedSession` host never rejects. **Consequence: the joiner
-    cannot pass `?noattract`, so an unattended joiner's menu keeps getting pulled into the attract
-    demo** -- drive it briskly and re-check state between steps.
-  - **JIP pass trap 3 -- a grant whose TARGET seat is taken desyncs SILENTLY and permanently.**
-    `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it is the *granted* slot
-    being occupied that bites -- a joiner merely seated in slot 0 with slot 1 free moves across
-    fine and logs `moved local primary slot 0 -> 1`. When it does refuse,
-    `AdoptGrantedPrimarySlot` logs `could not move local primary 0 -> 1 (slot busy) -- staying
-    put` and the peers disagree forever (`pri=0/0` vs `pri=0/1`), the joiner never builds a remote
-    puppet (`remoteShip=0`, `buf=0ms`), and NOTHING surfaces to the player. It cannot self-heal:
-    `peerPrimarySlot` is assigned BEFORE that early return, which satisfies the
-    `peerPrimarySlot == SlotNone` term and stops the hello retry on both peers. Observed once,
-    after the joiner had visited Start/Controls and backed out before joining.
+    `menuSession`-gated, so a `listedSession` host never rejects. **Put `?noattract` on the
+    joiner's URL** (out of `Active` since card af63f958) rather than driving its lobby against a
+    20s idle timer.
+  - **JIP pass trap 3 -- a grant whose TARGET seat was taken used to desync SILENTLY and
+    permanently. FIXED in card c0229c57 (protocol v8); the trap is recorded because the shape is
+    instructive.** `Oracle.MovePlayerSlot` refuses when `players[to].isPlaying`, so it was the
+    *granted* slot being occupied that bit -- a joiner merely seated in slot 0 with slot 1 free
+    moves across fine and logs `moved local primary slot 0 -> 1`. On refusal
+    `AdoptGrantedPrimarySlot` logged `... (slot busy) -- staying put` and the peers disagreed
+    forever (`pri=0/0` vs `pri=0/1`), the joiner never built a remote puppet (`remoteShip=0`,
+    `buf=0ms`), and NOTHING surfaced to the player.
+    **It was reachable with no debug flags at all**, which is the part worth remembering: the
+    menu's roster is whatever the last scene left behind (`GameScene.Terminate` does NOT reset
+    it; only the launch paths' `ResetPlayers()` do), and the attract demo seats MORE than one --
+    `mainMenu_DemoSelected` seats slot 0, then `Demo1/2/3.Initialize` adds 3 more on a 20% roll
+    and 1 more on a further 40% roll. So "idle at the menu -> attract demo -> key out -> Online
+    Co-op -> Join" left slot 1 seated ~60% of the time, and a couch session backed out to the
+    menu did it every time.
+    The fix is three things. (a) The host no longer GUESSES: the v8 handshake carries a
+    `blockedSlots` mask (client -> host) so `ReserveRemotePrimarySlot` grants a seat free on
+    BOTH rosters -- see the roster-slots bullet. (b) The client only moves a seat when a
+    `GameScene` is up; at the menu the roster is bookkeeping `ResetPlayers()` is about to wipe,
+    so there is nothing to move. (c) A grant that still lands badly RENEGOTIATES rather than
+    settling -- `peerPrimarySlot` is now assigned only on a settled adoption, which is what keeps
+    the 1 Hz hello alive so the host can re-grant. **That last one is the general lesson: any
+    early return in `AdoptGrantedPrimarySlot` that leaves `peerPrimarySlot` set silences the
+    retry on BOTH peers and makes the session unrecoverable.** Verify with `eaSlotTest()`.
+    (Note the `?noattract` point in trap 2 is about the TEST RIG only -- a real player never
+    passes flags, so the attract-demo roster is exactly how this reached them.)
   - **JIP pass trap 4 -- use a LOCAL signaling rig, not the deployed one.** All four entry points
     read `DebugFlags.NetSignal` (`NetListing.Tick`, `NetGameBrowser.Start`, `NetLobby` host/join,
     `WebRtcTransport`), so `uvicorn main:app --port 8091` in `server/signal` +
@@ -1592,8 +1673,8 @@ interpolation feel, both gated on real-network playtests.
     goes down, `NetListing` drops the room, and the joiner's carousel correctly falls back to
     "Searching for open games..." mid-test.
   - **JIP pass recipe:** host `?level=Level2&flyspiders&netjip&aiplayer&invuln&binlog&signal=...`,
-    joiner `?signal=...&binlog&netlog` -> menu -> Online Co-op -> Join Online Game -> pick the
-    room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
+    joiner `?signal=...&noattract&binlog&netlog` -> menu -> Online Co-op -> Join Online Game ->
+    pick the room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
     `... role=join ... (menu lobby)`, `granted joiner primary slot=1`, **mirror-image rosters**
     (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`), `localShip=1
     remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0,

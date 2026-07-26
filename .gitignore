@@ -127,3 +127,9 @@ tools/walls/_*.png
 # The ?texviewer scene compares each PNG against a throwaway BC3 preview built here.
 # Local dev only; production ships the real siblings from build_textures.py.
 web/EvilAliensWeb/wwwroot/Content/texviewer/
+
+# ---- REAPER peak caches (sfx editing) -----------------------------------------
+# Written next to the .wav whenever a sound is opened in REAPER; a regenerable
+# waveform-display cache, not an asset. The .wav itself ships.
+web/EvilAliensWeb/wwwroot/Content/sfx/peaks/
+*.reapeaks

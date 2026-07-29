@@ -102,6 +102,11 @@ its return value is printed. `help` lists what is currently available.
 - **Saves start empty every run, by design** — a leftover save silently changes unlock state,
   difficulty and the attract flow between runs. `--saves <dir>` keeps a persistent profile when
   that is the point of the test.
+- **The `[hitch]` frame watchdog does not run here.** `LoadProfiler.NoteFrame` is called only from
+  `Pages/Index.razor.cs`, which this host replaces — so a run is silent about long ticks no matter
+  how long they are. `?loadlog`'s `COLD decode` lines DO work (they are a preload-bracket fact, not
+  a timing one), as does `eval PreloadExport`. Anything phrased as "confirm the hitches stop" needs
+  Chrome.
 - **Only the boot frame has a non-synthesised dt.** `RunOneFrame()` ticks once off the wall clock to
   build the device and run `LoadContent`; every frame after it is exactly `1/--fps`. Note that the
   game itself is not fully deterministic across runs regardless (RNG seeding), so identical flags

@@ -28,12 +28,8 @@ TeamChallenge|gfx/sprites/eye_attract
 # avoids the GPU-upload hitch.)
 Level1|gfx/sprites/brainanimated
 Level1|gfx/sprites/brainanimatedglow
-Level2|gfx/sprites/brainanimated
-Level2|gfx/sprites/brainanimatedglow
 Braineroids|gfx/sprites/brainanimated
 Braineroids|gfx/sprites/brainanimatedglow
-InsaneBossI|gfx/sprites/brainanimated
-InsaneBossI|gfx/sprites/brainanimatedglow
 # Level3's BrainBoss spawns Braineroids (StuffToSpawn.brainz) once the fight is underway,
 # and Level3 has NO other Braineroid wave -- so nothing warms the ~4.6 MB brainanimated .dds
 # until the first brainz spawn ~26s into the fight, a big cold GPU upload = the "huge hitch
@@ -54,8 +50,6 @@ Demo2|gfx/sprites/brainanimatedglow
 # the boss spawns. Warm them on the two levels that spawn the boss so the fight opens clean.
 Level3|gfx/sprites/brainov_eye_reveal
 Level3|gfx/sprites/brainov_pods_flicker
-InsaneBossI|gfx/sprites/brainov_eye_reveal
-InsaneBossI|gfx/sprites/brainov_pods_flicker
 
 # Asteroids. The AsteroidSpawner picks AsteroidSmall1..4 at RANDOM per spawn
 # (Asteroid.Setup), and the big level-opener uses large_asteroid. None of the four
@@ -157,22 +151,6 @@ Level3|gfx/menu/powerbar
 Level3|gfx/hud/barlit
 Level3|gfx/hud/barunlit2
 Level3|gfx/hud/barlitedge
-InsaneBossI|gfx/sprites/asteroidsmall1
-InsaneBossI|gfx/sprites/asteroidsmall2
-InsaneBossI|gfx/sprites/asteroidsmall3
-InsaneBossI|gfx/sprites/asteroidsmall4
-InsaneBossI|gfx/sprites/block
-InsaneBossI|gfx/sprites/explosionpurple
-InsaneBossI|gfx/sprites/braingoo
-InsaneBossI|gfx/sprites/blooddrop_green
-InsaneBossI|gfx/sprites/lazermiddle
-InsaneBossI|gfx/sprites/mediumship_landed
-InsaneBossI|gfx/sprites/ufometpootjes
-InsaneBossI|gfx/sprites/smallship_landed
-InsaneBossI|gfx/menu/powerbar
-InsaneBossI|gfx/hud/barlit
-InsaneBossI|gfx/hud/barunlit2
-InsaneBossI|gfx/hud/barlitedge
 
 # Credits CAST ROLL gaps (cards f75e6f25 / 2956da8a / c5d91d6e: flying-spider / boss-spider /
 # spider-debris hitches). The cast-of-characters roll (CastDisplayer) only plays in the credits
@@ -200,3 +178,244 @@ Level3|gfx/sprites/spiderdebris2
 Level3|gfx/sprites/spiderdebris3
 Level3|gfx/sprites/mothershipa
 Level3|gfx/sprites/mothershipb
+
+# ---------------------------------------------------------------------------
+# CAPTURED SECTIONS -- regenerated wholesale, do not hand-edit.
+#
+# Everything above is hand-written per-theme. Everything below is the verbatim
+# output of  eval PreloadExport  (browser: eaPreloadExport()) for one level, and
+# is REPLACED AS A WHOLE when that level is re-captured, so a stale entry cannot
+# linger. A level appearing here must NOT also appear above: WarmThenLaunch
+# enqueues every manifest line, so a duplicate costs an extra warm tick.
+#
+# How these were taken (card 74b30beb): eahl --repl with
+# ?menu&noattract&unlockall&loadlog&aiplayer&invuln, driven through the MENU with
+# `eval Press`, then `eval PreloadExport`. The menu path matters -- a ?level= boot
+# has no splash, so Game1.QueueIdleWarm's 21 space/star assets drain into live
+# gameplay and get mis-recorded as that level's assets.
+#
+# THE GAP THESE FIX: Background.SetMars() loads the 12 marsloop ground tiles (plus
+# marshills1-3 and the two cloud layers) SYNCHRONOUSLY in the level's Initialize()
+# -- which runs AFTER Game1.WarmThenLaunch's pre-launch warm bracket and BEFORE
+# GameScene.LoadContent's own bracket. So nothing warmed them and each level paid
+# ~1.2s of decode on its first gameplay tick (browser-measured ~110ms x 12), which
+# the hitch watchdog reported as repeated [hitch] 12x-134ms frames. Listing them
+# here moves the decode into the pre-launch warm, which is pumped one-per-tick
+# before the scene is constructed, so SetMars's Content.Load calls are cache hits.
+#
+# The WARM lines are deliberate too: they are already loaded by the scene's own
+# PreloadGraphicalContent, and naming them here moves that whole synchronous
+# bracket onto the pumped pre-launch ticks instead of one blocking load tick --
+# which is exactly what the pre-launch warm exists for.
+#
+# GOTCHA when capturing a level that has NO lines here yet: WarmThenLaunch bails
+# out early when a level has zero manifest assets, so no preload bracket is ever
+# opened and the level's Initialize decodes are attributed to the "(boot)"
+# sentinel instead of the level. Capturing such a level takes two passes -- seed
+# its section from the (boot) block that immediately precedes its
+# "<Level> preload:" summary line, then re-capture to get the real section.
+# (Paratrooper below was seeded that way.)
+# ---------------------------------------------------------------------------
+
+# Level2 -- captured 2026-07-29
+Level2|gfx/game/blank|COLD|0|112x112
+Level2|gfx/hud/barlit|COLD|0|116x47
+Level2|gfx/hud/barlitedge|COLD|0|20x47
+Level2|gfx/hud/barunlit2|COLD|0|116x47
+Level2|gfx/marsbg/clouds-background|COLD|1|1124x700
+Level2|gfx/marsbg/clouds-foreground2|COLD|1|1124x700
+Level2|gfx/marsbg/marshills1|COLD|1|1100x700
+Level2|gfx/marsbg/marshills2|COLD|1|1100x700
+Level2|gfx/marsbg/marshills3|COLD|1|1100x700
+Level2|gfx/marsbg/marsloop1|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop10|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop11|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop12|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop2|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop3|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop4|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop5|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop6|COLD|1|1688x1072
+Level2|gfx/marsbg/marsloop7|COLD|5|1688x1072
+Level2|gfx/marsbg/marsloop8|COLD|2|1688x1072
+Level2|gfx/marsbg/marsloop9|COLD|2|1688x1072
+Level2|gfx/menu/powerbar|COLD|0|30x23
+Level2|gfx/spider/spiderfly|WARM|3|2148x1472
+Level2|gfx/spider/spiderjump|WARM|12|2148x1992
+Level2|gfx/spider/spiderland|WARM|4|2148x1680
+Level2|gfx/spider/spiderstand|WARM|2|2148x1352
+Level2|gfx/sprites/arrow|WARM|0|248x220
+Level2|gfx/sprites/blast|WARM|0|676x652
+Level2|gfx/sprites/block|WARM|2|80x80
+Level2|gfx/sprites/blooddrop|WARM|0|148x156
+Level2|gfx/sprites/blooddrop_green|WARM|0|148x156
+Level2|gfx/sprites/bombicon|COLD|1|96x96
+Level2|gfx/sprites/brainanimated|WARM|3|2660x1892
+Level2|gfx/sprites/brainanimatedglow|WARM|11|620x556
+Level2|gfx/sprites/braingoo|WARM|0|148x136
+Level2|gfx/sprites/bulletevil|WARM|1|128x128
+Level2|gfx/sprites/bulletgood|WARM|1|128x128
+Level2|gfx/sprites/connector|WARM|0|820x480
+Level2|gfx/sprites/explosion|COLD|0|612x612
+Level2|gfx/sprites/explosionpurple|WARM|0|612x612
+Level2|gfx/sprites/lazerbeam|WARM|10|512x512
+Level2|gfx/sprites/lazerglow|WARM|0|612x612
+Level2|gfx/sprites/lazermiddle|WARM|0|24x2
+Level2|gfx/sprites/mediumship|WARM|2|968x1836
+Level2|gfx/sprites/mediumship_landed|WARM|1|748x748
+Level2|gfx/sprites/mothership_landed|WARM|4|1468x1468
+Level2|gfx/sprites/mothershipa|WARM|3|1928x1928
+Level2|gfx/sprites/mothershipb|WARM|9|1928x1928
+Level2|gfx/sprites/option|WARM|0|72x72
+Level2|gfx/sprites/photocamera|COLD|0|264x252
+Level2|gfx/sprites/playersheet|COLD|1|1260x680
+Level2|gfx/sprites/powerupbw|WARM|0|228x228
+Level2|gfx/sprites/shadow|COLD|0|184x140
+Level2|gfx/sprites/singleconnectorglow|WARM|0|456x448
+Level2|gfx/sprites/smallship|WARM|1|680x1260
+Level2|gfx/sprites/smallship_landed|WARM|1|144x144
+Level2|gfx/sprites/smoke|COLD|0|612x612
+Level2|gfx/sprites/spider_sheet2|WARM|7|2796x3096
+Level2|gfx/sprites/spiderdebris1|WARM|0|236x184
+Level2|gfx/sprites/spiderdebris2|WARM|0|360x172
+Level2|gfx/sprites/spiderdebris3|WARM|0|320x232
+Level2|gfx/sprites/spiderjump|WARM|1|2500x836
+Level2|gfx/sprites/ufometpootjes|WARM|1|165x144
+Level2|gfx/sprites/ufosheet|WARM|19|1159x579
+Level2|gfx/sprites/wing1|WARM|0|376x180
+
+# Paratrooper -- captured 2026-07-29
+Paratrooper|gfx/game/blank|WARM|0|112x112
+Paratrooper|gfx/hud/barlit|WARM|0|116x47
+Paratrooper|gfx/hud/barlitedge|WARM|0|20x47
+Paratrooper|gfx/hud/barunlit2|WARM|0|116x47
+Paratrooper|gfx/marsbg/clouds-background|WARM|3|1124x700
+Paratrooper|gfx/marsbg/clouds-foreground2|WARM|1|1124x700
+Paratrooper|gfx/marsbg/marshills1|WARM|1|1100x700
+Paratrooper|gfx/marsbg/marshills2|WARM|1|1100x700
+Paratrooper|gfx/marsbg/marshills3|WARM|1|1100x700
+Paratrooper|gfx/marsbg/marsloop1|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop10|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop11|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop12|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop2|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop3|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop4|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop5|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop6|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop7|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop8|WARM|1|1688x1072
+Paratrooper|gfx/marsbg/marsloop9|WARM|1|1688x1072
+Paratrooper|gfx/menu/powerbar|WARM|0|30x23
+Paratrooper|gfx/sprites/arrow|WARM|0|248x220
+Paratrooper|gfx/sprites/blast|WARM|0|676x652
+Paratrooper|gfx/sprites/block|WARM|2|80x80
+Paratrooper|gfx/sprites/blooddrop|WARM|0|148x156
+Paratrooper|gfx/sprites/blooddrop_green|WARM|0|148x156
+Paratrooper|gfx/sprites/bombicon|WARM|1|96x96
+Paratrooper|gfx/sprites/braingoo|WARM|0|148x136
+Paratrooper|gfx/sprites/brainlargetransglow|WARM|0|620x516
+Paratrooper|gfx/sprites/bulletevil|WARM|1|128x128
+Paratrooper|gfx/sprites/bulletgood|WARM|1|128x128
+Paratrooper|gfx/sprites/connector|WARM|1|820x480
+Paratrooper|gfx/sprites/explosion|WARM|0|612x612
+Paratrooper|gfx/sprites/explosionpurple|WARM|0|612x612
+Paratrooper|gfx/sprites/lazerbeam|WARM|9|512x512
+Paratrooper|gfx/sprites/lazerglow|WARM|0|612x612
+Paratrooper|gfx/sprites/lazermiddle|WARM|0|24x2
+Paratrooper|gfx/sprites/mediumship|WARM|2|968x1836
+Paratrooper|gfx/sprites/mediumship_landed|WARM|1|748x748
+Paratrooper|gfx/sprites/option|WARM|0|72x72
+Paratrooper|gfx/sprites/parachute|WARM|0|396x420
+Paratrooper|gfx/sprites/photocamera|WARM|0|264x252
+Paratrooper|gfx/sprites/plasmaball2|WARM|0|624x608
+Paratrooper|gfx/sprites/playersheet|WARM|1|1260x680
+Paratrooper|gfx/sprites/powerupbw|WARM|0|228x228
+Paratrooper|gfx/sprites/shadow|WARM|0|184x140
+Paratrooper|gfx/sprites/singleconnectorglow|WARM|0|456x448
+Paratrooper|gfx/sprites/smoke|WARM|0|612x612
+
+# InsaneBossI -- captured 2026-07-29 (SetMars here is MID-LEVEL, so these
+#   decoded during live gameplay, not on a loading tick)
+InsaneBossI|gfx/alienboss/alienboss|WARM|7|1808x1180
+InsaneBossI|gfx/base/2331-v5|COLD|7|612x612
+InsaneBossI|gfx/base/756|COLD|7|612x612
+InsaneBossI|gfx/game/blank|COLD|0|112x112
+InsaneBossI|gfx/hud/barlit|WARM|0|116x47
+InsaneBossI|gfx/hud/barlitedge|WARM|0|20x47
+InsaneBossI|gfx/hud/barunlit2|WARM|0|116x47
+InsaneBossI|gfx/marsbg/clouds-background|COLD|1|1124x700
+InsaneBossI|gfx/marsbg/clouds-foreground2|COLD|0|1124x700
+InsaneBossI|gfx/marsbg/marshills1|COLD|2|1100x700
+InsaneBossI|gfx/marsbg/marshills2|COLD|1|1100x700
+InsaneBossI|gfx/marsbg/marshills3|COLD|1|1100x700
+InsaneBossI|gfx/marsbg/marsloop1|COLD|2|1688x1072
+InsaneBossI|gfx/marsbg/marsloop10|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop11|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop12|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop2|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop3|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop4|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop5|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop6|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop7|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop8|COLD|1|1688x1072
+InsaneBossI|gfx/marsbg/marsloop9|COLD|1|1688x1072
+InsaneBossI|gfx/menu/powerbar|WARM|0|30x23
+InsaneBossI|gfx/spider/spiderfly|WARM|3|2148x1472
+InsaneBossI|gfx/spider/spiderjump|WARM|3|2148x1992
+InsaneBossI|gfx/spider/spiderland|WARM|2|2148x1680
+InsaneBossI|gfx/spider/spiderstand|WARM|3|2148x1352
+InsaneBossI|gfx/sprites/andromeda|WARM|9|1684x1200
+InsaneBossI|gfx/sprites/arrow|WARM|0|248x220
+InsaneBossI|gfx/sprites/asteroidsmall1|WARM|6|368x376
+InsaneBossI|gfx/sprites/asteroidsmall2|WARM|5|368x376
+InsaneBossI|gfx/sprites/asteroidsmall3|WARM|6|368x376
+InsaneBossI|gfx/sprites/asteroidsmall4|WARM|6|368x376
+InsaneBossI|gfx/sprites/blast|WARM|0|676x652
+InsaneBossI|gfx/sprites/block|WARM|2|80x80
+InsaneBossI|gfx/sprites/blooddrop|WARM|0|148x156
+InsaneBossI|gfx/sprites/blooddrop_green|WARM|0|148x156
+InsaneBossI|gfx/sprites/bombicon|COLD|1|96x96
+InsaneBossI|gfx/sprites/brainanimated|WARM|3|2660x1892
+InsaneBossI|gfx/sprites/brainanimatedglow|WARM|11|620x556
+InsaneBossI|gfx/sprites/brainbossaura|WARM|6|1548x1188
+InsaneBossI|gfx/sprites/brainbosshd|WARM|7|1548x1188
+InsaneBossI|gfx/sprites/braingoo|WARM|0|148x136
+InsaneBossI|gfx/sprites/brainov_eye_reveal|WARM|6|776x1248
+InsaneBossI|gfx/sprites/brainov_pods_flicker|WARM|6|776x936
+InsaneBossI|gfx/sprites/bulletevil|WARM|1|128x128
+InsaneBossI|gfx/sprites/bulletgood|WARM|1|128x128
+InsaneBossI|gfx/sprites/connector|WARM|0|820x480
+InsaneBossI|gfx/sprites/deathstarsheet2|WARM|6|1644x872
+InsaneBossI|gfx/sprites/earth|WARM|8|1492x1924
+InsaneBossI|gfx/sprites/explosion|COLD|1|612x612
+InsaneBossI|gfx/sprites/explosionpurple|WARM|0|612x612
+InsaneBossI|gfx/sprites/eye_attract|WARM|6|1276x1128
+InsaneBossI|gfx/sprites/eye_idle|WARM|6|332x552
+InsaneBossI|gfx/sprites/faceofdeathspritesheet|WARM|6|1260x680
+InsaneBossI|gfx/sprites/lazerbeam|WARM|8|512x512
+InsaneBossI|gfx/sprites/lazerglow|WARM|0|612x612
+InsaneBossI|gfx/sprites/lazermiddle|WARM|0|24x2
+InsaneBossI|gfx/sprites/mediumship|WARM|2|968x1836
+InsaneBossI|gfx/sprites/mediumship_landed|WARM|1|748x748
+InsaneBossI|gfx/sprites/mothershipa|WARM|2|1928x1928
+InsaneBossI|gfx/sprites/mothershipb|WARM|3|1928x1928
+InsaneBossI|gfx/sprites/option|WARM|0|72x72
+InsaneBossI|gfx/sprites/photocamera|COLD|0|264x252
+InsaneBossI|gfx/sprites/plasmaball2|WARM|0|624x608
+InsaneBossI|gfx/sprites/playersheet|COLD|1|1260x680
+InsaneBossI|gfx/sprites/powerupbw|WARM|0|228x228
+InsaneBossI|gfx/sprites/shadow|WARM|0|184x140
+InsaneBossI|gfx/sprites/singleconnectorglow|WARM|0|456x448
+InsaneBossI|gfx/sprites/smallship|WARM|1|680x1260
+InsaneBossI|gfx/sprites/smallship_landed|WARM|1|144x144
+InsaneBossI|gfx/sprites/smoke|COLD|0|612x612
+InsaneBossI|gfx/sprites/spider_sheet2|WARM|8|2796x3096
+InsaneBossI|gfx/sprites/spiderdebris1|WARM|0|236x184
+InsaneBossI|gfx/sprites/spiderdebris2|WARM|0|360x172
+InsaneBossI|gfx/sprites/spiderdebris3|WARM|0|320x232
+InsaneBossI|gfx/sprites/spiderjump|WARM|2|2500x836
+InsaneBossI|gfx/sprites/ufometpootjes|WARM|1|165x144
+InsaneBossI|gfx/sprites/ufosheet|WARM|19|1159x579
+InsaneBossI|gfx/sprites/wing1|WARM|0|376x180

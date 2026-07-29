@@ -184,6 +184,30 @@ generate much of the art/audio referenced here.
   frame in <level>` for any tick > 120ms (not gated by `?loadlog`), skipping preload + boot warm-up.
   A still-hitching level is a manifest DATA gap — fix by playing with `?loadlog` +
   `eaPreloadExport()`, not by code.
+  - **The whole capture loop runs HEADLESSLY** — `eahl --repl`, then `eval PreloadExport`
+    (`DebugInput.PreloadExport`, a passthrough that exists only because `eval` binds to
+    `DebugInput` statics while the browser's `eaPreloadExport` calls `LoadProfiler` direct). The
+    "download" lands at `<dir of --out>/preload_manifest.txt`.
+  - **`[hitch]` does NOT exist headlessly.** `LoadProfiler.NoteFrame` is called from
+    `Pages/Index.razor.cs` alone, so hitch evidence is browser-only. COLD-vs-warm *is* headless-
+    valid: it is the preload-BRACKET structure, not a timing threshold.
+  - **CAPTURE FROM THE MENU PATH, never `?level=`.** A `?level=` boot has no splash, so
+    `QueueIdleWarm`'s 21 space/star assets drain into live gameplay and are recorded as that
+    level's assets — 20 junk entries. Drive the menu with `eval Press` instead (main menu ->
+    carousel -> difficulty; Challenges is 3 `down` from Start).
+  - **A level with ZERO manifest entries cannot be captured in one pass.** `WarmThenLaunch`
+    returns early when `ManifestAssets` is empty, so no bracket is opened and the level's
+    `Initialize` decodes are attributed to the `(boot)` sentinel. Seed the section from the
+    `(boot)` block immediately preceding the `<Level> preload:` line, then re-capture.
+  - **`(boot)` manifest lines are INERT** — `ManifestAssets` is only ever called with a `Levels`
+    name. Boot/menu gaps can only be fixed in `QueueMenuWarm`/`QueueIdleWarm`, i.e. code. Beware
+    false positives there: `RecordTexture` has no boot exemption (unlike `NoteFrame`), so an
+    asset the menu warm *deliberately* decodes still logs COLD.
+  - **MERGE into `manifest.txt`, never replace it.** `Serialize()` emits only the run's own
+    recordings — it never merges `Shipped()` — so overwriting the file deletes every curated
+    entry for levels the run did not play. Captured per-level sections live in one block at the
+    bottom of the file and are replaced WHOLESALE per level; a level must not also appear in the
+    hand-written blocks above (`WarmThenLaunch` enqueues duplicates twice).
 - **Level launches are gated by a pre-launch manifest warm.** `Game1.WarmThenLaunch` (every launch
   path incl. attract demos and `?level=`) decodes the level's manifest textures ONE per tick
   (`PumpLevelWarm`) before the scene is Added, so the browser paints between decodes (no "page

@@ -595,8 +595,12 @@ public class Game1 : Game
 
 	// Space-background tile set (card 97727578). Background.SetSpace() loads all of these
 	// synchronously inside a level's Initialize() — BEFORE base.Initialize() reaches the
-	// LoadContent preload bracket — so neither PreloadGraphicalContent nor the manifest can
-	// ever warm them first, and the FIRST space scene of a session paid ~0.5s extra on its
+	// LoadContent preload bracket — so PreloadGraphicalContent cannot warm them first. (Nor
+	// could the manifest when this was written; WarmThenLaunch's pre-launch warm now runs
+	// BEFORE Initialize, so a manifest entry does reach these — that is how the identical
+	// SetMars/marsbg gap is fixed, card 74b30beb. Boot-warming stays the better fit here:
+	// SetSpace is used by most levels, so paying once per session beats once per level.)
+	// The FIRST space scene of a session paid ~0.5s extra on its
 	// loading tick (12 nebula .dds uploads + 8 star PNG decodes + a shader compile). The
 	// shared content manager never unloads mid-session, so warming once at boot turns every
 	// SetSpace into cache hits. Low-priority (idleWarmQueue): needed before the first LEVEL,

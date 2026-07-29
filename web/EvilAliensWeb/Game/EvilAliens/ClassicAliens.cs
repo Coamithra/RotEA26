@@ -99,8 +99,8 @@ internal class ClassicAliens : GameScene
 		showMessage("Welcome to the Trial Simulation Chamber", 6.5f, isCheckpoint: false);
 		burst(1f);
 		showMessage("Activating Training Mode...", 6.5f, isCheckpoint: false);
-		WaitEvent waveWait = new WaitEvent(base.Game, 0.01f);
-		eventList.AddEvent(waveWait);
+		WaitEvent beatWait = new WaitEvent(base.Game, 0.01f);
+		eventList.AddEvent(beatWait);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
 		for (int i = 1; i < 21; i++)
@@ -119,10 +119,10 @@ internal class ClassicAliens : GameScene
 				eventList.AddEvent(messageEvent);
 				eventList.MakeConditional(messageEvent, Settings.DifficultyLevel.Very_Hard, Settings.DifficultyLevel.Inzane);
 				messageEvent.OnFinished += spawnbonus;
-				waveWait = new WaitEvent(base.Game, 2f);
-				eventList.AddEvent(waveWait);
+				beatWait = new WaitEvent(base.Game, 2f);
+				eventList.AddEvent(beatWait);
 				eventList.AddHalt();
-				eventList.MakeConditional(waveWait, Settings.DifficultyLevel.Very_Hard, Settings.DifficultyLevel.Inzane);
+				eventList.MakeConditional(beatWait, Settings.DifficultyLevel.Very_Hard, Settings.DifficultyLevel.Inzane);
 			}
 			if (i > 10 && i <= 15)
 			{

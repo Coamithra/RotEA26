@@ -45,13 +45,13 @@ internal class MarsBossSpawner : GameEvent
 			first = false;
 			boss1 = new MarsBoss(game);
 			boss1.Setup(MarsBoss.BossPosition.left);
-			MarsBoss leftBoss = boss1;
-			leftBoss.OnAlmostKilled = (AlienDrawableGameComponent.DeathEvent)Delegate.Combine(leftBoss.OnAlmostKilled, new AlienDrawableGameComponent.DeathEvent(AlienDrawableComponent_AlmostKilled));
+			MarsBoss boss1Ref = boss1;
+			boss1Ref.OnAlmostKilled = (AlienDrawableGameComponent.DeathEvent)Delegate.Combine(boss1Ref.OnAlmostKilled, new AlienDrawableGameComponent.DeathEvent(AlienDrawableComponent_AlmostKilled));
 			collectionHelper.Add((GameComponent)(object)boss1);
 			boss2 = new MarsBoss(game);
 			boss2.Setup(MarsBoss.BossPosition.right);
-			MarsBoss rightBoss = boss2;
-			rightBoss.OnAlmostKilled = (AlienDrawableGameComponent.DeathEvent)Delegate.Combine(rightBoss.OnAlmostKilled, new AlienDrawableGameComponent.DeathEvent(AlienDrawableComponent_AlmostKilled));
+			MarsBoss boss2Ref = boss2;
+			boss2Ref.OnAlmostKilled = (AlienDrawableGameComponent.DeathEvent)Delegate.Combine(boss2Ref.OnAlmostKilled, new AlienDrawableGameComponent.DeathEvent(AlienDrawableComponent_AlmostKilled));
 			collectionHelper.Add((GameComponent)(object)boss2);
 		}
 		if (boss1 == null && boss2 == null)

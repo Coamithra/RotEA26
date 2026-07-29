@@ -117,8 +117,8 @@ public class InputHandler : IInputHandlerService
 		};
 		if (Settings.GetInstance().GetPlayerSettings(controller).InvertSticks)
 		{
-			GamePadState invertedState = GamePad.GetState((PlayerIndex)i);
-			return invertedState.ThumbSticks.Right * new Vector2(1f, -1f);
+			GamePadState swappedSticksState = GamePad.GetState((PlayerIndex)i);
+			return swappedSticksState.ThumbSticks.Right * new Vector2(1f, -1f);
 		}
 		GamePadState state = GamePad.GetState((PlayerIndex)i);
 		return state.ThumbSticks.Left * new Vector2(1f, -1f);
@@ -136,8 +136,8 @@ public class InputHandler : IInputHandlerService
 		};
 		if (Settings.GetInstance().GetPlayerSettings(controller).InvertSticks)
 		{
-			GamePadState invertedState = GamePad.GetState((PlayerIndex)i, (GamePadDeadZone)2);
-			return invertedState.ThumbSticks.Left * new Vector2(1f, -1f);
+			GamePadState swappedSticksState = GamePad.GetState((PlayerIndex)i, (GamePadDeadZone)2);
+			return swappedSticksState.ThumbSticks.Left * new Vector2(1f, -1f);
 		}
 		GamePadState state = GamePad.GetState((PlayerIndex)i, (GamePadDeadZone)2);
 		return state.ThumbSticks.Right * new Vector2(1f, -1f);

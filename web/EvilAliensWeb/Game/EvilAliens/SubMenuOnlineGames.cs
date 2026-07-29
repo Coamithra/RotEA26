@@ -22,7 +22,11 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 
 	private List<NetGameBrowser.GameEntry> games = new List<NetGameBrowser.GameEntry>();
 
-	private readonly Dictionary<Levels, Texture2D> artCache = new Dictionary<Levels, Texture2D>();
+	// Keyed on the RAW wire level, not on Levels: a listed game's level is an int off the wire
+	// and may not be a member of our enum at all, so a `Levels` key here would be a value the
+	// type says cannot exist (card 88f87ba2 -- NetGameBrowser.GameEntry carries the checked
+	// Levels? beside the raw int, and this cache is the one place that still needs the raw).
+	private readonly Dictionary<int, Texture2D> artCache = new Dictionary<int, Texture2D>();
 
 	private Texture2D fallbackArt;
 
@@ -31,7 +35,7 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 	// would be a second copy of the same test, and reverting EnsureArt's guard would then leave
 	// the report -- and the probe reading it -- unchanged. Cumulative and idempotent, matching
 	// artCache's own lifetime.
-	private readonly HashSet<Levels> unmappedArtLevels = new HashSet<Levels>();
+	private readonly HashSet<int> unmappedArtLevels = new HashSet<int>();
 
 	public SubMenuOnlineGames(Game game)
 		: base(game)
@@ -91,30 +95,42 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		// EnsureArt's guard deleted, and the probe would pass on the mutation it exists to
 		// catch. `reported` is separate because unmappedArtLevels is cumulative -- two listed
 		// games on one unknown level would otherwise print it twice.
-		System.Collections.Generic.List<Levels> reported = new System.Collections.Generic.List<Levels>();
+		System.Collections.Generic.List<int> reported = new System.Collections.Generic.List<int>();
 		string unmappedArt = null;
+		// Card 88f87ba2: the same report for a DIFFICULTY this build does not know -- the other
+		// half of what a listing carries off the wire. Read straight off KnownDifficulty, which
+		// IS the boundary validator the carousel itself reads, so this is the subject rather
+		// than a second copy of it (unlike the art above, whose test lives in EnsureArt).
+		System.Collections.Generic.List<int> reportedDiff = new System.Collections.Generic.List<int>();
+		string unknownDifficulty = null;
 		for (int i = 0; i < games.Count; i++)
 		{
-			Levels level = (Levels)games[i].Level;
-			AddEntry(LevelArt.Title(level));
+			NetGameBrowser.GameEntry g = games[i];
+			AddEntry(LevelArt.Title(g.KnownLevel));
 			AddEntryEvent(entrySelected);
-			EnsureArt(level);
-			if (unmappedArtLevels.Contains(level) && !reported.Contains(level))
+			EnsureArt(g);
+			if (unmappedArtLevels.Contains(g.Level) && !reported.Contains(g.Level))
 			{
-				reported.Add(level);
-				// An out-of-enum value formats as the bare int, which is exactly what we want
-				// to read for a level our build does not know about.
-				unmappedArt = (unmappedArt == null) ? level.ToString() : unmappedArt + "," + level;
+				reported.Add(g.Level);
+				unmappedArt = (unmappedArt == null) ? LevelName(g) : unmappedArt + "," + LevelName(g);
+			}
+			if (!g.KnownDifficulty.HasValue && !reportedDiff.Contains(g.Difficulty))
+			{
+				reportedDiff.Add(g.Difficulty);
+				unknownDifficulty = (unknownDifficulty == null)
+					? g.Difficulty.ToString()
+					: unknownDifficulty + "," + g.Difficulty;
 			}
 		}
 		// Silent in the normal case: a public lobby rebuilds whenever a game opens or closes,
 		// and every level being mapped is the answer every time. The line is a report of the
 		// exceptional case, so it doubles as the probe's positive control (`entries=` can only
 		// come from a rebuild that walked the entries) without logging on the player's path.
-		if (unmappedArt != null)
+		if (unmappedArt != null || unknownDifficulty != null)
 		{
 			System.Console.WriteLine("[gamebrowser] rebuilt entries=" + games.Count
-				+ " unmappedArt=" + unmappedArt);
+				+ (unmappedArt != null ? " unmappedArt=" + unmappedArt : "")
+				+ (unknownDifficulty != null ? " unknownDifficulty=" + unknownDifficulty : ""));
 		}
 		if (selectedCode != null)
 		{
@@ -144,17 +160,20 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 	// always have something to draw. Handled BEFORE the try so we never hand Content.Load a
 	// null, whose throw the catch below would silently absorb. The level is recorded in
 	// unmappedArtLevels, which is what RefreshGames reports; the player just sees the default.
-	private void EnsureArt(Levels level)
+	private void EnsureArt(NetGameBrowser.GameEntry g)
 	{
-		if (artCache.ContainsKey(level))
+		if (artCache.ContainsKey(g.Level))
 		{
 			return;
 		}
-		string path = LevelArt.ScreenshotPath(level);
+		// A level not in our enum at all has no art by definition; one that IS in it may still
+		// have no carousel slot (Tutorial, the demos). Both are the same answer here.
+		Levels? known = g.KnownLevel;
+		string path = known.HasValue ? LevelArt.ScreenshotPath(known.Value) : null;
 		if (path == null)
 		{
-			unmappedArtLevels.Add(level);
-			artCache[level] = fallbackArt;
+			unmappedArtLevels.Add(g.Level);
+			artCache[g.Level] = fallbackArt;
 			return;
 		}
 		Texture2D t;
@@ -166,17 +185,26 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		{
 			t = fallbackArt;
 		}
-		artCache[level] = t ?? fallbackArt;
+		artCache[g.Level] = t ?? fallbackArt;
 	}
 
-	private Texture2D ArtFor(Levels level)
+	private Texture2D ArtFor(NetGameBrowser.GameEntry g)
 	{
-		if (artCache.TryGetValue(level, out Texture2D t))
+		if (artCache.TryGetValue(g.Level, out Texture2D t))
 		{
 			return t;
 		}
-		EnsureArt(level);
-		return artCache[level];
+		EnsureArt(g);
+		return artCache[g.Level];
+	}
+
+	// How a listed game's level reads in the diagnostic line: its enum NAME when this build
+	// knows the value, otherwise the bare int -- which is exactly what a reader wants to see
+	// for a level from a newer peer's build.
+	private static string LevelName(NetGameBrowser.GameEntry g)
+	{
+		Levels? known = g.KnownLevel;
+		return known.HasValue ? known.Value.ToString() : g.Level.ToString();
 	}
 
 	// Mirrors SubMenuLevelChoice's entry geometry exactly (same fly-in/scale/alpha), drawing
@@ -187,7 +215,7 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		{
 			return;
 		}
-		Texture2D art = ArtFor((Levels)games[entry].Level);
+		Texture2D art = ArtFor(games[entry]);
 		if (art == null)
 		{
 			return;
@@ -242,14 +270,14 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 			sel = 0;
 		}
 		NetGameBrowser.GameEntry g = games[sel];
-		string title = LevelArt.Title((Levels)g.Level);
+		string title = LevelArt.Title(g.KnownLevel);
 		Vector2 tc = font.MeasureString(title) / 2f;
 		base.SpriteBatch.DrawMetalString(font, title, new Vector2(400f, 50f), Color.AliceBlue, 0f, tc, 1f);
 
 		string ping = g.PingMs < 0 ? "--" : g.PingMs + " ms";
 		// Denominator is the real roster width, not a hard-coded 2: card 4d904410 relaxed a
 		// listed game to ANY free seat, so a couch host genuinely advertises 1..3 of 4 taken.
-		string details = "Difficulty: " + LevelArt.DifficultyName(g.Difficulty)
+		string details = "Difficulty: " + LevelArt.DifficultyName(g.KnownDifficulty)
 			+ "     Players: " + g.Players + "/" + Oracle.MaxPlayers + "     Ping: " + ping;
 		Vector2 dc = font.MeasureString(details) / 2f;
 		dc.Y = 0f;

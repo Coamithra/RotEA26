@@ -174,8 +174,7 @@ internal class FlyingSpider : KillableAlien
 			base.Collides = false;
 			color = new Color(new Vector4(1f, 1f, 1f, 0.2f));
 			scale = 0.67f * SizeFactor;
-			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-			base.Speed = (backgroundSpeed).Length() * 1.11f;
+			base.Speed = oracle.BackgroundSpeed.Length() * 1.11f;
 			base.DrawOrder = 1;
 			startheight = MathHelper.Min(BackgroundBandBottom, startheight);
 			swiveltimer.Duration = 4000f;
@@ -184,8 +183,7 @@ internal class FlyingSpider : KillableAlien
 		{
 			scale = 1f * SizeFactor;
 			base.Collides = true;
-			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-			base.Speed = (backgroundSpeed).Length() * 1.35f;
+			base.Speed = oracle.BackgroundSpeed.Length() * 1.35f;
 			base.DrawOrder = 20;
 			swiveltimer.Duration = 2700f;
 		}
@@ -387,17 +385,11 @@ internal class FlyingSpider : KillableAlien
 				AwardScore(isComboGenerator, other);
 			}
 			BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
-			BloodExplosion bloodExplosion2 = bloodExplosion;
-			Vector2 position = base.Position;
-			Vector2 speedVector = base.SpeedVector;
-			bloodExplosion2.Setup(position, 5f, 0.75f, MathHelper.Min((speedVector).Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
+			bloodExplosion.Setup(base.Position, 5f, 0.75f, MathHelper.Min(base.SpeedVector.Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
 			bloodExplosion.MakeGreen();
 			collection.Add((GameComponent)(object)bloodExplosion);
 			bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
-			BloodExplosion bloodExplosion3 = bloodExplosion;
-			Vector2 position2 = base.Position;
-			Vector2 speedVector2 = base.SpeedVector;
-			bloodExplosion3.Setup(position2, 3f, 0.5f, MathHelper.Min((speedVector2).Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
+			bloodExplosion.Setup(base.Position, 3f, 0.5f, MathHelper.Min(base.SpeedVector.Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
 			bloodExplosion.MakeGreen();
 			collection.Add((GameComponent)(object)bloodExplosion);
 			if (RandomHelper.RandomNextFloat(0f, 1f) <= 0.2f)

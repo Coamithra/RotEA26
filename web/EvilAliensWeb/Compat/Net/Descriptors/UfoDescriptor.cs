@@ -54,9 +54,12 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             UFO u = UFO.NewUFO(bin, game);
             u.Setup(state.Pos, (flags & FlagBig) != 0, (flags & FlagClassic) != 0 ? EnemyBehaviour.classic : EnemyBehaviour.normal);
             u.NetForceSmallSheet((flags & FlagUfoSheet) != 0);
-            if ((flags & FlagBonus) != 0 && len >= 2)
+            // Unrecognised bonus type -> drop the bonus, keep the enemy (see the Braineroid
+            // descriptor and the wire-enum contract in NetProtocol).
+            if ((flags & FlagBonus) != 0 && len >= 2
+                && NetProtocol.TryPowerupType(buf[off + 1], out Powerup.PowerupType bonus))
             {
-                u.SetAsBonus((Powerup.PowerupType)buf[off + 1]);
+                u.SetAsBonus(bonus);
             }
             return u;
         }

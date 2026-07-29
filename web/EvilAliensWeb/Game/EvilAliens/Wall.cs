@@ -1160,8 +1160,7 @@ internal class Wall : AlienDrawableGameComponent
 		float rowH = (float)texture.LogicalHeight() * scale;
 		base.Position = new Vector2(0f, (0f - rowH) * (float)height - EntryLead());
 		base.Direction = (float)Math.PI / 2f;
-		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-		base.Speed = (backgroundSpeed).Length() * 1f;
+		base.Speed = oracle.BackgroundSpeed.Length() * 1f;
 	}
 
 	// How far ABOVE the flat spawn point (-rowH*height, bottom row's top face at the screen edge)
@@ -1878,8 +1877,7 @@ internal class Wall : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-		base.Speed = (backgroundSpeed).Length() * 1f;
+		base.Speed = oracle.BackgroundSpeed.Length() * 1f;
 		base.Update(gameTime);
 		if (base.Position.Y > DeathY())
 		{

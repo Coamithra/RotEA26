@@ -142,6 +142,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeWireEnums(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -1291,6 +1297,285 @@ internal static class Program
         Check("restored: gamebrowser + its boot hijack are off",
             !(bool)get("GameBrowser") && !(bool)get("GameBrowserFallback")
                 && !(bool)get("SkipSplash") && !(bool)get("AutoStart"), null);
+        return 0;
+    }
+
+    // Card 88f87ba2 -- the wire-enum validation boundary (contract: NetProtocol.cs).
+    //
+    // WHY IT IS HERE AND NOT IN A BROWSER. Every validator and every decoder this drives is a
+    // pure `byte[] -> out` static on NetProtocol: no ServiceHelper, no Game, no content. So the
+    // real decoder can be fed real encoded frames on the desktop CLR, which is the strongest
+    // oracle available for this card and needs no rig at all.
+    //
+    // Four sections, and the shape of each matters:
+    //   1. Every declared member of every covered enum must be ACCEPTED and come back
+    //      UNCHANGED. The acceptance half is subsumed by section 2 (which compares against
+    //      IsDefined in both directions, so a refuse-everything validator fails it on every
+    //      member); what this section adds that nothing else checks is that the value handed
+    //      back is the one that went in -- a validator that accepted correctly but returned
+    //      default(T) would pass section 2 and every refusal row.
+    //   2. CONTIGUITY CROSS-CHECK against Enum.IsDefined across the whole 0..255 wire-byte
+    //      domain. This is the expectation stated INDEPENDENTLY of the implementation: the
+    //      validators use an explicit `raw <= (int)LastMember` bound, which silently assumes the
+    //      enum is contiguous from 0 and append-only. It fails in BOTH directions -- a member
+    //      appended past the bound (accepted by IsDefined, refused by the validator) and a gap or
+    //      explicit value breaking contiguity (the reverse) -- so it is what keeps the bounds
+    //      honest as the enums grow.
+    //   3. THE REAL DECODERS, driven with real Encode* frames. This is what the card is actually
+    //      about: a hostile or newer peer's bytes going in one end.
+    //   4. NEGATIVE CONTROL. The values section 3 refuses must genuinely be outside their enums,
+    //      i.e. the pre-card bare cast really did admit something no member matches.
+    private static int ProbeWireEnums(Assembly asm)
+    {
+        Type proto = asm.GetType("EvilAliensWeb.Compat.Net.NetProtocol", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        // validator name -> the enum it guards. Adding a wire enum means adding a ROW here; the
+        // contract in NetProtocol.cs says so, and section 2 is why that is not busywork.
+        (string Method, string EnumType)[] table =
+        {
+            ("TryLevel",        "EvilAliens.Levels"),
+            ("TryDifficulty",   "EvilAliens.Settings+DifficultyLevel"),
+            ("TryUnlockItem",   "EvilAliens.Unlockables+Items"),
+            ("TryUnlockType",   "EvilAliens.AnimatedMessage+UnlockType"),
+            ("TryCosmeticKind", "EvilAliensWeb.Compat.Net.NetCosmeticKind"),
+            ("TryPowerupType",  "EvilAliens.Powerup+PowerupType"),
+            ("TryMessageType",  "EvilAliens.AnimatedMessage+MessageType"),
+            ("TrySpeech",       "EvilAliens.SoundManager+Texts"),
+        };
+
+        MethodInfo launchEnc = proto.GetMethod("EncodeLaunchEvent", anyStatic);
+        MethodInfo launchDec = proto.GetMethod("TryDecodeLaunchEvent", anyStatic);
+        MethodInfo unlockEnc = proto.GetMethod("EncodeUnlockEvent", anyStatic);
+        MethodInfo unlockDec = proto.GetMethod("TryDecodeUnlockEvent", anyStatic);
+        MethodInfo msgEnc = proto.GetMethod("EncodeMessageEvent", anyStatic);
+        MethodInfo msgDec = proto.GetMethod("TryDecodeMessageEvent", anyStatic);
+        MethodInfo swarmEnc = proto.GetMethod("EncodeCosmeticSwarmEvent", anyStatic);
+        MethodInfo swarmDec = proto.GetMethod("TryDecodeCosmeticSwarmEvent", anyStatic);
+        if (launchEnc == null || launchDec == null || unlockEnc == null || unlockDec == null
+            || msgEnc == null || msgDec == null || swarmEnc == null || swarmDec == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the wire codecs (EncodeLaunchEvent="
+                + (launchEnc != null) + " TryDecodeLaunchEvent=" + (launchDec != null)
+                + " EncodeUnlockEvent=" + (unlockEnc != null) + " TryDecodeUnlockEvent=" + (unlockDec != null)
+                + " EncodeMessageEvent=" + (msgEnc != null) + " TryDecodeMessageEvent=" + (msgDec != null)
+                + " EncodeCosmeticSwarmEvent=" + (swarmEnc != null) + " TryDecodeCosmeticSwarmEvent=" + (swarmDec != null)
+                + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] wire enum validation (card 88f87ba2)");
+
+        // Invoke one `bool Try*(int, out TEnum)` validator; Value is the boxed enum it produced.
+        Func<MethodInfo, int, ValueTuple<bool, object>> call = (m, raw) =>
+        {
+            object[] a = { raw, null };
+            bool ok = (bool)m.Invoke(null, a);
+            return new ValueTuple<bool, object>(ok, a[1]);
+        };
+
+        // ---- 1. every declared member is accepted and comes back UNCHANGED -------------------
+        foreach ((string method, string enumTypeName) in table)
+        {
+            Type et = asm.GetType(enumTypeName, true);
+            MethodInfo m = proto.GetMethod(method, anyStatic);
+            if (m == null)
+            {
+                Check(method + " reflects", false, "renamed or moved?");
+                continue;
+            }
+            bool all = true;
+            string firstBad = null;
+            foreach (object member in Enum.GetValues(et))
+            {
+                int raw = Convert.ToInt32(member);
+                ValueTuple<bool, object> got = call(m, raw);
+                if (!got.Item1 || !Equals(got.Item2, member))
+                {
+                    all = false;
+                    firstBad = firstBad ?? (member + " (=" + raw + ") -> " + (got.Item1 ? got.Item2.ToString() : "REFUSED"));
+                }
+            }
+            Check(method + " accepts every declared member and returns it unchanged", all, firstBad);
+        }
+
+        // ---- 2. CONTIGUITY CROSS-CHECK vs Enum.IsDefined over the whole wire-byte domain ------
+        foreach ((string method, string enumTypeName) in table)
+        {
+            Type et = asm.GetType(enumTypeName, true);
+            MethodInfo m = proto.GetMethod(method, anyStatic);
+            if (m == null)
+            {
+                continue;
+            }
+            Type underlying = Enum.GetUnderlyingType(et);
+            bool agree = true;
+            string firstBad = null;
+            for (int raw = 0; raw <= 255; raw++)
+            {
+                // IsDefined demands the enum's own underlying type, so a byte-backed enum
+                // (NetCosmeticKind) would throw on a boxed int.
+                bool defined = Enum.IsDefined(et, Convert.ChangeType(raw, underlying));
+                bool accepted = call(m, raw).Item1;
+                if (defined != accepted)
+                {
+                    agree = false;
+                    firstBad = firstBad ?? (raw + ": IsDefined=" + defined + " but " + method + "=" + accepted);
+                }
+            }
+            Check(method + " agrees with Enum.IsDefined across 0..255", agree,
+                firstBad ?? ("guards " + et.Name));
+        }
+
+        // A negative int cannot be an enum member and must be refused by the validators the
+        // LISTING path uses (the browser's level/difficulty arrive as JSON ints, not wire bytes,
+        // so the byte domain above does not cover them).
+        Check("TryLevel refuses a negative", !call(proto.GetMethod("TryLevel", anyStatic), -1).Item1, null);
+        Check("TryDifficulty refuses a negative", !call(proto.GetMethod("TryDifficulty", anyStatic), -1).Item1, null);
+        Check("TryLevel refuses the browser's out-of-enum fake (9999)",
+            !call(proto.GetMethod("TryLevel", anyStatic), 9999).Item1, null);
+
+        // ---- 3. THE REAL DECODERS over real frames -------------------------------------------
+        Type levels = asm.GetType("EvilAliens.Levels", true);
+        Type diff = asm.GetType("EvilAliens.Settings+DifficultyLevel", true);
+        Type items = asm.GetType("EvilAliens.Unlockables+Items", true);
+        Type msgTypeEnum = asm.GetType("EvilAliens.AnimatedMessage+MessageType", true);
+
+        byte goodLevel = Convert.ToByte(Enum.Parse(levels, "Level2"));
+        byte goodDiff = Convert.ToByte(Enum.Parse(diff, "Hard"));
+
+        Func<byte[], ValueTuple<bool, object, object>> decodeLaunch = frame =>
+        {
+            object[] a = { frame, null, null };
+            bool ok = (bool)launchDec.Invoke(null, a);
+            return new ValueTuple<bool, object, object>(ok, a[1], a[2]);
+        };
+
+        // POSITIVE CONTROL first: a valid launch must still be ACCEPTED and carry the right
+        // values. A decoder that refused everything would pass every refusal below.
+        ValueTuple<bool, object, object> okLaunch =
+            decodeLaunch((byte[])launchEnc.Invoke(null, new object[] { (ushort)1, goodLevel, goodDiff }));
+        Check("EvLaunch: a valid frame decodes to the host's level+difficulty",
+            okLaunch.Item1 && Equals(okLaunch.Item2, Enum.Parse(levels, "Level2"))
+                && Equals(okLaunch.Item3, Enum.Parse(diff, "Hard")),
+            okLaunch.Item1 ? okLaunch.Item2 + "/" + okLaunch.Item3 : "REFUSED");
+
+        // The headline case: a level this build has never heard of. Unvalidated it reaches
+        // Game1.AddLevelComponent's throwing default arm AFTER the menu has been torn down.
+        Check("EvLaunch: an out-of-enum LEVEL is refused",
+            !decodeLaunch((byte[])launchEnc.Invoke(null, new object[] { (ushort)2, (byte)200, goodDiff })).Item1, null);
+        // The save-poisoning case: this value would land in the XML-serialized
+        // Settings.CurrentDifficulty and kill every later Settings.xml write.
+        Check("EvLaunch: an out-of-enum DIFFICULTY is refused",
+            !decodeLaunch((byte[])launchEnc.Invoke(null, new object[] { (ushort)3, goodLevel, (byte)200 })).Item1, null);
+        Check("EvLaunch: a truncated frame is refused",
+            !decodeLaunch(new byte[] { 0x30, 15, 0, 0, 5 }).Item1, null);
+
+        // The Item2/Item3 payloads matter as much as the bool: a decoder that returned true
+        // with default(T) in the out params would satisfy a boolean-only control while
+        // handing the caller the WRONG unlock.
+        Func<byte[], ValueTuple<bool, object, object>> decodeUnlock = frame =>
+        {
+            object[] a = { frame, null, null, null, null };
+            bool ok = (bool)unlockDec.Invoke(null, a);
+            return new ValueTuple<bool, object, object>(ok, a[1], a[2]);
+        };
+        byte goodItem = Convert.ToByte(Enum.Parse(items, "Challenges"));
+        Type unlockTypeEnum = asm.GetType("EvilAliens.AnimatedMessage+UnlockType", true);
+        ValueTuple<bool, object, object> okUnlock = decodeUnlock((byte[])unlockEnc.Invoke(null,
+            new object[] { (ushort)4, goodItem, Convert.ToByte(Enum.Parse(unlockTypeEnum, "cheat")), (byte)0, "x" }));
+        Check("EvUnlock: a valid frame decodes to the item and unlock type sent",
+            okUnlock.Item1 && Equals(okUnlock.Item2, Enum.Parse(items, "Challenges"))
+                && Equals(okUnlock.Item3, Enum.Parse(unlockTypeEnum, "cheat")),
+            okUnlock.Item1 ? okUnlock.Item2 + "/" + okUnlock.Item3 : "REFUSED");
+        // Same class as the difficulty above: an unknown item becomes a dictionary KEY in
+        // Unlockables.Collection and kills every later Unlockables.xml write.
+        Check("EvUnlock: an out-of-enum ITEM is refused",
+            !decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)5, (byte)200, (byte)0, (byte)0, "x" })).Item1, null);
+        Check("EvUnlock: an out-of-enum UNLOCK TYPE is refused",
+            !decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)6, goodItem, (byte)200, (byte)0, "x" })).Item1, null);
+
+        // EvMessage takes the CLAMP policy instead, and the difference is deliberate: dropping a
+        // script beat would lose the level's story text on the joiner only, where an unknown
+        // banner STYLE still renders readable text. So this one must SUCCEED.
+        Func<byte[], ValueTuple<bool, object, object>> decodeMsg = frame =>
+        {
+            object[] a = { frame, null, null, null, null };
+            bool ok = (bool)msgDec.Invoke(null, a);
+            return new ValueTuple<bool, object, object>(ok, a[1], a[2]);
+        };
+        ValueTuple<bool, object, object> badStyle =
+            decodeMsg((byte[])msgEnc.Invoke(null, new object[] { (ushort)7, (byte)200, (byte)200, 0f, "hello" }));
+        Check("EvMessage: an out-of-enum style is CLAMPED, not refused",
+            badStyle.Item1 && Equals(badStyle.Item2, Enum.Parse(msgTypeEnum, "starwarsblue")),
+            badStyle.Item1 ? badStyle.Item2.ToString() : "REFUSED");
+        Check("EvMessage: an out-of-enum speech cue clamps to Nothing",
+            badStyle.Item1 && Convert.ToInt32(badStyle.Item3) == 0, null);
+        // ... and a VALID style is not clamped away, or the row above would pass vacuously.
+        ValueTuple<bool, object, object> goodStyle = decodeMsg((byte[])msgEnc.Invoke(null, new object[]
+            { (ushort)8, Convert.ToByte(Enum.Parse(msgTypeEnum, "redwarning")), (byte)1, 0f, "hello" }));
+        Check("EvMessage: a valid style survives the clamp untouched",
+            goodStyle.Item1 && Equals(goodStyle.Item2, Enum.Parse(msgTypeEnum, "redwarning")),
+            goodStyle.Item1 ? goodStyle.Item2.ToString() : "REFUSED");
+        // ... and so does a valid SPEECH cue. Without this the clamp row above passes on a
+        // SpeechOrNone hard-wired to Nothing, which would silently mute every replicated beat.
+        Check("EvMessage: a valid speech cue survives the clamp untouched",
+            goodStyle.Item1 && Convert.ToInt32(goodStyle.Item3) == 1,
+            goodStyle.Item1 ? goodStyle.Item3.ToString() : "REFUSED");
+
+        // Payload asserted for the same reason as EvUnlock above.
+        Func<byte[], ValueTuple<bool, object, object, object>> decodeSwarm = frame =>
+        {
+            object[] a = { frame, null, null, null };
+            bool ok = (bool)swarmDec.Invoke(null, a);
+            return new ValueTuple<bool, object, object, object>(ok, a[1], a[2], a[3]);
+        };
+        Type kindEnum = asm.GetType("EvilAliensWeb.Compat.Net.NetCosmeticKind", true);
+        ValueTuple<bool, object, object, object> okSwarm = decodeSwarm((byte[])swarmEnc.Invoke(null,
+            new object[] { (ushort)9, Convert.ToByte(Enum.Parse(kindEnum, "BackgroundAsteroids")), true, 5.5f }));
+        Check("EvCosmeticSwarm: a valid frame decodes to the kind, on-flag and rate sent",
+            okSwarm.Item1 && Equals(okSwarm.Item2, Enum.Parse(kindEnum, "BackgroundAsteroids"))
+                && (bool)okSwarm.Item3 && Math.Abs((float)okSwarm.Item4 - 5.5f) < 1e-6f,
+            okSwarm.Item1 ? okSwarm.Item2 + "/" + okSwarm.Item3 + "/" + okSwarm.Item4 : "REFUSED");
+        Check("EvCosmeticSwarm: an out-of-enum kind is refused",
+            !decodeSwarm((byte[])swarmEnc.Invoke(null, new object[] { (ushort)10, (byte)200, true, 5.5f })).Item1, null);
+
+        // ---- 3b. THE SENTINEL'S DISPLAY CONTRACT ---------------------------------------------
+        // The browser LISTING keeps an unknown value rather than refusing it, so what has to
+        // hold is that the two things drawn from it stay sensible for null. Rig for the same
+        // pair end to end: tools/headless/probes/gamebrowser_fallback.txt.
+        Type levelArt = asm.GetType("EvilAliens.LevelArt", true);
+        Type nullableLevels = typeof(Nullable<>).MakeGenericType(levels);
+        Type nullableDiff = typeof(Nullable<>).MakeGenericType(diff);
+        MethodInfo titleOf = levelArt.GetMethod("Title", anyStatic, null, new[] { nullableLevels }, null);
+        MethodInfo diffName = levelArt.GetMethod("DifficultyName", anyStatic, null, new[] { nullableDiff }, null);
+        if (titleOf == null || diffName == null)
+        {
+            Check("LevelArt.Title(Levels?) / DifficultyName(DifficultyLevel?) reflect", false,
+                "Title=" + (titleOf != null) + " DifficultyName=" + (diffName != null)
+                    + " -- still taking a raw int/enum?");
+        }
+        else
+        {
+            Check("an unknown level titles as the generic \"Mission\"",
+                (string)titleOf.Invoke(null, new object[] { null }) == "Mission", null);
+            Check("an unknown difficulty renders as \"?\"",
+                (string)diffName.Invoke(null, new object[] { null }) == "?", null);
+            // Positive controls: neither may answer the unknown string for a value we DO know,
+            // or the two rows above would pass on a function that ignored its argument.
+            Check("... but a known level still titles properly",
+                (string)titleOf.Invoke(null, new[] { Enum.Parse(levels, "Level2") }) == "Mission 2", null);
+            Check("... and a known difficulty still names its tier",
+                (string)diffName.Invoke(null, new[] { Enum.Parse(diff, "Very_Hard") }) == "Very Hard", null);
+        }
+
+        // ---- 4. NEGATIVE CONTROL -------------------------------------------------------------
+        // Every refusal above is only meaningful if the value really is outside its enum -- i.e.
+        // the pre-card bare cast admitted something no member matches. Stated via IsDefined so it
+        // does not restate the validators' own bounds.
+        Check("negative control: 200 is not a Levels member", !Enum.IsDefined(levels, 200), null);
+        Check("negative control: 200 is not a DifficultyLevel member", !Enum.IsDefined(diff, 200), null);
+        Check("negative control: 200 is not an Unlockables.Items member", !Enum.IsDefined(items, 200), null);
         return 0;
     }
 }

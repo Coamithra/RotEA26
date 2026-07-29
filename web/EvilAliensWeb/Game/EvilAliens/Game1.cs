@@ -695,12 +695,25 @@ public class Game1 : Game
 	// per-tick pump could finish — worst case this is the old synchronous batch decode.
 	// Deliberately leaves idleWarmQueue alone: nothing there is needed for the menu, and
 	// blocking the menu on ~20 background tiles would trade a hidden warm for a visible wait.
+	//
+	// Reaching this with a non-empty queue means the pump never got its ~24 ticks -- a debug
+	// boot, or a player who double-tapped past the splash -- so the whole remainder decodes in
+	// ONE synchronous tick here. That tick reports itself under ?loadlog since card cccd763a;
+	// LoadProfiler.EndWarmDrain owns the wording and the gate (see it for why the count is
+	// queue entries rather than decodes). A full-splash boot drains nothing and stays silent.
 	private void DrainWarmQueue()
 	{
+		if (warmQueue.Count == 0)
+		{
+			return;
+		}
+		int drained = warmQueue.Count;
+		long drainStart = EvilAliensWeb.Compat.LoadProfiler.BeginWarmDrain();
 		while (warmQueue.Count > 0)
 		{
 			warmQueue.Dequeue()();
 		}
+		EvilAliensWeb.Compat.LoadProfiler.EndWarmDrain(drained, drainStart);
 	}
 
 	// Best-effort warm of a single asset into the shared content manager's cache. Guarded

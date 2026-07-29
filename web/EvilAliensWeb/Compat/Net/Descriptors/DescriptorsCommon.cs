@@ -43,9 +43,15 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             byte flags = len >= 1 ? buf[off] : (byte)0;
             Braineroid b = Braineroid.NewBraineroid(bin, game);
             b.Setup(state.Pos, (BrainSize)(flags & SizeMask), 0f, wrapping: false);
-            if ((flags & FlagBonus) != 0 && len >= 2)
+            // An unrecognised bonus type drops the BONUS and keeps the enemy. Unlike the
+            // Powerup descriptor -- where the type is the entity's whole identity -- this is
+            // an optional extra on an otherwise valid enemy, and declining the puppet would
+            // take a real shootable target out of the client's world to save a loot letter.
+            // See the wire-enum contract in NetProtocol.
+            if ((flags & FlagBonus) != 0 && len >= 2
+                && NetProtocol.TryPowerupType(buf[off + 1], out Powerup.PowerupType bonus))
             {
-                b.NetMakeBonus((Powerup.PowerupType)buf[off + 1]);
+                b.NetMakeBonus(bonus);
             }
             return b;
         }
@@ -110,9 +116,11 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             EvilSkull s = EvilSkull.NewEvilSkull(bin, game);
             s.Setup(state.Pos, (flags & FlagClassic) != 0 ? EnemyBehaviour.classic : EnemyBehaviour.normal);
             s.NetSettle();
-            if ((flags & FlagSpawnBonus) != 0 && len >= 2)
+            // Unrecognised bonus type -> drop the bonus, keep the enemy (Braineroid above).
+            if ((flags & FlagSpawnBonus) != 0 && len >= 2
+                && NetProtocol.TryPowerupType(buf[off + 1], out Powerup.PowerupType bonus))
             {
-                s.NetMakeBonus((Powerup.PowerupType)buf[off + 1]);
+                s.NetMakeBonus(bonus);
             }
             return s;
         }

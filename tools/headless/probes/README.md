@@ -121,7 +121,8 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (cards 8d6883f3, 0d166364): no level-select art decodes when either carousel is opened, and no entry falls back to the default art |
 | `netbg_catchup.txt` | the join-in-progress scenery catch-up replays every leg, the mid-level whole-scene swap included (cards 45a4e48d, ca4fd94f): a peer joining mid-level must end up looking at the host's scenery, which nothing else can detect — it fails silently and only a second player ever sees it. Drives `eaNetBgTest`'s one-tab round trip over `?netscript`; its third assertion is an anti-vacuity guard on the wipe, and the header says why it takes an `expect-not` |
 | `netbg_scene_insanebossi.txt` | the same card's ONE `NetApplySceneChange` override, on the only level that has one: entering Boss Train's Mars section must replicate the `Floor` as well as the backdrop. Plays the real fight to the swap, so it is the only probe that runs the production `GoMars` path |
-| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
+| `stockshots_pump.txt` | the OTHER half of card 4d47c5ba: on a boot that lets the warm pump run (a real player's), the Press-Start -> menu handoff decodes nothing. Card cccd763a -- it is the only probe that can see that half, see the block below |
+| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Also the out-of-range DIFFICULTY on the same row (card 88f87ba2): the boundary refuses it (`unknownDifficulty=7`) and the row is still listed. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
 level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
@@ -160,12 +161,32 @@ the drift the card is about — a `MenuScene` carousel entry authored for a leve
 `ScreenshotPath` row, where `StockShots` is still twelve and the count passes happily
 (measured with `Levels.Tutorial`: boot count and COLD both green, that line alone red); and
 `COLD` still covers the `ScreenshotSaver`/`QueueMenuWarm` side neither of the others sees.
-`gamebrowser_fallback` goes red when `EnsureArt`'s null guard is reverted — the
+`gamebrowser_fallback`'s difficulty half goes red when `GameEntry.KnownDifficulty` is reverted to
+a bare cast: `unknownDifficulty=7` stops printing entirely, since it is reported only for a value
+the boundary refused. (Rebuild `tools/headless` after the mutation — the probe runs `eahl.exe`,
+which links the game sources in, so a game-only rebuild leaves it testing the old binary and
+passing.) Its art half goes red when `EnsureArt`'s null guard is reverted — the
 `[gamebrowser] rebuilt` line stops printing entirely, since it is reported only when something
 resolved to no bundled art. Note what that mutation does NOT produce: an exception. `EnsureArt` wraps its
 `Content.Load` in `catch (Exception)`, so a broken fallback throws, gets absorbed, and draws the
 identical picture — which is why the probe reads a line reported from what `EnsureArt` recorded
 while resolving, and why that line must never be re-derived from `LevelArt` at the report site.
+
+**`stockshots_pump` exists because its two neighbours provably CANNOT catch the regression it
+pins, and that is worth stating rather than rediscovering.** Delete the
+`foreach (StockShots) EnqueueWarm` tail from `Game1.QueueMenuWarm` and every player boot decodes
+all twelve level-select thumbnails synchronously on the last beat before the menu -- the
+~350-470ms Chrome stall card 4d47c5ba removed. Measured on that exact mutation:
+`stockshots_warm.txt` **PASS**, `boot_cold.txt` **PASS**, `stockshots_pump.txt` **FAIL**, quoting
+the restored `stockshots warm: 12 textures` line. The two neighbours are blind for different
+reasons -- `stockshots_warm` boots `?menu`, which auto-presses Start on frame 1, so the twelve
+decode at `ScreenshotSaver.Init` whether or not they were ever queued; `boot_cold` runs a full
+splash but never presses Start, so `Init` does not run there at all. Only a boot that lets the
+pump run AND then presses Start separates them.
+Its second mutation is the rule-1 one: drop the two Enter taps and the run never leaves the
+splash, at which point `expect-not stockshots warm:` passes on **0 matches** while the
+`[loadprofile] Level1 preload:` control goes red. That control is the whole reason the probe
+navigates into a level at all.
 
 **`preload_insanebossi` additionally has a two-line mutation, and it is the sharp one:** deleting
 just `InsaneBossI|gfx/base/756` and `|gfx/base/2331-v5` goes red only because the soak runs the

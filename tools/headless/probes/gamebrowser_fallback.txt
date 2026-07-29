@@ -56,4 +56,16 @@ expect \[gamebrowser\] rebuilt entries=6 unmappedArt=Tutorial,9999
 # fired for everything would satisfy the expect above while silently replacing every game's art
 # with Mission 1's.
 expect-not \[gamebrowser\] .*unmappedArt=.*(Level1|Level2|Level3|ClassicAliens)
+
+# Card 88f87ba2. The FU7UR row also carries an out-of-range DIFFICULTY (7, against an enum that
+# stops at Inzane=4) -- the other half of what arrives off the wire, and the only offline rig for
+# the difficulty sentinel. Two things are being pinned at once here:
+#   (a) the boundary REFUSES it, i.e. GameEntry.KnownDifficulty is null and the carousel draws
+#       LevelArt.DifficultyName's "?" rather than casting 7 to a DifficultyLevel;
+#   (b) the row is still LISTED -- entries=6 above covers the whole set, so a sentinel that
+#       dropped or threw on the row would take that count to 5 and fail there instead.
+# Only ONE unknown difficulty exists in the fake set, so a fallback firing for everything would
+# print the other rows' tiers here too and fail the expect-not below.
+expect \[gamebrowser\] .*unknownDifficulty=7
+expect-not \[gamebrowser\] .*unknownDifficulty=.*(0|1|2|3),
 quit

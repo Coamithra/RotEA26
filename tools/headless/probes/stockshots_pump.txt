@@ -1,0 +1,66 @@
+# PROBE: on a real player's boot the warm pump covers the stock shots, so the Press-Start ->
+# menu handoff decodes nothing.
+#
+# PINS: the `foreach (StockShots) EnqueueWarm` tail of Game1.QueueMenuWarm (card 4d47c5ba), i.e.
+# the half of that card that is NOT about attribution. Delete those three lines and every player
+# boot goes back to decoding all twelve level-select thumbnails synchronously inside
+# ScreenshotSaver.Init, on the last beat before the menu appears -- ~350-470ms in Chrome, the
+# stall QueueMenuWarm exists to prevent.
+#
+# FAILURE MEANS: that regression, and it is otherwise INVISIBLE to this whole suite (card
+# cccd763a). Its sibling stockshots_warm.txt boots ?menu, where Start is auto-pressed on frame 1
+# and the twelve decode at Init whether or not they were ever queued -- so its
+# `stockshots warm: 12 textures` line reads identically on healthy and broken code. boot_cold.txt
+# runs a full splash but never presses Start, so ScreenshotSaver.Init does not run there at all.
+# Only a boot that lets the pump run AND then presses Start can tell the two apart, which is what
+# this probe is.
+#
+# HOW IT DIFFERS FROM A DEBUG BOOT, and why the settle length is the probe: ?menu / ?skipsplash /
+# ?autostart auto-press Start on frame 1, so the pump gets through only the first couple of
+# entries -- the sibling probe's `menu warm drain:` line reads 22 of 24 still queued. The queue is
+# 24 entries drained one per Update tick, menu-critical twelve FIRST and the stock shots after, so
+# the stall window is ~24 ticks wide -- measured, by pressing Start at tick 7 / 13 / 19 / 23 on a
+# full-splash boot: 12 / 8 / 2 / 0 stock shots still cold. `step 200` puts this run an order of
+# magnitude clear of that boundary, so a failure here is a real regression and never a race.
+#
+# THE POSITIVE CONTROL is the Level1 launch, and it is not optional (probes README rule 1):
+# `expect-not stockshots warm:` passes beautifully on a run that never pressed Start at all --
+# which is the single most likely way for this file to rot, since the two presses below are an
+# input sequence and nothing else here would notice if they stopped landing. Reaching
+# `[loadprofile] Level1 preload:` requires the menu to have been BUILT, which requires
+# startScreen_OnFinished, which requires ScreenshotSaver.Init to have run -- exactly the window
+# the assertion covers.
+#
+# ?splashvariant=revenged only pins the boot decode set so the run is deterministic; nothing here
+# asserts on it. ?invuln so the launched level does not die during the settle.
+#
+# eahl: --flags "?loadlog&noattract&invuln&splashvariant=revenged"
+
+# Let the splash play long enough for the pump to drain the whole menu queue -- this is the one
+# thing the probe is really testing, so do not shorten it (see the header).
+step 200 nodraw
+
+# Drop the boot decodes (splash art, cursor). Everything asserted below happens after this point.
+mark
+
+# A player double-tapping past the splash: the first Enter skips the splash sequence, the second
+# is the Press Start. They must be separate taps -- SplashScene consumes the first press's edge,
+# and StartScreen is added mid-Update and first reads input on the NEXT tick.
+eval Press enter 1
+step 3 nodraw
+eval Press enter 1
+step 60 nodraw
+
+# The handoff is done and the menu is up. Nothing may have decoded on it.
+expect-not \[loadprofile\] stockshots warm:
+
+# Positive control: Start Game -> the mission carousel (opens on Mission 1) -> difficulty -> go.
+eval Press enter 1
+step 90 nodraw
+eval Press enter 1
+step 120 nodraw
+eval Press enter 1
+step 240 nodraw
+
+expect \[loadprofile\] Level1 preload:
+quit

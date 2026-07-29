@@ -360,10 +360,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// Online co-op (card 1a3ad45a), SEND side: the per-slot HUD state this peer owns and is
 	// therefore authoritative for. `levels` is filled for the leading NetProtocol.HudLevelCount
 	// powerup types (OneUp's level never moves, so it is not on the wire).
-	internal void NetReadHudState(int player, int[] levels, out int combo, out byte activeType, out float progress)
+	// Mirrors NetSetHudState's shape: null = no powerup active on that slot, so a read/set
+	// round trip needs no conversion and no HudPowerupNone handling of its own.
+	internal void NetReadHudState(int player, int[] levels, out int combo, out Powerup.PowerupType? activeType, out float progress)
 	{
 		combo = 0;
-		activeType = EvilAliensWeb.Compat.Net.NetProtocol.HudPowerupNone;
+		activeType = null;
 		progress = 0f;
 		if (player < 0 || player >= scores.Count)
 		{
@@ -373,7 +375,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		combo = info.combo;
 		if (info.powerupactive)
 		{
-			activeType = (byte)info.powerup;
+			activeType = info.powerup;
 			progress = info.powerupDatas[info.powerup].GetProgress();
 		}
 		for (int t = 0; t < levels.Length && t < EvilAliensWeb.Compat.Net.NetProtocol.HudLevelCount; t++)
@@ -392,7 +394,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// adopted here becomes the client's real boss share. That is the intended correction (the
 	// host used to pay it from a combo the client never had) and it is why the wire field is a
 	// ushort rather than a byte.
-	internal void NetSetHudState(int player, int combo, byte activeType, float progress, int[] levels)
+	internal void NetSetHudState(int player, int combo, Powerup.PowerupType? activeType, float progress, int[] levels)
 	{
 		if (player < 0 || player >= scores.Count || levels == null)
 		{
@@ -415,12 +417,14 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		{
 			NetSetPowerupLevel(player, (Powerup.PowerupType)t, levels[t]);
 		}
-		bool active = activeType != EvilAliensWeb.Compat.Net.NetProtocol.HudPowerupNone && activeType <= (byte)Powerup.PowerupType.OneUp;
-		if (active)
+		// Null = no powerup active on that slot. The wire byte is validated (and the
+		// HudPowerupNone sentinel folded in) at the decode boundary -- see the wire-enum
+		// contract in NetProtocol; do not re-test the range here.
+		if (activeType.HasValue)
 		{
 			// SetPowerup restarts the panel's fade, so only touch it on a real change -- at the
 			// ~10Hz HUD cadence an unconditional call would hold the bar permanently fading in.
-			Powerup.PowerupType type = (Powerup.PowerupType)activeType;
+			Powerup.PowerupType type = activeType.Value;
 			if (!info.powerupactive || info.powerup != type)
 			{
 				SetPowerup(type, player);

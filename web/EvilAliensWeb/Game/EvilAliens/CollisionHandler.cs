@@ -158,11 +158,11 @@ public class CollisionHandler
 			// at most one per level) keep the original all-pairs scan with both callbacks.
 			for (int n = 0; n < count; n++)
 			{
-				ICollidable collidable2 = collidables[n];
-				if ((IsActive(collidable2) & IsActive(collidable)) && collidable2 != collidable && collidable.DetectCollision(collidable2))
+				ICollidable other = collidables[n];
+				if ((IsActive(other) & IsActive(collidable)) && other != collidable && collidable.DetectCollision(other))
 				{
-					collidable2.CollidesWith(collidable);
-					collidable.CollidesWith(collidable2);
+					other.CollidesWith(collidable);
+					collidable.CollidesWith(other);
 				}
 			}
 		}

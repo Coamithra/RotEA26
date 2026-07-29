@@ -1621,17 +1621,17 @@ public class Game1 : Game
 		{
 			list.Add(item);
 		}
-		foreach (IGameComponent item2 in list)
+		foreach (IGameComponent item in list)
 		{
-			bool flag = !(item2 is MousePointer);
-			flag = flag && !(item2 is Oracle);
-			flag = flag && !(item2 is BloomComponent);
-			flag = flag && !(item2 is GamerServicesComponent);
-			flag = flag && !(item2 is SpriteBatchWrapper);
-			flag = flag && !(item2 is Debugger);
-			if (flag && !(item2 is AwardmentBlade))
+			bool flag = !(item is MousePointer);
+			flag = flag && !(item is Oracle);
+			flag = flag && !(item is BloomComponent);
+			flag = flag && !(item is GamerServicesComponent);
+			flag = flag && !(item is SpriteBatchWrapper);
+			flag = flag && !(item is Debugger);
+			if (flag && !(item is AwardmentBlade))
 			{
-				((Collection<IGameComponent>)(object)base.Components).Remove(item2);
+				((Collection<IGameComponent>)(object)base.Components).Remove(item);
 			}
 		}
 		collectionHelper.FullReset();

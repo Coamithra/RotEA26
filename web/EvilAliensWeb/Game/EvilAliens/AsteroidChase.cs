@@ -32,8 +32,8 @@ internal class AsteroidChase : GameScene
 		eventList.AddEvent(messageEvent, halting: true);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
-		AsteroidSpawner gameEvent = new AsteroidSpawner(base.Game, 60f, 5f, startWithBig: true);
-		eventList.AddEvent(gameEvent, halting: true);
+		AsteroidSpawner asteroidSpawner = new AsteroidSpawner(base.Game, 60f, 5f, startWithBig: true);
+		eventList.AddEvent(asteroidSpawner, halting: true);
 		BonusSpawner bonusSpawner = new BonusSpawner(base.Game, 60f, 1f, randomly: false);
 		bonusSpawner.SetMars();
 		eventList.AddEvent(bonusSpawner, halting: false);

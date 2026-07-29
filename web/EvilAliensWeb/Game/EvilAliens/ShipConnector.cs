@@ -143,11 +143,11 @@ internal class ShipConnector : AlienDrawableGameComponent
 	{
 		this.A = A;
 		this.B = B;
-		Vector2 position = A.Position;
-		Vector2 position2 = B.Position;
-		float num = MyMath.VectorToAngle(position2 - position);
+		Vector2 aPosition = A.Position;
+		Vector2 bPosition = B.Position;
+		float num = MyMath.VectorToAngle(bPosition - aPosition);
 		rotation = num;
-		base.Position = position + (position2 - position) * 0.5f;
+		base.Position = aPosition + (bPosition - aPosition) * 0.5f;
 		// Fresh (or recycled) connector: drop any tendrils left from a previous docking so
 		// they don't flash on the new link.
 		for (int i = 0; i < tendrils.Length; i++)
@@ -475,19 +475,19 @@ internal class ShipConnector : AlienDrawableGameComponent
 		{
 			// Base sprite between the two ON-SCREEN ships (staleness reads as elastic
 			// stretch); the soft pull only ever moves the ship WE own.
-			Vector2 position = A.Position;
-			Vector2 position2 = B.Position;
-			rotation = MyMath.VectorToAngle(position2 - position);
-			base.Position = position + (position2 - position) * 0.5f;
+			Vector2 aPosition = A.Position;
+			Vector2 bPosition = B.Position;
+			rotation = MyMath.VectorToAngle(bPosition - aPosition);
+			base.Position = aPosition + (bPosition - aPosition) * 0.5f;
 			NetPullOwnShip(gameTime);
 			base.Update(gameTime);
 		}
 		else
 		{
-			Vector2 position = A.Position;
-			Vector2 position2 = B.Position;
-			float angle = (rotation = MyMath.VectorToAngle(position2 - position));
-			base.Position = position + (position2 - position) * 0.5f;
+			Vector2 aPosition = A.Position;
+			Vector2 bPosition = B.Position;
+			float angle = (rotation = MyMath.VectorToAngle(bPosition - aPosition));
+			base.Position = aPosition + (bPosition - aPosition) * 0.5f;
 			A.SetPosition(base.Position - MyMath.AngleToVector(angle) * 39f);
 			B.SetPosition(base.Position + MyMath.AngleToVector(angle) * 39f);
 			base.Update(gameTime);

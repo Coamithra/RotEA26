@@ -110,22 +110,22 @@ internal class Demo3 : GameScene
 		Walls walls = new Walls(base.Game, 0);
 		eventList.AddEvent(walls, halting: true);
 		eventList.SetLastEventAsCheckPoint();
-		SkullSpawner gameEvent = new SkullSpawner(base.Game, 0f, 1f, maze: true, bonusonly: false);
-		eventList.AddEvent(gameEvent, halting: false);
-		walls.LinkWith(gameEvent);
-		BattleSkullEvent gameEvent2 = new BattleSkullEvent(base.Game, 0f, 0.5f);
-		eventList.AddEvent(gameEvent2, halting: false);
+		SkullSpawner skullSpawner = new SkullSpawner(base.Game, 0f, 1f, maze: true, bonusonly: false);
+		eventList.AddEvent(skullSpawner, halting: false);
+		walls.LinkWith(skullSpawner);
+		BattleSkullEvent battleSkullEvent = new BattleSkullEvent(base.Game, 0f, 0.5f);
+		eventList.AddEvent(battleSkullEvent, halting: false);
 		eventList.AddHalt();
-		walls.LinkWith(gameEvent2);
+		walls.LinkWith(battleSkullEvent);
 		Wait(4f);
-		gameEvent = new SkullSpawner(base.Game, 0f, 3f, maze: true, bonusonly: false);
-		eventList.AddEvent(gameEvent, halting: false);
+		skullSpawner = new SkullSpawner(base.Game, 0f, 3f, maze: true, bonusonly: false);
+		eventList.AddEvent(skullSpawner, halting: false);
 		eventList.SetLastEventAsCheckPoint();
 		walls = new Walls(base.Game, 1);
 		eventList.AddEvent(walls, halting: true);
 		eventList.AddHalt();
-		UnlockEvent gameEvent3 = new UnlockEvent(base.Game, "Mechanical Friends", Unlockables.Items.Friends, AnimatedMessage.UnlockType.cheat, level);
-		eventList.AddEvent(gameEvent3, halting: true);
+		UnlockEvent unlockEvent = new UnlockEvent(base.Game, "Mechanical Friends", Unlockables.Items.Friends, AnimatedMessage.UnlockType.cheat, level);
+		eventList.AddEvent(unlockEvent, halting: true);
 		eventList.AddHalt();
 		WaitEvent waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent, halting: true);
@@ -150,8 +150,8 @@ internal class Demo3 : GameScene
 
 	private void Wait(float time)
 	{
-		WaitEvent gameEvent = new WaitEvent(base.Game, time);
-		eventList.AddEvent(gameEvent, halting: true);
+		WaitEvent waitEvent = new WaitEvent(base.Game, time);
+		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
 	}
 }

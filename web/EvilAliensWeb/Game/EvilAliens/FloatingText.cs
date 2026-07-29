@@ -91,12 +91,12 @@ public class FloatingText
 			{
 			case ShowType.scrollup:
 			{
-				Vector2 origin2 = font.MeasureString(text) / 2f;
+				Vector2 origin = font.MeasureString(text) / 2f;
 				float num3 = MathHelper.SmoothStep(0f, 1f, lifetime / 1200f);
 				byte b2 = (byte)(225f * num3);
 				float num4 = 25f * (1f - num3);
-				Color color3 = new Color((byte)0, (byte)128, (byte)128, b2);
-				wrapper.DrawString(font, text, position - new Vector2(0f, num4), color3, 0f, origin2, scale, (SpriteEffects)0, 1f);
+				Color color = new Color((byte)0, (byte)128, (byte)128, b2);
+				wrapper.DrawString(font, text, position - new Vector2(0f, num4), color, 0f, origin, scale, (SpriteEffects)0, 1f);
 				break;
 			}
 			case ShowType.pop:

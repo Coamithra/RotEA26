@@ -23,14 +23,14 @@ public class Vibrator : GameComponent, IVibratorService
 		base.Update(gameTime);
 		for (int i = 0; i < 4; i++)
 		{
-			ref Vector2 reference = ref power[i];
-			reference = Vector2.Zero;
+			ref Vector2 powerSlot = ref power[i];
+			powerSlot = Vector2.Zero;
 		}
 		for (int num = VibrationTimers.Count - 1; num > 0; num--)
 		{
 			VibrationTimers[num].timer.Update(gameTime);
-			ref Vector2 reference2 = ref power[(int)VibrationTimers[num].player];
-			reference2 = Vector2.Max(VibrationTimers[num].power, power[(int)VibrationTimers[num].player]);
+			ref Vector2 powerSlot = ref power[(int)VibrationTimers[num].player];
+			powerSlot = Vector2.Max(VibrationTimers[num].power, power[(int)VibrationTimers[num].player]);
 			if (VibrationTimers[num].timer.Finished)
 			{
 				VibrationTimers.RemoveAt(num);

@@ -103,17 +103,17 @@ internal class Paratrooper : GameScene
 		base.UpdateNormal(gameTime);
 		brainzleft.Clear();
 		brainzright.Clear();
-		foreach (ParatrooperBrain paratrooperBrain in oracle.GetParatrooperBrains())
+		foreach (ParatrooperBrain brain in oracle.GetParatrooperBrains())
 		{
-			if (paratrooperBrain.ReadyToConnect())
+			if (brain.ReadyToConnect())
 			{
-				if (paratrooperBrain.Position.X < 400f)
+				if (brain.Position.X < 400f)
 				{
-					brainzleft.Add(paratrooperBrain);
+					brainzleft.Add(brain);
 				}
-				if (paratrooperBrain.Position.X > 400f)
+				if (brain.Position.X > 400f)
 				{
-					brainzright.Add(paratrooperBrain);
+					brainzright.Add(brain);
 				}
 			}
 		}
@@ -127,17 +127,17 @@ internal class Paratrooper : GameScene
 		}
 		brainzleft.Clear();
 		brainzright.Clear();
-		foreach (ParatrooperBrain paratrooperBrain2 in oracle.GetParatrooperBrains())
+		foreach (ParatrooperBrain brain in oracle.GetParatrooperBrains())
 		{
-			if (paratrooperBrain2.ReadyToConnect2())
+			if (brain.ReadyToConnect2())
 			{
-				if (paratrooperBrain2.Position.X < 400f)
+				if (brain.Position.X < 400f)
 				{
-					brainzleft.Add(paratrooperBrain2);
+					brainzleft.Add(brain);
 				}
-				if (paratrooperBrain2.Position.X > 400f)
+				if (brain.Position.X > 400f)
 				{
-					brainzright.Add(paratrooperBrain2);
+					brainzright.Add(brain);
 				}
 			}
 		}

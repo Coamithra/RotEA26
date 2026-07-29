@@ -467,9 +467,9 @@ internal class WebcamLevel : GameScene
 		{
 			won = true;
 			Victory();
-			AnimatedMessage animatedMessage2 = AnimatedMessage.NewAnimatedMessage(Collection, base.Game);
-			animatedMessage2.Setup("Wave Completed!", SoundManager.Texts.WaveCompleted, AnimatedMessage.MessageType.starwarsblue);
-			Collection.Add((GameComponent)(object)animatedMessage2);
+			AnimatedMessage animatedMessage = AnimatedMessage.NewAnimatedMessage(Collection, base.Game);
+			animatedMessage.Setup("Wave Completed!", SoundManager.Texts.WaveCompleted, AnimatedMessage.MessageType.starwarsblue);
+			Collection.Add((GameComponent)(object)animatedMessage);
 		}
 	}
 

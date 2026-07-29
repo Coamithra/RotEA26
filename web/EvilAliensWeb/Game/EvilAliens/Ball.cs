@@ -215,8 +215,8 @@ internal class Ball : AlienDrawableGameComponent
 			{
 				rotation -= rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			}
-			float value2 = MyMath.VectorToAngle(owner.GetPosition - base.Position) + (float)Math.PI / 8f;
-			Move((float?)value2, gameTime);
+			float moveDirection = MyMath.VectorToAngle(owner.GetPosition - base.Position) + (float)Math.PI / 8f;
+			Move((float?)moveDirection, gameTime);
 			break;
 		}
 		case BallState.freed:

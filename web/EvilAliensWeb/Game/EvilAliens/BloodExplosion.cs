@@ -87,14 +87,14 @@ internal class BloodExplosion : AlienDrawableGameComponent
 	public override void Initialize()
 	{
 		BloodExplosionData[] drops = particles;
-		foreach (BloodExplosionData bloodExplosionData in drops)
+		foreach (BloodExplosionData particle in drops)
 		{
-			bloodExplosionData.Initialize(size, lifetime, impulse);
+			particle.Initialize(size, lifetime, impulse);
 		}
 		BloodExplosionData[] blobs = gooparticles;
-		foreach (BloodExplosionData bloodExplosionData2 in blobs)
+		foreach (BloodExplosionData particle in blobs)
 		{
-			bloodExplosionData2.Initialize(size, lifetime, impulse * 1.2f);
+			particle.Initialize(size, lifetime, impulse * 1.2f);
 		}
 		base.Initialize();
 	}
@@ -103,30 +103,30 @@ internal class BloodExplosion : AlienDrawableGameComponent
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		BloodExplosionData[] drops = particles;
-		foreach (BloodExplosionData bloodExplosionData in drops)
+		foreach (BloodExplosionData particle in drops)
 		{
-			if (!(bloodExplosionData.lifetime <= 0f))
+			if (!(particle.lifetime <= 0f))
 			{
-				float alpha = 4f * bloodExplosionData.normalizedLifetime * (1f - bloodExplosionData.normalizedLifetime);
+				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
 				if (green)
 				{
-					spriteBatch.Draw(greenblood, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth()), center: true, tint);
+					spriteBatch.Draw(greenblood, base.Position + particle.position, particle.rotation, particle.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth()), center: true, tint);
 				}
 				else
 				{
-					spriteBatch.Draw(texture, base.Position + bloodExplosionData.position, bloodExplosionData.rotation, bloodExplosionData.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth()), center: true, tint);
+					spriteBatch.Draw(texture, base.Position + particle.position, particle.rotation, particle.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth()), center: true, tint);
 				}
 			}
 		}
 		BloodExplosionData[] blobs = gooparticles;
-		foreach (BloodExplosionData bloodExplosionData2 in blobs)
+		foreach (BloodExplosionData particle in blobs)
 		{
-			if (!(bloodExplosionData2.lifetime <= 0f))
+			if (!(particle.lifetime <= 0f))
 			{
-				float alpha = 4f * bloodExplosionData2.normalizedLifetime * (1f - bloodExplosionData2.normalizedLifetime);
+				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(goo, base.Position + bloodExplosionData2.position, bloodExplosionData2.rotation, bloodExplosionData2.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth()), center: true, tint);
+				spriteBatch.Draw(goo, base.Position + particle.position, particle.rotation, particle.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth()), center: true, tint);
 			}
 		}
 	}
@@ -135,19 +135,19 @@ internal class BloodExplosion : AlienDrawableGameComponent
 	{
 		bool anyAlive = false;
 		BloodExplosionData[] drops = particles;
-		foreach (BloodExplosionData bloodExplosionData in drops)
+		foreach (BloodExplosionData particle in drops)
 		{
-			bloodExplosionData.Update(gameTime);
-			if (bloodExplosionData.lifetime > 0f)
+			particle.Update(gameTime);
+			if (particle.lifetime > 0f)
 			{
 				anyAlive = true;
 			}
 		}
 		BloodExplosionData[] blobs = gooparticles;
-		foreach (BloodExplosionData bloodExplosionData2 in blobs)
+		foreach (BloodExplosionData particle in blobs)
 		{
-			bloodExplosionData2.Update(gameTime);
-			if (bloodExplosionData2.lifetime > 0f)
+			particle.Update(gameTime);
+			if (particle.lifetime > 0f)
 			{
 				anyAlive = true;
 			}

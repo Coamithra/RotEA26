@@ -94,8 +94,8 @@ internal class OwnLevel : GameScene
 		Wait(2f);
 		if (!wallsOnly)
 		{
-			SkullSpawner gameEvent = new SkullSpawner(base.Game, 0f, 2f, maze: true, bonusonly: false);
-			eventList.AddEvent(gameEvent, halting: false);
+			SkullSpawner skullSpawner = new SkullSpawner(base.Game, 0f, 2f, maze: true, bonusonly: false);
+			eventList.AddEvent(skullSpawner, halting: false);
 			eventList.SetLastEventAsCheckPoint();
 			StarMineSpawner starMineSpawner = new StarMineSpawner(base.Game, 0f, 0.1f);
 			eventList.AddEvent(starMineSpawner, halting: false);
@@ -109,8 +109,8 @@ internal class OwnLevel : GameScene
 		}
 		else
 		{
-			Walls gameEvent2 = new Walls(base.Game, 2);
-			eventList.AddEvent(gameEvent2, halting: true);
+			Walls walls = new Walls(base.Game, 2);
+			eventList.AddEvent(walls, halting: true);
 			if (wallsOnly)
 			{
 				// The spawner that normally carries the checkpoint is gone, and a death on a

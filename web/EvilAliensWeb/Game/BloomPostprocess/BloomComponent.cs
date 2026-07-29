@@ -258,15 +258,15 @@ public class BloomComponent : DrawableGameComponent, IBloomService
 
 	private void FillSampleOffsets(Vector2[] dst, float dx, float dy, int count)
 	{
-		ref Vector2 reference = ref dst[0];
-		reference = new Vector2(0f);
+		ref Vector2 centreOffset = ref dst[0];
+		centreOffset = new Vector2(0f);
 		for (int i = 0; i < count / 2; i++)
 		{
 			float num3 = (float)(i * 2) + 1.5f;
 			Vector2 val3 = new Vector2(dx, dy) * num3;
 			dst[i * 2 + 1] = val3;
-			ref Vector2 reference2 = ref dst[i * 2 + 2];
-			reference2 = -val3;
+			ref Vector2 mirrorOffset = ref dst[i * 2 + 2];
+			mirrorOffset = -val3;
 		}
 	}
 

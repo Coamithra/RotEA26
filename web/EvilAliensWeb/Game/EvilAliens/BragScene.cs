@@ -383,18 +383,18 @@ public class BragScene : Scene
 						}
 						if (val2 != null)
 						{
-							GamerCollectionEnumerator<FriendGamer> enumerator2 = ((GamerCollection<FriendGamer>)(object)val2).GetEnumerator();
+							GamerCollectionEnumerator<FriendGamer> friendEnumerator = ((GamerCollection<FriendGamer>)(object)val2).GetEnumerator();
 							try
 							{
-								while (enumerator2.MoveNext())
+								while (friendEnumerator.MoveNext())
 								{
-									FriendGamer current2 = enumerator2.Current;
-									friends.Add((Gamer)(object)current2);
+									FriendGamer friend = friendEnumerator.Current;
+									friends.Add((Gamer)(object)friend);
 								}
 							}
 							finally
 							{
-								((IDisposable)enumerator2).Dispose();
+								((IDisposable)friendEnumerator).Dispose();
 							}
 						}
 					}

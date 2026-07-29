@@ -209,11 +209,11 @@ public class ComponentBin : IComponentBinService
 			WatcherRemove(item);
 			idleList.Add(item);
 			WatcherAdd(item);
-			foreach (List<GameComponent> item2 in inactive)
+			foreach (List<GameComponent> inactiveList in inactive)
 			{
-				if (item2.Contains(item))
+				if (inactiveList.Contains(item))
 				{
-					item2.Remove(item);
+					inactiveList.Remove(item);
 					WatcherRemove(item);
 				}
 			}

@@ -190,23 +190,23 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 		{
 		case MessageType.cheatwarning:
 		{
-			Vector2 origin6 = font.MeasureString(text) / 2f;
-			spriteBatch.DrawString(font, text, position, color, 0f, origin6, scale, (SpriteEffects)0, 0f);
+			Vector2 origin = font.MeasureString(text) / 2f;
+			spriteBatch.DrawString(font, text, position, color, 0f, origin, scale, (SpriteEffects)0, 0f);
 			break;
 		}
 		case MessageType.starwarsblue:
 		{
-			Vector2 origin5 = font.MeasureString(text) / 2f;
-			spriteBatch.DrawString(font, text, position, color, 0f, origin5, scale, (SpriteEffects)0, 0f);
+			Vector2 origin = font.MeasureString(text) / 2f;
+			spriteBatch.DrawString(font, text, position, color, 0f, origin, scale, (SpriteEffects)0, 0f);
 			break;
 		}
 		case MessageType.redwarning:
 		{
-			Vector2 origin4 = font.MeasureString(text) / 2f;
+			Vector2 origin = font.MeasureString(text) / 2f;
 			// In-game "Warning!" / "Danger!" alert: plain text. The chrome sheen was removed
 			// here (card 2b5867da) - it read wrong during actual gameplay. The tint alpha
 			// flicker/fade is preserved; the rotating arrow was always plain.
-			spriteBatch.DrawString(font, text, position, color, 0f, origin4, scale, (SpriteEffects)0, 0f);
+			spriteBatch.DrawString(font, text, position, color, 0f, origin, scale, (SpriteEffects)0, 0f);
 			MyMath.Mod(warningDirection, (float)Math.PI * 2f);
 			Vector2 val2 = new Vector2(400f, 300f) + MyMath.AngleToVector(warningDirection) * 275f;
 			spriteBatch.Draw(arrow, val2, warningDirection + (float)Math.PI / 2f, 1f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/arrow", arrow.LogicalWidth()), center: true, color);
@@ -214,17 +214,17 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 		}
 		case MessageType.unlocked:
 		{
-			Vector2 origin2 = font.MeasureString("Unlocked!") / 2f;
-			Vector2 origin3 = font.MeasureString(text) / 2f;
+			Vector2 headerOrigin = font.MeasureString("Unlocked!") / 2f;
+			Vector2 bodyOrigin = font.MeasureString(text) / 2f;
 			// Card 623f16d9: a long challenge/level/cheat name ("Evil Aliens Classic") could
 			// overflow the 800-wide playfield at the fixed popup scale -- shrink each line to
 			// fit independently (never scale up), reusing the already-measured widths so the
 			// unscaled origin/centering above is unaffected.
-			float headerScale = TextFit.FitScale(origin2.X * 2f, scale, UnlockedTextMaxWidth);
-			float bodyScale = TextFit.FitScale(origin3.X * 2f, scale, UnlockedTextMaxWidth);
+			float headerScale = TextFit.FitScale(headerOrigin.X * 2f, scale, UnlockedTextMaxWidth);
+			float bodyScale = TextFit.FitScale(bodyOrigin.X * 2f, scale, UnlockedTextMaxWidth);
 			// In-game unlock popup: plain text (chrome sheen removed, card 2b5867da - read wrong in gameplay).
-			spriteBatch.DrawString(font, "Unlocked!", position, color, 0f, origin2, headerScale, (SpriteEffects)0, 0f);
-			spriteBatch.DrawString(font, text, new Vector2(800f - position.X, position.Y + 125f), color, 0f, origin3, bodyScale, (SpriteEffects)0, 0f);
+			spriteBatch.DrawString(font, "Unlocked!", position, color, 0f, headerOrigin, headerScale, (SpriteEffects)0, 0f);
+			spriteBatch.DrawString(font, text, new Vector2(800f - position.X, position.Y + 125f), color, 0f, bodyOrigin, bodyScale, (SpriteEffects)0, 0f);
 			break;
 		}
 		case MessageType.defeat:
@@ -543,20 +543,20 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 			{
 			case 0:
 			{
-				ref Vector4 reference3 = ref targetcolor;
-				reference3.X += 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				ref Vector4 colorRef = ref targetcolor;
+				colorRef.X += 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
 				break;
 			}
 			case 1:
 			{
-				ref Vector4 reference2 = ref targetcolor;
-				reference2.Y += 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				ref Vector4 colorRef = ref targetcolor;
+				colorRef.Y += 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
 				break;
 			}
 			case 2:
 			{
-				ref Vector4 reference = ref targetcolor;
-				reference.Z += 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				ref Vector4 colorRef = ref targetcolor;
+				colorRef.Z += 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
 				break;
 			}
 			}
@@ -567,20 +567,20 @@ internal class AnimatedMessage : DrawableGameComponent, IComponentWatcher
 			{
 			case 0:
 			{
-				ref Vector4 reference6 = ref targetcolor;
-				reference6.X -= 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				ref Vector4 colorRef = ref targetcolor;
+				colorRef.X -= 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
 				break;
 			}
 			case 1:
 			{
-				ref Vector4 reference5 = ref targetcolor;
-				reference5.Y -= 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				ref Vector4 colorRef = ref targetcolor;
+				colorRef.Y -= 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
 				break;
 			}
 			case 2:
 			{
-				ref Vector4 reference4 = ref targetcolor;
-				reference4.Z -= 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				ref Vector4 colorRef = ref targetcolor;
+				colorRef.Z -= 0.5f * (float)gameTime.ElapsedGameTime.TotalSeconds;
 				break;
 			}
 			}

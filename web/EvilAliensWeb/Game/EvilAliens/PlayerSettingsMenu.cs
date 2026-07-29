@@ -53,30 +53,30 @@ internal class PlayerSettingsMenu : MenuSub1
 
 	private void drawPlayerSettings(int i, GameTime gameTime)
 	{
-		float num = (General.SafeZone).Left;
-		float num2 = (float)((General.SafeZone).Right - (General.SafeZone).Left) / 4f;
-		num += num2 * ((float)i + 0.5f);
+		float columnX = (General.SafeZone).Left;
+		float columnW = (float)((General.SafeZone).Right - (General.SafeZone).Left) / 4f;
+		columnX += columnW * ((float)i + 0.5f);
 		if (activeDevices.Count > i)
 		{
-			float num3 = 0.8f;
-			float num4 = font.MeasureString("x").Y * num3;
-			float num5 = 100f;
+			float textScale = 0.8f;
+			float lineH = font.MeasureString("x").Y * textScale;
+			float rowY = 100f;
 			ControlDevice controlDevice = activeDevices[i];
 			PlayerSettings playerSettings = Settings.GetInstance().GetPlayerSettings(controlDevice);
-			int num6 = selectedEntries[i];
+			int selectedRow = selectedEntries[i];
 			if (done[i])
 			{
-				num6 = 1000;
+				selectedRow = 1000;
 			}
-			base.SpriteBatch.DrawMetalString(controlDevice.ToString(), new Vector2(num, num5), Color.AliceBlue, 0f, centered: true, num3);
-			num5 += num4 * 2f;
-			num5 = drawSetting(num, num3, num4, num5, "Rumble", !playerSettings.DisableRumble, num6 == 0, gameTime);
-			num5 = drawSetting(num, num3, num4, num5, "Swap Sticks", playerSettings.InvertSticks, num6 == 1, gameTime);
-			num5 = drawSetting(num, num3, num4, num5, "Done", null, num6 == 2, gameTime);
+			base.SpriteBatch.DrawMetalString(controlDevice.ToString(), new Vector2(columnX, rowY), Color.AliceBlue, 0f, centered: true, textScale);
+			rowY += lineH * 2f;
+			rowY = drawSetting(columnX, textScale, lineH, rowY, "Rumble", !playerSettings.DisableRumble, selectedRow == 0, gameTime);
+			rowY = drawSetting(columnX, textScale, lineH, rowY, "Swap Sticks", playerSettings.InvertSticks, selectedRow == 1, gameTime);
+			rowY = drawSetting(columnX, textScale, lineH, rowY, "Done", null, selectedRow == 2, gameTime);
 		}
 		else
 		{
-			base.SpriteBatch.DrawMetalString("Press\nStart", new Vector2(num, 100f), Color.AliceBlue, 0f, centered: true, 1f);
+			base.SpriteBatch.DrawMetalString("Press\nStart", new Vector2(columnX, 100f), Color.AliceBlue, 0f, centered: true, 1f);
 		}
 	}
 
@@ -126,12 +126,12 @@ internal class PlayerSettingsMenu : MenuSub1
 				cancelPressed(controlDevice);
 			}
 		}
-		bool flag = true;
+		bool allDone = true;
 		foreach (bool item in done)
 		{
-			flag = flag && item;
+			allDone = allDone && item;
 		}
-		if (flag && !exiting)
+		if (allDone && !exiting)
 		{
 			Settings.GetInstance().SaveThreaded();
 			exiting = true;
@@ -175,10 +175,10 @@ internal class PlayerSettingsMenu : MenuSub1
 
 	private void moveSelection(ControlDevice device, int direction)
 	{
-		int num = activeDevices.IndexOf(device);
-		if (num != -1)
+		int deviceIndex = activeDevices.IndexOf(device);
+		if (deviceIndex != -1)
 		{
-			selectedEntries[num] = MyMath.Mod(selectedEntries[num] + direction, 3);
+			selectedEntries[deviceIndex] = MyMath.Mod(selectedEntries[deviceIndex] + direction, 3);
 		}
 	}
 
@@ -187,11 +187,11 @@ internal class PlayerSettingsMenu : MenuSub1
 		Color color;
 		if (selected)
 		{
-			float num = 15f / font.MeasureString(name).X * scale;
-			float num2 = (float)gameTime.TotalGameTime.TotalSeconds;
-			float num3 = MyMath.Mod(num2 / 2f, 1f);
+			float pulseAmount = 15f / font.MeasureString(name).X * scale;
+			float pulseTime = (float)gameTime.TotalGameTime.TotalSeconds;
+			float pulsePhase = MyMath.Mod(pulseTime / 2f, 1f);
 			color = Color.AliceBlue;
-			scale *= 1f + num * brainPulsate.Evaluate(num3);
+			scale *= 1f + pulseAmount * brainPulsate.Evaluate(pulsePhase);
 		}
 		else
 		{

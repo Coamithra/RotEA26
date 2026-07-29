@@ -1,0 +1,25 @@
+# Line endings that are part of the BUILD OUTPUT, not just a diff nuisance.
+#
+# Razor MARKUP WHITESPACE is embedded in the assembly as string content -- the
+# generated App/Index BuildRenderTree hand their literal markup (including
+# Index.razor's multi-line style="..." attribute) to AddMarkupContent, newlines
+# and all. So a .razor file's ON-DISK EOL changes EvilAliensWeb.dll's bytes,
+# which makes it part of tools/verify_il_identical.py's hash.
+#
+# Without a rule here that is decided by core.autocrlf plus whatever wrote the
+# file last, and it drifts silently: git reports such a file as modified but
+# prints an EMPTY diff (the blob is identical), which reads as noise and gets
+# ignored -- and then the oracle reports DIFFERENT for a provably cosmetic
+# change, because its reference side always comes from a FRESH checkout. That
+# cost a full investigation once (card 6cdb7c62).
+#
+# crlf, not lf: it is what every checkout on the Windows dev box already
+# produces, so pinning it moves nothing locally. Linux CI now checks these out
+# as CRLF too, which is the point -- one deterministic answer everywhere.
+#
+# Deliberately NOT a blanket `* text=auto`: that touches every file class in the
+# repo and needs its own card. Only the file types whose whitespace can reach
+# the assembly belong here. .cshtml matches nothing today; it is listed so a
+# future Razor Page cannot re-open the same trap.
+*.razor   text eol=crlf
+*.cshtml  text eol=crlf

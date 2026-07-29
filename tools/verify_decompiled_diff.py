@@ -255,6 +255,9 @@ def main():
     ili.BUILD_FLAGS.append('-p:Optimize=true')
 
     root = ili.repo_root()
+    # Same exposure as verify_il_identical: this also builds a FRESH checkout against the
+    # working tree, so pinned-EOL drift would show up as a phantom BuildRenderTree diff.
+    ili.check_pinned_eol(root)
     print(f'Decompiled-C# diff  (repo {root})', flush=True)
     commit = ili.resolve_ref(root, args.ref)
     label = f'{args.ref} ({commit[:8]})'

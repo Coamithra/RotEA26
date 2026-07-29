@@ -176,6 +176,71 @@ def cache_path(root, commit, toolchain):
     return os.path.join(tempfile.gettempdir(), f'rotea_il_baseline_{key}.json')
 
 
+def check_pinned_eol(root):
+    """Abort if a file whose EOL .gitattributes PINS has drifted in the working tree.
+
+    The reference side of every comparison here is materialized by a fresh `git worktree
+    add`, so it always gets the pinned EOL. The working tree does not have to: nothing
+    rewrites EOL on an existing file, so a tool (or an editor) that saves a .razor with the
+    wrong endings leaves it that way forever. Razor markup whitespace is embedded in the
+    assembly as string content, so the two sides then compile to different bytes and this
+    script reports DIFFERENT for a change that is provably cosmetic -- see .gitattributes,
+    and card 6cdb7c62, where exactly that burned a full investigation.
+
+    git will NOT save you from it. A pure-EOL drift shows up as a modified file with an
+    EMPTY `git diff` (the blob is byte-identical, so there is genuinely nothing to commit),
+    which reads as noise. Hence this guard, and hence it runs BEFORE the two builds rather
+    than explaining a red verdict afterwards.
+
+    Driven off `git ls-files --eol`, whose attr/ column is git's OWN attribute resolution --
+    so this needs no hardcoded extension list and picks up any eol= rule added later.
+
+    It only ever READS: the fix is printed, never applied. `git add --renormalize` is
+    deliberately not the advice -- measured, it BLESSES the bad state (clears the modified
+    flag, leaves the wrong endings on disk), which is worse than doing nothing.
+    """
+    proc = run(['git', 'ls-files', '--eol', '-z'], cwd=root, check=False)
+    if proc.returncode != 0:
+        return  # not fatal: a git that cannot list files will fail louder a moment later
+    bad = []
+    for entry in proc.stdout.split('\0'):
+        if '\t' not in entry:
+            continue
+        meta, path = entry.split('\t', 1)
+        # `i/lf    w/crlf  attr/text eol=crlf    ` -- the attr column can itself contain
+        # spaces, so it is the REST of the line, not a whitespace-delimited field.
+        fields = meta.split(None, 2)
+        if len(fields) < 3:
+            continue
+        worktree, attr = fields[1], fields[2].strip()
+        # w/none is an empty file and w/-text a binary one: neither HAS line endings to
+        # drift, so flagging them would be a permanent false alarm.
+        if worktree not in ('w/lf', 'w/crlf', 'w/mixed'):
+            continue
+        for style in ('crlf', 'lf'):
+            if f'eol={style}' in attr and worktree != f'w/{style}':
+                bad.append((path.strip(), style, worktree[2:]))
+    if not bad:
+        return
+    sys.stderr.write(
+        'EOL DRIFT -- refusing to compare, the verdict would be meaningless.\n\n'
+        'These files have line endings .gitattributes pins them away from. The reference\n'
+        'build comes from a fresh checkout (pinned), the working tree does not, so the two\n'
+        'would compile to different bytes for no semantic reason:\n\n')
+    for path, want, got in bad:
+        sys.stderr.write(f'  {path}  (pinned {want}, on disk {got})\n')
+    sys.stderr.write(
+        '\nRestore them from the index, then re-run:\n\n')
+    for path, _, _ in bad:
+        sys.stderr.write(f'  git checkout -- "{path}"\n')
+    sys.stderr.write(
+        '\nThat works even though the diff is empty, because git does still consider such a\n'
+        'file modified. Do NOT reach for `git add --renormalize` -- measured, it BLESSES the\n'
+        'drift (clears the modified flag, leaves the wrong endings on disk) instead of\n'
+        'undoing it, and the next run of this script would then be back to lying to you.\n')
+    sys.exit(EXIT_ERROR)
+
+
 def resolve_ref(root, ref):
     """Resolve `ref` to the MERGE-BASE with HEAD, not to its tip.
 
@@ -233,6 +298,7 @@ def main():
         BUILD_FLAGS.append('-p:Optimize=true')
 
     root = repo_root()
+    check_pinned_eol(root)
     print(f'IL-identity check  (repo {root})'
           f'{"  [optimized -- weaker oracle, see module docstring]" if args.optimize else ""}',
           flush=True)

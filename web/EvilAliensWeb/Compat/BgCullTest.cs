@@ -18,13 +18,27 @@ namespace EvilAliensWeb.Compat;
 // Draw path (the eaNetSim.test / eaBinTest rule): a python mirror of arithmetic this small
 // would drift and prove nothing.
 //
-// Three parts, because the two defects fail in different places:
+// Four parts, because the defects fail in different places:
 //  1. the predicate itself, swept over shapes/scales/positions -- catches the vertical term
 //     measuring the tile's WIDTH (a TALL tile is culled while visible);
 //  2. whole scenario layers walked through the real Draw -- catches the missing * size, which
 //     is a CALL-SITE defect in the mirrorX blocks and so invisible to part 1;
 //  3. a census of the live layers -- the integration evidence, and where the Mars ground's
-//     wasted off-screen row shows up as a number.
+//     wasted off-screen row shows up as a number;
+//  4. a differential against the pre-ef55b76e `>=` predicate -- the evidence that tightening
+//     the boundary changes no pixel.
+//
+// READ THIS BEFORE TRUSTING PART 1 OR PART 3. Since card ef55b76e tightened the cull to a strict
+// `> 0`, TileOnScreen and Intersects are the SAME float expression, so part 1's tightness check
+// and part 3's "of which off-screen 0" are now tautologies -- they cannot fail, and a green tick
+// from either proves nothing on its own. What still carries weight:
+//   * part 2, where the predicate's arguments come from the REAL Draw call sites while the truth
+//     is computed from independently recorded extents, so a call site passing the wrong texture,
+//     offset or scale still fails;
+//   * part 4, which restates the OLD predicate and asserts every decision the tightening flips is
+//     a tile of exactly zero on-screen area -- i.e. that no pixel can change;
+//   * part 3's numbers on a build from BEFORE the tightening, which is where the size of the win
+//     was measured.
 internal static class BgCullTest
 {
 	private const float ScreenW = 800f;
@@ -39,12 +53,21 @@ internal static class BgCullTest
 		return x + w > 0f && x < ScreenW && y + h > 0f && y < ScreenH;
 	}
 
-	// The one case where keeping a zero-area tile is legitimate: it lands exactly on the top
-	// or left edge, which the cull's `>= 0` admits by design (tightening that to `> 0` is its
-	// own change -- see the plan's Out of scope).
-	private static bool TouchesEdgeExactly(float x, float y, float w, float h)
+	// The cull as it stood BEFORE card ef55b76e: `>= 0` on the right/bottom edge, so a tile
+	// touching the screen edge with zero on-screen area was kept and drawn. Deliberately a
+	// verbatim copy rather than a call into anything -- it is the negative control part 4 diffs
+	// the live predicate against (the eaTeamSeat / eaNetScore.test idiom), and it has to keep
+	// stating the old behaviour even as TileOnScreen moves on.
+	private static bool KeptByOldCull(float x, float y, float w, float h)
 	{
-		return x + w >= 0f && x < ScreenW && y + h >= 0f && y < ScreenH && (x + w == 0f || y + h == 0f);
+		return x + w >= 0f && x < ScreenW && y + h >= 0f && y < ScreenH;
+	}
+
+	// Zero on-screen area: the tile's right or bottom edge lands exactly on the screen's origin
+	// edge. Painting one is a no-op, which is why part 4 can call the tightening pixel-neutral.
+	private static bool ZeroArea(float x, float y, float w, float h)
+	{
+		return x + w == 0f || y + h == 0f;
 	}
 
 	private static readonly (int W, int H, string Name)[] Shapes =
@@ -58,6 +81,12 @@ internal static class BgCullTest
 	};
 
 	private static readonly float[] Scales = { 1f / 3.238f, 1f, 1.5f, 2f, 2.4f };
+
+	// Scroll phases for part 4. `Move` wraps position into [0, realsize), so these are the
+	// fractions a scrolling layer really passes through. 0 is the case this card is about and
+	// must stay in the set; the rest are the fractional coverage a single ?bgfreeze frame cannot
+	// give, including one just short of a full wrap.
+	private static readonly float[] Phases = { 0f, 1f / 64f, 0.037f, 0.13f, 0.25f, 0.5f, 0.61f, 0.87f, 0.999f };
 
 	private static string F(float v)
 	{
@@ -112,7 +141,9 @@ internal static class BgCullTest
 		// ---- 1. the predicate, swept ------------------------------------------------
 		sb.Append("[bgcull] 1. predicate sweep (BackgroundImage.TileOnScreen)\n");
 		int cases = 0;
-		int slack = 0;
+		int flipped = 0;
+		int flippedWithArea = 0;
+		string firstFlipped = null;
 		foreach ((int W, int H, string Name) shape in Shapes)
 		{
 			foreach (float scale in Scales)
@@ -142,13 +173,23 @@ internal static class BgCullTest
 						}
 						else if (kept && !visible)
 						{
-							slack++;
-							if (!TouchesEdgeExactly(x, y, w, h))
+							keptOffScreen++;
+							if (firstKept == null)
 							{
-								keptOffScreen++;
-								if (firstKept == null)
+								firstKept = "e.g. at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
+							}
+						}
+						// What the tightening actually changed, and the proof it is invisible:
+						// every flipped decision must be a zero-area tile.
+						if (KeptByOldCull(x, y, w, h) != kept)
+						{
+							flipped++;
+							if (!ZeroArea(x, y, w, h))
+							{
+								flippedWithArea++;
+								if (firstFlipped == null)
 								{
-									firstKept = "e.g. at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
+									firstFlipped = "at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
 								}
 							}
 						}
@@ -163,8 +204,12 @@ internal static class BgCullTest
 				Check("tight  " + what, keptOffScreen == 0 && here > 0, keptOffScreen == 0 ? null : keptOffScreen + " tiles kept with no on-screen area; " + firstKept);
 			}
 		}
-		sb.Append("  info  ").Append(cases).Append(" cases; ").Append(slack)
-			.Append(" kept with no on-screen area (the >= 0 touching case -- deliberate slack, out of scope)\n");
+		sb.Append("  info  ").Append(cases).Append(" cases; ").Append(flipped)
+			.Append(" decisions differ from the pre-ef55b76e `>= 0` cull\n");
+		// The pixel-neutrality claim, over the whole sweep: the tightening may only ever drop a
+		// tile that had no area to draw. Its POSITIVE control is `flipped` above -- if that ever
+		// reads 0 the sweep stopped reaching the boundary at all and this check is vacuous.
+		Check("differential: every flipped decision is zero-area", flippedWithArea == 0 && flipped > 0, flippedWithArea == 0 ? flipped + " flipped, all zero-area" : flippedWithArea + " of " + flipped + " flipped tiles had REAL on-screen area; " + firstFlipped);
 
 		// ---- 2. scenario layers through the real Draw --------------------------------
 		sb.Append("[bgcull] 2. scenario layers, dry-run through the real Draw\n");
@@ -209,7 +254,7 @@ internal static class BgCullTest
 											firstCulled = "e.g. tile at (" + F(t.X) + "," + F(t.Y) + ") spanning " + F(t.W) + "x" + F(t.H);
 										}
 									}
-									else if (t.Drawn && !Intersects(t.X, t.Y, t.W, t.H) && !TouchesEdgeExactly(t.X, t.Y, t.W, t.H))
+									else if (t.Drawn && !Intersects(t.X, t.Y, t.W, t.H))
 									{
 										keptOffScreen++;
 									}
@@ -241,6 +286,70 @@ internal static class BgCullTest
 		{
 			CensusList(sb, "bg", live.CullTestBackgroundLayers);
 			CensusList(sb, "fg", live.CullTestForegroundLayers);
+		}
+
+		// ---- 4. the live layers, swept across every scroll phase ----------------------
+		// The card's "check nothing pops at a screen edge across a scroll phase sweep" -- as data,
+		// and over ALL phases rather than the one a ?bgfreeze screenshot happens to freeze. Each
+		// live layer is walked through the real Draw at a grid of phases and the tightened cull is
+		// diffed against the pre-card one; a flipped decision on a tile with real area is a pixel
+		// that would have popped.
+		sb.Append("[bgcull] 4. live layers, cull differential across scroll phases\n");
+		if (live == null)
+		{
+			sb.Append("  (no Background -- run this from a level, not the menu)\n");
+		}
+		else
+		{
+			int sweptTiles = 0;
+			int sweptFlipped = 0;
+			int sweptWithArea = 0;
+			string firstSweptFlipped = null;
+			void Sweep(IReadOnlyList<BackgroundImage> layers)
+			{
+				foreach (BackgroundImage layer in layers)
+				{
+					// Leave no trace: the live scroll position is restored exactly, and a dry run
+					// is already barred from advancing the layer's switchTimer.
+					Vector2 saved = layer.position;
+					try
+					{
+						foreach (float px in Phases)
+						{
+							foreach (float py in Phases)
+							{
+								layer.position = new Vector2(layer.realsize.X * px, layer.realsize.Y * py);
+								foreach (BackgroundImage.TracedTile t in Capture(layer))
+								{
+									sweptTiles++;
+									if (KeptByOldCull(t.X, t.Y, t.W, t.H) == t.Drawn)
+									{
+										continue;
+									}
+									sweptFlipped++;
+									if (!ZeroArea(t.X, t.Y, t.W, t.H))
+									{
+										sweptWithArea++;
+										if (firstSweptFlipped == null)
+										{
+											firstSweptFlipped = "tile at (" + F(t.X) + "," + F(t.Y) + ") spanning " + F(t.W) + "x" + F(t.H);
+										}
+									}
+								}
+							}
+						}
+					}
+					finally
+					{
+						layer.position = saved;
+					}
+				}
+			}
+			Sweep(live.CullTestBackgroundLayers);
+			Sweep(live.CullTestForegroundLayers);
+			sb.Append("  info  ").Append(sweptTiles).Append(" tile visits over ").Append(Phases.Length * Phases.Length)
+				.Append(" phases per layer; ").Append(sweptFlipped).Append(" decisions differ from the pre-ef55b76e cull\n");
+			Check("phase sweep: no flipped tile had on-screen area", sweptWithArea == 0 && sweptFlipped > 0, sweptWithArea == 0 ? sweptFlipped + " flipped, all zero-area -- the tightening cannot change a pixel at any phase" : sweptWithArea + " of " + sweptFlipped + " would have POPPED; " + firstSweptFlipped);
 		}
 
 		sb.Append("PASS ").Append(pass).Append("  FAIL ").Append(fail).Append('\n');

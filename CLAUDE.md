@@ -159,6 +159,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Level fast-boots** (replace a level's event list with one fight/section): `?spiderboss` ·
   `?spiders` · `?wallsonly` · `?brainboss` (bypasses the Hard+ gate). Pair with `?invuln`.
   e.g. `…:5280/?level=Level3&brainboss&invuln`.
+  **`?wallsonly` serves TWO levels** (card b174b00f): on `Level3` it loops the wall sections; on
+  `OwnLevel` it drops that level's `SkullSpawner`+`StarMineSpawner` and keeps its `Walls(2)`.
+  Same name on purpose -- it is what makes an OwnLevel churn figure comparable with a Level-3 one.
+  **`?nowalls`** is its OwnLevel-only complement and positive control (spawners live, walls gone).
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
   Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.

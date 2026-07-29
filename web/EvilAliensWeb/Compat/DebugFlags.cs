@@ -463,7 +463,20 @@ namespace EvilAliensWeb.Compat
 		// Fast-boot Level3 straight to a looping walls section (?level=Level3&wallsonly) -- mirrors
 		// ?spiderboss for Level2. Skips the whole wave sequence so the towers can be watched without
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
+		//
+		// Card b174b00f gave it a SECOND owner: OwnLevel. There it drops the level's continuous
+		// SkullSpawner and StarMineSpawner and keeps the Walls(2) section, which is what makes an
+		// OwnLevel churn figure comparable with the ~70 deg/s Level-3 baseline -- that baseline is
+		// a ?wallsonly number, and comparing it against OwnLevel's FULL level (walls plus a
+		// sustained enemy stream) is the confound that cost card b4972696 its premise. Same flag on
+		// both levels deliberately: the rigs are then matched by name, not by a reader remembering.
 		public static bool WallsOnly { get; private set; }
+
+		// ?nowalls (card b174b00f) -- the POSITIVE CONTROL for the above, currently OwnLevel only:
+		// keep the spawners, drop the Walls section. Without it a low ?wallsonly churn reading
+		// cannot distinguish "the walls are innocent" from "suppressing events broke the rig",
+		// because both look like a quiet number. Expect it to stay HIGH.
+		public static bool NoWalls { get; private set; }
 
 		// A/B the mip chain (?nomips): WebContentManager.TryLoadDds uploads level 0 only, so every
 		// .dds falls back to plain bilinear -- the before/after for card 110153c7, where a tower
@@ -1387,6 +1400,9 @@ namespace EvilAliensWeb.Compat
 				case "wallsonly":
 					WallsOnly = IsOn(val);
 					break;
+				case "nowalls":
+					NoWalls = IsOn(val);
+					break;
 				case "walltrace":
 					WallTrace = IsOn(val);
 					break;
@@ -2246,7 +2262,7 @@ namespace EvilAliensWeb.Compat
 			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
 			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
 			// refuses Demo1/2/3, so it can never advertise an attract demo.
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2257,6 +2273,7 @@ namespace EvilAliensWeb.Compat
 							// Level fast-boots print only when set: they REPLACE a level's whole event list,
 							// so "why is this level not playing normally" needs an answer in the log.
 							+ (WallsOnly ? " wallsonly" : "")
+							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")

@@ -86,10 +86,24 @@ The menu path, rehearsed headlessly (see `preload_level2.txt`):
 |---|---|
 | main menu order | Start · Options · Tutorial · Challenges · Online Co-op · Awardments · Cheats · Exit |
 | into a mission | `Press enter` → mission carousel (opens on Mission 1) → `Press right` per mission → `Press enter` → difficulty → `Press enter` |
-| into a challenge | `Press down` ×3 → `Press enter` → challenge carousel (opens on **Space Dodge**) |
+| into a challenge | `Press down` ×3 → `Press enter` → challenge carousel (opens on **Space Dodge**) → `Press right` per entry → `Press enter` → difficulty → `Press enter` |
+
+Challenge carousel order, from `MenuScene.cs`'s `challengeSelector.AddEntry` calls — the index
+is how many rights you need, and the level name is often not the menu label:
+
+| 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Space Dodge! | Braineroids | Evil Aliens Classic | **Paratrooper** | Base Pressure (`OwnLevel`) | Crazy Game | **Boss Train** (`InsaneBossI`) | Team Challenge | I Made This! (`WebcamAliens`) |
+
+**`Press <key> <n>` is an n-frame HOLD, not n taps.** `eval Press down 3` moves the menu ONCE.
+Every tap is its own `eval Press` with a `step` between — this cost a rehearsal run that never
+left the main menu, and would have been an invisible vacuous pass on a probe with no `expect`.
 
 `?unlockall` so a wiped save can still select the mission; `?invuln` + `?aiplayer` so the level
 is actually played rather than sitting on a dead ship.
+
+`info`'s `scene=menu` does **not** mean the run failed to reach the level — the menu component
+persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that instead.
 
 ## The probes
 
@@ -97,11 +111,28 @@ is actually played rather than sitting on a dead ship.
 |---|---|
 | `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested. **Windows-only**: the readback P/Invokes `soft_oal.dll`, so elsewhere it reports `alGain=<unreadable>` and fails. Add the platform library names to `HeadlessAudio` rather than relaxing the assertion |
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
+| `preload_paratrooper.txt` | the same, for the Paratrooper challenge (49 manifest entries) |
+| `preload_insanebossi.txt` | the same, for the Boss Train challenge (`InsaneBossI`, 82 entries — the largest section); soaks 180 s, because the bosses arrive in sequence |
 
-Both are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`
-first) when the `Level2|gfx/marsbg` manifest lines are deleted; `silence` goes red under
-`--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
+All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
+level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
+`gfx/marsbg/clouds-background`; `Paratrooper|gfx/marsbg` → 17 from the same;
+`InsaneBossI|gfx/sprites` → 10 from `gfx/sprites/playersheet` (only 10 of the 53 deleted
+entries decode cold — the rest are already in the shared content cache from the boot warm,
+which is why a mutation test asserts "red, naming an asset", not a count). `silence` goes red
+under `--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
 
-`Paratrooper`, `InsaneBossI` and `Demo2` are the other three levels with substantial manifest
-sections and deserve the same probe — they need challenge-carousel / attract-rotation navigation
-and their own measured baselines, so they are a follow-up card rather than an untested guess here.
+**`Demo2` has no probe, deliberately** (card 454cbeae, measured — do not "finish the set"
+without re-measuring). Two independent blockers:
+
+1. **It cannot be reached deterministically.** `MenuScene.mainMenu_DemoSelected` picks
+   `RandomHelper.Random.Next(3)` → Demo1/2/3 uniformly on every attract launch, off an
+   unseeded `new Random()`. There is no "demo 1 first" ordering and no debug seam to force one,
+   and a `--script` file cannot branch or retry, so any Demo2 probe is a `(2/3)^attempts` coin
+   flip.
+2. **It is not cold-free on `main` anyway.** A run that did land on Demo2 logged **10** COLD
+   decodes (`gfx/sprites/playersheet` 1260x680, `explosion`, `smoke`, `photocamera`,
+   `bombicon`, `gfx/hud/barlit`/`barunlit2`/`barlitedge`, `gfx/menu/powerbar`,
+   `gfx/game/blank`); Demo1 logs those 10 plus `ufometpootjes` and `smallship_landed`. The
+   `Demo*` manifest sections have a real gap — a probe would be red on a clean tree. That gap
+   is its own card.

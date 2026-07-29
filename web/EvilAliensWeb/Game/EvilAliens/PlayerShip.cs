@@ -2217,8 +2217,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		EvilAliensWeb.Compat.Juice.AddTrauma(0.35f);
 		Die();
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
-		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-		float impulse = (backgroundSpeed).Length();
+		float impulse = oracle.BackgroundSpeed.Length();
 		float direction = MyMath.VectorToAngle(oracle.BackgroundSpeed);
 		explosion.Setup(base.Position, 2f, 2f, impulse, direction);
 		collection.Add((GameComponent)(object)explosion);

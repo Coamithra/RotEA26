@@ -174,8 +174,7 @@ internal class FlyingSpider : KillableAlien
 			base.Collides = false;
 			color = new Color(new Vector4(1f, 1f, 1f, 0.2f));
 			scale = 0.67f * SizeFactor;
-			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-			base.Speed = (backgroundSpeed).Length() * 1.11f;
+			base.Speed = oracle.BackgroundSpeed.Length() * 1.11f;
 			base.DrawOrder = 1;
 			startheight = MathHelper.Min(BackgroundBandBottom, startheight);
 			swiveltimer.Duration = 4000f;
@@ -184,8 +183,7 @@ internal class FlyingSpider : KillableAlien
 		{
 			scale = 1f * SizeFactor;
 			base.Collides = true;
-			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-			base.Speed = (backgroundSpeed).Length() * 1.35f;
+			base.Speed = oracle.BackgroundSpeed.Length() * 1.35f;
 			base.DrawOrder = 20;
 			swiveltimer.Duration = 2700f;
 		}

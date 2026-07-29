@@ -281,6 +281,13 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
     317 bogus lines in `PlayerShip.DoAIMove`). Decompiling first makes slot numbers vanish.
     If you do diff IL directly, normalise `// Method begins at RVA 0x…` away first — removing code
     shifts every later method's RVA and otherwise reports thousands of false positives.
+  - **MUTATION-CONTROL RULE: the control must live in a member the branch does NOT touch.** An
+    `IDENTICAL` verdict is what a run that built the wrong thing also prints, so it means nothing
+    until you have shown the run is live. Flipping a constant INSIDE an edited member does not show
+    that: the member is already in the report (or already normalised away), so the flip folds into
+    lines that were differing anyway and is unobservable. Mutate an untouched member instead, and
+    require it to appear as a NEW row -- that proves the run reads your working tree AND that the
+    per-member attribution below would surface a stray edit. Revert it and re-run before shipping.
   - **GOTCHA — ILSpy normalises, so this tool can hide a real difference.** Both `|=` shapes
     decompile to the same C#, so that method simply does not appear in the report. An absent
     method means "ILSpy considers these the same construct", NOT "the IL is identical" — only
@@ -305,8 +312,14 @@ class (the last four in `InputHandler.LeftStick`/`RightStick`) and collapsed the
 methods stay: they sit on mutually exclusive `if`/`else` branches so there is nothing to merge,
 and hoisting the call above the `if` would MOVE a call site, which stops it being cosmetic. Card
 `5c6deab9` deleted the `Foo foo2 = foo;` RECEIVER spills in `Spider`/`FlyingSpider.KilledBy`, and
-that call's argument spills with them, bounded the same way -- never the hash, since deleting a
-spill renumbers slots.
+that call's argument spills with them, then finished the ARGUMENT-spill class itself -- the eight
+`Vector2 backgroundSpeed = oracle.BackgroundSpeed;` sites feeding one `(backgroundSpeed).Length()`
+(`Explosion`, `FlyingSpider` x2, `PlayerShip`, `Powerup` x2, `Wall` x2). Both bounded the same way
+-- never the hash, since deleting a spill renumbers slots. **`Braineroid.cs:153` reads as a ninth
+site and is NOT one: `(speedVector).Normalize()` MUTATES the local**, so inlining it would
+normalise a throwaway temporary and silently change behaviour -- check every candidate for a
+mutating call before assuming the shape is enough. `PlayerShip`'s neighbouring `impulse` stays for
+the other reason: it is READ TWICE, so it is a real value, not a spill.
 
 **Still deliberately not done.** ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
 everywhere else in `Game/` -- its own artifact class and its own card; don't fold it into an
@@ -317,12 +330,7 @@ CONDITIONAL or hoisted out of a loop**, needing per-path analysis -- most spot-c
 (`SpriteBatchWrapper`'s eight `zero` sites assign in both branches) but `ComponentBin`'s search-loop
 default is genuinely read, so treat them per site, not as a batch; and **3 non-declarations**,
 including `SpriteBatchWrapper`'s `Vector3 fogColor = default(Vector3)` DEFAULT PARAMETER, which a
-naive `= default(` sweep would corrupt into a signature change. ARGUMENT spills of the shape
-`Vector2 backgroundSpeed = oracle.BackgroundSpeed;` feeding one `(backgroundSpeed).Length()` also
-remain, in eight places (`Explosion`, `FlyingSpider` x2, `PlayerShip`, `Powerup` x2, `Wall` x2) --
-card `5c6deab9` took only the two it was already rewriting. `Braineroid.cs:153` reads as a ninth
-and is NOT one: `(speedVector).Normalize()` MUTATES the local, so inlining it would normalise a
-throwaway temporary and silently change behaviour.
+naive `= default(` sweep would corrupt into a signature change.
 
 ## Shaders — `tools/shaders/`
 

@@ -115,9 +115,31 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
 - Presenting the hidden window costs ~32 ms/frame for nothing, so `EndDraw` is skipped by default
   (`--present` restores it); the capture reads the back buffer BEFORE the swap either way, after
   bloom/post/gamma, so it is the finished frame.
-- Audio is silent by default via OpenAL Soft's `null` backend -- no device is opened, so a box with
-  no sound card runs too (`--audio` opts in). `--software` routes GL through Mesa llvmpipe for a
-  machine with no GPU at all, and FAILS (exit 3) rather than quietly using the GPU.
+- **Audio is silent by default, and since card `1e476668` that is actually TRUE** (`--audio` opts
+  in). It had been a no-op for the whole of eahl's first life while this file and the README both
+  vouched for it, so every headless soak played the game's SFX at full volume -- which is how the
+  user came to be blasted by a wave of bullet noise from a background batch run. Two traps, both
+  written up in `HeadlessAudio.cs`'s header: **(1)** `ALSOFT_DRIVERS=null` (the old mechanism, and
+  still the obvious-looking one) selects a discard backend that CRASHES the process with an
+  `AccessViolationException` under sustained SFX play -- deterministic, 3/3, and uncatchable, so
+  don't "restore" it; **(2)** an environment variable cannot configure OpenAL Soft from managed
+  code at all -- `soft_oal.dll` reads it with msvcrt's `getenv`, and .NET's
+  `Environment.SetEnvironmentVariable` writes the Win32 block, not msvcrt's `_environ` table.
+  The mechanism now is `SoundEffect.MasterVolume = 0` plus `alListenerf(AL_GAIN, 0)`, with the
+  gain READ BACK out of OpenAL (`audio` command) so silence is data. Cost of dropping the null
+  backend: a box with genuinely no sound card is no longer covered.
+- **`--script` files can ASSERT, and the ones worth keeping live in `tools/headless/probes/`**
+  (card `1e476668`). `mark` / `expect <regex>` / `expect-not <regex>` match per line against
+  everything the run printed since the last `mark` -- the game's own `[loadprofile]` / `[hitch]` /
+  `[net]` console output included, since the console is teed at boot. That is what makes a SILENT
+  failure mode (a data file, a manifest, a host default) defensible: run the set with
+  `python tools/headless/probes/run_probes.py` (exit 1 on any failure). Conventions, the four
+  rules for writing a probe, and the menu-navigation crib: `tools/headless/probes/README.md`.
+  **The trap: a preload/`COLD` probe must drive the MENU, never `?level=<Name>`** -- a `?level=`
+  boot drains `QueueIdleWarm` into that level's cold population (exactly 20 spurious
+  `gfx/game/space/*` lines, measured on Level2/Paratrooper/InsaneBossI alike).
+- `--software` routes GL through Mesa llvmpipe for a machine with no GPU at all, and FAILS
+  (exit 3) rather than quietly using the GPU.
 - Same isolation rule as `logic_probe` below: nothing in `web/` references it, CI only publishes
   `web/EvilAliensWeb`, so the shipped build is untouched. Keep its `nkast.*` versions in lockstep
   with `web/EvilAliensWeb.csproj`.

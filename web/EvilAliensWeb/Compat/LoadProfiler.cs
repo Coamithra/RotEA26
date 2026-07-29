@@ -256,8 +256,9 @@ namespace EvilAliensWeb.Compat
         //   * ScreenshotSaver.Init, labelled "stockshots", around its whole twelve-asset loop.
         //     That loop warms the SAME list Game1.QueueMenuWarm queues, so on a full-splash boot
         //     the pump got there first and these are cache hits -- zero decodes, no summary. On a
-        //     splash-SKIPPING boot (?menu / ?skipsplash / ?autostart, or a player mashing Start
-        //     inside ~24 ticks) the pump never ran and all twelve really do decode here. They
+        //     splash-SKIPPING boot (?menu / ?skipsplash / ?autostart, or a player double-tapping
+        //     past the splash inside ~24 ticks) the pump has not REACHED them yet -- the menu's
+        //     own twelve are queued ahead of them -- so they really do decode here. They
         //     used to report as twelve COLD gaps sitting at the top of every ?loadlog capture,
         //     which is what this label replaces with one line.
         //
@@ -295,6 +296,36 @@ namespace EvilAliensWeb.Compat
                 + $"{_warmMs}ms decode total"
                 + (_warmSlowest != null ? $" (slowest {_warmSlowest} {_warmMaxMs}ms)" : "")
                 + " -- deliberate, not a COLD gap; the ms is still time spent here");
+        }
+
+        // The pre-menu warm drain's own cost (card cccd763a). Game1.DrainWarmQueue decodes
+        // everything the per-tick pump did not reach, in ONE synchronous tick, the instant before
+        // the menu is built -- so reaching it with a non-empty queue is a real stall on the
+        // Press-Start -> menu handoff, and it was previously unmeasurable from either end: the
+        // per-asset Warm<T> brackets are UNLABELLED so EndWarm prints nothing for them, and
+        // NoteFrame's [hitch] watchdog returns early under the (boot) sentinel.
+        //
+        // It reports the QUEUE ENTRIES it drained, not a decode count -- ScreenshotSaver.Init runs
+        // immediately before it and has already decoded whatever stock shots the pump missed, so
+        // some of these are cache hits. The ms is the honest number; add it to the `stockshots
+        // warm` ms above for the whole handoff. Silent on a full-splash boot, which drains nothing.
+        //
+        // Deliberately NOT a Begin/EndWarm bracket: that pair is non-reentrant by construction and
+        // every drained entry opens its own inside Warm<T>. This is a plain timer either side.
+        public static long BeginWarmDrain()
+        {
+            return Recording ? System.Diagnostics.Stopwatch.GetTimestamp() : 0L;
+        }
+
+        public static void EndWarmDrain(int drained, long startTicks)
+        {
+            if (!Recording)
+                return;
+            double ms = (double)(System.Diagnostics.Stopwatch.GetTimestamp() - startTicks)
+                * 1000.0 / (double)System.Diagnostics.Stopwatch.Frequency;
+            Console.WriteLine($"[loadprofile] menu warm drain: {drained} assets still queued, "
+                + $"{(int)Math.Round(ms)}ms -- the splash was skipped or mashed past, so this is "
+                + "ONE synchronous tick on the Press-Start -> menu handoff");
         }
 
         public static void EndPreload()

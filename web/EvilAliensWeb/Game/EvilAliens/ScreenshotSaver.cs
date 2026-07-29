@@ -94,8 +94,9 @@ public class ScreenshotSaver
 		// Bracket the stock-shot loop as a deliberate warm (card 2367b39c). These are the SAME
 		// twelve Game1.QueueMenuWarm queues, so on a full-splash boot the pump beat us here and
 		// every Load is a cache hit -- nothing decodes, nothing is reported. On a splash-skipping
-		// boot (?menu / ?skipsplash / ?autostart, or a player mashing Start inside ~24 ticks) the
-		// pump never ran and all twelve decode right here, and they used to report as twelve COLD
+		// boot (?menu / ?skipsplash / ?autostart, or a player double-tapping past the splash inside
+		// ~24 ticks) the pump has not reached them -- the menu's own twelve are queued ahead of
+		// them -- so all twelve decode right here, and they used to report as twelve COLD
 		// gaps under the (boot) sentinel -- the top of every ?loadlog capture, discarded by hand
 		// every time (it polluted card e63601a4's investigation). Labelled, they collapse to one
 		// summary line that keeps the count and the ms.

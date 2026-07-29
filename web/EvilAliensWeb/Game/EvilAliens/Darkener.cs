@@ -77,7 +77,7 @@ public class Darkener : DrawableGameComponent
 		// Each label clears the WIDTH of the icon actually drawn beside it: BButton sits at
 		// tipBIconX, AButton at tipAIconX. The 2008 original had the two widths CROSSED (the
 		// B tip cleared AButton's, the A icon subtracted BButton's), exactly as
-		// MenuScene.drawButtonTips did before card 64967ea5. No-op today -- small_face_a and
+		// MenuScene.drawButtonTips and BragScene.drawButtons did. No-op today -- small_face_a and
 		// small_face_b are both 60x60 with no precompiled sibling -- so this changes no pixel;
 		// it is here so re-authoring either icon at a different size can't silently misplace
 		// a label.

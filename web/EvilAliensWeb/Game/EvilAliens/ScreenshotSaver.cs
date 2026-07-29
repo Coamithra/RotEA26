@@ -32,11 +32,15 @@ public class ScreenshotSaver
 	// the twelve, and the one it missed (webcamss, the challenge carousel's last entry) then
 	// decoded cold the first time the player opened Challenges.
 	//
-	// Card 8d6883f3: DERIVED, not spelled out, so that failure mode cannot recur. Every
-	// carousel level (LevelArt.HasCarouselEntry) contributes its bundled thumbnail
-	// (LevelArt.ScreenshotPath) -- the same lookup SubMenuLevelChoice draws through -- so
-	// adding a level to the carousel adds its art here for free. Deduped because two levels
-	// sharing one bundled image is legal and must not warm it twice.
+	// Card 8d6883f3: DERIVED, not spelled out. Every carousel level
+	// (LevelArt.HasCarouselEntry) contributes its bundled thumbnail (LevelArt.ScreenshotPath)
+	// -- the same lookup SubMenuLevelChoice draws through -- so adding a level to the carousel
+	// adds its art here for free. Deduped because two levels sharing one bundled image is legal
+	// and must not warm it twice.
+	// That cuts three hand-maintained copies to one, it does NOT make the failure impossible:
+	// HasCarouselEntry is still a hand list that has to agree with MenuScene's AddEntry* calls,
+	// and adding a carousel level while forgetting it reproduces the original bug exactly.
+	// tools/headless/probes/stockshots_warm.txt is what catches that.
 	//
 	// Order is enum order, not the old hand order. It only sets the warm-queue sequence; the
 	// whole set is drained before the menu is built either way (see Game1.QueueMenuWarm).

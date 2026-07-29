@@ -1713,9 +1713,10 @@ internal class MenuScene : Scene
 		// -- small_face_a and small_face_b are both 60x60 with no precompiled sibling, so the
 		// two LogicalWidth() calls return the same number -- so this changes no pixel; it is
 		// here so re-authoring either icon at a different width can't silently misplace a label.
-		// Card 8d6883f3 completed the set: the height axis above, and the same crossing in
-		// Darkener.drawButtons (this method's 2008 copy). So "an icon can be re-authored
-		// freely" now holds on both axes, in both places.
+		// Card 8d6883f3 completed the set: the height axis above, and the same two bugs in the
+		// other two verbatim copies of this layout -- Darkener.drawButtons (the pause overlay)
+		// and BragScene.drawButtons. So "an icon can be re-authored at a different size" now
+		// holds on both axes in all three.
 		float backTextX = backIconX + (float)BButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
 		float selectTextX = (float)(General.SafeZone).Right - font.MeasureString("select").X * textScale;
 		float selectIconX = selectTextX - (float)AButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;

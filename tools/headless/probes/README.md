@@ -97,11 +97,15 @@ is actually played rather than sitting on a dead ship.
 |---|---|
 | `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested. **Windows-only**: the readback P/Invokes `soft_oal.dll`, so elsewhere it reports `alGain=<unreadable>` and fails. Add the platform library names to `HeadlessAudio` rather than relaxing the assertion |
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
-| `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (card 8d6883f3): no level-select art decodes when Challenges is opened |
+| `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (card 8d6883f3): no level-select art decodes when either carousel is opened |
 
-Both are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`
+All three are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`
 first) when the `Level2|gfx/marsbg` manifest lines are deleted; `silence` goes red under
-`--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
+`--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control;
+`stockshots_warm` goes red naming the dropped asset when a level is deleted from
+`LevelArt.HasCarouselEntry` -- tested on BOTH carousels (`Level1` -> `gfx/screenshots/level1empty`,
+`WebcamAliens` -> `gfx/screenshots/webcamss`), because an earlier revision that opened only the
+challenge carousel passed the `Level1` mutation.
 
 `Paratrooper`, `InsaneBossI` and `Demo2` are the other three levels with substantial manifest
 sections and deserve the same probe — they need challenge-carousel / attract-rotation navigation

@@ -13,24 +13,28 @@
 # it had been true. Fix by restoring the level to LevelArt.HasCarouselEntry / ScreenshotPath,
 # NOT by re-hardcoding a list.
 #
-# WHY THE LONG WALK: the assertion is about a SHRUNKEN set, and a set can only shrink at its
-# edges as far as one entry's screen is concerned -- so the run must demand every entry's art,
-# not just the one the carousel opens on. It walks all nine challenges to the last
-# (WebcamAliens, the historical casualty), then back one to Team Challenge and launches it.
+# WHY IT OPENS BOTH CAROUSELS: `SubMenuLevelChoice.loadScreenshots` loads EVERY entry's image
+# in one loop, so merely opening a carousel demands all of its art -- no walking required. But
+# there are TWO of them, `levelSelector` (the three missions) and `challengeSelector` (the nine
+# challenges), each with its own Initialize. Opening only Challenges leaves level1/2/3empty
+# undemanded, and a probe that did that PASSED with Levels.Level1 deleted from
+# HasCarouselEntry (measured). So: Start Game to open the mission carousel, back out, then
+# Challenges.
 #
-# THE POSITIVE CONTROL is that launch. `expect-not COLD ... gfx/screenshots/` passes
+# THE POSITIVE CONTROL is the launch at the end. `expect-not COLD ... gfx/screenshots/` passes
 # beautifully on a run that never opened a carousel at all -- and it very nearly shipped that
 # way here, because ?autostart silently swallows menu keypresses and the whole run sat on the
 # main menu looking green. `[loadprofile] TeamChallenge preload:` can only be reached by
-# navigating INTO the challenge carousel and walking it, so it proves the window this probe
-# asserts over is the real one. Boot with ?menu (what the other menu-driven probe uses), never
-# ?autostart.
+# navigating into the CHALLENGE carousel and walking seven entries along it, so it proves the
+# window this probe asserts over is the real one. Boot with ?menu (what the other menu-driven
+# probe uses), never ?autostart. The mission leg has no equivalent control of its own: it is
+# covered transitively, since the same keypress stream has to have worked to reach the launch.
 #
 # WHERE THE `mark` GOES, and this is the whole probe: a SubMenuLevelChoice loads its entry art
 # in its own Initialize, which KNI runs when the submenu is first ADDED -- i.e. the moment the
-# player opens Challenges, not when the MenuScene is built. So a dropped level's art decodes
-# in the ~one second between pressing select and the carousel appearing. Mark AFTER the settle
-# but BEFORE navigating: a mark placed after the carousel is up sits one step too late, the
+# player opens that carousel, not when the MenuScene is built. So a dropped level's art decodes
+# in the beat between pressing select and the carousel appearing. Mark AFTER the settle but
+# BEFORE navigating: a mark placed after the carousel is up sits one step too late, the
 # offending decode lands in the dropped window, and the probe passes on the very mutation it
 # exists to catch (measured -- it did).
 #
@@ -50,7 +54,14 @@ step 150 nodraw
 # go and FETCH. The mark must sit BEFORE the navigation below -- see the header.
 mark
 
-# Main menu -> Challenges (three down from Start), then into the carousel.
+# Start Game -> the MISSION carousel (its Initialize decodes level1/2/3empty), then back out.
+eval Press enter 1
+step 90 nodraw
+eval Press esc 1
+step 90 nodraw
+
+# Main menu -> Challenges (three down from Start), then into the carousel. Its Initialize
+# decodes all nine challenge thumbnails.
 eval Press down 1
 step 90 nodraw
 eval Press down 1
@@ -60,9 +71,9 @@ step 90 nodraw
 eval Press enter 1
 step 90 nodraw
 
-# Walk all nine challenges: Space Dodge -> ... -> I Made This! (WebcamAliens).
-eval Press right 1
-step 30 nodraw
+# Walk to Team Challenge (index 7 of 9) and launch it -- the positive control. The walk buys no
+# extra COLD coverage (the carousel already loaded every entry above); it is only how the run
+# reaches a launchable entry, and how the control proves the navigation worked.
 eval Press right 1
 step 30 nodraw
 eval Press right 1
@@ -78,9 +89,7 @@ step 30 nodraw
 eval Press right 1
 step 60 nodraw
 
-# Back one to Team Challenge and launch it (difficulty screen, then select).
-eval Press left 1
-step 60 nodraw
+# Difficulty screen, then select.
 eval Press enter 1
 step 120 nodraw
 eval Press enter 1

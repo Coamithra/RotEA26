@@ -270,9 +270,10 @@ generate much of the art/audio referenced here.
     **Since card 8d6883f3 that list is DERIVED, and `LevelArt` is the one source** -- every
     level with `LevelArt.HasCarouselEntry` contributes its `LevelArt.ScreenshotPath`, deduped,
     and `SubMenuLevelChoice` resolves each entry's image through the SAME lookup instead of
-    being handed a path literal (`AddEntryData(briefing, level)`). So adding a carousel level
-    means touching `LevelArt` and nothing else; the three hand-maintained copies that had to
-    agree are gone. **`General.ScreenshotEnabled` is NOT the membership predicate and cannot be
+    being handed a path literal (`AddEntryData(briefing, level)`). A carousel level still needs
+    its `AddEntry`/`AddEntryData`/`AddEntryEvent` triple in `MenuScene` and BOTH `LevelArt`
+    switches (`HasCarouselEntry` and `ScreenshotPath`) -- what is gone is having to spell the
+    PATH out a second and third time, which is where the drift was. **`General.ScreenshotEnabled` is NOT the membership predicate and cannot be
     made into one** -- it answers "does this level CAPTURE a live thumbnail" and returns the
     `Settings.WebcamScreenshot` opt-in (default OFF) for `WebcamAliens`, so deriving off it
     re-drops the exact asset the original bug was about.

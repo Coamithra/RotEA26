@@ -506,12 +506,16 @@ namespace EvilAliensWeb.Compat
 		// the rest are level completions), so the banner -- and since card 57555583 the LAZY
 		// content load behind it -- had no way to be exercised at all.
 		//
-		// An ALREADY-UNLOCKED awardment is RE-LOCKED first (in memory, never saved), because
-		// otherwise this seam is useless on any save that has played the game -- both
-		// AwardAchievement and AwardmentBlade.Update drop an unlocked awardment, so there is no
-		// banner to see. That re-lock is announced on its own line: a capture taken after one
-		// must never be mistaken for the untouched path. The banner's own Enter transition then
-		// re-unlocks and saves it, exactly as in play.
+		// An ALREADY-UNLOCKED awardment is RE-LOCKED first, because otherwise this seam is
+		// useless on any save that has played the game -- both AwardAchievement and
+		// AwardmentBlade.Update drop an unlocked awardment, so there is no banner to see. The
+		// re-lock is announced on its own line: a capture taken after one must never be mistaken
+		// for the untouched path.
+		//
+		// It is NOT "in memory only": the blade's own Enter transition calls
+		// SetAwardmentIsUnlocked(true) + SaveThreaded(), which rewrites the whole Achievements.xml.
+		// The save therefore ends up as it started -- but only because the banner actually runs,
+		// which is why the cheat gate below is tested BEFORE anything is mutated.
 		//
 		// The cheat gate is REPORTED rather than bypassed -- it is a live property of the run,
 		// not stale save state, and a seam whose failure looks like its success is worse than
@@ -519,20 +523,31 @@ namespace EvilAliensWeb.Compat
 		[JSInvokable("debugAward")]
 		public static string Award(string awardment)
 		{
-			if (!System.Enum.TryParse<EvilAliens.Awardment>(awardment, ignoreCase: true, out var which)
+			// The comma test is not decoration: Enum.TryParse accepts "FirstAct,SecondAct" as a
+			// bitwise OR even though Awardment is not [Flags], and the result passes IsDefined --
+			// so a typo'd list would quietly award something the caller never named.
+			if (awardment == null || awardment.IndexOf(',') >= 0
+				|| !System.Enum.TryParse<EvilAliens.Awardment>(awardment, ignoreCase: true, out var which)
 				|| !System.Enum.IsDefined(typeof(EvilAliens.Awardment), which))
 			{
 				return "[debug] eaAward: unknown awardment '" + awardment + "' (expected one of: "
 					+ string.Join(", ", System.Enum.GetNames(typeof(EvilAliens.Awardment))) + ")";
 			}
-			EvilAliens.AwardmentBlade blade;
-			try
+			EvilAliens.AwardmentBlade blade =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IAwardmentBladeService>()?.get();
+			if (blade == null)
 			{
-				blade = EvilAliens.ServiceHelper.Get<EvilAliens.IAwardmentBladeService>().get();
+				return "[debug] eaAward: the awardment blade is not available yet (the game is "
+					+ "still booting -- try again once a scene is up).";
 			}
-			catch (System.Exception ex)
+			// The cheat gate is tested BEFORE the re-lock, and that ORDER is the whole safety of
+			// this seam: re-locking and then bailing out would drop the unlock on the floor, and
+			// the next SaveThreaded from anywhere serialises the whole singleton -- so a cheating
+			// session would silently lose an awardment the player had really earned.
+			if (EvilAliens.Settings.GetInstance().CheckForCheats())
 			{
-				return "[debug] eaAward: the awardment blade is not available yet (" + ex.Message + ")";
+				return "[debug] eaAward: a cheat is active, so " + which + " is dropped -- exactly "
+					+ "as in play (Settings.CheckForCheats). No banner, and nothing was touched.";
 			}
 			string relocked = "";
 			if (EvilAliens.Achievements.GetInstance().GetAwardmentIsUnlocked((int)which))
@@ -541,12 +556,9 @@ namespace EvilAliensWeb.Compat
 				relocked = "[debug] eaAward: re-locked " + which + " for this session before awarding "
 					+ "-- this is NOT the untouched path\n";
 			}
-			if (EvilAliens.Settings.GetInstance().CheckForCheats())
-			{
-				return relocked + "[debug] eaAward: a cheat is active, so " + which + " is dropped "
-					+ "-- exactly as in play (Settings.CheckForCheats). No banner.";
-			}
 			blade.AwardAchievement(which);
+			// The two durations mirror AwardmentBlade.Update's bladeTimer values (170f enter,
+			// 6500f show); nothing links them, so retune both together.
 			return relocked + "[debug] eaAward queued " + which + " (\"" + blade.AwardmentName(which)
 				+ "\") -- the banner takes ~170ms to enter and shows for 6.5s.";
 		}

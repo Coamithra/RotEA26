@@ -620,8 +620,9 @@
         // Debug: pop an awardment banner right now, through the real AwardAchievement path —
         // eaAward('Pacifist'). Every in-game trigger is minutes deep behind a condition a test
         // rig cannot produce, so this is the only way to see the banner (and the lazy content
-        // load behind it) on demand. Reports the gate instead of a banner when the awardment is
-        // already unlocked or a cheat is active; it does not force past either.
+        // load behind it) on demand. An already-unlocked awardment is re-locked first (announced
+        // on its own line) or there would be no banner to see; a cheat being active is REPORTED
+        // instead, and nothing is touched in that case.
         window.eaAward = (awardment) => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAward', String(awardment))); }
             catch (e) { console.warn('[debug] eaAward failed (game not booted yet?): ' + e.message); }

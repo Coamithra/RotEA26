@@ -967,11 +967,13 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   on Hard+, Dunce = a 180 s spider-boss timer, the rest are level completions). Since card
   57555583 the blade's sheet + `menufont` load LAZILY on the Idle -> Enter transition, so this is
   also the only way that load gets exercised at all.
-  - It **RE-LOCKS an already-unlocked awardment** (in memory, never saved) before awarding, and
-    says so on its own line -- both `AwardAchievement` and `AwardmentBlade.Update` drop an
-    unlocked one, so without that the seam does nothing on any save that has played the game. A
-    capture taken after that line is NOT the untouched path. The cheat gate (`CheckForCheats`) is
-    reported rather than bypassed: it is a live property of the run, not stale save state.
+  - It **RE-LOCKS an already-unlocked awardment** before awarding, and says so on its own line --
+    both `AwardAchievement` and `AwardmentBlade.Update` drop an unlocked one, so without that the
+    seam does nothing on any save that has played the game. A capture taken after that line is NOT
+    the untouched path. Not "in memory only": the blade's `Enter` calls `SaveThreaded()`, so the
+    save ends up as it started only *because the banner runs*. **Hence the cheat gate
+    (`CheckForCheats`) is tested BEFORE the re-lock** -- it is reported rather than bypassed, and
+    re-locking and then bailing would drop a genuinely earned unlock on the floor.
   - **TRAP -- eahl's saves are NOT clean between runs, and `--saves` does not fix it.** The XML
     container writes to a REAL directory (`/eaweb_save/EvilAliens/` == `C:\eaweb_save\...` on
     Windows); `--saves` only owns the b64 mirror, so `Achievements.xml` survives every run and

@@ -100,14 +100,12 @@ DDSCAPS_COMPLEX = 0x00000008
 DDSCAPS_MIPMAP = 0x00400000
 
 
-def read_dds(path):
-    """(data, padded_w, padded_h, logical_w, logical_h, mip_count, block_bytes).
+def parse_dds_header(data, path):
+    """(padded_w, padded_h, logical_w, logical_h, mip_count, block_bytes) from the 128-byte header.
 
     Unstamped .dds were never padded, so their logical size IS their padded size.
     Raises ValueError rather than exiting -- build_textures.py imports run() as a library, and one
     malformed file must fail the guard, not kill the build mid-`main()`."""
-    with open(path, "rb") as f:
-        data = f.read()
     if len(data) < 128 or data[:4] != b"DDS ":
         raise ValueError(f"not a DDS file (bad magic or truncated header): {path}")
     h, w = struct.unpack("<I", data[12:16])[0], struct.unpack("<I", data[16:20])[0]
@@ -116,7 +114,23 @@ def read_dds(path):
     lw, lh = struct.unpack("<II", data[32:40])
     if data[40:44] != DDS_LOGICAL_MAGIC:
         lw, lh = w, h
-    return data, w, h, lw, lh, mips, block
+    return w, h, lw, lh, mips, block
+
+
+def read_dds_header(path):
+    """The header fields alone, WITHOUT slurping the surface data.
+
+    build_textures.py's canary gate wants four dwords from every shipped .dds and nothing else;
+    read_dds() would read ~130 MB across the set to hand back dims."""
+    with open(path, "rb") as f:
+        return parse_dds_header(f.read(128), path)
+
+
+def read_dds(path):
+    """(data, padded_w, padded_h, logical_w, logical_h, mip_count, block_bytes) -- header + pixels."""
+    with open(path, "rb") as f:
+        data = f.read()
+    return (data,) + parse_dds_header(data, path)
 
 
 def mip_level_image(data, w, h, level, block):

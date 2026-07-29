@@ -73,6 +73,14 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // Does the extra ship streamed for `slot` have an adopted puppet? The SpawnFriend half of
+        // NetResetSpawnTest's subject -- same reasoning as HasRemotePuppet, and this is the site
+        // that bites more often, since couch players hit the resets that arm Purge<PlayerShip>.
+        internal static bool HasFriendPuppet(byte slot)
+        {
+            return friendChannels.TryGetValue(slot, out FriendChannel ch) && ch.Puppet != null;
+        }
+
         // Is this slot actively streamed to us? (Host-side grant bookkeeping asks.)
         private static bool FriendChannelExists(byte slot)
         {

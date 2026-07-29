@@ -436,6 +436,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
   `eaNetWire.test()` (the in-process net wire + every wire-level codec round trip — card
   25ad0659; needs no session, level or second tab, and also runs under `logic_probe`),
+  `eaNetResetSpawn()` (the reset/`TryAdd` ship-puppet spawn scenario — card 25ad0659; the ONE
+  **destructive** suite here: it pairs a real session onto the live level, so run it in a
+  throwaway `?level=Level2&invuln` boot),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
@@ -551,12 +554,19 @@ site now lives under:
 - **A caller that ADOPTS what it adds must use `ComponentBin.TryAdd`, not `Add`.** `Add` diverts
   silently -- that is the point, ordinary game code must not have to care -- but the net layer's
   ship puppets keep the reference and gate their retry on it being null, so adopting a diverted
-  ship stranded that player for the rest of the session (`NetSession.SpawnPuppet` and
+  ship points that reference at a ship the world does not have (`NetSession.SpawnPuppet` and
   `SpawnFriend`; the couch/friend one bites more often, since couch players hit the resets that
   arm `Purge<PlayerShip>`). `TryAdd` reports whether the component actually landed; on false,
   leave the reference clear and let the retry fire next tick. Note the ship SHOULD be purged by
   a reset (`SpawnAllPlayers` respawns every seated slot), so verify-and-retry is correct here
   and exempting would be wrong.
+  **The window is ONE TICK, not the session -- this line used to say "for the rest of the
+  session" and that was wrong** (measured by card 25ad0659's `eaNetResetSpawn()`, whose
+  faithful pre-card mutation fails exactly one assertion). `ManagePuppet` and `TickFriends` both
+  open by RELEASING a puppet the oracle does not hold, and that block predates the fix (Stage
+  11.1, `6f36aae`), so the pre-card bug self-heals on the next tick. Keep the guard -- the
+  release is a safety net, not the intended path -- but do not re-inflate the severity, and do
+  not write a test that expects the broken code to stay broken past one tick.
 - **Wire-driven banners are NOT exempt, deliberately** (card 74403f83). `NetSession`'s
   `EvMessage`/`EvUnlock` adds can be eaten by a standing `Purge<AnimatedMessage>`, and that
   MATCHES the host: the level script is host-only and only runs in `GameState.Normal`, so the

@@ -361,6 +361,34 @@ namespace EvilAliensWeb.Compat.Net
             StartWith(g, host: true, t, room, asMenuSession: false, asListedSession: true);
         }
 
+        // Scenario-harness path (card 25ad0659): start a REAL session over one endpoint of an
+        // in-process NetWire so a scripted peer can drive the other end (NetResetSpawnTest).
+        // Deliberately NEITHER a menu nor a listed session: `menuSession` makes HandleHello refuse
+        // a peer while DebugFlags.Active is set, and a scenario that needs a live world boots with
+        // ?level=, so a menu session would reject its own scripted pairing; `listedSession` would
+        // make PeerConnected send an EvLaunch no scenario wants.
+        internal static void StartForTest(Game g, bool host, INetTransport t, string room)
+        {
+            if (Active)
+            {
+                return;
+            }
+            StartWith(g, host, t, room, asMenuSession: false, asListedSession: false);
+        }
+
+        // The hash a scripted peer's hello must carry to be accepted. READ rather than recomputed:
+        // restating HashBuildString(WebRtcInterop.BuildHash()) in a scenario would drift silently
+        // from StartWith's own expression (?netfakehash included), and the only symptom would be a
+        // pairing the scenario cannot explain.
+        internal static ulong LocalBuildHash => localBuildHash;
+
+        // Is the remote peer's PRIMARY ship puppet currently adopted? The subject of
+        // NetResetSpawnTest: SpawnPuppet must leave this false when its bin.TryAdd is refused,
+        // because the retry gate IS `puppet == null` -- adopting a ship the bin diverted points it
+        // at a ship the world does not have (card 74403f83; the window is one tick, see the note
+        // in SpawnPuppet).
+        internal static bool HasRemotePuppet => puppet != null;
+
         private static void StartWith(Game g, bool host, INetTransport t, string room, bool asMenuSession, bool asListedSession)
         {
             game = g;
@@ -418,7 +446,10 @@ namespace EvilAliensWeb.Compat.Net
             lastMetricsAt = sessionStartAt;
             Console.WriteLine("[net] session start role=" + (isHost ? "host" : "join")
                 + " room=" + room + " protocol=v" + ProtocolVersion
-                + " transport=" + (t is BroadcastChannelTransport ? "BroadcastChannel" : "WebRTC")
+                // Names all THREE impls: the two-way test read "WebRTC" for an InMemoryTransport,
+                // i.e. the one line that says which wire a run is on lied about the headless one.
+                + " transport=" + (t is BroadcastChannelTransport ? "BroadcastChannel"
+                    : t is InMemoryTransport ? "InMemory" : "WebRTC")
                 + (menuSession ? " (menu lobby)" : listedSession ? " (join-in-progress)" : ""));
         }
 
@@ -3010,11 +3041,18 @@ namespace EvilAliensWeb.Compat.Net
                 // the drain, which leaves FindLocalShip() null and the caller's gate shut. The
                 // ship being purged is CORRECT either way (a reset wipes all ships and
                 // SpawnAllPlayers respawns every seated slot), but adopting one that never
-                // entered the world
-                // would leave `puppet` non-null forever and the guard above is `puppet == null`
-                // -- the remote player would stay invisible for the rest of the session. Leave
-                // it clear and retry next tick, once TopOfTickFlush has expired the filter; the
-                // seat we just took is reused via DeviceIsPlaying above (card 74403f83).
+                // entered the world points `puppet` at a ship the world does not have, and the
+                // retry gate above is `puppet == null`. Leave it clear and retry next tick, once
+                // TopOfTickFlush has expired the filter; the seat we just took is reused via
+                // DeviceIsPlaying above (card 74403f83).
+                // MEASURED WINDOW: one tick, not the session -- an earlier revision of this
+                // comment said "invisible for the rest of the session" and that is wrong.
+                // ManagePuppet opens by RELEASING a puppet the oracle does not hold
+                // (`!oracle.GetShips().Contains(puppet)`), a block that predates this fix
+                // (Stage 11.1, 6f36aae), so the pre-card bug self-heals on the next tick. The
+                // release is a safety net, not the intended path, so the guard stays -- but do
+                // not re-inflate the severity. Pinned by NetResetSpawnTest, whose mutation
+                // record has the numbers.
                 return;
             }
             puppet = ship;

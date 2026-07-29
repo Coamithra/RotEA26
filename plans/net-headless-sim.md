@@ -14,7 +14,9 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 
 > Status: **in implementation** (card `25ad0659`: steps 1, 1b, 2a-2c, 3, 4). Step 1 shipped in
 > PR #231 (`dce0772`) -- the in-process wire, its self-test, a `logic_probe` case set and two
-> committed probes.
+> committed probes. **Step 1b shipped next** -- `Compat/Net/NetResetSpawnTest.cs`
+> (`eaNetResetSpawn()`), `NetSession.StartForTest` + three read-only seams, and
+> `tools/headless/probes/net_reset_spawn.txt`. Next up: **2a**.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -297,6 +299,37 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    **It runs on `Environment.TickCount64`, so prove it is not flaky before committing it as a
    probe** (~10 runs + a mutation test). If it is flaky, ship it console-only and re-home it as a
    probe once 2a has landed the injected clock.
+   **DONE.** `Compat/Net/NetResetSpawnTest.cs` (31 assertions in four legs), `StartForTest` plus
+   `LocalBuildHash` / `HasRemotePuppet` / `HasFriendPuppet(slot)`, `eaNetResetSpawn()` +
+   `DebugInput.NetResetSpawn`, and `tools/headless/probes/net_reset_spawn.txt`. NOT flaky --
+   deterministic 31/31 over 10 consecutive runs, so it committed as a probe (16/16 now); its
+   two real-clock windows are re-armed by re-sending both streams immediately before each
+   `Update`. Five things worth carrying forward:
+   - **The tick structure is supplied by the SUITE, not by ticking the game.** Everything from
+     `DrainRx` onward is inside one `NetSession.Update()`, so the scenario calls that directly and
+     provides the two flush points (`bin.Update()` for the mid-tick one, `bin.TopOfTickFlush()`
+     for the boundary). Driving the real `Resetting -> Startup` choreography instead would cost
+     ~3 s of game time plus a background crossfade that needs `Draw`, and none of it is under
+     test.
+   - **The one thing it has to fake is `SpawnAllPlayers`' respawn of the local seat**, because
+     `NetApplyReset` purges `PlayerShip` and the retry legs need a non-null `FindLocalShip()`.
+     Done with the game's own three lines and flagged at each site. Step 2a's clock does not help
+     here; what would is an `INetScene` seam (2c) that lets a scenario drive the reset choreography
+     without `Draw`.
+   - **The client must be granted slot >= 1.** `AdoptGrantedPrimarySlot` sets
+     `peerPrimarySlot = HostPrimarySlot` (0), so slot 0 has to be free for the peer's own puppet --
+     i.e. the scenario reproduces the dev `?net=join` `MoveSeat` path, and granting slot 0 would
+     make `SpawnPuppet` fight the local ship for its seat.
+   - **The NEGATIVE half is asserted by the SEATS, not by the puppets.** "No `Remote` /
+     `RemoteFriend` seat was allocated at all" is what distinguishes "the caller was never
+     entered" from "TryAdd refused"; the puppet being null is true in both.
+   - **A SEVERITY CLAIM CORRECTED, and this is what step 2-3 reviewers should know.** The faithful
+     pre-card mutation (`bin.Add` + unconditional adopt) fails exactly ONE assertion, because
+     `ManagePuppet` and `TickFriends` both open by releasing a puppet the oracle does not hold and
+     that block predates the fix (Stage 11.1, `6f36aae`). So the pre-card bug's window was one
+     tick, not the session, and card 74403f83's "stranded for the rest of the session" wording
+     (in two `CLAUDE.md` files, `ComponentBin.TryAdd`'s comment and `SpawnPuppet`'s own) was
+     overstated. All four corrected in place; the guard stays.
 3. **Steps 2a/2b/2c** -- `INetHost` + `ServiceHelperNetHost`, split three ways because the seam is
    45 + 18 + 14 members rather than the ~30 sketched: **2a** the injected clock (`NowMs`, replacing
    9 `Environment.TickCount64` reads) plus the `DebugFlags` / `WebRtcInterop` consts -- FIRST,

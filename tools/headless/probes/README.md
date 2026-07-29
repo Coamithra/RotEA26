@@ -121,6 +121,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (cards 8d6883f3, 0d166364): no level-select art decodes when either carousel is opened, and no entry falls back to the default art |
 | `netbg_catchup.txt` | the join-in-progress scenery catch-up replays every leg, the mid-level whole-scene swap included (cards 45a4e48d, ca4fd94f): a peer joining mid-level must end up looking at the host's scenery, which nothing else can detect — it fails silently and only a second player ever sees it. Drives `eaNetBgTest`'s one-tab round trip over `?netscript`; its third assertion is an anti-vacuity guard on the wipe, and the header says why it takes an `expect-not` |
 | `stockshots_pump.txt` | the OTHER half of card 4d47c5ba: on a boot that lets the warm pump run (a real player's), the Press-Start -> menu handoff decodes nothing. Card cccd763a -- it is the only probe that can see that half, see the block below |
+| `net_reset_spawn.txt` | card 74403f83's two ship-puppet spawn sites, END TO END (card 25ad0659 step 1b): an `EvReset` purging from inside the rx drain must not let `NetSession.SpawnPuppet` / `SpawnFriend` adopt a ship the `ComponentBin` diverted. The fix was previously proven only at the primitive (`eaBinTest` scenario 5's bare `TryAdd` pair) — reaching the real call sites needs a live session with a host-granted peer slot and buffered ship samples. **The only DESTRUCTIVE probe here**: the suite pairs a real session onto the live level and leaves the scene in its reset branch (it restores the roster and asserts it did) |
 | `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Also the out-of-range DIFFICULTY on the same row (card 88f87ba2): the boundary refuses it (`unknownDifficulty=7`) and the row is still listed. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
@@ -168,6 +169,19 @@ resolved to no bundled art. Note what that mutation does NOT produce: an excepti
 `Content.Load` in `catch (Exception)`, so a broken fallback throws, gets absorbed, and draws the
 identical picture — which is why the probe reads a line reported from what `EnsureArt` recorded
 while resolving, and why that line must never be re-derived from `LevelArt` at the report site.
+
+`net_reset_spawn` is mutation-tested SIX ways, each isolated, each a revert of something it claims
+(counts are failing LEGS; the probe's own header lists them with the reasoning): SpawnPuppet back
+to the pre-card `bin.Add` + unconditional adopt → **1**; SpawnFriend the same → **1**; dropping
+`Collection.Purge<PlayerShip>()` from `GameScene.NetApplyReset` → **6** (the one that proves leg 2
+is not passing for another reason); dropping `FindLocalShip() != null` from `ManagePuppet`'s spawn
+gate → **1** and from `TickFriends`' → **1** (the NEGATIVE leg); dropping `pendingPurges.Clear()`
+from `ComponentBin.TopOfTickFlush` → **12**. **The first mutation being only ONE leg is a
+finding, not a weak assertion** — `ManagePuppet` releases a puppet the oracle does not hold, and
+that block predates the fix (Stage 11.1, `6f36aae`), so the pre-card bug self-heals on the next
+tick and the "stranded for the rest of the session" claim it carried was overstated. Its leg 3 is
+also legs 1 and 2's positive control, which is why "nothing happened" there cannot pass on a run
+whose frames never arrived.
 
 **`stockshots_pump` exists because its two neighbours provably CANNOT catch the regression it
 pins, and that is worth stating rather than rediscovering.** Delete the

@@ -114,19 +114,14 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
   reports DIFFERENT under `--optimize`.
   - **It does NOT fold a dead struct `initobj`, so MOST dead initializers are out of its reach**
     (card `cbdf0a6f`, measured over 5 sites). Roslyn has no dead-store elimination for `initobj`:
-    it drops the initializer only when it eliminates the LOCAL ITSELF, which for
-    `T x = default(T); (x) = expr;` means only the pure-return-temp shape (`...; return x;` --
-    `AlienDrawableGameComponent.getFrameRectangle`, the positive control, commit `8bd1cf9`,
-    IDENTICAL; that method's `Rectangle result = ...; return result;` local is
-    deliberately LEFT standing so the control stays reproducible -- inlining it is the separate
-    pure-return-temp class). Wherever the local SURVIVES -- even for one single use as a call argument -- its
-    dead `initobj` survives with it and the hash reports DIFFERENT. It is neither the struct TYPE
-    nor the constructor's ARGUMENT SHAPE: both hypotheses were tested and killed
-    (`Rectangle`+flat folded; `Color`+flat, `Color`+nested and `Vector2`+flat all did not). That
-    the store really is dead regardless is visible in the reference decompile -- `--optimize` had
-    already inlined `FloatingText`'s construction into its call and STILL left
-    `Color color = default(Color);` standing. So a dead-initializer sweep is bounded by
-    `verify_decompiled_diff.py`, not proven by this oracle.
+    it drops the initializer only when it eliminates the LOCAL ITSELF — for
+    `T x = default(T); (x) = expr;` that means only the pure-return-temp shape (`...; return x;`).
+    Any surviving use of the local, even one call argument, keeps the dead `initobj` and the hash
+    reports DIFFERENT. Neither the struct type nor the constructor's argument shape predicts it
+    (both hypotheses tested and killed). So a dead-initializer sweep is bounded by
+    `verify_decompiled_diff.py`, not proven by this oracle. Positive control: commit `8bd1cf9`
+    (`AlienDrawableGameComponent.getFrameRectangle`, IDENTICAL) — its `result` local is
+    deliberately left standing so the control stays reproducible.
 - **`verify_decompiled_diff.py`** — the companion for changes the compiler legitimately DOES see:
   collapsing `bool num = held; held = num | X;` to `held |= X` (the `ldloc` moves), or collapsing
   four `x.Position - y.Position` recomputations into one local (Roslyn cannot CSE a property call).
@@ -155,31 +150,22 @@ collapsed ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated
 them renumbers the method's local slots, so the byte-identical hash oracle cannot cover it. Card
 `7d14a3cd` did it anyway, BOUNDING it with `verify_decompiled_diff.py --ref main` instead, which
 is the tool for exactly that class — and that came back IDENTICAL, i.e. not merely confined to the
-edited method but invisible to ILSpy altogether. 24 temporaries inlined, the case-block braces
-dropped with them, and that one method's redundant parens cleared in passing. Card `cbdf0a6f`
-then FINISHED the struct-temporary class -- the last four `GamePadThumbSticks thumbSticksN =
-(stateN).ThumbSticks;` temps in `InputHandler.LeftStick`/`RightStick` -- and collapsed the 30
-provably-dead `= default(T)` initializers, both bounded the same way. Its `state`/`state2` locals
-were deliberately KEPT -- though NOT for the reason the card gave ("separate calls with different
-arguments"): WITHIN one method the two calls are identical, and they sit on mutually exclusive
-`if`/`else` branches, so there is nothing to merge. The deadzone differs only BETWEEN the two
-methods. Hoisting the call above the `if` to create something mergeable would MOVE a call site,
-which is what stops it being cosmetic.
+edited method but invisible to ILSpy altogether. Card `cbdf0a6f` finished the struct-temporary
+class (the last four in `InputHandler.LeftStick`/`RightStick`) and collapsed the 30 provably-dead
+`= default(T)` initializers, both bounded the same way. The `state`/`state2` locals in those
+methods stay: they sit on mutually exclusive `if`/`else` branches so there is nothing to merge,
+and hoisting the call above the `if` would MOVE a call site, which stops it being cosmetic.
 
 **Still deliberately not done.** ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
 everywhere else in `Game/` -- its own artifact class and its own card; don't fold it into an
-unrelated change. The other 39 `= default(` occurrences also stay, and NOT because nobody got to
-them -- card `cbdf0a6f` classified all 69 and took only the 30 provably-dead ones (see the initobj
-bullet above): **7 field-by-field inits** (`AnimatedSprite`, `BrainBoss`, `Floor`, `GameEventList`,
-`MyMath`, `Vibrator`, `Wall`), where the default does definite-assignment work; **29 where the
-assignment is CONDITIONAL or hoisted out of a loop**, so ADJACENCY cannot settle them and each
-needs its own per-path analysis. Do NOT read that as "these are live": spot-checking says most are
-not (`SpriteBatchWrapper`'s eight `zero` sites assign in BOTH the `if` and the `else`), while
-`ComponentBin`'s `T val = default(T);` -- a search loop that may match nothing, then
-`if (val != null)` -- genuinely is. That one is why the sweep refused to guess. Collapsible work,
-not forbidden ground; and **3
-non-declarations**, including `SpriteBatchWrapper`'s `Vector3 fogColor = default(Vector3)` DEFAULT
-PARAMETER, which a naive `= default(` sweep would corrupt into a signature change.
+unrelated change. 39 `= default(` occurrences remain, classified by card `cbdf0a6f`:
+**7 field-by-field inits** (`AnimatedSprite`, `BrainBoss`, `Floor`, `GameEventList`, `MyMath`,
+`Vibrator`, `Wall`), where the default does definite-assignment work; **29 where the assignment is
+CONDITIONAL or hoisted out of a loop**, needing per-path analysis -- most spot-check as collapsible
+(`SpriteBatchWrapper`'s eight `zero` sites assign in both branches) but `ComponentBin`'s search-loop
+default is genuinely read, so treat them per site, not as a batch; and **3 non-declarations**,
+including `SpriteBatchWrapper`'s `Vector3 fogColor = default(Vector3)` DEFAULT PARAMETER, which a
+naive `= default(` sweep would corrupt into a signature change.
 
 ## Shaders — `tools/shaders/`
 
@@ -196,22 +182,16 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   calls `install_external.install()` and `build_music` MERGES into `music.json`, so a full rebuild
   never drops an external cue (a missing raw source leaves the committed track untouched).
   **Three SFX are HAND-OWNED and are SKIPPED by `build_sfx` — `head_asplode.wav`,
-  `small_head_asplode.wav`, `spiderbossdeath.wav`** (`HAND_OWNED_SFX`). The user re-recorded them
-  in Reaper to strip the static background noise the bank originals carry, and they are committed
-  over the derived files (PR #192). They stay **PCM_16 stereo like the rest of the fleet** -- the
-  re-edits were delivered 24-bit and re-encoded to 16-bit before merging, saving ~488 KiB. Only
-  `spiderbossdeath` changed shape: resampled 22050 -> 44100 Hz (72086 -> 144172 frames, 282 -> 563
-  KiB); the other two keep their rate and frame count exactly and differ only in samples. All three
-  load through the real KNI `SoundEffect.FromStream` (checked on the DESKTOP host, so it is
-  evidence about the format, not about the shipped WASM/WebAudio build). A rebuild would otherwise
-  restore the noisy originals, and
-  **the failure would be SILENT** — `SoundManager.GetEffect` catches every load exception and
-  caches null, so a broken or regressed sfx never announces itself, it just stops sounding right.
-  Same rule as `channelswap.wav` below. To genuinely re-derive one, drop it from the set for that
-  run; it is deliberately not a CLI flag. **`--selftest`** pins the guard with no banks and no
-  PyAV: it monkeypatches `xact.decode`/`sf.write` and asserts the three never reach the writer
-  while the other 16 do, plus a negative control (set emptied → all 19 write) so a build_sfx that
-  wrote nothing at all could not pass vacuously.
+  `small_head_asplode.wav`, `spiderbossdeath.wav`** (`HAND_OWNED_SFX`). They are the user's Reaper
+  re-recordings (denoised; committed via PR #192), PCM_16 stereo like the rest of the fleet —
+  except `spiderbossdeath` runs at 44100 Hz where its bank original was 22050. A rebuild would
+  silently restore the noisy originals: **the failure is SILENT** — `SoundManager.GetEffect`
+  catches every load exception and caches null, so a broken or regressed sfx never announces
+  itself, it just stops sounding right. Same rule as `channelswap.wav` below. To genuinely
+  re-derive one, drop it from the set for that run; deliberately not a CLI flag. **`--selftest`**
+  pins the guard with no banks and no PyAV (monkeypatched `xact.decode`/`sf.write`; the three
+  never reach the writer, the other 16 do, plus a set-emptied negative control so an all-skipping
+  build_sfx cannot pass vacuously).
 - **`refine_loops.py`** (called as `build_audio.py`'s last step; re-runnable standalone): XACT
   looped whole waves, but WebAudio's loop is a HARD SPLICE, so a mismatched wrap CLICKS. The script
   measures each track's splice click and replaces only audibly-clicking loops with a

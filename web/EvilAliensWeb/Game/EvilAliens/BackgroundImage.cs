@@ -89,14 +89,12 @@ internal class BackgroundImage
 	// tall -- which is exactly why eaBgCull() reads the decisions as data.
 	//
 	// The right/bottom test is STRICT (card ef55b76e). The interval is half-open, so a tile whose
-	// right or bottom edge lands exactly on 0 covers zero on-screen area and painting it is pure
-	// cost: the quad spans [-w, 0], no pixel centre falls inside it, and nothing reaches the
-	// framebuffer. This is not a rare tie. Draw starts its grid at position - realsize, so for any
-	// layer whose realsize matches its tile the first column sits exactly on the boundary at scroll
-	// phase 0 -- and since only X ever scrolls, position.Y stays 0 forever, which put the whole top
-	// ROW of every [1,1] layer in this case on every single frame of play (half of every Mars
-	// parallax layer's draws). eaBgCull()'s differential section is what proves the tightening can
-	// change no pixel.
+	// right or bottom edge lands exactly on 0 covers zero on-screen area: its quad spans [-w, 0],
+	// no pixel centre falls inside, nothing reaches the framebuffer -- that argument (plus a
+	// pre/post pixel diff) is what proves the tightening changes no pixel; eaBgCull()'s
+	// differential is a SENTINEL against a future margin/inset, not proof (BgCullTest header).
+	// Not a rare tie: only X ever scrolls, so position.Y stays 0 forever and the whole top ROW of
+	// every [1,1] layer hit exact-zero on every frame of play.
 	internal static bool TileOnScreen(float x, float y, int tileW, int tileH, float scale)
 	{
 		return x + (float)tileW * scale > 0f && x < 800f && y + (float)tileH * scale > 0f && y < 600f;

@@ -103,6 +103,11 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     and real WebRTC can ONLY fail in the browser — as can a case-sensitive `Content/` path, which
     a local filesystem happily resolves. The Phase-5 gate (foreground Chrome, zero console
     exceptions) is unchanged; `eahl` is what you use to get the frame or the number *before* it.
+    Even for a genuinely browser-only gate, eahl is still the cheapest way to FIND the browser
+    leg's inputs: rehearse the menu key sequence headlessly (`--repl`, `eval Press ...`,
+    screenshots), then Chrome only replays a known-good script (card 2c3499f3). In Chrome, focus
+    the game tab with `window.focus()`, NEVER a synthetic click — every click on the canvas is
+    also a menu-select / fire input.
   - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
     scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
     `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first

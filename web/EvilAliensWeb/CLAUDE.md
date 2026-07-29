@@ -202,8 +202,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     `(boot)` block immediately preceding the `<Level> preload:` line, then re-capture.
     **It also makes such a level READ AS CLEAN, which is how Demo3 hid 12 cold decodes**
     (card e63601a4): no `COLD decode in Demo3` line was ever printed, and the
-    `[loadprofile] Demo3 preload:` summary still was, because the scene's own
-    `PreloadGraphicalContent` opens a bracket regardless. A level with an empty section is
+    `[loadprofile] Demo3 preload:` summary still was -- that line comes from
+    `GameScene.LoadContent`'s own `BeginPreload`/`EndPreload` bracket, which runs whatever the
+    manifest section holds. A level with an empty section is
     not evidence of anything -- check the `(boot)` block before believing it.
   - **The ATTRACT DEMOS capture through `?demo=<1|2|3>`** (card e63601a4). The idle menu picks
     Demo1/2/3 with an unseeded `RandomHelper.Random.Next(3)` in

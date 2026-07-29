@@ -2896,8 +2896,10 @@ namespace EvilAliensWeb.Compat
 							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
-							// Prints only when set, same reason: it decides which attract demo a
-							// capture or probe actually measured.
+							// Prints only when set: it decides which attract demo a capture or probe
+							// actually measured. Note the whole line is gated on `Active`, which
+							// DemoPick is deliberately out of -- so a bare ?demo=2 confirms nothing
+							// and the probes see this only because they also pass ?loadlog.
 							+ (DemoPick.HasValue ? " demo=" + DemoPick.Value.ToString(CultureInfo.InvariantCulture) : "")
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")

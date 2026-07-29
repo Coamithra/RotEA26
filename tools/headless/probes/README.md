@@ -140,11 +140,6 @@ level out. It PASSED at the 180 s length the probe was first written with — th
 reached late — which is how the soak length was chosen. Re-run that mutation, not the broad one,
 if you ever shorten the window. `silence` goes red
 under `--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
-The three `preload_demo*` were mutation-tested two ways each: a PARTIAL delete (one line --
-`Demo1|gfx/sprites/playersheet`, `Demo2|gfx/sprites/explosion`) goes red on the level's own
-`expect-not`, naming that asset; a WHOLE-section delete goes red on the `(boot)` guard
-instead, with the level's own `expect-not` passing on 0 matches. Run the whole-section one if
-you ever touch these -- it is the case the guard exists for.
 
 **The three attract demos each have a probe now (card e63601a4), and the two blockers that
 used to make them impossible are both gone.** This block used to say `Demo2` could not be
@@ -163,7 +158,16 @@ probed; what follows is what changed, because both halves generalise.
 Demo3 had NO manifest section, and `WarmThenLaunch` returns EARLY on an empty one -- so no
 preload bracket opened and its 12 decodes were logged against the `(boot)` sentinel. It
 therefore READ as the clean demo. `expect-not COLD decode in Demo3` passes vacuously in that
-state, and the `expect \[loadprofile\] Demo3 preload:` above it still matches, because the
-scene's own `PreloadGraphicalContent` opens its own bracket and prints that line regardless.
+state, and the `expect \[loadprofile\] Demo3 preload:` above it still matches, because that
+summary line comes from `GameScene.LoadContent`'s `BeginPreload`/`EndPreload` bracket, which
+runs whatever the manifest section holds (`PreloadGraphicalContent` is called inside it, not
+the opener).
 Only `expect-not COLD decode in \(boot\): gfx/sprites/playersheet` catches it -- verified by
 deleting the whole section, which goes red on exactly that line while the other two pass.
+
+Each `preload_demo*` is therefore mutation-tested TWO ways. A PARTIAL delete (one line) goes red
+on the level's own `expect-not`, naming the asset -- `Demo1|gfx/sprites/playersheet`,
+`Demo2|gfx/sprites/explosion`, `Demo3|gfx/base/756`. A WHOLE-section delete goes red on the
+`(boot)` guard instead, with the level's own `expect-not` passing on 0 matches. **Re-run the
+whole-section one if you ever touch these** -- it is the case the guard exists for, and it is the
+one a partial delete cannot reach.

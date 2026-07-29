@@ -22,8 +22,9 @@
 # lines does not merely remove the warm: WarmThenLaunch returns EARLY on an empty section, so
 # no preload bracket is opened at all and the decodes are logged against the "(boot)" sentinel
 # instead of Demo1. `expect-not COLD decode in Demo1` would then pass vacuously -- and the
-# `expect ... Demo1 preload:` above it would STILL match, because the scene's own
-# PreloadGraphicalContent opens its own bracket and prints that line regardless. Only the
+# `expect ... Demo1 preload:` above it would STILL match, because that summary line comes from
+# GameScene.LoadContent's BeginPreload/EndPreload bracket, which runs whatever the manifest
+# section holds (PreloadGraphicalContent is called inside it, not the opener). Only the
 # (boot) guard catches that case. Measured: it is exactly how Demo3 hid its 12 gaps.
 #
 # Window: mark at frame 400 (boot + the idle warm queue have drained by then), the attract

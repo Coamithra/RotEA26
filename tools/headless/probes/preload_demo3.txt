@@ -2,8 +2,9 @@
 #
 # PINS: wwwroot/Content/preload/manifest.txt's Demo3 section (card e63601a4). Demo3 is the
 # alien-base demo and had NO manifest section at all, which is why it read as the clean one:
-# with an empty section WarmThenLaunch bails before opening a preload bracket, so its 12 cold
-# decodes were filed under the "(boot)" sentinel and `COLD decode in Demo3` never appeared.
+# with an empty section WarmThenLaunch bails before opening its pre-launch bracket, so its 12
+# cold decodes -- made in the scene's own Initialize, before GameScene.LoadContent's bracket --
+# were filed under the "(boot)" sentinel and `COLD decode in Demo3` never appeared.
 # This probe is written so that exact disguise cannot come back -- see the (boot) guard below.
 #
 # FAILURE MEANS: an asset Demo3 uses is no longer preloaded and is decoded during live

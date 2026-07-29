@@ -524,11 +524,11 @@ Demo2|gfx/sprites/explosion|COLD|0|612x612
 Demo2|gfx/sprites/photocamera|COLD|0|264x252
 Demo2|gfx/sprites/playersheet|COLD|1|1260x680
 Demo2|gfx/sprites/smoke|COLD|0|612x612
-# DEFENSIVE, not observed: UFO.Initialize picks a small UFO's landed sheet at RANDOM per
-# spawn (ufometpootjes / smallship_landed), exactly like asteroidsmall1..4 above. Neither
-# came up across 7 Demo2 runs, but "did not come up" is not "cannot come up" -- and a lucky
-# roll would both stutter and turn preload_demo2 red. ~1 ms and 165x144 / 144x144 each, so
-# the insurance is free. Do NOT prune these as unobserved. Same for Demo3 below.
+# FREE NO-OPS here, kept for uniformity with Demo1/Demo3: Demo2.cs's own
+# PreloadGraphicalContent already cm.Load()s both, which is the real reason neither showed up
+# COLD across 7 runs -- not luck. ApplyManifest cache-dedups against that code list (see the
+# note near the top of this file), so these two cost nothing and would only start doing work
+# if that list were ever trimmed. The genuinely defensive version of this pair is Demo3's.
 Demo2|gfx/sprites/smallship_landed
 Demo2|gfx/sprites/ufometpootjes
 
@@ -548,6 +548,10 @@ Demo3|gfx/sprites/explosion|COLD|0|612x612
 Demo3|gfx/sprites/photocamera|COLD|0|264x252
 Demo3|gfx/sprites/playersheet|COLD|1|1260x680
 Demo3|gfx/sprites/smoke|COLD|0|612x612
-# Defensive random-variant pair, as for Demo2 above (5 runs, neither observed).
+# DEFENSIVE, not observed, and unlike Demo2's pair these are NOT in Demo3.cs's own preload:
+# UFO.Initialize picks a small UFO's landed sheet at RANDOM per spawn, exactly like
+# asteroidsmall1..4 above. Neither came up across 5 Demo3 runs, but "did not come up" is not
+# "cannot come up" -- and a lucky roll would both stutter and turn preload_demo3 red.
+# ~1 ms and 165x144 / 144x144 each, so the insurance is free. Do NOT prune as unobserved.
 Demo3|gfx/sprites/smallship_landed
 Demo3|gfx/sprites/ufometpootjes

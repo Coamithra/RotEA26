@@ -1182,7 +1182,11 @@ internal static class Program
         Check("StockShots is the distinct non-null paths",
             string.Join(",", stock) == string.Join(",", expected),
             "got " + stock.Length + ": " + string.Join(",", stock));
-        Check("StockShots covers all twelve carousel levels", stock.Length == 12,
+        // A tripwire on the count, not a coverage claim -- it is DISTINCT PATHS, and two levels
+        // sharing one bundled image is legal (see ScreenshotSaver), so twelve carousel levels
+        // could legitimately yield eleven. It exists only so adding a thirteenth level has to
+        // come past this line; the check above is what actually proves the derivation.
+        Check("StockShots has twelve distinct paths", stock.Length == 12,
             "got " + stock.Length);
         return 0;
     }

@@ -80,12 +80,18 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 			: null;
 		games = new List<NetGameBrowser.GameEntry>(live);
 		RemoveAllEntries();
-		// Card 0d166364: report the rebuild, naming any entry whose level resolved to no bundled
-		// art. That branch is only reachable off the wire, so nothing but a live stranger's
-		// build -- or ?gamebrowser's deliberately unmapped fake entries -- exercises it, and
-		// until this line existed a broken fallback would have failed in TOTAL SILENCE, since
-		// EnsureArt's catch absorbs throws. Only on the set-changed path, so it is not
-		// per-frame. Asserted by tools/headless/probes/gamebrowser_fallback.txt.
+		// Card 0d166364: report any entry whose level resolved to no bundled art. That branch is
+		// only reachable off the wire, so nothing but a live stranger's build -- or
+		// ?gamebrowser's deliberately unmapped fake entries -- exercises it, and until this line
+		// existed a broken fallback would have failed in TOTAL SILENCE, since EnsureArt's catch
+		// absorbs throws. Asserted by tools/headless/probes/gamebrowser_fallback.txt.
+		//
+		// Membership comes from what EnsureArt RECORDED while resolving, never re-derived from
+		// LevelArt here: a second copy of the test would keep printing the right answer with
+		// EnsureArt's guard deleted, and the probe would pass on the mutation it exists to
+		// catch. `reported` is separate because unmappedArtLevels is cumulative -- two listed
+		// games on one unknown level would otherwise print it twice.
+		System.Collections.Generic.List<Levels> reported = new System.Collections.Generic.List<Levels>();
 		string unmappedArt = null;
 		for (int i = 0; i < games.Count; i++)
 		{
@@ -93,15 +99,23 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 			AddEntry(LevelArt.Title(level));
 			AddEntryEvent(entrySelected);
 			EnsureArt(level);
-			if (unmappedArtLevels.Contains(level))
+			if (unmappedArtLevels.Contains(level) && !reported.Contains(level))
 			{
+				reported.Add(level);
 				// An out-of-enum value formats as the bare int, which is exactly what we want
 				// to read for a level our build does not know about.
 				unmappedArt = (unmappedArt == null) ? level.ToString() : unmappedArt + "," + level;
 			}
 		}
-		System.Console.WriteLine("[gamebrowser] rebuilt entries=" + games.Count
-			+ " unmappedArt=" + (unmappedArt ?? "none"));
+		// Silent in the normal case: a public lobby rebuilds whenever a game opens or closes,
+		// and every level being mapped is the answer every time. The line is a report of the
+		// exceptional case, so it doubles as the probe's positive control (`entries=` can only
+		// come from a rebuild that walked the entries) without logging on the player's path.
+		if (unmappedArt != null)
+		{
+			System.Console.WriteLine("[gamebrowser] rebuilt entries=" + games.Count
+				+ " unmappedArt=" + unmappedArt);
+		}
 		if (selectedCode != null)
 		{
 			for (int i = 0; i < games.Count; i++)
@@ -128,8 +142,8 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 	// level came off the wire as an int from a stranger's build, so it can be a level with no
 	// bundled art (Tutorial, a demo) or not in our Levels enum at all -- and a listed game must
 	// always have something to draw. Handled BEFORE the try so we never hand Content.Load a
-	// null, whose throw the catch below would silently absorb. HadUnmappedArt reports the case
-	// for the ?gamebrowser rig; the player just sees the default shot.
+	// null, whose throw the catch below would silently absorb. The level is recorded in
+	// unmappedArtLevels, which is what RefreshGames reports; the player just sees the default.
 	private void EnsureArt(Levels level)
 	{
 		if (artCache.ContainsKey(level))

@@ -12,9 +12,11 @@
 # something to draw. Moving that fallback to the call site made it the browser's job, and this
 # is what checks the browser actually does it.
 #
-# FAILURE MEANS: read `unmappedArt=`. `none` means EnsureArt no longer recognises an unmapped
-# level -- it is loading art for one, or the guard is gone. A missing `[gamebrowser] rebuilt`
-# line entirely means the carousel never built.
+# FAILURE MEANS: no `[gamebrowser] rebuilt` line, or one naming the wrong levels. The line is
+# printed ONLY when something resolved to no bundled art -- a public lobby rebuilds every time a
+# game opens or closes and the answer is always "all mapped", so logging that would be noise on
+# the player's path. Its absence therefore means either EnsureArt stopped recognising an unmapped
+# level (its guard is gone, or it is loading art for one) or the carousel never built at all.
 #
 # THE SILENCE THIS WORKS AROUND, and it is the whole reason the readout exists: EnsureArt wraps
 # its Content.Load in `catch (System.Exception)` and falls back to level1empty. So a BROKEN
@@ -25,10 +27,11 @@
 # from LevelArt at the report site: a second copy of the test would keep printing the right
 # answer with the guard deleted, and this probe would pass on the mutation it exists to catch.
 #
-# THE POSITIVE CONTROL is `entries=6`. `expect-not ...unmappedArt=none` passes beautifully on a
-# run where the carousel never built at all, and `?gamebrowser` hijacks the boot (SkipSplash +
-# AutoStart) so there is no navigation here to prove itself. The count is the proof: it can only
-# come from a rebuild that walked all six injected entries. Bump it if InjectFakeGames grows.
+# THE POSITIVE CONTROL is `entries=6`, and it is why the assertion below is an `expect` on an
+# exact string rather than a loose match. `?gamebrowser` hijacks the boot (SkipSplash +
+# AutoStart), so there is no navigation here that could prove itself the way the menu-driven
+# probes do; the count is the proof, since it can only come from a rebuild that walked all six
+# injected entries. Bump it if InjectFakeGames grows.
 #
 # NO `mark`: the subject line is printed during boot, on the first rebuild, so a mark would drop
 # the very thing being asserted. The window is the whole run, which is short (no navigation, no

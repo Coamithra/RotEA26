@@ -3,8 +3,9 @@ namespace EvilAliens;
 // Level -> (title, bundled screenshot, difficulty name) lookup (card 2001fbd8). The online
 // game browser (SubMenuOnlineGames) shows the LEVEL's screenshot art for each listed game;
 // this is the same title/screenshot mapping the level-select carousel spells out inline in
-// MenuScene, pulled into one table so the browser reads the same art. Missing/unmapped levels
-// fall back to a sensible default so a listed game always has something to draw.
+// MenuScene, pulled into one table so the browser reads the same art. A level with no bundled
+// art gets NULL from ScreenshotPath, not a default -- each of the three callers wants a
+// different answer, so the fallback lives at the call sites (see ScreenshotPath below).
 internal static class LevelArt
 {
     public static string Title(Levels level)

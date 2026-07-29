@@ -970,8 +970,13 @@ namespace EvilAliensWeb.Compat.Net
     }
 
     // The Background side-effect primitives the level scripts drive mid-level (hooked in
-    // Background.cs; wire value = enum value). Initialize-time setters (SetSpace/SetMars/...)
-    // are NOT here -- both peers run their own scene Initialize. APPEND-ONLY.
+    // Background.cs; wire value = enum value). APPEND-ONLY.
+    //
+    // That includes the whole-SCENE setters (SetScene* below): a scene setter run at level
+    // Initialize is not replicated -- both peers run their own -- but one run MID-level by the
+    // script is, because a client's event list never runs and would otherwise keep the level's
+    // opening backdrop for the rest of the run. Background tracks which case a call is; see its
+    // NoteScene.
     public enum NetBackgroundOp : byte
     {
         SetSpeed = 0,
@@ -990,6 +995,14 @@ namespace EvilAliensWeb.Compat.Net
         // the Queue* op that re-creates it (which parks it back at its entry point). Its own op
         // rather than a magic non-zero Vector2 on Queue*, so neither carries two meanings.
         SetDoodadPos = 11,
+        // The whole-scene swaps InsaneBossI drives between boss phases (card ca4fd94f). Named
+        // SetScene* rather than after the setters, because SetAlienBase2..6 above are the
+        // floor-TEXTURE switches within an alien-base scene -- a different thing entirely.
+        // The scenes with no op here (holodeck / classic variants) are never swapped to
+        // mid-level; Background reports it loudly if one ever is.
+        SetSceneSpace = 12,
+        SetSceneMars = 13,
+        SetSceneAlienBase = 14,
     }
 
     // The decorative swarms replicated as one on/off beat rather than per entity (card

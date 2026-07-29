@@ -119,6 +119,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `preload_demo{1,2,3}.txt` | the same, for the three attract demos (`?demo=<n>` pins which one the idle menu drops into). Each also asserts the `(boot)` sentinel stays clean -- see the block below for why that third line is the one that matters |
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (cards 8d6883f3, 0d166364): no level-select art decodes when either carousel is opened, and no entry falls back to the default art |
+| `netbg_catchup.txt` | the join-in-progress scenery catch-up replays every leg, the mid-level whole-scene swap included (cards 45a4e48d, ca4fd94f): a peer joining mid-level must end up looking at the host's scenery, which nothing else can detect — it fails silently and only a second player ever sees it. Drives `eaNetBgTest`'s one-tab round trip over `?netscript`; its third assertion is an anti-vacuity guard on the wipe, and the header says why it takes an `expect-not` |
 | `stockshots_pump.txt` | the OTHER half of card 4d47c5ba: on a boot that lets the warm pump run (a real player's), the Press-Start -> menu handoff decodes nothing. Card cccd763a -- it is the only probe that can see that half, see the block below |
 | `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Also the out-of-range DIFFICULTY on the same row (card 88f87ba2): the boundary refuses it (`unknownDifficulty=7`) and the row is still listed. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
 
@@ -131,6 +132,11 @@ which is why a mutation test asserts "red, naming an asset", not a count). `boot
 on either half it defends — restoring `AwardmentBlade`'s eager load in `LoadContent` trips its
 `awardmentblade` `expect-not`, and re-adding a `flipPureName`/`flipGlassesName` load to
 `SplashScene.LoadContent` trips the `-revenged-pure` one.
+`netbg_catchup` goes red three ways, one per assertion: latch the scene BEFORE the setter's own
+`Reset()` (the trap card ca4fd94f was about) or drop `GameScene.UpdateStartup`'s
+`NetNoteEntryScene` call and the scene op leaves `ops=`; make `NetTestWipe` skip rebuilding the
+entry scene and the run still prints **PASS** with the full `ops=` list, caught only by the
+`joiner :` `expect-not`.
 `silence` goes red under `--audio` (`masterVolume=1 alGain=1`), which is also its standing
 negative control. Its `lib=<unresolved>` line (added by card 72297923, which made the readback
 resolve OpenAL by candidate list) goes red when that list is replaced with names that do not

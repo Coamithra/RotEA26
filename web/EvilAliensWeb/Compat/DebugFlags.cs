@@ -19,6 +19,9 @@ namespace EvilAliensWeb.Compat
 	//                  Deliberately OUT of `Active` (card af63f958) so an ONLINE JOINER can pass
 	//                  it: a menu session rejects the pairing on its own Active bit, and its
 	//                  lobby is otherwise yanked into the attract demo mid-navigation.
+	//   ?demo=<1|2|3>  pin WHICH attract demo the idle menu drops into (Demo1/Demo2/Demo3),
+	//                  which is otherwise an unseeded random roll per launch. NOT the
+	//                  off-switch of ?nodemo/?noattract -- those disable attract entirely.
 	//   ?level=<Name>  boot straight into a level, bypassing the menu entirely
 	//                  (<Name> is a Levels enum value, case-insensitive: Level1, Level2,
 	//                   Level3, ClassicAliens, SpaceDodge, Braineroids, Tutorial, ...)
@@ -716,6 +719,18 @@ namespace EvilAliensWeb.Compat
 		// is unchanged. Out of `Active`: it picks between three splash images and cannot change
 		// a shared run.
 		public static string SplashVariant { get; private set; }
+
+		// Pin WHICH attract demo the idle menu drops into (?demo=1|2|3 -> Demo1/Demo2/Demo3).
+		// MenuScene.mainMenu_DemoSelected rolls RandomHelper.Random.Next(3) off an unseeded
+		// Random on every attract launch, so a demo cannot be reached on demand: capturing one
+		// demo's preload gaps, or probing them, was a (2/3)^attempts coin flip (card e63601a4).
+		// null => roll as normal, so a shipped build is unchanged.
+		// NOT the off-switch of ?nodemo/?noattract -- that unwires the idle timeout so no demo
+		// ever launches; this only pins which one the roll picks.
+		// Out of `Active`: like ?noattract it alters no gameplay, difficulty, unlock or fairness,
+		// and ComputeEligible refuses Demo1/2/3 outright so an attract demo can never be
+		// advertised to a peer in the first place.
+		public static int? DemoPick { get; private set; }
 
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
@@ -2535,6 +2550,21 @@ namespace EvilAliensWeb.Compat
 							+ (SplashVariant ?? "the random roll"));
 					}
 					break;
+				case "demo":
+					// Reported, never swallowed -- same reason as ?splashvariant= above: a typo
+					// would silently leave the RANDOM roll in force while the capture (or probe)
+					// is labelled as a pinned demo, i.e. evidence about whichever demo came up.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var dp)
+						&& dp >= 1 && dp <= 3)
+					{
+						DemoPick = dp;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "1, 2 or 3",
+							DemoPick.HasValue ? InForce(DemoPick) : "the random roll");
+					}
+					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);
 					break;
@@ -2866,6 +2896,9 @@ namespace EvilAliensWeb.Compat
 							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
+							// Prints only when set, same reason: it decides which attract demo a
+							// capture or probe actually measured.
+							+ (DemoPick.HasValue ? " demo=" + DemoPick.Value.ToString(CultureInfo.InvariantCulture) : "")
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
 							+ (NetRole != NetRole.None ? " net=" + NetRole.ToString().ToLowerInvariant() + " room=" + NetRoom : "")
 							+ (AIPlayer ? " aiplayer" : "")

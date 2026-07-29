@@ -48,8 +48,9 @@ Level3|gfx/sprites/brainanimated
 Level3|gfx/sprites/brainanimatedglow
 TeamChallenge|gfx/sprites/brainanimated
 TeamChallenge|gfx/sprites/brainanimatedglow
-Demo1|gfx/sprites/brainanimated
-Demo1|gfx/sprites/brainanimatedglow
+# Demo1's pair moved to the CAPTURED SECTIONS at the bottom when that level got a captured
+# section (card e63601a4) -- a level must appear in ONE place only, or WarmThenLaunch enqueues
+# it twice. Demo2's pair is likewise down there; Demo3 spawns no Braineroids.
 
 # Brain FINAL BOSS animated overlay patches (BrainBossOverlays, from tools/brainanim).
 # The BrainBoss (Level3 + InsaneBossI) composites these feathered i2v sheets over its
@@ -73,10 +74,7 @@ Level1|gfx/sprites/asteroidsmall1
 Level1|gfx/sprites/asteroidsmall2
 Level1|gfx/sprites/asteroidsmall3
 Level1|gfx/sprites/asteroidsmall4
-Demo1|gfx/sprites/asteroidsmall1
-Demo1|gfx/sprites/asteroidsmall2
-Demo1|gfx/sprites/asteroidsmall3
-Demo1|gfx/sprites/asteroidsmall4
+# (Demo1's four moved to the CAPTURED SECTIONS at the bottom -- card e63601a4, see above.)
 SpaceDodge|gfx/sprites/asteroidsmall1
 SpaceDodge|gfx/sprites/asteroidsmall2
 SpaceDodge|gfx/sprites/asteroidsmall3
@@ -445,6 +443,47 @@ InsaneBossI|gfx/sprites/ufometpootjes|WARM|1|165x144
 InsaneBossI|gfx/sprites/ufosheet|WARM|19|1159x579
 InsaneBossI|gfx/sprites/wing1|WARM|0|376x180
 
+# ---------------------------------------------------------------------------
+# THE THREE ATTRACT DEMOS (card e63601a4). The idle main menu drops into Demo1/2/3 at
+# random, so the demo a player sees FIRST -- before they have touched anything -- was the
+# worst-served scene in this file: Demo1 cold-decoded 12 textures during playback, Demo2 10,
+# Demo3 12. Same core gap in all three (card 74b30beb's base-preload dummy + HUD + UFO-landed
+# families), so the sections below overlap heavily.
+#
+# Demo3 had NO section at all, which is why it looked CLEAN in a capture and was not:
+# WarmThenLaunch returns early on an empty section, so no preload bracket opens and the
+# level's decodes are logged against the "(boot)" sentinel instead. Its 12 were read out of
+# the (boot) block immediately preceding its "Demo3 preload:" line, then re-captured with the
+# section in place (the documented two-pass capture).
+#
+# CAPTURING ONE: ?demo=<1|2|3> pins the roll (it is otherwise unseeded, so reaching a chosen
+# demo was a coin flip). ONE demo per process -- the content manager is shared, so a second
+# demo in the same run finds everything warm and exports a short section. Pinned by
+# tools/headless/probes/preload_demo{1,2,3}.txt.
+# ---------------------------------------------------------------------------
+
+# Demo1 -- captured 2026-07-29 from the idle ATTRACT rotation, ?demo=1, single-demo run.
+# The six unsuffixed lines at the end were MOVED here from the hand-written theme blocks
+# above (brainanimated pair, asteroidsmall1..4) so this level lives in one place only.
+Demo1|gfx/game/blank|COLD|0|112x112
+Demo1|gfx/hud/barlit|COLD|0|116x47
+Demo1|gfx/hud/barlitedge|COLD|0|20x47
+Demo1|gfx/hud/barunlit2|COLD|0|116x47
+Demo1|gfx/menu/powerbar|COLD|0|30x23
+Demo1|gfx/sprites/bombicon|COLD|1|96x96
+Demo1|gfx/sprites/explosion|COLD|0|612x612
+Demo1|gfx/sprites/photocamera|COLD|0|264x252
+Demo1|gfx/sprites/playersheet|COLD|1|1260x680
+Demo1|gfx/sprites/smallship_landed|COLD|1|144x144
+Demo1|gfx/sprites/smoke|COLD|0|612x612
+Demo1|gfx/sprites/ufometpootjes|COLD|1|165x144
+Demo1|gfx/sprites/brainanimated
+Demo1|gfx/sprites/brainanimatedglow
+Demo1|gfx/sprites/asteroidsmall1
+Demo1|gfx/sprites/asteroidsmall2
+Demo1|gfx/sprites/asteroidsmall3
+Demo1|gfx/sprites/asteroidsmall4
+
 # Demo2 -- captured 2026-07-29 from the idle ATTRACT rotation (not menu-
 #   selectable). Multi-level run, so this section is a UNION with the
 #   brainanimated lines it previously had; see the note above.
@@ -474,3 +513,41 @@ Demo2|gfx/sprites/spiderjump|WARM|2|2500x836
 Demo2|gfx/sprites/wing1|WARM|0|376x180
 Demo2|gfx/sprites/brainanimated
 Demo2|gfx/sprites/brainanimatedglow
+# The 10 gaps, added 2026-07-29 (card e63601a4) as a UNION with everything above.
+Demo2|gfx/game/blank|COLD|0|112x112
+Demo2|gfx/hud/barlit|COLD|0|116x47
+Demo2|gfx/hud/barlitedge|COLD|0|20x47
+Demo2|gfx/hud/barunlit2|COLD|0|116x47
+Demo2|gfx/menu/powerbar|COLD|0|30x23
+Demo2|gfx/sprites/bombicon|COLD|1|96x96
+Demo2|gfx/sprites/explosion|COLD|0|612x612
+Demo2|gfx/sprites/photocamera|COLD|0|264x252
+Demo2|gfx/sprites/playersheet|COLD|1|1260x680
+Demo2|gfx/sprites/smoke|COLD|0|612x612
+# DEFENSIVE, not observed: UFO.Initialize picks a small UFO's landed sheet at RANDOM per
+# spawn (ufometpootjes / smallship_landed), exactly like asteroidsmall1..4 above. Neither
+# came up across 7 Demo2 runs, but "did not come up" is not "cannot come up" -- and a lucky
+# roll would both stutter and turn preload_demo2 red. ~1 ms and 165x144 / 144x144 each, so
+# the insurance is free. Do NOT prune these as unobserved. Same for Demo3 below.
+Demo2|gfx/sprites/smallship_landed
+Demo2|gfx/sprites/ufometpootjes
+
+# Demo3 -- captured 2026-07-29, ?demo=3, single-demo run, two passes (its section was empty,
+# so pass 1's decodes were attributed to "(boot)" -- see this block's header).
+# gfx/base/756 + gfx/base/2331-v5 are the alien-base art Background.SetAlienBase() pulls in;
+# they are Demo3-only among the demos.
+Demo3|gfx/base/2331-v5|COLD|5|612x612
+Demo3|gfx/base/756|COLD|6|612x612
+Demo3|gfx/game/blank|COLD|0|112x112
+Demo3|gfx/hud/barlit|COLD|0|116x47
+Demo3|gfx/hud/barlitedge|COLD|0|20x47
+Demo3|gfx/hud/barunlit2|COLD|0|116x47
+Demo3|gfx/menu/powerbar|COLD|0|30x23
+Demo3|gfx/sprites/bombicon|COLD|1|96x96
+Demo3|gfx/sprites/explosion|COLD|0|612x612
+Demo3|gfx/sprites/photocamera|COLD|0|264x252
+Demo3|gfx/sprites/playersheet|COLD|1|1260x680
+Demo3|gfx/sprites/smoke|COLD|0|612x612
+# Defensive random-variant pair, as for Demo2 above (5 runs, neither observed).
+Demo3|gfx/sprites/smallship_landed
+Demo3|gfx/sprites/ufometpootjes

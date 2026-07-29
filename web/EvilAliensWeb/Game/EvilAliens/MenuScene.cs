@@ -972,7 +972,11 @@ internal class MenuScene : Scene
 		state = MenuState.FadeToGame;
 		nextState = NextState.StartLevel;
 		starter = ControlDevice.AI;
-		switch (RandomHelper.Random.Next(3))
+		// Debug (?demo=1|2|3): pin the roll so one demo can be reached on demand -- capturing a
+		// demo's preload gaps needs ONE demo per process (the content manager is shared), and a
+		// committed probe cannot retry, so an unseeded roll made both a coin flip (card e63601a4).
+		// Unset => the normal random pick, so a shipped build is unchanged.
+		switch (DebugFlags.DemoPick.HasValue ? DebugFlags.DemoPick.Value - 1 : RandomHelper.Random.Next(3))
 		{
 		case 0:
 			selectedLevel = Levels.Demo1;

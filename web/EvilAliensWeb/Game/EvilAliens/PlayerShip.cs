@@ -267,15 +267,31 @@ public class PlayerShip : AlienDrawableGameComponent
 	// separate the pilot from the enemies:
 	//   AimRad         Level1, 15deg -> 57.3deg  : progress 50/64 -> 45/64.  KEPT
 	//   FieldPx        spiderboss, 190 -> 30px   : deaths 11 -> 14.          KEPT (weak)
-	//   WallReactionMs wallsonly, 420 -> 80ms    : contacts 0 -> 0, turn 22 -> 18 deg/s,
-	//                                              progress 7/8 -> 7/8.      DROPPED
-	//   ThreatLeadMs   spiderboss, 700 -> 80ms   : deaths 11 -> 10.          DROPPED
-	// The two dropped ones did not move ANY available metric at a 5-9x degradation, so tiering
-	// them would ship a dial that does nothing. `contacts` in particular is floored by
-	// ClampIntoWallSpace -- the hard override runs regardless of how far ahead the bot looked,
-	// so wall look-ahead cannot show up there. **Don't re-add either to this table without an
-	// instrument that can actually see it**; their consts and ?aireact/?aithreatlead overrides
-	// are untouched from card f4d1721f.
+	//   WallReactionMs OwnLevel, 420 -> 600ms     : victories 25 -> 0 of 30.
+	//                                               NOT TIERABLE (card 21bb6849)
+	//   ThreatLeadMs   CrazyGame, 700 -> 200ms    : victories 23 -> 14 of 30.
+	//                                               NOT TIERABLE (card 21bb6849)
+	//
+	// **The last two are NOT excluded for being inert.** They were, originally, on one run each
+	// (n=1) that happened to pick the one rig where each is inert -- card b174b00f retired that
+	// verdict and showed both have large authority. Card 21bb6849 then ran the tuning campaign
+	// that retraction called for (eahl, Very_Hard, ?invuln OFF, N=30, 300 sim-s) and still leaves
+	// them out, for a DIFFERENT reason: neither has a band that is at once WORSE, SUBTLE and
+	// MONOTONE, which is what a difficulty ladder needs.
+	//   WallReactionMs -- below the anchor is not a degradation at all (80ms matches 420ms on
+	//     survival and churns LESS), so the only degrading direction is a LONGER look-ahead,
+	//     which models nothing recognisable as a novice. That direction has a ~130ms usable band
+	//     and then a cliff: on OwnLevel 550ms already fails the level in 14 of 30 runs and 600ms
+	//     in 30 of 30.
+	//   ThreatLeadMs -- the response around the anchor is a broad shallow plateau; nothing within
+	//     +-200ms of 700 is distinguishable at N=30. The nearest measurably-worse value is 200ms,
+	//     a 3.5x change one step above total collapse (80ms wins 0 of 30) -- and at 200ms the knob
+	//     is inert on SpaceDodge, Level3 and Level1, so the row would change exactly one level.
+	// Full tables and the rigs: web/EvilAliensWeb/CLAUDE.md, the per-tier skill bullet. **Don't
+	// re-add either without re-running that campaign**, and mind the instrument caution that came
+	// with it: `contacts` is floored by ClampIntoWallSpace -- the hard override runs regardless of
+	// how far ahead the bot looked -- so wall look-ahead only shows up where `turn` can carry it.
+	// Their consts and ?aireact/?aithreatlead overrides are untouched from card f4d1721f.
 	//
 	// The steering smoothing / park demand are excluded for a different reason -- jitter and
 	// idle fidget are the BUGS f4d1721f fixed, so degrading them reproduces a defect instead of

@@ -1144,10 +1144,18 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     its `Purge<Ball>` is host-authoritative (the host's purge broadcasts an `EvDeath` per removal,
     so a local purge would strand puppet ids). **KNOWN LIMIT:** `spawnType` is not mirrored, so a
     client respawning inside the Mars section enters from the south rather than the west.
-    Its mirror is covered like the backdrop: `GameScene.NetSceneChangeState` puts it in the
+    Its mirror is observable rather than invisible: `GameScene.NetSceneChangeState` puts it in the
     `eaNetBg()` line (`floor=`) and `NetSceneChangeTestWipe` removes it for the round trip, so the
-    leg is non-vacuous. Both read "live NEXT tick" -- `ComponentBin.Remove` is queued, so a
-    membership test alone reports a floor the wipe has already dropped.
+    leg is non-vacuous when you run `eaNetBgTest()` inside the Mars section. Both read "live NEXT
+    tick" -- `ComponentBin.Remove` is queued, so a membership test alone reports a floor the wipe
+    has already dropped. Verified that way (`?level=InsaneBossI&invuln&aiplayer`, soak to the swap:
+    host `floor=1` / joiner `floor=0` / caught `floor=1`).
+    **It has no COMMITTED probe, and the reason is worth knowing before writing one**: reaching the
+    Mars section means an AI fight of nondeterministic length (`RandomHelper.Random` is
+    time-seeded), so a probe asserting at a fixed frame is flaky -- measured landing in the
+    preceding SPACE section on roughly one run in six at frame 7200, where six other runs read
+    Mars. A committed probe here needs a fast-boot flag into that section first, the way
+    `?spiderboss`/`?brainboss` do for theirs.
   - The scenes with NO wire op (holodeck / classic variants) are Initialize-only. A mid-level swap
     to one is REPORTED on the `[net]` line rather than silently latching null -- silence there
     would reproduce this very card's bug one level up.

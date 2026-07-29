@@ -70,6 +70,11 @@ step 200 nodraw
 mark
 eval NetResetSpawn
 
+# The session really ran on the in-process wire, and the log line says so. That line used to
+# print "WebRTC" for an InMemoryTransport -- the one line telling you which wire a run is on,
+# naming the wrong one -- and this probe is the only thing in the repo that reaches a live session
+# over it, so without this the lie can come back for free.
+expect \[net\] session start role=join .* transport=InMemory
 expect \[netreset\] EvReset -> SpawnPuppet/SpawnFriend TryAdd
 expect 1\. NEGATIVE
 expect 2\. POSITIVE -- EvReset purges inside the drain

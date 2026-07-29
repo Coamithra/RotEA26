@@ -49,7 +49,9 @@ public class ComponentBin : IComponentBinService
 
 	ComponentBin IComponentBinService.ComponentBin => this;
 
-	// The owning Game — for the eaBinTest console suite (Compat/BinTest.cs).
+	// The owning Game, for a console suite that has the bin but not the Game (the two reachable
+	// service locators are separate). Kept a bare accessor rather than a named caller list, which
+	// rots on every new one.
 	internal Game Game => game;
 
 	public void FullReset()

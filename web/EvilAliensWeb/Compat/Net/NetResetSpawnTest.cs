@@ -17,9 +17,11 @@ namespace EvilAliensWeb.Compat.Net
     // fixed both sites with ComponentBin.TryAdd, but the fix was only ever proven at the
     // PRIMITIVE (eaBinTest scenario 5: a bare TryAdd landed/diverted pair). Reaching the two real
     // call sites needs a live session with a host-granted peer slot and buffered ship samples --
-    // which is what this does, with no production change beyond four internal seams: ONE real
-    // CLIENT session on one endpoint of an in-process NetWire, and a scripted host driving the
-    // other end by hand.
+    // which is what this does: ONE real CLIENT session on one endpoint of an in-process NetWire,
+    // and a scripted host driving the other end by hand. Its whole production cost is four
+    // internal seams (StartForTest, LocalBuildHash, HasRemotePuppet, HasFriendPuppet) plus one
+    // corrected log string -- the session-start line used to print "WebRTC" for an
+    // InMemoryTransport, which this is the first rig to have noticed.
     //
     // WHAT IT MEASURED, and it corrects card 74403f83's own severity claim: the faithful pre-card
     // mutation (bin.Add + unconditional adopt) fails exactly ONE of the assertions below, because
@@ -58,8 +60,8 @@ namespace EvilAliensWeb.Compat.Net
     // that directly and supplies the two flush points itself. It does NOT tick the game: driving
     // the real Resetting -> Startup choreography would take ~3 s of game time plus a background
     // crossfade that needs Draw, and none of it is under test. The one thing it therefore has to
-    // stand in for is SpawnAllPlayers' respawn of the local seat, which it does with the game's
-    // own three lines (new PlayerShip / Setup / bin.Add) -- flagged at each site.
+    // stand in for is SpawnAllPlayers' respawn of the local seat -- see RespawnLocalShip, which
+    // lists the four ways it is NOT a faithful copy.
     //
     // *** THIS SUITE IS DESTRUCTIVE. It is the only one in this directory that is. ***
     // It really pairs a session onto the live level, really moves the local player's seat, and
@@ -153,10 +155,21 @@ namespace EvilAliensWeb.Compat.Net
             InMemoryTransport ours = wire[0];
             InMemoryTransport peer = wire[1];
             ushort eventSeq = 1;
-            ushort streamSeq = 1;
-            uint senderMs = 100;
+            // Per-STREAM seq + sender clock, mirroring production's own split (`friendTxSeq` is
+            // kept apart from `txSeq` "so the primary stream's seq stays contiguous"). Sharing one
+            // counter would make the ship stream arrive as 1, 3, 5 and score a phantom
+            // metrics.StreamSeqGaps on every frame -- harmless while nothing here reads the
+            // metrics, and exactly what would defeat a later seqGap/drop assertion in this suite.
+            ushort shipSeq = 1;
+            ushort friendSeq = 1;
+            uint shipMs = 100;
+            uint friendMs = 100;
 
-            try
+            // Legs 1-3 sit in a local function purely so the `!paired` bail-out can be a plain
+            // `return`: `return sb.ToString()` from inside the `try` renders the report BEFORE the
+            // finally's teardown has appended its own lines, so on the one path a destructive
+            // suite most needs to say whether it put the roster back, it would say nothing.
+            void RunLegs()
             {
                 NetSession.StartForTest(game, host: false, ours, Room);
                 peer.Open(Room);
@@ -178,16 +191,16 @@ namespace EvilAliensWeb.Compat.Net
                 if (!paired)
                 {
                     // Nothing below can mean anything without a settled pairing, and a rejected
-                    // hello (build hash, role, protocol) prints its own [net] line above.
-                    sb.Append(Tally(pass, fail));
-                    return sb.ToString();
+                    // hello (build hash, role, protocol) prints its own [net] line above. The
+                    // teardown in the finally still runs AND still reports.
+                    return;
                 }
 
                 // ---- 1. NEGATIVE: a purge armed in base.Update is flushed BEFORE the drain ----
                 sb.Append(" 1. NEGATIVE -- LoseLife / UpdateWin / UpdateResetting: purge flushed before the drain\n");
                 long rx = ours.RxDelivered;
-                peer.SendStream(ShipFrame(ref streamSeq, ref senderMs, alive: true));
-                peer.SendStream(FriendFrame(ref streamSeq, ref senderMs));
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                peer.SendStream(FriendFrame(ref friendSeq, ref friendMs));
                 wire.Pump();
                 // What GameScene.UpdateWin / UpdateResetting / LoseLife do from base.Update, and
                 // then what collectionHelper.Update() does to it -- note Update() flushes the
@@ -220,8 +233,8 @@ namespace EvilAliensWeb.Compat.Net
                 // one that does not also spend a life.
                 peer.SendReliable(NetProtocol.EncodeByteEvent(eventSeq++, NetProtocol.EvReset,
                     NetSession.ResetModeRespawn));
-                peer.SendStream(ShipFrame(ref streamSeq, ref senderMs, alive: true));
-                peer.SendStream(FriendFrame(ref streamSeq, ref senderMs));
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                peer.SendStream(FriendFrame(ref friendSeq, ref friendMs));
                 wire.Pump();
                 NetSession.Update();
 
@@ -257,8 +270,8 @@ namespace EvilAliensWeb.Compat.Net
                     oracle.IsAlive(GrantedSlot));
 
                 rx = ours.RxDelivered;
-                peer.SendStream(ShipFrame(ref streamSeq, ref senderMs, alive: true));
-                peer.SendStream(FriendFrame(ref streamSeq, ref senderMs));
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                peer.SendStream(FriendFrame(ref friendSeq, ref friendMs));
                 wire.Pump();
                 NetSession.Update();
 
@@ -285,6 +298,11 @@ namespace EvilAliensWeb.Compat.Net
                     && oracle.Controller(FriendSlot) == ControlDevice.RemoteFriend);
                 Check("one ship per seat -- no duplicate was added"
                     + " (ships=" + oracle.GetShips().Count + ")", oracle.GetShips().Count == 3);
+            }
+
+            try
+            {
+                RunLegs();
             }
             catch (Exception ex)
             {
@@ -326,11 +344,17 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return "  (no stack trace)\n";
             }
+            const int MaxFrames = 8;
             string[] lines = trace.Split('\n');
             StringBuilder frames = new StringBuilder();
-            for (int i = 0; i < lines.Length && i < 8; i++)
+            for (int i = 0; i < lines.Length && i < MaxFrames; i++)
             {
                 frames.Append("  ").Append(lines[i].Trim()).Append('\n');
+            }
+            if (lines.Length > MaxFrames)
+            {
+                // Say so: a report that just stops mid-trace reads like a short stack.
+                frames.Append("  (trace truncated after ").Append(MaxFrames).Append(" frames)\n");
             }
             return frames.ToString();
         }
@@ -341,13 +365,15 @@ namespace EvilAliensWeb.Compat.Net
                 "[netreset] {0} passed, {1} failed\n", pass, fail);
         }
 
-        // Stand-in for GameScene.SpawnAllPlayers' respawn of the local seat: the same three lines
-        // it uses, minus the spawn-spread arithmetic and the Recycle (a fresh instance keeps the
-        // scenario's object identities readable -- the recycle pool at this point holds the very
-        // ships the purge and the diverted TryAdds put there). The real choreography reaches this
-        // ~3 s of game time later via Resetting -> Startup plus a background crossfade that needs
-        // Draw; none of that is under test, and the ONLY thing the retry legs need from it is a
-        // non-null FindLocalShip().
+        // Stand-in for GameScene.SpawnAllPlayers' respawn of the local seat. The real
+        // choreography reaches that ~3 s of game time later via Resetting -> Startup plus a
+        // background crossfade that needs Draw; none of it is under test, and the ONLY thing the
+        // retry legs need from it is a non-null FindLocalShip(). It is deliberately NOT a faithful
+        // copy, so do not read it as one: no spawn-position spread, no Recycle (a fresh instance
+        // keeps the scenario's object identities readable -- at this point the recycle pool holds
+        // the very ships the purge and the diverted TryAdds put there), `startup: false` rather
+        // than the real respawn's entry animation, and none of the caller's cursor/score
+        // bookkeeping. All four are invisible to `oracle.IsAlive`, which is the whole requirement.
         private static void RespawnLocalShip(ComponentBin bin, Game game)
         {
             PlayerShip ship = new PlayerShip(game);
@@ -355,16 +381,19 @@ namespace EvilAliensWeb.Compat.Net
             bin.Add((GameComponent)(object)ship);
         }
 
-        private static byte[] ShipFrame(ref ushort seq, ref uint senderMs, bool alive)
+        // Always alive=true: the alive-flag edge belongs to the puppet DEATH path (ExplodePuppet),
+        // which is a different subject, so this suite never varies it rather than carrying a seam
+        // that reads as coverage it does not have.
+        private static byte[] ShipFrame(ref ushort seq, ref uint senderMs)
         {
-            senderMs += 33;
+            senderMs += 33; // advance, or ShipStateBuffer refuses the sample as stale
             return NetProtocol.EncodeShipState(seq++, senderMs, RemoteShipPos, Vector2.Zero,
-                FacingUp, alive, firing: false, shotsPerSec: 8, bulletLife: 450f);
+                FacingUp, alive: true, firing: false, shotsPerSec: 8, bulletLife: 450f);
         }
 
         private static byte[] FriendFrame(ref ushort seq, ref uint senderMs)
         {
-            senderMs += 1; // distinct sender times: ShipStateBuffer refuses a non-advancing sample
+            senderMs += 33; // as above -- the channel has its own buffer and its own clock
             return NetProtocol.EncodeFriendState(FriendSlot, seq++, senderMs, FriendShipPos,
                 Vector2.Zero, FacingUp, firing: false, shotsPerSec: 8, bulletLife: 450f);
         }

@@ -28,37 +28,44 @@ internal static class LevelArt
         };
     }
 
-    // Does this level have a level-select carousel entry (MenuScene's levelSelector or
-    // challengeSelector)? Card 8d6883f3: this is the ONE membership list, and with
-    // ScreenshotPath below it derives ScreenshotSaver.StockShots -- the set of bundled
-    // thumbnails that must be preloaded AND splash-warmed. Adding a carousel level means
-    // adding it here and to ScreenshotPath; nothing else has to be kept in step.
+    // What a caller draws when a level has no bundled art of its own -- Mission 1's empty
+    // shot. Only the two call sites that MUST render something use it (see ScreenshotPath).
+    internal const string DefaultScreenshotPath = "GFX/Screenshots/level1empty";
+
+    // The bundled level-select thumbnail, or NULL for a level that has none. The single
+    // source: what the carousel draws for a level the player has no saved screenshot of yet
+    // (SubMenuLevelChoice.loadScreenshots), the art the online game browser shows for a listed
+    // game (SubMenuOnlineGames.EnsureArt -- an in-progress game rarely has a saved
+    // ScreenshotSaver capture for the joiner's profile), and the set ScreenshotSaver.StockShots
+    // preloads and splash-warms.
+    //
+    // Card 0d166364: this switch IS the membership list. It used to have a twin, a
+    // HasCarouselEntry predicate spelling out the same twelve levels, with a
+    // `_ => "GFX/Screenshots/level1empty"` default here -- so a level added to the predicate
+    // but missed here fell silently through that default, StockShots deduped the duplicate
+    // away, and the carousel just drew Mission 1's art for the new level. Two hand lists that
+    // had to agree became one where the drift cannot be expressed. Adding a carousel level =
+    // adding one line here.
+    //
+    // NULL IS NOT AN ERROR EVERYWHERE, which is why the fallback lives at the call sites and
+    // not here -- each of the three wants something different:
+    //   - ScreenshotSaver.BuildStockShots: skip. Null IS "no bundled art to warm".
+    //   - SubMenuOnlineGames.EnsureArt: draw DefaultScreenshotPath, silently. A listed game's
+    //     level arrives OFF THE WIRE from a stranger's build, so an unmapped (or out-of-enum)
+    //     level is reachable in production and a listed game must always have something to
+    //     draw. This is the case that kept the old `_ =>` default honest.
+    //   - SubMenuLevelChoice.loadScreenshots: draw DefaultScreenshotPath, LOUDLY. Every
+    //     carousel entry is authored in MenuScene against a level in this table, so null there
+    //     is an authoring bug, and a silent fallback would be the exact quiet failure this card
+    //     removed. It is also what keeps tools/headless/probes/stockshots_warm.txt sensitive:
+    //     the mutation that used to show up as a COLD decode of the dropped asset now resolves
+    //     to already-warm level1empty art, so the WARNING is the signal.
     //
     // NOT the same question as General.ScreenshotEnabled, and that one cannot stand in for
-    // this: it answers "does this level CAPTURE a live thumbnail", and for WebcamAliens it
-    // returns the Settings.WebcamScreenshot opt-in, which is OFF by default. Deriving the
+    // membership: it answers "does this level CAPTURE a live thumbnail", and for WebcamAliens
+    // it returns the Settings.WebcamScreenshot opt-in, which is OFF by default. Deriving the
     // stock set from it would drop gfx/screenshots/webcamss -- precisely the asset whose
-    // absence from the warm set was the bug that led to this card.
-    public static bool HasCarouselEntry(Levels level)
-    {
-        return level switch
-        {
-            Levels.Level1 or Levels.Level2 or Levels.Level3 => true,
-            Levels.SpaceDodge or Levels.Braineroids or Levels.ClassicAliens
-                or Levels.Paratrooper or Levels.OwnLevel or Levels.CrazyGame
-                or Levels.InsaneBossI or Levels.TeamChallenge or Levels.WebcamAliens => true,
-            // Tutorial (launched from the main menu) and Demo1/2/3 (attract rotation) have
-            // no carousel slot, so they need no bundled thumbnail.
-            _ => false,
-        };
-    }
-
-    // The bundled level-select thumbnail: what the carousel draws for a level the player has
-    // no saved screenshot of yet, and the art the online game browser shows for a listed game.
-    // (An in-progress game rarely has a saved ScreenshotSaver capture for the joiner's
-    // profile, so the browser uses this bundled art.) The single source of these paths --
-    // SubMenuLevelChoice resolves each entry's image through here, and ScreenshotSaver.
-    // StockShots is derived from here over HasCarouselEntry above.
+    // absence from the warm set was the bug that led to card 8d6883f3.
     public static string ScreenshotPath(Levels level)
     {
         return level switch
@@ -75,7 +82,10 @@ internal static class LevelArt
             Levels.InsaneBossI => "GFX/Screenshots/InsaneBossI",
             Levels.TeamChallenge => "GFX/Screenshots/teamchallengess",
             Levels.WebcamAliens => "GFX/Screenshots/webcamss",
-            _ => "GFX/Screenshots/level1empty",
+            // Tutorial (launched from the main menu) and Demo1/2/3 (attract rotation) have no
+            // carousel slot, so they need no bundled thumbnail. So does any value that is not
+            // in the enum at all -- a listed game's Level is an int off the wire.
+            _ => null,
         };
     }
 

@@ -93,6 +93,15 @@ namespace EvilAliensWeb.Compat.Net
             AddFake("B29MT", Levels.Level2, 2, 2, 120, 88);
             AddFake("Z4HRW", Levels.Level3, 3, Oracle.MaxPlayers - 1, 7, 152);
             AddFake("KP8FN", Levels.ClassicAliens, 0, 1, 260, -1);
+            // Card 0d166364: the last two are UNMAPPED on purpose -- they are the rig for
+            // SubMenuOnlineGames' no-bundled-art fallback, which nothing else can reach. A
+            // listed game's Level is an int off the wire from a stranger's build, so it can be
+            // a level we know but have no carousel art for (Tutorial), or one our Levels enum
+            // does not contain at all (a NEWER peer's build -- the 9999). Both must draw the
+            // default shot rather than throw or blank. Do not "tidy" these into real levels;
+            // tools/headless/probes/gamebrowser_fallback.txt asserts on them by name.
+            AddFake("TU7OR", Levels.Tutorial, 1, 1, 12, 22);
+            AddFake("FU7UR", (Levels)9999, 2, 2, 55, 190);
             Version++;
         }
 

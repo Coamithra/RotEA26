@@ -292,12 +292,23 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     `QueueMenuWarm` iterate; keep it that way** -- `Init` used to hardcode eleven of the twelve
     and the one it missed (`webcamss`) decoded cold on first opening Challenges.
     **Since card 8d6883f3 that list is DERIVED, and `LevelArt` is the one source** -- every
-    level with `LevelArt.HasCarouselEntry` contributes its `LevelArt.ScreenshotPath`, deduped,
-    and `SubMenuLevelChoice` resolves each entry's image through the SAME lookup instead of
-    being handed a path literal (`AddEntryData(briefing, level)`). A carousel level still needs
-    its `AddEntry`/`AddEntryData`/`AddEntryEvent` triple in `MenuScene` and BOTH `LevelArt`
-    switches (`HasCarouselEntry` and `ScreenshotPath`) -- what is gone is having to spell the
-    PATH out a second and third time, which is where the drift was. **`General.ScreenshotEnabled` is NOT the membership predicate and cannot be
+    level whose `LevelArt.ScreenshotPath` is non-null contributes it, deduped, and
+    `SubMenuLevelChoice` resolves each entry's image through the SAME lookup instead of
+    being handed a path literal (`AddEntryData(briefing, level)`).
+    **Card 0d166364 made `ScreenshotPath` itself the membership list**: it returns `null` for a
+    level with no bundled art, and the `HasCarouselEntry` predicate that used to spell the same
+    twelve levels out a second time is gone. So a carousel level now needs its
+    `AddEntry`/`AddEntryData`/`AddEntryEvent` triple in `MenuScene` and ONE `LevelArt` line.
+    **The fallback moved to the three call sites, and they deliberately differ** --
+    `ScreenshotSaver.BuildStockShots` skips a null, `SubMenuOnlineGames.EnsureArt` draws
+    `LevelArt.DefaultScreenshotPath` SILENTLY (a listed game's level is an int off the wire from
+    a stranger's build, so an unmapped or out-of-enum level is a production case, not a bug), and
+    `SubMenuLevelChoice.loadScreenshots` draws it while printing `[levelart] carousel entry
+    <Level> has no bundled art`. **That warning is not decoration: it is the probe's only
+    signal.** A level dropped from `ScreenshotPath` now falls back to `level1empty`, which is
+    already warm, so nothing decodes cold and the pre-existing `expect-not COLD` goes green on
+    the very mutation it exists to catch (measured on both carousels). Never make that fallback
+    quiet. **`General.ScreenshotEnabled` is NOT the membership predicate and cannot be
     made into one** -- it answers "does this level CAPTURE a live thumbnail" and returns the
     `Settings.WebcamScreenshot` opt-in (default OFF) for `WebcamAliens`, so deriving off it
     re-drops the exact asset the original bug was about.

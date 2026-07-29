@@ -1,0 +1,49 @@
+# PROBE: the online game browser draws SOMETHING for a level it has no bundled art for.
+#
+# PINS: SubMenuOnlineGames.EnsureArt's null-ScreenshotPath branch (card 0d166364), and the two
+# deliberately unmapped fake entries in NetGameBrowser.InjectFakeGames that are the only way to
+# reach it offline.
+#
+# WHY IT EXISTS: card 0d166364 collapsed LevelArt's two parallel switches into one nullable
+# ScreenshotPath, which meant deleting a `_ => "GFX/Screenshots/level1empty"` default that was
+# DELIBERATE. A listed game's Level arrives off the wire as an int from a stranger's build, so
+# it can name a level we know but have no carousel art for (Tutorial), or one our Levels enum
+# does not contain at all (a NEWER peer's build). Either way a listed game must always have
+# something to draw. Moving that fallback to the call site made it the browser's job, and this
+# is what checks the browser actually does it.
+#
+# FAILURE MEANS: read `unmappedArt=`. `none` means EnsureArt no longer recognises an unmapped
+# level -- it is loading art for one, or the guard is gone. A missing `[gamebrowser] rebuilt`
+# line entirely means the carousel never built.
+#
+# THE SILENCE THIS WORKS AROUND, and it is the whole reason the readout exists: EnsureArt wraps
+# its Content.Load in `catch (System.Exception)` and falls back to level1empty. So a BROKEN
+# fallback -- handing Content.Load a null path -- throws, gets absorbed, and draws exactly the
+# same picture as the working one. There is no exception to expect-not and no screenshot that
+# could tell the two apart. The `[gamebrowser] rebuilt` line is therefore reported from what
+# EnsureArt RECORDED while resolving (SubMenuOnlineGames.unmappedArtLevels), never re-derived
+# from LevelArt at the report site: a second copy of the test would keep printing the right
+# answer with the guard deleted, and this probe would pass on the mutation it exists to catch.
+#
+# THE POSITIVE CONTROL is `entries=6`. `expect-not ...unmappedArt=none` passes beautifully on a
+# run where the carousel never built at all, and `?gamebrowser` hijacks the boot (SkipSplash +
+# AutoStart) so there is no navigation here to prove itself. The count is the proof: it can only
+# come from a rebuild that walked all six injected entries. Bump it if InjectFakeGames grows.
+#
+# NO `mark`: the subject line is printed during boot, on the first rebuild, so a mark would drop
+# the very thing being asserted. The window is the whole run, which is short (no navigation, no
+# level load) and well inside the capture cap.
+#
+# eahl: --flags "?gamebrowser&noattract"
+
+step 240 nodraw
+
+# Both unmapped fakes, in injection order. Tutorial is in our enum with no carousel slot; 9999
+# is not in the enum at all and formats as the bare int -- that is the newer-peer case.
+expect \[gamebrowser\] rebuilt entries=6 unmappedArt=Tutorial,9999
+
+# The four MAPPED fakes (Level1/Level2/Level3/ClassicAliens) must NOT be listed: a fallback that
+# fired for everything would satisfy the expect above while silently replacing every game's art
+# with Mission 1's.
+expect-not \[gamebrowser\] .*unmappedArt=.*(Level1|Level2|Level3|ClassicAliens)
+quit

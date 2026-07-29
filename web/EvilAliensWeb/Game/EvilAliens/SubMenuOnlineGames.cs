@@ -26,6 +26,13 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 
 	private Texture2D fallbackArt;
 
+	// Levels seen in a listing that had no bundled art, recorded by EnsureArt as it resolves
+	// them and reported by RefreshGames. Deliberately NOT re-derived at the report site: that
+	// would be a second copy of the same test, and reverting EnsureArt's guard would then leave
+	// the report -- and the probe reading it -- unchanged. Cumulative and idempotent, matching
+	// artCache's own lifetime.
+	private readonly HashSet<Levels> unmappedArtLevels = new HashSet<Levels>();
+
 	public SubMenuOnlineGames(Game game)
 		: base(game)
 	{
@@ -34,7 +41,7 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 	protected override void LoadContent()
 	{
 		base.LoadContent();
-		fallbackArt = Content.Load<Texture2D>("GFX/Screenshots/level1empty");
+		fallbackArt = Content.Load<Texture2D>(LevelArt.DefaultScreenshotPath);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -73,12 +80,28 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 			: null;
 		games = new List<NetGameBrowser.GameEntry>(live);
 		RemoveAllEntries();
+		// Card 0d166364: report the rebuild, naming any entry whose level resolved to no bundled
+		// art. That branch is only reachable off the wire, so nothing but a live stranger's
+		// build -- or ?gamebrowser's deliberately unmapped fake entries -- exercises it, and
+		// until this line existed a broken fallback would have failed in TOTAL SILENCE, since
+		// EnsureArt's catch absorbs throws. Only on the set-changed path, so it is not
+		// per-frame. Asserted by tools/headless/probes/gamebrowser_fallback.txt.
+		string unmappedArt = null;
 		for (int i = 0; i < games.Count; i++)
 		{
-			AddEntry(LevelArt.Title((Levels)games[i].Level));
+			Levels level = (Levels)games[i].Level;
+			AddEntry(LevelArt.Title(level));
 			AddEntryEvent(entrySelected);
-			EnsureArt((Levels)games[i].Level);
+			EnsureArt(level);
+			if (unmappedArtLevels.Contains(level))
+			{
+				// An out-of-enum value formats as the bare int, which is exactly what we want
+				// to read for a level our build does not know about.
+				unmappedArt = (unmappedArt == null) ? level.ToString() : unmappedArt + "," + level;
+			}
 		}
+		System.Console.WriteLine("[gamebrowser] rebuilt entries=" + games.Count
+			+ " unmappedArt=" + (unmappedArt ?? "none"));
 		if (selectedCode != null)
 		{
 			for (int i = 0; i < games.Count; i++)
@@ -101,16 +124,29 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		}
 	}
 
+	// Card 0d166364: a null ScreenshotPath is EXPECTED here and is not an error. This entry's
+	// level came off the wire as an int from a stranger's build, so it can be a level with no
+	// bundled art (Tutorial, a demo) or not in our Levels enum at all -- and a listed game must
+	// always have something to draw. Handled BEFORE the try so we never hand Content.Load a
+	// null, whose throw the catch below would silently absorb. HadUnmappedArt reports the case
+	// for the ?gamebrowser rig; the player just sees the default shot.
 	private void EnsureArt(Levels level)
 	{
 		if (artCache.ContainsKey(level))
 		{
 			return;
 		}
+		string path = LevelArt.ScreenshotPath(level);
+		if (path == null)
+		{
+			unmappedArtLevels.Add(level);
+			artCache[level] = fallbackArt;
+			return;
+		}
 		Texture2D t;
 		try
 		{
-			t = Content.Load<Texture2D>(LevelArt.ScreenshotPath(level));
+			t = Content.Load<Texture2D>(path);
 		}
 		catch (System.Exception)
 		{

@@ -130,6 +130,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeLevelArt(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -1064,6 +1070,120 @@ internal static class Program
         // looking like more discrimination than the set has. If a control is ever added back here,
         // it has to compare a pair whose individual answers are NOT pinned elsewhere in the set --
         // otherwise it is a restatement, not evidence.
+        return 0;
+    }
+
+    // Card 0d166364 -- LevelArt.ScreenshotPath is the ONE membership list. It used to have a twin,
+    // a HasCarouselEntry predicate spelling out the same twelve levels, with a
+    // `_ => "GFX/Screenshots/level1empty"` default on the paths; a level in the predicate but
+    // missed in the table fell through that default, ScreenshotSaver deduped the duplicate away,
+    // and the carousel silently drew Mission 1's art. The collapse makes the drift unwritable, and
+    // this is where that claim is checked -- a pure static lookup, so no browser and no rig.
+    //
+    // A lookup table can only be restated, so the twelve rows below ARE a restatement and prove
+    // little on their own. The evidence is in the other three sections: the derivation
+    // (StockShots is the distinct non-null paths and nothing else), the negative control (the
+    // pre-card default is GONE, which is the mutation this card could regress into), and the
+    // off-the-wire values, which no test in the repo covered before.
+    private static int ProbeLevelArt(Assembly asm)
+    {
+        Type levelArt = asm.GetType("EvilAliens.LevelArt", true);
+        Type levels = asm.GetType("EvilAliens.Levels", true);
+        MethodInfo path = levelArt.GetMethod("ScreenshotPath", new[] { levels });
+        FieldInfo defaultPath = levelArt.GetField("DefaultScreenshotPath",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (path == null || defaultPath == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (ScreenshotPath(Levels)="
+                + (path != null) + " DefaultScreenshotPath=" + (defaultPath != null)
+                + ") -- renamed or moved?");
+            return 2;
+        }
+        string theDefault = (string)defaultPath.GetValue(null);
+        Func<string, string> pathOf = name =>
+            (string)path.Invoke(null, new[] { Enum.Parse(levels, name) });
+        // An out-of-enum value is a legal input here: a listed game's Level arrives as an int off
+        // the wire, so a NEWER peer's build can name a level this one has never heard of.
+        Func<int, string> pathOfRaw = raw =>
+            (string)path.Invoke(null, new[] { Enum.ToObject(levels, raw) });
+
+        Console.WriteLine("[logic_probe] LevelArt.ScreenshotPath (card 0d166364)");
+
+        // 1. The twelve carousel levels and their art. A restatement -- see the header.
+        Check("Level1", pathOf("Level1") == "GFX/Screenshots/level1empty", pathOf("Level1"));
+        Check("Level2", pathOf("Level2") == "GFX/Screenshots/level2empty", pathOf("Level2"));
+        Check("Level3", pathOf("Level3") == "GFX/Screenshots/level3empty", pathOf("Level3"));
+        Check("SpaceDodge", pathOf("SpaceDodge") == "GFX/Screenshots/SpaceDodge", pathOf("SpaceDodge"));
+        Check("Braineroids", pathOf("Braineroids") == "GFX/Screenshots/ss1", pathOf("Braineroids"));
+        Check("ClassicAliens", pathOf("ClassicAliens") == "GFX/Screenshots/classicss", pathOf("ClassicAliens"));
+        Check("Paratrooper", pathOf("Paratrooper") == "GFX/Screenshots/Paratrooper", pathOf("Paratrooper"));
+        Check("OwnLevel", pathOf("OwnLevel") == "GFX/Screenshots/OwnLevel", pathOf("OwnLevel"));
+        Check("CrazyGame", pathOf("CrazyGame") == "GFX/Screenshots/crazygamess", pathOf("CrazyGame"));
+        Check("InsaneBossI", pathOf("InsaneBossI") == "GFX/Screenshots/InsaneBossI", pathOf("InsaneBossI"));
+        Check("TeamChallenge", pathOf("TeamChallenge") == "GFX/Screenshots/teamchallengess", pathOf("TeamChallenge"));
+        // WebcamAliens is called out because it is the asset the whole lineage of these cards is
+        // about: the one ScreenshotSaver.Init originally missed (card 4d47c5ba), and the one a
+        // General.ScreenshotEnabled-based membership test would drop again (card 8d6883f3).
+        Check("WebcamAliens", pathOf("WebcamAliens") == "GFX/Screenshots/webcamss", pathOf("WebcamAliens"));
+
+        // 2. The levels with no carousel slot answer NULL -- Tutorial launches from the main menu,
+        // Demo1/2/3 are the attract rotation.
+        Check("Tutorial has no art", pathOf("Tutorial") == null, pathOf("Tutorial") ?? "null");
+        Check("Demo1 has no art", pathOf("Demo1") == null, pathOf("Demo1") ?? "null");
+        Check("Demo2 has no art", pathOf("Demo2") == null, pathOf("Demo2") ?? "null");
+        Check("Demo3 has no art", pathOf("Demo3") == null, pathOf("Demo3") ?? "null");
+
+        // 3. OFF THE WIRE. Nothing in the repo covered these before this card; they are what the
+        // deleted `_ =>` default was protecting, and the reason the fallback had to move to the
+        // call sites rather than simply vanish.
+        Check("an int beyond the enum has no art", pathOfRaw(9999) == null, pathOfRaw(9999) ?? "null");
+        Check("a negative int has no art", pathOfRaw(-1) == null, pathOfRaw(-1) ?? "null");
+
+        // 4. NEGATIVE CONTROL, and the only section that discriminates the mutation this card is
+        // about: the pre-card behaviour returned DefaultScreenshotPath for every unmapped level
+        // instead of null. Section 2 already pins those to null, so this states the property the
+        // OLD code violated -- no level outside the table may answer the default, even though the
+        // default's own string is still a legal answer for Level1, whose art it is. Mutation-
+        // tested: restoring `_ => "GFX/Screenshots/level1empty"` turns these six FAIL, plus
+        // section 2's four and section 3's two -- 12 in all. No other edit in the file can.
+        Check("Tutorial is not the default", pathOf("Tutorial") != theDefault, "old code: " + theDefault);
+        Check("Demo1 is not the default", pathOf("Demo1") != theDefault, "old code: " + theDefault);
+        Check("Demo2 is not the default", pathOf("Demo2") != theDefault, "old code: " + theDefault);
+        Check("Demo3 is not the default", pathOf("Demo3") != theDefault, "old code: " + theDefault);
+        Check("9999 is not the default", pathOfRaw(9999) != theDefault, "old code: " + theDefault);
+        Check("-1 is not the default", pathOfRaw(-1) != theDefault, "old code: " + theDefault);
+        // ... and the default is still the right STRING for the two call sites that draw it.
+        Check("the default is Mission 1's empty shot", theDefault == "GFX/Screenshots/level1empty", theDefault);
+
+        // 5. THE DERIVATION, which is the actual subject: ScreenshotSaver.StockShots must be
+        // exactly the distinct non-null paths, in enum order. This is NOT a restatement -- it
+        // recomputes the set from ScreenshotPath and compares against the field the game really
+        // warms, so a StockShots that grew a hardcoded entry back, lost one, or stopped deduping
+        // fails here. (ScreenshotSaver's static init touches no engine service; it only walks the
+        // enum and sizes an array.)
+        Type saver = asm.GetType("EvilAliens.ScreenshotSaver", true);
+        FieldInfo stockField = saver.GetField("StockShots",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (stockField == null)
+        {
+            Console.WriteLine("FAIL: could not reflect ScreenshotSaver.StockShots -- renamed or moved?");
+            return 2;
+        }
+        string[] stock = (string[])stockField.GetValue(null);
+        System.Collections.Generic.List<string> expected = new System.Collections.Generic.List<string>();
+        foreach (object level in Enum.GetValues(levels))
+        {
+            string p = (string)path.Invoke(null, new[] { level });
+            if (p != null && !expected.Contains(p))
+            {
+                expected.Add(p);
+            }
+        }
+        Check("StockShots is the distinct non-null paths",
+            string.Join(",", stock) == string.Join(",", expected),
+            "got " + stock.Length + ": " + string.Join(",", stock));
+        Check("StockShots covers all twelve carousel levels", stock.Length == 12,
+            "got " + stock.Length);
         return 0;
     }
 }

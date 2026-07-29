@@ -1,24 +1,36 @@
 # PROBE: every level-select carousel entry's stock art is preloaded, none decodes cold.
 #
-# PINS: ScreenshotSaver.StockShots, which since card 8d6883f3 is DERIVED -- every level with
-# LevelArt.HasCarouselEntry contributes its LevelArt.ScreenshotPath, deduped. Both consumers
+# PINS: ScreenshotSaver.StockShots, which since card 8d6883f3 is DERIVED -- every level whose
+# LevelArt.ScreenshotPath is non-null contributes it, deduped. Both consumers
 # (ScreenshotSaver.Init and Game1.QueueMenuWarm) iterate that one list, and SubMenuLevelChoice
 # resolves each carousel entry's image through the same ScreenshotPath lookup.
 #
 # FAILURE MEANS: a carousel entry's art is no longer in the preloaded set, so it decodes
-# (900x700, ~30-40ms in Chrome) the first time the player opens that carousel. The quoted line
-# names the asset. That is EXACTLY the bug card 4d47c5ba fixed: ScreenshotSaver.Init hardcoded
-# eleven of the twelve and the one it missed -- gfx/screenshots/webcamss, the challenge
-# carousel's LAST entry -- decoded cold on first opening Challenges, unnoticed for however long
-# it had been true. Fix by restoring the level to LevelArt.HasCarouselEntry / ScreenshotPath,
-# NOT by re-hardcoding a list.
+# (900x700, ~30-40ms in Chrome) the first time the player opens that carousel. That is EXACTLY
+# the bug card 4d47c5ba fixed: ScreenshotSaver.Init hardcoded eleven of the twelve and the one
+# it missed -- gfx/screenshots/webcamss, the challenge carousel's LAST entry -- decoded cold on
+# first opening Challenges, unnoticed for however long it had been true. Fix by restoring the
+# level to LevelArt.ScreenshotPath, NOT by re-hardcoding a list.
+#
+# TWO ASSERTIONS, AND SINCE CARD 0d166364 THE SECOND ONE IS THE LIVE ONE. Read this before
+# touching either. The probe used to rest entirely on the COLD line, because a level dropped
+# from the old LevelArt.HasCarouselEntry lost its warm slot while SubMenuLevelChoice still
+# resolved its real path -- so the carousel went and fetched it and the decode was visible.
+# 0d166364 collapsed HasCarouselEntry into ScreenshotPath returning null, and that KILLS the
+# cold signal: a level dropped from ScreenshotPath now resolves to null in the carousel too,
+# which falls back to GFX/Screenshots/level1empty -- an asset that is ALREADY WARM. Nothing
+# decodes, and the COLD assertion alone goes green on the exact mutation it exists to catch
+# (measured, both carousels). The `[levelart] carousel entry` warning that
+# SubMenuLevelChoice.loadScreenshots prints on that fallback is what makes the drop visible now,
+# and it names the LEVEL rather than the asset path. Keep both: COLD still defends the preload
+# set against changes on the ScreenshotSaver/QueueMenuWarm side, which the warning cannot see.
 #
 # WHY IT OPENS BOTH CAROUSELS: `SubMenuLevelChoice.loadScreenshots` loads EVERY entry's image
 # in one loop, so merely opening a carousel demands all of its art -- no walking required. But
 # there are TWO of them, `levelSelector` (the three missions) and `challengeSelector` (the nine
 # challenges), each with its own Initialize. Opening only Challenges leaves level1/2/3empty
 # undemanded, and a probe that did that PASSED with Levels.Level1 deleted from
-# HasCarouselEntry (measured). So: Start Game to open the mission carousel, back out, then
+# the membership list (measured). So: Start Game to open the mission carousel, back out, then
 # Challenges.
 #
 # THE POSITIVE CONTROL is the launch at the end. `expect-not COLD ... gfx/screenshots/` passes
@@ -97,4 +109,7 @@ step 240 nodraw
 
 expect \[loadprofile\] TeamChallenge preload:
 expect-not COLD decode in .*: gfx/screenshots/
+# The live signal since card 0d166364 -- see the header. Names the LEVEL, not the asset:
+# `[levelart] carousel entry WebcamAliens has no bundled art`.
+expect-not \[levelart\] carousel entry
 quit

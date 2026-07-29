@@ -52,8 +52,8 @@ internal class SplashScene : Scene
 
 	private string flipRevengedName, flipPureName, flipGlassesName;
 
-	private Texture2D flipRevenged, flipPure, flipGlasses;
-
+	// The ONE reveal this run uses. The variant is rolled in LoadContent and only the winner
+	// is decoded -- see PickFlipVariant (card 57555583).
 	private Texture2D chosenNew;
 
 	private Vector4 chosenNewRect;
@@ -195,9 +195,11 @@ internal class SplashScene : Scene
 				System.Console.WriteLine("[channelflip] effect load failed: " + ex);
 				channelFlip = null;
 			}
-			flipRevenged = localContent.Load<Texture2D>(flipRevengedName);
-			flipPure = localContent.Load<Texture2D>(flipPureName);
-			flipGlasses = localContent.Load<Texture2D>(flipGlassesName);
+			// Roll the reveal HERE and decode only the winner (card 57555583). Loading all
+			// three cost two wasted multi-megapixel decodes on the boot path every run, and
+			// no warm queue can reach them: this scene owns a PRIVATE content manager and
+			// its LoadContent runs before Game1.LoadContent builds the queues.
+			PickFlipVariant();
 		}
 	}
 
@@ -240,22 +242,42 @@ internal class SplashScene : Scene
 		flipSoundPlayed = false;
 		if (isFlip)
 		{
-			PickFlipVariant();
+			// The variant was rolled and decoded back in LoadContent; just re-arm the flag
+			// the line above cleared.
+			variantPicked = (chosenNew != null) && (channelFlip != null);
 		}
 	}
 
 	// ~1-in-10 reveals a portrait "pure" shot (50/50 plain vs sunglasses); otherwise
 	// the 4:3 "revenged" default. The reveal is pillarboxed into the 4:3 splash frame.
+	//
+	// Called ONCE, from LoadContent: the roll picks the NAME and only that texture is
+	// decoded, so a boot pays for one reveal instead of three. Rolling this early is safe
+	// because `rng` is this scene's own Random, not the shared RandomHelper.Random -- so
+	// moving it cannot shift any other consumer's stream. `?splashvariant=` pins the roll
+	// for screenshots (the pure/glasses shots are otherwise a 5% branch each).
 	private void PickFlipVariant()
 	{
-		if (rng.NextDouble() < 0.10)
+		string name;
+		string forced = EvilAliensWeb.Compat.DebugFlags.SplashVariant;
+		if (forced != null)
 		{
-			chosenNew = (rng.Next(2) == 0) ? flipPure : flipGlasses;
+			name = forced switch
+			{
+				"pure" => flipPureName,
+				"glasses" => flipGlassesName,
+				_ => flipRevengedName,
+			};
+		}
+		else if (rng.NextDouble() < 0.10)
+		{
+			name = (rng.Next(2) == 0) ? flipPureName : flipGlassesName;
 		}
 		else
 		{
-			chosenNew = flipRevenged;
+			name = flipRevengedName;
 		}
+		chosenNew = localContent.Load<Texture2D>(name);
 		chosenNewRect = FitRect(chosenNew);
 		variantPicked = (chosenNew != null) && (channelFlip != null);
 	}

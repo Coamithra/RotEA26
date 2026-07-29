@@ -139,3 +139,7 @@ web/EvilAliensWeb/wwwroot/Content/texviewer/
 # waveform-display cache, not an asset. The .wav itself ships.
 web/EvilAliensWeb/wwwroot/Content/sfx/peaks/
 *.reapeaks
+
+# eahl PreloadExport drop (boot_cold.txt calls it; the "download" lands next to --out,
+# or in the cwd when a --script run has none -- i.e. the repo root under run_probes.py).
+/preload_manifest.txt

@@ -651,6 +651,16 @@ public class Game1 : Game
 		// hidden warm for a visible one. Same reasoning as the space tiles above.
 		EnqueueIdleWarm<Texture2D>("GFX/Help/Controls_Keyboard");
 		EnqueueIdleWarm<Texture2D>("GFX/Help/Controls_Joypad");
+		// The awardment banner's sheet (card 57555583). AwardmentBlade used to decode it in its
+		// own LoadContent -- i.e. inside base.Initialize(), BEFORE this method exists to warm
+		// anything -- so the boot always paid for a component that only draws when an awardment
+		// pops. Its load is lazy now and this is what keeps that lazy load a cache hit.
+		//
+		// IDLE queue, not the menu queue: the banner pops mid-LEVEL, it is not menu-first-frame
+		// art, and DrainWarmQueue is synchronous -- adding it to the menu queue would put its
+		// decode back on the Press-Start -> menu handoff that card 4d47c5ba just cleared. Its
+		// `menufont` is already covered by QueueMenuWarm above.
+		EnqueueIdleWarm<Texture2D>("GFX/Sprites/awardmentblade");
 	}
 
 	// Queue one asset to be warmed later (during splash idle, or the pre-menu drain).

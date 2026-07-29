@@ -75,8 +75,26 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		base.LoadContent();
 		batch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		content = ServiceHelper.Get<IContentManagerService>().ContentManager;
-		blade = content.Load<Texture2D>("GFX/Sprites/awardmentblade");
-		font = content.Load<SpriteFont>("GFX/Menu/menufont");
+	}
+
+	// The blade art + font are LAZY (card 57555583). This component is added in
+	// Game1.Initialize, so its LoadContent ran during base.Initialize() -- before
+	// Game1.LoadContent builds the warm queues, which is why no warm entry could ever
+	// precede it and the decode always landed on the pre-splash black screen for a
+	// component that only draws when an awardment pops. In practice this is a cache hit:
+	// Game1.QueueIdleWarm warms the sheet during the splash (and the menu's own
+	// QueueMenuWarm already warms menufont), so the decode happens off the critical path
+	// rather than when the banner animates in.
+	private void EnsureContent()
+	{
+		if (blade == null)
+		{
+			blade = content.Load<Texture2D>("GFX/Sprites/awardmentblade");
+		}
+		if (font == null)
+		{
+			font = content.Load<SpriteFont>("GFX/Menu/menufont");
+		}
 	}
 
 	public override void Update(GameTime gameTime)
@@ -88,6 +106,7 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 			{
 				return;
 			}
+			EnsureContent();
 			bladeTimer.Duration = 170f;
 			bladeTimer.Reset();
 			bladeTimer.Start();
@@ -132,6 +151,13 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 	{
 		base.Draw(gameTime);
 		batch.BlendMode = (SpriteBlendMode)1;
+		if (state != State.Idle)
+		{
+			// Belt-and-braces: Update's Idle -> Enter transition is the only way to reach a
+			// drawing state and it loads first -- but Draw is where `blade`/`font` are
+			// actually dereferenced, so it does not get to assume that.
+			EnsureContent();
+		}
 		switch (state)
 		{
 		case State.Enter:

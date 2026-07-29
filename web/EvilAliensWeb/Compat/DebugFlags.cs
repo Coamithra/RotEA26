@@ -709,6 +709,14 @@ namespace EvilAliensWeb.Compat
 		// See TutorialLevel.PopulatePowerUpTrainingOnly.
 		public static bool TutorialTraining { get; private set; }
 
+		// Pin the splash channel-flip's reveal variant (?splashvariant=revenged|pure|glasses).
+		// SplashScene rolls it ~90/10 (then 50/50 on the two portrait shots) and, since card
+		// 57555583, decodes ONLY the winner -- so the two portrait reveals are a 5% branch each
+		// and unreachable on demand for a screenshot. null => roll as normal, so a shipped build
+		// is unchanged. Out of `Active`: it picks between three splash images and cannot change
+		// a shared run.
+		public static string SplashVariant { get; private set; }
+
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
 		// the boot routes into the harness in cast-brain mode instead of the menu/a level.
@@ -2070,6 +2078,23 @@ namespace EvilAliensWeb.Compat
 						Console.WriteLine("[debug] unknown ?flyspiderbox= value '" + val
 							+ "' (expected a number > 0) -- ignored, staying on "
 							+ EvilAliens.FlyingSpider.FlattenBoxHalfDesign.ToString(CultureInfo.InvariantCulture));
+					}
+					break;
+				case "splashvariant":
+					// Reported, never swallowed -- same reason as ?flyspiderflatten= above: a typo
+					// would silently leave the RANDOM roll in force while the capture is labelled
+					// as a pinned variant, i.e. a screenshot of whatever came up.
+					if (string.Equals(val, "revenged", StringComparison.OrdinalIgnoreCase)
+						|| string.Equals(val, "pure", StringComparison.OrdinalIgnoreCase)
+						|| string.Equals(val, "glasses", StringComparison.OrdinalIgnoreCase))
+					{
+						SplashVariant = val.ToLowerInvariant();
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?splashvariant= value '" + val
+							+ "' (expected revenged/pure/glasses) -- ignored, staying on "
+							+ (SplashVariant ?? "the random roll"));
 					}
 					break;
 				case "tutorialtraining":

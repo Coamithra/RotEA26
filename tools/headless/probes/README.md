@@ -97,6 +97,7 @@ is actually played rather than sitting on a dead ship.
 |---|---|
 | `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested. **Windows-only**: the readback P/Invokes `soft_oal.dll`, so elsewhere it reports `alGain=<unreadable>` and fails. Add the platform library names to `HeadlessAudio` rather than relaxing the assertion |
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
+| `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 
 Both are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`
 first) when the `Level2|gfx/marsbg` manifest lines are deleted; `silence` goes red under

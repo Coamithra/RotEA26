@@ -213,15 +213,25 @@ generate much of the art/audio referenced here.
   - **The `(boot)` COLD lines that REMAIN are unreachable by any warm queue -- do not "fix" them
     by adding entries.** `QueueMenuWarm`/`QueueIdleWarm` are built in `Game1.LoadContent`, which
     `base.Initialize()` reaches only AFTER every component's own `LoadContent` has run. So
-    `gfx/cursor2` (`MousePointer`), `gfx/sprites/awardmentblade` (`AwardmentBlade`) and the
-    `gfx/splash/*` set (`SplashScene.AddSplash`, called from `Game1.Initialize`, and into that
-    scene's OWN content manager besides) have all already decoded by the time the first queue
-    entry is pumped. Warming them is a cache hit that changes nothing, including the log line.
-    The steady state on a full-splash boot is that set and nothing else -- `easplashredone`,
-    `uglysplash22`, its three `-revenged*` variants, `splash/blank` (twice), `cursor2` and
-    `awardmentblade`. Anything OUTSIDE it is a real new gap. (Reducing the set means making a
-    boot-time load lazy or deferred, not warming it: see the follow-up cards on the splash's
-    three channel-flip variants, of which a run uses one, and on `AwardmentBlade`.)
+    `gfx/cursor2` (`MousePointer`) and the `gfx/splash/*` set (`SplashScene.AddSplash`, called
+    from `Game1.Initialize`, and into that scene's OWN content manager besides) have all
+    already decoded by the time the first queue entry is pumped. Warming them is a cache hit
+    that changes nothing, including the log line. **Reducing the set means making a boot-time
+    load LAZY or DEFERRED, not warming it**, which card 57555583 did to the two that were pure
+    waste:
+    - `SplashScene` decoded all THREE channel-flip reveals and a run shows ONE. It now rolls
+      the variant in `LoadContent` (`PickFlipVariant`) and decodes only the winner. Rolling
+      that early is safe because the scene's `rng` is its own `Random`, NOT
+      `RandomHelper.Random` -- the card's description said otherwise and was wrong.
+    - `AwardmentBlade` decoded its sheet + `menufont` at boot for a banner that only appears
+      when an awardment pops. Both loads are lazy (`EnsureContent`, called at the Idle -> Enter
+      transition and defensively in `Draw`), and `QueueIdleWarm` warms the sheet during the
+      splash so the lazy load is a cache hit. It is the IDLE queue on purpose: the banner pops
+      mid-level, it is not menu-first-frame art, and `DrainWarmQueue` is synchronous.
+    The steady state on a full-splash boot is now SIX lines -- `easplashredone`,
+    `uglysplash22`, ONE `-revenged*` variant, `splash/blank` (twice -- `Game1.blackPixel` and
+    the splash scene's own copy, from two different content managers) and `cursor2`. Anything
+    outside that is a real new gap. Pinned by `tools/headless/probes/boot_cold.txt`.
   - **Do not reformat the `COLD decode in <Level>: <asset>` console line.** Committed headless
     probes under `tools/headless/` grep it, so its shape is an interface. Suppressing a line
     (as the warm bracket does) is fine; changing its wording is not.
@@ -941,6 +951,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   (suspended AudioContext) — **don't add a click-to-start gate to "fix" it**; the project boots
   straight through by design. The cue's owner is `tools/audio/pick_channelswap.py` (see
   tools/CLAUDE.md).
+  **`?splashvariant=revenged|pure|glasses`** pins which reveal the flip lands on (card 57555583)
+  -- the two portrait shots are a 5% branch each, so they are otherwise unreachable on demand for
+  a screenshot, and the roll now also decides which texture is decoded at all. An unrecognised
+  value is REPORTED and falls back to the random roll; null = roll as normal, so a shipped build
+  is unchanged.
 
 ### The AI player (`ControlDevice.AI`) + the AI bench (card f4d1721f)
 

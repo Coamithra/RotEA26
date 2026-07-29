@@ -245,6 +245,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   to reach the disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
   pad-connection masks through the real resolver + the pre-card policy as the negative control) —
   it needs no level and no gamepads. Replaces `?aiteam`.
+- **`?splashvariant=revenged|pure|glasses`** (card 57555583): pin which reveal the splash's
+  channel flip lands on. The two portrait shots are a 5% branch each, and since that card the
+  roll (in `SplashScene.LoadContent`) also decides which texture is DECODED at all -- so this
+  is both the screenshot rig for the flip and what makes the boot decode set deterministic for
+  `tools/headless/probes/boot_cold.txt`. Bad value => reported + the random roll.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

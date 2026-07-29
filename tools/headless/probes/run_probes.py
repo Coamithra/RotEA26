@@ -81,9 +81,12 @@ TIMEOUT_S = 300
 
 def run(path, extra_argv, verbose):
     cmd = [EAHL, "--script", path] + extra_argv
+    # cwd=REPO, not the caller's: a probe calling `eval PreloadExport` drops its
+    # preload_manifest.txt next to --out, or in the cwd when a --script run has none. Pinning
+    # it keeps that litter in the one place .gitignore covers, wherever the runner was invoked.
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                              timeout=TIMEOUT_S)
+                              cwd=REPO, timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired as ex:
         out = (ex.stdout or "") + (ex.stderr or "")
         if isinstance(out, bytes):

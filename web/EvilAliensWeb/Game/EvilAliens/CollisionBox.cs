@@ -209,10 +209,8 @@ public class CollisionBox : ICollisionType
 
 	private bool TestCollisionLine(CollisionLine collisionLine)
 	{
-		BoundingBox val = default(BoundingBox);
-		(val) = new BoundingBox(new Vector3(TopLeft, 0f), new Vector3(BottomRight, 0f));
-		Ray val2 = default(Ray);
-		(val2) = new Ray(new Vector3(collisionLine.Origin, 0f), new Vector3(collisionLine.DirectionalVector, 0f));
+		BoundingBox val = new BoundingBox(new Vector3(TopLeft, 0f), new Vector3(BottomRight, 0f));
+		Ray val2 = new Ray(new Vector3(collisionLine.Origin, 0f), new Vector3(collisionLine.DirectionalVector, 0f));
 		if ((val).Intersects(val2).HasValue && (val).Intersects(val2) < collisionLine.Length)
 		{
 			return true;

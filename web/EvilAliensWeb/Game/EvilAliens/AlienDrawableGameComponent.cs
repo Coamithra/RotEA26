@@ -538,8 +538,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		cellWidth /= columns;
 		int cellHeight = texture.LogicalHeight() - (rows - 1) * separatingspace;
 		cellHeight /= rows;
-		Rectangle result = default(Rectangle);
-		(result) = new Rectangle(frameCol * (cellWidth + separatingspace), frameRow * (cellHeight + separatingspace), cellWidth, cellHeight);
+		Rectangle result = new Rectangle(frameCol * (cellWidth + separatingspace), frameRow * (cellHeight + separatingspace), cellWidth, cellHeight);
 		return result;
 	}
 
@@ -563,10 +562,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		{
 		case 2:
 		{
-			Color currentTint = default(Color);
-			(currentTint) = new Color(new Vector4(1f, 1f, 1f, 1f - frameBlend));
-			Color nextTint = default(Color);
-			(nextTint) = new Color(new Vector4(1f, 1f, 1f, frameBlend));
+			Color currentTint = new Color(new Vector4(1f, 1f, 1f, 1f - frameBlend));
+			Color nextTint = new Color(new Vector4(1f, 1f, 1f, frameBlend));
 			spriteBatch.Draw(texture, frameRectangle, Position, rotation, DrawScale, center: true, currentTint, spriteEffects);
 			spriteBatch.Draw(texture, frameRectangle2, Position, rotation, DrawScale, center: true, nextTint, spriteEffects);
 			break;

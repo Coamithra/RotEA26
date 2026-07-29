@@ -90,8 +90,7 @@ internal class DifficultyMenu : MenuSub1
 		Vector2 val = font.MeasureString(text) / 2f;
 		base.SpriteBatch.DrawMetalString(text, new Vector2(400f, 100f), Color.Azure, 0f, val, 1.2f);
 		yoffset = 40f;
-		Vector2 val2 = default(Vector2);
-		(val2) = new Vector2(400f, 300f);
+		Vector2 val2 = new Vector2(400f, 300f);
 		int num = 0;
 		for (int i = 0; i < difficultyLevelValues.Count; i++)
 		{
@@ -100,8 +99,7 @@ internal class DifficultyMenu : MenuSub1
 				num++;
 			}
 		}
-		Vector2 position = default(Vector2);
-		(position) = new Vector2(val2.X - 75f, yoffset + val2.Y - (float)(font.LineSpacing * num) / 3f);
+		Vector2 position = new Vector2(val2.X - 75f, yoffset + val2.Y - (float)(font.LineSpacing * num) / 3f);
 		Vector2 val3 = default(Vector2);
 		for (int j = 0; j < num; j++)
 		{

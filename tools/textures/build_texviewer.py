@@ -133,7 +133,9 @@ def build_dds_preview(png_path, asset, cols, rows, dry):
 
 def main():
     ap = argparse.ArgumentParser(description="Build DXT previews + manifest for the ?texviewer scene")
-    ap.add_argument("--only", help="glob over the Content-relative asset key (e.g. 'gfx/sprites/*')")
+    ap.add_argument("--only", metavar="GLOB",
+                    help="glob over the Content-relative asset key (e.g. 'gfx/sprites/*'). Matching "
+                         "nothing is an error, not a silent no-op -- same as build_textures.py.")
     ap.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     ap.add_argument("--manifest-only", action="store_true",
                     help="rewrite manifest.json from existing previews; no texconv")
@@ -145,11 +147,18 @@ def main():
 
     decisions = load_config_decisions()
     pngs = enumerate_pngs()
+    # A --only that matches nothing is a typo, not a request to build nothing: it used to print
+    # "0 asset(s) ... done." and exit 0, so a mistyped glob looked like a successful build.
+    # build_textures.py's --only hard-fails on no match; match that. (Dropping the pattern's
+    # .lower() is cosmetic on Windows -- tools/CLAUDE.md explains why -- the error is the fix.)
+    selected = [p for p in sorted(pngs) if not args.only or fnmatch.fnmatch(rel_asset(p), args.only)]
+    if args.only:
+        if not selected:
+            bt.fail(f"--only {args.only!r} matched none of the {len(pngs)} PNG(s) under Content/")
+        print(f"  [only] {len(selected)} of {len(pngs)} asset(s) match {args.only!r}")
     records = []
-    for png in sorted(pngs):
+    for png in selected:
         asset = rel_asset(png)
-        if args.only and not fnmatch.fnmatch(asset, args.only.lower()):
-            continue
         from PIL import Image
         with Image.open(png) as im:
             w, h = im.size

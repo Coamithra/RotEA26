@@ -111,10 +111,12 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 
 | file | pins |
 |---|---|
-| `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested. **Windows-only**: the readback P/Invokes `soft_oal.dll`, so elsewhere it reports `alGain=<unreadable>` and fails. Add the platform library names to `HeadlessAudio` rather than relaxing the assertion |
+| `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested, and that the OpenAL binary resolved at all (`lib=`). A box with genuinely no audio device FAILS it, deliberately: the suite's contract is *this box can confirm mixer silence*, and one that cannot should be loud rather than green — `no_audio_device.txt` is what covers such a box |
+| `no_audio_device.txt` | a box with **no audio device** still runs the game and REPORTS that audio is dead (card 72297923). Uses `--fake-no-audio-device`, which makes `alcOpenDevice` genuinely fail rather than mocking anything |
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
 | `preload_paratrooper.txt` | the same, for the Paratrooper challenge (49 manifest entries) |
 | `preload_insanebossi.txt` | the same, for the Boss Train challenge (`InsaneBossI`, 82 entries — the largest section); soaks the level OUT (720 s) because the bosses arrive in sequence — see its header for the two assets a shorter window provably missed |
+| `preload_demo{1,2,3}.txt` | the same, for the three attract demos (`?demo=<n>` pins which one the idle menu drops into). Each also asserts the `(boot)` sentinel stays clean -- see the block below for why that third line is the one that matters |
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (card 8d6883f3): no level-select art decodes when either carousel is opened |
 
@@ -128,7 +130,14 @@ on either half it defends — restoring `AwardmentBlade`'s eager load in `LoadCo
 `awardmentblade` `expect-not`, and re-adding a `flipPureName`/`flipGlassesName` load to
 `SplashScene.LoadContent` trips the `-revenged-pure` one.
 `silence` goes red under `--audio` (`masterVolume=1 alGain=1`), which is also its standing
-negative control. `stockshots_warm` goes red naming the dropped asset when a level is deleted
+negative control. Its `lib=<unresolved>` line (added by card 72297923, which made the readback
+resolve OpenAL by candidate list) goes red when that list is replaced with names that do not
+exist. That line discriminates no mutant the `alGain=0` line below it would miss — a failed
+resolve makes the gain unreadable too — so it is ordered FIRST purely to make the failure name
+the cause; it earns its place as diagnosis, not as coverage. `no_audio_device` goes red both ways that matter:
+drop `BringUp`'s catch and the run dies with `err NoAudioHardwareException`, and make
+`--fake-no-audio-device` a no-op and it fails on its `NO AUDIO DEVICE` expect rather than
+passing on a run that had a device all along. `stockshots_warm` goes red naming the dropped asset when a level is deleted
 from `LevelArt.HasCarouselEntry` — tested on BOTH carousels (`Level1` →
 `gfx/screenshots/level1empty`, `WebcamAliens` → `gfx/screenshots/webcamss`), because an
 earlier revision that opened only the challenge carousel passed the `Level1` mutation.
@@ -140,20 +149,33 @@ reached late — which is how the soak length was chosen. Re-run that mutation, 
 if you ever shorten the window. `silence` goes red
 under `--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
 
-**`Demo2` has no probe, deliberately** (card 454cbeae, measured — do not "finish the set"
-without re-measuring). Two independent blockers:
+**The three attract demos each have a probe now (card e63601a4), and the two blockers that
+used to make them impossible are both gone.** This block used to say `Demo2` could not be
+probed; what follows is what changed, because both halves generalise.
 
-1. **It cannot be reached deterministically by the attract path a valid preload probe
-   requires.** (`?level=Demo2` boots it fine — and walks straight into the `QueueIdleWarm` trap
-   above, which is the whole reason the attract path is the only usable route.)
-   `MenuScene.mainMenu_DemoSelected` picks
-   `RandomHelper.Random.Next(3)` → Demo1/2/3 uniformly on every attract launch, off an
-   unseeded `new Random()`. There is no "demo 1 first" ordering and no debug seam to force one,
-   and a `--script` file cannot branch or retry, so any Demo2 probe is a `(2/3)^attempts` coin
-   flip.
-2. **It is not cold-free on `main` anyway.** A run that did land on Demo2 logged **10** COLD
-   decodes (`gfx/sprites/playersheet` 1260x680, `explosion`, `smoke`, `photocamera`,
-   `bombicon`, `gfx/hud/barlit`/`barunlit2`/`barlitedge`, `gfx/menu/powerbar`,
-   `gfx/game/blank`); Demo1 logs those 10 plus `ufometpootjes` and `smallship_landed`. The
-   `Demo*` manifest sections have a real gap — a probe would be red on a clean tree. That gap
-   is its own card.
+1. **Reaching one deterministically.** `MenuScene.mainMenu_DemoSelected` picks Demo1/2/3 with
+   `RandomHelper.Random.Next(3)` off an unseeded `Random`, and a `--script` file cannot branch
+   or retry -- so any demo probe was a `(2/3)^attempts` coin flip. **`?demo=<1|2|3>` pins the
+   roll.** It is NOT the off-switch of `?nodemo`/`?noattract` (those unwire the idle timeout so
+   no demo launches at all). `?level=Demo2` is still the wrong route -- it walks into the
+   `QueueIdleWarm` trap above, which is why the attract path is the only usable one.
+2. **They were not cold-free.** Demo1 logged 12 COLD decodes, Demo2 10, Demo3 12; the manifest
+   sections were short. Fixed by the same card.
+
+**Demo3 is why every one of these probes asserts on `(boot)` as well as on its own level.**
+Demo3 had NO manifest section, and `WarmThenLaunch` returns EARLY on an empty one -- so no
+preload bracket opened and its 12 decodes were logged against the `(boot)` sentinel. It
+therefore READ as the clean demo. `expect-not COLD decode in Demo3` passes vacuously in that
+state, and the `expect \[loadprofile\] Demo3 preload:` above it still matches, because that
+summary line comes from `GameScene.LoadContent`'s `BeginPreload`/`EndPreload` bracket, which
+runs whatever the manifest section holds (`PreloadGraphicalContent` is called inside it, not
+the opener).
+Only `expect-not COLD decode in \(boot\): gfx/sprites/playersheet` catches it -- verified by
+deleting the whole section, which goes red on exactly that line while the other two pass.
+
+Each `preload_demo*` is therefore mutation-tested TWO ways. A PARTIAL delete (one line) goes red
+on the level's own `expect-not`, naming the asset -- `Demo1|gfx/sprites/playersheet`,
+`Demo2|gfx/sprites/explosion`, `Demo3|gfx/base/756`. A WHOLE-section delete goes red on the
+`(boot)` guard instead, with the level's own `expect-not` passing on 0 matches. **Re-run the
+whole-section one if you ever touch these** -- it is the case the guard exists for, and it is the
+one a partial delete cannot reach.

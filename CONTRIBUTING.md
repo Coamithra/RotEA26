@@ -13,7 +13,7 @@ file wins.
 | Default branch | `main` |
 | Trello backend / board | **always** `--backend local --board 10989a3d` (offline file-backed board, NOT trello.com) |
 | Columns (list ids) | `Backlog` `79158996` → `In Progress` `3b43cba3` → `Done` `9c204b80` |
-| Branch prefixes | `fix/` `feature/` `refactor/` `docs/` (note: `feature/`, not `feat/`) |
+| Branch prefixes | `fix/` `feature/` `refactor/` `docs/` `chore/` (note: `feature/`, not `feat/`) |
 | Tracker doc | `plans/tracker_<branch>.md` — **gitignored, never committed** (see "Tracker docs"); `plans/plan.md` is the archived staged plan and STAYS |
 | Worktree layout | fixed slots `.claude/worktrees/wt1`..`wt8` (gitignored) |
 | Plan detail | cards are pointers; long-form per-stage detail is in the archived `plans/plan.md` |
@@ -152,6 +152,7 @@ proof.
   case-sensitive on both hosts, localhost isn't.
 - **Docs are split** — when a change adds a convention/flag/gotcha, update the right file:
   root `CLAUDE.md` (workflow/cross-cutting), `web/EvilAliensWeb/CLAUDE.md` (game/engine features),
+  `web/EvilAliensWeb/Compat/Net/CLAUDE.md` (online co-op / net layer),
   `tools/CLAUDE.md` (asset pipelines).
 
 ## Filing a follow-up card (Phase 6 step 11)
@@ -183,5 +184,6 @@ Read the matching doc section *before* designing (each has known gotchas):
 | Input / menus / overlays | `web/…/CLAUDE.md` "Input" (outside-`#app` pattern, `eaPress`) |
 | Resolution / present / post-FX | `web/…/CLAUDE.md` "Architecture" + "Feel / post FX" |
 | Saves / trim / hosting | root `CLAUDE.md` gotchas (trim, case-sensitivity) + `web/…/CLAUDE.md` (saves) |
+| Online co-op / net layer / WebRTC | `web/EvilAliensWeb/Compat/Net/CLAUDE.md` (loads automatically under `Compat/Net/`) + `plans/stage11-online-coop.md` |
 | Generated `Game/` code | root `CLAUDE.md` gotchas (Xbox build, codegen) |
 | Exit / "boss key" launcher | root `CLAUDE.md` "Related repos" — edit the separate `meridian` repo, not this tree |

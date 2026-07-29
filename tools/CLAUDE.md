@@ -163,8 +163,20 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
   code at all -- `soft_oal.dll` reads it with msvcrt's `getenv`, and .NET's
   `Environment.SetEnvironmentVariable` writes the Win32 block, not msvcrt's `_environ` table.
   The mechanism now is `SoundEffect.MasterVolume = 0` plus `alListenerf(AL_GAIN, 0)`, with the
-  gain READ BACK out of OpenAL (`audio` command) so silence is data. Cost of dropping the null
-  backend: a box with genuinely no sound card is no longer covered.
+  gain READ BACK out of OpenAL (`audio` command) so silence is data.
+- **A box with NO audio device is covered too, and the readback is no longer Windows-only**
+  (card `72297923`). Dropping the null backend had cost the one machine it genuinely served: one
+  with no sound card. Measured, the run never actually DIED there — KNI's
+  `NoAudioHardwareException` surfaces inside `Content.Load<SoundEffect>`, where
+  `SoundManager.GetEffect`'s catch-all swallows it — so the defect was that nothing SAID so.
+  `HeadlessAudio.BringUp()` now opens the device once at boot in a try/catch and reports
+  `device=ok|none|nolib`, printing a loud `NO AUDIO DEVICE` and playing on rather than dying.
+  **`--fake-no-audio-device` reaches that path on a box that has a device** by writing an
+  `alsoft.ini` naming a nonexistent backend, so `alcOpenDevice` really fails (an ini is the only
+  way to configure OpenAL Soft from here — trap 2 — and `drivers = null` is trap 1, so do not use
+  it here). The P/Invokes also resolve through KNI's own candidate list (`soft_oal.dll`,
+  `libopenal.so.1`, `libopenal.1.dylib`, `openal`) rather than naming `soft_oal.dll`, reporting the
+  winner as `lib=`. Both pinned: `probes/no_audio_device.txt` and `probes/silence.txt`.
 - **`--script` files can ASSERT, and the ones worth keeping live in `tools/headless/probes/`**
   (card `1e476668`). `mark` / `expect <regex>` / `expect-not <regex>` match per line against
   everything the run printed since the last `mark` -- the game's own `[loadprofile]` / `[hitch]` /

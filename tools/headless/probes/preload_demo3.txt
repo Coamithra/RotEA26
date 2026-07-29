@@ -1,0 +1,26 @@
+# PROBE: attract demo 3 decodes no textures during playback.
+#
+# PINS: wwwroot/Content/preload/manifest.txt's Demo3 section (card e63601a4). Demo3 is the
+# alien-base demo and had NO manifest section at all, which is why it read as the clean one:
+# with an empty section WarmThenLaunch bails before opening its pre-launch bracket, so its 12
+# cold decodes -- made in the scene's own Initialize, before GameScene.LoadContent's bracket --
+# were filed under the "(boot)" sentinel and `COLD decode in Demo3` never appeared.
+# This probe is written so that exact disguise cannot come back -- see the (boot) guard below.
+#
+# FAILURE MEANS: an asset Demo3 uses is no longer preloaded and is decoded during live
+# playback. The quoted line names it. Fix by restoring the manifest entry. gfx/base/756 and
+# gfx/base/2331-v5 are Demo3-only among the demos (Background.SetAlienBase).
+#
+# See preload_demo1.txt for the full reasoning behind the three assertions, the ?demo= flag
+# and the attract-vs-?level= route -- it is identical here and not repeated.
+#
+# eahl: --flags "?menu&loadlog&demo=3"
+
+step 400 nodraw
+mark
+step 4600 nodraw
+
+expect      \[loadprofile\] Demo3 preload:
+expect-not  COLD decode in Demo3
+expect-not  COLD decode in \(boot\): gfx/sprites/playersheet
+quit

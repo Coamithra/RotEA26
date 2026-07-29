@@ -54,6 +54,7 @@ Exits 0 when the decompiled C# is identical, 1 when it differs (expected for thi
 change -- a 1 is "now go read it", not a failure), 2 on a build or plumbing failure.
 """
 import argparse
+import collections
 import difflib
 import io
 import os
@@ -93,13 +94,26 @@ MEMBER_RE = re.compile(
     r'~?(?P<ctor>[\w<>]+)\s*\('
     r')')
 # Explicit interface implementations carry no access modifier, so they need their own pattern.
-# The mandatory dotted qualifier is what keeps this from matching a statement.
+# The dotted qualifier is most of what keeps this from matching a statement -- but NOT all of it,
+# because a call statement has the same `word word.Name(` shape: `return MyMath.AngleToVector(x);`
+# otherwise parses as an impl named `AngleToVector` (143 such lines in this assembly), and every
+# hunk after it files under that phantom. This is the same trap the mandatory modifier guards
+# against in MEMBER_RE, and it needs its own guard here because a modifier cannot be required.
 EXPLICIT_IMPL_RE = re.compile(
     r'^(?P<indent>\s*)[\w<>\[\],.?]+\s+[\w<>]+(?:\.[\w<>]+)*\.(?P<name>[\w<>]+)\s*(?:\(|\{|=>)')
+# The first token of that pattern is a RETURN TYPE, so it can only be an identifier or a builtin
+# type keyword. Any other keyword there means the line is a statement, not a declaration.
+STATEMENT_HEAD_RE = re.compile(
+    r'^\s*(?:return|else|yield|throw|await|case|lock|using|fixed|checked|unchecked|new|do|goto|'
+    r'break|continue|while|for|foreach|switch|if|try|catch|finally|base|this)\b')
 TYPE_RE = re.compile(r'^(?P<indent>\s*)(?:public|private|protected|internal|sealed|abstract|'
                      r'static|partial|\s)*(?:class|struct|record|interface|enum)\s+([\w<>]+)')
-# A closing brace at or above the member's own indent ends it, so the next changed line is not
-# still attributed to the member that happened to precede it.
+# A closing brace at or above a member's or a type's own indent ends it, so the next changed line
+# is not still attributed to whatever happened to precede it. TYPES NEED THIS AS MUCH AS MEMBERS:
+# ilspycmd emits a nested type FIRST in its outer type's body, ahead of the fields, whatever the
+# source order -- so a type scope that never closes does not mis-name an occasional trailing hunk,
+# it mis-names EVERY member of the outer type (measured before the scope stack existed: 68 of this
+# assembly's types, 48.8% of its decompiled lines).
 CLOSE_RE = re.compile(r'^(?P<indent>\s*)\}')
 
 EXIT_IDENTICAL = 0
@@ -135,38 +149,112 @@ def decompile(dll, outdir, label):
         return [l for l in fh.read().split('\n') if not IL_COMMENT_RE.match(l)]
 
 
+def member_at(line):
+    """-> (name, body_indent) for a member DECLARATION on this line, else None.
+
+    `body_indent` is the indent whose closing brace ends the member, or None when the declaration
+    COMPLETES on its own line (`=> expr;`, `{ get; set; }`) and so opens no scope at all. Leaving a
+    scope open for one of those would file every following field under that property, all the way to
+    the type's own closing brace (220 lines across 25 sites here, worst run 80).
+    """
+    m = MEMBER_RE.match(line)
+    if m is None and not STATEMENT_HEAD_RE.match(line):
+        m = EXPLICIT_IMPL_RE.match(line)
+    if m is None:
+        return None
+    # `new` is both a modifier and an expression head, and it is the ONE statement head that can
+    # reach MEMBER_RE. An array-initializer element (`new Color(46, 125, 201),`) therefore matches
+    # the constructor alternative as a member named `Color` -- 84 such lines in this assembly. A
+    # constructor can never be declared `new`, so a ctor-branch match with a statement head is
+    # always an object creation.
+    if m.groupdict().get('ctor') and STATEMENT_HEAD_RE.match(line):
+        return None
+    name = m.group('name') or m.groupdict().get('ctor')
+    # A tuple type breaks the return-type character class, so
+    # `private readonly List<(int index, Rectangle rect)> hits = ...;` matches the CONSTRUCTOR
+    # alternative as a member named `List<`. No real member name carries a lone angle bracket.
+    if name is None or name.count('<') != name.count('>'):
+        return None
+    stripped = line.rstrip()
+    complete = (line.count('{') == line.count('}')
+                and (stripped.endswith(';') or stripped.endswith('}')))
+    return name, (None if complete else m.group('indent'))
+
+
 def enclosing(lines):
-    """-> per-line 'Type.Member' attribution, so a hunk can be named."""
+    """-> per-line 'Type.Member' attribution, so a hunk can be named.
+
+    Types NEST, so they need a scope stack rather than one current name; a nested type's members
+    read as the qualified 'Outer.Nested.Member'. Everything outside a nested type keeps exactly the
+    'Type.Member' spelling it has always had.
+    """
     out = []
-    cur_type = '<none>'
+    types = []                              # [(name, indent_len)], innermost last
     cur_member = '<declarations>'
     member_indent = None
+
+    def attribution():
+        return '.'.join([n for n, _ in types] or ['<none>']) + f'.{cur_member}'
+
     for line in lines:
         t = TYPE_RE.match(line)
         if t:
-            cur_type, cur_member, member_indent = t.group(2), '<declarations>', None
-            out.append(f'{cur_type}.{cur_member}')
+            indent = len(t.group('indent'))
+            while types and indent <= types[-1][1]:
+                types.pop()
+            types.append((t.group(2), indent))
+            cur_member, member_indent = '<declarations>', None
+            out.append(attribution())
             continue
-        if member_indent is not None:
-            c = CLOSE_RE.match(line)
-            if c and len(c.group('indent')) <= len(member_indent):
-                out.append(f'{cur_type}.{cur_member}')
+        c = CLOSE_RE.match(line)
+        if c:
+            indent = len(c.group('indent'))
+            ends_member = member_indent is not None and indent <= len(member_indent)
+            ends_type = bool(types) and indent <= types[-1][1]
+            if ends_member or ends_type:
+                out.append(attribution())   # the brace itself belongs to what it closes
+                if ends_type:
+                    while types and indent <= types[-1][1]:
+                        types.pop()
                 cur_member, member_indent = '<declarations>', None
                 continue
-        m = MEMBER_RE.match(line) or EXPLICIT_IMPL_RE.match(line)
+        m = member_at(line)
         if m:
-            cur_member = m.group('name') or m.groupdict().get('ctor')
-            member_indent = m.group('indent')
-        out.append(f'{cur_type}.{cur_member}')
+            cur_member, member_indent = m
+            out.append(attribution())
+            if member_indent is None:
+                cur_member = '<declarations>'   # the declaration line WAS the whole member
+            continue
+        out.append(attribution())
     return out
 
 
-SELFTEST_SOURCE = '''\
+# Every DECLARATION SHAPE the patterns have to tell apart, and every statement they must not
+# mistake for one. Hand-written so the awkward cases sit next to each other, but the individual
+# lines are lifted from real ilspycmd output -- the tuple-typed field, the expression-bodied
+# property and event pair, the `return X.Y(...)` call, the expression-bodied explicit impl.
+SHAPES_SOURCE = '''\
 public class Widget
 {
 \tprivate int count;
 
+\tprivate readonly List<(int index, Rectangle rect)> entryHitBounds = new List<(int, Rectangle)>();
+
+\tprivate Vector2 lastMousePos;
+
+\tprivate static readonly Color[] Palette = new Color[2]
+\t{
+\t\tnew Color(46, 125, 201),
+\t\tnew Color(49, 77, 176)
+\t};
+
+\tprivate int paletteIndex;
+
 \tpublic int Count => count;
+
+\tpublic bool IsEntering => count == 0;
+
+\tpublic event ExitMenu OnExit;
 
 \tpublic string Name
 \t{
@@ -193,6 +281,34 @@ public class Widget
 \t\t}
 \t}
 
+\tpublic Vector2 Facing()
+\t{
+\t\treturn MyMath.AngleToVector(_direction);
+\t}
+
+\tpublic struct Inner
+\t{
+\t\tpublic float Depth;
+
+\t\tpublic enum Mode
+\t\t{
+\t\t\toff,
+\t\t\ton
+\t\t}
+
+\t\tpublic void Reset()
+\t\t{
+\t\t\tDepth = 0f;
+\t\t}
+\t}
+
+\tpublic void After()
+\t{
+\t\tcount = 7;
+\t}
+
+\tOracle IOracleService.Oracle => this;
+
 \tvoid IDisposable.Dispose()
 \t{
 \t\tcount = 0;
@@ -200,40 +316,168 @@ public class Widget
 }
 '''
 
-SELFTEST_EXPECT = {
+SHAPES_EXPECT = {
     'count = n;': 'Widget.Widget',
     'count--;': 'Widget.Step',
     'count++;': 'Widget.Step',
     'count = 0;': 'Widget.Dispose',
     'return "w";': 'Widget.Name',
+    # a call statement is not an explicit interface implementation
+    'return MyMath.AngleToVector(_direction);': 'Widget.Facing',
+    # ... while a real one, expression-bodied and modifier-less, still is
+    'Oracle IOracleService.Oracle => this;': 'Widget.Oracle',
+    # a tuple-typed field is not a constructor, and the field after it is not inside one
+    'private Vector2 lastMousePos;': 'Widget.<declarations>',
+    # an array-initializer element is an object creation, not a constructor declaration
+    'new Color(46, 125, 201),': 'Widget.<declarations>',
+    'private int paletteIndex;': 'Widget.<declarations>',
+    # a declaration that completes on its own line does not swallow the next one
+    'public event ExitMenu OnExit;': 'Widget.<declarations>',
+    # a nested type's own members are qualified by it ...
+    'public float Depth;': 'Widget.Inner.<declarations>',
+    'Depth = 0f;': 'Widget.Inner.Reset',
+    'on': 'Widget.Inner.Mode.<declarations>',
+    # ... and the outer type gets its name back afterwards, which is the whole card
+    'count = 7;': 'Widget.After',
 }
+
+SHAPES_ALLOWED = {
+    # the trailing line past the class' closing brace -- present because the type scope really does
+    # close, which is the fault this fixture exists to catch
+    '<none>.<declarations>',
+    'Widget.<declarations>', 'Widget.Count', 'Widget.IsEntering', 'Widget.Name', 'Widget.Widget',
+    'Widget.Step', 'Widget.Facing', 'Widget.After', 'Widget.Oracle', 'Widget.Dispose',
+    'Widget.Inner.<declarations>', 'Widget.Inner.Reset', 'Widget.Inner.Mode.<declarations>',
+}
+
+# VERBATIM ilspycmd output (ILSpy 8.2.0, EvilAliensWeb.dll, decompiled lines 1959-2012 = the whole
+# of `AudioData`). Do not reflow, retype or tidy it: what it pins is ILSpy's own LAYOUT choice --
+# the nested `StreamState` is emitted FIRST, ahead of the fields, though `AudioData.cs` declares it
+# after them. That is what makes an unclosed type scope mis-attribute the entire outer type rather
+# than a trailing member or two, and a hand-authored fixture would only encode our belief about it.
+ILSPY_NESTED_TYPE_SOURCE = '''\
+\tinternal class AudioData
+\t{
+\t\tpublic enum StreamState
+\t\t{
+\t\t\tpending,
+\t\t\tplaying,
+\t\t\tfadeIn,
+\t\t\tfadeOut
+\t\t}
+
+\t\tprivate const int Volume_Silent = -5000;
+
+\t\tprivate const int Volume_Normal = -1200;
+
+\t\tprivate const float FadeSpeed = 1.5f;
+
+\t\tprivate const int E_ABORT = -2147467260;
+
+\t\tprivate float volume;
+
+\t\tprivate StreamState state;
+
+\t\tpublic StreamState State => state;
+
+\t\tpublic AudioData()
+\t\t{
+\t\t\tstate = StreamState.pending;
+\t\t\tNewGraph();
+\t\t}
+
+\t\tprivate void ResetGraph()
+\t\t{
+\t\t}
+
+\t\tprivate void NewGraph()
+\t\t{
+\t\t}
+
+\t\tpublic void Update(GameTime gameTime)
+\t\t{
+\t\t}
+
+\t\tpublic void SetRate(double rate)
+\t\t{
+\t\t}
+
+\t\tpublic void PlayFile(string filename, bool fadein)
+\t\t{
+\t\t}
+
+\t\tpublic void Stop(bool fadeout)
+\t\t{
+\t\t}
+\t}
+'''
+
+ILSPY_NESTED_TYPE_EXPECT = {
+    'playing,': 'AudioData.StreamState.<declarations>',
+    # the fields ILSpy emits AFTER the hoisted nested type belong to the outer type
+    'private StreamState state;': 'AudioData.<declarations>',
+    'public StreamState State => state;': 'AudioData.State',
+    'state = StreamState.pending;': 'AudioData.AudioData',
+    'NewGraph();': 'AudioData.AudioData',
+}
+
+ILSPY_NESTED_TYPE_ALLOWED = {
+    '<none>.<declarations>',    # the trailing line past the class' closing brace, as above
+    'AudioData.<declarations>', 'AudioData.StreamState.<declarations>', 'AudioData.State',
+    'AudioData.AudioData', 'AudioData.ResetGraph', 'AudioData.NewGraph', 'AudioData.Update',
+    'AudioData.SetRate', 'AudioData.PlayFile', 'AudioData.Stop',
+}
+
+Fixture = collections.namedtuple('Fixture', 'label source expect allowed')
+
+SELFTEST_FIXTURES = (
+    Fixture('declaration shapes', SHAPES_SOURCE, SHAPES_EXPECT, SHAPES_ALLOWED),
+    Fixture('verbatim ilspycmd output', ILSPY_NESTED_TYPE_SOURCE, ILSPY_NESTED_TYPE_EXPECT,
+            ILSPY_NESTED_TYPE_ALLOWED),
+)
 
 
 def selftest():
     """Attribution IS this tool's contract, so it gets a test that does not need a build.
 
-    Guards the specific ways it has already been broken: a zero-or-more modifier prefix makes
-    `else if (...)` parse as a member named `if`, and constructors / properties / explicit
-    interface implementations match no `modifiers returnType Name(` pattern at all.
+    Guards the specific ways it has already been broken: a type scope that never closed, so a
+    nested type stole its outer type's name for every member below it; a zero-or-more modifier
+    prefix that made `else if (...)` parse as a member named `if`; constructors / properties /
+    explicit interface implementations matching no `modifiers returnType Name(` pattern at all;
+    and three shapes that matched a pattern they had no business matching (a `return X.Y(...)`
+    call, a tuple-typed field, a declaration complete on one line).
     """
-    lines = SELFTEST_SOURCE.split('\n')
-    where = enclosing(lines)
     failures = []
-    for needle, expected in SELFTEST_EXPECT.items():
-        hits = [w for l, w in zip(lines, where) if l.strip() == needle]
-        if not hits:
-            failures.append(f'  {needle!r}: never found in the fixture')
-        elif hits[0] != expected:
-            failures.append(f'  {needle!r}: attributed to {hits[0]}, expected {expected}')
-    bogus = sorted({w for w in where if w.split('.')[-1] in ('if', 'else', 'return', 'get')})
-    if bogus:
-        failures.append(f'  a statement keyword parsed as a member: {bogus}')
+    checked = 0
+    for fx in SELFTEST_FIXTURES:
+        lines = fx.source.split('\n')
+        where = enclosing(lines)
+        for needle, expected in fx.expect.items():
+            checked += 1
+            hits = [w for l, w in zip(lines, where) if l.strip() == needle]
+            if not hits:
+                failures.append(f'  [{fx.label}] {needle!r}: never found in the fixture')
+            elif hits[0] != expected:
+                failures.append(f'  [{fx.label}] {needle!r}: attributed to {hits[0]}, '
+                                f'expected {expected}')
+        # An EXACT whitelist, not a blacklist of statement keywords. A phantom member is named
+        # after whichever identifier the regex latched onto -- `AngleToVector`, `List<` -- which no
+        # keyword list can anticipate, and that is precisely how those two went unnoticed. The
+        # `missing` half is not symmetry for its own sake either: it fails a fixture that has been
+        # edited until it no longer reaches a construct it is supposed to cover.
+        seen = set(where)
+        for name in sorted(seen - fx.allowed):
+            failures.append(f'  [{fx.label}] attributed lines to {name!r}, which is not a member '
+                            f'of this fixture')
+        for name in sorted(fx.allowed - seen):
+            failures.append(f'  [{fx.label}] nothing attributed to {name!r} -- the fixture no '
+                            f'longer reaches it')
     if failures:
         print('SELFTEST FAILED:')
         print('\n'.join(failures))
         return EXIT_DIFFERENT
-    print(f'SELFTEST PASSED -- {len(SELFTEST_EXPECT)} member attributions correct, '
-          f'no statement parsed as a member.')
+    print(f'SELFTEST PASSED -- {checked} member attributions correct across '
+          f'{len(SELFTEST_FIXTURES)} fixtures, no phantom members.')
     return EXIT_IDENTICAL
 
 

@@ -313,6 +313,32 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
     is the finding"), so it has **`--selftest`** (no build, no git — run it after touching the
     regexes). At least one modifier is REQUIRED in the member pattern: relax it and `else if (…)`
     parses as a member named `if`, and every later hunk files under it.
+  - **Attribution is FULLY QUALIFIED: a nested type's members read `Outer.Nested.Member`.** Anything
+    not inside a nested type keeps the plain `Type.Member` spelling. Two of this assembly's nested
+    types are both called `Entry` (`LandedOffsets`, `NetIdRegistry`), so the bare leaf is ambiguous.
+  - **`ilspycmd` emits a nested type FIRST in its outer type's body, ahead of the fields, whatever
+    the source order.** So a type scope that fails to close does not mis-name a trailing hunk or
+    two -- it mis-names EVERY member of the outer type. 85 nested types across 68 of this
+    assembly's 374 types, i.e. 48.8% of its decompiled lines before card `e5fafedb`.
+  - **Every declaration pattern has to stay distinguishable from a STATEMENT, and each needs its
+    own guard** -- this is the failure mode the tool keeps having. `MEMBER_RE` requires a modifier
+    (above). `EXPLICIT_IMPL_RE` cannot (a real explicit impl carries none), so it rejects a line
+    whose head token is a statement keyword -- otherwise `return MyMath.AngleToVector(x);` is a
+    member named `AngleToVector`. The CONSTRUCTOR alternative rejects an unbalanced `<` in the name
+    (else a tuple-typed field, `List<(int, Rectangle)> hits = ...;`, matches as `List<`) and a
+    statement head (else an array-initializer element, `new Color(46, 125, 201),`, matches as
+    `Color` -- `new` is the one keyword that is both a modifier and an expression head, and a
+    constructor can never be declared `new`). A declaration that completes on its own line
+    (`=> expr;`, `{ get; set; }`) opens no scope, or every following field files under that
+    property until the type's closing brace.
+  - **`--selftest`'s safety net is an EXACT WHITELIST of the attributions a fixture may produce, not
+    a blacklist of statement keywords** -- a phantom member is named after whichever identifier the
+    regex latched onto, which no keyword list can anticipate. Measured: with the blacklist in place,
+    a build that still parses the tuple-typed field as `List<` passes clean. It asserts the
+    whitelist is fully REACHED too, so a fixture cannot be edited until it stops covering a shape.
+  - **One fixture is VERBATIM `ilspycmd` output (`ILSPY_NESTED_TYPE_SOURCE`) -- do not reflow or
+    retype it.** It is what pins the hoisting rule above; a hand-authored equivalent would only
+    encode our belief about ILSpy's layout.
 
 **Decompiler-artifact cleanup: what has been done, and what deliberately has not.** Card `0c624f9d`
 collapsed ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated

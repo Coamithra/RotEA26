@@ -149,10 +149,8 @@ def main():
     pngs = enumerate_pngs()
     # A --only that matches nothing is a typo, not a request to build nothing: it used to print
     # "0 asset(s) ... done." and exit 0, so a mistyped glob looked like a successful build.
-    # build_textures.py's --only hard-fails on no match; match that. (The pattern is NOT lowercased
-    # any more either -- but note that is cosmetic on this Windows-only toolchain, because
-    # fnmatch.fnmatch normcases both sides, so an uppercase pattern already matched. The error
-    # below is the part that actually changes behaviour.)
+    # build_textures.py's --only hard-fails on no match; match that. (Dropping the pattern's
+    # .lower() is cosmetic on Windows -- tools/CLAUDE.md explains why -- the error is the fix.)
     selected = [p for p in sorted(pngs) if not args.only or fnmatch.fnmatch(rel_asset(p), args.only)]
     if args.only:
         if not selected:

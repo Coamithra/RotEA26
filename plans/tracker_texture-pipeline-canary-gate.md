@@ -66,9 +66,10 @@ uppercase pattern already matched. The error is the part that changes behaviour.
 
 | # | Check | Result |
 |---|---|---|
-| 1 | `build_textures.py --selftest` | 19/19 ok |
-| 2 | 6 mutants of the rule + write policy | all killed (5/1/1/3/2/1 rows flipped) |
-| 3 | `check_pad_bleed.py --selftest` | ok (untouched) |
+| 1 | `build_textures.py --selftest` | 28/28 ok |
+| 2 | 10 mutants of the rule, the gate and the write policy | all killed (5/1/1/3/2/1 + 4/2/3/1) |
+| 3 | `check_pad_bleed.py --selftest` and full 124-asset sweep | ok (after the `read_dds` header split) |
+| 3b | manifest damaged, then a canary-refused build | manifest NOT rewritten (the gate precedes every write) |
 | 4 | `--only gfx/base/756-v1 --padtest 100` | builds, `check_pad_bleed` green, `.dds` byte-identical to the committed one |
 | 5 | `--only gfx/base/756-v1` (bare) | gate fires, exit 1, `git status` clean |
 | 6 | `--dry-run` bare | gate fires, exit 1 |

@@ -236,8 +236,13 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
     it is what the eventual ship rebuild at `--padtest 0` (Trello `f2621e52`) must pass.
   - **`--selftest`** pins the rule against a case table (strip / partial shrink / minimal→minimal /
     growth / new asset / unstamped / resized source, both ways) plus a negative control: the
-    plausible padded-dims rule must FALSE-POSITIVE on the resized-source row. Mutation-tested —
-    `<`→`<=` flips 5 rows, deleting the new-asset exemption flips 1, the padded-dims rule flips 1.
+    plausible padded-dims rule must FALSE-POSITIVE on the resized-source row. It also pins the
+    GATE, not just the rule — that `--drop-canary` bypasses a real finding, that a raw-only
+    selection checks nothing, that a new asset is reported but not fatal — driving `check_canary`
+    through an injected `probe`, so no `Content` tree is needed. Mutation-tested: `<`→`<=` flips 5
+    rows, deleting the new-asset exemption 1, the padded-dims rule 1, inverting `--drop-canary` 4,
+    making the opt-out a no-op 2, disabling the gate 3.
+
   **`--manifest-only` no longer dirties `Compat/PrecompiledTextures.cs`.** It goes through
   `write_generated()`, which writes only when the bytes would change and preserves the file's own
   line endings. The checkout is `core.autocrlf=true` with no `.gitattributes`, so that file is CRLF
@@ -246,7 +251,9 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   preserving the endings alone still rewrites (and bumps mtime, so MSBuild rebuilds) when nothing
   changed, and skipping on equal content alone never matches, because LF text never equals a CRLF
   file. The same `--selftest` covers it.
-- **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and checks
+- **`check_pad_bleed.py`** owns the DDS header parse for both scripts (`parse_dds_header`, plus
+  `read_dds_header` for the callers that want the four dims and not the ~130 MB of surface data —
+  the canary gate above). It is the guard for that gutter: it decodes every shipped `.dds` and checks
   the texel just outside the logical edge still looks like the edge it replicates (alpha-weighted,
   each texel calibrated against the image's own local across-edge step, so BC3 noise doesn't cry
   wolf). `build_textures.py` **runs it automatically** and fails the build on a regression; run it

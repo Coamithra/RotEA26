@@ -158,6 +158,9 @@ def poke_dds_logical(path, w, h):
 
 
 def fail(msg) -> NoReturn:
+    # Flush stdout FIRST: it is block-buffered under a redirect/pipe while stderr is not, so an
+    # error that says "listed above" would otherwise print before the lines it refers to.
+    sys.stdout.flush()
     print("ERROR: " + msg, file=sys.stderr)
     sys.exit(1)
 
@@ -207,14 +210,14 @@ def read_dds_dims(path):
     if not os.path.isfile(path):
         return None
     try:
-        _data, pw, ph, lw, lh, _mips, _block = pad_bleed_module().read_dds(path)
-    except ValueError as e:
+        pw, ph, lw, lh, _mips, _block = pad_bleed_module().read_dds_header(path)
+    except (ValueError, OSError) as e:
         print(f"  WARN  cannot read {os.path.relpath(path, REPO)} for the canary check: {e}")
         return None
     return pw, ph, lw, lh
 
 
-def pad_over(pw, ph, lw, lh):
+def over_pad(pw, ph, lw, lh):
     """How far a built .dds is padded PAST the minimal mult-of-4 -- i.e. the canary it carries.
 
     (0, 0) for a ship-minimal (--padtest 0) build and for an unpadded/unstamped file; exactly
@@ -231,53 +234,78 @@ def canary_shrink(disk, w, h, pad_extra):
     axis is a finding."""
     if disk is None:
         return None
-    old = pad_over(*disk)
-    new = pad_over(*target_dims(w, h, pad_extra), w, h)
+    old = over_pad(*disk)
+    new = over_pad(*target_dims(w, h, pad_extra), w, h)
     return (old, new) if new[0] < old[0] or new[1] < old[1] else None
 
 
 def dds_path_for(asset):
+    """Where build_dxt writes this asset's .dds -- the gate must inspect the file the build
+    replaces, so both sides resolve the path through here."""
     png = src_png(asset)
     return os.path.join(os.path.dirname(png), os.path.basename(asset) + ".dds")
 
 
-def fleet_canary(entries):
+def asset_probe(asset):
+    """(logical w, h, dims of the .dds already on disk) -- ALL the I/O the canary gate does.
+
+    None when the source PNG is missing, which build_dxt reports properly; the gate must not
+    pre-empt that error. Isolated behind one function so selftest() can drive check_canary with a
+    table instead of a Content tree."""
+    from PIL import Image
+    png = src_png(asset)
+    if not os.path.isfile(png):
+        return None
+    with Image.open(png) as im:
+        w, h = im.size
+    return w, h, read_dds_dims(dds_path_for(asset))
+
+
+def fleet_canary(entries, known, probe):
     """The over-pad every already-built dxt asset agrees on, or None if they disagree / none exist.
 
-    Only consulted when a NEW asset is in the build (see check_canary), so the ~124 header reads
-    are not paid by an ordinary run."""
-    overs = {pad_over(*disk) for disk in
-             (read_dds_dims(dds_path_for(e[1])) for e in entries if e[0] == "dxt")
-             if disk is not None}
+    `known` is the {asset: disk} check_canary has already read, so nothing is read twice -- on a
+    full build that covers every entry and this costs no I/O at all. Only consulted when a NEW
+    asset is in the build, so an ordinary run never pays for the rest of the sweep either."""
+    overs = set()
+    for e in entries:
+        if e[0] != "dxt":
+            continue
+        if e[1] in known:
+            disk = known[e[1]]
+        else:
+            probed = probe(e[1])
+            disk = probed[2] if probed else None
+        if disk is not None:
+            overs.add(over_pad(*disk))
     return overs.pop() if len(overs) == 1 else None
 
 
-def check_canary(selected, entries, pad_extra, drop_canary):
+def check_canary(selected, entries, pad_extra, drop_canary, probe=asset_probe):
     """Preflight the SELECTED dxt entries: refuse to shrink the shipped over-pad canary.
 
-    Runs before anything is written, and under --dry-run too -- a dry run that prints a plan for a
-    command which would abort has predicted the wrong outcome. Zero selected dxt entries (e.g. a
-    raw-only --only) means zero checks and no output."""
-    from PIL import Image
-    findings, fresh = [], []
+    Runs before ANY write, and under --dry-run too -- a dry run that prints a plan for a command
+    which would abort has predicted the wrong outcome. Zero selected dxt entries (e.g. a raw-only
+    --only, or --manifest-only, which never reaches here) means zero checks and no output."""
+    findings, fresh, known = [], [], {}
     for e in selected:
         if e[0] != "dxt":
             continue
-        png = src_png(e[1])
-        if not os.path.isfile(png):
+        probed = probe(e[1])
+        if probed is None:
             continue           # build_dxt owns the "source not found" error; don't pre-empt it
-        with Image.open(png) as im:
-            w, h = im.size
-        disk = read_dds_dims(dds_path_for(e[1]))
+        w, h, disk = probed
+        known[e[1]] = disk
         hit = canary_shrink(disk, w, h, pad_extra)
         if hit:
             findings.append((e[1], target_dims(w, h, pad_extra), disk, hit[0], hit[1]))
         elif disk is None:
-            fresh.append((e[1], pad_over(*target_dims(w, h, pad_extra), w, h)))
+            fresh.append((e[1], over_pad(*target_dims(w, h, pad_extra), w, h)))
     # A brand-new asset has no canary to lose, so the rule above cannot judge it -- but building the
     # one asset that ships WITHOUT the fleet's canary is the same mistake by another route. Say so.
+    # Deliberately NOT fatal: the card requires a legitimate first build of a new asset to pass.
     if fresh:
-        fleet = fleet_canary(entries)
+        fleet = fleet_canary(entries, known, probe)
         for asset, new in fresh:
             if fleet is not None and new != fleet:
                 print(f"  NOTE  {asset} has no .dds yet, so the canary gate cannot judge it: this "
@@ -285,22 +313,23 @@ def check_canary(selected, entries, pad_extra, drop_canary):
                       f"+{fleet[0]}x{fleet[1]}px.  --padtest {fleet[0]} matches the shipped set.")
     if not findings:
         return
+    verb = "strip" if pad_extra == 0 else "shrink"
     print(f"  [canary] {len(findings)} selected asset(s) carry an over-pad canary this run would "
-          f"{'strip' if pad_extra == 0 else 'shrink'}:")
+          f"{verb}:")
     for asset, (tw, th), disk, old, new in findings:
         print(f"    {asset}  on disk {disk[0]}x{disk[1]} (logical {disk[2]}x{disk[3]}, "
               f"+{old[0]}x{old[1]}px)  ->  would build {tw}x{th} (+{new[0]}x{new[1]}px)")
     if drop_canary:
-        print("  [drop-canary] removing it is the point of this run (Trello f2621e52) -- proceeding.")
+        print(f"  [drop-canary] this run is meant to {verb} it -- proceeding.")
         return
     keep = max(o for f in findings for o in f[3])
-    fail(f"this build would strip the over-pad canary from {len(findings)} of the "
-         f"{len(selected)} selected asset(s) (listed above).\n"
+    fail(f"this build would {verb} the over-pad canary from {len(findings)} of the "
+         f"{len(known)} selected dxt asset(s) (listed above).\n"
          "  The shipped .dds deliberately carry it -- tools/CLAUDE.md (Textures) and web\n"
          '  CLAUDE.md ("The canary is LEFT ON"). It is what makes a padded-vs-logical size bug\n'
          "  visible in play, so dropping it by accident costs that coverage silently.\n"
          f"  Keep it:                 --padtest {keep}\n"
-         "  Remove it deliberately:  --drop-canary   (the opt-out; Trello f2621e52)")
+         "  Remove it deliberately:  --drop-canary   (see tools/CLAUDE.md before you do)")
 
 
 def mult4_preserving_pitch(total, divs):
@@ -416,7 +445,7 @@ def build_dxt(asset, dry, pad_extra=0, mip=False):
     tw, th = target_dims(w, h, pad_extra)
     padded = (tw != w or th != h)
     base = os.path.basename(asset)
-    out_dds = os.path.join(os.path.dirname(png), base + ".dds")
+    out_dds = dds_path_for(asset)   # same helper the canary gate inspects, so they cannot diverge
     note = f"  (logical {w}x{h}, +{pad_extra}px test-pad)" if pad_extra else (
         f"  (logical {w}x{h})" if padded else "")
     levels = len(mip_sizes(tw, th)) if mip else 1
@@ -512,7 +541,9 @@ def write_generated(path, text, dry):
         with open(path, "rb") as f:
             existing = f.read()
     newline = "\r\n" if existing and b"\r\n" in existing else "\n"
-    data = text.replace("\n", newline).encode("utf-8")
+    # Normalise first: `text` is LF-only today, but a caller that ever hands this CRLF would
+    # otherwise get \r\r\n out.
+    data = text.replace("\r\n", "\n").replace("\n", newline).encode("utf-8")
     if data == existing:
         return False
     if not dry:
@@ -566,15 +597,15 @@ def write_manifest_cs(entries, dry):
           f"{os.path.relpath(MANIFEST_CS, REPO)}  ({state})")
 
 
-def padded_dims_verdict(disk, w, h, pad_extra):
-    """The SUPERSEDED rule, kept only so selftest() can show what it gets wrong.
+def _padded_dims_verdict(disk, w, h, pad_extra):
+    """The SUPERSEDED rule, kept only so selftest() can show what it gets wrong. True == flagged.
 
     It compares the PADDED DIMS instead of the over-pad -- the obvious first guess, and wrong,
     because padded dims also shrink when the SOURCE PNG does."""
     if disk is None:
-        return None
+        return False
     tw, th = target_dims(w, h, pad_extra)
-    return True if tw < disk[0] or th < disk[1] else None
+    return tw < disk[0] or th < disk[1]
 
 
 def selftest():
@@ -607,18 +638,62 @@ def selftest():
     # The discrimination the over-pad measure exists for, asserted rather than assumed: the naive
     # padded-dims rule flags a rebuild of a shrunken source whose canary is intact.
     resized = (canary, 900, 900, 100)
-    if padded_dims_verdict(*resized) is None:
+    if not _padded_dims_verdict(*resized):
         print("  FAIL  the superseded padded-dims rule was expected to MISS-fire on a resized source")
         ok = False
     else:
         print("  ok    the superseded padded-dims rule flags a resized source whose canary is "
               "intact; the over-pad rule passes it")
 
+    # The RULE is pinned above; this pins the GATE built on it -- above all that --drop-canary
+    # actually bypasses a real finding, since a --drop-canary that silently did nothing would let
+    # exactly the footgun this card exists to close back through. `probe` stands in for the whole
+    # Content tree, so no .dds and no PNG are needed.
+    tree = {"keeps": (1248, 1248, canary), "strips": (1248, 1248, canary),
+            "brand-new": (1000, 1000, None)}
+    entries = [("dxt", a, 1, 1, False) for a in tree] + [("raw", "a/glow", None, None, False)]
+    probe = lambda asset: tree[asset]
+    def gate(assets, pad_extra, drop=False):
+        """(aborted?, everything it printed) for a check_canary run over `assets`.
+
+        stderr is merged in because fail()'s message goes there while the findings it refers to go
+        to stdout -- and the message is part of what these cases assert."""
+        import contextlib
+        import io as _io
+        buf = _io.StringIO()
+        aborted = False
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                check_canary([e for e in entries if e[1] in assets], entries, pad_extra, drop,
+                             probe=probe)
+        except SystemExit:
+            aborted = True
+        return aborted, buf.getvalue()
+
+    gate_cases = [
+        ("a canary-stripping build aborts", gate(["strips"], 0)[0] is True),
+        ("--drop-canary lets the SAME build through", gate(["strips"], 0, drop=True)[0] is False),
+        ("...and says so out loud", "[drop-canary]" in gate(["strips"], 0, drop=True)[1]),
+        ("a --padtest 100 build is silent", gate(["keeps", "strips"], 100) == (False, "")),
+        ("a raw-only selection checks nothing", gate(["a/glow"], 0) == (False, "")),
+        ("a new asset does not abort", gate(["brand-new"], 0)[0] is False),
+        ("...but is reported against the fleet", "NOTE" in gate(["brand-new"], 0)[1]),
+        ("...and is silent when it matches the fleet", gate(["brand-new"], 100) == (False, "")),
+        ("the abort names the padtest that would keep it",
+         "--padtest 100" in gate(["strips"], 0)[1]),
+    ]
+    for name, good in gate_cases:
+        ok &= good
+        print(f"  {'ok  ' if good else 'FAIL'}  check_canary: {name}")
+
     import tempfile
     text = "line one\nline two\n"
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "Generated.cs")
-        read = lambda: open(p, "rb").read()
+
+        def read():
+            with open(p, "rb") as f:      # `with` matters: a leaked handle makes the
+                return f.read()           # TemporaryDirectory cleanup flaky on Windows
         writes = [("first write creates the file", write_generated(p, text, False) is True),
                   ("...as LF", read() == b"line one\nline two\n"),
                   ("re-writing identical text is a no-op", write_generated(p, text, False) is False)]
@@ -660,7 +735,7 @@ def main():
     ap.add_argument("--drop-canary", action="store_true",
                     help="allow this run to strip/shrink the over-pad canary the committed .dds "
                          "carry. The deliberate opt-out from the canary gate, and what the eventual "
-                         "ship rebuild at --padtest 0 needs (Trello f2621e52).")
+                         "ship rebuild at --padtest 0 needs. See tools/CLAUDE.md first.")
     ap.add_argument("--selftest", action="store_true",
                     help="check the canary rule and the generated-file write policy against a case "
                          "table; no config, no .dds, no texconv needed")
@@ -673,10 +748,10 @@ def main():
     print(f"build_textures: {len(entries)} asset(s) from {os.path.relpath(args.config, REPO)}"
           + ("  [dry-run]" if args.dry_run else "")
           + ("  [manifest-only]" if args.manifest_only else ""))
-    # The manifest is derived from the config alone, so emit it first — it stays in sync even if a
-    # later texture build fails, and --manifest-only regenerates it without texconv/Pillow.
-    write_manifest_cs(entries, args.dry_run)
     if args.manifest_only:
+        # Derived from the config alone, so it needs neither texconv nor Pillow -- and there is no
+        # texture build for the canary gate to have an opinion about.
+        write_manifest_cs(entries, args.dry_run)
         print("done.")
         return
     if args.padtest:
@@ -688,9 +763,13 @@ def main():
         if not selected:
             fail(f"--only {args.only!r} matched none of the {len(entries)} config entries")
         print(f"  [only] {len(selected)} of {len(entries)} asset(s) match {args.only!r}")
-    # Refuse to quietly strip the shipped over-pad canary. Before the build, so a rejected run
-    # writes nothing at all -- and so the post-build all-clear can never vouch for one.
+    # Refuse to quietly strip the shipped over-pad canary. This runs before ANY write -- including
+    # the manifest below -- so a refused run leaves the working tree byte-for-byte untouched, and
+    # the post-build all-clear can never end up vouching for one.
     check_canary(selected, entries, args.padtest, args.drop_canary)
+    # The manifest is derived from the config alone, so emit it before the textures: it then stays
+    # in sync even if a later texture build fails.
+    write_manifest_cs(entries, args.dry_run)
     for e in selected:
         if e[0] == "dxt":
             build_dxt(e[1], args.dry_run, args.padtest, mip=e[4])

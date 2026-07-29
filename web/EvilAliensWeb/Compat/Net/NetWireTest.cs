@@ -111,6 +111,10 @@ namespace EvilAliensWeb.Compat.Net
                 ordered = b.Payloads[i][0] == (byte)i;
             }
             check("32 stream sends arrive in order, none dropped", ordered);
+            // No loopback at N=2 either: `a` has been subscribed to the SENDER throughout every
+            // leg above, so nothing it sent may have come back to it. (The rooms wire asserts the
+            // same thing at N=3; without this leg the two-endpoint case was uncovered.)
+            check("nothing a sender sends comes back to it", a.Count == 0);
 
             // No aliasing. The caller may reuse its buffer the moment Send returns -- NetSession
             // does exactly that on the snapshot lane (a static scratch array). A queue that
@@ -187,8 +191,8 @@ namespace EvilAliensWeb.Compat.Net
             check("N=4: one send reaches all three peers",
                 rec[1].Count == 1 && rec[2].Count == 1 && rec[3].Count == 1);
             check("N=4: the sender is not one of them", rec[0].Count == 0);
-            check("N=4: TxSent counts calls, TxDelivered counts deliveries",
-                four[0].TxSent == 1 && four[0].TxDelivered == 3);
+            check("N=4: TxSent counts calls, TxFanout counts the enqueues they produced",
+                four[0].TxSent == 1 && four[0].TxFanout == 3);
 
             // A bye fans out to room-mates, and only to them. Best-effort by contract (the JS
             // pagehide frame), so the assertion is that it arrives, not when.
@@ -212,9 +216,20 @@ namespace EvilAliensWeb.Compat.Net
             byeWire[0].SendReliable(new byte[] { 1 });
             byeWire.Pump();
             check("a closed endpoint cannot send", afterClose.Count == 0);
-            byeWire[1].SendReliable(new byte[] { 1 });
-            byeWire.Pump();
-            check("a closed endpoint receives nothing", byeWire[0].RxDelivered == 0);
+            // The receive half needs a NON-ZERO baseline or it is near-vacuous: p0's RxDelivered
+            // was already 0 before it closed, so "still 0" would hold even with both IsOpen guards
+            // gone. Take the count from a second wire where the endpoint really did receive first.
+            NetWire closeRx = new NetWire(2);
+            closeRx[0].Open("alpha");
+            closeRx[1].Open("alpha");
+            closeRx[1].SendReliable(new byte[] { 1 });
+            closeRx.Pump();
+            long beforeClose = closeRx[0].RxDelivered;
+            check("precondition: the endpoint had received something", beforeClose == 1);
+            closeRx[0].Close();
+            closeRx[1].SendReliable(new byte[] { 2 });
+            closeRx.Pump();
+            check("a closed endpoint receives nothing more", closeRx[0].RxDelivered == beforeClose);
         }
 
         // ---- 2. NetImpairment over a real endpoint ----------------------------------------
@@ -388,7 +403,12 @@ namespace EvilAliensWeb.Compat.Net
                 new int[] { 0, 0, 0, 0, 0 },
             };
             byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, 2), reliable: false);
+            // One scratch array PER ENTRY. TryDecodeHudState writes the levels of whichever entry
+            // it was asked for, so a shared buffer makes every later assertion depend on decode
+            // ORDER -- which is the exact latent defect this commit fixes in NetComboTest. Cheap
+            // here, so it is simply avoided rather than commented around.
             int[] outLevels = new int[NetProtocol.HudLevelCount];
+            int[] outLevels1 = new int[NetProtocol.HudLevelCount];
             bool hudOk = hud != null
                 && NetProtocol.TryDecodeHudCount(hud, out int hudCount) && hudCount == 2
                 && NetProtocol.TryDecodeHudState(hud, 0, outLevels, out byte hslot, out int hcombo,
@@ -399,7 +419,7 @@ namespace EvilAliensWeb.Compat.Net
                 && outLevels[4] == 0;
             check("MsgHudState round-trips entry 0 (combo > 255 survives)", hudOk);
             bool hud1Ok = hud != null
-                && NetProtocol.TryDecodeHudState(hud, 1, outLevels, out byte h1slot, out int h1combo,
+                && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, out byte h1slot, out int h1combo,
                     out EvilAliens.Powerup.PowerupType? h1active, out float h1prog)
                 && h1slot == 2 && h1combo == 3 && !h1active.HasValue && Near(h1prog, 1f);
             check("MsgHudState entry 1 decodes, and HudPowerupNone reads as no powerup", hud1Ok);

@@ -22,11 +22,19 @@
 # ServiceHelper touch introduced later would throw. NetWireTest is deliberately Game-free; if it
 # ever stops being so, this leg is where that shows up first.
 #
-# THE POSITIVE IS THE `67 passed, 0 failed` TALLY, not the absence of FAIL lines. `expect-not FAIL`
+# THE POSITIVE IS THE `69 passed, 0 failed` TALLY, not the absence of FAIL lines. `expect-not FAIL`
 # alone would pass on a run where the eval never happened (a renamed DebugInput method makes `eval`
 # report an unknown command, prints no FAIL, and the probe would go green over nothing). The tally
 # also catches a suite that silently stopped running sections -- the count is the number at the
 # time of writing and is meant to be RAISED when legs are added, never lowered.
+#
+# IT OVERLAPS net_selftests.txt ON PURPOSE, and outlives it. That probe is a REFACTOR-ERA net --
+# it exists to hold card 25ad0659's steps 2-4 to the pre-refactor behaviour of eleven cards' worth
+# of suites, and once the de-static work has landed and settled it is a candidate for pruning. This
+# one is the wire's OWN permanent probe: it is where the section-header assertions live (which is
+# what catches a suite that threw or returned early rather than one that failed), and it is what a
+# future change to InMemoryTransport or to a NetProtocol layout should be run against. If you are
+# tempted to fold them together, fold net_selftests INTO this one, not the other way round.
 #
 # No level, no session, no gamepad, no content: the suite is pure bytes. `?menu&noattract` only
 # keeps the attract demo from taking the scene over mid-window.
@@ -42,6 +50,6 @@ expect 1\. transport contract
 expect 2\. NetImpairment composed over an endpoint
 expect 3\. codec round trips through the wire
 expect 4\. stream-lane reorder \+ dedup
-expect \[netwire\] 67 passed, 0 failed
+expect \[netwire\] 69 passed, 0 failed
 expect-not FAIL
 quit

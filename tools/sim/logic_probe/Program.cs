@@ -1602,7 +1602,7 @@ internal static class Program
     // added, never lowered to make a run green.
     private static int ProbeNetWire(Assembly asm)
     {
-        const int MinAssertions = 67;
+        const int MinAssertions = 69;
         string[] sections =
         {
             "1. transport contract",
@@ -1634,6 +1634,15 @@ internal static class Program
                 + (ex.InnerException != null ? ex.InnerException.ToString() : ex.ToString()));
             failures++;
             return 0;
+        }
+
+        if (report == null)
+        {
+            // Same class as the "could not reflect" bail above: a Run() changed to return null (or
+            // to void, which Invoke reports as null) would otherwise NRE out with a stack trace --
+            // the one failure the TargetInvocationException catch was written to avoid.
+            Console.WriteLine("FAIL: NetWireTest.Run returned null -- signature changed?");
+            return 2;
         }
 
         int passes = 0;

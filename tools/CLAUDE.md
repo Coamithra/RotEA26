@@ -167,9 +167,10 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   Two guards make a green run mean something: every SECTION HEADER must be present (a suite that
   threw or returned early cannot pass on the FAIL lines it never printed), and a FLOOR on the PASS
   count, meant to be RAISED when legs are added and never lowered to make a run green.
-  Mutation-tested three ways against the wire itself, each isolated: dropping the per-recipient
-  clone turns the aliasing leg FAIL; delivering inline instead of queueing turns 4; taking the
-  Pump budget per endpoint instead of up front turns exactly ONE -- the upward
+  Mutation-tested three ways against the wire itself, each isolated, and the counts here are
+  FAILING LEGS (not the probe's own `FAILURE(S)` line, which is one higher): dropping the
+  per-recipient clone turns **1** (the aliasing leg); delivering inline instead of queueing turns
+  **3**; taking the Pump budget per endpoint instead of up front turns exactly **1** -- the upward
   (`p0 -> p1`) direction and not the downward one, which is why the suite drives both.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it

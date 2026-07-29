@@ -96,7 +96,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
 - **Impl #3 `InMemoryTransport` (card 25ad0659) is the HEADLESS one: N endpoints in ONE process,
   no browser and no JS.** Created only by `NetWire(int peers)` (its owner and switch, max 8);
   `wire[i]` is the endpoint. `NetSession.StartWith` already takes an arbitrary `INetTransport`, so
-  a scenario can put one end into a live session and drive the other by hand.
+  a scenario can put one end into a live session and drive the other by hand (the reachable entry
+  points are `StartMenuSession` / `StartListedSession`; `StartWith` itself is private).
   - **The peer count is a PARAMETER, not 2.** Per-`(src,dst)` queues and a fan-out `Dispatch`,
     even though the protocol is 2-peer, so the N-peer stages (`plans/4p-online-coop.md`,
     11.7-11.11) add contexts rather than rebuilding the rig. Anything written against it must
@@ -109,9 +110,19 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     "reply waits for the next Pump" assertion passed whether the budget was there or not, and
     only the upward direction ever discriminated. `Pump(int budget)` drains ONE peer, which is how
     a peer is made to lag a tick behind.
-  - Payload is cloned **per recipient**; rooms isolate (a send only reaches endpoints opened on
-    the same room string, so one wire can host two pairings and `?room=`'s property is tested
-    rather than assumed); `Close()` byes room-mates only, and a closed endpoint is inert both ways.
+  - Payload is cloned **per recipient**; rooms isolate (a send only reaches endpoints opened on the
+    same room string, so one wire can host two pairings and `?room=`'s property is tested rather
+    than assumed -- and re-`Open`ing an endpoint on a DIFFERENT room THROWS rather than silently
+    staying put); a closed endpoint is inert both ways. `TxSent` counts calls and `TxFanout` the
+    enqueues they produced -- **neither is a delivery count** (delivery moves `RxDelivered` on the
+    recipient's Pump, and `Close()` drops what was still queued), so never assert
+    `TxFanout == RxDelivered` as "everything got through".
+  - **The bye is NOT ordered against data** -- `Close()` raises `OnPeerBye` inline (to room-mates
+    only), so it jumps ahead of anything still queued at the recipient. That matches
+    `BroadcastChannelTransport` (a separate JS pagehide event) and is the OPPOSITE of
+    `WebRtcTransport`, whose bye rides the ORDERED reliable channel as a `0x00` frame. So a
+    scenario asserting "the peer's last `EvLeave` arrives before its bye" passes here and fails in
+    play; do not write one against this transport.
   - **Verify with `eaNetWire.test()`** (`Compat/Net/NetWireTest.cs`, 67 assertions): the transport
     contract at N=2 and N=4, `NetImpairment` composed over a real endpoint (the chain production
     always builds, previously never executed outside a browser), and every codec's real frames put

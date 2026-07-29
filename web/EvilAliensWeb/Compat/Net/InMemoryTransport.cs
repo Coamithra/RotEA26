@@ -11,8 +11,10 @@ namespace EvilAliensWeb.Compat.Net
     // tick at a useful rate -- see the two-window GOTCHA in this directory's CLAUDE.md) or drove
     // one internal policy through a synthetic input (NetImpairment.SelfTest, NetScoreLedger.
     // SelfTest). Neither can reach a real NetSession's own decisions off a real wire. A paired
-    // in-memory transport can: NetSession.StartWith already takes an arbitrary INetTransport, so
-    // a scenario opens one endpoint into the live session and drives the other by hand.
+    // in-memory transport can: NetSession's session entry points already take an arbitrary
+    // INetTransport (StartMenuSession / StartListedSession are the public ones -- StartWith itself
+    // is private), so a scenario opens one endpoint into the live session and drives the other by
+    // hand.
     //
     // THE PEER COUNT IS A PARAMETER, deliberately (card 25ad0659's absorbed 11.6 half). A
     // two-endpoint transport is one field -- `peer` -- and every scenario written against it bakes
@@ -31,6 +33,13 @@ namespace EvilAliensWeb.Compat.Net
     //   * delivery is on the RECEIVING endpoint's Pump, never inline on the send. That is the
     //     whole point -- a scenario decides when each peer drains, which is what makes event
     //     ORDERING assertions possible at all.
+    //   * the BYE IS THE EXCEPTION and it is NOT ordered against data: Close() raises OnPeerBye
+    //     synchronously, so it jumps ahead of everything the closing endpoint still has queued at
+    //     the recipient. That matches BroadcastChannelTransport (a separate JS pagehide event) but
+    //     is the OPPOSITE of WebRtcTransport, whose bye is a 1-byte 0x00 frame on the ORDERED
+    //     reliable channel and therefore lands after previously-sent reliable data. So a scenario
+    //     asserting "the peer's final EvLeave is seen before its bye" would pass here and fail in
+    //     play -- do not write one against this transport.
     public sealed class NetWire
     {
         // Bounded so a typo (`new NetWire(1000000)`) fails loudly instead of allocating. Well
@@ -144,12 +153,17 @@ namespace EvilAliensWeb.Compat.Net
 
         public bool IsOpen { get; private set; }
 
-        // Counters, so a scenario can assert about traffic without subscribing to OnData. TxSent
-        // counts CALLS; TxDelivered counts endpoint-deliveries, so with one peer up they agree and
-        // with three they do not -- which is the check that a fan-out really fanned out.
+        // Counters, so a scenario can assert about traffic without subscribing to OnData.
+        //
+        // TxSent counts CALLS and TxFanout counts the ENQUEUES those calls produced, so with one
+        // peer up they agree and with three they do not -- which is the check that a fan-out really
+        // fanned out. **TxFanout is not a delivery count**: delivery happens on the recipient's
+        // Pump, which is where RxDelivered moves, and Close() drops whatever was still queued -- so
+        // `sender.TxFanout == receiver.RxDelivered` is NOT "everything got through" and must not be
+        // asserted as such.
         public long TxSent { get; private set; }
 
-        public long TxDelivered { get; private set; }
+        public long TxFanout { get; private set; }
 
         public long RxDelivered { get; private set; }
 
@@ -157,12 +171,22 @@ namespace EvilAliensWeb.Compat.Net
 
         public void Open(string room)
         {
+            string want = room ?? string.Empty;
             if (IsOpen)
             {
+                // Re-opening the SAME room is the idempotent no-op BroadcastChannelTransport.Open
+                // also allows. A DIFFERENT room is not: room isolation is one of the properties
+                // scenarios assert on this transport, so silently staying in the first room would
+                // make a mis-set-up rig look like a passing one.
+                if (Room != want)
+                {
+                    throw new InvalidOperationException("InMemoryTransport " + Id + " is already open on room '"
+                        + Room + "' and cannot be re-opened on '" + want + "'");
+                }
                 return;
             }
             IsOpen = true;
-            Room = room ?? string.Empty;
+            Room = want;
         }
 
         public void SendStream(byte[] payload)
@@ -185,7 +209,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             TxSent++;
-            TxDelivered += wire.Dispatch(this, payload, reliable);
+            TxFanout += wire.Dispatch(this, payload, reliable);
         }
 
         public void Close()

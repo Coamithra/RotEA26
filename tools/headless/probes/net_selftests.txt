@@ -19,18 +19,25 @@
 # prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
 # probe by loosening an expectation: these are all-or-nothing tallies on purpose.
 #
-# ALL ELEVEN ARE ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
+# TEN SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
 # already cost something in this repo: (a) an `expect-not` passes on a run where the eval never
 # happened, which a renamed DebugInput method silently produces; (b) several of these suites SKIP
 # legs they cannot reach (NetCosmetic's client apply path needs a level, NetKickTest's
 # survives-Stop() leg needs no live session) and a skipped leg is not a pass -- the tally is what
 # distinguishes them; (c) a suite that threw halfway prints neither a FAIL nor a tally.
 #
-# THE COUNTS ARE PART OF THE ASSERTION. `67`, `82/82`, `29/29`, `18`, `36`, `9/9`, `15/15`, `27`, `17` are the
-# figures at the time of writing; a suite that loses checks fails here rather than passing faster.
-# Raise them when checks are added.
+# THE COUNTS ARE PART OF THE ASSERTION. `69`, `82/82`, `29/29`, `18`, `36`, `9/9`, `15/15`, `27`,
+# `17` are the figures at the time of writing; a suite that loses checks fails here rather than
+# passing faster. Raise them when checks are added.
+# TWO SUITES CANNOT BE ASSERTED THAT WAY, and both are called out rather than quietly weaker:
+# `eaNetScore.test`'s `NetScoreLedger.SelfTest` prints a bare `[netscore] PASS` with no tally (it
+# is an AND of five booleans), so a leg DELETED from it would pass faster and silently -- the one
+# gap in the counts rule here; and `eaNetSim.test` prints measurements rather than a verdict, so
+# its line asserts the INVARIANT instead (below).
 #
 # MENU-ONLY, AND THAT IS LOAD-BEARING: eaBinTest and eaNetSnap both refuse to run near a live world
+# (their two SKIP messages are worded differently -- `SKIP (run from the main menu` vs
+# `SKIP net-puppet scenarios (run from the main menu` -- hence the loose `SKIP.*` guard below)
 # (they arm a real Purge<AlienDrawableGameComponent> / build real puppets) and would print SKIP
 # instead -- which the tallies above would then catch. `?noattract` is what keeps the 20s attract
 # demo from becoming that live world mid-window; it is out of DebugFlags.Active, so it changes
@@ -51,9 +58,10 @@ eval NetScoreTest 400 6 80 1
 eval NetCosmetic
 eval BinTest
 eval TeamSeat
+eval NetSimTest 150 20 60 200
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659)
-expect \[netwire\] 67 passed, 0 failed
+expect \[netwire\] 69 passed, 0 failed
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
@@ -72,7 +80,16 @@ expect \[cosmetictest\] PASS \(15/15 checks\)
 expect \[bin\] 27 passed, 0 failed
 # the TeamChallenge seat resolver over every pad mask (card e6927ef8)
 expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
+# The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
+# and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
+# ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs
+# lag/loss but never jitter (at jitter=0 every ReleaseAt is equal and the clamp is a no-op), so the
+# net genuinely did not cover it. ONE regex, both halves: the STREAM lane must have reordered
+# (proof the jitter setting was actually in force -- otherwise `reorder=0` on the reliable lane is
+# vacuous) while the reliable lane is complete, undropped and in order. Only the stream columns
+# move run to run (private unseeded RNG), so no reliable-lane number here is flaky.
+expect stream: got=.* reorder=[1-9][0-9]* \| reliable: got=200 drop=0 .* reorder=0
 
 expect-not FAILURES
-expect-not SKIP \(run from the main menu
+expect-not SKIP.*run from the main menu
 quit

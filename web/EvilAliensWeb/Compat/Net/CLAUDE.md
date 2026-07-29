@@ -215,11 +215,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   wire byte to an enum outside it**, and a consumer of a decoded value may ASSUME it is in
   range -- do not add a per-site defensive default. A new wire enum needs its validator there
   AND a row in `logic_probe`'s `ProbeWireEnums`.
-  - **`NetBackgroundOp` is the one exemption and it is temporary** -- `NetSession`'s
-    `EvBackground` case still casts the raw byte, because card `ca4fd94f` owned that enum
-    when this landed. It survives only because `NetApplyBackgroundOp`'s switch has no default
-    arm, and it is outside the `Enum.IsDefined` cross-check, so an appended member there is
-    unguarded. Fold it in.
+  - **`NetBackgroundOp`'s range check and `NetApplyBackgroundOp`'s scene guard are DIFFERENT
+    checks -- keep both.** `TryBackgroundOp` refuses a value outside the enum; the guard inside
+    `NetApplyBackgroundOp` refuses an in-enum op that is wrong for the CURRENT scene (a
+    `SetAlienBase2..6` arriving while the client is in a space scene indexes an empty layer
+    list, and on MARS layer 0 is the sky, so it would paint a base tile over it). Neither
+    subsumes the other.
   - Three policies, chosen by what the field DOES. **REJECT** (decoder returns false, message
     dropped) when the field is EXECUTED and no substitute is correct, or when the raw value can
     reach a save file. **CLAMP** for presentation-only fields, where dropping the message loses

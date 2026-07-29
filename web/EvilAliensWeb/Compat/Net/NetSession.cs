@@ -2687,12 +2687,11 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvBackground:
             {
-                if (isHost || data.Length < 13)
+                if (isHost || !NetProtocol.TryDecodeBackgroundEvent(data, out NetBackgroundOp bgOp, out Vector2 v))
                 {
                     return;
                 }
-                Vector2 v = new Vector2(NetProtocol.ReadF32(data, 5), NetProtocol.ReadF32(data, 9));
-                GameScene.NetActiveScene?.NetApplyBackgroundOp((NetBackgroundOp)data[4], v);
+                GameScene.NetActiveScene?.NetApplyBackgroundOp(bgOp, v);
                 metrics.BeatsRx++;
                 break;
             }

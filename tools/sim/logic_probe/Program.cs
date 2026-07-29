@@ -1342,6 +1342,7 @@ internal static class Program
             ("TryPowerupType",  "EvilAliens.Powerup+PowerupType"),
             ("TryMessageType",  "EvilAliens.AnimatedMessage+MessageType"),
             ("TrySpeech",       "EvilAliens.SoundManager+Texts"),
+            ("TryBackgroundOp", "EvilAliensWeb.Compat.Net.NetBackgroundOp"),
         };
 
         MethodInfo launchEnc = proto.GetMethod("EncodeLaunchEvent", anyStatic);

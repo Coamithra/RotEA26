@@ -86,15 +86,6 @@ namespace EvilAliensWeb.Compat.Net
         // Adding a wire enum means adding its validator here AND a row in logic_probe's
         // ProbeWireEnums. Both halves are required -- see the maintenance note below.
         //
-        // ONE KNOWN EXEMPTION, and it is temporary: `NetBackgroundOp`. NetSession's
-        // EvBackground case still does a bare `(NetBackgroundOp)data[4]` cast, because a
-        // concurrent card (ca4fd94f) owns that enum and its decode path. It does not crash
-        // today only because GameScene.NetApplyBackgroundOp's switch has no default arm, so
-        // an unknown op silently no-ops -- that is luck, not this contract. It is also NOT
-        // covered by the Enum.IsDefined cross-check below, so an appended member there is
-        // unguarded in both directions. Fold it in once that card has landed; until then,
-        // read the sentence above as "every wire enum except this one".
-        //
         // Three policies. Pick by what the field DOES, not by how bad the value looks:
         //   REJECT   -- the decoder returns false and the whole message is dropped. Use
         //               when the field is EXECUTED and no substitute is correct, or when
@@ -227,6 +218,21 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             speech = (SoundManager.Texts)raw;
+            return true;
+        }
+
+        // REJECT: the op SELECTS a Background primitive to run, so an unknown one has no
+        // stand-in -- substituting a different scene or doodad would put the joiner's world
+        // somewhere the host's is not. Dropping the message leaves it on the backdrop it
+        // already had, which is the pre-replication behaviour and desyncs nothing.
+        internal static bool TryBackgroundOp(int raw, out NetBackgroundOp op)
+        {
+            op = default;
+            if (raw < 0 || raw > (int)NetBackgroundOp.SetSceneAlienBase)
+            {
+                return false;
+            }
+            op = (NetBackgroundOp)raw;
             return true;
         }
 
@@ -825,6 +831,18 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 5, v.X);
             WriteF32(b, 9, v.Y);
             return b;
+        }
+
+        internal static bool TryDecodeBackgroundEvent(byte[] b, out NetBackgroundOp op, out Vector2 v)
+        {
+            op = default;
+            v = Vector2.Zero;
+            if (b.Length < 13 || !TryBackgroundOp(b[4], out op))
+            {
+                return false;
+            }
+            v = new Vector2(ReadF32(b, 5), ReadF32(b, 9));
+            return true;
         }
 
         // EvCosmeticSwarm (card 9a3175d0): [kind:1][on:1][rate:f32] -- turn a decorative swarm on

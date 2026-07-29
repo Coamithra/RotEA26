@@ -505,12 +505,16 @@ internal class MenuScene : Scene
 
 	private void confirmationMenu_YesSelected(MenuSub1 sender)
 	{
+		// SaveIgnoringSuppression, not SaveNoThread: under ?unlockall those two savables refuse
+		// to save (card 36db5d75), which would make this reset half-apply -- screenshots really
+		// deleted, Settings written, but every unlock resurrecting on the next reload. Erasing
+		// to a clean slate is the one direction suppression must not block.
 		Achievements.GetInstance().Reset();
-		Achievements.GetInstance().SaveNoThread();
+		Achievements.GetInstance().SaveIgnoringSuppression();
 		Settings.GetInstance().DisableCheats();
 		Settings.GetInstance().SaveNoThread();
 		Unlockables.GetInstance().Reset();
-		Unlockables.GetInstance().SaveNoThread();
+		Unlockables.GetInstance().SaveIgnoringSuppression();
 		ScreenshotSaver.DeleteScreenshots();
 		confirmationMenu.Remove();
 		optionsMenu.Show();
@@ -1354,7 +1358,13 @@ internal class MenuScene : Scene
 		base.SoundManager.PlayMusic(Songs.Sjaak);
 		// Debug (?unlockall): reveal every gated menu option (Cheats, all challenges,
 		// Level 2/3, Challenges/Awardments) and mark all awardments unlocked, so the whole
-		// menu can be walked through. Session-only (not saved) — a normal reload reverts it.
+		// menu can be walked through.
+		//
+		// Session-only, and since card 36db5d75 that is ENFORCED rather than merely claimed:
+		// Achievements and Unlockables refuse to save at all while the flag is on. It mutates
+		// both singletons and plenty of unrelated code persists them later, so finishing one
+		// level in a ?unlockall session used to make the unlock permanent. See
+		// Savable.SuppressSave for why the WRITE is suppressed rather than the mutation avoided.
 		if (DebugFlags.UnlockAll)
 		{
 			foreach (Unlockables.Items item in Game1.GetEnumValues<Unlockables.Items>())

@@ -1002,15 +1002,25 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     save ends up as it started only *because the banner runs*. **Hence the cheat gate
     (`CheckForCheats`) is tested BEFORE the re-lock** -- it is reported rather than bypassed, and
     re-locking and then bailing would drop a genuinely earned unlock on the floor.
-  - **TRAP -- eahl's saves are NOT clean between runs, and `--saves` does not fix it.** The XML
-    container writes to a REAL directory (`/eaweb_save/EvilAliens/` == `C:\eaweb_save\...` on
-    Windows); `--saves` only owns the b64 mirror, so `Achievements.xml` survives every run and
-    the `--saves <dir>` help's "runs start clean" does not cover it. Any probe booting
-    `?unlockall` (three of the committed ones do) unlocks all ten in memory, and the next
-    `SaveThreaded` persists that -- so on a machine that has ever run one, EVERY later eahl run
-    reads all ten awardments as unlocked. This cost card 57555583 a long investigation into a
-    Pacifist award that was being dropped, not missed. Delete that directory to get a true
-    fresh-save run.
+  - **eahl's saves now live under `--saves` and ARE clean per run (card 36db5d75).** The XML
+    container (`Achievements.xml`, `Settings.xml`, the screenshot `.dat`s) lands in
+    `<--saves>/fs/EvilAliens/`, default a temp dir wiped at boot, alongside the b64 mirror
+    `--saves` always owned.
+    - **It did NOT, until that card, and the fallout is worth recognising.** `StorageDevice.Root`
+      was the browser's `/eaweb_save/`, which on a desktop host is a real directory at the drive
+      root that nothing wiped. Any probe booting `?unlockall` (three of the committed ones do)
+      unlocks all ten awardments in memory, and the next `SaveThreaded` persisted that -- so on a
+      machine that had ever run one, EVERY later run read all ten as unlocked and
+      `AwardAchievement` dropped every award. It cost card 57555583 a long investigation into a
+      Pacifist award that was being dropped, not missed.
+    - **A pre-existing `C:\eaweb_save\` is now orphaned cruft that nothing reads.** Delete it if
+      you like; leaving it changes nothing. Note the saves it holds are NOT migrated.
+    - **`?unlockall` cannot poison a save any more, anywhere** -- `Achievements` and
+      `Unlockables` refuse to save while it is set (`Savable.SuppressSave`). Saves already
+      poisoned by the old behaviour are NOT healed retroactively, in the browser or on disk:
+      unlike `Settings.Invulnerability` (whose loader forces `false`, since a `true` there can
+      only be fallout), an unlocked awardment is indistinguishable from an earned one, so a
+      blanket heal would erase real progress.
 - **Splash channel-swap SFX:** the "I made this!" splash channel-flips the old meme into the
   revenged image (`channelflip.fx`); `SplashScene.Update` fires `PlayCue("channelswap")` once when
   the glitch starts (gated on `variantPicked`, one-shot via `flipSoundPlayed`). Autoplay caveat: the

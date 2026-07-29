@@ -2841,6 +2841,17 @@ namespace EvilAliensWeb.Compat
 			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
 			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
 			// refuses Demo1/2/3, so it can never advertise an attract demo.
+			// ?unlockall is reachable on the LIVE site (this whole method parses the real URL
+			// query in Release), and since card 36db5d75 it stops Achievements and Unlockables
+			// saving at all -- which is what makes its own "session-only" promise true, but also
+			// means a session booted with it keeps NO progress: no hiscores, no level completion,
+			// no awardments. Silent progress loss deserves a line of its own, above the flag dump.
+			if (UnlockAll)
+			{
+				Console.WriteLine("[debug] ?unlockall is on -- everything is unlocked for this "
+					+ "session ONLY, and NOTHING will be saved (no hiscores, no level completion, "
+					+ "no awardments). Reload without the flag to keep progress.");
+			}
 			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{

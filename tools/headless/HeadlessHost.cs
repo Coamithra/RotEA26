@@ -48,6 +48,14 @@ namespace EvilAliensWeb.Headless
             HeadlessTitleContainerFactory.Register(wwwroot);
 
             var saves = new HeadlessSaveStore(opt.SaveDir, opt.WipeSaves);
+            // Put the XML save tree INSIDE the --saves dir. On desktop the stub's browser
+            // default ("/eaweb_save/") is a real directory at the drive root that nothing here
+            // owns or wipes, so Achievements.xml survived every run and a ?unlockall probe
+            // poisoned every later one (card 36db5d75). The constraint is only that SetRoot
+            // precedes the first OpenContainer, which Boot() (later) guarantees -- SetRoot
+            // itself creates nothing, the first StorageContainer creates `fs/` lazily.
+            Microsoft.Xna.Framework.Storage.StorageDevice.SetRoot(
+                Path.Combine(Path.GetFullPath(opt.SaveDir), "fs"));
             _js = new HeadlessJsRuntime(saves, opt.Flags, opt.Verbose)
             {
                 DownloadDir = Path.GetDirectoryName(Path.GetFullPath(opt.OutPath ?? "out.png"))

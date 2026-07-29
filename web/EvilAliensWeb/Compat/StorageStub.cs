@@ -29,8 +29,18 @@ namespace Microsoft.Xna.Framework.Storage
 
         internal StorageContainer(string path)
         {
-            Path = path.EndsWith("/") ? path : path + "/";
+            Path = EnsureTrailingSeparator(path);
             try { Directory.CreateDirectory(Path); } catch { /* MEMFS best effort */ }
+        }
+
+        // Accepts BOTH separators, because the browser default is a '/' MEMFS path while a
+        // desktop host hands us a native one -- the two tests must agree, or a root that
+        // already ends in '\' gets a second separator glued on. Appends '/' either way:
+        // .NET accepts it on Windows, and PersistentSave's mirror keys are built by
+        // Substring-ing this prefix off, so keeping one spelling keeps those keys stable.
+        internal static string EnsureTrailingSeparator(string path)
+        {
+            return path.EndsWith("/") || path.EndsWith("\\") ? path : path + "/";
         }
 
         public bool IsDisposed { get; private set; }
@@ -51,7 +61,32 @@ namespace Microsoft.Xna.Framework.Storage
     {
         public static readonly StorageDevice Default = new StorageDevice();
 
-        internal const string Root = "/eaweb_save/";
+        // The save tree's root. In the BROWSER this is a MEMFS path: per-page, in-memory, and
+        // only persistent because PersistentSave mirrors it to localStorage/IndexedDB. On a
+        // DESKTOP host (tools/headless) the very same string resolves to a REAL directory
+        // (C:\eaweb_save\ on Windows) that outlives the process -- which silently made every
+        // eahl run inherit the previous one's saves, `--saves` notwithstanding, since that flag
+        // only ever owned the b64 mirror. A ?unlockall probe run therefore left every LATER run
+        // with all ten awardments unlocked, and AwardAchievement dropping every award (cards
+        // 57555583 / d2f746d5 lost an investigation to exactly that).
+        //
+        // So it is settable, and the headless host points it inside its own --saves dir: one
+        // store, one owner, and the "runs start clean" promise true by construction rather than
+        // by hope. Never call SetRoot from game code -- the browser default is correct there.
+        internal static string Root { get; private set; } = "/eaweb_save/";
+
+        // Repoint the save tree. MUST be called before the first OpenContainer (the hydrate +
+        // every Load runs off it); throws rather than silently splitting the tree in two if a
+        // container has already been opened.
+        internal static void SetRoot(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException("save root must not be empty", nameof(path));
+            if (PersistentSave.Hydrated)
+                throw new InvalidOperationException(
+                    "StorageDevice.SetRoot must be called before the first OpenContainer");
+            Root = StorageContainer.EnsureTrailingSeparator(path);
+        }
 
         public bool IsConnected => true;
         public long FreeSpace => long.MaxValue;
@@ -76,6 +111,10 @@ namespace Microsoft.Xna.Framework.Storage
     internal static class PersistentSave
     {
         private static bool _hydrated;
+
+        // Read by StorageDevice.SetRoot: repointing the tree after the first hydrate would
+        // leave half the saves behind the old root.
+        internal static bool Hydrated => _hydrated;
 
         // Last bytes we persisted, per relative name. Lets Sync skip unchanged files
         // (Dispose fires on read-only opens too) and detect deletions.

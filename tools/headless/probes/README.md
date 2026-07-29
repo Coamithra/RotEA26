@@ -120,7 +120,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (cards 8d6883f3, 0d166364): no level-select art decodes when either carousel is opened, and no entry falls back to the default art |
 | `stockshots_pump.txt` | the OTHER half of card 4d47c5ba: on a boot that lets the warm pump run (a real player's), the Press-Start -> menu handoff decodes nothing. Card cccd763a -- it is the only probe that can see that half, see the block below |
-| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
+| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Also the out-of-range DIFFICULTY on the same row (card 88f87ba2): the boundary refuses it (`unknownDifficulty=7`) and the row is still listed. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
 level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
@@ -152,7 +152,11 @@ the drift the card is about — a `MenuScene` carousel entry authored for a leve
 `ScreenshotPath` row, where `StockShots` is still twelve and the count passes happily
 (measured with `Levels.Tutorial`: boot count and COLD both green, that line alone red); and
 `COLD` still covers the `ScreenshotSaver`/`QueueMenuWarm` side neither of the others sees.
-`gamebrowser_fallback` goes red when `EnsureArt`'s null guard is reverted — the
+`gamebrowser_fallback`'s difficulty half goes red when `GameEntry.KnownDifficulty` is reverted to
+a bare cast: `unknownDifficulty=7` stops printing entirely, since it is reported only for a value
+the boundary refused. (Rebuild `tools/headless` after the mutation — the probe runs `eahl.exe`,
+which links the game sources in, so a game-only rebuild leaves it testing the old binary and
+passing.) Its art half goes red when `EnsureArt`'s null guard is reverted — the
 `[gamebrowser] rebuilt` line stops printing entirely, since it is reported only when something
 resolved to no bundled art. Note what that mutation does NOT produce: an exception. `EnsureArt` wraps its
 `Content.Load` in `catch (Exception)`, so a broken fallback throws, gets absorbed, and draws the

@@ -145,6 +145,18 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   still at its `false` default -- so both passed on a build with the assignment deleted (measured;
   a cold reviewer caught it). A "does not set X" assertion is only worth anything if something
   earlier in the set actually set X. Turn it on first, then assert the clear.
+- **Ninth case set: the wire-enum validation boundary** (card 88f87ba2) -- `NetProtocol`'s
+  `Try*` validators and the `TryDecode*Event` decoders, which are pure `byte[] -> out` statics
+  and so can be fed REAL encoded frames here. **Adding a wire enum means adding a row to its
+  table**, and section 2 is why: it cross-checks every validator against `Enum.IsDefined` over
+  the whole 0..255 byte domain, so it fails both when a member is appended past a validator's
+  bound (silently refused off the wire) and when a gap breaks the contiguity the bounds assume.
+  Section 1 is the positive control every declared member is ACCEPTED -- without it a validator
+  refusing everything would pass the rest, which only assert refusals. Section 3 drives the real
+  decoders (`EvLaunch`/`EvUnlock` must refuse an out-of-enum field, `EvMessage` must CLAMP and
+  not refuse), each with a valid frame beside it. Mutation-tested three ways: widening a bound
+  by 1 turns the cross-check FAIL naming the value, narrowing it turns 2 FAIL, and reverting
+  `TryDecodeLaunchEvent` to the pre-card bare casts turns its 2 refusal rows FAIL.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

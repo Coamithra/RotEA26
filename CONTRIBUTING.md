@@ -152,6 +152,7 @@ proof.
   case-sensitive on both hosts, localhost isn't.
 - **Docs are split** — when a change adds a convention/flag/gotcha, update the right file:
   root `CLAUDE.md` (workflow/cross-cutting), `web/EvilAliensWeb/CLAUDE.md` (game/engine features),
+  `web/EvilAliensWeb/Compat/Net/CLAUDE.md` (online co-op / net layer),
   `tools/CLAUDE.md` (asset pipelines).
 
 ## Filing a follow-up card (Phase 6 step 11)

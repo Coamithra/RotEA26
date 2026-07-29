@@ -7,7 +7,7 @@ They are documented here because the board CLI runs only on the author's machine
 
 1. ~~**JIP: deep mid-level background/doodad state.**~~ **DONE** (card 45a4e48d) -- the host now
    replays the latching ops + any in-flight doodad (with its current position) + the current song
-   in an `EvReady`-triggered burst. See `web/EvilAliensWeb/CLAUDE.md` -> "Deep mid-level scenery
+   in an `EvReady`-triggered burst. See `web/EvilAliensWeb/Compat/Net/CLAUDE.md` -> "Deep mid-level scenery
    catch-up". RESIDUAL: the whole-scene setters (`SetSpace`/`SetMars`/`SetAlienBase`) are still
    unhooked, and `InsaneBossI` swaps scenes MID-level via them, so a joiner arriving after a
    `GoMars`/`GoSpace`/`GoAlienBase` still sees the level's starting scene. Original text: The join-in-progress catch-up sends

@@ -4,9 +4,12 @@ Moved out of `web/EvilAliensWeb/CLAUDE.md` so it loads only when working on the 
 The parent file has the rest of the game/engine notes; `NetStatusMenu.cs` lives in
 `Game/EvilAliens/` but belongs to this feature. Design doc: `plans/stage11-online-coop.md`.
 
+Path bases below, since the text was written one level up: `plans/`, `tools/` and `server/`
+are repo-root-relative; `Compat/`, `Game/` and `wwwroot/` are relative to `web/EvilAliensWeb/`.
+
 Distributed-authority state replication (NOT lockstep): each peer owns its own ship
 completely (input read untouched, zero added latency); the wire carries ship STATE, never
-inputs; the other peer's ship is an interpolated puppet. Code lives in `Compat/Net/`.
+inputs; the other peer's ship is an interpolated puppet.
 Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback),
 card 11.2 (host world authority: client enemy puppets, world snapshots, generous claims,
 score sync), card 11.3 (level-script beat replication, host-broadcast reset/victory,
@@ -131,7 +134,7 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v9):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -369,7 +372,7 @@ interpolation feel, both gated on real-network playtests.
     same**, or it silently reintroduces the divergence.
   - `AwardScoreToAll` (every boss) pays each seated slot with THAT slot's own multiplier,
     which is why the wire carries a per-slot array rather than one number. Wire width: the
-    field went `u16` base-points -> `f32` per slot (protocol **v6**) because a combo-modified
+    field went `u16` base-points -> `f32` per slot (protocol **v7**) because a combo-modified
     award overflows a ushort -- a 10000-point boss at a routine 40x combo is 30000, and
     `comboModify` has no ceiling.
   - **The combo COUNTER is no longer local -- see the per-slot HUD state bullet below.** It was

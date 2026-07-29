@@ -6,7 +6,7 @@ package, and is ported to run in the browser via **KNI** (an XNA-4.0-compatible
 engine with a Blazor WebAssembly / WebGL backend) — output is a static site.
 
 **Play it live:** https://coamithra.github.io/RotEA26/ — that is the current public
-build, published 2026-07-24 and by now hundreds of commits stale. Hosting is
+build, published 2026-07-23 and by now hundreds of commits stale. Hosting is
 mid-migration to https://haraldmaassen.com/RotEA26/, which does not exist until the
 first deploy runs there; see [`docs/DEPLOY.md`](docs/DEPLOY.md).
 

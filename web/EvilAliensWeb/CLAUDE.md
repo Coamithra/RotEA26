@@ -2,7 +2,8 @@
 
 Architecture and per-feature notes for the ported game. The root `CLAUDE.md` has workflow,
 build/run, and the verification rules; `tools/CLAUDE.md` has the offline asset pipelines that
-generate much of the art/audio referenced here.
+generate much of the art/audio referenced here; `Compat/Net/CLAUDE.md` has the online co-op
+net layer, split out of this file so it loads only when you work under `Compat/Net/`.
 
 ## Architecture
 

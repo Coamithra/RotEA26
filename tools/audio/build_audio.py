@@ -46,6 +46,20 @@ SFX_CUES = [
     "spiderbossdeath", "evillaugh", "usepowerup",
 ]
 
+# Cues whose shipped .wav is HAND-MADE and must never be re-derived from the bank.
+# These three were re-recorded by hand in Reaper to strip the static background noise
+# the originals carry, and were committed over the bank-derived files (24-bit stereo
+# where the bank gives 16-bit). build_sfx SKIPS them: a rebuild would otherwise silently
+# restore the noisy originals, and nothing would complain at runtime -- SoundManager
+# .GetEffect swallows every load exception and caches null, so a broken or regressed sfx
+# never announces itself, it just stops sounding right. Same rule as channelswap.wav,
+# which pick_channelswap.py owns (tools/CLAUDE.md, Audio).
+# To genuinely re-derive one from the bank, drop it from this set for that run --
+# deliberately not a CLI flag, because casual use is exactly what this guards against.
+HAND_OWNED_SFX = frozenset({
+    "head asplode", "small head asplode", "spiderbossdeath",
+})
+
 # Music cues -> the SongInstance.songFiles ids. Cues with two waves are an
 # authored intro + loop body (the intro plays once, then the body loops).
 # "classic"/"classicclean"/"lastsignal" are NOT here: each was replaced with a
@@ -84,6 +98,10 @@ def write_ogg(path, audio, rate):
 def build_sfx(entries, cues):
     os.makedirs(SFX_DIR, exist_ok=True)
     for cue in SFX_CUES:
+        if cue in HAND_OWNED_SFX:
+            print(f"  SKIP {cue:20} hand-recorded replacement, NOT rebuilt from the bank "
+                  f"({sanitize(cue)}.wav)")
+            continue
         waves = cues[cue]
         a, rate = xact.decode(entries[waves[0]])
         a = to_unit(a)
@@ -201,5 +219,65 @@ def main():
     print("\ndone.")
 
 
+def selftest():
+    """Prove build_sfx never writes the hand-owned SFX -- without banks, PyAV, or
+    touching a single file. Monkeypatches the two side-effecting calls (xact.decode,
+    sf.write) and records which cues reach the writer.
+
+    The negative control matters as much as the positive one: with HAND_OWNED_SFX
+    emptied, all 19 cues must write. Without it a build_sfx that wrote NOTHING (a
+    typo'd loop, a stray early return) would pass the main assertion vacuously.
+    """
+    import unittest.mock as mock
+
+    def run(hand_owned):
+        written = []
+        fake_entries = {0: object()}
+        fake_cues = {cue: [0] for cue in SFX_CUES}
+        with mock.patch.object(xact, "decode", return_value=(np.zeros((8, 1), np.float32), 44100)), \
+             mock.patch.object(sf, "write", side_effect=lambda p, *a, **k: written.append(os.path.basename(p))), \
+             mock.patch.object(os, "makedirs"), \
+             mock.patch(__name__ + ".HAND_OWNED_SFX", hand_owned):
+            build_sfx(fake_entries, fake_cues)
+        return written
+
+    ok = True
+    protected = {sanitize(c) + ".wav" for c in HAND_OWNED_SFX}
+    all_wavs = {sanitize(c) + ".wav" for c in SFX_CUES}
+
+    print("Protected (must never be written by build_sfx):")
+    for fn in sorted(protected):
+        print(f"  {fn}")
+
+    written = set(run(HAND_OWNED_SFX))
+    leaked = written & protected
+    missing = (all_wavs - protected) - written
+    print(f"\n[1] real run: {len(written)} written, {len(protected)} skipped")
+    if leaked:
+        print(f"  FAIL: hand-owned file(s) rebuilt from the bank: {sorted(leaked)}")
+        ok = False
+    else:
+        print(f"  PASS: none of the {len(protected)} hand-owned files was written")
+    if missing:
+        print(f"  FAIL: unprotected cue(s) not built: {sorted(missing)}")
+        ok = False
+    else:
+        print(f"  PASS: all {len(all_wavs) - len(protected)} other cues still built")
+
+    # Negative control: without the guard the very same call DOES clobber them.
+    written = set(run(frozenset()))
+    print(f"\n[2] negative control (HAND_OWNED_SFX emptied): {len(written)} written")
+    if written == all_wavs:
+        print("  PASS: all 19 cues write, so [1] is a real guard and not a no-op loop")
+    else:
+        print(f"  FAIL: expected all {len(all_wavs)}, got {len(written)}")
+        ok = False
+
+    print("\nSELFTEST", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     main()

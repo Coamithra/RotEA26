@@ -165,6 +165,18 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   `music/music.json`. Re-run after changing the banks or the ElevenLabs renders. Its `main()` also
   calls `install_external.install()` and `build_music` MERGES into `music.json`, so a full rebuild
   never drops an external cue (a missing raw source leaves the committed track untouched).
+  **Three SFX are HAND-OWNED and are SKIPPED by `build_sfx` — `head_asplode.wav`,
+  `small_head_asplode.wav`, `spiderbossdeath.wav`** (`HAND_OWNED_SFX`). The user re-recorded them
+  in Reaper to strip the static background noise the bank originals carry, and committed them over
+  the derived files (24-bit stereo vs the bank's 16-bit; all three verified loadable through the
+  real KNI `SoundEffect.FromStream`). A rebuild would otherwise restore the noisy originals, and
+  **the failure would be SILENT** — `SoundManager.GetEffect` catches every load exception and
+  caches null, so a broken or regressed sfx never announces itself, it just stops sounding right.
+  Same rule as `channelswap.wav` below. To genuinely re-derive one, drop it from the set for that
+  run; it is deliberately not a CLI flag. **`--selftest`** pins the guard with no banks and no
+  PyAV: it monkeypatches `xact.decode`/`sf.write` and asserts the three never reach the writer
+  while the other 16 do, plus a negative control (set emptied → all 19 write) so a build_sfx that
+  wrote nothing at all could not pass vacuously.
 - **`refine_loops.py`** (called as `build_audio.py`'s last step; re-runnable standalone): XACT
   looped whole waves, but WebAudio's loop is a HARD SPLICE, so a mismatched wrap CLICKS. The script
   measures each track's splice click and replaces only audibly-clicking loops with a
@@ -263,7 +275,13 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   connected-component pass), decimates to 20 frames, packs a 5×4 grid of 512px cells →
   `gfx/sprites/brainanimated.png` + a blurred blue glow `brainanimatedglow.png`. Sheet is dxt in
   `textures.config`; the glow stays raw. Re-run the script then `build_textures.py` after a new
-  export.
+  export. **`CELL_W` is resolution ONLY — it does not set on-screen size**, so raising it buys
+  crispness and bytes and nothing else: `AlienDrawableGameComponent` registers `brainanimated` at
+  a *design* width of 100, so the brain covers `100 * scale` design px whatever the cell is, and
+  `Braineroid`'s 2/1/0.35 scales give 200/100/35. 512 is the point where that stops mattering —
+  design space is 800×600 and `RenderScale` caps the target at 1440px tall, so design→device tops
+  out at 2.4×, the largest brain is 480 device px, and a 512 cell is ~1.07 texel:pixel there.
+  Draw-path detail: web CLAUDE.md, "Animated Braineroid".
 
 ## Font — `tools/font/`
 

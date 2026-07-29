@@ -197,9 +197,14 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   never drops an external cue (a missing raw source leaves the committed track untouched).
   **Three SFX are HAND-OWNED and are SKIPPED by `build_sfx` — `head_asplode.wav`,
   `small_head_asplode.wav`, `spiderbossdeath.wav`** (`HAND_OWNED_SFX`). The user re-recorded them
-  in Reaper to strip the static background noise the bank originals carry, and committed them over
-  the derived files (24-bit stereo vs the bank's 16-bit; all three verified loadable through the
-  real KNI `SoundEffect.FromStream`). A rebuild would otherwise restore the noisy originals, and
+  in Reaper to strip the static background noise the bank originals carry, and they are committed
+  over the derived files (PR #192). They stay **PCM_16 stereo like the rest of the fleet** -- the
+  re-edits were delivered 24-bit and re-encoded to 16-bit before merging, saving ~488 KiB. Only
+  `spiderbossdeath` changed shape: resampled 22050 -> 44100 Hz (72086 -> 144172 frames, 282 -> 563
+  KiB); the other two keep their rate and frame count exactly and differ only in samples. All three
+  load through the real KNI `SoundEffect.FromStream` (checked on the DESKTOP host, so it is
+  evidence about the format, not about the shipped WASM/WebAudio build). A rebuild would otherwise
+  restore the noisy originals, and
   **the failure would be SILENT** — `SoundManager.GetEffect` catches every load exception and
   caches null, so a broken or regressed sfx never announces itself, it just stops sounding right.
   Same rule as `channelswap.wav` below. To genuinely re-derive one, drop it from the set for that

@@ -48,9 +48,10 @@ SFX_CUES = [
 
 # Cues whose shipped .wav is HAND-MADE and must never be re-derived from the bank.
 # These three were re-recorded by hand in Reaper to strip the static background noise
-# the originals carry, and were committed over the bank-derived files (24-bit stereo
-# where the bank gives 16-bit). build_sfx SKIPS them: a rebuild would otherwise silently
-# restore the noisy originals, and nothing would complain at runtime -- SoundManager
+# the originals carry, and were committed over the bank-derived files (PR #192). They are
+# PCM_16 stereo like every other sfx; only spiderbossdeath changed shape, resampled
+# 22050 -> 44100 Hz. build_sfx SKIPS them: a rebuild would otherwise silently restore
+# the noisy originals, and nothing would complain at runtime -- SoundManager
 # .GetEffect swallows every load exception and caches null, so a broken or regressed sfx
 # never announces itself, it just stops sounding right. Same rule as channelswap.wav,
 # which pick_channelswap.py owns (tools/CLAUDE.md, Audio).

@@ -1,6 +1,12 @@
-# Spike: real batched 3D for the Level-3 wall towers (`?wall3d`)
+# Spike: real batched 3D for the Level-3 wall towers (`?wall3d`, flag since removed)
 
 Trello `a66fc73e`. Branch `spike/wall3d-batched`, worktree `wt2`, dev port `5282`.
+
+**STATUS: landed, and the follow-up landed too.** The spike shipped behind `?wall3d`; commit
+`e511a08` then committed to real 3D as the ONLY tower path and deleted the flag along with the
+entire sprite-slice machinery. Read what follows as the as-shipped design, except where a line
+is explicitly marked as spike-era. This doc is kept because it is the design rationale for the
+geometry, and is cited from `Wall.cs`, `DebugFlags.cs` and `web/EvilAliensWeb/CLAUDE.md`.
 
 ## Context
 
@@ -11,8 +17,8 @@ they are a radial smear with a diagonal scan walked over them, sampling a bespok
 `756-v1-side.png` scan-plane sheet.
 
 The card asks: replace the slice stack with **one batched 3D draw** of the tower side
-faces, behind `?wall3d`. If it lands, the side faces get genuine UVs and the whole slice
-machinery dies.
+faces, behind `?wall3d`. It landed: the side faces got genuine UVs, and the whole slice
+machinery is gone (`e511a08`).
 
 The stated blocker — "3D is unviable on WebGL, per the `Quad.cs` lesson" — does not
 survive reading `Quad.cs:172-179`. That comment describes *three separate immediate-mode
@@ -91,8 +97,9 @@ Top faces stay correct for free: they sit at `d == 1`, the maximum, so drawing t
 
 ## Design
 
-Behind **`?wall3d`** (default off). `?walltowers=0` remains the flat kill switch, and the
-slice path remains the default — so a shipped build is byte-identical unless asked.
+SPIKE-ERA GATING (since removed): this sat behind **`?wall3d`**, default off, with the slice
+path still the default, so a shipped build was byte-identical unless asked. `e511a08` deleted
+both the flag and the slice path; **`?walltowers=0` remains the flat kill switch.**
 
 **Geometry is genuinely 3D; the perspective divide happens on the GPU.** Pre-projecting
 to 2D and sending flat quads would give affine (PS1-style) texture warp, because the `w`
@@ -116,9 +123,9 @@ Per frame, per `Wall`:
    block straddling the VP axis shows neither on that axis). That is the backface cull,
    done on the CPU, so `RasterizerState.CullNone`.
 4. Each face is tessellated into `bands` vertical strips (default 4, `?wall3dbands=`) so
-   the smoothstep bottom dissolve and the fog lerp — today evaluated per slice — survive
-   as per-vertex colour that the GPU interpolates. UVs come from the block's **real 8x8
-   `756-v1` cell**, spanning the face's full width and height.
+   the smoothstep bottom dissolve and the fog lerp — evaluated per slice in the path this
+   replaced — survive as per-vertex colour that the GPU interpolates. UVs come from the
+   block's **real 8x8 `756-v1` cell**, spanning the face's full width and height.
 5. One `DrawUserIndexedPrimitives(TriangleList, verts, 0, nv, indices, 0, ntris)` with
    `BasicEffect` (`TextureEnabled`, `VertexColorEnabled`, `LightingEnabled = false`),
    `BlendState.NonPremultiplied` (straight alpha, as everywhere), `DepthStencilState.None`.
@@ -134,25 +141,29 @@ slices did.
 
 | File | Change |
 |---|---|
-| `Game/EvilAliens/Wall.cs` | `DrawTowerShafts3D()` alongside the slice path; `Draw` branches on the flag |
-| `Compat/DebugFlags.cs` | `?wall3d`, `?wall3dbands=` (out of `DebugFlags.Active`) |
+| `Game/EvilAliens/Wall.cs` | `DrawTowerShafts3D()` alongside the slice path; `Draw` branches on the flag. Since `e511a08` there is no slice path and no path branch: `Draw` calls `DrawTowerShafts3D` directly, still under the `?walltowers=0` gate |
+| `Compat/DebugFlags.cs` | `?wall3d`, `?wall3dbands=` (out of `DebugFlags.Active`). `?wall3d` was removed by `e511a08`; `?wall3dbands=` is still there |
 | `tools/walls/verify_tower_order.py` | new — the offline occlusion certification above |
 | `CLAUDE.md` | document the flag + the finding |
 
 ### Out of scope for the spike
 
-- Deleting the slice machinery (`?wallslicestep`, `?wallsidescan`, `MaxSlices`,
-  `756-v1-side.png`, `build_wall_side.py`). That is the follow-up **if** this lands.
+- ~~Deleting the slice machinery (`?wallslicestep`, `?wallsidescan`, `MaxSlices`,
+  `756-v1-side.png`, `build_wall_side.py`).~~ **DONE** — this landed, so the follow-up ran:
+  `e511a08` deleted all of it (plus `faceshade.fx` and `?walltwist`). `tools/walls/README.md`
+  records the removal; the old code is recoverable from `906f344`.
 - Persistent `VertexBuffer`/`IndexBuffer` + `DrawIndexedPrimitives` (removes the
   per-frame transient-buffer upload). Only worth it if the transient path measures hot.
 - Painter's order *across* two overlapping `Wall` entities (each does its own draw call).
   The slice path has the same property; sections don't overlap on screen in practice.
-- `?walltwist` / `?wallsidescan` have no meaning in the 3D path.
+- `?walltwist` / `?wallsidescan` have no meaning in the 3D path (both were deleted outright
+  by `e511a08`).
 
 ## Verification
 
 Per CLAUDE.md, the wall scrolls and the canvas goes black when its tab is backgrounded,
-so drawing is verified **offline** and the live check is a pixel diff, not eyeballing:
+so drawing is verified **offline** and the live check is a pixel diff, not eyeballing.
+This was the spike's PLAN; all of it ran, and the outcome is under "Result" below:
 
 1. `python tools/walls/verify_tower_order.py` — the occlusion proof above. **Done, passes.**
 2. Offline numpy/Pillow render of `DrawTowerShafts3D`'s exact projection against the real
@@ -207,6 +218,9 @@ Two measurement traps worth remembering:
 section, and each construction re-reads and re-links the precompiled shader.
 
 ## Success / kill
+
+The criteria the spike was judged against. **Outcome: SUCCESS on every count** (see "Result"
+above); the KILL condition never triggered, and `e511a08` went on to make 3D the only path.
 
 - **SUCCESS:** towers render with correct occlusion, side faces show real wall texture
   (no smear, no scan), vertex colour carries the fog for free, and tick time drops toward

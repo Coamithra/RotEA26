@@ -5,7 +5,12 @@ using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
-public class HelpText : DrawableGameComponent, IComponentWatcher
+// Not an IComponentWatcher since card 4d47c5ba: the only thing the removal hook did was
+// Unload this component's private content manager, and the two control diagrams it held moved
+// to the shared one. ComponentBin keeps a persistently-maintained watcher list and notifies it
+// on EVERY add and remove, so staying registered to run two empty method bodies was pure cost --
+// a demo's HelpText lives in that list for the whole session.
+public class HelpText : DrawableGameComponent
 {
 	public enum Displays
 	{
@@ -79,8 +84,11 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		content = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		inputHandler = ServiceHelper.Get<IInputHandlerService>().InputHandler;
 		sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
+		// base.Initialize() runs the LoadContent OVERRIDE. The bare base.LoadContent() that
+		// used to follow it was always a no-op (non-virtual, the empty
+		// DrawableGameComponent body) -- it was scaffolding for the explicit re-loads that sat
+		// after it, and those went with the private content manager in card 4d47c5ba.
 		base.Initialize();
-		base.LoadContent();
 	}
 
 	public void SetDisplay(Displays display)
@@ -287,15 +295,4 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		currentlyDisplaying = Displays.Keyboard;
 	}
 
-	// Nothing to release on removal since card 4d47c5ba: the two control diagrams moved to
-	// the shared content manager, which this component does not own and must never Unload.
-	// The hook stays because IComponentWatcher requires it and this is the seam a future
-	// per-instance resource would be freed from.
-	public void OnComponentRemoved(GameComponentCollectionEventArgs e)
-	{
-	}
-
-	public void OnComponentAdded(GameComponentCollectionEventArgs e)
-	{
-	}
 }

@@ -38,9 +38,10 @@ internal class InstructionsMenu : DrawableGameComponent
 
 	public override void Initialize()
 	{
+		// base.Initialize() runs the LoadContent OVERRIDE; the bare base.LoadContent() that used
+		// to follow was a no-op -- see the matching note in HelpText.Initialize.
 		base.Initialize();
 		currentlyDisplaying = HelpText.Displays.Lead;
-		base.LoadContent();
 	}
 
 	protected override void LoadContent()
@@ -236,5 +237,4 @@ internal class InstructionsMenu : DrawableGameComponent
 		spriteBatch.DrawString(p, new Vector2(120f, y), color, 0f, Vector2.Zero, 0.8f, (SpriteEffects)0, 0f);
 		spriteBatch.Flush();
 	}
-
 }

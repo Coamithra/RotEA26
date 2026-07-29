@@ -191,9 +191,12 @@ public class Game1 : Game
 	// queued entries become free cache hits afterwards; either order is safe.
 	// Known minor edge: a ?level= boot into a NON-space level (e.g. Level2/Mars) never
 	// calls SetSpace, so the leftovers trickle-decode one-per-tick during early gameplay
-	// (each sub-watchdog, ~40ms .dds / ~20ms star PNG) and ?loadlog logs them as COLD
-	// against that level — don't let eaPreloadExport bake space tiles into a non-space
-	// level's manifest set from such a run. Debug-only boots; accepted.
+	// (each sub-watchdog, ~40ms .dds / ~20ms star PNG). Debug-only boots; accepted.
+	// They no longer log as COLD against that level (card 4d47c5ba brackets every warm),
+	// and LoadProfiler.RecordTexture now DROPS a warm that lands outside the (boot)
+	// sentinel rather than filing it under the level -- so eaPreloadExport can no longer
+	// bake the space tile set into a non-space level's manifest section from such a run,
+	// which is what the COLD lines used to be the (noisy) warning about.
 	private readonly Queue<Action> idleWarmQueue = new Queue<Action>();
 
 	// Pre-launch LEVEL warm (card fe25712a): a level's whole preload used to decode
@@ -696,9 +699,11 @@ public class Game1 : Game
 	private void Warm<T>(string assetName)
 	{
 		// Tell the load profiler this decode is deliberate, so ?loadlog stops reporting the
-		// warm queues doing their job as COLD gaps (card 4d47c5ba). The bracket covers BOTH
-		// queues because every queued lambda funnels through here, and only them -- a boot
-		// decode from anywhere else still surfaces, which is the point.
+		// warm queues doing their job as COLD gaps (card 4d47c5ba). All THREE queues funnel
+		// through here (menu, idle and the pre-launch levelWarmQueue) and nothing else does, so
+		// a boot decode from anywhere else still surfaces -- which is the point. The level warm
+		// also sits inside a BeginPreload/EndPreload bracket, which takes precedence, so it goes
+		// on counting as a preload rather than becoming invisible.
 		EvilAliensWeb.Compat.LoadProfiler.BeginWarm();
 		try
 		{

@@ -30,8 +30,8 @@
 // TWO CAVEATS, both from it using the SHARED manager (ServiceHelper's
 // IContentManagerService is always Game1.content):
 //   - A probe of a cold asset DECODES it. Not free, and it warms the shared cache.
-//   - An asset owned by a scene-local WebContentManager (HelpText's GFX/Help/*,
-//     Bloom, Credits) is not reachable here: probing one decodes a SECOND copy into
+//   - An asset owned by a scene-local WebContentManager (Bloom, Credits, Splash) is
+//     not reachable here: probing one decodes a SECOND copy into
 //     the shared manager, reports on that copy rather than the one the game is
 //     drawing, and leaks it until game teardown. Each manager decodes its own
 //     instances — see WebContentManager.Unload's note.

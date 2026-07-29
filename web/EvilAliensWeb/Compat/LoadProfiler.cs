@@ -72,7 +72,10 @@ namespace EvilAliensWeb.Compat
         private static bool _preloadActive;
 
         // True while Game1's warm queues are decoding an asset ON PURPOSE (BeginWarm/EndWarm
-        // bracket Game1.Warm<T>, the single funnel for both QueueMenuWarm and QueueIdleWarm).
+        // bracket Game1.Warm<T>, which every queued lambda funnels through -- QueueMenuWarm's,
+        // QueueIdleWarm's AND the pre-launch levelWarmQueue's. The level warm is additionally
+        // inside a BeginPreload/EndPreload bracket, and _preloadActive is tested FIRST below, so
+        // its decodes keep counting as preloads and still reach the per-level summary.
         // Without it every one of those ~34 boot decodes reported itself as a COLD gap -- the
         // menu warm doing exactly its job, logged as the thing it exists to prevent -- which
         // made the (boot) block unreadable and cost card 4d47c5ba a wrong asset list.
@@ -120,6 +123,21 @@ namespace EvilAliensWeb.Compat
         {
             if (!Recording)
                 return;
+            // A boot warm that LEAKS INTO A LEVEL is recorded against nothing. The idle queue
+            // drains one-per-tick and a ?level= boot into a non-space level never calls
+            // SetSpace, so its leftovers trickle-decode during early gameplay -- and recording
+            // them there is how eaPreloadExport bakes the space tile set into a non-space
+            // level's manifest section (a hazard Game1.QueueIdleWarm has warned about in prose
+            // since card 97727578; the COLD lines that used to make it visible are, correctly,
+            // no longer printed). Warms under the (boot) sentinel record as normal.
+            //
+            // `!_preloadActive` is what keeps this narrow, and it is NOT optional: the
+            // pre-launch levelWarmQueue also runs through Game1.Warm<T>, so without it this
+            // would drop every entry of the level warm -- i.e. exactly the per-level manifest
+            // set eaPreloadExport exists to capture. Measured: a ?level=Level2&loadlog capture
+            // came back with ZERO Level2 entries.
+            if (_warmActive && !_preloadActive && _currentLevel != SentinelBoot)
+                return;
             string assetId = key.StartsWith("Content/", StringComparison.Ordinal)
                 ? key.Substring("Content/".Length)
                 : key;
@@ -140,10 +158,11 @@ namespace EvilAliensWeb.Compat
             }
             else if (_warmActive)
             {
-                // A deliberate boot warm. Still RECORDED above (so the export keeps the asset
-                // and its size), but it is not a gap: nothing is on screen waiting for it. Not
-                // folded into the preload counters either -- those summarise one level's
-                // bracket, and a warm decode belongs to no level.
+                // A deliberate boot warm: not a gap, because nothing is on screen waiting for
+                // it. Recorded above under the (boot) sentinel so the export keeps the asset and
+                // its size, but never flagged Cold and never logged. Not folded into the preload
+                // counters either -- those summarise one level's bracket, and a warm decode
+                // belongs to no level.
             }
             else
             {
@@ -205,12 +224,19 @@ namespace EvilAliensWeb.Compat
         // Bracket ONE deliberate warm-queue decode (Game1.Warm<T>). See _warmActive: inside the
         // bracket a decode is recorded but never flagged Cold and never logged, because there is
         // no frame waiting on it. Cheap enough to leave unguarded by Recording -- two bool writes.
-        public static void BeginWarm()
+        //
+        // INTERNAL on purpose, unlike the rest of this class's surface. A caller that opens the
+        // bracket and never closes it (a missing finally, an early return between the two) mutes
+        // every COLD line for the rest of the session -- the diagnostic this class exists to
+        // provide, failing closed and silently. Keeping the pair unreachable from outside the
+        // assembly keeps "Warm<T> is the only caller" checkable by grep. A depth counter would
+        // not help: an unbalanced Begin leaves it stuck either way.
+        internal static void BeginWarm()
         {
             _warmActive = true;
         }
 
-        public static void EndWarm()
+        internal static void EndWarm()
         {
             _warmActive = false;
         }

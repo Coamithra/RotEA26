@@ -214,12 +214,17 @@ generate much of the art/audio referenced here.
     by adding entries.** `QueueMenuWarm`/`QueueIdleWarm` are built in `Game1.LoadContent`, which
     `base.Initialize()` reaches only AFTER every component's own `LoadContent` has run. So
     `gfx/cursor2` (`MousePointer`), `gfx/sprites/awardmentblade` (`AwardmentBlade`) and the
-    `gfx/splash/*` set (`SplashScene.AddSplash`, called from `Game1.Initialize` line ~306, and
-    into that scene's OWN content manager besides) have all already decoded by the time the first
-    queue entry is pumped. Warming them is a cache hit that changes nothing, including the log
-    line. The expected steady state is exactly those **9** lines; a tenth is a real new gap.
-  - **The `COLD decode in <Level>: <asset>` string is PROBE-PINNED** -- `tools/headless/probes/
-    preload_level2.txt` greps it. Suppressing a line is fine; reformatting one breaks that probe.
+    `gfx/splash/*` set (`SplashScene.AddSplash`, called from `Game1.Initialize`, and into that
+    scene's OWN content manager besides) have all already decoded by the time the first queue
+    entry is pumped. Warming them is a cache hit that changes nothing, including the log line.
+    The steady state on a full-splash boot is that set and nothing else -- `easplashredone`,
+    `uglysplash22`, its three `-revenged*` variants, `splash/blank` (twice), `cursor2` and
+    `awardmentblade`. Anything OUTSIDE it is a real new gap. (Reducing the set means making a
+    boot-time load lazy or deferred, not warming it: see the follow-up cards on the splash's
+    three channel-flip variants, of which a run uses one, and on `AwardmentBlade`.)
+  - **Do not reformat the `COLD decode in <Level>: <asset>` console line.** Committed headless
+    probes under `tools/headless/` grep it, so its shape is an interface. Suppressing a line
+    (as the warm bracket does) is fine; changing its wording is not.
   - **MERGE into `manifest.txt`, never replace it.** `Serialize()` emits only the run's own
     recordings — it never merges `Shipped()` — so overwriting the file deletes every curated
     entry for levels the run did not play. Captured per-level sections live in one block at the

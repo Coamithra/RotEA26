@@ -31,6 +31,9 @@ public class ScreenshotSaver
 	// Init()'s loads are cache hits. They MUST NOT drift: Init() used to hardcode eleven of
 	// the twelve, and the one it missed (webcamss, the challenge carousel's last entry) then
 	// decoded cold the first time the player opened Challenges.
+	// TWO MORE COPIES of these same paths exist and are NOT derived from this one:
+	// LevelArt.ScreenshotPath (keyed by Levels) and MenuScene's AddEntryData calls. Adding a
+	// level means touching all three, or its art silently drops out of the warm+preload set.
 	internal static readonly string[] StockShots =
 	{
 		"GFX/Screenshots/level1empty",

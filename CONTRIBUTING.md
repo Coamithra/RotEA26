@@ -14,7 +14,7 @@ file wins.
 | Trello backend / board | **always** `--backend local --board 10989a3d` (offline file-backed board, NOT trello.com) |
 | Columns (list ids) | `Backlog` `79158996` → `In Progress` `3b43cba3` → `Done` `9c204b80` |
 | Branch prefixes | `fix/` `feature/` `refactor/` `docs/` (note: `feature/`, not `feat/`) |
-| Tracker doc | `plans/tracker_<branch>.md` (delete after shipping; `plans/plan.md` is the archived staged plan and STAYS) |
+| Tracker doc | `plans/tracker_<branch>.md` — **gitignored, never committed** (see "Tracker docs"); `plans/plan.md` is the archived staged plan and STAYS |
 | Worktree layout | fixed slots `.claude/worktrees/wt1`..`wt8` (gitignored) |
 | Plan detail | cards are pointers; long-form per-stage detail is in the archived `plans/plan.md` |
 
@@ -26,6 +26,7 @@ trello --backend local --board 10989a3d card ls 79158996                     # v
 trello --backend local --board 10989a3d card move <card_id> <listId>
 trello --backend local --board 10989a3d comment add <card_id> "<text>"       # real newlines, not \n
 trello --backend local --board 10989a3d card add 79158996 "<title>" "<desc>" # follow-up card
+trello --backend local --board 10989a3d search --partial "<keyword>"         # dedupe BEFORE filing
 ```
 
 `--from`/`--to` are REQUIRED on this board (the CLI's `To Do`/`Doing` defaults don't exist here).
@@ -34,6 +35,31 @@ handshake is never needed here.
 
 ## Worktrees & dev servers
 
+- **Picking a slot: check the DIRECTORY, not just `git worktree list`.** A worktree whose
+  `git worktree remove` hit the Windows permission-denied path is unregistered but still on disk,
+  so the slot looks free and the `add` fails anyway — **after git has already created the
+  branch** (verified: the failed add leaves the new branch behind). Check both, from the ROOT
+  checkout, and take the lowest `wt<k>` in neither:
+
+  ```
+  git worktree list          # registered slots
+  ls .claude/worktrees       # actual dirs — may include unregistered leftovers
+  ```
+
+  If the `add` still fails, a parallel agent took the slot in that same instant (the documented
+  race): **delete the branch git just created** before retrying on the next slot, or you leave a
+  stray branch that reads as someone else's in-flight work. Use `git branch -d <branch>` — it has
+  no commits of its OWN, so `-d` succeeds; if `-d` REFUSES, you have grabbed the wrong branch, so
+  stop and look (never `-D` your way past that).
+
+  A leftover dir holding only `bin/`/`obj/` is dead litter, but look before you delete — an
+  unregistered dir can hold uncommitted source from a failed cleanup. If it is only build output:
+  `powershell.exe -Command "Remove-Item -LiteralPath '<abs path>' -Recurse -Force"`, then
+  `git worktree prune`, then take the slot.
+- **A branch NAME collision on `git worktree add -b` can mean duplicate WORK.** Rule out the
+  stray-branch litter above first (a doomed add, yours or another agent's). If the name is held
+  by a branch you did not create, another session is (or was) doing your card — investigate
+  before renaming past it.
 - **Per-worktree bootstrap: none.** `bin/`/`obj/` regenerate on the first `dotnet build` (slow —
   WASM workload restore; expected). No `.env`, no package install.
 - **Most cards need no dev server at all** — verify through `tools/headless/` (`eahl`) instead
@@ -54,6 +80,22 @@ handshake is never needed here.
   collisions and lost-update races between parallel agents.
 - **Kill your dev server before `git worktree remove`** — besides the Windows directory lock (see
   global doc), a stale server squats the slot's port and blocks the next agent who claims it.
+
+## Tracker docs
+
+`plans/tracker_<branch>.md` (the global runbook's durable per-card tracker) is **gitignored here —
+never commit it.** Phase 6 step 8's "delete the tracker" was missed often enough to need repeated
+sweep commits clearing strays off `main`; the ignore rule makes that hard to do by accident rather
+than something to remember. Flatten the branch's `/` when naming it (`docs/foo` ->
+`tracker_docs-foo.md`): a literal slash would make a *directory*, which the ignore rule has to
+cover separately.
+
+So it is local convenience only, not a handoff channel — anything a successor genuinely needs
+goes in a **card comment**, the only durable shared surface here. It dies with the worktree; for a
+card spanning sessions the ROOT checkout's `plans/` works too (same ignore rule, survives
+`git worktree remove`), and that copy is yours to delete at ship.
+
+The card's DESIGN doc (`plans/<name>.md`) is unaffected: still committed, still deleted in Phase 6.
 
 ## Verification gate (Phase 5)
 
@@ -106,6 +148,22 @@ proof.
 - **Docs are split** — when a change adds a convention/flag/gotcha, update the right file:
   root `CLAUDE.md` (workflow/cross-cutting), `web/EvilAliensWeb/CLAUDE.md` (game/engine features),
   `tools/CLAUDE.md` (asset pipelines).
+
+## Filing a follow-up card (Phase 6 step 11)
+
+**Search the board first — every time.** `grab` dedupes *cards*, not *work*: nothing stops two
+reviews filing two cards for one task, and that has already cost a duplicated claim-and-research
+cycle plus a session left holding a branch deleted underneath it.
+
+```
+trello --backend local --board 10989a3d search --partial "<keyword>"   # all lists, incl. Done
+```
+
+Search a distinctive noun from the work (a file, a symbol, a flag), not your card title's phrasing
+— a duplicate filed off a different review will be worded differently. Matching is WHOLE-WORD
+without `--partial` (`--substring` for mid-word), so an unprefixed search misses the near-miss
+wordings you are hunting. Found one? Comment on it rather than filing a second; file new only if
+the scope genuinely differs.
 
 ## Per-card-type routing
 

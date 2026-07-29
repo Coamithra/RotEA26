@@ -80,9 +80,9 @@ namespace EvilAliensWeb.Compat.Net
                 NetProtocol.TryDecodeHudCount(packet, out int count) && count == 3);
 
             int[] rx = new int[NetProtocol.HudLevelCount];
-            bool got0 = NetProtocol.TryDecodeHudState(packet, 0, rx, out byte s0, out int c0, out byte t0, out float p0);
+            bool got0 = NetProtocol.TryDecodeHudState(packet, 0, rx, out byte s0, out int c0, out Powerup.PowerupType? t0, out float p0);
             check("entry 0 slot/combo/type round-trip",
-                got0 && s0 == 1 && c0 == 37 && t0 == (byte)Powerup.PowerupType.Range);
+                got0 && s0 == 1 && c0 == 37 && t0 == Powerup.PowerupType.Range);
             // progress is quantised to a byte, so 0.5 comes back as 128/255 -- within half a step.
             check("entry 0 progress within one quantisation step", got0 && Math.Abs(p0 - 0.5f) <= 1f / 255f);
             bool levels0 = got0;
@@ -92,9 +92,17 @@ namespace EvilAliensWeb.Compat.Net
             }
             check("entry 0 levels round-trip in enum order", levels0);
 
-            bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx, out byte s1, out int c1, out byte t1, out _);
+            bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx, out byte s1, out int c1, out Powerup.PowerupType? t1, out _);
             check("entry 1 decodes independently (slot 3, no active powerup)",
-                got1 && s1 == 3 && t1 == NetProtocol.HudPowerupNone);
+                got1 && s1 == 3 && !t1.HasValue);
+            // Card 88f87ba2: an activeType that is neither a real type nor the sentinel folds
+            // into the SAME null, so a consumer has one case to handle rather than two.
+            byte[] bogusType = (byte[])packet.Clone();
+            const int entry0ActiveTypeOffset = 2 + 3;   // header, then [slot][combo:2] of entry 0
+            bogusType[entry0ActiveTypeOffset] = 200;
+            check("an out-of-enum activeType decodes as 'no powerup', not as a cast",
+                NetProtocol.TryDecodeHudState(bogusType, 0, rx, out _, out _, out Powerup.PowerupType? tBad, out _)
+                    && !tBad.HasValue);
             // A byte-wide field would have returned 255 here and underpaid the slot's boss share.
             check("a combo past 255 survives the wire intact", got1 && c1 == 400);
             check("out-of-range level clamps to 4", got1 && rx[NetProtocol.HudLevelCount - 1] == 4);
@@ -139,14 +147,14 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             int[] before = new int[NetProtocol.HudLevelCount];
-            sv.NetReadHudState(scratchSlot, before, out int beforeCombo, out byte beforeType, out float beforeProgress);
+            sv.NetReadHudState(scratchSlot, before, out int beforeCombo, out Powerup.PowerupType? beforeType, out float beforeProgress);
 
             int[] want = { 1, 0, 3, 2, 0 };
-            sv.NetSetHudState(scratchSlot, 42, (byte)Powerup.PowerupType.FirePower, 0.25f, want);
+            sv.NetSetHudState(scratchSlot, 42, Powerup.PowerupType.FirePower, 0.25f, want);
             int[] after = new int[NetProtocol.HudLevelCount];
-            sv.NetReadHudState(scratchSlot, after, out int afterCombo, out byte afterType, out _);
+            sv.NetReadHudState(scratchSlot, after, out int afterCombo, out Powerup.PowerupType? afterType, out _);
             check("NetSetHudState lands the combo on the live ScoreVisualiser", afterCombo == 42);
-            check("NetSetHudState lands the active powerup type", afterType == (byte)Powerup.PowerupType.FirePower);
+            check("NetSetHudState lands the active powerup type", afterType == Powerup.PowerupType.FirePower);
             bool landed = true;
             for (int t = 0; t < NetProtocol.HudLevelCount; t++)
             {
@@ -154,8 +162,8 @@ namespace EvilAliensWeb.Compat.Net
             }
             check("NetSetHudState lands every powerup level", landed);
 
-            sv.NetSetHudState(ScoreVisualiser.SlotCount + 4, 99, 0, 0f, want);
-            sv.NetSetHudState(-1, 99, 0, 0f, want);
+            sv.NetSetHudState(ScoreVisualiser.SlotCount + 4, 99, Powerup.PowerupType.Blast, 0f, want);
+            sv.NetSetHudState(-1, 99, Powerup.PowerupType.Blast, 0f, want);
             check("an out-of-range slot is ignored, not indexed",
                 sv.Combo(scratchSlot) == 42);
 

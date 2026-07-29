@@ -311,8 +311,10 @@ namespace EvilAliensWeb.Compat.Net
         private static bool kickOfferShown;
         private static bool sceneWasUp;       // GameScene edge detection (EvReady / match end)
         private static bool pendingLaunchHas;
-        private static byte pendingLaunchLevel;
-        private static byte pendingLaunchDifficulty;
+        // Validated at the decode boundary, so these hold real enum members and never a raw
+        // wire byte -- see the wire-enum contract in NetProtocol.
+        private static Levels pendingLaunchLevel;
+        private static Settings.DifficultyLevel pendingLaunchDifficulty;
         private static bool peerByeQueued;
 
         // A short user-facing notice for the menus ("PLAYER LEFT -- MATCH ENDED", "UPDATE
@@ -524,7 +526,7 @@ namespace EvilAliensWeb.Compat.Net
 
         // Client side: the host picked a level in the lobby -- MenuScene polls this and
         // mirrors the launch.
-        public static bool TakePendingLaunch(out int level, out int difficulty)
+        public static bool TakePendingLaunch(out Levels level, out Settings.DifficultyLevel difficulty)
         {
             level = pendingLaunchLevel;
             difficulty = pendingLaunchDifficulty;
@@ -537,7 +539,7 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Host side: called from the menu's difficulty pick just before the fade to game.
-        public static void SendLaunch(Levels level, int difficulty)
+        public static void SendLaunch(Levels level, Settings.DifficultyLevel difficulty)
         {
             if (!IsHost || !PeerUp)
             {
@@ -770,10 +772,12 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     continue;
                 }
-                score.NetReadHudState(slot, hudTxLevels[count], out int combo, out byte activeType, out float progress);
+                score.NetReadHudState(slot, hudTxLevels[count], out int combo, out Powerup.PowerupType? activeType, out float progress);
                 hudTxSlots[count] = (byte)slot;
                 hudTxCombos[count] = combo;
-                hudTxTypes[count] = activeType;
+                // No active powerup goes on the wire as the HudPowerupNone sentinel; the
+                // receiver folds it back into the same null (NetProtocol.TryDecodeHudState).
+                hudTxTypes[count] = activeType.HasValue ? (byte)activeType.Value : NetProtocol.HudPowerupNone;
                 hudTxProgress[count] = progress;
                 count++;
             }
@@ -795,7 +799,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             for (int i = 0; i < count; i++)
             {
-                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, out byte slot, out int combo, out byte activeType, out float progress))
+                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress))
                 {
                     continue;
                 }
@@ -2617,13 +2621,13 @@ namespace EvilAliensWeb.Compat.Net
             case NetProtocol.EvMessage:
             {
                 if (isHost || GameScene.NetActiveScene == null
-                    || !NetProtocol.TryDecodeMessageEvent(data, out byte msgType, out byte speech, out float angle, out string text))
+                    || !NetProtocol.TryDecodeMessageEvent(data, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text))
                 {
                     return;
                 }
                 AnimatedMessage msg = AnimatedMessage.NewAnimatedMessage(bin, game);
-                msg.Setup(text, (SoundManager.Texts)speech, (AnimatedMessage.MessageType)msgType);
-                if ((AnimatedMessage.MessageType)msgType == AnimatedMessage.MessageType.redwarning)
+                msg.Setup(text, speech, msgType);
+                if (msgType == AnimatedMessage.MessageType.redwarning)
                 {
                     msg.SetWarningDirection(angle);
                 }
@@ -2646,14 +2650,12 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvUnlock:
             {
-                if (isHost || !NetProtocol.TryDecodeUnlockEvent(data, out byte item, out byte unlockType, out byte speech, out string text))
+                if (isHost || !NetProtocol.TryDecodeUnlockEvent(data, out Unlockables.Items unlockItem, out AnimatedMessage.UnlockType ut, out SoundManager.Texts speech, out string text))
                 {
                     return;
                 }
                 // Generous: the join peer played the level too -- grant the same unlocks the
                 // host-side UnlockEvent granted (idempotent), then show the same banner.
-                Unlockables.Items unlockItem = (Unlockables.Items)item;
-                AnimatedMessage.UnlockType ut = (AnimatedMessage.UnlockType)unlockType;
                 Unlockables.GetInstance().Unlock(unlockItem);
                 if (unlockItem == Unlockables.Items.HarderDifficulties)
                 {
@@ -2673,7 +2675,7 @@ namespace EvilAliensWeb.Compat.Net
                 if (GameScene.NetActiveScene != null)
                 {
                     AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
-                    banner.Setup(text, (SoundManager.Texts)speech, AnimatedMessage.MessageType.unlocked);
+                    banner.Setup(text, speech, AnimatedMessage.MessageType.unlocked);
                     banner.SetUnlockType(ut);
                     // Same standing-purge analysis as EvMessage above: eating this matches the
                     // host, and the GRANT (which is what actually matters) already happened
@@ -2696,12 +2698,11 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvCosmeticSwarm:
             {
-                if (isHost || data.Length < 10)
+                if (isHost || !NetProtocol.TryDecodeCosmeticSwarmEvent(data, out NetCosmeticKind kind, out bool swarmOn, out float swarmRate))
                 {
                     return;
                 }
-                GameScene.NetActiveScene?.NetApplyCosmeticSwarm(
-                    (NetCosmeticKind)data[4], data[5] != 0, NetProtocol.ReadF32(data, 6));
+                GameScene.NetActiveScene?.NetApplyCosmeticSwarm(kind, swarmOn, swarmRate);
                 metrics.BeatsRx++;
                 break;
             }
@@ -2783,14 +2784,30 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvLaunch:
             {
-                if (isHost || data.Length < 6)
+                if (isHost)
                 {
                     return;
                 }
-                pendingLaunchLevel = data[4];
-                pendingLaunchDifficulty = data[5];
+                // A launch we cannot mirror ENDS the pairing rather than being ignored: we are
+                // sitting in the lobby on "the host is choosing a mission", and a silently
+                // dropped launch leaves that screen there forever -- the same never-advances
+                // failure the validation exists to remove. Reuses the peer-gone path (no
+                // GameScene here, so it is exactly Stop() + the notice).
+                if (!NetProtocol.TryDecodeLaunchEvent(data, out Levels launchLevel, out Settings.DifficultyLevel launchDifficulty))
+                {
+                    Console.WriteLine("[net] refused launch: level/difficulty off the wire is not in this build"
+                        + (data.Length >= 6 ? " (level=" + data[4] + " difficulty=" + data[5] + ")" : " (truncated)"));
+                    // Wording covers BOTH refusals -- the decoder fails on an unknown level,
+                    // an unknown difficulty or a short frame, and naming only the mission
+                    // would be simply untrue for a joiner refused over the tier.
+                    EndMatchPeerGone("launch not understood",
+                        "Update required\nThe host picked a mission or difficulty\nthis version does not have\n(reload the page)");
+                    return;
+                }
+                pendingLaunchLevel = launchLevel;
+                pendingLaunchDifficulty = launchDifficulty;
                 pendingLaunchHas = true;
-                Console.WriteLine("[net] rx launch level=" + data[4] + " difficulty=" + data[5]);
+                Console.WriteLine("[net] rx launch level=" + launchLevel + " difficulty=" + launchDifficulty);
                 break;
             }
             case NetProtocol.EvReady:

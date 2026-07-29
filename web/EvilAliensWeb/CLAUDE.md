@@ -322,7 +322,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     first ADDED -- i.e. when the player opens Challenges -- so a dropped level decodes in the
     beat between the keypress and the carousel appearing, and a probe that marks its assertion
     window after the carousel is up passes on the very regression it exists to catch.
-    A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never runs and all
+    A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never REACHES them
+    (the menu's own twelve are queued ahead) and all
     twelve decode at `Init` as before: that is the debug path, not a regression. Since card
     2367b39c `Init` brackets that loop as a LABELLED warm, so those twelve report as one
     `[loadprofile] stockshots warm: 12 textures, <n>ms decode total ... -- deliberate, not a gap`
@@ -333,6 +334,32 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     a different reason again -- it never presses Start, so `Init` does not run there at all.
     `stockshots_warm.txt` asserts the count, which is what catches a dropped carousel level at
     BOOT rather than only via the carousel navigation.
+  - **A splash-skipping boot is NOT a distorted measurement, and `?menu`/`?skipsplash`/
+    `?autostart` deliberately do NOT drain the warm queue before auto-pressing Start (card
+    cccd763a -- decided, measured, don't re-open).** The menu queue is never "skipped": whatever
+    the pump did not reach, `DrainWarmQueue` decodes at `startScreen_OnFinished`, so it is fully
+    warm before the menu is built on EVERY path. Draining before the auto-press would relocate
+    zero work (same 24 decodes, one tick earlier) and buy no fidelity -- it would only stop the
+    `stockshots warm:` line printing, which is `stockshots_warm.txt`'s boot-leg count. The
+    residual difference is the IDLE queue's 24 entries running ~24 ticks behind: measured, a
+    `?menu` boot's warm set is complete at **frame 27** and IDENTICAL IN MEMBERSHIP to a
+    1200-frame full-splash boot's (59 entries, `eval PreloadExport`). Every probe settles at least
+    150 ticks before it asserts, so nothing measures inside that transient. (A `?level=` boot defers the
+    idle queue further, behind `PumpLevelWarm` -- considered and left alone; it is the known edge
+    `QueueIdleWarm` already documents, and `RecordTexture` drops those warms rather than filing
+    them under the level.)
+  - **The player-facing half of that is real but unfixed: the mash window is ~24 ticks wide.**
+    Two Enter taps inside it (skip the splash, then Press Start) put the whole remaining menu warm
+    on one synchronous tick. Measured, second tap at tick 7 / 13 / 19 / 23 -> **12 / 8 / 2 / 0**
+    stock shots still cold. The wall clock is the same however it is drained, the screen already
+    reads "Loading", and the `[hitch]` watchdog is muted under the `(boot)` sentinel -- so what
+    was missing was a number, not a fix. `DrainWarmQueue` now reports itself under `?loadlog`
+    (`[loadprofile] menu warm drain: <n> assets still queued, <ms>ms`, silent when it drained
+    nothing, so a full-splash boot is unchanged); add it to the `stockshots warm:` ms for the
+    whole handoff. Pacing that drain one-per-tick instead is a separate card, gated on reading
+    those two numbers in Chrome. **The pump coverage this all rests on is pinned by
+    `tools/headless/probes/stockshots_pump.txt`** -- neither `stockshots_warm` nor `boot_cold`
+    can see it (measured; see that probe's header).
   - **`GFX/Help/Controls_Keyboard`/`_Joypad` are in the IDLE queue, and moving them there meant
     moving them to the shared content manager (card 4d47c5ba).** `HelpText` (every attract demo)
     and `InstructionsMenu` (every in-level pause -> Instructions) each used to own a private

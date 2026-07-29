@@ -46,6 +46,16 @@ internal static class Program
         Console.WriteLine((ok ? "  PASS " : "  FAIL ") + label + (detail != null ? "  " + detail : ""));
     }
 
+    // A captured Parse() run is usually two lines (Parse tails into Hint() whenever nothing in
+    // `Active` was set) and the diagnostic under test is the first. Detail strings are printed on
+    // the same line as their PASS/FAIL, so a raw capture would break that format -- and splitting
+    // on '\n' alone leaves a trailing '\r' on Windows.
+    private static string FirstLine(string captured)
+    {
+        string[] lines = captured.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        return lines.Length > 0 ? lines[0] : "(nothing printed)";
+    }
+
     private static int Main(string[] args)
     {
         if (args.Length < 1)
@@ -83,6 +93,12 @@ internal static class Program
         }
 
         rc = ProbeAiWallScanFlags(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeAiFlagRejection(asm);
         if (rc != 0)
         {
             return rc;
@@ -448,11 +464,8 @@ internal static class Program
         run("?aicrosspenalty=2.5q");
         Check("?aicrosspenalty=2.5q refused", Equals(livePenalty(), 2.5f), "penalty=" + livePenalty());
 
-        // NOTE, deliberately not asserted as a diagnostic: unlike ?flyspider*, the ?ai* family
-        // rejects a bad value SILENTLY -- ?aireact, ?aigapmargin and the other ten all do. These
-        // two follow their family rather than splitting it. The guarded path is the one that
-        // produces published numbers: tools/sim/aiwallnav's --scanrows= exits 2 on a non-integer
-        // instead of benching the default. Making the whole ?ai* family report is its own card.
+        // The DIAGNOSTIC these two now print is asserted with the other twelve ?ai* tuning knobs
+        // in ProbeAiFlagRejection below, so the family is covered in one place.
 
         // 4. Clamps. 0 scan rows is ALLOWED on purpose -- it is "does not look ahead at all", the
         // floor end of a look-ahead sweep and the same kind of deliberate skill floor ?aiaim=Pi is.
@@ -490,6 +503,172 @@ internal static class Program
         Check("case set leaves no override behind",
             Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
             "rows=" + liveRows() + " penalty=" + livePenalty());
+        return 0;
+    }
+
+    // Card 48b7c6b1 -- the ?ai* TUNING knobs' REJECTION diagnostic. Fourteen flags parsed as
+    // `TryParse` plus an optional range guard, with no else, so `?aireact=420x` left the baked
+    // default in force and said nothing. That is the failure card 6eb8dc9e named for ?flyspider*:
+    // a run that measures the DEFAULT path while carrying the label of the variant under test --
+    // and these fourteen are the ones whose readings get published as sweep rows, where a
+    // silently-ignored value reads as "the knob did nothing".
+    //
+    // NOT every flag whose name starts with "ai": `?aifriends=<0-3>` (a co-op soak seam, not a
+    // tuning knob) is still silent, and so is the boolean `?aiplayer`/`?aibench` pair, which
+    // cannot have a bad value. Say "the 14 tuning knobs", never "the whole ?ai* family".
+    //
+    // Silence is invisible in any frame or number, so the assertion has to be made about the
+    // OUTPUT. Three legs per flag, driven through the real DebugFlags.Parse:
+    //   1. a valid value lands AND reports no rejection  (the negative control -- a helper that
+    //      printed unconditionally, or an else placed on the wrong branch, fails here and only
+    //      here; note Parse tails into Hint() on these queries, so the capture is never EMPTY);
+    //   2. an unparseable value changes nothing, is reported, and the "staying on" clause names
+    //      THE VALUE JUST SET rather than the baked default -- the part of the ?flyspider*
+    //      precedent that is easy to get wrong, since Parse never resets a property and a repeated
+    //      flag must keep the earlier valid value;
+    //   3. a NEGATIVE value -- parseable but refused by the range guard, i.e. the second way into
+    //      the else, which a TryParse-only test would miss.
+    // Then the two per-tier knobs' wording, which cannot be a number (see below).
+    private static int ProbeAiFlagRejection(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        if (parse == null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags.Parse -- renamed or moved?");
+            return 2;
+        }
+
+        // Parse one query and hand back everything it printed. Parse tails into Hint() when nothing
+        // in `Active` is set, so a capture is usually two lines; the diagnostic is the first.
+        Func<string, string> run = query =>
+        {
+            System.IO.TextWriter saved = Console.Out;
+            System.IO.StringWriter buf = new System.IO.StringWriter();
+            Console.SetOut(buf);
+            try { parse.Invoke(null, new object[] { query }); }
+            finally { Console.SetOut(saved); }
+            return buf.ToString();
+        };
+        Func<string, object> get = name => flags.GetProperty(name, anyStatic).GetValue(null);
+        Action<string, object> set = (name, v) => flags.GetProperty(name, anyStatic).SetValue(null, v);
+
+        // flag, the DebugFlags property it writes, a valid value (chosen != the baked default, so
+        // leg 2's "names the value in force" claim is not vacuous), what that value must read back
+        // as, and the baked default as it renders in a message -- which must NOT appear.
+        var rows = new[]
+        {
+            new { Flag = "aismooth",       Prop = "AiSteerSmoothMs",       Good = "111", Want = (object)111f,  Baked = "90"   },
+            new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
+            new { Flag = "aipark",         Prop = "AiParkDemand",          Good = "3",   Want = (object)3f,    Baked = "0.95" },
+            new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
+            new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
+            new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
+            new { Flag = "aicrosspenalty", Prop = "AiWallCrossPenalty",    Good = "33",  Want = (object)33f,   Baked = ""     },
+            new { Flag = "aithreatlead",   Prop = "AiThreatLeadMs",        Good = "555", Want = (object)555f,  Baked = "700"  },
+            new { Flag = "aibossbias",     Prop = "AiPriorityBias",        Good = "0.75",Want = (object)0.75f, Baked = "0.45" },
+            new { Flag = "aiaim",          Prop = "AiAimSpreadRad",        Good = "2",   Want = (object)2f,    Baked = ""     },
+            new { Flag = "aifieldpx",      Prop = "AiThreatFieldPx",       Good = "321", Want = (object)321f,  Baked = ""     },
+            new { Flag = "aifieldsize",    Prop = "AiThreatFieldSize",     Good = "6",   Want = (object)6f,    Baked = "1.8"  },
+            new { Flag = "aifieldfall",    Prop = "AiThreatFieldFalloff",  Good = "8",   Want = (object)8f,    Baked = "3"    },
+            new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
+        };
+        // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
+        // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
+        // "(expected ...)" clause or the value being quoted back, so the check would fire on text
+        // that is not the default at all. aiaim/aifieldpx have no single baked number (per tier).
+
+        // Bind every property up front and fail LOUDLY, the way the other case sets do -- a
+        // renamed override would otherwise surface as a puzzling value mismatch inside one leg.
+        string missing = null;
+        foreach (var row in rows)
+        {
+            if (flags.GetProperty(row.Prop, anyStatic) == null) { missing ??= row.Prop; }
+        }
+        if (missing != null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags." + missing + " -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 14 knobs (card 48b7c6b1)");
+
+        // One counter and its OWN first-problem detail per leg: a shared sink attaches the
+        // diagnosis to whichever Check happens to print it, which in a mutation run put the only
+        // useful line on a PASS and left the FAIL as a bare count.
+        int landed = 0, quiet = 0, reported = 0, named = 0, negatives = 0;
+        string badLanded = null, badQuiet = null, badReported = null, badNamed = null, badNeg = null;
+        foreach (var row in rows)
+        {
+            // 1. valid value: lands, and reports no rejection.
+            string outGood = run("?" + row.Flag + "=" + row.Good);
+            if (Equals(get(row.Prop), row.Want)) { landed++; }
+            else { badLanded ??= row.Flag + " read back " + get(row.Prop) + ", wanted " + row.Want; }
+            if (!outGood.Contains("unknown")) { quiet++; }
+            else { badQuiet ??= row.Flag + "=" + row.Good + " was REPORTED: " + FirstLine(outGood); }
+
+            // 2. unparseable: unchanged, reported, names the value in force (not the baked default).
+            string outBad = run("?" + row.Flag + "=xx");
+            bool unchanged = Equals(get(row.Prop), row.Want);
+            bool says = outBad.Contains("unknown ?" + row.Flag + "= value 'xx'") && outBad.Contains("-- ignored, staying on ");
+            bool inForce = outBad.Contains(row.Good) && (row.Baked.Length == 0 || !outBad.Contains(row.Baked));
+            if (unchanged && says) { reported++; }
+            else { badReported ??= row.Flag + ": prop=" + get(row.Prop) + " said: " + FirstLine(outBad); }
+            if (inForce) { named++; }
+            else { badNamed ??= row.Flag + " does not name the in-force " + row.Good + ": " + FirstLine(outBad); }
+
+            // 3. negative: parses, fails the range guard, must be refused the same way. ?aiff is
+            //    the one flag with no range guard (it CLAMPS to 0..64), so -1 is accepted there.
+            if (row.Flag != "aiff")
+            {
+                string outNeg = run("?" + row.Flag + "=-1");
+                if (Equals(get(row.Prop), row.Want) && outNeg.Contains("unknown ?" + row.Flag + "=")) { negatives++; }
+                else { badNeg ??= row.Flag + "=-1: prop=" + get(row.Prop) + " said: " + FirstLine(outNeg); }
+            }
+        }
+        Check("a valid value lands on all 14", landed == rows.Length,
+            landed + "/" + rows.Length + (badLanded != null ? "; " + badLanded : ""));
+        Check("a valid value reports NO rejection (the control)", quiet == rows.Length,
+            quiet + "/" + rows.Length + " clean -- a helper that printed unconditionally fails here"
+            + (badQuiet != null ? "; " + badQuiet : ""));
+        Check("a bad value is refused AND reported on all 14", reported == rows.Length,
+            reported + "/" + rows.Length + (badReported != null ? "; " + badReported : ""));
+        Check("the message names the value IN FORCE, not the baked default", named == rows.Length,
+            named + "/" + rows.Length + " (Parse never resets a property, so a repeated flag keeps the"
+            + " earlier value)" + (badNamed != null ? "; " + badNamed : ""));
+        Check("a NEGATIVE value is refused AND reported on all 13 guarded flags", negatives == rows.Length - 1,
+            negatives + "/" + (rows.Length - 1) + " (?aiff has no range guard -- it clamps)"
+            + (badNeg != null ? "; " + badNeg : ""));
+
+        // ?aiaim and ?aifieldpx resolve through PlayerShip.AiSkillByDifficulty at PLAY time, off a
+        // difficulty this parse has not settled, so with no override standing there is no number to
+        // name -- and a diagnostic that can state the wrong condition is worse than one that states
+        // none. They must say which table is in force instead. (With an override standing they name
+        // it like the rest, which the table above already covered.)
+        set("AiAimSpreadRad", null);
+        set("AiThreatFieldPx", null);
+        string outAim = run("?aiaim=xx");
+        string outPx = run("?aifieldpx=xx");
+        Check("per-tier knobs name the SKILL ROW when no override stands",
+            get("AiAimSpreadRad") == null && get("AiThreatFieldPx") == null
+            && outAim.Contains("staying on the per-tier skill row")
+            && outPx.Contains("staying on the per-tier skill row"),
+            "aiaim said: " + FirstLine(outAim) + " | aifieldpx said: " + FirstLine(outPx));
+
+        // Hand the process back as it was found. Parse can only ASSIGN, so a Probe* added after
+        // this one would otherwise inherit fourteen overrides with no way to reach the defaults.
+        foreach (var row in rows)
+        {
+            set(row.Prop, row.Flag == "aiff" ? (object)0 : null);
+        }
+        int leaked = 0;
+        foreach (var row in rows)
+        {
+            object v = get(row.Prop);
+            if (row.Flag == "aiff" ? !Equals(v, 0) : v != null) { leaked++; }
+        }
+        Check("case set leaves no override behind", leaked == 0, leaked + " still set");
         return 0;
     }
 

@@ -1200,18 +1200,10 @@ the rest are tier-independent.
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
-  **A malformed value on any of the 14 is REPORTED and ignored, never swallowed** (card 48b7c6b1,
-  the `?flyspider*` convention): `[debug] unknown ?aireact= value '420x' (expected a number >= 0)
-  -- ignored, staying on 420`. The "staying on" clause names the setting actually IN FORCE, so a
-  repeated flag (`?aireact=333&aireact=nope`) reports 333, not the baked 420; `?aiaim` and
-  `?aifieldpx` say "the per-tier skill row" instead of a number, because they resolve through
-  `AiSkillByDifficulty` at play time off a tier that is not settled while the URL is parsed.
-  A NEGATIVE value is a rejection too (the range guards), not a clamp -- except `?aiff`, which has
-  no guard and clamps 0..64; an out-of-RANGE value is still clamped silently on all 14, since only
-  a value the guard cannot use at all reaches the diagnostic. Pinned by `logic_probe`'s
-  `ProbeAiFlagRejection`, whose control is that a valid value reports no rejection.
-  Card 4e401005 has since taken the same treatment to every other value-carrying flag in the file
-  (`?aifriends=` included) -- see "Debug flags & tuning conventions" above.
+  A malformed value on any of the 14 is REPORTED and ignored, never swallowed, per the file-wide
+  value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
+  4e401005). The one wrinkle specific to this family: `?aiaim`/`?aifieldpx` name "the per-tier
+  skill row" as the in-force setting when no override stands. Pinned by `ProbeAiFlagRejection`.
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.

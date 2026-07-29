@@ -1,4 +1,4 @@
-# Spike: real batched 3D for the Level-3 wall towers (`?wall3d`)
+# Spike: real batched 3D for the Level-3 wall towers (`?wall3d`, flag since removed)
 
 Trello `a66fc73e`. Branch `spike/wall3d-batched`, worktree `wt2`, dev port `5282`.
 

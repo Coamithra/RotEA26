@@ -225,7 +225,7 @@ def selftest():
     sf.write) and records which cues reach the writer.
 
     The negative control matters as much as the positive one: with HAND_OWNED_SFX
-    emptied, all 19 cues must write. Without it a build_sfx that wrote NOTHING (a
+    emptied, every cue must write. Without it a build_sfx that wrote NOTHING (a
     typo'd loop, a stray early return) would pass the main assertion vacuously.
     """
     import unittest.mock as mock
@@ -268,7 +268,8 @@ def selftest():
     written = set(run(frozenset()))
     print(f"\n[2] negative control (HAND_OWNED_SFX emptied): {len(written)} written")
     if written == all_wavs:
-        print("  PASS: all 19 cues write, so [1] is a real guard and not a no-op loop")
+        print(f"  PASS: all {len(all_wavs)} cues write, so [1] is a real guard, "
+              f"not a no-op loop")
     else:
         print(f"  FAIL: expected all {len(all_wavs)}, got {len(written)}")
         ok = False

@@ -104,12 +104,6 @@ tools/mars/_*.png
 # throwaway (re-render to reproduce).
 tools/sim/_*
 
-# ---- Reaper peak cache (tools/audio) -----------------------------------------
-# Reaper writes a .reapeaks waveform cache beside any wav it opens. Three SFX are
-# hand-recorded there (see tools/CLAUDE.md, Audio), so this dir appears whenever
-# one is re-edited. Local scratch, regenerated on demand; the .wav files ship.
-web/EvilAliensWeb/wwwroot/Content/sfx/peaks/
-
 # ---- Channel-swap SFX auditions (tools/audio) --------------------------------
 # eleven_channelswap.py renders throwaway ElevenLabs candidates + an audition page
 # here; the PICKED one is committed as channelswap_source.mp3 (+ the shipped WAV),

@@ -60,12 +60,14 @@ DEFAULT_SRC = r"C:\Programming\AnimGen\data\exports\brain_20260625_005814_18720b
 # (huge/med/small) = 200/100/35 design px, chosen to match the original
 # brainlargetransglow's on-screen size. Why 512 is enough: the design space is 800x600
 # and RenderScale caps the render target at 1440px tall, so design->device tops out at
-# 1440/600 = 2.4x; the largest brain is 200 * 2.4 = 480 device px, and a 512 cell is
-# ~1.07 texel:pixel there, i.e. the OG-size draw is never upscaled.
+# 1440/600 = 2.4x; the largest brain is 200 * 2.4 = 480 device px AT REST, and a 512 cell
+# is ~1.07 texel:pixel there. It does go a hair soft at the top of the breathe: Braineroid
+# multiplies scale by pulsate (1.00..1.14), so the peak is 228 design px = ~547 device px,
+# ~0.94 texel:pixel. That is the only upscaling, and it is 6% for a fraction of a cycle.
 # Full write-up (incl. the draw-path gotchas): web/EvilAliensWeb/CLAUDE.md,
 # "Animated Braineroid".
 FRAME_STEP = 4          # keep every Nth source frame (4 = quarter the frames, ~20)
-COLS, ROWS = 5, 4       # grid => COLS*ROWS cells; must be >= number of kept frames
+COLS, ROWS = 5, 4       # grid => COLS*ROWS cells; any kept frames beyond that are dropped
                         # (the 81-frame export yields 21 kept, truncated to these 20)
 CELL_W = 512            # cell width in texels; resolution only -- see the scale math above.
 MARGIN = 0.07           # fractional padding added around the union content bbox

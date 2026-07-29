@@ -101,6 +101,9 @@ generate much of the art/audio referenced here.
   that is the accepted price: a padded-vs-logical slip is runtime-only, easy to miss, and cheap to
   ship by accident. The over-pad has been mistaken for a build accident and reported as a bug
   before, hence this note -- if you think you have found stale padtest output, you have found this.
+  Since card `06c6c741` the build ENFORCES it: `build_textures.py` aborts before writing anything
+  if a run would pad an asset LESS than the `.dds` it is replacing, so the bare default can no
+  longer strip the canary by accident. `--drop-canary` is the deliberate opt-out (tools/CLAUDE.md).
 - **A clamped source rect does NOT stop the filter reaching the pad — hence the 4px edge gutter.**
   `LinearClamp` clamps at the TEXTURE border, not at the source rect, so a destination pixel whose
   centre lands in the last half texel bilinearly blends the last content texel with texel `[LW]`.

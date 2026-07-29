@@ -215,11 +215,37 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   then 127/191/223 at 3/4/5). The full chain must be shipped — KNI allocates every level and GL
   needs a mipmap-COMPLETE texture, so a short chain renders black.
   **Rebuild one asset with `--only <glob>`** rather than rewriting all ~124 committed `.dds`.
-  **Rebuild with `--padtest 100`, not the bare default.** The shipped `.dds` deliberately carry the
-  over-pad canary (web CLAUDE.md, "The canary is LEFT ON"), but `--padtest` DEFAULTS TO 0 — so a
-  plain `python tools/textures/build_textures.py` silently strips it off every texture it touches
-  and the diff looks like a harmless size win. Check `git diff --stat` on `Content/gfx/**.dds`
-  before committing a rebuild: shrinking files mean you dropped the canary.
+  **Rebuild with `--padtest 100`, not the bare default** — and since card `06c6c741` the build
+  ENFORCES that rather than trusting you to remember. The shipped `.dds` deliberately carry the
+  over-pad canary (web CLAUDE.md, "The canary is LEFT ON") while `--padtest` DEFAULTS TO 0, so a
+  plain `python tools/textures/build_textures.py` used to strip it off every texture it touched and
+  the diff read as a harmless size win. `check_canary()` now compares each SELECTED asset against
+  the `.dds` already on disk and **aborts before writing anything** if this run would pad it less.
+  - **It compares the OVER-PAD (`padded - pad4(logical)`), not the padded dims** — padded dims also
+    shrink when the SOURCE PNG does, so a padded-dims rule flags a legitimate rebuild of a
+    re-exported smaller sprite whose canary is perfectly intact. All 124 committed `.dds` read
+    exactly `+100/+100` on that measure.
+  - **Firing BEFORE the build is the point**, not an implementation detail: nothing bad reaches the
+    working tree, and `check_pad_bleed`'s reassuring "ok: all 124 replicate their logical edge"
+    can never end up vouching for a run that just dropped the canary (which is the review finding
+    that created this card). `--dry-run` fires it too — a dry run whose plan ends in an abort has
+    predicted the wrong outcome.
+  - **A NEW asset is exempt** (no `.dds` on disk = no canary to lose) but gets a non-fatal `NOTE`
+    when the pad it would be built at differs from the one the rest of the fleet agrees on.
+  - **`--drop-canary` is the deliberate opt-out** and the ONLY sanctioned way to shrink the pad —
+    it is what the eventual ship rebuild at `--padtest 0` (Trello `f2621e52`) must pass.
+  - **`--selftest`** pins the rule against a case table (strip / partial shrink / minimal→minimal /
+    growth / new asset / unstamped / resized source, both ways) plus a negative control: the
+    plausible padded-dims rule must FALSE-POSITIVE on the resized-source row. Mutation-tested —
+    `<`→`<=` flips 5 rows, deleting the new-asset exemption flips 1, the padded-dims rule flips 1.
+  **`--manifest-only` no longer dirties `Compat/PrecompiledTextures.cs`.** It goes through
+  `write_generated()`, which writes only when the bytes would change and preserves the file's own
+  line endings. The checkout is `core.autocrlf=true` with no `.gitattributes`, so that file is CRLF
+  in the working tree while the script renders LF: every run used to rewrite all 143 line endings
+  and leave it MODIFIED in `git status` with an EMPTY content diff. Neither half works alone —
+  preserving the endings alone still rewrites (and bumps mtime, so MSBuild rebuilds) when nothing
+  changed, and skipping on equal content alone never matches, because LF text never equals a CRLF
+  file. The same `--selftest` covers it.
 - **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and checks
   the texel just outside the logical edge still looks like the edge it replicates (alpha-weighted,
   each texel calibrated against the image's own local across-edge step, so BC3 noise doesn't cry
@@ -255,7 +281,13 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,
-  `--dry-run`, `--manifest-only`. The in-game `?texviewer` scene's Save button writes
+  `--dry-run`, `--manifest-only`. **`--only` matching nothing is an ERROR** (card `06c6c741`),
+  like `build_textures.py`'s — a typo'd glob used to build zero textures and report success. The
+  pattern is no longer `.lower()`ed either, but do not read anything into that: `fnmatch.fnmatch`
+  normcases BOTH sides on Windows, so an uppercase pattern always matched anyway and this toolchain
+  is Windows-only. The hard fail is the part that changed. (Don't "fix" either script to
+  `fnmatchcase` — that would make texviewer stricter than `build_textures.py`.)
+  The in-game `?texviewer` scene's Save button writes
   `textures.config` lines via a dev-only `POST /api/texdecide` on `web/DevServer` (serve via
   DevServer or Save 404s); after saving decisions, re-run `build_textures.py`.
 - **`build_brain_sheet.py`** builds the animated Braineroid: chroma-keys 81 magenta-backdrop

@@ -34,8 +34,14 @@ and ship under wwwroot/Content; WebContentManager.LoadTexture prefers .dds, then
 box differs from the Linux CI, which just consumes the committed outputs (same
 model as tools/shaders/build_shaders.py and tools/audio/build_audio.py).
 
+The committed .dds are built at --padtest 100 (a deliberate over-pad canary; see check_canary and
+web CLAUDE.md) even though --padtest defaults to 0, so a run that would pad an asset LESS than the
+file it is replacing is refused before anything is written. --drop-canary is the opt-out.
+
 Usage:
-  python tools/textures/build_textures.py [--config FILE] [--dry-run]
+  python tools/textures/build_textures.py [--config FILE] [--dry-run] [--only GLOB]
+                                          [--padtest PX] [--drop-canary]
+  python tools/textures/build_textures.py --selftest
 
 Requires: Pillow (PIL); texconv.exe in tools/textures/ for any 'dxt' entries
 (download: https://github.com/microsoft/DirectXTex/releases/latest/download/texconv.exe).
@@ -76,6 +82,15 @@ DDS_LOGICAL_MAGIC = b"LOGD"   # written at reserved1[2] to flag that reserved1[0
 
 def pad4(x):
     return ((x + 3) // 4) * 4
+
+
+def target_dims(w, h, pad_extra=0):
+    """The padded (mult-of-4) size a dxt build writes for a logical w x h image.
+
+    The ONE place that size is computed. build_dxt and the canary preflight below must not grow
+    two copies of it: the preflight decides whether to abort by predicting what the build will
+    write, so a second formula that drifted would silently predict the wrong size."""
+    return pad4(w + pad_extra), pad4(h + pad_extra)
 
 
 # How far the logical edge is replicated into the pad (see edge_gutter). ONE texel is all
@@ -151,6 +166,141 @@ def src_png(asset):
     # asset is Content-relative, lowercase, no extension (e.g. gfx/sprites/x).
     # The on-disk root is capital "Content"; everything under it is lowercase.
     return os.path.join(CONTENT, asset.replace("/", os.sep) + ".png")
+
+
+# ---------------------------------------------------------------------------------------------
+# The --padtest canary gate (Trello 06c6c741).
+#
+# The committed .dds are deliberately built at --padtest 100 (web CLAUDE.md, "The canary is LEFT
+# ON") while --padtest DEFAULTS TO 0 -- so a plain `python tools/textures/build_textures.py` used
+# to silently strip the canary off every texture it touched, and the diff read as a harmless size
+# win. So before anything is written, every SELECTED dxt asset is compared against the .dds already
+# on disk and the build ABORTS if this run would pad it LESS than the file it is about to replace.
+#
+# Firing BEFORE the build rather than inspecting the output is deliberate: nothing bad ever reaches
+# the working tree (so there is no revert dance), and check_pad_bleed's reassuring "ok: all 124
+# replicate their logical edge" is never printed under a run that just dropped the canary -- that
+# reassuring-all-clear-after-the-footgun is what motivated this gate.
+#
+# The comparison is over the OVER-PAD (padded minus the minimal mult-of-4), never over the padded
+# dims: padded dims also move when the SOURCE PNG is resized, so a padded-dims rule flags a
+# legitimate rebuild of a shrunken sprite whose canary is perfectly intact. selftest() pins that
+# distinction against the naive rule.
+# ---------------------------------------------------------------------------------------------
+
+
+def pad_bleed_module():
+    """Import the sibling guard module, whichever way this file was invoked."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import check_pad_bleed
+    return check_pad_bleed
+
+
+def read_dds_dims(path):
+    """(padded_w, padded_h, logical_w, logical_h) of an existing .dds, or None if there is none.
+
+    None means "no prior build to compare against", which is exactly what exempts the FIRST build
+    of a NEW asset from the gate. Reuses check_pad_bleed's header parse rather than growing a
+    second one; a file it cannot parse is reported and treated as no-info (a malformed .dds is
+    that guard's business, not this gate's)."""
+    if not os.path.isfile(path):
+        return None
+    try:
+        _data, pw, ph, lw, lh, _mips, _block = pad_bleed_module().read_dds(path)
+    except ValueError as e:
+        print(f"  WARN  cannot read {os.path.relpath(path, REPO)} for the canary check: {e}")
+        return None
+    return pw, ph, lw, lh
+
+
+def pad_over(pw, ph, lw, lh):
+    """How far a built .dds is padded PAST the minimal mult-of-4 -- i.e. the canary it carries.
+
+    (0, 0) for a ship-minimal (--padtest 0) build and for an unpadded/unstamped file; exactly
+    (N, N) for a --padtest N build whenever N is a multiple of 4 -- all 124 committed .dds read
+    +100/+100. Clamped at 0 so a hand-made .dds with non-mult-of-4 dims cannot read negative."""
+    return max(0, pw - pad4(lw)), max(0, ph - pad4(lh))
+
+
+def canary_shrink(disk, w, h, pad_extra):
+    """THE RULE. None if this build is fine, else (over-pad on disk, over-pad this run would write).
+
+    `disk` is read_dds_dims()'s tuple, or None for an asset that has no .dds yet -- exempt, since a
+    new asset has no canary to lose. GROWING the pad is always allowed; only a shrink on either
+    axis is a finding."""
+    if disk is None:
+        return None
+    old = pad_over(*disk)
+    new = pad_over(*target_dims(w, h, pad_extra), w, h)
+    return (old, new) if new[0] < old[0] or new[1] < old[1] else None
+
+
+def dds_path_for(asset):
+    png = src_png(asset)
+    return os.path.join(os.path.dirname(png), os.path.basename(asset) + ".dds")
+
+
+def fleet_canary(entries):
+    """The over-pad every already-built dxt asset agrees on, or None if they disagree / none exist.
+
+    Only consulted when a NEW asset is in the build (see check_canary), so the ~124 header reads
+    are not paid by an ordinary run."""
+    overs = {pad_over(*disk) for disk in
+             (read_dds_dims(dds_path_for(e[1])) for e in entries if e[0] == "dxt")
+             if disk is not None}
+    return overs.pop() if len(overs) == 1 else None
+
+
+def check_canary(selected, entries, pad_extra, drop_canary):
+    """Preflight the SELECTED dxt entries: refuse to shrink the shipped over-pad canary.
+
+    Runs before anything is written, and under --dry-run too -- a dry run that prints a plan for a
+    command which would abort has predicted the wrong outcome. Zero selected dxt entries (e.g. a
+    raw-only --only) means zero checks and no output."""
+    from PIL import Image
+    findings, fresh = [], []
+    for e in selected:
+        if e[0] != "dxt":
+            continue
+        png = src_png(e[1])
+        if not os.path.isfile(png):
+            continue           # build_dxt owns the "source not found" error; don't pre-empt it
+        with Image.open(png) as im:
+            w, h = im.size
+        disk = read_dds_dims(dds_path_for(e[1]))
+        hit = canary_shrink(disk, w, h, pad_extra)
+        if hit:
+            findings.append((e[1], target_dims(w, h, pad_extra), disk, hit[0], hit[1]))
+        elif disk is None:
+            fresh.append((e[1], pad_over(*target_dims(w, h, pad_extra), w, h)))
+    # A brand-new asset has no canary to lose, so the rule above cannot judge it -- but building the
+    # one asset that ships WITHOUT the fleet's canary is the same mistake by another route. Say so.
+    if fresh:
+        fleet = fleet_canary(entries)
+        for asset, new in fresh:
+            if fleet is not None and new != fleet:
+                print(f"  NOTE  {asset} has no .dds yet, so the canary gate cannot judge it: this "
+                      f"run would build it +{new[0]}x{new[1]}px while the other assets carry "
+                      f"+{fleet[0]}x{fleet[1]}px.  --padtest {fleet[0]} matches the shipped set.")
+    if not findings:
+        return
+    print(f"  [canary] {len(findings)} selected asset(s) carry an over-pad canary this run would "
+          f"{'strip' if pad_extra == 0 else 'shrink'}:")
+    for asset, (tw, th), disk, old, new in findings:
+        print(f"    {asset}  on disk {disk[0]}x{disk[1]} (logical {disk[2]}x{disk[3]}, "
+              f"+{old[0]}x{old[1]}px)  ->  would build {tw}x{th} (+{new[0]}x{new[1]}px)")
+    if drop_canary:
+        print("  [drop-canary] removing it is the point of this run (Trello f2621e52) -- proceeding.")
+        return
+    keep = max(o for f in findings for o in f[3])
+    fail(f"this build would strip the over-pad canary from {len(findings)} of the "
+         f"{len(selected)} selected asset(s) (listed above).\n"
+         "  The shipped .dds deliberately carry it -- tools/CLAUDE.md (Textures) and web\n"
+         '  CLAUDE.md ("The canary is LEFT ON"). It is what makes a padded-vs-logical size bug\n'
+         "  visible in play, so dropping it by accident costs that coverage silently.\n"
+         f"  Keep it:                 --padtest {keep}\n"
+         "  Remove it deliberately:  --drop-canary   (the opt-out; Trello f2621e52)")
 
 
 def mult4_preserving_pitch(total, divs):
@@ -263,8 +413,7 @@ def build_dxt(asset, dry, pad_extra=0, mip=False):
     # Pad up to a mult-of-4 (never crop). pad_extra (>0 only in --padtest) grossly over-pads so
     # any code that still reads the PADDED size instead of the logical size shows an obvious
     # artifact. Content stays at (0,0); the logical (w,h) is stamped into the .dds for the runtime.
-    tw = pad4(w + pad_extra)
-    th = pad4(h + pad_extra)
+    tw, th = target_dims(w, h, pad_extra)
     padded = (tw != w or th != h)
     base = os.path.basename(asset)
     out_dds = os.path.join(os.path.dirname(png), base + ".dds")
@@ -345,6 +494,33 @@ def parse_config(path):
     return entries
 
 
+def write_generated(path, text, dry):
+    """Write `text` only if it would actually change the file, in the file's OWN line endings.
+
+    Both halves matter, and neither works alone (Trello 06c6c741). This repo is checked out with
+    core.autocrlf=true and no .gitattributes, so the working copy of a generated .cs is CRLF while
+    `text` is built with \\n: writing it verbatim rewrote every line ending on every run and left
+    the file MODIFIED in git status with an EMPTY content diff, which looks like the build changed
+    something and invites a pointless commit. Preserving the endings alone would still rewrite the
+    file (bumping its mtime, so MSBuild rebuilds for nothing) when nothing changed; skipping on
+    equal content alone would never match, because the rendered LF text never equals the CRLF file.
+    A file that does not exist yet is written LF -- git's checkout filter owns the local flavour.
+
+    Returns True if the content differs (i.e. it wrote, or under --dry-run would have)."""
+    existing = None
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            existing = f.read()
+    newline = "\r\n" if existing and b"\r\n" in existing else "\n"
+    data = text.replace("\n", newline).encode("utf-8")
+    if data == existing:
+        return False
+    if not dry:
+        with open(path, "wb") as f:
+            f.write(data)
+    return True
+
+
 def write_manifest_cs(entries, dry):
     # WebContentManager keys assets as ResolvePath does: "Content/" + the lowercase,
     # Content-relative path (ResolvePath calls ToLowerInvariant on every lookup key). So lowercase
@@ -384,11 +560,83 @@ def write_manifest_cs(entries, dry):
         "    }\n"
         "}\n"
     )
+    changed = write_generated(MANIFEST_CS, text, dry)
+    state = ("would rewrite" if dry else "rewritten") if changed else "unchanged"
     print(f"  manifest  {len(siblings)} entr{'y' if len(siblings)==1 else 'ies'} -> "
-          f"{os.path.relpath(MANIFEST_CS, REPO)}")
-    if not dry:
-        with open(MANIFEST_CS, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+          f"{os.path.relpath(MANIFEST_CS, REPO)}  ({state})")
+
+
+def padded_dims_verdict(disk, w, h, pad_extra):
+    """The SUPERSEDED rule, kept only so selftest() can show what it gets wrong.
+
+    It compares the PADDED DIMS instead of the over-pad -- the obvious first guess, and wrong,
+    because padded dims also shrink when the SOURCE PNG does."""
+    if disk is None:
+        return None
+    tw, th = target_dims(w, h, pad_extra)
+    return True if tw < disk[0] or th < disk[1] else None
+
+
+def selftest():
+    """Pin the canary rule and the generated-file write policy. No config, no .dds, no texconv."""
+    canary = (1348, 1348, 1248, 1248)    # a shipped --padtest 100 build (756-v1; logical mult-of-4)
+    minimal = (1252, 1252, 1250, 1250)   # the same asset as it would ship at --padtest 0
+    oneaxis = (1348, 600, 1248, 600)     # a canary on the width only
+    cases = [
+        ("rebuild at --padtest 100 keeps the canary", canary, (1248, 1248), 100, False),
+        ("the bare default strips the canary", canary, (1248, 1248), 0, True),
+        ("a weaker --padtest 50 still shrinks it", canary, (1248, 1248), 50, True),
+        ("minimal-pad asset rebuilt minimally", minimal, (1250, 1250), 0, False),
+        ("minimal-pad asset gaining a canary", minimal, (1250, 1250), 100, False),
+        ("NEW asset with no .dds on disk is exempt", None, (1000, 1000), 0, False),
+        ("unpadded, unstamped .dds", (1024, 1024, 1024, 1024), (1024, 1024), 0, False),
+        ("resized source PNG, canary kept", canary, (900, 900), 100, False),
+        ("resized source PNG, canary dropped", canary, (900, 900), 0, True),
+        ("shrink on one axis only", oneaxis, (1248, 600), 0, True),
+        ("growth on the other axis is not a shrink", oneaxis, (1248, 600), 100, False),
+    ]
+    ok = True
+    for name, disk, (w, h), extra, want_flag in cases:
+        hit = canary_shrink(disk, w, h, extra)
+        got_flag = hit is not None
+        ok &= got_flag == want_flag
+        detail = f"{hit[0]} -> {hit[1]}" if hit else "-"
+        print(f"  {'ok  ' if got_flag == want_flag else 'FAIL'}  {name}: "
+              f"{'flagged' if got_flag else 'passes'} (want "
+              f"{'flagged' if want_flag else 'passes'})  [{detail}]")
+    # The discrimination the over-pad measure exists for, asserted rather than assumed: the naive
+    # padded-dims rule flags a rebuild of a shrunken source whose canary is intact.
+    resized = (canary, 900, 900, 100)
+    if padded_dims_verdict(*resized) is None:
+        print("  FAIL  the superseded padded-dims rule was expected to MISS-fire on a resized source")
+        ok = False
+    else:
+        print("  ok    the superseded padded-dims rule flags a resized source whose canary is "
+              "intact; the over-pad rule passes it")
+
+    import tempfile
+    text = "line one\nline two\n"
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "Generated.cs")
+        read = lambda: open(p, "rb").read()
+        writes = [("first write creates the file", write_generated(p, text, False) is True),
+                  ("...as LF", read() == b"line one\nline two\n"),
+                  ("re-writing identical text is a no-op", write_generated(p, text, False) is False)]
+        with open(p, "wb") as f:
+            f.write(b"line one\r\nline two\r\n")     # the repo's own checked-out flavour
+        writes += [("identical text over a CRLF file is a no-op",
+                    write_generated(p, text, False) is False),
+                   ("changed text does rewrite",
+                    write_generated(p, "line one\nline three\n", False) is True),
+                   ("...keeping the file's CRLF", read() == b"line one\r\nline three\r\n"),
+                   ("--dry-run reports the change without writing",
+                    write_generated(p, "line four\n", True) is True
+                    and read() == b"line one\r\nline three\r\n")]
+    for name, good in writes:
+        ok &= good
+        print(f"  {'ok  ' if good else 'FAIL'}  write_generated: {name}")
+    print("selftest: " + ("ok" if ok else "FAILED"))
+    return ok
 
 
 def main():
@@ -406,8 +654,20 @@ def main():
     ap.add_argument("--padtest", type=int, default=0, metavar="PX",
                     help="TEST MODE: over-pad every dxt by ~PX px (still rounded to mult-of-4) so "
                          "any code path that uses the padded size instead of the logical size shows "
-                         "an obvious PX-sized artifact. Ship builds use 0 (minimal mult-of-4 pad).")
+                         "an obvious PX-sized artifact. Ship builds use 0 (minimal mult-of-4 pad), "
+                         "but the COMMITTED .dds are --padtest 100 builds and the canary gate "
+                         "refuses to shrink that without --drop-canary.")
+    ap.add_argument("--drop-canary", action="store_true",
+                    help="allow this run to strip/shrink the over-pad canary the committed .dds "
+                         "carry. The deliberate opt-out from the canary gate, and what the eventual "
+                         "ship rebuild at --padtest 0 needs (Trello f2621e52).")
+    ap.add_argument("--selftest", action="store_true",
+                    help="check the canary rule and the generated-file write policy against a case "
+                         "table; no config, no .dds, no texconv needed")
     args = ap.parse_args()
+
+    if args.selftest:
+        sys.exit(0 if selftest() else 1)
 
     entries = parse_config(args.config)
     print(f"build_textures: {len(entries)} asset(s) from {os.path.relpath(args.config, REPO)}"
@@ -428,6 +688,9 @@ def main():
         if not selected:
             fail(f"--only {args.only!r} matched none of the {len(entries)} config entries")
         print(f"  [only] {len(selected)} of {len(entries)} asset(s) match {args.only!r}")
+    # Refuse to quietly strip the shipped over-pad canary. Before the build, so a rejected run
+    # writes nothing at all -- and so the post-build all-clear can never vouch for one.
+    check_canary(selected, entries, args.padtest, args.drop_canary)
     for e in selected:
         if e[0] == "dxt":
             build_dxt(e[1], args.dry_run, args.padtest, mip=e[4])
@@ -439,9 +702,7 @@ def main():
     # The guard sweeps EVERY shipped .dds, not just what this run wrote, so under --only the
     # failure need not be in the asset you just rebuilt -- read the BLEED lines for which it is.
     if not args.dry_run:
-        sys.path.insert(0, HERE)   # sibling module, whichever way this file was invoked
-        import check_pad_bleed
-        if not check_pad_bleed.run():
+        if not pad_bleed_module().run():
             fail("a shipped .dds does not replicate its logical edge (see above)")
     print("done.")
 

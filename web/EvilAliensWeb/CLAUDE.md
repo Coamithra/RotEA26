@@ -791,7 +791,10 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     ?wallsidetile= ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps=
     ?wallwispspeed=` ·
     fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
-    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
+    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids).
+    **`?wallsonly` also serves OwnLevel** (card b174b00f -- there it drops that level's two
+    spawners and keeps its `Walls(2)`), with **`?nowalls`** as the OwnLevel-only complement; the
+    pair is the churn-attribution rig -- see the AI section's OwnLevel row. `?walltoplift` is
     COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check
     `?hitboxes`).
   - **Verify drawing OFFLINE** (`tools/walls/preview_wall3d.py` contact sheet) — the wall scrolls
@@ -914,8 +917,8 @@ the rest are tier-independent.
     making the clamp its own oscillator.
   - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
     It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
-    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or the
-    `?aireact` knob in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid, or any
+    of the `?aireact` / `?aiscanrows` / `?aicrosspenalty` knobs, in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
     lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
     share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
     whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
@@ -987,13 +990,33 @@ the rest are tier-independent.
   - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
     candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
     not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
-    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`; but
-    **`?aireact` `420 -> 80ms` moved nothing** (contacts `0 -> 0`, turn `22 -> 18 deg/s`, progress
-    `7/8 -> 7/8`) and **`?aithreatlead` `700 -> 80ms` moved nothing** (deaths `11 -> 10`). Both
-    were dropped from the table rather than shipped as dials that do nothing.
-    **`contacts` cannot see wall look-ahead at all** -- `ClampIntoWallSpace` is a hard override
-    that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
-    either knob to the table without an instrument that can actually see it.
+    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`.
+  - **`?aireact` and `?aithreatlead` were dropped as "dials that do nothing". That verdict is
+    RETIRED (card b174b00f): both have large authority and the original RIGS were blind.** Each
+    was a single run (n=1, on fights this file itself calls +-30% noise) and each happened to pick
+    the one rig where its knob is inert. Re-measured through `eahl` with no browser, N=6,
+    Very_Hard:
+    - **`?aireact` 80 / 420 / 2000ms** on `?level=OwnLevel&wallsonly` -- deterministic, since with
+      the spawners gone all six runs are identical and any movement is pure signal: turn
+      **88 / 229 / 944 deg/s**, contacts **0 / 0 / 13**, and at 2000ms the level stops completing
+      (`prog 5/5 -> 4/5`). Level 3's grids read 22 / 29 / 115 over the same sweep, which is exactly
+      why the original Level-3 isolation saw `420 -> 80ms` move nothing. It doesn't move much
+      THERE.
+    - **`?aithreatlead` 80 / 700 / 2000ms** on **CrazyGame** (30 homing bullets, no walls): deaths
+      **15.3 / 3.8 / 7.0** and progress **~6 / ~20 / ~16 of 21**, with the 80 and 700 ranges not
+      overlapping on either measure. The baked 700 sits near an interior optimum. On the SPIDERBOSS
+      rig -- the original's -- it still moves nothing (deaths 6.2 / 6.0 / 5.8, ranges fully
+      overlapping), which is a fact about that rig and not about the knob.
+    - **The 80ms CrazyGame row is the durable caution.** It posts the LOWEST churn anywhere in the
+      sweep (117 deg/s against 411 at the baked value) while dying three times as often: the bot
+      has stopped dodging, and a bot that has stopped dodging is smooth. **Never read `turn` as
+      quality without a survival column beside it.**
+    Whether either knob should be TIER-SCALED is therefore an OPEN tuning question with a working
+    instrument, not a closed one. Choosing per-tier values is its own measurement campaign and is
+    deliberately not done here.
+    **`contacts` still cannot see wall look-ahead on a level with enemies** -- `ClampIntoWallSpace`
+    is a hard override that runs however far ahead the bot looked, so it floors the metric; the
+    reading above can see it because a walls-only rig lets `turn` carry the signal instead.
   - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
     tier (and Level3's wall SCROLL SPEED is `4.3 * GetDifficultyValue / 16.667`, i.e. 0.090 px/ms
     at Easy to 0.310 at Inzane -- the `0.43 *` variant is `Level3.popTestSlow`, `?wallpoptest`
@@ -1003,7 +1026,8 @@ the rest are tier-independent.
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
-  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
+  ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
@@ -1084,27 +1108,56 @@ before hunting a blind spot in any future stalled-level report.
     sum-of-repulsions model is the shape that churns; it is the natural rig for the next
     bullet-hell attempt.
   - **OwnLevel is the only challenge with WALLS** and the only one scoring `contacts` (13/1/4).
-    Its churn (`turn` 254-477 deg/s) runs far above the ~70 deg/s the parent card settled Level 3
-    at. **That 4-7x gap is NOT a wall-nav defect, and reading it as one cost card b4972696 its
-    premise** -- the two figures come from rigs that differ by more than the grid. The ~70 deg/s
-    baseline is from **`?wallsonly`**, i.e. `Level3.PopulateWallsOnly`, whose own comment says it
-    runs the wall sections "with nothing else spawning"; OwnLevel's 254-477 is the WHOLE level,
-    where `Walls(game, 2)` runs concurrently with a continuous `SkullSpawner(0f, 2f, maze: true)`
-    and (Very_Hard+) a `StarMineSpawner`. Scroll speed is NOT the confounder -- `?wallsonly` calls
-    the same 4.3x `speedup` OwnLevel uses. So it is walls-alone against walls-plus-a-sustained-
-    enemy-stream, and the extra churn belongs to the same sum-of-repulsions problem CrazyGame
-    shows at 389-450 deg/s with **no walls at all**, which is the band OwnLevel sits in.
-    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser) at the real
-    Very_Hard wall scroll: on OwnLevel's grid `ChooseGapColumn` switches **0.52/s against var3's
-    0.43/s** -- 1.2x, one switch every two seconds -- and the lateral push flips sign 0.17/s vs
-    0.16/s. Neither can produce 3-5 heading reversals/s. OwnLevel's grid IS the hardest of the
-    five, but by modest ratios: `clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77, `contact/s`
-    0.06 vs 0.03. The one big gap is the share of ticks with a blocked row inside reach --
-    **25.0% vs 4.5%** -- so the maze really is tighter; it just does not convert that into
-    proportional churn. `--react=2000` shifts `urgency%`/`clampX/s` but leaves switching, sign
-    flips and contacts unchanged everywhere, so there is no tuning win in the look-ahead either.
-    **Before attributing any churn on a walled level to the walls, match the rigs** -- suppress
-    the spawners, or bench the grid offline.
+    Its churn (`turn` 254-477 deg/s) runs far above Level 3's wall sections. **That gap IS the
+    walls -- an earlier revision of this file concluded the opposite, and card b174b00f measured
+    it directly: the hypothesis lost.**
+    The old comparison really was confounded, so the critique stands even though the conclusion
+    drawn from it does not: the Level-3 baseline is a **`?wallsonly`** run (`PopulateWallsOnly`,
+    whose own comment says "with nothing else spawning") while OwnLevel's 254-477 was the WHOLE
+    level -- `Walls(game, 2)` alongside a continuous `SkullSpawner(0f, 2f, maze: true)` and a
+    Very_Hard+ `StarMineSpawner`. Scroll speed was never the confounder (`?wallsonly` calls the
+    same 4.3x `speedup`). But suppressing either half resolves it the other way. `?wallsonly` and
+    `?nowalls` both work on OwnLevel now. Measured with `eahl`, Very_Hard, N=6, each run soaked by
+    `eval AiBenchRun 60` x3:
+
+    | OwnLevel, one rig | `turn` deg/s |
+    |---|---|
+    | walls only (`?wallsonly`) | **229** (deterministic -- all 6 runs identical) |
+    | spawners only (`?nowalls`) | **~55** (41-67 over 14 runs) |
+    | full level | **404** (304-525) |
+    | *Level 3 walls only, same rig* | **29** (deterministic) |
+
+    **`?invuln` must be OFF, and that cuts against the habit** -- every other doc line pairs
+    `?wallsonly` with it. With `?invuln` on the bot cannot die, the checkpoint rewind never fires,
+    and the same boot reads 426 deg/s / 3 contacts / VICTORY instead. The rigs verbatim:
+    `?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard[&wallsonly|&nowalls]` and
+    `?level=Level3&aiplayer&aibench&difficulty=Very_Hard&wallsonly`.
+    **The two walls-only rigs are not the same SHAPE, which bounds the ratio**: Level 3 loops six
+    sections (variations 1/0/3, twice) and is still running at 180 sim-seconds, while OwnLevel has
+    a single `Walls(2)` and reaches victory at ~60, freezing its rate there. Both are rates over
+    the ticks they ran, so they compare as rates -- but this is grid-against-grid, not
+    run-against-run, and a soak length describes the command, not OwnLevel's window.
+
+    So OwnLevel's grid ALONE churns **7.9x Level 3's grid alone**; the enemy stream alone accounts
+    for 61 deg/s; and the two together are superadditive (404 against a 290 sum), which is the
+    sum-of-repulsions model gaining another set of competing terms. **`?nowalls` is the control
+    that makes the walls-only number readable at all** -- without it, "the walls are innocent" and
+    "suppressing events broke the rig" are the same quiet number.
+    (The Level-3 walls-only baseline re-measures at **29 deg/s on this rig, not the ~70** long
+    quoted here from card f4d1721f's browser run. The 7.9x is a within-rig ratio, which is the
+    comparison that carries; the absolute discrepancy across rigs is unexplained and worth
+    remembering before quoting either figure on its own.)
+  - **`tools/sim/aiwallnav`'s columns do NOT predict heading churn, and leaning on them to
+    exonerate the walls was the actual error.** Its gap-switch (0.52 vs 0.43/s), lateral sign-flip
+    (0.17 vs 0.16/s) and clamp (`clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77) ratios are all
+    real measurements, and all read 1.2-1.8x where the live churn is 7.9x. The one column that
+    DOES track it is **`urgency%` -- 25.0% vs 4.5%, 5.6x** -- the share of ticks with a blocked row
+    inside reach. The bench states its own limit ("the WALL TERM ONLY -- `turn deg/s` is the whole
+    steering sum"); honour it. **Read `urgency%` as the churn proxy** and treat every other column
+    as a claim about routing mechanics rather than about the heading.
+    **Before attributing churn on a walled level to the walls (or away from them), match the
+    rigs** -- suppress the spawners with `?wallsonly`, keep `?nowalls` as the control, and never
+    compare a whole-level figure against a walls-only one.
 - **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into
   `Oracle.GetBaddies`.** Its `LooksLikeEnemy` is a deliberately name-shaped heuristic, so it
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),

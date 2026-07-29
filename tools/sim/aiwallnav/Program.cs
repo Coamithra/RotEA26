@@ -67,6 +67,8 @@ internal static class Program
     private static int Main(string[] args)
     {
         float? react = null;
+        int? scanRows = null;
+        float? crossPenalty = null;
         bool ladder = false;
         var only = new List<int>();
         foreach (string a in args)
@@ -75,6 +77,18 @@ internal static class Program
             {
                 if (!TryNum(a, out float v)) { Console.Error.WriteLine("not a number: " + a); Usage(); return 2; }
                 react = v;
+            }
+            else if (a.StartsWith("--scanrows="))
+            {
+                // INT, like ?aiscanrows= -- it counts grid rows, so refusing `4.7` here keeps a
+                // mislabelled sweep (one that silently benched the default depth) impossible.
+                if (!TryInt(a, out int n)) { Console.Error.WriteLine("not a whole number of rows: " + a); Usage(); return 2; }
+                scanRows = n;
+            }
+            else if (a.StartsWith("--crosspenalty="))
+            {
+                if (!TryNum(a, out float v)) { Console.Error.WriteLine("not a number: " + a); Usage(); return 2; }
+                crossPenalty = v;
             }
             else if (a.StartsWith("--grid="))
             {
@@ -112,13 +126,43 @@ internal static class Program
         tSettings.GetField("_difficultyLevel", BindingFlags.NonPublic | BindingFlags.Instance)
                  .SetValue(settings, Enum.Parse(tSettings.GetNestedType("DifficultyLevel"), "Very_Hard"));
 
-        if (react.HasValue)
+        // Applied by handing the REAL DebugFlags.Parse a synthesized query -- the same code path
+        // the URL flags take, so the clamps and the reject-out-of-range rules are the shipped ones
+        // and not a second copy that can drift. Writing the properties directly (as this did
+        // originally) skips every one of those guards: --scanrows=-3 was accepted, benched
+        // identically to 0, and printed "-3" in the header, which is precisely the mislabelled run
+        // this tool exists to make impossible.
+        var query = new List<string>();
+        if (react.HasValue) query.Add("aireact=" + react.Value.ToString(CultureInfo.InvariantCulture));
+        if (scanRows.HasValue) query.Add("aiscanrows=" + scanRows.Value.ToString(CultureInfo.InvariantCulture));
+        if (crossPenalty.HasValue) query.Add("aicrosspenalty=" + crossPenalty.Value.ToString(CultureInfo.InvariantCulture));
+        if (query.Count > 0)
         {
-            // Through the REAL ?aireact knob, so the override path being exercised is the shipped
-            // one rather than a second copy of the resolution rule.
-            asm.GetType("EvilAliensWeb.Compat.DebugFlags")
-               .GetProperty("AiWallReactionMs", BindingFlags.Public | BindingFlags.Static)
-               .SetValue(null, react);
+            MethodInfo parse = asm.GetType("EvilAliensWeb.Compat.DebugFlags")
+                .GetMethod("Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            TextWriter savedOut = Console.Out;
+            Console.SetOut(TextWriter.Null);
+            try { parse.Invoke(null, new object[] { "?" + string.Join("&", query) }); }
+            finally { Console.SetOut(savedOut); }
+        }
+
+        // Read the values back OUT of PlayerShip and report those, never the ones asked for. The
+        // resolving properties are the arbiter: anything Parse refused or clamped shows up here as
+        // the value actually in force, so the header can no longer disagree with the table under
+        // it. A run is labelled with what it benched or it is not labelled at all.
+        string inForce = ""
+            + (react.HasValue ? ", WallReactionMs=" + Resolved("WallReactionMs") : "")
+            + (scanRows.HasValue ? ", WallScanRows=" + Resolved("WallScanRows") : "")
+            + (crossPenalty.HasValue ? ", WallCrossPenalty=" + Resolved("WallCrossPenalty") : "");
+        if (scanRows.HasValue && Resolved("WallScanRows") != scanRows.Value.ToString(CultureInfo.InvariantCulture))
+        {
+            Console.Error.WriteLine("--scanrows=" + scanRows.Value + " was refused or clamped by DebugFlags"
+                + " -- benching " + Resolved("WallScanRows") + " rows instead");
+        }
+        if (crossPenalty.HasValue && Resolved("WallCrossPenalty") != crossPenalty.Value.ToString(CultureInfo.InvariantCulture))
+        {
+            Console.Error.WriteLine("--crosspenalty=" + crossPenalty.Value.ToString(CultureInfo.InvariantCulture)
+                + " was refused or clamped by DebugFlags -- benching " + Resolved("WallCrossPenalty") + " instead");
         }
 
         // Grids are extracted BEFORE the table starts printing: Wall.Setup drives KNI's
@@ -147,7 +191,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("ai wall-nav bench -- real PlayerShip code, grid difficulty=Very_Hard, ship box="
             + (ShipHalf * 2).ToString(CultureInfo.InvariantCulture) + "px"
-            + (react.HasValue ? ", WallReactionMs=" + react.Value.ToString(CultureInfo.InvariantCulture) : ""));
+            + inForce);
 
         foreach (int rung in ladder ? new[] { 0, 1, 2, 3, 4 } : new[] { VeryHardRung })
         {
@@ -176,16 +220,32 @@ internal static class Program
 
     private static void Usage()
     {
-        Console.WriteLine("usage: dotnet run --project tools/sim/aiwallnav [--react=<ms>] [--grid=<n>] [--ladder]");
-        Console.WriteLine("  --react=<ms>  set PlayerShip's WallReactionMs (same DebugFlags property as ?aireact)");
-        Console.WriteLine("  --grid=<n>    bench only wall variation n (repeatable)");
-        Console.WriteLine("  --ladder      repeat the table at all five difficulty scroll speeds");
+        Console.WriteLine("usage: dotnet run --project tools/sim/aiwallnav [--react=<ms>] [--scanrows=<n>]");
+        Console.WriteLine("                                               [--crosspenalty=<c>] [--grid=<n>] [--ladder]");
+        Console.WriteLine("  --react=<ms>        set PlayerShip's WallReactionMs   (DebugFlags property ?aireact writes)");
+        Console.WriteLine("  --scanrows=<n>      set PlayerShip's WallScanRows     (?aiscanrows -- a whole number of rows)");
+        Console.WriteLine("  --crosspenalty=<c>  set PlayerShip's WallCrossPenalty (?aicrosspenalty)");
+        Console.WriteLine("  --grid=<n>          bench only wall variation n (repeatable)");
+        Console.WriteLine("  --ladder            repeat the table at all five difficulty scroll speeds");
         Console.WriteLine();
         Console.WriteLine("Build the game first: dotnet build web/EvilAliensWeb -c Debug");
     }
 
     private static bool TryNum(string arg, out float value) =>
         float.TryParse(arg.Substring(arg.IndexOf('=') + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+
+    private static bool TryInt(string arg, out int value) =>
+        int.TryParse(arg.Substring(arg.IndexOf('=') + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+    // What PlayerShip's own resolving property returns right now -- i.e. the value the methods
+    // under test will actually read, after DebugFlags has had its say. Private, like everything
+    // else this bench reaches for.
+    private static string Resolved(string property) =>
+        Convert.ToString(
+            asm.GetType("EvilAliens.PlayerShip")
+               .GetProperty(property, BindingFlags.NonPublic | BindingFlags.Static)
+               .GetValue(null),
+            CultureInfo.InvariantCulture);
 
     // The typeof lives behind a non-inlined call so a missing//stale EvilAliensWeb.dll surfaces as
     // the caller's friendly "build the game first" rather than a JIT-time type-load failure while

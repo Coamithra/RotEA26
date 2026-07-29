@@ -87,8 +87,7 @@ public class GammaMenu : Scene
 		num5 /= ufoAnimation.columns;
 		int num6 = ufo.LogicalHeight() - (ufoAnimation.rows - 1) * ufoAnimation.separatingspace;
 		num6 /= ufoAnimation.rows;
-		Rectangle source = default(Rectangle);
-		(source) = new Rectangle(num4 * (num5 + ufoAnimation.separatingspace), num3 * (num6 + ufoAnimation.separatingspace), num5, num6);
+		Rectangle source = new Rectangle(num4 * (num5 + ufoAnimation.separatingspace), num3 * (num6 + ufoAnimation.separatingspace), num5, num6);
 		float ssf = AlienDrawableGameComponent.SuperSampleFactor(ufoAnimation.TextureName, num5);
 		float num7 = (float)(General.SafeZone).Left + (float)num5 / ssf / 4f;
 		float num8 = (float)(General.SafeZone).Top + (float)num6 / ssf / 4f;
@@ -113,11 +112,9 @@ public class GammaMenu : Scene
 	private void drawPowerbar()
 	{
 		float num = 1f;
-		Vector2 val = default(Vector2);
-		(val) = new Vector2((float)(415 - barUnlit.LogicalWidth() / 2), 205f);
+		Vector2 val = new Vector2((float)(415 - barUnlit.LogicalWidth() / 2), 205f);
 		Vector2 val2 = val;
-		Vector2 val3 = default(Vector2);
-		(val3) = new Vector2(-16f, 13f);
+		Vector2 val3 = new Vector2(-16f, 13f);
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		Color aliceBlue = Color.AliceBlue;
 		float num2 = 1f;

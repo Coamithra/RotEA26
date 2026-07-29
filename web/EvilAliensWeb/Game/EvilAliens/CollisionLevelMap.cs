@@ -99,8 +99,7 @@ public class CollisionLevelMap : ICollisionType
 
 	private bool TestCollisionSimpleCircle(CollisionSimpleCircle collisionSimpleCircle)
 	{
-		Vector2 val = default(Vector2);
-		(val) = new Vector2(collisionSimpleCircle.Radius * 0.8f, collisionSimpleCircle.Radius * 0.8f);
+		Vector2 val = new Vector2(collisionSimpleCircle.Radius * 0.8f, collisionSimpleCircle.Radius * 0.8f);
 		CollisionBox collisionBox = new CollisionBox(collisionSimpleCircle.Position - val, collisionSimpleCircle.Position + val);
 		return TestCollisionBox(collisionBox);
 	}

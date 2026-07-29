@@ -15,8 +15,7 @@ internal class SubMenuAwardments : MenuSub1
 	public override void DrawMenu(GameTime gameTime, float yoffset)
 	{
 		yoffset -= 35f;
-		Vector2 position = default(Vector2);
-		(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
+		Vector2 position = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
 		Vector2 val = default(Vector2);
 		for (int i = 0; i < menuEntries.Count; i++)
 		{

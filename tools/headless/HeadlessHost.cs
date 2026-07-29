@@ -48,6 +48,13 @@ namespace EvilAliensWeb.Headless
             HeadlessTitleContainerFactory.Register(wwwroot);
 
             var saves = new HeadlessSaveStore(opt.SaveDir, opt.WipeSaves);
+            // Put the XML save tree INSIDE the --saves dir. On desktop the stub's browser
+            // default ("/eaweb_save/") is a real directory at the drive root that nothing here
+            // owns or wipes, so Achievements.xml survived every run and a ?unlockall probe
+            // poisoned every later one (card 36db5d75). Ordered after the store on purpose:
+            // its wipe deletes the whole SaveDir, so this subdirectory must be created after.
+            Microsoft.Xna.Framework.Storage.StorageDevice.SetRoot(
+                Path.Combine(Path.GetFullPath(opt.SaveDir), "fs"));
             _js = new HeadlessJsRuntime(saves, opt.Flags, opt.Verbose)
             {
                 DownloadDir = Path.GetDirectoryName(Path.GetFullPath(opt.OutPath ?? "out.png"))

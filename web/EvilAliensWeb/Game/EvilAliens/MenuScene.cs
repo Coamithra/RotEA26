@@ -1354,7 +1354,14 @@ internal class MenuScene : Scene
 		base.SoundManager.PlayMusic(Songs.Sjaak);
 		// Debug (?unlockall): reveal every gated menu option (Cheats, all challenges,
 		// Level 2/3, Challenges/Awardments) and mark all awardments unlocked, so the whole
-		// menu can be walked through. Session-only (not saved) — a normal reload reverts it.
+		// menu can be walked through.
+		//
+		// NOT session-only, despite what this comment claimed until card 36db5d75: it mutates
+		// the two save singletons, and any of five unrelated call sites can persist them later
+		// (GameScene finishing a level, MenuScene, UnlockEvent, AwardmentBlade x2). Finish one
+		// level in a ?unlockall session and the unlock is permanent. Unlike ?invuln -- which was
+		// fixed by never writing to Settings at all -- the read paths here are spread across the
+		// whole menu, so it still writes; see the card for the options weighed.
 		if (DebugFlags.UnlockAll)
 		{
 			foreach (Unlockables.Items item in Game1.GetEnumValues<Unlockables.Items>())

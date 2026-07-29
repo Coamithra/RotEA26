@@ -1835,11 +1835,21 @@ namespace EvilAliensWeb.Compat
 					{
 						AiSteerSmoothMs = MathHelper.Min(aism, 1000f);
 					}
+					else
+					{
+						RejectAiValue("aismooth", val, "a number >= 0",
+							InForce(AiSteerSmoothMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothMs));
+					}
 					break;
 				case "aireact":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aire) && aire >= 0f)
 					{
 						AiWallReactionMs = MathHelper.Min(aire, 3000f);
+					}
+					else
+					{
+						RejectAiValue("aireact", val, "a number >= 0",
+							InForce(AiWallReactionMs ?? EvilAliens.PlayerShip.DefaultWallReactionMs));
 					}
 					break;
 				case "aiaim":
@@ -1851,11 +1861,24 @@ namespace EvilAliensWeb.Compat
 					{
 						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.Pi);
 					}
+					else
+					{
+						// Per-tier (PlayerShip.AimSpread resolves to Skill.AimRad): with no override
+						// standing there is no single number to name, and the tier is not settled at
+						// parse time, so say which TABLE is in force rather than guess a row.
+						RejectAiValue("aiaim", val, "a number >= 0",
+							AiAimSpreadRad.HasValue ? InForce(AiAimSpreadRad.Value) : "the per-tier skill row");
+					}
 					break;
 				case "aigapmargin":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigm) && aigm >= 0f)
 					{
 						AiGapSwitchMargin = MathHelper.Min(aigm, 20f);
+					}
+					else
+					{
+						RejectAiValue("aigapmargin", val, "a number >= 0",
+							InForce(AiGapSwitchMargin ?? EvilAliens.PlayerShip.DefaultGapSwitchMargin));
 					}
 					break;
 				case "aiscanrows":
@@ -1872,6 +1895,11 @@ namespace EvilAliensWeb.Compat
 					{
 						AiWallScanRows = MathHelper.Clamp(aisr, 0, 64);
 					}
+					else
+					{
+						RejectAiValue("aiscanrows", val, "an integer >= 0",
+							InForce(AiWallScanRows ?? EvilAliens.PlayerShip.DefaultWallScanRows));
+					}
 					break;
 				case "aicrosspenalty":
 					// Cost per blocked column crossed, against WallRowWeight's 8 per row of
@@ -1880,11 +1908,21 @@ namespace EvilAliensWeb.Compat
 					{
 						AiWallCrossPenalty = MathHelper.Min(aicp, 100f);
 					}
+					else
+					{
+						RejectAiValue("aicrosspenalty", val, "a number >= 0",
+							InForce(AiWallCrossPenalty ?? EvilAliens.PlayerShip.DefaultWallCrossPenalty));
+					}
 					break;
 				case "aithreatlead":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
 					{
 						AiThreatLeadMs = MathHelper.Min(aitl, 3000f);
+					}
+					else
+					{
+						RejectAiValue("aithreatlead", val, "a number >= 0",
+							InForce(AiThreatLeadMs ?? EvilAliens.PlayerShip.DefaultThreatLeadMs));
 					}
 					break;
 				case "aismoothurgent":
@@ -1892,11 +1930,21 @@ namespace EvilAliensWeb.Compat
 					{
 						AiSteerSmoothUrgentMs = MathHelper.Min(aisu, 1000f);
 					}
+					else
+					{
+						RejectAiValue("aismoothurgent", val, "a number >= 0",
+							InForce(AiSteerSmoothUrgentMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothUrgentMs));
+					}
 					break;
 				case "aipark":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aipk) && aipk >= 0f)
 					{
 						AiParkDemand = MathHelper.Min(aipk, 20f);
+					}
+					else
+					{
+						RejectAiValue("aipark", val, "a number >= 0",
+							InForce(AiParkDemand ?? EvilAliens.PlayerShip.DefaultSteerParkDemand));
 					}
 					break;
 				case "aifieldpx":
@@ -1904,11 +1952,22 @@ namespace EvilAliensWeb.Compat
 					{
 						AiThreatFieldPx = MathHelper.Min(aifp, 800f);
 					}
+					else
+					{
+						// Per-tier, like ?aiaim above (PlayerShip.ThreatFieldBasePx => Skill.FieldPx).
+						RejectAiValue("aifieldpx", val, "a number >= 0",
+							AiThreatFieldPx.HasValue ? InForce(AiThreatFieldPx.Value) : "the per-tier skill row");
+					}
 					break;
 				case "aifieldsize":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifs) && aifs >= 0f)
 					{
 						AiThreatFieldSize = MathHelper.Min(aifs, 10f);
+					}
+					else
+					{
+						RejectAiValue("aifieldsize", val, "a number >= 0",
+							InForce(AiThreatFieldSize ?? EvilAliens.PlayerShip.DefaultThreatFieldSizeScale));
 					}
 					break;
 				case "aifieldfall":
@@ -1916,17 +1975,36 @@ namespace EvilAliensWeb.Compat
 					{
 						AiThreatFieldFalloff = MathHelper.Min(aiff2, 12f);
 					}
+					else
+					{
+						// STRICTLY > 0 (it is the exponent of a (1-t)^p falloff), so 0 is rejected
+						// here where it is a legitimate floor for most of the family.
+						RejectAiValue("aifieldfall", val, "a number > 0",
+							InForce(AiThreatFieldFalloff ?? EvilAliens.PlayerShip.DefaultThreatFieldFalloff));
+					}
 					break;
 				case "aibossbias":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibb) && aibb > 0f)
 					{
 						AiPriorityBias = MathHelper.Min(aibb, 1f);
 					}
+					else
+					{
+						RejectAiValue("aibossbias", val, "a number > 0",
+							InForce(AiPriorityBias ?? EvilAliens.PlayerShip.DefaultPriorityTargetBias));
+					}
 					break;
 				case "aiff":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aiff))
 					{
 						AiFastForward = (int)MathHelper.Clamp(aiff, 0, 64);
+					}
+					else
+					{
+						// Not nullable: AiFastForward is 0 (off) until a flag sets it, so the value in
+						// force is simply the current one. No range predicate either -- it clamps --
+						// so only an unparseable value reaches here.
+						RejectAiValue("aiff", val, "an integer", InForce(AiFastForward));
 					}
 					break;
 				case "netscript":
@@ -2365,6 +2443,34 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] no boot-hijacking debug flags. URL options: ?menu  ?noattract  "
 				+ "?level=<Name>  ?skipsplash  (see Compat/DebugFlags.cs)");
 		}
+
+		// The ?ai* family's rejection diagnostic (card 48b7c6b1), following the wording card
+		// 6eb8dc9e settled for ?flyspider*:
+		//   [debug] unknown ?aireact= value '420x' (expected a number >= 0) -- ignored, staying on 420
+		// A tuning flag's failure mode is not a wrong picture, it is a run that measures the
+		// DEFAULT path while carrying the label of the variant under test -- which for these
+		// fourteen is about to be published as sweep rows, so a silently-ignored value reads as
+		// "the knob did nothing".
+		//
+		// `inForce` must be the setting ACTUALLY left standing, not the baked default: a repeated
+		// flag (?aireact=420&aireact=xx) keeps the earlier valid value, and a diagnostic that can
+		// state the wrong condition is worse than one that states none. Callers therefore pass
+		// `Override ?? PlayerShip.Default*` -- and for the two per-tier knobs (?aiaim, ?aifieldpx,
+		// which resolve through AiSkillByDifficulty at PLAY time, off a difficulty this parse has
+		// not settled yet) the words "the per-tier skill row" rather than a number that would be a
+		// guess. The three ?flyspider* sites keep their own inline WriteLines: their exact wording
+		// is pinned by tools/sim/logic_probe, and rerouting them buys nothing.
+		private static void RejectAiValue(string flag, string val, string expected, string inForce)
+		{
+			Console.WriteLine("[debug] unknown ?" + flag + "= value '" + val + "' (expected "
+				+ expected + ") -- ignored, staying on " + inForce);
+		}
+
+		// Invariant-culture rendering of an in-force number for RejectAiValue. InvariantGlobalization
+		// is on project-wide, but these are diagnostics quoted back into a URL, so say it explicitly.
+		private static string InForce(float v) => v.ToString(CultureInfo.InvariantCulture);
+
+		private static string InForce(int v) => v.ToString(CultureInfo.InvariantCulture);
 
 		// A bare flag (?menu) or =1/=true/=yes/=on means ON; =0/=false/=no/=off means OFF.
 		private static bool IsOn(string val)

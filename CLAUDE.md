@@ -37,7 +37,8 @@ lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programming\F
 - **When picking up a card/task, FOLLOW [`CONTRIBUTING.md`](CONTRIBUTING.md)**: claim the card, a
   per-card worktree (mandatory; slot `wt1`..`wt8`, dev server on port `528<k>`), research → design
   → implement, the visual+console verification gate (no unit tests here), PR self-merge (deploy to
-  Pages is MANUAL — `workflow_dispatch`, not on push), and the card-close paperwork.
+  publishing is MANUAL and separate from merging — see `docs/DEPLOY.md`), and the card-close
+  paperwork.
 
 ## Build / run
 
@@ -284,9 +285,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `window.eaBuildHash`, and SFTPs the result to the shared Hetzner host incrementally. The dev
   build keeps `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
   **The build hash is the co-op compatibility key** (peers-run-identical-binary check; dev builds
-  keep `'dev'`, which also shows the FPS HUD). Its recipe is inherited verbatim from the retired
-  Pages workflow and pinned by `python tools/deploy_web.py --selftest` — that self-test is now the
-  only record of it, so treat a FAIL as "I am about to split the player base", not as a stale test.
+  keep `'dev'`, which also shows the FPS HUD). Its recipe is inherited verbatim from the
+  Pages workflow and pinned by `python tools/deploy_web.py --selftest` — which becomes the only
+  record of it once that workflow goes, so treat a FAIL as "I am about to split the player base",
+  not as a stale test.
   The old `.github/workflows/deploy.yml` (Pages, `workflow_dispatch`) still exists and still works;
   it is slated for deletion once the Hetzner cutover is verified live.
 - **Publish trimming:** `PublishTrimmed=true` + `TrimMode=partial` (NOT full — full strips the
@@ -319,8 +321,8 @@ The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
   project's `/opt/rotea` is NOT a git checkout** — it is an scp'd copy of `server/signal/`, so
   there is no `git pull` to run; follow `server/signal/README.md` → "Updating an existing
   deployment" (stage to `server.new`, run `test_signal.py` there, swap, `systemctl restart rotea`).
-  **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual Pages
-  `workflow_dispatch`); a networked client feature needs both, or the live site talks to a server
+  **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual, see
+  `docs/DEPLOY.md`); a networked client feature needs both, or the live site talks to a server
   that does not speak its protocol.
 - **Shared box etiquette:** it's a small CPU-only VPS (2 vCPU / 4GB RAM) also running an LLM
   server — keep resource usage modest and never stop/restart the `notzelda*` (or other

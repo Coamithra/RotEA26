@@ -25,6 +25,9 @@ import urllib.request
 from urllib.parse import urlparse
 
 DEFAULT_URL = "https://haraldmaassen.com/RotEA26/"
+# Source of truth for where clients actually dial is DebugFlags.DefaultSignalUrl
+# (web/EvilAliensWeb/Compat/DebugFlags.cs) -- the wss:// sibling of this path.
+# Keep them in step, or override with --signal-url.
 SIGNAL_HEALTH = "https://notzelda.haraldmaassen.com/rotea/health"
 
 # Lowercase asset paths the game fetches at runtime. Windows resolves any casing,
@@ -47,8 +50,12 @@ WRONG_CASE_PROBE = "content/levels/level3.txt"
 failures: list[str] = []
 
 
-def fetch(url: str, timeout: int = 30) -> tuple[int, bytes]:
-    req = urllib.request.Request(url, headers={"User-Agent": "rotea-check-deploy"})
+def fetch(url: str, timeout: int = 30, method: str = "GET") -> tuple[int, bytes]:
+    """Fetch `url`. Use method="HEAD" when only the status code matters --
+    `Content/gfx/base/756-v1.dds` alone is megabytes, and the asset probes
+    care about reachability, not content."""
+    req = urllib.request.Request(url, method=method,
+                                 headers={"User-Agent": "rotea-check-deploy"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read()
@@ -74,6 +81,8 @@ def main() -> None:
     ap.add_argument("--hash", help="expected window.eaBuildHash (from the deploy output)")
     ap.add_argument("--base-href", help="expected <base href> (default: the URL's own path)")
     ap.add_argument("--no-signal", action="store_true", help="skip the signaling health probe")
+    ap.add_argument("--signal-url", default=SIGNAL_HEALTH,
+                    help=f"signaling health endpoint (default {SIGNAL_HEALTH})")
     args = ap.parse_args()
 
     base = args.url if args.url.endswith("/") else args.url + "/"
@@ -96,6 +105,8 @@ def main() -> None:
     m = re.search(r"window\.eaBuildHash = '([^']*)'", html)
     got_hash = m.group(1) if m else None
     check("eaBuildHash stamped", got_hash not in (None, "dev"),
+          "no window.eaBuildHash in the page at all -- is this the game's "
+          "index.html, or has the script tag been renamed?" if got_hash is None else
           f"got {got_hash!r} -- 'dev' means the deploy did not stamp it "
           "(peers cannot match it, and the FPS HUD is visible)")
     if args.hash:
@@ -114,16 +125,16 @@ def main() -> None:
 
     # --- case sensitivity -------------------------------------------------
     for rel in CONTENT_PROBES:
-        status, _ = fetch(base + rel)
+        status, _ = fetch(base + rel, method="HEAD")
         check(f"content path {rel}", status == 200, f"HTTP {status}")
-    status, _ = fetch(base + WRONG_CASE_PROBE)
+    status, _ = fetch(base + WRONG_CASE_PROBE, method="HEAD")
     check("host IS case-sensitive (wrong-case probe 404s)", status == 404,
           f"HTTP {status} for {WRONG_CASE_PROBE} -- a forgiving host makes the "
           "checks above meaningless; a real deploy would still break")
 
     # --- online co-op signaling ------------------------------------------
     if not args.no_signal:
-        status, body = fetch(SIGNAL_HEALTH)
+        status, body = fetch(args.signal_url)
         ok = check("signaling /health", status == 200, f"HTTP {status}")
         if ok:
             try:

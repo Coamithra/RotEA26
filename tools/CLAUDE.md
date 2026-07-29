@@ -29,7 +29,7 @@ essentials for an agent that stumbles on them:
   It publishes from a **throwaway detached checkout**, so nothing uncommitted can ship.
 - **`--selftest` pins the `eaBuildHash` recipe** against a fixed tree and a captured value.
   That hash is the online-co-op compatibility key -- peers with different hashes cannot see or
-  join each other -- and the retired `.github/workflows/deploy.yml` it was ported from is going
+  join each other -- and `.github/workflows/deploy.yml`, which it was ported from, is going
   away, so this self-test is the recipe's only surviving specification. Mutation-tested (separator,
   path prefix and sort order each flip it to FAIL). A FAIL means the player base is about to split.
   **The hash identifies a PUBLISH, not a commit** -- building one commit twice gives two different

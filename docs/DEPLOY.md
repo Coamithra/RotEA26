@@ -50,12 +50,22 @@ retried rather than trusted, but the live site is still mixed until you finish.
 Run these in order, from a checkout of `main` that is up to date.
 
 ```sh
-python tools/deploy_web.py --selftest     # the build-hash recipe still matches its pinned value
-python tools/deploy_web.py --build-only   # what would ship, and how big
-python tools/deploy_web.py --dry-run      # + what the host already has, and what would be deleted
-python tools/deploy_web.py                # the real upload
+python tools/deploy_web.py --selftest                  # the build-hash recipe still matches its pinned value
+python tools/deploy_web.py --build-only --keep-build   # ONE publish: what would ship, how big, and where it is
+python tools/deploy_web.py --dry-run --site <that wwwroot>   # + what the host has, and what would be deleted
+python tools/deploy_web.py --site <that wwwroot>             # the real upload -- the SAME bytes you rehearsed
 python tools/check_deploy.py --hash <the hash the deploy printed>
+git worktree remove --force <that dir>/src && rm -rf <that dir>   # --keep-build leaves both behind
 ```
+
+**Publish once and reuse it.** Each bare invocation does a full ~322 MB
+`dotnet publish`, and two publishes of one commit are not byte-identical (see
+below) — so rehearsing with one build and shipping another means the dry run's
+file counts, byte totals and orphan list described a payload that never went
+anywhere. `--keep-build` prints the directory it kept; `--site` then re-uses it,
+and re-stamping is idempotent (it verifies the existing hash and refuses if the
+tree changed underneath). The convenience of a bare `python tools/deploy_web.py`
+is fine when you do not care to rehearse; it is not the careful path.
 
 `deploy_web.py` publishes from a **throwaway detached checkout**, not your
 working tree — `dotnet publish` copies `wwwroot/` as a directory and cannot tell a
@@ -65,7 +75,8 @@ the live site, and `--ref` picks what does.
 
 ## What the deploy does to the build
 
-Both edits are inherited from the retired `.github/workflows/deploy.yml`:
+Both edits are inherited from `.github/workflows/deploy.yml`, which still
+exists and is still the live publishing route until the cutover:
 
 - **`<base href="/" />` -> `/RotEA26/`.** The dev build keeps `/` so `dotnet run`
   works at a domain root; never hard-code the deployed value in `index.html`.
@@ -78,8 +89,8 @@ Both edits are inherited from the retired `.github/workflows/deploy.yml`:
 compares it and rejects a mismatched peer with an "update required" notice, and
 the game browser filters the room list on it. Change the recipe and you split the
 player base across the boundary; `--selftest` exists to make that impossible to do
-by accident, and it is the only surviving record of the recipe now that the CI
-workflow is gone. A `dev` hash on a live site is a deploy that did not stamp — it
+by accident, and it becomes the only record of the recipe once the CI workflow
+is deleted. A `dev` hash on a live site is a deploy that did not stamp — it
 also leaves the frame-profiler HUD visible, which keys off the same value.
 
 ### The hash identifies a PUBLISH, not a commit
@@ -117,6 +128,14 @@ Two things the old Pages workflow did that this one does not, both Pages-specifi
 `index.html` to `404.html` (a Pages SPA fallback; the game is a single page and
 `harness.html` is a real file).
 
+And one thing **neither** does, deliberately deferred to the cutover: the
+absolute `og:image` / `og:url` tags in `index.html` still point at
+`coamithra.github.io/RotEA26/`. Link previews for the Hetzner site therefore
+advertise the Pages URL, and break outright when Pages is taken down. They are
+part of the same change as flipping `MERIDIAN_BASE` to `../meridian/`, which
+must not ship before the first verified deploy — so `stamp()` leaves them alone
+rather than half-migrating the origin.
+
 ## Incremental uploads and the manifest
 
 The deploy writes `.deploy-manifest.json` at the site root: `{path: sha256}` for
@@ -124,16 +143,39 @@ everything it uploaded, plus the build hash. The next deploy reads it back and
 uploads only files whose hash changed.
 
 This also handles **orphans**, which SFTP does not do for you the way a Pages
-artifact swap did: `_framework/` filenames carry content fingerprints, so every
-build leaves the previous build's assemblies behind. Files listed in the previous
-manifest and absent from the new one are deleted; anything the manifest never
-claimed is left strictly alone, so nothing else on the host is at risk.
-`--no-prune` keeps them, `--force-all` ignores the manifest entirely.
+artifact swap did. On .NET 8 the `_framework/` filenames are plain
+(`EvilAliensWeb.wasm`, `Kni.Platform.wasm`, ...), so a rebuild overwrites them
+rather than accumulating — the orphans that matter here are files the *repo*
+stopped shipping: a deleted or renamed `Content/` asset, a dropped `lib/`
+dependency, an SDK version that emits a different set of runtime files. Left
+alone those sit on the host forever, and on a plan whose quota is a real gate
+(step 0) that leaks silently.
+
+Files listed in the previous manifest and absent from the new one are deleted;
+anything the manifest never claimed is left strictly alone, so nothing else on
+the host is at risk. `--no-prune` keeps them — and records them in the
+manifest's `stale` list so a later run can still reclaim them, rather than
+forgetting they exist. `--force-all` ignores the manifest and re-uploads
+everything.
 
 With no manifest on the host (the first deploy) the comparison falls back to file
 **size**. Do not "improve" that to mtime: publishing from a fresh checkout stamps
 every file with today's date, so an mtime rule would re-upload all 322 MB every
 time while looking like it was being clever.
+
+## Taking the site down (`--rm`)
+
+`python tools/deploy_web.py --rm` recursively deletes the deploy target and
+nothing else. Two guards, because `SFTP_PATH` is the account's **web root** and
+holds `/meridian/` and every sibling site:
+
+- it **refuses to run against the web root itself** — `--subdir ""` is a valid
+  way to *deploy* to the root but never a valid thing to delete;
+- it demands you type the **full remote path** to confirm, not the folder name.
+  A basename prompt reads as routine on exactly the target where it must not.
+
+It only ever touches `SFTP_PATH/<subdir>`. Nothing outside that directory is
+reachable from this flag.
 
 ## Post-deploy smoke
 

@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import posixpath
+import re
 import shutil
 import stat
 import subprocess
@@ -96,6 +97,20 @@ def load_env(path: Path) -> dict[str, str]:
 # publish
 # --------------------------------------------------------------------------
 
+def run_step(cmd: list[str], cwd: Path, what: str) -> None:
+    """Run a build step, failing with a readable message rather than a traceback.
+
+    A `CalledProcessError` stack dumped at a user mid-deploy buries the actual
+    cause under six frames of subprocess internals.
+    """
+    try:
+        subprocess.run(cmd, cwd=cwd, check=True)
+    except subprocess.CalledProcessError as ex:
+        sys.exit(f"{what}\n  (exit {ex.returncode}: {' '.join(cmd[:3])} ...)")
+    except OSError as ex:
+        sys.exit(f"{what}\n  ({cmd[0]} could not be run: {ex})")
+
+
 def publish(ref: str, workdir: Path) -> Path:
     """Release-publish ``ref`` from a throwaway checkout; return its wwwroot.
 
@@ -107,20 +122,30 @@ def publish(ref: str, workdir: Path) -> Path:
     """
     src = workdir / "src"
     print(f"[publish] checking out {ref} -> {src}")
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(src), ref],
-        cwd=REPO_ROOT, check=True,
-    )
+    run_step(["git", "worktree", "add", "--detach", str(src), ref], REPO_ROOT,
+             f"could not check out {ref!r} -- is it a real commit or branch?")
     out = workdir / "release"
     print(f"[publish] dotnet publish -c Release -> {out}")
-    subprocess.run(
-        ["dotnet", "publish", "web/EvilAliensWeb", "-c", "Release", "-o", str(out)],
-        cwd=src, check=True,
-    )
+    run_step(["dotnet", "publish", "web/EvilAliensWeb", "-c", "Release", "-o", str(out)],
+             src, "the Release publish failed -- see the build output above")
     site = out / "wwwroot"
     if not (site / "index.html").exists():
         sys.exit(f"publish produced no index.html at {site}")
     return site
+
+
+def resolve_ref(ref: str) -> str | None:
+    """The commit ``ref`` names, so the manifest records what is actually live.
+
+    Storing ``args.ref`` verbatim would write ``"HEAD"`` into every manifest --
+    true, useless, and exactly the question the field exists to answer.
+    """
+    try:
+        out = subprocess.run(["git", "rev-parse", ref], cwd=REPO_ROOT,
+                             check=True, capture_output=True, text=True)
+        return out.stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
 
 
 def drop_publish_worktree(workdir: Path) -> None:
@@ -149,9 +174,9 @@ def build_hash(site: Path) -> str:
     THIS IS THE CO-OP COMPATIBILITY KEY. NetSession's hello handshake compares
     it and refuses a peer whose hash differs, and the game browser filters the
     room list on it -- so two players only ever meet when their builds hash the
-    same. Do not "improve" the recipe: it is ported VERBATIM from the retired
-    .github/workflows/deploy.yml so a site published by this script is
-    indistinguishable from one the old CI published.
+    same. Do not "improve" the recipe: it is ported VERBATIM from
+    .github/workflows/deploy.yml (still present, pending the cutover) so a site
+    published by this script is indistinguishable from one CI published.
 
     The shell it replaces was:
 
@@ -227,7 +252,7 @@ SELFTEST_HASH = "81e6338c0c74dca6"
 
 
 def selftest() -> int:
-    """Prove build_hash() still reproduces the retired CI recipe."""
+    """Prove build_hash() still reproduces the CI shell recipe."""
     with tempfile.TemporaryDirectory(prefix="rotea-selftest-") as tmp:
         site = Path(tmp) / "release" / "wwwroot"
         for rel, body in SELFTEST_FILES.items():
@@ -249,12 +274,17 @@ def selftest() -> int:
 def stamp(site: Path) -> str:
     """Rewrite index.html for the live host. Returns the stamped build hash.
 
-    Two edits, both of which the retired CI workflow did:
+    Two edits, both of which the Pages workflow did:
       * ``<base href="/" />`` -> ``/RotEA26/`` (the dev build keeps "/" so
         ``dotnet run`` works at a domain root).
       * ``window.eaBuildHash = 'dev'`` -> the real fingerprint. Leaving it at
         'dev' would ALSO leave the frame-profiler HUD visible on the live site,
         which keys off that same value.
+
+    IDEMPOTENT, because the documented one-publish workflow re-stamps a tree that
+    is already stamped: ``--build-only --keep-build`` then ``--dry-run --site``
+    then ``--site`` all hand the same directory back here. Re-stamping verifies
+    the existing hash rather than rejecting the tree.
     """
     # stamp() EDITS THE TREE IT IS GIVEN, in place. That is harmless for a
     # throwaway publish but would rewrite a source checkout, so refuse anything
@@ -276,8 +306,10 @@ def stamp(site: Path) -> str:
     already_based = f'<base href="{BASE_HREF}" />' in html
     if not already_based and '<base href="/" />' not in html:
         sys.exit('index.html has no recognisable <base href="/" /> to rewrite')
-    if "window.eaBuildHash = 'dev'" not in html:
-        sys.exit("index.html has no window.eaBuildHash = 'dev' to stamp")
+    prior = re.search(r"window\.eaBuildHash = '([0-9a-f]{16})'", html)
+    if prior is None and "window.eaBuildHash = 'dev'" not in html:
+        sys.exit("index.html has neither window.eaBuildHash = 'dev' nor an "
+                 "already-stamped hash -- is this the game's index.html?")
 
     digest = build_hash(site)
 
@@ -286,10 +318,21 @@ def stamp(site: Path) -> str:
     else:
         html = html.replace('<base href="/" />', f'<base href="{BASE_HREF}" />', 1)
         print(f"[stamp] base href -> {BASE_HREF}")
-    html = html.replace(
-        "window.eaBuildHash = 'dev'", f"window.eaBuildHash = '{digest}'", 1
-    )
-    print(f"[stamp] eaBuildHash -> {digest}")
+    if prior is not None:
+        # Re-stamping a tree an earlier run already stamped. The hash is a pure
+        # function of that tree, so a DIFFERENT value means the files changed
+        # under us between the rehearsal and the upload -- exactly the mix-up
+        # this workflow exists to avoid, so refuse rather than quietly restamp.
+        if prior.group(1) != digest:
+            sys.exit(f"{index} is already stamped {prior.group(1)} but this tree "
+                     f"hashes {digest} -- the directory changed since it was "
+                     "stamped; rebuild rather than uploading a mixed tree")
+        print(f"[stamp] eaBuildHash already {digest}")
+    else:
+        html = html.replace(
+            "window.eaBuildHash = 'dev'", f"window.eaBuildHash = '{digest}'", 1
+        )
+        print(f"[stamp] eaBuildHash -> {digest}")
 
     index.write_bytes(html.encode("utf-8"))
     check = index.read_bytes().decode("utf-8")
@@ -302,17 +345,51 @@ def stamp(site: Path) -> str:
 # SFTP
 # --------------------------------------------------------------------------
 
-def connect(env: dict[str, str], port: int):
+def connect(env: dict[str, str], port: int, insecure: bool = False):
+    """Open an SFTP session, verifying the host key first.
+
+    This hands a PLAINTEXT ACCOUNT PASSWORD to whatever answers on port 22, so
+    the host key is checked against the machine's known_hosts before the
+    password is offered. A bare ``paramiko.Transport`` performs no such check --
+    anything that can win a DNS race or sit on the path (captive wifi) would
+    collect the credentials and could then serve a forged site.
+    """
     import paramiko
     missing = [k for k in ENV_KEYS if not env.get(k)]
     if missing:
         sys.exit("missing in .env: " + ", ".join(missing))
-    transport = paramiko.Transport((env["SFTP_HOST"], port))
-    transport.connect(username=env["SFTP_USER"], password=env["SFTP_PASS"])
-    sftp = paramiko.SFTPClient.from_transport(transport)
+
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(
+        paramiko.AutoAddPolicy() if insecure else paramiko.RejectPolicy()
+    )
+    if insecure:
+        print("[ssh] WARNING: --insecure-host-key skips host verification; the "
+              "account password is being offered to an unauthenticated host")
+    try:
+        client.connect(
+            hostname=env["SFTP_HOST"], port=port, username=env["SFTP_USER"],
+            password=env["SFTP_PASS"], allow_agent=False, look_for_keys=False,
+        )
+    except paramiko.SSHException as ex:
+        # Never let the exception text carry the password onward.
+        if "not found in known_hosts" in str(ex) or isinstance(ex, paramiko.BadHostKeyException):
+            sys.exit(
+                f"host key for {env['SFTP_HOST']} is not in known_hosts, so the "
+                f"password was NOT sent.\nRecord it once (verify the fingerprint "
+                f"against your host's control panel):\n"
+                f"    ssh-keyscan -p {port} {env['SFTP_HOST']} >> ~/.ssh/known_hosts\n"
+                f"or connect interactively: ssh {env['SFTP_USER']}@{env['SFTP_HOST']}\n"
+                f"(--insecure-host-key bypasses this; only for a key you have "
+                f"just rotated and verified out of band)"
+            )
+        sys.exit(f"ssh connection failed: {type(ex).__name__}: {ex}")
+
+    sftp = client.open_sftp()
     if sftp is None:
         sys.exit("could not open an SFTP session")
-    return transport, sftp
+    return client, sftp
 
 
 def remote_free_bytes(sftp, path: str) -> int | None:
@@ -341,6 +418,12 @@ def remote_free_bytes(sftp, path: str) -> int | None:
 
 
 def mkdir_p(sftp, remote_dir: str, made: set[str]) -> None:
+    """Create ``remote_dir`` and its parents, failing loudly if it cannot.
+
+    A swallowed mkdir surfaces hundreds of files later as a bare paramiko
+    traceback out of ``sftp.put``, mid-upload, with the real cause (a permission
+    or quota problem on one directory) already thrown away.
+    """
     if remote_dir in made:
         return
     parts = [p for p in remote_dir.split("/") if p]
@@ -354,8 +437,12 @@ def mkdir_p(sftp, remote_dir: str, made: set[str]) -> None:
         except IOError:
             try:
                 sftp.mkdir(cur)
-            except IOError:
-                pass
+            except IOError as ex:
+                # A racing creation is fine; anything else is not.
+                try:
+                    sftp.stat(cur)
+                except IOError:
+                    sys.exit(f"could not create remote directory {cur}: {ex}")
         made.add(cur)
 
 
@@ -391,6 +478,26 @@ def read_remote_manifest(sftp, base: str) -> dict | None:
     if not isinstance(data.get("files"), dict):
         return None
     return data
+
+
+def check_rm_target(base: str, target: str, subdir: str) -> None:
+    """Refuse a --rm that would take out more than the game's own directory.
+
+    ``SFTP_PATH`` is the account's WEB ROOT: it holds ``/meridian/`` and every
+    other site on this host. ``--subdir ""`` is a legitimate way to *deploy* to
+    that root, which makes ``target == base`` reachable -- and a path-depth check
+    does not catch it, because a perfectly ordinary ``/home/<user>/public_html``
+    has three components and sails through. Hence the explicit identity test.
+
+    Pure and side-effect free so it can be tested without a connection, and
+    called before one is opened.
+    """
+    if target == base or not subdir.strip("/"):
+        sys.exit(f"refusing --rm on the web root itself ({target}) -- --rm only "
+                 "ever removes the game's own subdirectory, and deleting the root "
+                 "would take /meridian/ and every sibling site with it")
+    if len([p for p in target.split("/") if p]) < 2:
+        sys.exit(f"refusing --rm on a top-level path: {target}")
 
 
 def rmtree(sftp, path: str) -> None:
@@ -457,6 +564,10 @@ def main() -> None:
                     help="do not delete the temporary checkout / publish output")
     ap.add_argument("--selftest", action="store_true",
                     help="check the build-hash recipe against its pinned value and exit")
+    ap.add_argument("--insecure-host-key", action="store_true",
+                    help="skip SSH host-key verification (UNSAFE: offers the account "
+                         "password to an unauthenticated host). Only for a key you have "
+                         "just rotated and verified out of band")
     args = ap.parse_args()
 
     if args.selftest:
@@ -479,15 +590,21 @@ def main() -> None:
         print(f"host={env['SFTP_HOST']} user={env['SFTP_USER']} target={target} "
               f"(password: <{len(env['SFTP_PASS'])} chars, hidden>)")
 
+    # Decide whether --rm is even permissible BEFORE opening a connection, so a
+    # refused delete never offers the account password to anything.
+    if args.rm:
+        check_rm_target(base, target, args.subdir)
+
     # --- remote-only modes ------------------------------------------------
     if args.list or args.rm:
-        transport, sftp = connect(env, args.port)
+        client, sftp = connect(env, args.port, args.insecure_host_key)
         try:
             if args.rm:
-                if len([p for p in target.split("/") if p]) < 2:
-                    sys.exit(f"refusing --rm on a top-level path: {target}")
-                confirm = input(f"delete EVERYTHING under {target}? type the folder name: ")
-                if confirm.strip() != posixpath.basename(target):
+                # Demand the FULL path, not the basename: a basename prompt reads
+                # as routine ("public_html") on exactly the target that matters.
+                confirm = input(f"delete EVERYTHING under {target}?\n"
+                                f"type the full path to confirm: ")
+                if confirm.strip() != target:
                     sys.exit("aborted")
                 rmtree(sftp, target)
                 print("removed")
@@ -506,20 +623,26 @@ def main() -> None:
             return
         finally:
             sftp.close()
-            transport.close()
+            client.close()
 
     # --- build ------------------------------------------------------------
+    # The publish itself lives INSIDE the try: `git worktree add` and
+    # `dotnet publish` are the likeliest things here to fail, and a failure
+    # outside it would leak both the temp dir and a REGISTERED git worktree into
+    # the real repo's `git worktree list`.
     workdir: Path | None = None
-    if args.site:
-        site = Path(args.site).resolve()
-        if not (site / "index.html").exists():
-            sys.exit(f"{site} has no index.html")
-        print(f"[publish] skipped -- using {site}")
-    else:
-        workdir = Path(tempfile.mkdtemp(prefix="rotea-deploy-"))
-        site = publish(args.ref, workdir)
-
     try:
+        if args.site:
+            site = Path(args.site).resolve()
+            if not (site / "index.html").exists():
+                sys.exit(f"{site} has no index.html")
+            print(f"[publish] skipped -- using {site}")
+            ref_sha = None
+        else:
+            workdir = Path(tempfile.mkdtemp(prefix="rotea-deploy-"))
+            site = publish(args.ref, workdir)
+            ref_sha = resolve_ref(args.ref)
+
         digest = stamp(site)
         hashes, sizes = local_manifest(site)
         payload = sum(sizes.values())
@@ -542,7 +665,7 @@ def main() -> None:
                   "hosting quota (docs/DEPLOY.md step 0) before deploying")
             return
 
-        transport, sftp = connect(env, args.port)
+        client, sftp = connect(env, args.port, args.insecure_host_key)
         try:
             # --- quota gate (advisory) --------------------------------
             free = remote_free_bytes(sftp, base)
@@ -560,7 +683,12 @@ def main() -> None:
             if prev is not None:
                 old = prev["files"]
                 todo = [r for r, h in hashes.items() if old.get(r) != h]
-                orphans = sorted(set(old) - set(hashes))
+                # Files a previous run left behind (--no-prune, or a delete that
+                # failed) are recorded in "stale" and stay candidates. Without
+                # that they would be orphaned AND forgotten on the first run, so
+                # nothing could ever reclaim them.
+                known = set(old) | set(prev.get("stale") or [])
+                orphans = sorted(known - set(hashes))
                 print(f"[plan] manifest {prev.get('buildHash', '?')} -> {digest}: "
                       f"{len(todo)} changed/new, {len(orphans)} orphaned")
             else:
@@ -591,6 +719,19 @@ def main() -> None:
             # --- upload -----------------------------------------------
             made: set[str] = set()
             mkdir_p(sftp, target, made)
+
+            # Invalidate the manifest BEFORE the first byte moves. If this run is
+            # interrupted, the host is left with no manifest, so the next run
+            # falls back to the size compare and re-checks every file. Leaving
+            # the old one in place would be actively dangerous under --force-all:
+            # an interrupted re-upload can truncate a file whose content did NOT
+            # change between builds, and the stale manifest would then vouch for
+            # its old hash forever, so no later deploy would ever fix it.
+            try:
+                sftp.remove(posixpath.join(target, MANIFEST_NAME))
+            except IOError:
+                pass  # absent is the normal first-deploy case
+
             done_bytes = 0
             for i, rel in enumerate(todo, 1):
                 remote = posixpath.join(target, rel)
@@ -600,6 +741,10 @@ def main() -> None:
                 if i % 25 == 0 or i == len(todo):
                     print(f"  {i}/{len(todo)}  {human(done_bytes)}/{human(upload_bytes)}  {rel}")
 
+            # Anything still on the host that this build does not include, and
+            # that we did not manage to remove, is carried forward so a later run
+            # can try again.
+            stale = sorted(orphans) if args.no_prune else []
             if orphans and not args.no_prune:
                 # Only ever delete files a PREVIOUS manifest claims we put there.
                 # Anything else on the host is somebody else's and stays.
@@ -609,13 +754,14 @@ def main() -> None:
                         print(f"  deleted {rel}")
                     except IOError as ex:
                         print(f"  could not delete {rel}: {ex}")
+                        stale.append(rel)
 
-            # Manifest LAST: if the upload dies halfway, the old manifest is still
-            # the truthful record of what is on the host, so the next run redoes
-            # the missing files instead of trusting a half-written state.
+            # Manifest LAST, and only once every upload and delete has succeeded:
+            # it is the claim "the host holds exactly this", so writing it early
+            # would let a later run skip a file that never actually landed.
             body = json.dumps(
                 {"version": MANIFEST_VERSION, "buildHash": digest,
-                 "ref": args.ref, "files": hashes},
+                 "ref": ref_sha, "files": hashes, "stale": sorted(set(stale))},
                 indent=0, sort_keys=True,
             ).encode()
             with sftp.open(posixpath.join(target, MANIFEST_NAME), "w") as fh:
@@ -626,7 +772,7 @@ def main() -> None:
             print("now verify:  python tools/check_deploy.py --hash " + digest)
         finally:
             sftp.close()
-            transport.close()
+            client.close()
     finally:
         if workdir is not None and not args.keep_build:
             drop_publish_worktree(workdir)

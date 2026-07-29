@@ -234,8 +234,16 @@ namespace EvilAliensWeb.Compat.Net
               .Append(" every provisional entry was settled and removed (no accounting leak)\n");
             sb.Append(syncSilent ? "  PASS" : "  FAIL")
               .Append(" the books explain the score at all times, so the 1Hz sync never moves it\n");
-            sb.Append(unbiased && reproducedBug && converges && drained && syncSilent
-                ? "[netscore] PASS" : "[netscore] FAIL");
+            // The verdict carries a COUNT, not just PASS/FAIL. Five booleans ANDed into a bare
+            // "PASS" means a leg DELETED from this method makes the run pass faster and silently,
+            // which is the one shape tools/headless/probes/net_selftests.txt cannot otherwise
+            // catch -- every other suite it drives reports a tally it can pin (card 25ad0659).
+            int legs = 5;
+            int passed = (unbiased ? 1 : 0) + (reproducedBug ? 1 : 0) + (converges ? 1 : 0)
+                + (drained ? 1 : 0) + (syncSilent ? 1 : 0);
+            sb.Append(passed == legs
+                ? "[netscore] PASS (" + passed + "/" + legs + ")"
+                : "[netscore] FAIL (" + passed + "/" + legs + ")");
             return sb.ToString();
         }
 

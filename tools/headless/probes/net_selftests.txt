@@ -15,6 +15,10 @@
 # TeamChallenge seat resolver), so capturing their PRE-REFACTOR state as one exit code is what
 # makes that refactor defensible at all. Landed in step 1, before a line of it was written.
 #
+# THE ARGUMENT FOR THIS FILE, IN ONE FACT: when it was written, `eaNetCombo.test()` had been
+# FAILING ON MAIN and nobody knew. Eleven cards' worth of self-tests that nothing ever runs are
+# not a regression net; they are eleven console calls a human made once.
+#
 # FAILURE MEANS: the quoted line names the suite. Go and read that suite's own FAIL lines -- each
 # prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
 # probe by loosening an expectation: these are all-or-nothing tallies on purpose.
@@ -27,13 +31,13 @@
 # distinguishes them; (c) a suite that threw halfway prints neither a FAIL nor a tally.
 #
 # THE COUNTS ARE PART OF THE ASSERTION. `69`, `82/82`, `29/29`, `18`, `36`, `9/9`, `15/15`, `27`,
-# `17` are the figures at the time of writing; a suite that loses checks fails here rather than
+# `5/5`, `17` are the figures at the time of writing; a suite that loses checks fails here rather than
 # passing faster. Raise them when checks are added.
-# TWO SUITES CANNOT BE ASSERTED THAT WAY, and both are called out rather than quietly weaker:
-# `eaNetScore.test`'s `NetScoreLedger.SelfTest` prints a bare `[netscore] PASS` with no tally (it
-# is an AND of five booleans), so a leg DELETED from it would pass faster and silently -- the one
-# gap in the counts rule here; and `eaNetSim.test` prints measurements rather than a verdict, so
-# its line asserts the INVARIANT instead (below).
+# ONE SUITE CANNOT BE ASSERTED THAT WAY, and it is called out rather than quietly weaker:
+# `eaNetSim.test` prints measurements rather than a verdict, so its line asserts the INVARIANT
+# instead (below). `NetScoreLedger.SelfTest` used to be a second exception -- a bare
+# `[netscore] PASS` ANDed out of five booleans, so a leg deleted from it passed faster and
+# silently; it now reports `(5/5)` and is pinned like the rest.
 #
 # MENU-ONLY, AND THAT IS LOAD-BEARING: eaBinTest and eaNetSnap both refuse to run near a live world
 # (their two SKIP messages are worded differently -- `SKIP (run from the main menu` vs
@@ -71,7 +75,7 @@ expect \[netsnap\] PASS \(18 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a)
 expect -> ALL PASS \(36 passed, 0 failed\)
 # the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)
-expect \[netscore\] PASS
+expect \[netscore\] PASS \(5/5\)
 expect \[netscore\] wire PASS \(9/9\)
 # the decorative-swarm codec + the instance predicate (card 9a3175d0)
 expect \[cosmetictest\] PASS \(15/15 checks\)

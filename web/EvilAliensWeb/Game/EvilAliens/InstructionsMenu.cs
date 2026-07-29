@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -9,8 +8,6 @@ namespace EvilAliens;
 internal class InstructionsMenu : DrawableGameComponent
 {
 	public delegate void ExitEvent(object sender);
-
-	private List<Texture2D> instructionTextures = new List<Texture2D>();
 
 	private Texture2D keyboardlayout;
 

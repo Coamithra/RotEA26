@@ -31,24 +31,34 @@ public class ScreenshotSaver
 	// Init()'s loads are cache hits. They MUST NOT drift: Init() used to hardcode eleven of
 	// the twelve, and the one it missed (webcamss, the challenge carousel's last entry) then
 	// decoded cold the first time the player opened Challenges.
-	// TWO MORE COPIES of these same paths exist and are NOT derived from this one:
-	// LevelArt.ScreenshotPath (keyed by Levels) and MenuScene's AddEntryData calls. Adding a
-	// level means touching all three, or its art silently drops out of the warm+preload set.
-	internal static readonly string[] StockShots =
+	//
+	// Card 8d6883f3: DERIVED, not spelled out, so that failure mode cannot recur. Every
+	// carousel level (LevelArt.HasCarouselEntry) contributes its bundled thumbnail
+	// (LevelArt.ScreenshotPath) -- the same lookup SubMenuLevelChoice draws through -- so
+	// adding a level to the carousel adds its art here for free. Deduped because two levels
+	// sharing one bundled image is legal and must not warm it twice.
+	//
+	// Order is enum order, not the old hand order. It only sets the warm-queue sequence; the
+	// whole set is drained before the menu is built either way (see Game1.QueueMenuWarm).
+	internal static readonly string[] StockShots = BuildStockShots();
+
+	private static string[] BuildStockShots()
 	{
-		"GFX/Screenshots/level1empty",
-		"GFX/Screenshots/level2empty",
-		"GFX/Screenshots/level3empty",
-		"GFX/Screenshots/SpaceDodge",
-		"GFX/Screenshots/ss1",
-		"GFX/Screenshots/classicss",
-		"GFX/Screenshots/Paratrooper",
-		"GFX/Screenshots/OwnLevel",
-		"GFX/Screenshots/crazygamess",
-		"GFX/Screenshots/InsaneBossI",
-		"GFX/Screenshots/teamchallengess",
-		"GFX/Screenshots/webcamss"
-	};
+		List<string> paths = new List<string>();
+		foreach (Levels level in levels)
+		{
+			if (!LevelArt.HasCarouselEntry(level))
+			{
+				continue;
+			}
+			string path = LevelArt.ScreenshotPath(level);
+			if (!paths.Contains(path))
+			{
+				paths.Add(path);
+			}
+		}
+		return paths.ToArray();
+	}
 
 	public static void Init()
 	{

@@ -28,8 +28,37 @@ internal static class LevelArt
         };
     }
 
-    // The bundled level-select thumbnail. (An in-progress game rarely has a saved
-    // ScreenshotSaver capture for the joiner's profile, so the browser uses this bundled art.)
+    // Does this level have a level-select carousel entry (MenuScene's levelSelector or
+    // challengeSelector)? Card 8d6883f3: this is the ONE membership list, and with
+    // ScreenshotPath below it derives ScreenshotSaver.StockShots -- the set of bundled
+    // thumbnails that must be preloaded AND splash-warmed. Adding a carousel level means
+    // adding it here and to ScreenshotPath; nothing else has to be kept in step.
+    //
+    // NOT the same question as General.ScreenshotEnabled, and that one cannot stand in for
+    // this: it answers "does this level CAPTURE a live thumbnail", and for WebcamAliens it
+    // returns the Settings.WebcamScreenshot opt-in, which is OFF by default. Deriving the
+    // stock set from it would drop gfx/screenshots/webcamss -- precisely the asset whose
+    // absence from the warm set was the bug that led to this card.
+    public static bool HasCarouselEntry(Levels level)
+    {
+        return level switch
+        {
+            Levels.Level1 or Levels.Level2 or Levels.Level3 => true,
+            Levels.SpaceDodge or Levels.Braineroids or Levels.ClassicAliens
+                or Levels.Paratrooper or Levels.OwnLevel or Levels.CrazyGame
+                or Levels.InsaneBossI or Levels.TeamChallenge or Levels.WebcamAliens => true,
+            // Tutorial (launched from the main menu) and Demo1/2/3 (attract rotation) have
+            // no carousel slot, so they need no bundled thumbnail.
+            _ => false,
+        };
+    }
+
+    // The bundled level-select thumbnail: what the carousel draws for a level the player has
+    // no saved screenshot of yet, and the art the online game browser shows for a listed game.
+    // (An in-progress game rarely has a saved ScreenshotSaver capture for the joiner's
+    // profile, so the browser uses this bundled art.) The single source of these paths --
+    // SubMenuLevelChoice resolves each entry's image through here, and ScreenshotSaver.
+    // StockShots is derived from here over HasCarouselEntry above.
     public static string ScreenshotPath(Levels level)
     {
         return level switch

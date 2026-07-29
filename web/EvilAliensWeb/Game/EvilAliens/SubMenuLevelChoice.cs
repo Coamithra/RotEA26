@@ -13,8 +13,6 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 {
 	private List<Texture2D> entryImages = new List<Texture2D>();
 
-	private List<string> entryImageNames = new List<string>();
-
 	private List<string> briefings = new List<string>();
 
 	private List<Levels> levels = new List<Levels>();
@@ -30,9 +28,12 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 	{
 	}
 
-	public void AddEntryData(string imageFilename, string briefing, Levels level)
+	// Card 8d6883f3: the entry's bundled image is NOT passed in -- it is looked up from the
+	// level (LevelArt.ScreenshotPath) at load time. The caller used to spell the path out, a
+	// third copy of the same twelve strings that could drift from ScreenshotSaver's preload
+	// set. This also removes one of the class's positional parallel lists.
+	public void AddEntryData(string briefing, Levels level)
 	{
-		entryImageNames.Add(imageFilename);
 		levels.Add(level);
 		briefings.Add(briefing);
 	}
@@ -56,9 +57,11 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 	private void loadScreenshots()
 	{
 		entryImages.Clear();
-		for (int i = 0; i < entryImageNames.Count; i++)
+		for (int i = 0; i < levels.Count; i++)
 		{
-			string imageName = entryImageNames[i];
+			// The bundled fallback art, from the one table ScreenshotSaver.StockShots is
+			// also derived from -- so anything reached here was preloaded and splash-warmed.
+			string imageName = LevelArt.ScreenshotPath(levels[i]);
 			Texture2D image;
 			if (General.ScreenshotEnabled(levels[i]))
 			{

@@ -262,13 +262,13 @@ internal class MenuScene : Scene
 		levelSelector = new SubMenuLevelChoice(base.Game);
 		levelSelector.OnExit += levelSelector_OnExit;
 		levelSelector.AddEntry("Mission 1");
-		levelSelector.AddEntryData("GFX/Screenshots/level1empty", "The Evil Aliens must be repelled!", Levels.Level1);
+		levelSelector.AddEntryData("The Evil Aliens must be repelled!", Levels.Level1);
 		levelSelector.AddEntryEvent(levelSelector_levelSelected);
 		levelSelector.AddEntry("Mission 2", Unlockables.Items.Level2);
-		levelSelector.AddEntryData("GFX/Screenshots/level2empty", "Mars Attacks!", Levels.Level2);
+		levelSelector.AddEntryData("Mars Attacks!", Levels.Level2);
 		levelSelector.AddEntryEvent(levelSelector_levelSelected);
 		levelSelector.AddEntry("Mission 3", Unlockables.Items.Level3);
-		levelSelector.AddEntryData("GFX/Screenshots/level3empty", "Invade the Alien base!", Levels.Level3);
+		levelSelector.AddEntryData("Invade the Alien base!", Levels.Level3);
 		levelSelector.AddEntryEvent(levelSelector_levelSelected);
 		confirmationMenu = new ConfirmationMenu(base.Game, "Are you sure?\nThis will erase all progress..");
 		confirmationMenu.AddEntry("Yes");
@@ -279,25 +279,25 @@ internal class MenuScene : Scene
 		challengeSelector = new SubMenuLevelChoice(base.Game);
 		challengeSelector.OnExit += challengeSelector_OnExit;
 		challengeSelector.AddEntry("Space Dodge!", Unlockables.Items.SpaceDodge);
-		challengeSelector.AddEntryData("GFX/Screenshots/SpaceDodge", "Move fast and dodge the oncoming asteroids!", Levels.SpaceDodge);
+		challengeSelector.AddEntryData("Move fast and dodge the oncoming asteroids!", Levels.SpaceDodge);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Braineroids", Unlockables.Items.Braineroids);
-		challengeSelector.AddEntryData("GFX/Screenshots/ss1", "What the arcade classic could have looked like..", Levels.Braineroids);
+		challengeSelector.AddEntryData("What the arcade classic could have looked like..", Levels.Braineroids);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Evil Aliens Classic", Unlockables.Items.ClassicAliens);
-		challengeSelector.AddEntryData("GFX/Screenshots/classicss", "Can you beat the game that started it all?", Levels.ClassicAliens);
+		challengeSelector.AddEntryData("Can you beat the game that started it all?", Levels.ClassicAliens);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Paratrooper", Unlockables.Items.Paratrooper);
-		challengeSelector.AddEntryData("GFX/Screenshots/Paratrooper", "Paratrooper!", Levels.Paratrooper);
+		challengeSelector.AddEntryData("Paratrooper!", Levels.Paratrooper);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Base Pressure", Unlockables.Items.OwnLevel);
-		challengeSelector.AddEntryData("GFX/Screenshots/OwnLevel", "Can you manoeuvre through the narrow passageways?", Levels.OwnLevel);
+		challengeSelector.AddEntryData("Can you manoeuvre through the narrow passageways?", Levels.OwnLevel);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Crazy Game", Unlockables.Items.CrazyGame);
-		challengeSelector.AddEntryData("GFX/Screenshots/crazygamess", "The year is 2501. Your planet has just been overrun by an\nevil alien force known only as The Dots.\nYou managed to escape the fate of your planet by hopping\ninto your shuttle and blasting off, but The Dots are right\non your tail!\nHow long can you last before they destroy you too?", Levels.CrazyGame);
+		challengeSelector.AddEntryData("The year is 2501. Your planet has just been overrun by an\nevil alien force known only as The Dots.\nYou managed to escape the fate of your planet by hopping\ninto your shuttle and blasting off, but The Dots are right\non your tail!\nHow long can you last before they destroy you too?", Levels.CrazyGame);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Boss Train", Unlockables.Items.BossTrain);
-		challengeSelector.AddEntryData("GFX/Screenshots/InsaneBossI", "Defeat the Alien bosses for great victory", Levels.InsaneBossI);
+		challengeSelector.AddEntryData("Defeat the Alien bosses for great victory", Levels.InsaneBossI);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Team Challenge", Unlockables.Items.TeamChallenge);
 		// The "two players" line is the 2008 briefing; the second sentence is the web port's
@@ -306,13 +306,13 @@ internal class MenuScene : Scene
 		// decides to launch, and because an in-level banner has nowhere safe to live (one added
 		// during Startup is eaten by UpdateStartup's 1300ms Purge<AnimatedMessage>, one added in
 		// Normal collides with the script's own "Get ready!" beat).
-		challengeSelector.AddEntryData("GFX/Screenshots/teamchallengess", "Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players -- plug in a gamepad for player two,\nor an auto-pilot partner takes the second seat.", Levels.TeamChallenge);
+		challengeSelector.AddEntryData("Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players -- plug in a gamepad for player two,\nor an auto-pilot partner takes the second seat.", Levels.TeamChallenge);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		// Web-port addition, deliberately UNGATED (no Unlockables item): the remake of
 		// the 2004 webcam game the "I made this!" splash is from. The screenshot is the
 		// meme's embedded mini-screenshot (tools/webcam/build_webcam_assets.py).
 		challengeSelector.AddEntry("I Made This!");
-		challengeSelector.AddEntryData("GFX/Screenshots/webcamss", "The legendary 2004 webcam game, remade. YOU are the ship:\nyour camera puts you in the starfield. Swat the saucers with\nyour body before they blink, aim... and FIRE.\nRequires a webcam", Levels.WebcamAliens);
+		challengeSelector.AddEntryData("The legendary 2004 webcam game, remade. YOU are the ship:\nyour camera puts you in the starfield. Swat the saucers with\nyour body before they blink, aim... and FIRE.\nRequires a webcam", Levels.WebcamAliens);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		cheatsMenu = new MenuSub1(base.Game);
 		cheatsMenu.AddEntry("Infinite Lives: " + boolToGameString(Settings.GetInstance().InfiniteLives), Unlockables.Items.InfiniteLives);

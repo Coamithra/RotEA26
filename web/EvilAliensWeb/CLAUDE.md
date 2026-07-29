@@ -224,6 +224,11 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     cannot be warmed at all.
     It is a BRACKET, not a `_currentLevel == SentinelBoot` mute like `NoteFrame`'s, precisely so
     the boot decodes that are NOT warm-queue driven still surface -- they are the signal.
+    **`ScreenshotSaver.Init` is the bracket's SECOND caller (card 2367b39c), and the only one
+    that passes a label** -- `BeginWarm("stockshots")` around its twelve-asset loop, which makes
+    `EndWarm` print a one-line summary instead of the decodes vanishing silently. `Warm<T>` passes
+    no label (one asset per bracket has nothing to summarise), so the warm queues' output is
+    unchanged. Both close in a `finally`; keep it at two callers so the claim stays greppable.
   - **The `(boot)` COLD lines that REMAIN are unreachable by any warm queue -- do not "fix" them
     by adding entries.** `QueueMenuWarm`/`QueueIdleWarm` are built in `Game1.LoadContent`, which
     `base.Initialize()` reaches only AFTER every component's own `LoadContent` has run. So
@@ -307,7 +312,16 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     beat between the keypress and the carousel appearing, and a probe that marks its assertion
     window after the carousel is up passes on the very regression it exists to catch.
     A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never runs and all
-    twelve decode at `Init` as before: that is the debug path, not a regression.
+    twelve decode at `Init` as before: that is the debug path, not a regression. Since card
+    2367b39c `Init` brackets that loop as a LABELLED warm, so those twelve report as one
+    `[loadprofile] stockshots warm: 12 textures, <n>ms decode total ... -- deliberate, not a gap`
+    line instead of twelve `(boot)` COLD gaps at the top of every capture. The tail reads "not a
+    COLD gap", NOT "free" -- reaching the line means they really did decode synchronously on the
+    Press-Start -> menu handoff, so read the ms. On a real full-splash boot the pump warms them
+    first and the bracket sees zero decodes, so nothing prints; `boot_cold.txt` is unaffected for
+    a different reason again -- it never presses Start, so `Init` does not run there at all.
+    `stockshots_warm.txt` asserts the count, which is what catches a dropped carousel level at
+    BOOT rather than only via the carousel navigation.
   - **`GFX/Help/Controls_Keyboard`/`_Joypad` are in the IDLE queue, and moving them there meant
     moving them to the shared content manager (card 4d47c5ba).** `HelpText` (every attract demo)
     and `InstructionsMenu` (every in-level pause -> Instructions) each used to own a private

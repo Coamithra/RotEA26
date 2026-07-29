@@ -38,9 +38,22 @@
 # offending decode lands in the dropped window, and the probe passes on the very mutation it
 # exists to catch (measured -- it did).
 #
-# Under ?menu the splash is skipped and the warm pump never runs, so all twelve decode inside
-# ScreenshotSaver.Init during boot. That is the debug path, not a regression, and is what the
-# mark drops -- leaving the carousel's own late fetch, which is the signal.
+# THE TWO ASSERTIONS BEFORE THE MARK are the boot leg (card 2367b39c). Under ?menu the splash is
+# skipped and the warm pump never runs, so all twelve decode inside ScreenshotSaver.Init during
+# boot. That is the debug path, not a regression -- and since that card Init brackets the loop as
+# a labelled warm, so it reports as ONE `stockshots warm:` summary instead of twelve COLD lines.
+# Asserting on that summary pins the new attribution AND counts the set: a level dropped from the
+# carousel reads `11 textures` here, caught at BOOT, before the navigation below has run at all.
+# They sit before the mark because the mark is what throws that window away.
+#
+# **ADDING a carousel level bumps the literal to 13 -- update it here.** Card 8d6883f3 made the
+# set derive from LevelArt so an addition costs no code, and this pin is the one place that still
+# has to be told. A stale literal fails as though the addition were a regression; it is not.
+#
+# The `expect-not` under it is NOT the main anti-COLD assertion -- the summary line above already
+# fails if the bracket is gone. It covers the narrower case the summary cannot see: a
+# gfx/screenshots/* decode at boot from OUTSIDE Init's bracketed loop (a thirteenth load added
+# elsewhere), which is the card's literal acceptance criterion.
 #
 # ?unlockall so a wiped save can select the later challenges; ?invuln so the launched level
 # does not die during the settle.
@@ -49,9 +62,15 @@
 
 step 150 nodraw
 
-# Boot decodes the whole stock set (ScreenshotSaver.Init) under the (boot) sentinel; that is
-# the set being defended, and dropping it here is what leaves only decodes the carousel had to
-# go and FETCH. The mark must sit BEFORE the navigation below -- see the header.
+# The boot leg: ScreenshotSaver.Init decodes the whole stock set here (the pump never ran under
+# ?menu), and since card 2367b39c it is bracketed, so it must report as one labelled summary
+# naming all twelve -- never as COLD gaps. The count is what catches a dropped carousel level at
+# boot. Both must precede the mark, which discards this window.
+expect \[loadprofile\] stockshots warm: 12 textures
+expect-not COLD decode in \(boot\): gfx/screenshots/
+
+# Now drop the boot window, so the only decodes left are ones the carousel had to go and FETCH.
+# The mark must sit BEFORE the navigation below -- see the header.
 mark
 
 # Start Game -> the MISSION carousel (its Initialize decodes level1/2/3empty), then back out.

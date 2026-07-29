@@ -148,6 +148,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeNetWire(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -1577,6 +1583,84 @@ internal static class Program
         Check("negative control: 200 is not a Levels member", !Enum.IsDefined(levels, 200), null);
         Check("negative control: 200 is not a DifficultyLevel member", !Enum.IsDefined(diff, 200), null);
         Check("negative control: 200 is not an Unlockables.Items member", !Enum.IsDefined(items, 200), null);
+        return 0;
+    }
+
+    // Card 25ad0659 (step 1) -- the in-process net wire and the wire-level codec round trips.
+    //
+    // Unlike every case set above, this does NOT restate any expectation: it invokes
+    // Compat/Net/NetWireTest.Run(), which is the SAME suite eaNetWire.test() runs in the browser
+    // and `eval NetWireTest` runs under eahl. That is deliberate, and it is the ProbeTeamPartnerSeat
+    // precedent -- one suite, three runners, nothing to drift. What this adds is a BROWSERLESS
+    // runner with an exit code, which is what makes the wire a CI-able gate; NetWireTest is
+    // Game-free precisely so it survives this loader's limits (no ServiceHelper, no GraphicsDevice).
+    //
+    // Two guards make a green run mean something. (a) Every section header must be present, so a
+    // suite that threw or returned early cannot pass on the FAIL lines it never printed. (b) A
+    // floor on the PASS count, so deleting assertions is a failure rather than a faster pass --
+    // the number is the count at the time of writing and is meant to be raised when legs are
+    // added, never lowered to make a run green.
+    private static int ProbeNetWire(Assembly asm)
+    {
+        const int MinAssertions = 67;
+        string[] sections =
+        {
+            "1. transport contract",
+            "2. NetImpairment composed over an endpoint",
+            "3. codec round trips through the wire",
+            "4. stream-lane reorder + dedup",
+        };
+
+        Type suite = asm.GetType("EvilAliensWeb.Compat.Net.NetWireTest", true);
+        MethodInfo run = suite.GetMethod("Run", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (run == null)
+        {
+            Console.WriteLine("FAIL: could not reflect NetWireTest.Run -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] Compat/Net/NetWireTest (card 25ad0659)");
+        string report;
+        try
+        {
+            report = (string)run.Invoke(null, null);
+        }
+        catch (TargetInvocationException ex)
+        {
+            // A throw here is a real failure, not a reflection problem: the suite is Game-free, so
+            // nothing in this loader's documented limits can reach it. Name the inner exception --
+            // TargetInvocationException's own message says nothing.
+            Console.WriteLine("  FAIL NetWireTest threw: "
+                + (ex.InnerException != null ? ex.InnerException.ToString() : ex.ToString()));
+            failures++;
+            return 0;
+        }
+
+        int passes = 0;
+        foreach (string line in report.Split('\n'))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+            Console.WriteLine("  " + trimmed);
+            if (trimmed.StartsWith("PASS ", StringComparison.Ordinal))
+            {
+                passes++;
+            }
+            else if (trimmed.StartsWith("FAIL ", StringComparison.Ordinal))
+            {
+                failures++;
+            }
+        }
+
+        foreach (string section in sections)
+        {
+            Check("section ran: " + section, report.Contains(section, StringComparison.Ordinal), null);
+        }
+        Check("assertion count did not shrink", passes >= MinAssertions,
+            "passes=" + passes + " floor=" + MinAssertions);
         return 0;
     }
 }

@@ -1,0 +1,78 @@
+# PROBE: every menu-runnable net-layer self-test still passes, in one run.
+#
+# PINS: nothing of its own. This is a MECHANICAL REGRESSION NET over the suites cards 40334a8f,
+# b0ab09ec, 1a3ad45a, 48ab9b2f, 9a3175d0, 0b8a300b, c0229c57, ee96ea61, 74403f83, e6927ef8 and
+# bcdc7430 each left behind. Every one of them was already the right tool for its card; what none
+# of them had was anything that RUNS them. They were console calls a human made once.
+#
+# WHY IT EXISTS: card 25ad0659 is a four-step de-static refactor of NetSession / NetPuppets /
+# NetIdRegistry -- ~108 pieces of per-session static state moving into instances behind static
+# facades, under 227 external reference sites. The facade keeps the call sites identical, so the
+# failure mode is not a compile error: it is one of these decisions quietly changing. These eleven
+# suites already cover the decisions (slot negotiation, the kick/block predicate and its v6 codec,
+# snapshot unknown-id attribution, the score ledger and the EvDeath wire, the per-slot HUD codec
+# and OwnsSlot, the cosmetic-swarm predicate, the bin's purge filter and the puppet exemption, the
+# TeamChallenge seat resolver), so capturing their PRE-REFACTOR state as one exit code is what
+# makes that refactor defensible at all. Landed in step 1, before a line of it was written.
+#
+# FAILURE MEANS: the quoted line names the suite. Go and read that suite's own FAIL lines -- each
+# prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
+# probe by loosening an expectation: these are all-or-nothing tallies on purpose.
+#
+# ALL ELEVEN ARE ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
+# already cost something in this repo: (a) an `expect-not` passes on a run where the eval never
+# happened, which a renamed DebugInput method silently produces; (b) several of these suites SKIP
+# legs they cannot reach (NetCosmetic's client apply path needs a level, NetKickTest's
+# survives-Stop() leg needs no live session) and a skipped leg is not a pass -- the tally is what
+# distinguishes them; (c) a suite that threw halfway prints neither a FAIL nor a tally.
+#
+# THE COUNTS ARE PART OF THE ASSERTION. `67`, `82/82`, `29/29`, `18`, `36`, `9/9`, `15/15`, `27`, `17` are the
+# figures at the time of writing; a suite that loses checks fails here rather than passing faster.
+# Raise them when checks are added.
+#
+# MENU-ONLY, AND THAT IS LOAD-BEARING: eaBinTest and eaNetSnap both refuse to run near a live world
+# (they arm a real Purge<AlienDrawableGameComponent> / build real puppets) and would print SKIP
+# instead -- which the tallies above would then catch. `?noattract` is what keeps the 20s attract
+# demo from becoming that live world mid-window; it is out of DebugFlags.Active, so it changes
+# nothing else. `eaNetBgTest` is deliberately ABSENT -- it needs a level and has its own probe
+# (netbg_catchup.txt).
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+
+eval NetWireTest
+eval SlotTest
+eval KickTest
+eval NetSnapTest
+eval NetComboTest
+eval NetScoreTest 400 6 80 1
+eval NetCosmetic
+eval BinTest
+eval TeamSeat
+
+# the in-process wire + the wire-level codec round trips (card 25ad0659)
+expect \[netwire\] 67 passed, 0 failed
+# primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
+expect \[slottest\] PASS \(82/82 checks\)
+# the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
+expect \[kicktest\] PASS \(29/29 checks\)
+# snapshot unknown-id attribution + the snapTurn arithmetic (card 48ab9b2f)
+expect \[netsnap\] PASS \(18 passed, 0 failed\)
+# per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a)
+expect -> ALL PASS \(36 passed, 0 failed\)
+# the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)
+expect \[netscore\] PASS
+expect \[netscore\] wire PASS \(9/9\)
+# the decorative-swarm codec + the instance predicate (card 9a3175d0)
+expect \[cosmetictest\] PASS \(15/15 checks\)
+# the ComponentBin lifecycle contract incl. TryAdd + the puppet purge exemption (cards 02d9ad67 /
+# 74403f83 / bcdc7430)
+expect \[bin\] 27 passed, 0 failed
+# the TeamChallenge seat resolver over every pad mask (card e6927ef8)
+expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
+
+expect-not FAILURES
+expect-not SKIP \(run from the main menu
+quit

@@ -510,6 +510,19 @@
             }
         };
 
+        // Debug: the in-process net wire + wire-level codec round trips (card 25ad0659).
+        // Runs N endpoints in this one process over InMemoryTransport — the transport contract
+        // (lane bit, sender id, no aliasing, deliver-on-the-receiver's-Pump, room isolation,
+        // bye fan-out) plus NetImpairment composed over a real endpoint, then puts every
+        // NetProtocol frame on the wire and decodes what the far end received. Prints PASS/FAIL.
+        // Needs no session, no level and no second tab.
+        window.eaNetWire = {
+            test: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetWireTest')); }
+                catch (e) { console.warn('[debug] eaNetWire.test failed (game not booted yet?): ' + e.message); }
+            }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so

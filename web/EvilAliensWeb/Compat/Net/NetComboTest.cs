@@ -100,8 +100,15 @@ namespace EvilAliensWeb.Compat.Net
             byte[] bogusType = (byte[])packet.Clone();
             const int entry0ActiveTypeOffset = 2 + 3;   // header, then [slot][combo:2] of entry 0
             bogusType[entry0ActiveTypeOffset] = 200;
+            // Its OWN scratch array, not `rx`. TryDecodeHudState writes the levels of whichever
+            // entry it was asked for, so decoding ENTRY 0 here through `rx` overwrote entry 1's
+            // levels and the clamp assertion below then read entry 0's last level (3) and failed.
+            // It had been failing on main since the check landed; a shared scratch buffer across
+            // independent decodes is the whole bug, so the fix is a second buffer rather than
+            // re-decoding.
+            int[] rxBogus = new int[NetProtocol.HudLevelCount];
             check("an out-of-enum activeType decodes as 'no powerup', not as a cast",
-                NetProtocol.TryDecodeHudState(bogusType, 0, rx, out _, out _, out Powerup.PowerupType? tBad, out _)
+                NetProtocol.TryDecodeHudState(bogusType, 0, rxBogus, out _, out _, out Powerup.PowerupType? tBad, out _)
                     && !tBad.HasValue);
             // A byte-wide field would have returned 255 here and underpaid the slot's boss share.
             check("a combo past 255 survives the wire intact", got1 && c1 == 400);

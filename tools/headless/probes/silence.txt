@@ -8,12 +8,16 @@
 #   masterVolume=1      -> the mute was not applied at all
 #   alGain=1            -> HeadlessAudio.Pump never landed, or something re-asserted the
 #                          listener gain mid-run
-#   alGain=<unreadable> -> OpenAL never initialised, or soft_oal.dll stopped resolving.
-#                          NOT a pass: silence was not confirmed, so it is reported as a
-#                          failure rather than skipped. Note the readback is Windows-only
-#                          (see HeadlessAudio's header) -- off Windows this probe cannot
-#                          pass, and the fix is to add the platform library names there,
-#                          never to relax the assertion.
+#   alGain=<unreadable> -> NOT a pass: silence was not confirmed, so it is reported as a
+#                          failure rather than skipped. The same line says which of the three
+#                          causes it was (card 72297923): device=none is a box with no audio
+#                          device, lib=<unresolved> is the OpenAL binary not resolving, and
+#                          device=ok with a readable lib is OpenAL simply not up yet.
+#                          A genuinely device-less box FAILS this probe, deliberately -- the
+#                          suite's contract is "this box can confirm mixer silence", and one
+#                          that cannot should be loud rather than green. It is no_audio_device.txt
+#                          that covers such a box, and the fix for a new PLATFORM is to add its
+#                          library name to HeadlessAudio, never to relax the assertion.
 #
 # WHY IT FIRES A SHOT: KNI brings OpenAL up lazily on the FIRST sound, and until then the
 # gain cannot be read back at all. Menu navigation produces no sound, so the probe has to
@@ -35,5 +39,22 @@ audio
 # Asserted per field rather than against the whole AudioStatus() line, so adding a field to
 # it does not turn every future run red for the wrong reason.
 expect ^ok audio .*\bmasterVolume=0\b
+
+# Added by card 72297923, which made the readback resolve OpenAL through KNI's own candidate
+# list instead of naming soft_oal.dll outright. It asserts the P/Invokes bound to SOMETHING
+# without saying to what, so it reads the same off Windows -- where a wrong candidate list is
+# exactly what would break.
+#
+# It is ORDERED BEFORE the alGain assertion on purpose, and that ordering is the whole of its
+# value: a failed resolve also makes alGain unreadable, so this discriminates no mutant that
+# the next line would miss. What it does is make the run say WHICH fault it hit -- "the OpenAL
+# binary did not resolve" instead of the far vaguer "the gain is not zero". Do not reorder it
+# below the next line; that is where it was first written, and it never got to fire.
+#
+# No trailing \b: '>' and the following space are BOTH non-word characters, so there is no word
+# boundary between them and the assertion passed on a line that plainly said lib=<unresolved>.
+# Caught by the mutation test, which is the only thing that would have caught it.
+expect-not ^ok audio .*\blib=<unresolved>
+
 expect ^ok audio .*\balGain=0\b
 quit

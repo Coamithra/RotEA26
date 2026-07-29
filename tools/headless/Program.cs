@@ -49,6 +49,7 @@ namespace EvilAliensWeb.Headless
         internal bool NoDraw;
         internal bool Present;
         internal bool Audio;
+        internal bool FakeNoAudioDevice;
     }
 
     internal static class Program
@@ -98,17 +99,45 @@ namespace EvilAliensWeb.Headless
                 }
             }
 
+            // Before the device is ever opened, i.e. before boot. Writes an alsoft.ini that makes
+            // OpenAL Soft genuinely fail to open one -- see NoAudioDeviceSim.
+            if (opt.FakeNoAudioDevice)
+            {
+                string why = NoAudioDeviceSim.Install();
+                if (why != null)
+                {
+                    // Its own exit code, not 2: this is a runtime failure, and a caller that sees
+                    // 2 goes looking for a typo in its argv. Same reasoning as --software's 3.
+                    Console.Error.WriteLine("err --fake-no-audio-device: " + why);
+                    return 4;
+                }
+            }
+
             try
             {
                 using (var host = new HeadlessHost(opt))
                 {
                     host.Boot();
-                    // No alGain here on purpose: OpenAL does not exist until the first sound,
-                    // so a gain printed at boot would ALWAYS read <unreadable> and every run
-                    // would carry what looks like a warning. Ask for it with `audio` once the
-                    // run has stepped far enough to make a sound.
-                    Console.WriteLine("[eahl] audio    silenced=" + HeadlessAudio.Silenced
-                        + " masterVolume=" + HeadlessAudio.MasterVolume.ToString("0.###", CultureInfo.InvariantCulture));
+
+                    // Open the device HERE rather than leaving KNI to do it lazily on the first
+                    // sound: that is what makes a device-less box report itself instead of just
+                    // going quiet, and what makes alGain readable from frame 0 instead of only
+                    // after something has played (HeadlessAudio's header has the measurements).
+                    HeadlessAudio.BringUp();
+                    Console.WriteLine("[eahl] audio    " + AudioStatus());
+                    if (HeadlessAudio.Device != HeadlessAudio.DeviceState.Ok)
+                    {
+                        Console.WriteLine("[eahl] audio    NO AUDIO DEVICE (" + DeviceWord(HeadlessAudio.Device)
+                            + ") -- the run CONTINUES with audio dead: no SFX, and silence cannot be"
+                            + " confirmed at the mixer. See tools/headless/HeadlessAudio.cs."
+                            + (HeadlessAudio.Failure != null ? " Cause: " + HeadlessAudio.Failure : ""));
+                        // A box that HAS a device reporting none is almost always this.
+                        string stranded = NoAudioDeviceSim.StrandedIni();
+                        if (stranded != null)
+                            Console.WriteLine("[eahl] audio    NOTE a leftover " + stranded + " from an earlier"
+                                + " --fake-no-audio-device run is what disabled the device. Delete it, or pass"
+                                + " --fake-no-audio-device once to have it cleaned up on exit.");
+                    }
 
                     int rc = opt.Repl || opt.ScriptPath != null ? RunCommands(host, opt) : RunOneShot(host, opt);
                     if (opt.JsCalls)
@@ -122,6 +151,10 @@ namespace EvilAliensWeb.Headless
                 if (opt.Verbose)
                     Console.Error.WriteLine(ex.ToString());
                 return 1;
+            }
+            finally
+            {
+                NoAudioDeviceSim.Remove();
             }
         }
 
@@ -309,12 +342,33 @@ namespace EvilAliensWeb.Headless
         // silenced= is what we ASKED for; alGain= is what OpenAL itself reports. Printing both
         // is the point: the previous silencing mechanism asked and was ignored, silently, for
         // the whole of eahl's first life (HeadlessAudio, trap 2).
+        //
+        // device= and lib= exist to make an unreadable gain DIAGNOSABLE. It has three causes that
+        // used to look identical -- the device never opened, OpenAL is simply not up yet, or the
+        // OpenAL binary did not resolve at all -- and only the middle one is benign.
         private static string AudioStatus()
         {
             float? gain = HeadlessAudio.ListenerGain;
             return "silenced=" + HeadlessAudio.Silenced
                 + " masterVolume=" + HeadlessAudio.MasterVolume.ToString("0.###", CultureInfo.InvariantCulture)
+                + " device=" + DeviceWord(HeadlessAudio.Device)
+                + " lib=" + (HeadlessAudio.ResolvedLibrary ?? "<unresolved>")
                 + " alGain=" + (gain.HasValue ? gain.Value.ToString("0.###", CultureInfo.InvariantCulture) : "<unreadable>");
+        }
+
+        // Every member is spelled out and the fallback is derived, so a state added later reports
+        // its own name rather than silently borrowing NotTried's -- a wrong answer in the one
+        // field whose entire job is diagnosis.
+        private static string DeviceWord(HeadlessAudio.DeviceState state)
+        {
+            switch (state)
+            {
+                case HeadlessAudio.DeviceState.NotTried: return "nottried";
+                case HeadlessAudio.DeviceState.Ok: return "ok";
+                case HeadlessAudio.DeviceState.None: return "none";
+                case HeadlessAudio.DeviceState.NoLibrary: return "nolib";
+                default: return state.ToString().ToLowerInvariant();
+            }
         }
 
         // Whitespace split honouring "quoted runs", so `eval Press "left" 30` works.
@@ -366,6 +420,7 @@ namespace EvilAliensWeb.Headless
                     case "--nodraw": opt.NoDraw = true; break;
                     case "--present": opt.Present = true; break;
                     case "--audio": opt.Audio = true; break;
+                    case "--fake-no-audio-device": opt.FakeNoAudioDevice = true; break;
                     case "--help":
                     case "-h":
                         return false;
@@ -426,7 +481,7 @@ REPL (boot once, then drive it)
     shot <path.png>        render the CURRENT state to a PNG (does not advance)
     eval <method> [args]   call a Compat.DebugInput method (the eaPress/eaAiBench surface)
     info                   frame counter, sim time, buffer sizes, scene
-    audio                  silenced= + the gain OpenAL itself reports
+    audio                  silenced= / device= / lib= + the gain OpenAL itself reports
     mark                   start a fresh assertion window (drop captured output)
     expect <regex>         FAIL unless some captured line matches
     expect-not <regex>     FAIL if any captured line matches (quotes the offender)
@@ -449,6 +504,10 @@ OPTIONS
   --saves <dir>     persist saves here (default: a temp dir, wiped, so runs start clean)
   --audio           let the game make noise (default: silent -- the mixer, the decodes and
                     every source still run, the gain is just zero)
+  --fake-no-audio-device
+                    make the audio device genuinely fail to open (an alsoft.ini naming a
+                    backend that does not exist), so the no-sound-card path can be tested
+                    on a box that has one. The run continues, deaf, and says so.
   --software        rasterize on the CPU via Mesa llvmpipe, for machines with no GPU
   --mesa <dll>      path to Mesa's opengl32.dll (implies --software)
   --jscalls         dump which browser (ea*) calls the game made

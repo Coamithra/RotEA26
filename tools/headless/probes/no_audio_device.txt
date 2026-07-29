@@ -1,0 +1,47 @@
+# PROBE: a box with NO audio device still runs the game, and SAYS that audio is dead.
+#
+# PINS: HeadlessAudio.BringUp + NoAudioDeviceSim (card 72297923). eahl opens a real audio
+# device since card 1e476668 dropped the crashing OpenAL "null" backend, which left a box
+# with no sound card (CI container, SSH session, driverless VM) uncovered.
+#
+# FAILURE MEANS one of two different things -- read which line went red:
+#   the `NO AUDIO DEVICE` expect  -> either the run no longer reports the degradation, or the
+#                                    simulation did not take (--fake-no-audio-device could not
+#                                    write its alsoft.ini, or OpenAL Soft stopped honouring it).
+#                                    Check the boot `[eahl] audio` line for device=ok.
+#   `device=none` / `frame=600`   -> the run did not survive the missing device, or BringUp
+#                                    mis-classified it. device=nolib means the OpenAL binary
+#                                    itself did not resolve, which is a DIFFERENT fault.
+#
+# WHY IT IS NOT A MOCK: --fake-no-audio-device writes an alsoft.ini naming a backend that does
+# not exist, so alcOpenDevice really returns NULL and KNI really throws the
+# NoAudioHardwareException a driverless VM would. Note this run is NOT expected to be provably
+# silent -- there is no mixer to read a gain out of, and alGain=<unreadable> is correct here.
+# masterVolume is asserted instead: it is managed, needs no device, and is what actually keeps
+# a device-less box quiet. Confirming silence at the mixer is silence.txt's job, on a box that
+# has one.
+#
+# WHY IT FIRES A SHOT: the same reason silence.txt does -- a sound is what drags the audio path
+# through Content.Load<SoundEffect>, which is where a device-less box's failure surfaces (and is
+# swallowed by SoundManager.GetEffect). A probe that never played anything would pass on a build
+# where the audio path was skipped entirely.
+#
+# The first expect is deliberately BEFORE any mark: the boot report is printed before the script
+# starts, and the capture buffer runs from process start.
+#
+# eahl: --flags "?level=Level1&invuln" --fake-no-audio-device
+
+expect ^\[eahl\] audio\s+NO AUDIO DEVICE
+mark
+
+step 400 nodraw
+eval Press fire 60
+step 200 nodraw
+audio
+
+# The run got where it claims -- a level, played, past the intro settle.
+expect ^ok step frame=600
+# ...and it got there deaf rather than dead.
+expect ^ok audio .*\bdevice=none\b
+expect ^ok audio .*\bmasterVolume=0\b
+quit

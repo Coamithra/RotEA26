@@ -111,7 +111,8 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 
 | file | pins |
 |---|---|
-| `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested. **Windows-only**: the readback P/Invokes `soft_oal.dll`, so elsewhere it reports `alGain=<unreadable>` and fails. Add the platform library names to `HeadlessAudio` rather than relaxing the assertion |
+| `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested, and that the OpenAL binary resolved at all (`lib=`). A box with genuinely no audio device FAILS it, deliberately: the suite's contract is *this box can confirm mixer silence*, and one that cannot should be loud rather than green — `no_audio_device.txt` is what covers such a box |
+| `no_audio_device.txt` | a box with **no audio device** still runs the game and REPORTS that audio is dead (card 72297923). Uses `--fake-no-audio-device`, which makes `alcOpenDevice` genuinely fail rather than mocking anything |
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
 | `preload_paratrooper.txt` | the same, for the Paratrooper challenge (49 manifest entries) |
 | `preload_insanebossi.txt` | the same, for the Boss Train challenge (`InsaneBossI`, 82 entries — the largest section); soaks the level OUT (720 s) because the bosses arrive in sequence — see its header for the two assets a shorter window provably missed |
@@ -128,7 +129,14 @@ on either half it defends — restoring `AwardmentBlade`'s eager load in `LoadCo
 `awardmentblade` `expect-not`, and re-adding a `flipPureName`/`flipGlassesName` load to
 `SplashScene.LoadContent` trips the `-revenged-pure` one.
 `silence` goes red under `--audio` (`masterVolume=1 alGain=1`), which is also its standing
-negative control. `stockshots_warm` goes red naming the dropped asset when a level is deleted
+negative control. Its `lib=<unresolved>` line (added by card 72297923, which made the readback
+resolve OpenAL by candidate list) goes red when that list is replaced with names that do not
+exist. That line discriminates no mutant the `alGain=0` line below it would miss — a failed
+resolve makes the gain unreadable too — so it is ordered FIRST purely to make the failure name
+the cause; it earns its place as diagnosis, not as coverage. `no_audio_device` goes red both ways that matter:
+drop `BringUp`'s catch and the run dies with `err NoAudioHardwareException`, and make
+`--fake-no-audio-device` a no-op and it fails on its `NO AUDIO DEVICE` expect rather than
+passing on a run that had a device all along. `stockshots_warm` goes red naming the dropped asset when a level is deleted
 from `LevelArt.HasCarouselEntry` — tested on BOTH carousels (`Level1` →
 `gfx/screenshots/level1empty`, `WebcamAliens` → `gfx/screenshots/webcamss`), because an
 earlier revision that opened only the challenge carousel passed the `Level1` mutation.

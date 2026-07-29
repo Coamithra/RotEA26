@@ -119,7 +119,8 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 			DrawAchievementText(entry, position, entryScale, color);
 			// Mouse hit box: the screenshot is drawn centred at `position`, sized
-			// imgW*scaleX x imgH*scaleY = 800*num2 x 600*num2 (scaleX = (800/imgW)*num2).
+			// imgW*scale.X x imgH*scale.Y -- fitX/fitY cancel the image dimensions,
+			// so that is exactly 800*entryScale x 600*entryScale.
 			RecordEntryHit(entry, position, 800f * entryScale, 600f * entryScale);
 		}
 		else
@@ -135,7 +136,7 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 			base.SpriteBatch.Draw(entryImages[entry], position2, 0f, scale2, center: true, color2);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 			DrawAchievementText(entry, position2, entryScale, color2);
-			// Mouse hit box: screenshot centred at `position2`, sized 800*num6 x 600*num6.
+			// Mouse hit box: screenshot centred at `position2`, sized 800*entryScale x 600*entryScale.
 			RecordEntryHit(entry, position2, 800f * entryScale, 600f * entryScale);
 		}
 	}

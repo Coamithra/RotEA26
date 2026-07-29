@@ -91,9 +91,31 @@ public class ScreenshotSaver
 				}
 			}
 		}
-		foreach (string stockShot in StockShots)
+		// Bracket the stock-shot loop as a deliberate warm (card 2367b39c). These are the SAME
+		// twelve Game1.QueueMenuWarm queues, so on a full-splash boot the pump beat us here and
+		// every Load is a cache hit -- nothing decodes, nothing is reported. On a splash-skipping
+		// boot (?menu / ?skipsplash / ?autostart, or a player mashing Start inside ~24 ticks) the
+		// pump never ran and all twelve decode right here, and they used to report as twelve COLD
+		// gaps under the (boot) sentinel -- the top of every ?loadlog capture, discarded by hand
+		// every time (it polluted card e63601a4's investigation). Labelled, they collapse to one
+		// summary line that keeps the count and the ms.
+		//
+		// try/finally is NOT optional: unlike Game1.Warm<T> this loop has no per-asset catch, so a
+		// throwing Load would escape with the bracket still open and mute every COLD line for the
+		// rest of the session. Only the loop is bracketed -- the LoadScreenshot pass above reads
+		// saved shots off the StorageDevice, never through the content manager, so it cannot reach
+		// LoadProfiler.RecordTexture and widening the bracket would only add risk.
+		LoadProfiler.BeginWarm("stockshots");
+		try
 		{
-			contentManager.Load<Texture2D>(stockShot);
+			foreach (string stockShot in StockShots)
+			{
+				contentManager.Load<Texture2D>(stockShot);
+			}
+		}
+		finally
+		{
+			LoadProfiler.EndWarm();
 		}
 	}
 

@@ -46,6 +46,20 @@ internal static class Program
         Console.WriteLine((ok ? "  PASS " : "  FAIL ") + label + (detail != null ? "  " + detail : ""));
     }
 
+    // Run one query through the real DebugFlags.Parse and hand back everything it PRINTED. Four
+    // case sets need this now (card 4e401005 would have been the fourth copy), and it is the only
+    // way to assert about a DIAGNOSTIC rather than a resulting value -- silence is the bug these
+    // flag sets exist to catch, and silence has no other observable.
+    private static string RunParse(MethodInfo parse, string query)
+    {
+        System.IO.TextWriter saved = Console.Out;
+        System.IO.StringWriter buf = new System.IO.StringWriter();
+        Console.SetOut(buf);
+        try { parse.Invoke(null, new object[] { query }); }
+        finally { Console.SetOut(saved); }
+        return buf.ToString();
+    }
+
     // A captured Parse() run is usually two lines (Parse tails into Hint() whenever nothing in
     // `Active` was set) and the diagnostic under test is the first. Detail strings are printed on
     // the same line as their PASS/FAIL, so a raw capture would break that format -- and splitting
@@ -99,6 +113,12 @@ internal static class Program
         }
 
         rc = ProbeAiFlagRejection(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeFlagRejectionSweep(asm);
         if (rc != 0)
         {
             return rc;
@@ -262,21 +282,7 @@ internal static class Program
 
         // Run one query through Parse and hand back everything it printed, so an assertion can be
         // made about the DIAGNOSTIC and not just the resulting value. Silence is the old bug.
-        Func<string, string> run = query =>
-        {
-            System.IO.TextWriter saved = Console.Out;
-            System.IO.StringWriter buf = new System.IO.StringWriter();
-            Console.SetOut(buf);
-            try
-            {
-                parse.Invoke(null, new object[] { query });
-            }
-            finally
-            {
-                Console.SetOut(saved);
-            }
-            return buf.ToString();
-        };
+        Func<string, string> run = query => RunParse(parse, query);
         // Parse tails into Hint() whenever nothing in `Active` got set, so the capture is usually
         // two lines; the diagnostic under test is the first one.
         Func<string, string> firstLine = s =>
@@ -415,13 +421,7 @@ internal static class Program
             return 2;
         }
 
-        Action<string> run = query =>
-        {
-            System.IO.TextWriter saved = Console.Out;
-            Console.SetOut(System.IO.TextWriter.Null);
-            try { parse.Invoke(null, new object[] { query }); }
-            finally { Console.SetOut(saved); }
-        };
+        Action<string> run = query => RunParse(parse, query);
         Func<object> liveRows = () => rows.GetValue(null);
         Func<object> livePenalty = () => penalty.GetValue(null);
         object bakedRows = defRows.GetValue(null);
@@ -542,15 +542,7 @@ internal static class Program
 
         // Parse one query and hand back everything it printed. Parse tails into Hint() when nothing
         // in `Active` is set, so a capture is usually two lines; the diagnostic is the first.
-        Func<string, string> run = query =>
-        {
-            System.IO.TextWriter saved = Console.Out;
-            System.IO.StringWriter buf = new System.IO.StringWriter();
-            Console.SetOut(buf);
-            try { parse.Invoke(null, new object[] { query }); }
-            finally { Console.SetOut(saved); }
-            return buf.ToString();
-        };
+        Func<string, string> run = query => RunParse(parse, query);
         Func<string, object> get = name => flags.GetProperty(name, anyStatic).GetValue(null);
         Action<string, object> set = (name, v) => flags.GetProperty(name, anyStatic).SetValue(null, v);
 
@@ -669,6 +661,236 @@ internal static class Program
             if (row.Flag == "aiff" ? !Equals(v, 0) : v != null) { leaked++; }
         }
         Check("case set leaves no override behind", leaked == 0, leaked + " still set");
+        return 0;
+    }
+
+    // Card 4e401005 -- the SWEEP: every other value-carrying flag in DebugFlags.cs, after cards
+    // 6eb8dc9e (?flyspider*) and 48b7c6b1 (the 14 ?ai* knobs) established the convention. Same
+    // failure mode as those two, over ~80 more flags: `?wallsidetile=4x` ran the baked tiling
+    // while the run carried the label of the variant under test.
+    //
+    // WHY THIS SET IS SHAPED DIFFERENTLY FROM ProbeAiFlagRejection. That one knows each knob's
+    // baked default (PlayerShip exposes them as public consts) and asserts the message names the
+    // in-force value rather than that default. Here the defaults live in a dozen different game
+    // classes -- Wall, HoloSim, WebcamLevel.Tunings[], Spider, ... -- and are not reachable from
+    // Parse at all, which is exactly why these call sites say "the shipped default" instead of a
+    // number they would have to guess. So the in-force claim is proven WITHOUT restating any
+    // constant, by READING BACK what the flag actually set and requiring the message to name that:
+    //   leg 0  no override standing  -> the message says "the shipped default"   (nullable only)
+    //   leg 1  a valid value         -> it lands, and NO rejection is reported    (the control)
+    //   leg 2  an unparseable value  -> unchanged, reported, names the READ-BACK value from leg 1
+    //                                   and no longer says "the shipped default"
+    //   leg 3  a negative value      -> the same, for the flags whose guard refuses one
+    // Reading back also sidesteps every inline clamp (?holofilter caps at 2, ?aifriends at 3, ...)
+    // without this file having to know a single one of them.
+    private static int ProbeFlagRejectionSweep(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        if (parse == null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags.Parse -- renamed or moved?");
+            return 2;
+        }
+
+        Func<string, string> run = query => RunParse(parse, query);
+
+        // Flag, the DebugFlags property it writes, a value its guard accepts, and whether that
+        // guard refuses a negative (derived from the "(expected ...)" clause the call site states,
+        // so the two cannot drift). Good values are deliberately distinctive -- 0.375 / 9 -- so
+        // leg 2's "the message contains it" is not satisfied by a digit in the expected clause.
+        var rows = new[]
+        {
+            new { Flag = "slowmotraildecay", Prop = "SlowmoTrailDecay", Good = "0.375", RejectsNeg = false },
+            new { Flag = "slowmotrailstrength", Prop = "SlowmoTrailStrength", Good = "0.375", RejectsNeg = false },
+            new { Flag = "holofilter", Prop = "HoloFilter", Good = "0.375", RejectsNeg = false },
+            new { Flag = "holoburst", Prop = "HoloBurst", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hologreen", Prop = "HoloGreen", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hologreenpulse", Prop = "HoloGreenPulse", Good = "0.375", RejectsNeg = false },
+            new { Flag = "holostaticrate", Prop = "HoloStaticRate", Good = "0.375", RejectsNeg = false },
+            new { Flag = "blastactive", Prop = "BlastActiveAlpha", Good = "0.375", RejectsNeg = false },
+            new { Flag = "blasthit", Prop = "BlastHitFactor", Good = "0.375", RejectsNeg = true },
+            new { Flag = "reticlesize", Prop = "ReticleSize", Good = "0.375", RejectsNeg = true },
+            new { Flag = "blastloop", Prop = "BlastLoopSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazerchargescale", Prop = "LazerChargeScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazercapscale", Prop = "LazerCapScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazerarcs", Prop = "LazerArcRate", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazertendrilspeed", Prop = "LazerTendrilSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazerarclife", Prop = "LazerArcLife", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorbolts", Prop = "ConnectorBoltCount", Good = "9", RejectsNeg = true },
+            new { Flag = "connectorarcs", Prop = "ConnectorArcRate", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorjitter", Prop = "ConnectorJitter", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorpulse", Prop = "ConnectorPulse", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorglow", Prop = "ConnectorGlow", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wall3dbands", Prop = "Wall3DBands", Good = "9", RejectsNeg = true },
+            new { Flag = "walldepth", Prop = "WallDepth", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallfog", Prop = "WallFog", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallsidedark", Prop = "WallSideDark", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallsidetile", Prop = "WallSideTile", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallfacelight", Prop = "WallFaceLight", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallfaceangle", Prop = "WallFaceAngle", Good = "0.375", RejectsNeg = false },
+            new { Flag = "walltoplift", Prop = "WallTopLift", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallwisps", Prop = "WallWisps", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallwispspeed", Prop = "WallWispSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wchearts", Prop = "WebcamHearts", Good = "9", RejectsNeg = true },
+            new { Flag = "wckills", Prop = "WebcamKills", Good = "9", RejectsNeg = true },
+            new { Flag = "wcsaucers", Prop = "WebcamSaucers", Good = "9", RejectsNeg = true },
+            new { Flag = "wcsaucerspeed", Prop = "WebcamSaucerSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcplasmaspeed", Prop = "WebcamPlasmaSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcspawn", Prop = "WebcamSpawnInterval", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcarm", Prop = "WebcamArmDelay", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wccharge", Prop = "WebcamChargeTime", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcminemax", Prop = "WebcamMineMax", Good = "9", RejectsNeg = true },
+            new { Flag = "wcminespawn", Prop = "WebcamMineSpawn", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcminelife", Prop = "WebcamMineLife", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcmothership", Prop = "WebcamMothership", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcmothershipfreeze", Prop = "WebcamMothershipFreeze", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wchitleeway", Prop = "WebcamHitLeeway", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcavoid", Prop = "WebcamAvoid", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcreturndelay", Prop = "WebcamReturnDelay", Good = "0.375", RejectsNeg = true },
+            new { Flag = "huestart", Prop = "HueStart", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hueend", Prop = "HueEnd", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hue", Prop = "HueTarget", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hueloop", Prop = "HueLoopSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelpercycles", Prop = "SpiderHelperCycles", Good = "9", RejectsNeg = true },
+            new { Flag = "spiderhelperhp", Prop = "SpiderHelperHitPoints", Good = "9", RejectsNeg = true },
+            new { Flag = "spiderhelperhovery", Prop = "SpiderHelperHoverY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderhelperspeed", Prop = "SpiderHelperSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperwindup", Prop = "SpiderHelperWindupSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperfire", Prop = "SpiderHelperFireSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperlead", Prop = "SpiderHelperFireLead", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperenterpower", Prop = "SpiderHelperEnterPower", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderbosshp", Prop = "SpiderBossHp", Good = "9", RejectsNeg = true },
+            new { Flag = "aifriends", Prop = "AiFriends", Good = "9", RejectsNeg = false },
+            new { Flag = "netlocal", Prop = "NetLocal", Good = "9", RejectsNeg = false },
+            new { Flag = "netlag", Prop = "NetLagMs", Good = "0.375", RejectsNeg = true },
+            new { Flag = "netloss", Prop = "NetLossPct", Good = "0.375", RejectsNeg = true },
+            new { Flag = "castbrainscale", Prop = "CastBrainScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "castbrainfps", Prop = "CastBrainFps", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderloop", Prop = "SpiderLoopSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderjumpframe", Prop = "SpiderJumpFrame", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderlandframe", Prop = "SpiderLandFrame", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderjumpx", Prop = "SpiderJumpX", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spidershadowx", Prop = "SpiderShadowX", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spidershadowy", Prop = "SpiderShadowY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spidershadowscale", Prop = "SpiderShadowScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderairx", Prop = "SpiderAirX", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderairy", Prop = "SpiderAirY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "frame", Prop = "HarnessFrame", Good = "9", RejectsNeg = false },
+            new { Flag = "size", Prop = "HarnessScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "rotation", Prop = "HarnessRot", Good = "0.375", RejectsNeg = false },
+            new { Flag = "animfps", Prop = "HarnessFps", Good = "0.375", RejectsNeg = true },
+        };
+
+        Console.WriteLine("[logic_probe] DebugFlags value rejection, the remaining " + rows.Length
+            + " flags (card 4e401005)");
+
+        string missing = null;
+        foreach (var row in rows)
+        {
+            if (flags.GetProperty(row.Prop, anyStatic) == null) { missing ??= row.Flag + " -> " + row.Prop; }
+        }
+        if (missing != null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags." + missing + " -- renamed or moved?");
+            return 2;
+        }
+
+        int shipped = 0, shippedN = 0, landed = 0, quiet = 0, reported = 0, named = 0, negatives = 0, negN = 0;
+        string badShipped = null, badLanded = null, badQuiet = null, badReported = null, badNamed = null, badNeg = null;
+        foreach (var row in rows)
+        {
+            PropertyInfo p = flags.GetProperty(row.Prop, anyStatic);
+            bool nullable = Nullable.GetUnderlyingType(p.PropertyType) != null;
+
+            // 0. Nothing standing yet -> the message must SAY so rather than invent a number. This
+            //    runs before anything sets this flag, which is why the leg order matters.
+            if (nullable)
+            {
+                shippedN++;
+                string outFresh = run("?" + row.Flag + "=xx");
+                if (p.GetValue(null) == null && outFresh.Contains("staying on the shipped default")) { shipped++; }
+                else { badShipped ??= row.Flag + " with no override said: " + FirstLine(outFresh); }
+            }
+
+            // 1. A valid value lands, and reports no rejection.
+            string outGood = run("?" + row.Flag + "=" + row.Good);
+            object landedVal = p.GetValue(null);
+            string inForce = Convert.ToString(landedVal, System.Globalization.CultureInfo.InvariantCulture);
+            if (landedVal != null) { landed++; }
+            else { badLanded ??= row.Flag + "=" + row.Good + " left the override null"; }
+            if (!outGood.Contains("unknown")) { quiet++; }
+            else { badQuiet ??= row.Flag + "=" + row.Good + " was REPORTED: " + FirstLine(outGood); }
+
+            // 2. An unparseable value: unchanged, reported, and it names what leg 1 just set.
+            string outBad = run("?" + row.Flag + "=xx");
+            bool unchanged = Equals(p.GetValue(null), landedVal);
+            bool says = outBad.Contains("unknown ?" + row.Flag + "= value 'xx'")
+                && outBad.Contains("-- ignored, staying on ");
+            if (unchanged && says) { reported++; }
+            else { badReported ??= row.Flag + ": prop=" + p.GetValue(null) + " said: " + FirstLine(outBad); }
+            if (outBad.Contains(inForce) && !outBad.Contains("the shipped default")) { named++; }
+            else { badNamed ??= row.Flag + " does not name the in-force " + inForce + ": " + FirstLine(outBad); }
+
+            // 3. A negative value -- parseable, refused by the range guard. The second way into the
+            //    else, which a TryParse-only test would never reach.
+            if (row.RejectsNeg)
+            {
+                negN++;
+                string outNeg = run("?" + row.Flag + "=-1");
+                if (Equals(p.GetValue(null), landedVal) && outNeg.Contains("unknown ?" + row.Flag + "=")) { negatives++; }
+                else { badNeg ??= row.Flag + "=-1: prop=" + p.GetValue(null) + " said: " + FirstLine(outNeg); }
+            }
+        }
+        Check("with no override standing, the message says so", shipped == shippedN,
+            shipped + "/" + shippedN + " nullable flags" + (badShipped != null ? "; " + badShipped : ""));
+        Check("a valid value lands on all " + rows.Length, landed == rows.Length,
+            landed + "/" + rows.Length + (badLanded != null ? "; " + badLanded : ""));
+        Check("a valid value reports NO rejection (the control)", quiet == rows.Length,
+            quiet + "/" + rows.Length + " clean" + (badQuiet != null ? "; " + badQuiet : ""));
+        Check("a bad value is refused AND reported on all " + rows.Length, reported == rows.Length,
+            reported + "/" + rows.Length + (badReported != null ? "; " + badReported : ""));
+        Check("the message names the value IN FORCE, not the shipped default", named == rows.Length,
+            named + "/" + rows.Length + (badNamed != null ? "; " + badNamed : ""));
+        Check("a NEGATIVE value is refused AND reported wherever a guard refuses one",
+            negatives == negN, negatives + "/" + negN + " guarded flags"
+            + (badNeg != null ? "; " + badNeg : ""));
+
+        // The five whose value space is not a number, so their "expected" clause and their in-force
+        // wording had to be written by hand. Each states a DIFFERENT thing in place of a number, so
+        // a copy-paste slip between them would show up nowhere else.
+        string outDir = run("?wcmothershipdir=verticl");
+        Check("?wcmothershipdir= names the orientation roll",
+            outDir.Contains("expected vertical or horizontal")
+            && outDir.Contains("staying on the random orientation roll"), FirstLine(outDir));
+        string outDiff = run("?difficulty=2");
+        Check("?difficulty= refuses the ordinal and says which spelling it wants",
+            outDiff.Contains("a tier name") && outDiff.Contains("not a number")
+            && outDiff.Contains("staying on the saved menu difficulty"), FirstLine(outDiff));
+        string outWcd = run("?wcdiff=Hrd");
+        Check("?wcdiff= names the level's own tier", outWcd.Contains("staying on the level's own tier"),
+            FirstLine(outWcd));
+        string outCol = run("?wallfogcolor=nothex");
+        Check("?wallfogcolor= states a hex example", outCol.Contains("a hex colour like #4080c8")
+            && outCol.Contains("staying on the shipped default"), FirstLine(outCol));
+        string outHarness = run("?harness");
+        Check("a BARE ?harness is reported, not silently a normal boot",
+            outHarness.Contains("unknown ?harness= value ''")
+            && outHarness.Contains("staying on no harness (a normal boot)"), FirstLine(outHarness));
+        // ... and that an ALIASED spelling reports under the name the author actually typed, which
+        // is why every call site passes `key` rather than a literal.
+        string outAlias = run("?objscale=xx");
+        Check("an alias reports under the spelling used (?objscale, not ?size)",
+            outAlias.Contains("unknown ?objscale="), FirstLine(outAlias));
+
+        // Hand the process back as it was found -- Parse can only ASSIGN, so a Probe* added after
+        // this one would otherwise inherit eighty overrides with no way to reach the defaults.
+        foreach (var row in rows)
+        {
+            PropertyInfo p = flags.GetProperty(row.Prop, anyStatic);
+            if (Nullable.GetUnderlyingType(p.PropertyType) != null) { p.SetValue(null, null); }
+        }
         return 0;
     }
 

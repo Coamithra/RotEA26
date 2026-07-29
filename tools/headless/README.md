@@ -61,7 +61,7 @@ eahl --script probe.txt         # same commands from a file; first failure exits
 | `shot <path.png>` | render the **current** state to a PNG — does not advance time |
 | `eval <method> [args…]` | call a `Compat.DebugInput` method |
 | `info` | frame counter, sim time, buffer sizes, scene |
-| `audio` | `silenced=` + the gain OpenAL itself reports |
+| `audio` | `silenced=` / `device=` / `lib=` + the gain OpenAL itself reports |
 | `mark` | start a fresh assertion window (drop what was captured) |
 | `expect <regex>` | fail unless some captured line matches |
 | `expect-not <regex>` | fail if any captured line matches — quotes the offender |
@@ -159,18 +159,30 @@ its return value is printed. `help` lists what is currently available.
   buffer through the gamma shader, letterboxed. `HeadlessGame` reads the back buffer between
   `Draw()` and `EndDraw()` — after bloom, post FX, gamma and the present blit, before the swap.
 - **Silent by default, at the mixer** (`HeadlessAudio.cs`): `SoundEffect.MasterVolume = 0` plus a
-  direct `alListenerf(AL_GAIN, 0)` once OpenAL is up, so a background soak does not play SFX
-  through the speakers. The device, the mixer, the `.wav` decodes and every source stay real and
-  running — only the gain is zero — so an audio-path crash still surfaces instead of being hidden.
-  `audio` reports the gain **read back out of OpenAL**, which is the only part of this you should
-  believe; `--audio` opts back in. **Do not "simplify" this to `ALSOFT_DRIVERS=null`** — that
-  looks like the elegant answer, is what this file used to do, and kills the process with an
-  `AccessViolationException` under sustained SFX play (deterministic, 3/3). Full autopsy of that
-  and of why an environment variable cannot configure OpenAL Soft from managed code: the header
-  comment in `HeadlessAudio.cs`. **Two limits came with it:** a real audio device is now opened
-  (the null backend's one genuine merit was that none was, so a box with *no* sound card is no
-  longer covered — there is no try/catch around KNI's audio bring-up), and the gain readback is
-  Windows-only, so off Windows the run is quiet but `probes/silence.txt` cannot confirm it.
+  direct `alListenerf(AL_GAIN, 0)`, both in force before the first sound can play, so a background
+  soak does not play SFX through the speakers. The device, the mixer, the `.wav` decodes and every
+  source stay real and running — only the gain is zero — so an audio-path crash still surfaces
+  instead of being hidden. `audio` reports the gain **read back out of OpenAL**, which is the only
+  part of this you should believe; `--audio` opts back in. **Do not "simplify" this to
+  `ALSOFT_DRIVERS=null`** — that looks like the elegant answer, is what this file used to do, and
+  kills the process with an `AccessViolationException` under sustained SFX play (deterministic,
+  3/3). Full autopsy of that and of why an environment variable cannot configure OpenAL Soft from
+  managed code: the header comment in `HeadlessAudio.cs`.
+- **A box with no audio device still runs, and says so** (card 72297923). `HeadlessAudio.BringUp()`
+  opens the device once at boot inside a try/catch and reports the outcome in the `[eahl] audio`
+  line as `device=ok|none|nolib`; a machine with no sound card (CI container, SSH session,
+  driverless VM) prints a loud `NO AUDIO DEVICE` and plays on, deaf. It never fails the run. Opening
+  it at boot rather than lazily on the first sound is what makes `alGain` readable from frame 0 and
+  lands the mixer mute *before* the first sound rather than just after it. **`--fake-no-audio-device`
+  reaches that path on a box that HAS a device**, by writing an `alsoft.ini` naming a backend that
+  does not exist so OpenAL genuinely fails to open one — it refuses rather than clobber an
+  `alsoft.ini` that is already there, and removes its own on exit. Pinned by
+  `probes/no_audio_device.txt`.
+- **The gain readback is no longer Windows-only.** The P/Invokes resolve OpenAL through KNI's own
+  candidate list (`soft_oal.dll`, `libopenal.so.1`, `libopenal.1.dylib`, `openal`) instead of
+  naming `soft_oal.dll`, and whichever one answered is reported as `lib=`. Nobody has run `eahl`
+  off Windows yet; if you do and the gain still will not read, add the name in `HeadlessAudio`
+  rather than relaxing `probes/silence.txt`.
 - **A fake browser, not 13 stubs** (`HeadlessJsRuntime.cs`). `Microsoft.JSInterop` is a plain
   netstandard package, so every `Compat/*Interop.cs` compiles here unchanged and this class answers
   the ~37 `ea*` calls. Stubbing the interop classes instead would have forked exactly the logic

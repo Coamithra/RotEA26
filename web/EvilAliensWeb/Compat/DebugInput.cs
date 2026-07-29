@@ -493,11 +493,13 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// JS bridge for the OFFLINE roster (eaOracleRoster in wwwroot/index.html):
-		// DotNet.invokeMethod('EvilAliensWeb', 'debugOracleRoster'). eaNetRoster() early-returns
-		// without a net session, so until card ee96ea61 there was no way to read the roster at
-		// the MENU at all -- which is exactly where a seat left behind by the last level or
-		// attract demo does its damage (the menu-lobby handshake allocates from it). Reads the
-		// live Oracle directly, so it needs no session, no level and no gamepads.
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugOracleRoster'). Reads the live Oracle
+		// directly, so it needs no session, no level and no gamepads -- unlike eaNetRoster(),
+		// which early-returns without a net session and so cannot see the MENU roster, which is
+		// exactly where a seat left behind by the last level or attract demo does its damage
+		// (the menu-lobby handshake allocates from it). eaScore() also reports seated-ness per
+		// slot; what this adds is the CONTROLLER DEVICE per seat, which is what distinguishes an
+		// attract demo's leftover AI seats from a real player's.
 		[JSInvokable("debugOracleRoster")]
 		public static string OracleRoster()
 		{

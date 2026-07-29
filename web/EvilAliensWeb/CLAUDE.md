@@ -1705,7 +1705,16 @@ interpolation feel, both gated on real-network playtests.
   - **Read the OFFLINE roster with `eaOracleRoster()`** (`eval OracleRoster` under `eahl`).
     `eaNetRoster()` early-returns without a net session, so it cannot see the menu roster at
     all -- which is exactly where a stale seat does its damage. Needs no session, level or
-    gamepad.
+    gamepad. (`eaScore()` also shows seated-ness; what this adds is the DEVICE per seat, which
+    is what tells an attract demo's leftover AI seats from a real player.)
+    **The repro, headless and flag-free:** `eahl --repl --flags "?menu"`, `step 1500 nodraw` to
+    idle past the 20s attract timeout, `eval Press esc 2` back to the menu, `eval OracleRoster`.
+    Pre-fix the demo's seats are still there afterwards (`players=1 seated=0:AI`, or more --
+    slot 0 always, plus 3 on a 20% roll and 1 on a further 40%); post-fix `players=0`.
+    Do NOT read `info`'s `scene=` to tell whether the demo ran -- it reports the booted level and
+    stays `Level2`/`menu` throughout; the roster dump is the signal. `eaSlotTest()` covers what that stale
+    roster then COSTS at the allocator, but it seats its scratch roster by hand and never
+    reaches `Terminate` -- so it cannot substitute for this run.
   - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
     slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
     tab pairs WHILE it boots, so the grant can land before the seat is taken) and

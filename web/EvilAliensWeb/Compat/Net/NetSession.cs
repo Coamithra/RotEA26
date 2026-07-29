@@ -1783,9 +1783,9 @@ namespace EvilAliensWeb.Compat.Net
         // reserve -> hold -> expire -> REALLOCATE cycle can be driven against a scratch Oracle
         // with no session (eaSlotTest). That cycle is the only proof that a seat the host
         // reclaims from an unclaimed grant is genuinely re-usable rather than merely released.
-        internal static int AllocateSeatFrom(Oracle o, int localPrimary, int peerPrimary)
+        internal static int AllocateSeatFrom(Oracle roster, int localPrimary, int peerPrimary)
         {
-            for (int slot = o.FirstFreeSlot(); slot >= 0; slot = o.FirstFreeSlot(slot + 1))
+            for (int slot = roster.FirstFreeSlot(); slot >= 0; slot = roster.FirstFreeSlot(slot + 1))
             {
                 if (slot != peerPrimary && slot != localPrimary)
                 {
@@ -1797,8 +1797,9 @@ namespace EvilAliensWeb.Compat.Net
 
         // The grant claim clock, split out for the same reason. STRICTLY greater: a grant is
         // still live on the tick its deadline lands, so a peer whose first stream arrives
-        // exactly then keeps the seat it was given.
-        internal static bool GrantHasExpired(long deadlineMs, long nowMs)
+        // exactly then keeps the seat it was given. Argument order mirrors the `now > deadline`
+        // it replaced -- transposing the two would silently invert the predicate.
+        internal static bool GrantHasExpired(long nowMs, long deadlineMs)
         {
             return nowMs > deadlineMs;
         }
@@ -1839,7 +1840,7 @@ namespace EvilAliensWeb.Compat.Net
             grantScratchSlots.Clear();
             foreach (KeyValuePair<byte, long> g in grantsAwaitingStream)
             {
-                if (GrantHasExpired(g.Value, now))
+                if (GrantHasExpired(now, g.Value))
                 {
                     grantScratchSlots.Add(g.Key);
                 }

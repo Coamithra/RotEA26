@@ -25,6 +25,9 @@ namespace EvilAliensWeb.Compat.Net
     // with the live one's Game and never added to it, so the real player table is untouched --
     // and detached again in a finally, because Oracle's constructor subscribes to
     // Game.Components and would otherwise leave this fixture mirroring the live world for good.
+    // The one leg that touches real NetSession statics is the ?netdropgrant latch (section 7):
+    // it save/restores the latch itself, and its teardown half is gated on !Active so it can
+    // never reset a live session's state.
     internal static class NetSlotTest
     {
         public static string Run()
@@ -197,8 +200,8 @@ namespace EvilAliensWeb.Compat.Net
                     scratch.AddPlayerAt(0, ControlDevice.Keyboard);
                     scratch.AddPlayerAt(3, ControlDevice.AI);
                     Check(scratch.FirstFreeSlot(1) < 0, "a full roster really has no free slot above 0");
-                    Check(NetSession.FirstMutuallyFreeSlot(NetSession.OccupiedMask(scratch, exclude: -1), 0) == -1,
-                        "a full real roster reaches the RejectFull leg");
+                    // (The full-roster -> RejectFull leg itself is section 6's, where it is the
+                    // attract-demo control rather than a bare restatement of the mask.)
                 }
                 finally
                 {
@@ -344,6 +347,7 @@ namespace EvilAliensWeb.Compat.Net
             // Save/restore, so running this over a live ?netdropgrant session cannot eat the drop
             // it is waiting for.
             bool dropLatchWas = NetSession.DropGrantUsed;
+            bool dropResetLegRan = false;
             try
             {
                 // Flag off: never drops, and -- the subtle half -- never CONSUMES. If an off run
@@ -365,7 +369,8 @@ namespace EvilAliensWeb.Compat.Net
                 // here would execute no reset at all and this leg would pass against the very
                 // regression it exists to catch (the latch left out of the reset). Skipped over a
                 // LIVE session, which the reset would wipe.
-                if (!NetSession.Active)
+                dropResetLegRan = !NetSession.Active;
+                if (dropResetLegRan)
                 {
                     NetSession.ResetPerSessionState();
                     Check(!NetSession.DropGrantUsed, "a session teardown clears the drop latch");
@@ -385,6 +390,16 @@ namespace EvilAliensWeb.Compat.Net
             // comes BACK. Driven as the real cycle -- allocate, reserve as RemoteFriend the way
             // HandleJoinRequest does, watch the allocator route around it, expire the claim clock,
             // release it the way ExpireUnclaimedGrants does, allocate again.
+            // The claim clock first -- pure long comparisons, so they must not ride on the oracle
+            // service being up. Strictly greater, so a peer whose first stream lands exactly on
+            // the deadline keeps the seat it was given.
+            {
+                long deadline = 10000L;
+                Check(!NetSession.GrantHasExpired(deadline - 1, deadline), "a grant is live before its deadline");
+                Check(!NetSession.GrantHasExpired(deadline, deadline), "a grant is still live ON its deadline");
+                Check(NetSession.GrantHasExpired(deadline + 1, deadline), "a grant expires past its deadline");
+            }
+
             if (oracleLegRan)
             {
                 Oracle seats = new Oracle(live.Game);
@@ -405,13 +420,6 @@ namespace EvilAliensWeb.Compat.Net
                     Check(NetSession.AllocateSeatFrom(seats, hostPrimary, peerPrimary) == 3,
                         "a held grant is not re-allocated -- the next join gets slot 3");
 
-                    // The claim clock. Strictly greater, so a peer whose first stream lands
-                    // exactly on the deadline keeps the seat it was given.
-                    long deadline = 10000L;
-                    Check(!NetSession.GrantHasExpired(deadline, deadline - 1), "a grant is live before its deadline");
-                    Check(!NetSession.GrantHasExpired(deadline, deadline), "a grant is still live ON its deadline");
-                    Check(NetSession.GrantHasExpired(deadline, deadline + 1), "a grant expires past its deadline");
-
                     // What ExpireUnclaimedGrants does once the clock is up.
                     seats.RemovePlayerAt(granted, ControlDevice.RemoteFriend);
                     Check(!seats.IsSeated(granted), "the expired grant leaves the roster rather than leaking");
@@ -421,12 +429,6 @@ namespace EvilAliensWeb.Compat.Net
                         "the reclaimed seat is handed to the NEXT couch join");
                     Check(seats.AddPlayerAt(granted, ControlDevice.RemoteFriend),
                         "and can actually be seated again");
-
-                    // The leak this guards against, stated as its own assertion: had the seat NOT
-                    // come back, a roster with both primaries and one leaked seat would have only
-                    // slot 3 left, and the session would run one seat short for good.
-                    Check(NetSession.AllocateSeatFrom(seats, hostPrimary, peerPrimary) == 3,
-                        "with the seat retaken the allocator moves on to slot 3");
                 }
                 finally
                 {
@@ -443,15 +445,26 @@ namespace EvilAliensWeb.Compat.Net
             }
             sb.Append("\n  covers: DecideSlotAdopt, FirstMutuallyFreeSlot + its convergence, the v8 codec,");
             sb.Append("\n          a legacy control showing the old policy breaking on the same input,");
-            sb.Append("\n          the stale menu roster reaching the host allocator (+ ResetPlayers as the fix),");
+            sb.Append("\n          what an attract-demo roster makes the host allocator answer,");
             sb.Append("\n          ?netdropgrant's one-shot latch and its clearing on a session teardown,");
             sb.Append("\n          and the reserve -> hold -> expire -> REALLOCATE cycle for a reclaimed couch seat.");
             if (!oracleLegRan)
             {
                 // A skipped leg must never read as a passed one.
-                sb.Append("\n  SKIPPED (no oracle service): the real-Oracle premise leg. Re-run in-game to cover it.");
+                sb.Append("\n  SKIPPED (no oracle service): the real-Oracle premise leg, the attract-roster");
+                sb.Append("\n          allocator control and the couch-seat reuse cycle. Re-run in-game to cover them.");
+            }
+            if (!dropResetLegRan)
+            {
+                sb.Append("\n  SKIPPED (session live): the drop-latch teardown leg -- the one that checks the");
+                sb.Append("\n          latch does not outlive its session. Re-run with no session to cover it.");
             }
             sb.Append("\n  NOT covered (two-window run): hello delivery, RejectFull reaching the peer, the re-list.");
+            // Nor does anything here reach GameScene.Terminate: the attract-roster leg feeds the
+            // allocator a roster it seats by hand, so it shows what a stale roster COSTS, not that
+            // the scene exit now clears it. That half is an eahl run -- ?menu, let the attract
+            // demo seat itself, Esc back out, eaOracleRoster (web CLAUDE.md, roster-slots bullet).
+            sb.Append("\n  NOT covered (eahl run): that GameScene.Terminate itself clears the roster.");
             return sb.ToString();
         }
     }

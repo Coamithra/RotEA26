@@ -348,6 +348,8 @@ generate much of the art/audio referenced here.
   menu roster, `?netdropgrant`'s one-shot latch and couch-seat reuse -- leave-no-trace,
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
+  `eaAward('Pacifist')` (pop an awardment banner now -- every real trigger is minutes deep
+  behind a condition a rig cannot produce; see the awardment bullet under "Feature notes"),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
@@ -959,6 +961,28 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   `Compat/TrailerInterop.Play(youtubeId)` → `window.eaTrailer(id)` (outside `#app`):
   youtube-nocookie iframe + Back button, pauses/resumes `eaMusic` (AudioContext suspend/resume),
   refocuses the canvas on close. Ids live in `MenuScene.trailerMenu_*Selected`.
+- **Awardment banner (`AwardmentBlade`) -- pop one on demand with `eaAward('<Awardment>')`
+  (`eval Award <name>` under `eahl`), card d2f746d5.** Nothing else can reach it in a test: every
+  trigger is minutes deep behind a condition a rig cannot produce (Pacifist = 90 s of not firing
+  on Hard+, Dunce = a 180 s spider-boss timer, the rest are level completions). Since card
+  57555583 the blade's sheet + `menufont` load LAZILY on the Idle -> Enter transition, so this is
+  also the only way that load gets exercised at all.
+  - It **RE-LOCKS an already-unlocked awardment** before awarding, and says so on its own line --
+    both `AwardAchievement` and `AwardmentBlade.Update` drop an unlocked one, so without that the
+    seam does nothing on any save that has played the game. A capture taken after that line is NOT
+    the untouched path. Not "in memory only": the blade's `Enter` calls `SaveThreaded()`, so the
+    save ends up as it started only *because the banner runs*. **Hence the cheat gate
+    (`CheckForCheats`) is tested BEFORE the re-lock** -- it is reported rather than bypassed, and
+    re-locking and then bailing would drop a genuinely earned unlock on the floor.
+  - **TRAP -- eahl's saves are NOT clean between runs, and `--saves` does not fix it.** The XML
+    container writes to a REAL directory (`/eaweb_save/EvilAliens/` == `C:\eaweb_save\...` on
+    Windows); `--saves` only owns the b64 mirror, so `Achievements.xml` survives every run and
+    the `--saves <dir>` help's "runs start clean" does not cover it. Any probe booting
+    `?unlockall` (three of the committed ones do) unlocks all ten in memory, and the next
+    `SaveThreaded` persists that -- so on a machine that has ever run one, EVERY later eahl run
+    reads all ten awardments as unlocked. This cost card 57555583 a long investigation into a
+    Pacifist award that was being dropped, not missed. Delete that directory to get a true
+    fresh-save run.
 - **Splash channel-swap SFX:** the "I made this!" splash channel-flips the old meme into the
   revenged image (`channelflip.fx`); `SplashScene.Update` fires `PlayCue("channelswap")` once when
   the glitch starts (gated on `variantPicked`, one-shot via `flipSoundPlayed`). Autoplay caveat: the

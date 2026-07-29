@@ -1203,6 +1203,16 @@ namespace EvilAliensWeb.Compat
 		// ?gamebrowser pattern. Hijacks boot => SkipSplash + AutoStart, and is in Active.
 		public static bool GameBrowser { get; private set; }
 
+		// ?gamebrowser=fallback: the same boot, but NetGameBrowser.InjectFakeGames also lists two
+		// levels with no bundled art -- one in our Levels enum with no carousel slot, one not in
+		// the enum at all. That is the only offline way to reach SubMenuOnlineGames.EnsureArt's
+		// no-art branch, which is otherwise reachable only from a real stranger's build off the
+		// wire (card 0d166364). Split from the bare flag (card 0d166364 follow-up) because the
+		// two rigs want opposite things: an APPEARANCE screenshot wants every row to look like a
+		// real game, and two rows drawing Mission 1's art under the generic "Mission" title are
+		// noise you have to mentally discount. Bare ?gamebrowser is therefore the clean rig again.
+		public static bool GameBrowserFallback { get; private set; }
+
 		// ?netjip: the two-window join-in-progress test. Pair with ?level=<Name> (+ ?invuln):
 		// the host boots straight into a level, solo, and LISTS it despite the debug boot
 		// (NetListing's eligibility normally refuses a DebugFlags.Active / cheating host, so
@@ -2399,7 +2409,33 @@ namespace EvilAliensWeb.Compat
 					NetDropGrant = IsOn(val);
 					break;
 				case "gamebrowser":
-					GameBrowser = IsOn(val);
+					// Bare ?gamebrowser is the appearance rig (real-looking entries only).
+					// ?gamebrowser=fallback adds the two unmapped entries. An unrecognised value
+					// is REPORTED and treated as bare, for the ?teampartner reason: a typo would
+					// otherwise silently run the appearance rig while the run is labelled as the
+					// fallback one, and the missing entries look exactly like the bug.
+					if (val != null && val.Trim().ToLowerInvariant() == "fallback")
+					{
+						GameBrowser = true;
+						GameBrowserFallback = true;
+					}
+					else if (IsOn(val))
+					{
+						GameBrowser = true;
+						GameBrowserFallback = false;
+					}
+					else if (IsExplicitlyOff(val))
+					{
+						GameBrowser = false;
+						GameBrowserFallback = false;
+					}
+					else
+					{
+						GameBrowser = true;
+						GameBrowserFallback = false;
+						Console.WriteLine("[debug] unknown ?gamebrowser= value '" + val
+							+ "' (expected fallback) -- ignored, listing the real-looking entries only");
+					}
 					if (GameBrowser)
 					{
 						SkipSplash = true;

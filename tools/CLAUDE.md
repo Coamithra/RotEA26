@@ -129,6 +129,16 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   the deleted default was protecting. Mutation-tested: restoring that default turns 12 FAIL.
   Note `ScreenshotSaver`'s static init loads fine here despite the limits above -- it only walks
   the enum and sizes an array, touching no engine service.
+- **Eighth case set: `?gamebrowser=`** (card 0d166364 follow-up) -- the flag went from a plain
+  on/off boolean to carrying a value (`=fallback`), because ONE flag now serves two rigs that want
+  opposite things: the appearance screenshot wants four real-looking games, the fallback probe
+  wants two rows on levels with no bundled art. What is asserted is that the two spellings
+  DISAGREE, plus the `?flyspiderflatten` rejection shape (a typo is reported, boots the bare rig,
+  and never silently enables the fallback one). Mutation-tested with the pre-card
+  `GameBrowser = IsOn(val)`: 2 FAIL -- `=fallback` stops adding the entries and starts reporting
+  itself as unknown. Its control is that a valid value reports nothing, and it restores
+  `gamebrowser`/`skipsplash`/`autostart` on the way out (and asserts the restore took) so a later
+  `Probe*` does not inherit a browser-hijacked boot.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

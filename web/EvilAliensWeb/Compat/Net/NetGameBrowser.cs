@@ -81,7 +81,11 @@ namespace EvilAliensWeb.Compat.Net
 
         // ?gamebrowser: inject a fixed set of fake games so the carousel can be screenshotted
         // with no server and no WebRTC. Active is left FALSE (no socket), so Tick is inert.
-        public static void InjectFakeGames()
+        //
+        // withUnmappedArt (?gamebrowser=fallback) appends the two entries no appearance shot
+        // wants -- see below. Two rigs, one flag, because they share this whole boot path and
+        // differ only in these two rows.
+        public static void InjectFakeGames(bool withUnmappedArt)
         {
             games.Clear();
             pingByCode.Clear();
@@ -93,15 +97,23 @@ namespace EvilAliensWeb.Compat.Net
             AddFake("B29MT", Levels.Level2, 2, 2, 120, 88);
             AddFake("Z4HRW", Levels.Level3, 3, Oracle.MaxPlayers - 1, 7, 152);
             AddFake("KP8FN", Levels.ClassicAliens, 0, 1, 260, -1);
-            // Card 0d166364: the last two are UNMAPPED on purpose -- they are the rig for
-            // SubMenuOnlineGames' no-bundled-art fallback, which nothing else can reach. A
-            // listed game's Level is an int off the wire from a stranger's build, so it can be
-            // a level we know but have no carousel art for (Tutorial), or one our Levels enum
-            // does not contain at all (a NEWER peer's build -- the 9999). Both must draw the
-            // default shot rather than throw or blank. Do not "tidy" these into real levels;
+            // Card 0d166364: two UNMAPPED entries -- the rig for SubMenuOnlineGames'
+            // no-bundled-art fallback, which nothing else can reach. A listed game's Level is an
+            // int off the wire from a stranger's build, so it can be a level we know but have no
+            // carousel art for (Tutorial), or one our Levels enum does not contain at all (a
+            // NEWER peer's build -- the 9999). Both must draw the default shot rather than throw
+            // or blank. Do not "tidy" these into real levels;
             // tools/headless/probes/gamebrowser_fallback.txt asserts on them by name.
-            AddFake("TU7OR", Levels.Tutorial, 1, 1, 12, 22);
-            AddFake("FU7UR", (Levels)9999, 2, 2, 55, 190);
+            //
+            // Behind ?gamebrowser=fallback rather than always on, because they are actively
+            // WRONG for the flag's original job: both draw Mission 1's art under the generic
+            // "Mission" title, so an appearance screenshot of the carousel would have two of six
+            // rows the reader has to know to discount.
+            if (withUnmappedArt)
+            {
+                AddFake("TU7OR", Levels.Tutorial, 1, 1, 12, 22);
+                AddFake("FU7UR", (Levels)9999, 2, 2, 55, 190);
+            }
             Version++;
         }
 

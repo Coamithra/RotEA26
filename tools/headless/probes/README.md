@@ -119,7 +119,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `preload_demo{1,2,3}.txt` | the same, for the three attract demos (`?demo=<n>` pins which one the idle menu drops into). Each also asserts the `(boot)` sentinel stays clean -- see the block below for why that third line is the one that matters |
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (cards 8d6883f3, 0d166364): no level-select art decodes when either carousel is opened, and no entry falls back to the default art |
-| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build |
+| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
 level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
@@ -151,8 +151,9 @@ the drift the card is about — a `MenuScene` carousel entry authored for a leve
 `ScreenshotPath` row, where `StockShots` is still twelve and the count passes happily
 (measured with `Levels.Tutorial`: boot count and COLD both green, that line alone red); and
 `COLD` still covers the `ScreenshotSaver`/`QueueMenuWarm` side neither of the others sees.
-`gamebrowser_fallback` goes red with `unmappedArt=none` when `EnsureArt`'s null guard is
-reverted. Note what that mutation does NOT produce: an exception. `EnsureArt` wraps its
+`gamebrowser_fallback` goes red when `EnsureArt`'s null guard is reverted — the
+`[gamebrowser] rebuilt` line stops printing entirely, since it is reported only when something
+resolved to no bundled art. Note what that mutation does NOT produce: an exception. `EnsureArt` wraps its
 `Content.Load` in `catch (Exception)`, so a broken fallback throws, gets absorbed, and draws the
 identical picture — which is why the probe reads a line reported from what `EnsureArt` recorded
 while resolving, and why that line must never be re-derived from `LevelArt` at the report site.

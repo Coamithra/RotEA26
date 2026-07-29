@@ -43,53 +43,53 @@ internal abstract class SubMenuCarousel : MenuSub1
         swaptimer.Update(gameTime);
         if (swaptimer.Active)
         {
-            int num = 0;
-            int num2 = 0;
-            int num3 = (int)System.Math.Round(prevSelected);
-            while (num3 != targetSelected)
+            int forwardSteps = 0;
+            int backwardSteps = 0;
+            int scanIndex = (int)System.Math.Round(prevSelected);
+            while (scanIndex != targetSelected)
             {
-                num3 = MyMath.Mod(num3 + 1, menuEntries.Count);
-                if (Visible(num3))
+                scanIndex = MyMath.Mod(scanIndex + 1, menuEntries.Count);
+                if (Visible(scanIndex))
                 {
-                    num++;
+                    forwardSteps++;
                 }
             }
-            num3 = (int)prevSelected;
-            while (num3 != targetSelected)
+            scanIndex = (int)prevSelected;
+            while (scanIndex != targetSelected)
             {
-                num3 = MyMath.Mod(num3 - 1, menuEntries.Count);
-                if (Visible(num3))
+                scanIndex = MyMath.Mod(scanIndex - 1, menuEntries.Count);
+                if (Visible(scanIndex))
                 {
-                    num2++;
+                    backwardSteps++;
                 }
             }
-            int num4 = targetSelected;
-            if (num2 < num)
+            int wrappedTarget = targetSelected;
+            if (backwardSteps < forwardSteps)
             {
-                if ((float)num4 > prevSelected)
+                if ((float)wrappedTarget > prevSelected)
                 {
-                    num4 -= menuEntries.Count;
+                    wrappedTarget -= menuEntries.Count;
                 }
             }
-            else if (num2 > num)
+            else if (backwardSteps > forwardSteps)
             {
-                if ((float)num4 < prevSelected)
+                if ((float)wrappedTarget < prevSelected)
                 {
-                    num4 += menuEntries.Count;
+                    wrappedTarget += menuEntries.Count;
                 }
             }
             else if (preferredDirection == 1)
             {
-                if ((float)num4 < prevSelected)
+                if ((float)wrappedTarget < prevSelected)
                 {
-                    num4 += menuEntries.Count;
+                    wrappedTarget += menuEntries.Count;
                 }
             }
-            else if ((float)num4 > prevSelected)
+            else if ((float)wrappedTarget > prevSelected)
             {
-                num4 -= menuEntries.Count;
+                wrappedTarget -= menuEntries.Count;
             }
-            scroller = MyMath.Mod(prevSelected + MathHelper.SmoothStep(0f, (float)num4 - prevSelected, 1f - swaptimer.Normalized), menuEntries.Count);
+            scroller = MyMath.Mod(prevSelected + MathHelper.SmoothStep(0f, (float)wrappedTarget - prevSelected, 1f - swaptimer.Normalized), menuEntries.Count);
         }
         else if (swaptimer.Finished)
         {
@@ -159,53 +159,53 @@ internal abstract class SubMenuCarousel : MenuSub1
             DrawCarouselOverlay(gameTime);
             return;
         }
-        int num = 0;
-        int num2 = int.MaxValue;
-        int num3 = int.MaxValue;
+        int visibleCount = 0;
+        int prevVisible = int.MaxValue;
+        int firstVisible = int.MaxValue;
         float a = 0f;
         for (int i = 0; i < menuEntries.Count; i++)
         {
             if (Visible(i))
             {
-                if ((float)num2 <= scroller && scroller < (float)i)
+                if ((float)prevVisible <= scroller && scroller < (float)i)
                 {
-                    a = (float)(num - 1) + (scroller - (float)num2) / (float)(i - num2);
+                    a = (float)(visibleCount - 1) + (scroller - (float)prevVisible) / (float)(i - prevVisible);
                 }
-                if (num3 > menuEntries.Count)
+                if (firstVisible > menuEntries.Count)
                 {
-                    num3 = i;
+                    firstVisible = i;
                 }
-                num2 = i;
-                num++;
+                prevVisible = i;
+                visibleCount++;
             }
         }
-        if ((float)num2 <= scroller && scroller < (float)menuEntries.Count)
+        if ((float)prevVisible <= scroller && scroller < (float)menuEntries.Count)
         {
-            a = (float)(num - 1) + (scroller - (float)num2) / (float)(menuEntries.Count + num3 - num2);
+            a = (float)(visibleCount - 1) + (scroller - (float)prevVisible) / (float)(menuEntries.Count + firstVisible - prevVisible);
         }
-        if (0f <= scroller && scroller < (float)num3)
+        if (0f <= scroller && scroller < (float)firstVisible)
         {
-            a = (float)(num - 1) + (scroller + (float)menuEntries.Count - (float)num2) / (float)(menuEntries.Count + num3 - num2);
+            a = (float)(visibleCount - 1) + (scroller + (float)menuEntries.Count - (float)prevVisible) / (float)(menuEntries.Count + firstVisible - prevVisible);
         }
-        int num4 = 0;
-        int num5 = 0;
+        int visibleIndex = 0;
+        int selectedVisibleIndex = 0;
         for (int j = 0; j < menuEntries.Count; j++)
         {
             if (Visible(j))
             {
-                float step = 0.5f + 0.333f * MyMath.DifferenceMod(a, num4, num);
+                float step = 0.5f + 0.333f * MyMath.DifferenceMod(a, visibleIndex, visibleCount);
                 if (j != targetSelected)
                 {
                     DrawEntryAt(j, step);
                 }
                 else
                 {
-                    num5 = num4;
+                    selectedVisibleIndex = visibleIndex;
                 }
-                num4++;
+                visibleIndex++;
             }
         }
-        float step2 = 0.5f + 0.33f * MyMath.DifferenceMod(a, num5, num);
+        float step2 = 0.5f + 0.33f * MyMath.DifferenceMod(a, selectedVisibleIndex, visibleCount);
         DrawEntryAt(targetSelected, step2);
         DrawCarouselOverlay(gameTime);
     }

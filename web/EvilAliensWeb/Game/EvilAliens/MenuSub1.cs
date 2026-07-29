@@ -253,7 +253,7 @@ internal class MenuSub1 : Scene
 
 	private void HandleInput()
 	{
-		bool flag = false;
+		bool acted = false;
 		if (firstUpdate)
 		{
 			firstUpdate = false;
@@ -261,7 +261,7 @@ internal class MenuSub1 : Scene
 		}
 		if (HandleMouse())
 		{
-			flag = true;
+			acted = true;
 		}
 		if (mouseActivated)
 		{
@@ -270,88 +270,88 @@ internal class MenuSub1 : Scene
 			timeouttimer.Reset();
 			return;
 		}
-		bool flag2 = false;
+		bool backPressed = false;
 		for (int i = 0; i < 4; i++)
 		{
 			if (!controller.HasValue || controlDeviceToInt(controller.Value) == i)
 			{
-				flag2 |= base.InputHandler.PadPressed(PadKeys.Back, i) || base.InputHandler.PadPressed(PadKeys.B, i);
+				backPressed |= base.InputHandler.PadPressed(PadKeys.Back, i) || base.InputHandler.PadPressed(PadKeys.B, i);
 			}
 		}
 		if (!controller.HasValue || controller.Value == ControlDevice.Keyboard)
 		{
-			flag2 |= base.InputHandler.Pressed(MyKeys.Esc);
+			backPressed |= base.InputHandler.Pressed(MyKeys.Esc);
 		}
-		if (flag2 && allowNormalExit)
+		if (backPressed && allowNormalExit)
 		{
 			if (this.OnExit != null)
 			{
 				this.OnExit(this);
 			}
-			flag = true;
+			acted = true;
 		}
 		if (menuEntries.Count <= 0)
 		{
 			return;
 		}
-		bool flag3 = false;
+		bool prevPressed = false;
 		if (!controller.HasValue || controller.Value == ControlDevice.Keyboard)
 		{
-			flag3 |= base.InputHandler.Pressed(MyKeys.Up) | base.InputHandler.Pressed(MyKeys.Left);
+			prevPressed |= base.InputHandler.Pressed(MyKeys.Up) | base.InputHandler.Pressed(MyKeys.Left);
 		}
 		for (int j = 0; j < 4; j++)
 		{
 			if (!controller.HasValue || controlDeviceToInt(controller.Value) == j)
 			{
-				flag3 |= base.InputHandler.PadPressed(PadKeys.Up, j);
-				flag3 |= base.InputHandler.PadPressed(PadKeys.Left, j);
+				prevPressed |= base.InputHandler.PadPressed(PadKeys.Up, j);
+				prevPressed |= base.InputHandler.PadPressed(PadKeys.Left, j);
 			}
 		}
-		if (flag3)
+		if (prevPressed)
 		{
 			selectPrevious();
-			flag = true;
+			acted = true;
 		}
-		bool flag4 = false;
+		bool nextPressed = false;
 		if (!controller.HasValue || controller.Value == ControlDevice.Keyboard)
 		{
-			flag4 |= base.InputHandler.Pressed(MyKeys.Down) | base.InputHandler.Pressed(MyKeys.Right);
+			nextPressed |= base.InputHandler.Pressed(MyKeys.Down) | base.InputHandler.Pressed(MyKeys.Right);
 		}
 		for (int k = 0; k < 4; k++)
 		{
 			if (!controller.HasValue || controlDeviceToInt(controller.Value) == k)
 			{
-				flag4 |= base.InputHandler.PadPressed(PadKeys.Right, k);
-				flag4 |= base.InputHandler.PadPressed(PadKeys.Down, k);
+				nextPressed |= base.InputHandler.PadPressed(PadKeys.Right, k);
+				nextPressed |= base.InputHandler.PadPressed(PadKeys.Down, k);
 			}
 		}
-		if (flag4)
+		if (nextPressed)
 		{
 			selectNext();
-			flag = true;
+			acted = true;
 		}
-		bool flag5 = false;
+		bool selectPressed = false;
 		if (!controller.HasValue || controller.Value == ControlDevice.Keyboard)
 		{
-			flag5 |= base.InputHandler.Pressed(MyKeys.Enter) | base.InputHandler.Pressed(MyKeys.Generic_Start);
+			selectPressed |= base.InputHandler.Pressed(MyKeys.Enter) | base.InputHandler.Pressed(MyKeys.Generic_Start);
 		}
 		for (int l = 0; l < 4; l++)
 		{
 			if (!controller.HasValue || controlDeviceToInt(controller.Value) == l)
 			{
-				flag5 |= base.InputHandler.PadPressed(PadKeys.Start, l);
-				flag5 |= base.InputHandler.PadPressed(PadKeys.A, l);
+				selectPressed |= base.InputHandler.PadPressed(PadKeys.Start, l);
+				selectPressed |= base.InputHandler.PadPressed(PadKeys.A, l);
 			}
 		}
-		if (flag5)
+		if (selectPressed)
 		{
 			if (ItemSelectedEvents[selectedEntry] != null)
 			{
 				ItemSelectedEvents[selectedEntry](this);
 			}
-			flag = true;
+			acted = true;
 		}
-		if (flag)
+		if (acted)
 		{
 			timeouttimer.Reset();
 		}
@@ -516,25 +516,26 @@ internal class MenuSub1 : Scene
 		{
 			(position) = new Vector2(origin.X, yoffset + origin.Y - (float)(font.LineSpacing * menuEntries.Count) / 3f);
 		}
-		Vector2 val = default(Vector2);
+		Vector2 entryOrigin = default(Vector2);
 		// Stage 13: metal-sheen glint clock — shared by every entry so the rows glint in sync.
 		float time = (float)gameTime.TotalGameTime.TotalSeconds;
 		for (int i = 0; i < menuEntries.Count; i++)
 		{
 			Color color;
-			float num4;
+			float entryScale;
 			if (i == selectedEntry)
 			{
-				float num = 15f / font.MeasureString(menuEntries[i]).X;
-				float num2 = (float)gameTime.TotalGameTime.TotalSeconds;
-				float num3 = MyMath.Mod(num2 / 2f, 1f);
+				float pulseAmount = 15f / font.MeasureString(menuEntries[i]).X;
+				// Same clock as `time` above, read a second time -- not a second clock.
+				float pulseTime = (float)gameTime.TotalGameTime.TotalSeconds;
+				float pulsePhase = MyMath.Mod(pulseTime / 2f, 1f);
 				color = MenuTheme.Selected;
-				num4 = 1f + num * brainPulsate.Evaluate(num3);
+				entryScale = 1f + pulseAmount * brainPulsate.Evaluate(pulsePhase);
 			}
 			else
 			{
 				color = MenuTheme.Idle;
-				num4 = 1f;
+				entryScale = 1f;
 			}
 			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
 			{
@@ -544,7 +545,7 @@ internal class MenuSub1 : Scene
 				// Centre each entry on origin.X (was left-aligned at origin.X-75); the centre
 				// origin keeps the selected-row pulse symmetric. Matches the framed main menu
 				// so the HUD ring (which centres on the menu) lines up for the submenus too.
-				(val) = new Vector2(x / 2f, (float)(font.LineSpacing / 2));
+				(entryOrigin) = new Vector2(x / 2f, (float)(font.LineSpacing / 2));
 				// Polish: a soft drop shadow under every entry lifts the text off the busy
 				// starfield/planet backdrop (the flat gray items in particular were reading
 				// weakly). Same glyph string, offset a few design-space px in translucent
@@ -552,7 +553,7 @@ internal class MenuSub1 : Scene
 				// (NonPremultiplied) so it darkens the scene behind rather than glowing —
 				// and being dark it stays below the bloom threshold, so it never blooms.
 				Vector2 shadowOffset = new Vector2(3f, 3f);
-				base.SpriteBatch.DrawString(font, menuEntries[i], position + shadowOffset, new Color(0, 0, 0, 160), 0f, val, num4, (SpriteEffects)0, 0f);
+				base.SpriteBatch.DrawString(font, menuEntries[i], position + shadowOffset, new Color(0, 0, 0, 160), 0f, entryOrigin, entryScale, (SpriteEffects)0, 0f);
 				if (i == selectedEntry)
 				{
 					// Selection aura: a violet halo behind the bright core, a neon
@@ -567,14 +568,14 @@ internal class MenuSub1 : Scene
 					Color glow = MenuTheme.WithAlpha(MenuTheme.Glow, ga);
 					foreach (Vector2 off in SelectionGlowRing)
 					{
-						base.SpriteBatch.DrawString(font, menuEntries[i], position + off, glow, 0f, val, num4, (SpriteEffects)0, 0f);
+						base.SpriteBatch.DrawString(font, menuEntries[i], position + off, glow, 0f, entryOrigin, entryScale, (SpriteEffects)0, 0f);
 					}
 				}
 				// Stage 13: the entry's main text gets the chrome sheen; the drop shadow + the
 					// selection glow rings (above) stay as the frame. Per-entry RT composite => each
 					// row's sheen is local to itself, so stacked rows read identically regardless of
 					// height. The MenuTheme colour is preserved (the sheen modulates it).
-					base.SpriteBatch.DrawMetalStringCached(menuEntries[i], position, color, 0f, val, num4, time);
+					base.SpriteBatch.DrawMetalStringCached(menuEntries[i], position, color, 0f, entryOrigin, entryScale, time);
 				position.Y += (float)font.LineSpacing;
 			}
 		}
@@ -594,7 +595,7 @@ internal class MenuSub1 : Scene
 		base.SpriteBatch.Flush();
 		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 		float scale = 1f;
-		float num = 1f;
+		float fade = 1f;
 		switch (state)
 		{
 		case SubMenuState.entry:
@@ -602,7 +603,7 @@ internal class MenuSub1 : Scene
 			break;
 		case SubMenuState.exit:
 			scale = MyMath.PowerCurve(1f, 8f, 2f, 1f - fadeTimer.Normalized);
-			num = MyMath.PowerCurve(1f, 0f, 2f, 1f - fadeTimer.Normalized);
+			fade = MyMath.PowerCurve(1f, 0f, 2f, 1f - fadeTimer.Normalized);
 			break;
 		}
 		// Stage 10: the RT is render-sized, so composite it 1:1 into the scene via the
@@ -612,7 +613,7 @@ internal class MenuSub1 : Scene
 		base.SpriteBatch.DrawPresent(myRenderTarget,
 			new Vector2((float)RenderScale.Width / 2f, (float)RenderScale.Height / 2f),
 			new Vector2((float)((Texture2D)myRenderTarget).Width / 2f, (float)((Texture2D)myRenderTarget).Height / 2f),
-			scale, new Color(new Vector4(num, num, num, num)));
+			scale, new Color(new Vector4(fade, fade, fade, fade)));
 	}
 
 	public void RemoveInstantly()

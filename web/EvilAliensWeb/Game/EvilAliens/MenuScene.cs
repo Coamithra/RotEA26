@@ -838,16 +838,16 @@ internal class MenuScene : Scene
 
 	private void optionsMenu_DifficultySelected(MenuSub1 sender)
 	{
-		int num = 1;
+		int maxDifficulty = 1;
 		if (Unlockables.GetInstance().Collection[Unlockables.Items.HarderDifficulties])
 		{
-			num = 3;
+			maxDifficulty = 3;
 		}
 		if (Unlockables.GetInstance().Collection[Unlockables.Items.InsaneDifficulty])
 		{
-			num = 4;
+			maxDifficulty = 4;
 		}
-		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)MyMath.Mod((int)(Settings.GetInstance().CurrentDifficulty + 1), num + 1));
+		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)MyMath.Mod((int)(Settings.GetInstance().CurrentDifficulty + 1), maxDifficulty + 1));
 		sender.SetEntry("Difficulty: " + Settings.GetInstance().CurrentDifficulty.ToString().Replace("_", " "));
 	}
 
@@ -1484,14 +1484,14 @@ internal class MenuScene : Scene
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		EnsureRenderTarget();
 		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
-		bool flag = false;
+		bool showInzaneBackdrop = false;
 		if (state != MenuState.FadeToGame)
 		{
-			flag = true;
-			flag &= Achievements.GetInstance().Data[Levels.Level1].difficulty >= Settings.DifficultyLevel.Inzane;
-			flag &= Achievements.GetInstance().Data[Levels.Level2].difficulty >= Settings.DifficultyLevel.Inzane;
-			flag &= Achievements.GetInstance().Data[Levels.Level3].difficulty >= Settings.DifficultyLevel.Inzane;
-			if (flag)
+			showInzaneBackdrop = true;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level1].difficulty >= Settings.DifficultyLevel.Inzane;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level2].difficulty >= Settings.DifficultyLevel.Inzane;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level3].difficulty >= Settings.DifficultyLevel.Inzane;
+			if (showInzaneBackdrop)
 			{
 				base.SpriteBatch.Draw(backdrop, origin, 0f, currentBackdropSize, center: true, Color.Red);
 			}
@@ -1502,12 +1502,12 @@ internal class MenuScene : Scene
 			base.SpriteBatch.Draw(vignette, new Rectangle(0, 0, 800, 600), Color.White);
 			DrawHudDecor();
 		}
-		bool flag2 = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.WebcamAliens].difficulty >= Settings.DifficultyLevel.Inzane;
+		bool allChallengesInzane = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.WebcamAliens].difficulty >= Settings.DifficultyLevel.Inzane;
 		foreach (Star star in stars)
 		{
-			star.Draw(flag2);
+			star.Draw(allChallengesInzane);
 		}
-		if (flag && flag2)
+		if (showInzaneBackdrop && allChallengesInzane)
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Insane);
 		}
@@ -1523,16 +1523,16 @@ internal class MenuScene : Scene
 		drawButtonTips();
 		if (state == MenuState.FadeToGame)
 		{
-			int num = Convert.ToInt16(currentFade);
-			if (num < 0)
+			int fadeAlpha = Convert.ToInt16(currentFade);
+			if (fadeAlpha < 0)
 			{
-				num = 0;
+				fadeAlpha = 0;
 			}
-			if (num > 255)
+			if (fadeAlpha > 255)
 			{
-				num = 255;
+				fadeAlpha = 255;
 			}
-			fadeBackBufferToWhite(num);
+			fadeBackBufferToWhite(fadeAlpha);
 		}
 	}
 
@@ -1701,17 +1701,22 @@ internal class MenuScene : Scene
 
 	private void drawButtonTips()
 	{
-		float num = 0.5f;
-		float num2 = 0.8f;
-		float num3 = (General.SafeZone).Left;
-		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num, font.MeasureString("yo").Y * num2);
-		float num5 = num3 + (float)AButton.LogicalWidth() * num + font.MeasureString(" ").X * num2;
-		float num6 = (float)(General.SafeZone).Right - font.MeasureString("select").X * num2;
-		float num7 = num6 - (float)BButton.LogicalWidth() * num - font.MeasureString(" ").X * num2;
-		base.SpriteBatch.Draw(BButton, new Vector2(num3, num4), 0f, num, center: false, Color.White);
-		base.SpriteBatch.DrawString("back", new Vector2(num5, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
-		base.SpriteBatch.Draw(AButton, new Vector2(num7, num4), 0f, num, center: false, Color.White);
-		base.SpriteBatch.DrawString("select", new Vector2(num6, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
+		float iconScale = 0.5f;
+		float textScale = 0.8f;
+		float backIconX = (General.SafeZone).Left;
+		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * iconScale, font.MeasureString("yo").Y * textScale);
+		// NOTE: original behaviour -- the two icons' widths are crossed here (the "back"
+		// text clears AButton's width though BButton is what sits at backIconX, and
+		// selectIconX below clears BButton's though AButton is drawn there). Harmless
+		// because small_face_a and small_face_b are the same size; left as-is so this
+		// stays a pure rename. Don't "fix" it without checking the two sprites first.
+		float backTextX = backIconX + (float)AButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
+		float selectTextX = (float)(General.SafeZone).Right - font.MeasureString("select").X * textScale;
+		float selectIconX = selectTextX - (float)BButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
+		base.SpriteBatch.Draw(BButton, new Vector2(backIconX, tipsY), 0f, iconScale, center: false, Color.White);
+		base.SpriteBatch.DrawString("back", new Vector2(backTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
+		base.SpriteBatch.Draw(AButton, new Vector2(selectIconX, tipsY), 0f, iconScale, center: false, Color.White);
+		base.SpriteBatch.DrawString("select", new Vector2(selectTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -1735,21 +1740,23 @@ internal class MenuScene : Scene
 		UpdateRing(gameTime);
 		UpdateRingCentre(gameTime);
 		HandleStars(gameTime);
-		float num = 16.666666f;
+		float frameMs = 16.666666f;
 		// Backdrop Ken-Burns zoom. This used to be an unbounded exponential
 		// (1.0001^frames) keyed off the ever-accumulating menu timer, so the planet
 		// crept bigger with no ceiling the whole time the menu sat idle. Now it's an
 		// exponential *approach* to a 2x cap: it eases toward 2x and tapers to a stop.
 		// The approach rate is the old curve's initial per-ms growth (ln(base)/frameMs),
 		// so the zoom starts identically and only slows as it nears the cap.
-		float num2 = (float)(BackdropZoomCap - (BackdropZoomCap - 1.0) * Math.Exp(-Math.Log(1.000100016593933) / num * timer.TotalMilliseconds));
-		currentBackdropSize = originalBackdropSize * num2;
+		float curve = (float)(BackdropZoomCap - (BackdropZoomCap - 1.0) * Math.Exp(-Math.Log(1.000100016593933) / frameMs * timer.TotalMilliseconds));
+		currentBackdropSize = originalBackdropSize * curve;
 		if (state != MenuState.FadeToGame)
 		{
 			return;
 		}
-		num2 = Convert.ToSingle(Math.Pow(1.0499999523162842, (timer - fadestarted).TotalMilliseconds / (double)num));
-		currentFade = num2 * 7.5f;
+		// The same local, reused for an unrelated quantity: past this point it is the
+		// fade ramp, not the backdrop zoom above.
+		curve = Convert.ToSingle(Math.Pow(1.0499999523162842, (timer - fadestarted).TotalMilliseconds / (double)frameMs));
+		currentFade = curve * 7.5f;
 		if (!(currentFade > 255f))
 		{
 			return;
@@ -1776,21 +1783,21 @@ internal class MenuScene : Scene
 
 	private void HandleStars(GameTime gameTime)
 	{
-		float num = ((state != 0) ? 2.36f : 0.06f);
-		float num2;
-		for (num2 = Convert.ToSingle((double)num * gameTime.ElapsedGameTime.TotalMilliseconds); num2 > 1f; num2 -= 1f)
+		float starsPerMs = ((state != 0) ? 2.36f : 0.06f);
+		float starBudget;
+		for (starBudget = Convert.ToSingle((double)starsPerMs * gameTime.ElapsedGameTime.TotalMilliseconds); starBudget > 1f; starBudget -= 1f)
 		{
 			CreateStar(moveit: false);
 		}
-		float num3 = num2;
-		if (RandomHelper.RandomNextFloat(0f, 1f) <= num3)
+		float fractionalStar = starBudget;
+		if (RandomHelper.RandomNextFloat(0f, 1f) <= fractionalStar)
 		{
 			CreateStar(moveit: false);
 		}
-		Star[] array = stars.ToArray();
+		Star[] starsSnapshot = stars.ToArray();
 		bool hyperspace = state == MenuState.FadeToGame;
-		Star[] array2 = array;
-		foreach (Star star in array2)
+		Star[] starsToMove = starsSnapshot;
+		foreach (Star star in starsToMove)
 		{
 			star.Move(hyperspace, gameTime);
 			if (star.IsOffScreen(800, 600))
@@ -1803,19 +1810,19 @@ internal class MenuScene : Scene
 
 	private void CreateStar(bool moveit)
 	{
-		float num = RandomHelper.RandomNextFloat(0.001f, 0.8f);
-		float num2 = (float)Math.PI * 2f * RandomHelper.RandomNextFloat(0f, 1f);
+		float speed = RandomHelper.RandomNextFloat(0.001f, 0.8f);
+		float direction = (float)Math.PI * 2f * RandomHelper.RandomNextFloat(0f, 1f);
 		float size = RandomHelper.RandomNextFloat(0.002f, 0.005f);
 		Star star;
 		if (idleStars.Count == 0)
 		{
-			star = new Star(base.Game as Game1, stargfx, origin, size, num2, num);
+			star = new Star(base.Game as Game1, stargfx, origin, size, direction, speed);
 		}
 		else
 		{
 			star = idleStars[0];
 			idleStars.RemoveAt(0);
-			star.Reset(origin, size, num2, num);
+			star.Reset(origin, size, direction, speed);
 		}
 		stars.Add(star);
 		if (moveit)

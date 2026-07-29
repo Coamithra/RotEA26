@@ -53,10 +53,10 @@
          50 CS0436 warnings (25 unique sites). `ExcludeAssets=compile` keeps the RUNTIME assembly
          (the platform dll is linked against it, and Xna.Framework.Storage.wasm has always been in
          the published _framework/) while removing it from THIS compilation, so the stub is the
-         only definition the game sees. Publish output is byte-identical either way — verified by
-         sha256-diffing two full Release publishes, against a control pair proving the publish is
-         deterministic. tools/headless/EvilAliensHeadless.csproj carries the same line for the same
-         reason; keep the two in lockstep. -->
+         only definition the game sees. It changes nothing shipped: the published file set is
+         unchanged and `python tools/verify_il_identical.py` hashes the assembly identically.
+         tools/headless/EvilAliensHeadless.csproj carries the same line for the same reason;
+         keep the two in lockstep. -->
     <PackageReference Include="nkast.Xna.Framework.Storage" Version="4.1.9001.*" ExcludeAssets="compile" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.11" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.11" PrivateAssets="all" />

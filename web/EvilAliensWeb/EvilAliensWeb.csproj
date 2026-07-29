@@ -44,8 +44,20 @@
     <PackageReference Include="nkast.Xna.Framework.Input" Version="4.1.9001.*" />
     <PackageReference Include="nkast.Xna.Framework.Game" Version="4.1.9001.*" />
     <PackageReference Include="nkast.Xna.Framework.Devices" Version="4.1.9001.*" />
-    <!-- nkast.Xna.Framework.Storage removed: replaced by Compat/StorageStub.cs (XNA 3.x sync API) -->
     <PackageReference Include="nkast.Kni.Platform.Blazor.GL" Version="4.1.9001.*" />
+    <!-- nkast.Xna.Framework.Storage is deliberately NOT compiled against: the game wants the XNA
+         *3.x* SYNCHRONOUS storage API (device.OpenContainer -> container.Path + File IO), which
+         Compat/StorageStub.cs provides; KNI ships the 4.0 async API instead. Dropping the
+         PackageReference is not enough — nkast.Kni.Platform.Blazor.GL drags the package back in
+         TRANSITIVELY, and its StorageDevice / StorageContainer then collide with the stub's for
+         50 CS0436 warnings (25 unique sites). `ExcludeAssets=compile` keeps the RUNTIME assembly
+         (the platform dll is linked against it, and Xna.Framework.Storage.wasm has always been in
+         the published _framework/) while removing it from THIS compilation, so the stub is the
+         only definition the game sees. Publish output is byte-identical either way — verified by
+         sha256-diffing two full Release publishes, against a control pair proving the publish is
+         deterministic. tools/headless/EvilAliensHeadless.csproj carries the same line for the same
+         reason; keep the two in lockstep. -->
+    <PackageReference Include="nkast.Xna.Framework.Storage" Version="4.1.9001.*" ExcludeAssets="compile" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.11" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.11" PrivateAssets="all" />
   </ItemGroup>

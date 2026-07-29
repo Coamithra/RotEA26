@@ -195,11 +195,11 @@ public class HelpText : DrawableGameComponent
 				break;
 			case Displays.Powerups:
 			{
-				Color color2 = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
-				spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
+				Color color = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+				spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color);
 				spriteBatch.Flush();
 				string text2 = "Enhancements";
-				spriteBatch.DrawString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f, (SpriteEffects)0, 0f);
+				spriteBatch.DrawString(font, text2, new Vector2(400f, 180f), color, 0f, font.MeasureString(text2) / 2f, 1.5f, (SpriteEffects)0, 0f);
 				spriteBatch.Flush();
 				float num3 = 220f;
 				float num4 = 40f;

@@ -1379,7 +1379,7 @@ internal abstract class GameScene : Scene
 		}
 		for (int i = 0; i < 4; i++)
 		{
-			ControlDevice controlDevice2 = i switch
+			ControlDevice padDevice = i switch
 			{
 				0 => ControlDevice.PadOne, 
 				1 => ControlDevice.PadTwo, 
@@ -1387,10 +1387,10 @@ internal abstract class GameScene : Scene
 				3 => ControlDevice.PadFour, 
 				_ => throw new Exception(), 
 			};
-			if (oracle.DeviceIsPlaying(controlDevice2) && (!base.InputHandler.PadConnected(i) || base.InputHandler.PadPressed(PadKeys.Start, i)))
+			if (oracle.DeviceIsPlaying(padDevice) && (!base.InputHandler.PadConnected(i) || base.InputHandler.PadPressed(PadKeys.Start, i)))
 			{
 				pauseRequested = true;
-				controlDevice = controlDevice2;
+				controlDevice = padDevice;
 			}
 		}
 		if (base.InputHandler.Pressed(MyKeys.Generic_Start) && oracle.DeviceIsPlaying(ControlDevice.Generic))

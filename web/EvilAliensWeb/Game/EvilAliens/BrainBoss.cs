@@ -218,12 +218,12 @@ internal class BrainBoss : KillableAlien
 			float num3 = MathHelper.Lerp(5f, 1f, stateTimer.Normalized);
 			if (RandomHelper.RandomFromAverage(10f * num3, gameTime))
 			{
-				BloodExplosion bloodExplosion3 = BloodExplosion.NewExplosion(collection, base.Game);
+				BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 				FindSpawnSpot(out var angle3, out var range3);
-				Vector2 position2 = MyMath.AngleToVector(angle3) * range3 + base.Position;
+				Vector2 position = MyMath.AngleToVector(angle3) * range3 + base.Position;
 				float num4 = 2f;
-				bloodExplosion3.Setup(position2, num4, num4, 0.12f, angle3);
-				collection.Add((GameComponent)(object)bloodExplosion3);
+				bloodExplosion.Setup(position, num4, num4, 0.12f, angle3);
+				collection.Add((GameComponent)(object)bloodExplosion);
 			}
 			if (RandomHelper.RandomFromAverage(3f, gameTime))
 			{
@@ -234,34 +234,34 @@ internal class BrainBoss : KillableAlien
 				sound.PlayCue("head asplode");
 				for (int i = 0; i < 10; i++)
 				{
-					BloodExplosion bloodExplosion4 = BloodExplosion.NewExplosion(collection, base.Game);
+					BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 					FindSpawnSpot(out var angle4, out var range4);
-					Vector2 position3 = MyMath.AngleToVector(angle4) * range4 + base.Position;
-					bloodExplosion4.Setup(position3, 5f + (float)i / 5f, 1f + (float)i / 5f, 0f, base.Direction);
-					collection.Add((GameComponent)(object)bloodExplosion4);
+					Vector2 position = MyMath.AngleToVector(angle4) * range4 + base.Position;
+					bloodExplosion.Setup(position, 5f + (float)i / 5f, 1f + (float)i / 5f, 0f, base.Direction);
+					collection.Add((GameComponent)(object)bloodExplosion);
 				}
 			}
 			if (RandomHelper.RandomFromAverage(0.5f * num3, gameTime))
 			{
 				FindSpawnSpot(out var angle5, out var range5);
-				Vector2 position4 = MyMath.AngleToVector(angle5) * range5 + base.Position;
+				Vector2 position = MyMath.AngleToVector(angle5) * range5 + base.Position;
 				Explosion explosion = Explosion.NewExplosion(collection, base.Game);
-				explosion.Setup(position4, 3.5f, 2.5f, 0f, 0f);
+				explosion.Setup(position, 3.5f, 2.5f, 0f, 0f);
 				collection.Add((GameComponent)(object)explosion);
 				FindSpawnSpot(out angle5, out range5);
-				position4 = MyMath.AngleToVector(angle5) * range5 + base.Position;
+				position = MyMath.AngleToVector(angle5) * range5 + base.Position;
 				explosion = Explosion.NewExplosion(collection, base.Game);
-				explosion.Setup(position4, 2f, 1.3f, 0f, 0f);
+				explosion.Setup(position, 2f, 1.3f, 0f, 0f);
 				collection.Add((GameComponent)(object)explosion);
 				sound.PlayCue("expl2");
 			}
 			if (RandomHelper.RandomFromAverage(2f * num3, gameTime))
 			{
 				FindSpawnSpot(out var angle6, out var range6);
-				Vector2 position5 = MyMath.AngleToVector(angle6) * range6 + base.Position;
-				Explosion explosion2 = Explosion.NewExplosion(collection, base.Game);
-				explosion2.Setup(position5, 1f, 1f, 0f, 0f);
-				collection.Add((GameComponent)(object)explosion2);
+				Vector2 position = MyMath.AngleToVector(angle6) * range6 + base.Position;
+				Explosion explosion = Explosion.NewExplosion(collection, base.Game);
+				explosion.Setup(position, 1f, 1f, 0f, 0f);
+				collection.Add((GameComponent)(object)explosion);
 				sound.PlayCue("expl1");
 			}
 			if (stateTimer.Finished)
@@ -270,9 +270,9 @@ internal class BrainBoss : KillableAlien
 				UberExplosion(base.Position);
 				UberExplosion(base.Position - new Vector2(100f, 0f));
 				UberExplosion(base.Position + new Vector2(100f, 0f));
-				BloodExplosion bloodExplosion5 = BloodExplosion.NewExplosion(collection, base.Game);
-				bloodExplosion5.Setup(base.Position, 7f, 3f, 0f, base.Direction);
-				collection.Add((GameComponent)(object)bloodExplosion5);
+				BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
+				bloodExplosion.Setup(base.Position, 7f, 3f, 0f, base.Direction);
+				collection.Add((GameComponent)(object)bloodExplosion);
 				state = BossState.smallwaitafterasplosion;
 				stateTimer.Duration = 300f;   // a really quick fadeout (see the state below)
 				stateTimer.Reset();
@@ -388,7 +388,7 @@ internal class BrainBoss : KillableAlien
 					spawnsoundtimer.Start();
 					spawnsoundtimer.Randomize();
 				}
-				BloodExplosion bloodExplosion2 = BloodExplosion.NewExplosion(collection, base.Game);
+				BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 				FindSpawnSpot(out var angle2, out var range2);
 				Vector2 val = base.Position + MyMath.AngleToVector(angle2) * range2;
 				switch (stuff)
@@ -459,8 +459,8 @@ internal class BrainBoss : KillableAlien
 					break;
 				}
 				}
-				bloodExplosion2.Setup(base.Position + MyMath.AngleToVector(angle2) * range2, 1f, 1f, 0.06f, angle2);
-				collection.Add((GameComponent)(object)bloodExplosion2);
+				bloodExplosion.Setup(base.Position + MyMath.AngleToVector(angle2) * range2, 1f, 1f, 0.06f, angle2);
+				collection.Add((GameComponent)(object)bloodExplosion);
 			}
 			break;
 		}

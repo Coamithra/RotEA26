@@ -161,16 +161,16 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		else
 		{
 			float num5 = MathHelper.Lerp(0f, 1f, step);
-			Vector2 position2 = new Vector2(MathHelper.Lerp(0f, 400f, num5), 200f);
-			Color color2 = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, num5)));
+			Vector2 position = new Vector2(MathHelper.Lerp(0f, 400f, num5), 200f);
+			Color color = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, num5)));
 			float num6 = MathHelper.Lerp(0.25f, 0.4f, num5);
 			float num7 = 800f / (float)art.Width;
 			float num8 = 600f / (float)art.Height;
-			Vector2 scale2 = new Vector2(num7 * num6, num8 * num6);
+			Vector2 scale = new Vector2(num7 * num6, num8 * num6);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
-			base.SpriteBatch.Draw(art, position2, 0f, scale2, center: true, color2);
+			base.SpriteBatch.Draw(art, position, 0f, scale, center: true, color);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-			RecordEntryHit(entry, position2, 800f * num6, 600f * num6);
+			RecordEntryHit(entry, position, 800f * num6, 600f * num6);
 		}
 	}
 

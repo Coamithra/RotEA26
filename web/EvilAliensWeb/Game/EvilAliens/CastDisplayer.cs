@@ -433,12 +433,12 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		}
 		for (int j = 0; j < debrisposition.Count; j++)
 		{
-			List<Vector2> list;
-			int index;
-			(list = debrisposition)[index = j] = list[index] + debrisspeed[j] * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
-			List<Vector2> list2;
-			int index2;
-			(list2 = debrisspeed)[index2 = j] = list2[index2] + new Vector2(0f, 0.001f * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+			List<Vector2> posList;
+			int posIndex;
+			(posList = debrisposition)[posIndex = j] = posList[posIndex] + debrisspeed[j] * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+			List<Vector2> speedList;
+			int speedIndex;
+			(speedList = debrisspeed)[speedIndex = j] = speedList[speedIndex] + new Vector2(0f, 0.001f * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 			debrisrotation[j] += debrisrotationspeed[j] * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			if (debrisposition[j].Y > 550f && debrisspeed[j].Y > 0f)
 			{
@@ -788,8 +788,8 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		}
 		else if (state == CastState.spiderboss)
 		{
-			int frame2 = (int)MyMath.Mod((float)gameTime.TotalGameTime.TotalSeconds * 30f, spiderFly.Frames);
-			spiderFly.Draw(frame2, spawnposition - new Vector2(450f, 200f), Color.White, scale, center: false);
+			int frame = (int)MyMath.Mod((float)gameTime.TotalGameTime.TotalSeconds * 30f, spiderFly.Frames);
+			spiderFly.Draw(frame, spawnposition - new Vector2(450f, 200f), Color.White, scale, center: false);
 		}
 		else if (texture != null)
 		{

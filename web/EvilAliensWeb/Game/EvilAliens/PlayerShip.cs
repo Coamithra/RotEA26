@@ -750,8 +750,8 @@ public class PlayerShip : AlienDrawableGameComponent
 					}
 					if (input.Down(MyKeys.Mouse1))
 					{
-						float direction2 = MyMath.VectorToAngle(input.MousePosition - base.Position);
-						FireAt(direction2);
+						float aimDirection = MyMath.VectorToAngle(input.MousePosition - base.Position);
+						FireAt(aimDirection);
 					}
 					else if (shoottimer.Finished)
 					{
@@ -1428,11 +1428,11 @@ public class PlayerShip : AlienDrawableGameComponent
 				steerTarget = haltingBoss.Position + (fromBoss / bossDist) * standoff;
 			}
 		}
-		foreach (PlayerShip ship2 in oracle.GetShips())
+		foreach (PlayerShip ship in oracle.GetShips())
 		{
-			if (ship2.readyToConnect && ship2 != this && readyToConnect && !isConnectedWith(ship2))
+			if (ship.readyToConnect && ship != this && readyToConnect && !isConnectedWith(ship))
 			{
-				steerTarget = ship2.Position;
+				steerTarget = ship.Position;
 			}
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)

@@ -323,9 +323,9 @@ internal class EvilSkull : KillableAlien
 					}
 					if (!(flag | fadeintimer.Active))
 					{
-						EvilBullet evilBullet2 = EvilBullet.NewEvilBullet(collection, base.Game);
-						evilBullet2.Setup(base.Position, MyMath.SnapAngle(MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position), 32));
-						collection.Add((GameComponent)(object)evilBullet2);
+						EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
+						evilBullet.Setup(base.Position, MyMath.SnapAngle(MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position), 32));
+						collection.Add((GameComponent)(object)evilBullet);
 					}
 				}
 				bulletsfired++;

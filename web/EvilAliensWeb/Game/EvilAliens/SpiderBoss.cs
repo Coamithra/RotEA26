@@ -437,20 +437,20 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				base.Position = new Vector2(-345f, randomYPosition());
 				ResetTimer(4f);
 				sfxplayed = false;
-				AnimatedMessage animatedMessage3 = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
-				animatedMessage3.Setup("Danger!", SoundManager.Texts.Danger, AnimatedMessage.MessageType.redwarning);
-				float warningDirection3 = (float)Math.PI;
+				AnimatedMessage animatedMessage = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
+				animatedMessage.Setup("Danger!", SoundManager.Texts.Danger, AnimatedMessage.MessageType.redwarning);
+				float warningDirection = (float)Math.PI;
 				if (base.Position.Y < 150f)
 				{
-					warningDirection3 = 3.6913714f;
+					warningDirection = 3.6913714f;
 				}
 				if (base.Position.Y > 250f)
 				{
-					warningDirection3 = (float)Math.PI * 7f / 8f;
+					warningDirection = (float)Math.PI * 7f / 8f;
 				}
-				animatedMessage3.SetWarningDirection(warningDirection3);
-				animatedMessage3.MakeShort();
-				collection.Add((GameComponent)(object)animatedMessage3);
+				animatedMessage.SetWarningDirection(warningDirection);
+				animatedMessage.MakeShort();
+				collection.Add((GameComponent)(object)animatedMessage);
 				waittimer.Duration = flyPauseMs;
 				waittimer.Reset();
 				waittimer.Start();
@@ -465,12 +465,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			}
 			if (base.Position.X > 1145f && stateTimer.Finished)
 			{
-				AnimatedMessage animatedMessage2 = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
-				animatedMessage2.Setup("Danger!", SoundManager.Texts.Danger, AnimatedMessage.MessageType.redwarning);
-				float warningDirection2 = -0.9424779f;
-				animatedMessage2.SetWarningDirection(warningDirection2);
-				animatedMessage2.MakeShort();
-				collection.Add((GameComponent)(object)animatedMessage2);
+				AnimatedMessage animatedMessage = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
+				animatedMessage.Setup("Danger!", SoundManager.Texts.Danger, AnimatedMessage.MessageType.redwarning);
+				float warningDirection = -0.9424779f;
+				animatedMessage.SetWarningDirection(warningDirection);
+				animatedMessage.MakeShort();
+				collection.Add((GameComponent)(object)animatedMessage);
 				state = SpiderBossState.land;
 				base.Position = new Vector2(600f, -345f);
 				waittimer.Duration = landWarningLeadMs;
@@ -573,12 +573,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			for (int i = 0; i < debrisposition.Count; i++)
 			{
-				List<Vector2> list;
-				int index;
-				(list = debrisposition)[index = i] = list[index] + (oracle.BackgroundSpeed + debrisspeed[i]) * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
-				List<Vector2> list2;
-				int index2;
-				(list2 = debrisspeed)[index2 = i] = list2[index2] + new Vector2(0f, 0.001f * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+				List<Vector2> posList;
+				int posIndex;
+				(posList = debrisposition)[posIndex = i] = posList[posIndex] + (oracle.BackgroundSpeed + debrisspeed[i]) * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+				List<Vector2> speedList;
+				int speedIndex;
+				(speedList = debrisspeed)[speedIndex = i] = speedList[speedIndex] + new Vector2(0f, 0.001f * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 				debrisrotation[i] += debrisrotationspeed[i] * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 				if (debrisposition[i].Y > 550f && debrisspeed[i].Y > 0f)
 				{

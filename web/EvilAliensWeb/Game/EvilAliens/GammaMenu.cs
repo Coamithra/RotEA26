@@ -131,12 +131,12 @@ public class GammaMenu : Scene
 	public override void Update(GameTime gameTime)
 	{
 		base.Update(gameTime);
-		ref Vector2 reference = ref starfieldPos;
-		reference.Y += (float)gameTime.ElapsedGameTime.TotalSeconds * 20f;
+		ref Vector2 scrollRef = ref starfieldPos;
+		scrollRef.Y += (float)gameTime.ElapsedGameTime.TotalSeconds * 20f;
 		if (starfieldPos.Y > 600f)
 		{
-			ref Vector2 reference2 = ref starfieldPos;
-			reference2.Y -= (float)starfield.LogicalHeight();
+			ref Vector2 wrapRef = ref starfieldPos;
+			wrapRef.Y -= (float)starfield.LogicalHeight();
 		}
 		bool brightenHeld = false;
 		for (int i = 0; i < 4; i++)

@@ -91,9 +91,9 @@ internal class TutorialLevel : GameScene
 		// Fire prompt + the practice UFO on the same beat; the prompt clears the moment
 		// the kill lands so a fast kill can't leave it overlapping the next message.
 		TutorialMessageEvent firePrompt = messageByDevice("Use Right Stick to Fire", "Aim with the Mouse, hold Left Click to Fire", isCheckpoint: true, halting: false);
-		SingleEnemySpawner gameEvent = new SingleEnemySpawner(base.Game);
-		gameEvent.LinkWith(firePrompt);
-		eventList.AddEvent(gameEvent);
+		SingleEnemySpawner singleEnemySpawner = new SingleEnemySpawner(base.Game);
+		singleEnemySpawner.LinkWith(firePrompt);
+		eventList.AddEvent(singleEnemySpawner);
 		eventList.AddHalt();
 		wait(1f);
 		powerupLesson("Pick up B's for a bomb", Powerup.PowerupType.Blast, 10f);
@@ -118,8 +118,8 @@ internal class TutorialLevel : GameScene
 		waitEvent = new WaitEvent(base.Game, 0.01f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += spawnPunchingBag;
-		PowerUpTrainingEvent gameEvent2 = new PowerUpTrainingEvent(base.Game);
-		eventList.AddEvent(gameEvent2);
+		PowerUpTrainingEvent powerUpTrainingEvent = new PowerUpTrainingEvent(base.Game);
+		eventList.AddEvent(powerUpTrainingEvent);
 		eventList.AddHalt();
 		wait(3f);
 		waitEvent = new WaitEvent(base.Game, 0.01f);
@@ -271,8 +271,8 @@ internal class TutorialLevel : GameScene
 	// to whatever ends the beat so banners can never stack (they share one screen position).
 	private TutorialMessageEvent message(string message, float time, bool isCheckpoint, bool halting = true)
 	{
-		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, time, message);
-		eventList.AddEvent(gameEvent, halting);
+		TutorialMessageEvent tutorialMessageEvent = new TutorialMessageEvent(base.Game, time, message);
+		eventList.AddEvent(tutorialMessageEvent, halting);
 		if (halting)
 		{
 			eventList.AddHalt();
@@ -285,15 +285,15 @@ internal class TutorialLevel : GameScene
 		{
 			wait(0.6f);
 		}
-		return gameEvent;
+		return tutorialMessageEvent;
 	}
 
 	// Device-dependent prompt: picks gamepadText vs mkText when the message is actually
 	// shown (see UsingGamepad — must be resolved at display time, not list-build time).
 	private TutorialMessageEvent messageByDevice(string gamepadText, string mkText, bool isCheckpoint = false, bool halting = true)
 	{
-		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, 6.5f, () => UsingGamepad ? gamepadText : mkText);
-		eventList.AddEvent(gameEvent, halting);
+		TutorialMessageEvent tutorialMessageEvent = new TutorialMessageEvent(base.Game, 6.5f, () => UsingGamepad ? gamepadText : mkText);
+		eventList.AddEvent(tutorialMessageEvent, halting);
 		if (halting)
 		{
 			eventList.AddHalt();
@@ -306,13 +306,13 @@ internal class TutorialLevel : GameScene
 		{
 			wait(0.6f);
 		}
-		return gameEvent;
+		return tutorialMessageEvent;
 	}
 
 	private void wait(float time)
 	{
-		WaitEvent gameEvent = new WaitEvent(base.Game, time);
-		eventList.AddEvent(gameEvent, halting: true);
+		WaitEvent waitEvent = new WaitEvent(base.Game, time);
+		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
 	}
 

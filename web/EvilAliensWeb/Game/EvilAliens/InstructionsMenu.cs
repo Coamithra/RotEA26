@@ -146,11 +146,11 @@ internal class InstructionsMenu : DrawableGameComponent
 			break;
 		case HelpText.Displays.Powerups:
 		{
-			Color color2 = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
-			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
+			Color color = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
+			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color);
 			spriteBatch.Flush();
 			string heading = "Enhancements";
-			spriteBatch.DrawMetalString(font, heading, new Vector2(400f, 180f), color2, 0f, font.MeasureString(heading) / 2f, 1.5f);
+			spriteBatch.DrawMetalString(font, heading, new Vector2(400f, 180f), color, 0f, font.MeasureString(heading) / 2f, 1.5f);
 			spriteBatch.Flush();
 			float rowY = 220f;
 			float rowStep = 40f;

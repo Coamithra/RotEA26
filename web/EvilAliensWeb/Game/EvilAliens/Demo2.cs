@@ -148,25 +148,25 @@ internal class Demo2 : GameScene
 		StationaryWave(1f, 3f, 0f, 1f, 0f, 0f);
 		Wait(3f);
 		StationaryWave(1f, 3f, 0f, 1f, 0f, 0f);
-		WaitEvent waitEvent2 = new WaitEvent(base.Game, 3f);
-		eventList.AddEvent(waitEvent2, halting: false);
-		waitEvent2.OnFinished += spawnStationaryBoss;
+		WaitEvent delayEvent = new WaitEvent(base.Game, 3f);
+		eventList.AddEvent(delayEvent, halting: false);
+		delayEvent.OnFinished += spawnStationaryBoss;
 		Wait(5f);
 		StationaryWave(1f, 6f, 1f, 1f, 0f, 0f);
 		Wait(4f);
 		StationaryWave(1f, 3f, 0f, 1f, 0f, 0f);
 		Wait(3f);
 		StationaryWave(1f, 3f, 0f, 1f, 0f, 0f);
-		waitEvent2 = new WaitEvent(base.Game, 3f);
-		eventList.AddEvent(waitEvent2, halting: false);
-		waitEvent2.OnFinished += spawnStationaryBoss;
+		delayEvent = new WaitEvent(base.Game, 3f);
+		eventList.AddEvent(delayEvent, halting: false);
+		delayEvent.OnFinished += spawnStationaryBoss;
 		StationaryWave(1f, 3f, 0f, 1f, 0f, 0f);
 		Wait(3f);
 		StationaryWave(1f, 6f, 1f, 1f, 0f, 0f);
 		eventList.AddEvent(waitEvent, halting: false);
-		waitEvent2 = new WaitEvent(base.Game, 10f);
-		eventList.AddEvent(waitEvent2, halting: true);
-		waitEvent2.OnFinished += slowdown;
+		delayEvent = new WaitEvent(base.Game, 10f);
+		eventList.AddEvent(delayEvent, halting: true);
+		delayEvent.OnFinished += slowdown;
 		eventList.AddHalt();
 		ufoSpawner = new UfoSpawner(base.Game, 25f, 2.1f, big: false);
 		ufoSpawner.SetupMarsWest();
@@ -179,12 +179,12 @@ internal class Demo2 : GameScene
 		eventList.AddEvent(bonusSpawner, halting: false);
 		Wait(5f);
 		StationaryWave(20f, 0.5f, 0f, 0f, 0f, 1f);
-		waitEvent2 = new WaitEvent(base.Game, 6f);
-		eventList.AddEvent(waitEvent2, halting: true);
-		waitEvent2.OnFinished += speedup;
+		delayEvent = new WaitEvent(base.Game, 6f);
+		eventList.AddEvent(delayEvent, halting: true);
+		delayEvent.OnFinished += speedup;
 		eventList.AddHalt();
-		waitEvent2 = new WaitEvent(base.Game, 2f);
-		eventList.AddEvent(waitEvent2, halting: true);
+		delayEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(delayEvent, halting: true);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
 		MarsBossSpawner marsBossSpawner = new MarsBossSpawner(base.Game);
@@ -194,8 +194,8 @@ internal class Demo2 : GameScene
 		marsBossSpawner.LinkWith(stationarySpawner);
 		eventList.AddEvent(stationarySpawner, halting: false);
 		Wait(5f);
-		waitEvent2 = new WaitEvent(base.Game, 3f);
-		eventList.AddEvent(waitEvent2, halting: true);
+		delayEvent = new WaitEvent(base.Game, 3f);
+		eventList.AddEvent(delayEvent, halting: true);
 		eventList.AddHalt();
 		bonusSpawner = new BonusSpawner(base.Game, 0f, 0.2f, randomly: true);
 		bonusSpawner.SetMars();
@@ -203,13 +203,13 @@ internal class Demo2 : GameScene
 		eventList.AddEvent(bonusSpawner, halting: false);
 		eventList.AddEvent(marsBossSpawner, halting: true);
 		eventList.AddHalt();
-		UnlockEvent gameEvent = new UnlockEvent(base.Game, "Mechanical Friends", Unlockables.Items.Friends, AnimatedMessage.UnlockType.cheat, level);
-		eventList.AddEvent(gameEvent, halting: true);
+		UnlockEvent unlockEvent = new UnlockEvent(base.Game, "Mechanical Friends", Unlockables.Items.Friends, AnimatedMessage.UnlockType.cheat, level);
+		eventList.AddEvent(unlockEvent, halting: true);
 		eventList.AddHalt();
-		waitEvent2 = new WaitEvent(base.Game, 0.1f);
-		eventList.AddEvent(waitEvent2, halting: true);
+		delayEvent = new WaitEvent(base.Game, 0.1f);
+		eventList.AddEvent(delayEvent, halting: true);
 		eventList.AddHalt();
-		waitEvent2.OnFinished += Victory;
+		delayEvent.OnFinished += Victory;
 	}
 
 	private void Victory(GameEvent sender)
@@ -237,8 +237,8 @@ internal class Demo2 : GameScene
 
 	private void Wait(float time)
 	{
-		WaitEvent gameEvent = new WaitEvent(base.Game, time);
-		eventList.AddEvent(gameEvent, halting: true);
+		WaitEvent waitEvent = new WaitEvent(base.Game, time);
+		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
 	}
 

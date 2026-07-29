@@ -55,14 +55,14 @@ internal class MiniExplosion
 	{
 		Active = true;
 		ExplosionData[] fire = particles;
-		foreach (ExplosionData explosionData in fire)
+		foreach (ExplosionData particle in fire)
 		{
-			explosionData.Initialize(size, lifetime, Vector2.Zero);
+			particle.Initialize(size, lifetime, Vector2.Zero);
 		}
 		ExplosionData[] smoke = smokeparticles;
-		foreach (ExplosionData explosionData2 in smoke)
+		foreach (ExplosionData particle in smoke)
 		{
-			explosionData2.Initialize(size, lifetime * 1.35f, Vector2.Zero);
+			particle.Initialize(size, lifetime * 1.35f, Vector2.Zero);
 		}
 		this.position = position;
 	}
@@ -71,24 +71,24 @@ internal class MiniExplosion
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		ExplosionData[] smoke = smokeparticles;
-		foreach (ExplosionData explosionData in smoke)
+		foreach (ExplosionData particle in smoke)
 		{
-			if (!(explosionData.lifetime <= 0f))
+			if (!(particle.lifetime <= 0f))
 			{
-				float alpha = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
+				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(smoketexture, position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, tint);
+				spriteBatch.Draw(smoketexture, position + particle.position, particle.rotation, particle.scale, center: true, tint);
 			}
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		ExplosionData[] fire = particles;
-		foreach (ExplosionData explosionData2 in fire)
+		foreach (ExplosionData particle in fire)
 		{
-			if (!(explosionData2.lifetime <= 0f))
+			if (!(particle.lifetime <= 0f))
 			{
-				float alpha = 4f * explosionData2.normalizedLifetime * (1f - explosionData2.normalizedLifetime);
+				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(particletexture, position + explosionData2.position, explosionData2.rotation, explosionData2.scale, center: true, tint);
+				spriteBatch.Draw(particletexture, position + particle.position, particle.rotation, particle.scale, center: true, tint);
 			}
 		}
 	}
@@ -96,19 +96,19 @@ internal class MiniExplosion
 	public void Update(GameTime gameTime)
 	{
 		ExplosionData[] fire = particles;
-		foreach (ExplosionData explosionData in fire)
+		foreach (ExplosionData particle in fire)
 		{
-			explosionData.Update(gameTime);
-			if (explosionData.lifetime > 0f)
+			particle.Update(gameTime);
+			if (particle.lifetime > 0f)
 			{
 				Active = true;
 			}
 		}
 		ExplosionData[] smoke = smokeparticles;
-		foreach (ExplosionData explosionData2 in smoke)
+		foreach (ExplosionData particle in smoke)
 		{
-			explosionData2.Update(gameTime);
-			if (explosionData2.lifetime > 0f)
+			particle.Update(gameTime);
+			if (particle.lifetime > 0f)
 			{
 				Active = true;
 			}

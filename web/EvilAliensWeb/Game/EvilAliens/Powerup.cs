@@ -192,8 +192,8 @@ public class Powerup : AlienDrawableGameComponent
 		}
 		else
 		{
-			Vector2 backgroundSpeed2 = oracle.BackgroundSpeed;
-			base.Speed = (backgroundSpeed2).Length();
+			Vector2 backgroundSpeed = oracle.BackgroundSpeed;
+			base.Speed = (backgroundSpeed).Length();
 		}
 		base.Direction = MyMath.VectorToAngle(oracle.BackgroundSpeed);
 		if (impulsetimer.Active)

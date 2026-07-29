@@ -70,15 +70,15 @@ internal class ClassicAliens : GameScene
 
 	private void showMessage(string message, float time, bool isCheckpoint)
 	{
-		TutorialMessageEvent gameEvent = new TutorialMessageEvent(base.Game, time, message);
-		eventList.AddEvent(gameEvent);
+		TutorialMessageEvent tutorialMessageEvent = new TutorialMessageEvent(base.Game, time, message);
+		eventList.AddEvent(tutorialMessageEvent);
 		eventList.AddHalt();
 		if (isCheckpoint)
 		{
 			eventList.SetLastEventAsCheckPoint();
 		}
-		WaitEvent gameEvent2 = new WaitEvent(base.Game, 0.6f);
-		eventList.AddEvent(gameEvent2);
+		WaitEvent waitEvent = new WaitEvent(base.Game, 0.6f);
+		eventList.AddEvent(waitEvent);
 		eventList.AddHalt();
 	}
 
@@ -99,8 +99,8 @@ internal class ClassicAliens : GameScene
 		showMessage("Welcome to the Trial Simulation Chamber", 6.5f, isCheckpoint: false);
 		burst(1f);
 		showMessage("Activating Training Mode...", 6.5f, isCheckpoint: false);
-		WaitEvent gameEvent = new WaitEvent(base.Game, 0.01f);
-		eventList.AddEvent(gameEvent);
+		WaitEvent waveWait = new WaitEvent(base.Game, 0.01f);
+		eventList.AddEvent(waveWait);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
 		for (int i = 1; i < 21; i++)
@@ -119,10 +119,10 @@ internal class ClassicAliens : GameScene
 				eventList.AddEvent(messageEvent);
 				eventList.MakeConditional(messageEvent, Settings.DifficultyLevel.Very_Hard, Settings.DifficultyLevel.Inzane);
 				messageEvent.OnFinished += spawnbonus;
-				gameEvent = new WaitEvent(base.Game, 2f);
-				eventList.AddEvent(gameEvent);
+				waveWait = new WaitEvent(base.Game, 2f);
+				eventList.AddEvent(waveWait);
 				eventList.AddHalt();
-				eventList.MakeConditional(gameEvent, Settings.DifficultyLevel.Very_Hard, Settings.DifficultyLevel.Inzane);
+				eventList.MakeConditional(waveWait, Settings.DifficultyLevel.Very_Hard, Settings.DifficultyLevel.Inzane);
 			}
 			if (i > 10 && i <= 15)
 			{
@@ -145,11 +145,11 @@ internal class ClassicAliens : GameScene
 		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
 		eventList.MakeConditional(waitEvent, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
-		MessageEvent messageEvent2 = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 3.2f);
-		messageEvent2.SetupAsWarning(4.712389f);
-		eventList.AddEvent(messageEvent2, halting: true);
+		MessageEvent warningMessage = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 3.2f);
+		warningMessage.SetupAsWarning(4.712389f);
+		eventList.AddEvent(warningMessage, halting: true);
 		eventList.AddHalt();
-		eventList.MakeConditional(messageEvent2, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
+		eventList.MakeConditional(warningMessage, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		ClassicBossSpawner classicBossSpawner = new ClassicBossSpawner(base.Game);
 		eventList.AddEvent(classicBossSpawner, halting: true);
 		eventList.AddHalt();

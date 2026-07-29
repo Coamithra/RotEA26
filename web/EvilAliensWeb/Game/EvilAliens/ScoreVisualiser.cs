@@ -694,9 +694,9 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		if (phototimer.Active)
 		{
 			float alpha = MathHelper.SmoothStep(0f, 1f, phototimer.Normalized);
-			Color color2 = new Color(new Vector4((snapshotcolor).ToVector3(), alpha));
+			Color photoTint = new Color(new Vector4((snapshotcolor).ToVector3(), alpha));
 			float photoSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/photocamera", photocamera.LogicalWidth());
-			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.LogicalHeight() / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
+			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.LogicalHeight() / photoSsf / 2f), 0f, 1f / photoSsf, center: true, photoTint);
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 	}

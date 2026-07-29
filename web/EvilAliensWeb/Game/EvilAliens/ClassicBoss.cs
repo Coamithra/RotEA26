@@ -163,10 +163,10 @@ internal class ClassicBoss : KillableAlien
 		}
 		if ((double)RandomHelper.RandomNextFloat(0f, 1f) <= (double)(num3 * 2f) * gameTime.ElapsedGameTime.TotalMilliseconds * (double)Settings.GetInstance().DifficultyModifier)
 		{
-			EvilBullet evilBullet2 = EvilBullet.NewEvilBullet(collection, base.Game);
-			float direction2 = RandomHelper.RandomNextAngle();
-			evilBullet2.Setup(base.Position, direction2);
-			collection.Add((GameComponent)(object)evilBullet2);
+			EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
+			float direction = RandomHelper.RandomNextAngle();
+			evilBullet.Setup(base.Position, direction);
+			collection.Add((GameComponent)(object)evilBullet);
 		}
 		base.DirectionalVector = directionalVector;
 		targetdir = MyMath.VectorToAngle(v);

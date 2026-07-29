@@ -205,8 +205,8 @@ internal abstract class SubMenuCarousel : MenuSub1
                 visibleIndex++;
             }
         }
-        float step2 = 0.5f + 0.33f * MyMath.DifferenceMod(a, selectedVisibleIndex, visibleCount);
-        DrawEntryAt(targetSelected, step2);
+        float selectedStep = 0.5f + 0.33f * MyMath.DifferenceMod(a, selectedVisibleIndex, visibleCount);
+        DrawEntryAt(targetSelected, selectedStep);
         DrawCarouselOverlay(gameTime);
     }
 

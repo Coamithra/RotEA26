@@ -129,18 +129,18 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 		else
 		{
 			float toCentre = MathHelper.Lerp(0f, 1f, step);
-			Vector2 position2 = new Vector2(MathHelper.Lerp(0f, 400f, toCentre), 200f);
-			Color color2 = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, toCentre)));
+			Vector2 position = new Vector2(MathHelper.Lerp(0f, 400f, toCentre), 200f);
+			Color color = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, toCentre)));
 			float entryScale = MathHelper.Lerp(0.25f, 0.4f, toCentre);
 			float fitX = 800f / (float)entryImages[entry].Width;
 			float fitY = 600f / (float)entryImages[entry].Height;
-			Vector2 scale2 = new Vector2(fitX * entryScale, fitY * entryScale);
+			Vector2 scale = new Vector2(fitX * entryScale, fitY * entryScale);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
-			base.SpriteBatch.Draw(entryImages[entry], position2, 0f, scale2, center: true, color2);
+			base.SpriteBatch.Draw(entryImages[entry], position, 0f, scale, center: true, color);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-			DrawAchievementText(entry, position2, entryScale, color2);
+			DrawAchievementText(entry, position, entryScale, color);
 			// Mouse hit box: screenshot centred at `position2`, sized 800*entryScale x 600*entryScale.
-			RecordEntryHit(entry, position2, 800f * entryScale, 600f * entryScale);
+			RecordEntryHit(entry, position, 800f * entryScale, 600f * entryScale);
 		}
 	}
 

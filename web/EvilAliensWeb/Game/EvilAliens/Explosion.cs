@@ -110,14 +110,14 @@ internal class Explosion : AlienDrawableGameComponent
 	public override void Initialize()
 	{
 		ExplosionData[] fire = particles;
-		foreach (ExplosionData explosionData in fire)
+		foreach (ExplosionData particle in fire)
 		{
-			explosionData.Initialize(size, lifetime, impulse);
+			particle.Initialize(size, lifetime, impulse);
 		}
 		ExplosionData[] smoke = smokeparticles;
-		foreach (ExplosionData explosionData2 in smoke)
+		foreach (ExplosionData particle in smoke)
 		{
-			explosionData2.Initialize(size, lifetime * 1.35f, impulse * 0.85f);
+			particle.Initialize(size, lifetime * 1.35f, impulse * 0.85f);
 		}
 		base.Initialize();
 		SmokeDrawer smokeDrawer = SmokeDrawer.NewSmokeDrawer(collection, base.Game);
@@ -196,14 +196,14 @@ internal class Explosion : AlienDrawableGameComponent
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		ExplosionData[] fire = particles;
-		foreach (ExplosionData explosionData in fire)
+		foreach (ExplosionData particle in fire)
 		{
-			if (!(explosionData.lifetime <= 0f))
+			if (!(particle.lifetime <= 0f))
 			{
-				float alpha = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
+				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
 				Texture2D blastTexture = ((!blue) ? redblast : blueblast);
-				spriteBatch.Draw(blastTexture, base.Position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, tint);
+				spriteBatch.Draw(blastTexture, base.Position + particle.position, particle.rotation, particle.scale, center: true, tint);
 			}
 		}
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
@@ -213,13 +213,13 @@ internal class Explosion : AlienDrawableGameComponent
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)1;
 		ExplosionData[] smoke = smokeparticles;
-		foreach (ExplosionData explosionData in smoke)
+		foreach (ExplosionData particle in smoke)
 		{
-			if (!(explosionData.lifetime <= 0f))
+			if (!(particle.lifetime <= 0f))
 			{
-				float alpha = 4f * explosionData.normalizedLifetime * (1f - explosionData.normalizedLifetime);
+				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(smoketexture, base.Position + explosionData.position, explosionData.rotation, explosionData.scale, center: true, tint);
+				spriteBatch.Draw(smoketexture, base.Position + particle.position, particle.rotation, particle.scale, center: true, tint);
 			}
 		}
 	}
@@ -239,19 +239,19 @@ internal class Explosion : AlienDrawableGameComponent
 		}
 		bool anyAlive = false;
 		ExplosionData[] fire = particles;
-		foreach (ExplosionData explosionData in fire)
+		foreach (ExplosionData particle in fire)
 		{
-			explosionData.Update(gameTime);
-			if (explosionData.lifetime > 0f)
+			particle.Update(gameTime);
+			if (particle.lifetime > 0f)
 			{
 				anyAlive = true;
 			}
 		}
 		ExplosionData[] smoke = smokeparticles;
-		foreach (ExplosionData explosionData2 in smoke)
+		foreach (ExplosionData particle in smoke)
 		{
-			explosionData2.Update(gameTime);
-			if (explosionData2.lifetime > 0f)
+			particle.Update(gameTime);
+			if (particle.lifetime > 0f)
 			{
 				anyAlive = true;
 			}

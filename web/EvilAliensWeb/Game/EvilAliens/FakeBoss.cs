@@ -226,10 +226,10 @@ internal class FakeBoss : KillableAlien
 			float num5 = 0f;
 			for (int k = 0; k < num4; k++)
 			{
-				float direction2 = (float)k * (float)Math.PI / (float)num4 + num5;
-				EvilBullet evilBullet3 = EvilBullet.NewEvilBullet(collection, base.Game);
-				evilBullet3.Setup(base.Position + mouthhotspot, direction2);
-				collection.Add((GameComponent)(object)evilBullet3);
+				float direction = (float)k * (float)Math.PI / (float)num4 + num5;
+				EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
+				evilBullet.Setup(base.Position + mouthhotspot, direction);
+				collection.Add((GameComponent)(object)evilBullet);
 			}
 			RestartMoving(50f);
 			break;
@@ -243,9 +243,9 @@ internal class FakeBoss : KillableAlien
 			{
 				float num2 = MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - (base.Position + mouthhotspot));
 				num2 += RandomHelper.RandomNextFloat(-0.3f, 0.3f);
-				EvilBullet evilBullet2 = EvilBullet.NewEvilBullet(collection, base.Game);
-				evilBullet2.Setup(base.Position + mouthhotspot, num2);
-				collection.Add((GameComponent)(object)evilBullet2);
+				EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
+				evilBullet.Setup(base.Position + mouthhotspot, num2);
+				collection.Add((GameComponent)(object)evilBullet);
 			}
 			break;
 		case FakeBossState.spawnufos:
@@ -290,8 +290,8 @@ internal class FakeBoss : KillableAlien
 				{
 					BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
 					FindSpawnSpot(out var angle2, out var range2);
-					Vector2 position2 = MyMath.AngleToVector(angle2) * range2 + base.Position;
-					bloodExplosion.Setup(position2, 5f + (float)j / 5f, 1f + (float)j / 5f, 0f, base.Direction);
+					Vector2 position = MyMath.AngleToVector(angle2) * range2 + base.Position;
+					bloodExplosion.Setup(position, 5f + (float)j / 5f, 1f + (float)j / 5f, 0f, base.Direction);
 					collection.Add((GameComponent)(object)bloodExplosion);
 				}
 			}

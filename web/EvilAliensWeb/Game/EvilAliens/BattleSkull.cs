@@ -167,9 +167,9 @@ internal class BattleSkull : KillableAlien
 				// ~2.5s dying animation, before the DeathTimer.Finished finale below) — no shake
 				// per pop, or a procession of these minibosses dying together rattles the screen
 				// nonstop. The finale explosions above keep their shake.
-				Explosion explosion2 = Explosion.NewExplosion(collection, base.Game);
-				explosion2.Setup(base.Position + new Vector2(RandomHelper.RandomNextFloat(-60f, 60f), RandomHelper.RandomNextFloat(-90f, 90f)) * scale, 0.8f * scale, 0.8f * scale, 0f, 0f, noShake: true);
-				collection.Add((GameComponent)(object)explosion2);
+				Explosion explosion = Explosion.NewExplosion(collection, base.Game);
+				explosion.Setup(base.Position + new Vector2(RandomHelper.RandomNextFloat(-60f, 60f), RandomHelper.RandomNextFloat(-90f, 90f)) * scale, 0.8f * scale, 0.8f * scale, 0f, 0f, noShake: true);
+				collection.Add((GameComponent)(object)explosion);
 				sound.PlayCue("expl1");
 			}
 			break;

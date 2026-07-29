@@ -240,7 +240,8 @@ generate much of the art/audio referenced here.
   a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
-  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
+  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec, plus the stale
+  menu roster, `?netdropgrant`'s one-shot latch and couch-seat reuse -- leave-no-trace,
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
@@ -249,6 +250,7 @@ generate much of the art/audio referenced here.
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
+  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
@@ -1686,6 +1688,24 @@ interpolation feel, both gated on real-network playtests.
       `RejectFull` ("Game full"). The host's own game SURVIVES that -- `Stop()` does not exit a
       level and `NetListing.ComputeEligible` needs `!NetSession.Active`, so a listed host drops
       back to single-player and re-lists. Verify with `eaSlotTest()`.
+  - **The roster is cleared on the way OUT of a scene as well as in (card ee96ea61).**
+    `GameScene.Terminate` ends with `oracle.ResetPlayers()`. Before that only the launch paths
+    reset it, so between a scene ending and the next launch the roster held whatever the last
+    level or attract demo left behind -- and that window is where BOTH menu-lobby handshakes and
+    the join-in-progress joiner hello run. The client side was already guarded
+    (`LocalBlockedSlots` returns 0 with no `GameScene`), but **`HostOccupiedSlots` reads the
+    roster raw**, so an attract demo could make a host answer a good joiner with `RejectFull`
+    ("Game full") with no real players aboard, or grant them slot 2 instead of 1 for the whole
+    session. Safe because `PlayerInfo.Reset()` only clears `isPlaying` -- score lives in
+    `ScoreVisualiser`, unlocks in `Achievements`, and the hue is deliberately left alone. It is
+    LAST in `Terminate`: `OnFinished` fires mid-method and has already queued the next scene
+    (credits/menu), neither of which seats anyone.
+    **Do not add a second menu-guard to `HostOccupiedSlots` instead** -- the reset is the root
+    cause and covers `AllocateSeat`/`HandleJoinRequest` too.
+  - **Read the OFFLINE roster with `eaOracleRoster()`** (`eval OracleRoster` under `eahl`).
+    `eaNetRoster()` early-returns without a net session, so it cannot see the menu roster at
+    all -- which is exactly where a stale seat does its damage. Needs no session, level or
+    gamepad.
   - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
     slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
     tab pairs WHILE it boots, so the grant can land before the seat is taken) and
@@ -1750,15 +1770,27 @@ interpolation feel, both gated on real-network playtests.
     LOOP flag, so it needs neither the HUD nor `?nofps`. Cost: the client runs far above vsync,
     which inflates `pupPops`/`dup`/`snapUnk` around id churn -- read those as not comparable to
     a normal-rate run, while roster/adopt/`resets` assertions stay valid.
-  - **`?netdropgrant` (client) is the only trigger for `ExpireUnclaimedGrants`.** The host holds
+  - **`?netdropgrant` (client) is the only trigger for `ExpireUnclaimedGrants`, and it is
+    ONE-SHOT (card ee96ea61).** The host holds
     a granted couch seat as `RemoteFriend` until the peer's first stream for it lands; a client
     that silently fails to take the grant would otherwise leak that seat for the session (and the
     game stops being re-listable). `?netlocal` always TAKES its grant, so the expiry path had no
-    trigger at all -- this flag drops **every** `EvSlotGrant` (it is read per grant, not
-    one-shot, so while it is set no couch join completes) after clearing `joinRequestPending`,
-    leaving this side exactly as a genuine failed take does. Expect the host to log
+    trigger at all -- this flag drops the **first** `EvSlotGrant` of a session after clearing
+    `joinRequestPending`, leaving this side exactly as a genuine failed take does, and lets every
+    later grant through. Expect the host to log
     `granted peer couch join slot=N` then `released unclaimed couch grant slot=N` ~10s later
     (`GrantClaimTimeoutMs`), and the seat to leave `roster=` rather than leak.
+    - **It dropped EVERY grant until card ee96ea61**, so a run could only show the DROP half and
+      "the reclaimed seat is re-usable" went unverified. `?netlocal=2` now covers both halves in
+      one run. Note the second join lands ~3s after the first while `GrantClaimTimeoutMs` is 10s,
+      so it is handed a DIFFERENT free seat -- proving recovery, not reuse. For reuse proper,
+      wait out the release and call `eaNetCouchJoin()`, or just read `eaSlotTest()`, which drives
+      the whole reserve -> hold -> expire -> reallocate cycle as data.
+    - **The latch is per SESSION and the clearing is the load-bearing half** -- a flag outliving
+      the thing that set it is the exact bug class this seam exists to hunt, so it lives in
+      `NetSession.ResetPerSessionState` beside `joinRequestPending`, and `eaSlotTest()` asserts a
+      teardown clears it (driving `ResetPerSessionState` directly, since `Stop()` early-returns
+      with nothing Active and would make the leg vacuous -- the `eaKickTest()` precedent).
   - **`RejectFull` needs `eaNetCouchJoin()`, NOT `?netlocal`.** Reaching it means the host roster
     is already full when a joiner says hello, which means couch players seated BEFORE pairing --
     and `TickLocalJoinSim` is deliberately gated behind `PeerUp` (pre-pairing, `AllocateSeat`
@@ -2069,8 +2101,9 @@ interpolation feel, both gated on real-network playtests.
     forever (`pri=0/0` vs `pri=0/1`), the joiner never built a remote puppet (`remoteShip=0`,
     `buf=0ms`), and NOTHING surfaced to the player.
     **It was reachable with no debug flags at all**, which is the part worth remembering: the
-    menu's roster is whatever the last scene left behind (`GameScene.Terminate` does NOT reset
-    it; only the launch paths' `ResetPlayers()` do), and the attract demo seats MORE than one --
+    menu's roster was whatever the last scene left behind (`GameScene.Terminate` did NOT reset
+    it; only the launch paths' `ResetPlayers()` did -- card ee96ea61 has since made Terminate
+    reset it too, see the roster-slots bullet), and the attract demo seats MORE than one --
     `mainMenu_DemoSelected` seats slot 0, then `Demo1/2/3.Initialize` adds 3 more on a 20% roll
     and 1 more on a further 40% roll. So "idle at the menu -> attract demo -> key out -> Online
     Co-op -> Join" left slot 1 seated ~60% of the time, and a couch session backed out to the

@@ -56,9 +56,12 @@ namespace EvilAliensWeb.Compat.Net
             Check(NetSession.DecideSlotAdopt(1, 1, None, true, true, false) == NetSession.SlotAdopt.TakeSlot,
                 "granted our current slot but not yet settled -> TakeSlot, not Settled");
 
-            // THE CARD'S CASE. At the menu the roster is leftover bookkeeping (GameScene.Terminate
-            // never clears it; ~60% of attract demos leave slot 1 seated) that the launch path's
-            // ResetPlayers() wipes before seating us -- so a busy destination means nothing there.
+            // THE CARD'S CASE. At the menu a seated slot means nothing to the client: the launch
+            // path's ResetPlayers() wipes the roster before seating us either way. It used to be
+            // reachable in ordinary play too (~60% of attract demos left slot 1 seated, since
+            // GameScene.Terminate did not clear the roster) -- card ee96ea61 closed that at the
+            // source, but the client's indifference here is what makes it safe regardless, so the
+            // case stays covered.
             Check(NetSession.DecideSlotAdopt(0, 1, None, false, true, true) == NetSession.SlotAdopt.TakeSlot,
                 "menu + granted seat busy -> TakeSlot (the reachable-by-a-real-player case)");
             Check(NetSession.DecideSlotAdopt(0, 1, None, false, true, false) == NetSession.SlotAdopt.TakeSlot,
@@ -277,6 +280,160 @@ namespace EvilAliensWeb.Compat.Net
             Check(!NetProtocol.SlotInMask(0xFF, 4) && !NetProtocol.SlotInMask(0xFF, -1),
                 "an out-of-range slot is never blocked");
 
+            // ---- 6. The MENU roster reaches the host allocator (card ee96ea61) ----------------
+            //
+            // Everything above tests the negotiation given a roster. This tests where the host's
+            // roster COMES FROM at the moment it allocates -- the menu-lobby handshake runs at the
+            // main menu, and until this card `GameScene.Terminate` left the last level's or attract
+            // demo's seats standing there. Unlike the client's `LocalBlockedSlots`, which is
+            // guarded on a live `GameScene`, `HostOccupiedSlots` reads the roster raw.
+            //
+            // So this is a NEGATIVE CONTROL in the eaNetScore.test sense: it shows the exact
+            // roster an attract demo leaves behind driving the real allocator to RejectFull, and
+            // the same roster after ResetPlayers granting a seat normally.
+            if (oracleLegRan)
+            {
+                Oracle demo = new Oracle(live.Game);
+                try
+                {
+                    // mainMenu_DemoSelected seats slot 0, then Demo1/2/3.Initialize adds 3 more on
+                    // a 20% roll -- the shape that fills the table.
+                    demo.AddPlayerAt(0, ControlDevice.AI);
+                    demo.AddPlayerAt(1, ControlDevice.AI);
+                    demo.AddPlayerAt(2, ControlDevice.AI);
+                    demo.AddPlayerAt(3, ControlDevice.AI);
+                    Check(NetSession.FirstMutuallyFreeSlot(NetSession.OccupiedMask(demo, exclude: -1), 0) == -1,
+                        "STALE-ROSTER CONTROL: a full attract-demo roster makes the host reject a good joiner");
+
+                    // The 40% roll is the quieter half: a seat is granted, just the WRONG one, so
+                    // the joiner spends the session on another slot's HUD panel and colour.
+                    demo.ResetPlayers();
+                    demo.AddPlayerAt(0, ControlDevice.AI);
+                    demo.AddPlayerAt(1, ControlDevice.AI);
+                    Check(NetSession.FirstMutuallyFreeSlot(NetSession.OccupiedMask(demo, exclude: -1), 0) == 2,
+                        "STALE-ROSTER CONTROL: a 2-seat leftover pushes the joiner to slot 2, not 1");
+
+                    // THE FIX. Terminate now does this on the way out of every scene, so the
+                    // handshake allocates from an empty table however the player got to the menu.
+                    demo.ResetPlayers();
+                    Check(demo.Players == 0, "ResetPlayers empties the roster");
+                    for (int slot = 0; slot < Oracle.MaxPlayers; slot++)
+                    {
+                        Check(!demo.IsSeated(slot), "slot " + slot + " is unseated after ResetPlayers");
+                    }
+                    Check(NetSession.OccupiedMask(demo, exclude: -1) == 0,
+                        "a reset roster reports an empty occupied mask");
+                    Check(NetSession.FirstMutuallyFreeSlot(NetSession.OccupiedMask(demo, exclude: -1), 0) == 1,
+                        "a reset roster grants the joiner slot 1, the seat it should have had");
+                }
+                finally
+                {
+                    demo.DetachFromComponents();
+                }
+            }
+
+            // ---- 7. ?netdropgrant is ONE-SHOT, and its latch clears (card ee96ea61) -----------
+            //
+            // The flag drops a granted couch seat so the host's ExpireUnclaimedGrants path -- which
+            // nothing else can reach -- actually runs. Making it one-shot is what lets a single run
+            // cover the drop AND the recovery, and the cost is a latch that MUST NOT outlive its
+            // session. A missed reset there is silent: the second session in a page would quietly
+            // take its first grant instead of dropping it, and the seam would look broken only to
+            // whoever was relying on it.
+            //
+            // Save/restore, so running this over a live ?netdropgrant session cannot eat the drop
+            // it is waiting for.
+            bool dropLatchWas = NetSession.DropGrantUsed;
+            try
+            {
+                // Flag off: never drops, and -- the subtle half -- never CONSUMES. If an off run
+                // armed the latch, whether a session still had its drop would depend on how many
+                // grants went past while the seam was disabled.
+                NetSession.DropGrantUsed = false;
+                Check(!NetSession.ShouldDropGrant(false), "flag off: the first grant is taken");
+                Check(!NetSession.ShouldDropGrant(false), "flag off: so is the second");
+                Check(!NetSession.DropGrantUsed, "flag off: the latch is not consumed");
+
+                // Flag on: exactly one drop, then every later grant completes normally.
+                Check(NetSession.ShouldDropGrant(true), "flag on: the FIRST grant is dropped");
+                Check(NetSession.DropGrantUsed, "flag on: the drop is recorded");
+                Check(!NetSession.ShouldDropGrant(true), "flag on: the SECOND grant is taken (one-shot)");
+                Check(!NetSession.ShouldDropGrant(true), "flag on: and the third");
+
+                // THE PART THAT MATTERS. Driving ResetPerSessionState rather than Stop() for the
+                // NetKickTest reason: Stop() early-returns when nothing is Active, so calling it
+                // here would execute no reset at all and this leg would pass against the very
+                // regression it exists to catch (the latch left out of the reset). Skipped over a
+                // LIVE session, which the reset would wipe.
+                if (!NetSession.Active)
+                {
+                    NetSession.ResetPerSessionState();
+                    Check(!NetSession.DropGrantUsed, "a session teardown clears the drop latch");
+                    Check(NetSession.ShouldDropGrant(true),
+                        "the NEXT session drops its first grant too, instead of silently taking it");
+                }
+            }
+            finally
+            {
+                NetSession.DropGrantUsed = dropLatchWas;
+            }
+
+            // ---- 8. A reclaimed couch seat is genuinely RE-USABLE (card ee96ea61) -------------
+            //
+            // The half ?netdropgrant existed to reach but could never show while it dropped every
+            // grant: the host releasing an unclaimed seat is only worth something if the seat then
+            // comes BACK. Driven as the real cycle -- allocate, reserve as RemoteFriend the way
+            // HandleJoinRequest does, watch the allocator route around it, expire the claim clock,
+            // release it the way ExpireUnclaimedGrants does, allocate again.
+            if (oracleLegRan)
+            {
+                Oracle seats = new Oracle(live.Game);
+                try
+                {
+                    const int hostPrimary = 0;
+                    const int peerPrimary = 1;
+                    seats.AddPlayerAt(hostPrimary, ControlDevice.Keyboard);
+                    seats.AddPlayerAt(peerPrimary, ControlDevice.Remote);
+
+                    int granted = NetSession.AllocateSeatFrom(seats, hostPrimary, peerPrimary);
+                    Check(granted == 2, "a couch join is allocated slot 2");
+
+                    // HandleJoinRequest holds the seat the moment it grants, so a second join
+                    // cannot be handed the same one while the first grant is still in flight.
+                    Check(seats.AddPlayerAt(granted, ControlDevice.RemoteFriend),
+                        "the grant reserves its seat as RemoteFriend");
+                    Check(NetSession.AllocateSeatFrom(seats, hostPrimary, peerPrimary) == 3,
+                        "a held grant is not re-allocated -- the next join gets slot 3");
+
+                    // The claim clock. Strictly greater, so a peer whose first stream lands
+                    // exactly on the deadline keeps the seat it was given.
+                    long deadline = 10000L;
+                    Check(!NetSession.GrantHasExpired(deadline, deadline - 1), "a grant is live before its deadline");
+                    Check(!NetSession.GrantHasExpired(deadline, deadline), "a grant is still live ON its deadline");
+                    Check(NetSession.GrantHasExpired(deadline, deadline + 1), "a grant expires past its deadline");
+
+                    // What ExpireUnclaimedGrants does once the clock is up.
+                    seats.RemovePlayerAt(granted, ControlDevice.RemoteFriend);
+                    Check(!seats.IsSeated(granted), "the expired grant leaves the roster rather than leaking");
+
+                    // THE CLAIM: the seat is re-allocatable, not merely released.
+                    Check(NetSession.AllocateSeatFrom(seats, hostPrimary, peerPrimary) == granted,
+                        "the reclaimed seat is handed to the NEXT couch join");
+                    Check(seats.AddPlayerAt(granted, ControlDevice.RemoteFriend),
+                        "and can actually be seated again");
+
+                    // The leak this guards against, stated as its own assertion: had the seat NOT
+                    // come back, a roster with both primaries and one leaked seat would have only
+                    // slot 3 left, and the session would run one seat short for good.
+                    Check(NetSession.AllocateSeatFrom(seats, hostPrimary, peerPrimary) == 3,
+                        "with the seat retaken the allocator moves on to slot 3");
+                }
+                finally
+                {
+                    seats.DetachFromComponents();
+                }
+            }
+
             StringBuilder sb = new StringBuilder();
             sb.Append("[slottest] ").Append(fails.Count == 0 ? "PASS" : "FAIL")
               .Append(" (").Append(checks - fails.Count).Append('/').Append(checks).Append(" checks)");
@@ -285,7 +442,10 @@ namespace EvilAliensWeb.Compat.Net
                 sb.Append("\n  FAILED: ").Append(f);
             }
             sb.Append("\n  covers: DecideSlotAdopt, FirstMutuallyFreeSlot + its convergence, the v8 codec,");
-            sb.Append("\n          and a legacy control showing the old policy breaking on the same input.");
+            sb.Append("\n          a legacy control showing the old policy breaking on the same input,");
+            sb.Append("\n          the stale menu roster reaching the host allocator (+ ResetPlayers as the fix),");
+            sb.Append("\n          ?netdropgrant's one-shot latch and its clearing on a session teardown,");
+            sb.Append("\n          and the reserve -> hold -> expire -> REALLOCATE cycle for a reclaimed couch seat.");
             if (!oracleLegRan)
             {
                 // A skipped leg must never read as a passed one.

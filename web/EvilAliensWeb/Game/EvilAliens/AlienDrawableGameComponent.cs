@@ -538,8 +538,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		cellWidth /= columns;
 		int cellHeight = texture.LogicalHeight() - (rows - 1) * separatingspace;
 		cellHeight /= rows;
-		Rectangle result = default(Rectangle);
-		(result) = new Rectangle(frameCol * (cellWidth + separatingspace), frameRow * (cellHeight + separatingspace), cellWidth, cellHeight);
+		Rectangle result = new Rectangle(frameCol * (cellWidth + separatingspace), frameRow * (cellHeight + separatingspace), cellWidth, cellHeight);
 		return result;
 	}
 

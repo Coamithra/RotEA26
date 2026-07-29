@@ -1704,17 +1704,18 @@ internal class MenuScene : Scene
 		float iconScale = 0.5f;
 		float textScale = 0.8f;
 		float backIconX = (General.SafeZone).Left;
-		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * iconScale, font.MeasureString("yo").Y * textScale);
+		// Both icons sit on this baseline, so it must clear the TALLER of the two (the 2008
+		// original measured AButton's height alone).
+		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max(MathHelper.Max((float)AButton.LogicalHeight(), (float)BButton.LogicalHeight()) * iconScale, font.MeasureString("yo").Y * textScale);
 		// Each label clears the WIDTH of the icon actually drawn beside it: BButton sits at
 		// backIconX, AButton at selectIconX. The 2008 original had the two widths CROSSED
 		// (back cleared AButton's, select cleared BButton's). That is a provable no-op today
 		// -- small_face_a and small_face_b are both 60x60 with no precompiled sibling, so the
 		// two LogicalWidth() calls return the same number -- so this changes no pixel; it is
 		// here so re-authoring either icon at a different width can't silently misplace a label.
-		// Two neighbours of that bug are deliberately NOT touched here: tipsY below still
-		// measures AButton's height alone, and Darkener.drawButtons is a verbatim copy of this
-		// method with the same crossing. So the "an icon can be re-authored freely" property
-		// holds for THIS method's horizontal axis only.
+		// Card 8d6883f3 completed the set: the height axis above, and the same crossing in
+		// Darkener.drawButtons (this method's 2008 copy). So "an icon can be re-authored
+		// freely" now holds on both axes, in both places.
 		float backTextX = backIconX + (float)BButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
 		float selectTextX = (float)(General.SafeZone).Right - font.MeasureString("select").X * textScale;
 		float selectIconX = selectTextX - (float)AButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;

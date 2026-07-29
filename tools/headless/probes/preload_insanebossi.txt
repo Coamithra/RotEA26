@@ -22,19 +22,35 @@
 # and the carousel opens on Space Dodge -- hence six rights, as six SEPARATE taps: `eval Press
 # right 6` is a six-tick HOLD, not six presses, and moves the carousel once.
 #
-# The soak is 180 simulated seconds rather than preload_level2's 90, because the bosses arrive
-# in SEQUENCE: the level is still making real progress at the 90s mark (measured with eval
-# ScoreDump at both marks -- score 21767 -> 34651, and another power-up tier collected), so a
-# 90s run would stop short of the later bosses and never touch their share of those 82 entries.
-# Measured clean over five runs at this length.
+# THE SOAK MUST OUTLAST THE LEVEL, AND THAT IS THE WHOLE DIFFICULTY HERE. The bosses arrive in
+# SEQUENCE, so a window that stops early never reaches the later ones and silently defends only
+# the front of the manifest. Measured hole at the 180s length this probe was first written with:
+# deleting the WHOLE InsaneBossI section surfaced 23 cold assets at 180s but 25 at 720s, and
+# deleting just the two it never got to -- InsaneBossI|gfx/base/756 and |gfx/base/2331-v5 --
+# left the probe PASSING. So the soak runs the level OUT: ~420 simulated seconds of play plus
+# slack, i.e. 43200 frames. That costs ~3.5s wall, not 12x the 180s run, because once the level
+# ends the remaining frames tick a menu (TIMEOUT_S in run_probes.py is 300).
+# As on preload_paratrooper, the post-level tail is wanted rather than tolerated:
+# LoadProfiler._currentLevel persists past a level by design, so the tail extends the assertion
+# over the results/menu path, and a window trimmed to the finishing frame would be fragile
+# because that frame moves with the AI. Measured clean over five runs at this length.
 #
-# The `expect` before the `expect-not` is not decoration -- it is what stops this probe passing
-# vacuously. Without it, a carousel reorder that landed the run on a different challenge would
-# sail through, because the assertion below only ever mentions InsaneBossI.
+# THE TWO ASSERTIONS BELOW THE SOAK ARE BOTH ANTI-VACUITY GUARDS, and neither is decoration:
+#   - the `expect ... preload:` pins WHICH level loaded, so a carousel reorder that landed the
+#     run on a different challenge cannot sail through (the `expect-not` only ever mentions
+#     InsaneBossI, so it would find nothing and pass).
+#   - the `expect ... s0=` pins that the level was PLAYED rather than merely entered. Without
+#     it, a change that wedged or instantly killed the bot at spawn would still preload, still
+#     match the line above, and still go green over a window containing no gameplay. The
+#     ScoreDump is sampled MID-level (the score component is gone once the run is back on the
+#     menu, so a sample after the soak prints nothing at all). The floor is four digits, i.e.
+#     >= 1000, against a measured 22334/35857/51942 at that mark over three runs -- a progress
+#     check, not a performance one; widen the margin rather than tightening it.
 #
 # ?unlockall so the challenge is selectable from a wiped save; ?invuln + ?aiplayer so the level
-# is actually PLAYED rather than sitting on a dead ship. (This level runs with score.Lives = -1,
-# so a stuck bot shows up as the level not progressing, never as a GAME OVER.)
+# is actually played rather than sitting on a dead ship. (This level runs with score.Lives = -1,
+# so a stuck bot shows up as the level not progressing, never as a GAME OVER -- which is exactly
+# what the score assertion is there to catch.)
 #
 # eahl: --flags "?menu&noattract&loadlog&unlockall&invuln&aiplayer"
 
@@ -68,8 +84,11 @@ step 30 nodraw
 eval Press enter 1
 step 120 nodraw
 eval Press enter 1
-step 10800 nodraw
+step 5400 nodraw
+eval ScoreDump
+step 37800 nodraw
 
 expect \[loadprofile\] InsaneBossI preload:
+expect \[score\] .*s0=[1-9][0-9][0-9][0-9]
 expect-not COLD decode in InsaneBossI
 quit

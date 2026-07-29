@@ -176,11 +176,21 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
+            // The type IS this entity's identity, so an unrecognised one DECLINES the whole
+            // puppet (-> snapBad) rather than being dropped: ScoreVisualiser keys
+            // powerupDatas by the enum, so a bogus type throws the moment a player collects
+            // it. Tested BEFORE the factory call so a refusal never strands a pooled
+            // instance. See the wire-enum contract in NetProtocol.
+            Powerup.PowerupType type = default;
+            if (len >= 1 && !NetProtocol.TryPowerupType(buf[off], out type))
+            {
+                return null;
+            }
             Powerup p = Powerup.NewPowerup(bin, game);
             p.Setup(state.Pos); // Randomize() picks a random type...
             if (len >= 1)
             {
-                p.MakeType((Powerup.PowerupType)buf[off]); // ...pin the host's actual type (sets color + letter)
+                p.MakeType(type); // ...pin the host's actual type (sets color + letter)
             }
             return p;
         }

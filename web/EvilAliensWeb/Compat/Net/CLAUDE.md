@@ -211,6 +211,35 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   timer throttling, so its ticks arrive in ~1/min bursts; without the wide window the link
   flaps and the designed peer-lost failsafe silently unfreezes the world. A held local
   pause is re-announced on reconnect (`PeerConnected`).
+- **Every wire enum is validated at the DECODE boundary, and nowhere else (card 88f87ba2).**
+  The validators and the contract live in one region of `NetProtocol.cs`. **Never cast a raw
+  wire byte to an enum outside it**, and a consumer of a decoded value may ASSUME it is in
+  range -- do not add a per-site defensive default. A new wire enum needs its validator there
+  AND a row in `logic_probe`'s `ProbeWireEnums`.
+  - Three policies, chosen by what the field DOES. **REJECT** (decoder returns false, message
+    dropped) when the field is EXECUTED and no substitute is correct, or when the raw value can
+    reach a save file. **CLAMP** for presentation-only fields, where dropping the message loses
+    more than degrading it. **SENTINEL** (keep the raw value, expose a checked nullable beside
+    it) for the public game browser's listings, where an unknown value is a normal production
+    case that must still be displayed.
+  - **Two fields can silently kill a save file, which is why they REJECT.** `XmlSerializer`
+    refuses an undeclared enum value, and `Settings`/`Unlockables` open their `StreamWriter`
+    BEFORE serializing -- so the file is truncated and the write then throws into
+    `Savable.SaveInner`'s catch-all. Settings or unlocks then stop persisting for the session
+    with nothing said and a corrupt file on disk. The two paths are `EvLaunch` difficulty ->
+    `Settings.SetDifficultyTo`, and `EvUnlock` item -> a `Unlockables.Collection` KEY.
+  - **`EvLaunch` rejects the whole message, and ENDS the pairing with a notice.** A clamped
+    level or difficulty replicates into a mismatched world, which is worse than a refused join;
+    an out-of-enum level also reaches `Game1.AddLevelComponent`'s throwing default arm AFTER
+    `MenuFinished` has removed the menu, leaving a black screen for the session. Ignoring it
+    silently would strand the joiner on "the host is choosing a mission" forever.
+  - **The bounds assume each enum is CONTIGUOUS from 0 and APPEND-ONLY.** Nothing enforces
+    that; `ProbeWireEnums` cross-checks every validator against `Enum.IsDefined` over 0..255,
+    which is what catches an appended member the bound does not know about (silently REFUSED
+    off the wire) as well as a gap.
+  - **Validation is client-side by design.** The signaling server does not bound these values,
+    and a server check would not be a security boundary -- gameplay is peer-to-peer, so a peer
+    can put any byte on the wire whatever the server saw.
 - **NetIds (`Compat/Net/NetIdRegistry`):** host-side, on the ComponentBin seam
   (`Game.Components` ComponentAdded/Removed -- the same events Oracle uses, fired when a
   component actually enters/leaves the world). Replicable set = the `NetTypeRegistry`

@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using EvilAliens;
 using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
@@ -74,6 +75,151 @@ namespace EvilAliensWeb.Compat.Net
 
         public const byte ShipFlagAlive = 1 << 0;
         public const byte ShipFlagFiring = 1 << 1;
+
+        // ---- wire enum validation (card 88f87ba2) -------------------------------------
+        //
+        // CONTRACT. Every enum that crosses the wire is validated HERE, at the decode
+        // boundary. A consumer of a decoded value MAY ASSUME it is in range and must not
+        // add a defensive default of its own; a raw wire byte must never be cast to an
+        // enum anywhere else.
+        //
+        // Adding a wire enum means adding its validator here AND a row in logic_probe's
+        // ProbeWireEnums. Both halves are required -- see the maintenance note below.
+        //
+        // Three policies. Pick by what the field DOES, not by how bad the value looks:
+        //   REJECT   -- the decoder returns false and the whole message is dropped. Use
+        //               when the field is EXECUTED and no substitute is correct, or when
+        //               the raw value could reach a SAVE FILE (see below).
+        //   CLAMP    -- substitute a safe in-range value. Use for presentation-only fields
+        //               where dropping the message loses more than degrading it.
+        //   SENTINEL -- keep the raw value and expose a checked nullable beside it. Use
+        //               where an unknown value is a NORMAL production case that must still
+        //               be displayed (the public game browser's listings).
+        //
+        // TWO FIELDS CAN KILL A SAVE FILE, which is why they REJECT rather than clamp.
+        // XmlSerializer refuses to serialize an enum value that is not a declared member,
+        // and both Settings and Unlockables open their StreamWriter BEFORE serializing --
+        // so the file is truncated and the write then throws. Savable.SaveInner swallows
+        // that into Storage.ShowSaveError, so the player's settings or unlocks silently
+        // stop persisting for the rest of the session and the file on disk is corrupt:
+        //   - EvLaunch difficulty -> Settings.SetDifficultyTo -> Settings.xml
+        //   - EvUnlock item       -> Unlockables.Collection key -> Unlockables.xml
+        //
+        // VALIDATION IS CLIENT-SIDE BY DESIGN. The signaling server does not bound any of
+        // these values and a server check would not be a security boundary -- gameplay is
+        // peer-to-peer, so a peer can put any byte on the wire whatever the server saw.
+        //
+        // MAINTENANCE. The range tests below assume each enum is CONTIGUOUS from 0 and
+        // APPEND-ONLY, so the bound names the last declared member. Nothing in the compiler
+        // enforces that, and an appended member would otherwise be silently REFUSED off the
+        // wire. logic_probe's ProbeWireEnums cross-checks every validator against
+        // Enum.IsDefined across the whole 0..255 domain, which fails in BOTH directions --
+        // a member added past the bound, or a gap/explicit value breaking contiguity.
+
+        internal static bool TryLevel(int raw, out Levels level)
+        {
+            level = default;
+            if (raw < 0 || raw > (int)Levels.WebcamAliens)
+            {
+                return false;
+            }
+            level = (Levels)raw;
+            return true;
+        }
+
+        internal static bool TryDifficulty(int raw, out Settings.DifficultyLevel difficulty)
+        {
+            difficulty = default;
+            if (raw < 0 || raw > (int)Settings.DifficultyLevel.Inzane)
+            {
+                return false;
+            }
+            difficulty = (Settings.DifficultyLevel)raw;
+            return true;
+        }
+
+        internal static bool TryUnlockItem(int raw, out Unlockables.Items item)
+        {
+            item = default;
+            if (raw < 0 || raw > (int)Unlockables.Items.Awardments)
+            {
+                return false;
+            }
+            item = (Unlockables.Items)raw;
+            return true;
+        }
+
+        internal static bool TryUnlockType(int raw, out AnimatedMessage.UnlockType unlockType)
+        {
+            unlockType = default;
+            if (raw < 0 || raw > (int)AnimatedMessage.UnlockType.difficulty)
+            {
+                return false;
+            }
+            unlockType = (AnimatedMessage.UnlockType)raw;
+            return true;
+        }
+
+        internal static bool TryCosmeticKind(int raw, out NetCosmeticKind kind)
+        {
+            kind = default;
+            if (raw < 0 || raw > (int)NetCosmeticKind.BackgroundAsteroids)
+            {
+                return false;
+            }
+            kind = (NetCosmeticKind)raw;
+            return true;
+        }
+
+        internal static bool TryPowerupType(int raw, out Powerup.PowerupType type)
+        {
+            type = default;
+            if (raw < 0 || raw > (int)Powerup.PowerupType.OneUp)
+            {
+                return false;
+            }
+            type = (Powerup.PowerupType)raw;
+            return true;
+        }
+
+        // CLAMP. A banner style we do not know still has readable text, and the level script
+        // beat it belongs to only reaches the joiner once -- dropping the message would lose
+        // the story text outright, which is worse than showing it in the default style.
+        internal static AnimatedMessage.MessageType ClampMessageType(int raw)
+        {
+            return TryMessageType(raw, out AnimatedMessage.MessageType t)
+                ? t
+                : AnimatedMessage.MessageType.starwarsblue;
+        }
+
+        internal static bool TryMessageType(int raw, out AnimatedMessage.MessageType msgType)
+        {
+            msgType = default;
+            if (raw < 0 || raw > (int)AnimatedMessage.MessageType.devcomment)
+            {
+                return false;
+            }
+            msgType = (AnimatedMessage.MessageType)raw;
+            return true;
+        }
+
+        // CLAMP onto the enum's own "no speech" member, for the same reason as the banner
+        // style: the text is the payload, the voice line is dressing.
+        internal static SoundManager.Texts SpeechOrNone(int raw)
+        {
+            return TrySpeech(raw, out SoundManager.Texts speech) ? speech : SoundManager.Texts.Nothing;
+        }
+
+        internal static bool TrySpeech(int raw, out SoundManager.Texts speech)
+        {
+            speech = default;
+            if (raw < 0 || raw > (int)SoundManager.Texts.GameOver)
+            {
+                return false;
+            }
+            speech = (SoundManager.Texts)raw;
+            return true;
+        }
 
         // ---- ship stream --------------------------------------------------------------
 
@@ -212,11 +358,16 @@ namespace EvilAliensWeb.Compat.Net
 
         // Reads entry `index` out of a validated packet. Levels are written into `levels` (length
         // must be >= HudLevelCount) rather than allocated, so the ~10 Hz rx path stays garbage-free.
-        public static bool TryDecodeHudState(byte[] b, int index, int[] levels, out byte slot, out int combo, out byte activeType, out float progress)
+        //
+        // `activeType` comes back as a checked nullable rather than the raw byte: null is "this
+        // slot has no powerup active", which covers the explicit HudPowerupNone sentinel and any
+        // value we do not recognise in one answer, so the consumer has one case to handle
+        // instead of two tests it could get individually wrong.
+        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress)
         {
             slot = 0;
             combo = 0;
-            activeType = HudPowerupNone;
+            activeType = null;
             progress = 0f;
             if (!TryDecodeHudCount(b, out int count) || index < 0 || index >= count || levels == null || levels.Length < HudLevelCount)
             {
@@ -225,7 +376,7 @@ namespace EvilAliensWeb.Compat.Net
             int off = 2 + HudSlotBytes * index;
             slot = b[off];
             combo = ReadU16(b, off + 1);
-            activeType = b[off + 3];
+            activeType = TryPowerupType(b[off + 3], out Powerup.PowerupType active) ? active : (Powerup.PowerupType?)null;
             progress = b[off + 4] / 255f;
             for (int t = 0; t < HudLevelCount; t++)
             {
@@ -600,18 +751,19 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        public static bool TryDecodeMessageEvent(byte[] b, out byte msgType, out byte speech, out float angle, out string text)
+        // Both enums CLAMP rather than reject -- see the wire-enum contract above.
+        internal static bool TryDecodeMessageEvent(byte[] b, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text)
         {
-            msgType = 0;
-            speech = 0;
+            msgType = AnimatedMessage.MessageType.starwarsblue;
+            speech = SoundManager.Texts.Nothing;
             angle = 0f;
             text = null;
             if (b.Length < 11 || b.Length < 11 + b[10])
             {
                 return false;
             }
-            msgType = b[4];
-            speech = b[5];
+            msgType = ClampMessageType(b[4]);
+            speech = SpeechOrNone(b[5]);
             angle = ReadF32(b, 6);
             text = System.Text.Encoding.UTF8.GetString(b, 11, b[10]);
             return true;
@@ -632,19 +784,26 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        public static bool TryDecodeUnlockEvent(byte[] b, out byte item, out byte unlockType, out byte speech, out string text)
+        // `item` and `unlockType` REJECT the whole message: an unknown item would be added
+        // to Unlockables.Collection as a dictionary KEY and kill every later save (see the
+        // wire-enum contract above), and granting a DIFFERENT item instead of the one we do
+        // not recognise is worse than granting none. The banner is dropped with the grant
+        // deliberately -- announcing an unlock that did not happen would be a lie.
+        internal static bool TryDecodeUnlockEvent(byte[] b, out Unlockables.Items item, out AnimatedMessage.UnlockType unlockType, out SoundManager.Texts speech, out string text)
         {
-            item = 0;
-            unlockType = 0;
-            speech = 0;
+            item = default;
+            unlockType = default;
+            speech = SoundManager.Texts.Nothing;
             text = null;
             if (b.Length < 8 || b.Length < 8 + b[7])
             {
                 return false;
             }
-            item = b[4];
-            unlockType = b[5];
-            speech = b[6];
+            if (!TryUnlockItem(b[4], out item) || !TryUnlockType(b[5], out unlockType))
+            {
+                return false;
+            }
+            speech = SpeechOrNone(b[6]);
             text = System.Text.Encoding.UTF8.GetString(b, 8, b[7]);
             return true;
         }
@@ -671,6 +830,23 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
+        // REJECT: the kind selects which spawner to BUILD, so an unknown one has no sensible
+        // stand-in (announcing the wrong swarm would put scenery on the joiner's screen that
+        // the host is not running). The rate stays clamped where it is applied.
+        internal static bool TryDecodeCosmeticSwarmEvent(byte[] b, out NetCosmeticKind kind, out bool on, out float rate)
+        {
+            kind = default;
+            on = false;
+            rate = 0f;
+            if (b.Length < 10 || !TryCosmeticKind(b[4], out kind))
+            {
+                return false;
+            }
+            on = b[5] != 0;
+            rate = ReadF32(b, 6);
+            return true;
+        }
+
         // EvMusic: [song:1] (MusicStop = StopMusic). EvCheckpoint/EvVictory/EvTetherBreak carry
         // no payload; EvReset carries [mode:1]; EvPause carries [on:1] -- all use EncodeByteEvent.
         public const byte MusicStop = 0xFF;
@@ -695,6 +871,28 @@ namespace EvilAliensWeb.Compat.Net
             b[4] = level;
             b[5] = difficulty;
             return b;
+        }
+
+        // BOTH fields REJECT the message (see the wire-enum contract above). There is no
+        // correct substitute for either: a clamped level launches a DIFFERENT level from the
+        // one the host is playing and the two peers then replicate into mismatched worlds --
+        // a silent desync, strictly worse than a refused join -- and a clamped difficulty
+        // joins the match with enemy scaling that differs on one screen only. They ride one
+        // message because together they ARE the match, so one reject covers both.
+        //
+        // Beyond the desync: an out-of-enum level reaches Game1.AddLevelComponent, whose
+        // default arm throws AFTER MenuFinished has already frozen and removed the menu and
+        // reset the roster -- the joiner is left on a black screen for the rest of the
+        // session. The difficulty is the Settings.xml save-poisoning field.
+        internal static bool TryDecodeLaunchEvent(byte[] b, out Levels level, out Settings.DifficultyLevel difficulty)
+        {
+            level = default;
+            difficulty = default;
+            if (b.Length < 6)
+            {
+                return false;
+            }
+            return TryLevel(b[4], out level) && TryDifficulty(b[5], out difficulty);
         }
 
         // EvBlast: [slot:1][posX:4][posY:4][level]. The slot (v5, card 4d904410) is which of the

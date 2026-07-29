@@ -8,7 +8,10 @@ namespace EvilAliens;
 // different answer, so the fallback lives at the call sites (see ScreenshotPath below).
 internal static class LevelArt
 {
-    public static string Title(Levels level)
+    // Nullable because the public game browser's level arrives off the wire: null = not a
+    // Levels value this build knows, which shares the generic "Mission" answer with the
+    // levels that have no title of their own (the demos).
+    public static string Title(Levels? level)
     {
         return level switch
         {
@@ -90,12 +93,13 @@ internal static class LevelArt
         };
     }
 
-    public static string DifficultyName(int difficulty)
+    // Takes the CHECKED nullable, never a raw int: the only caller is the public game browser,
+    // whose difficulty arrives off the wire and is validated at the boundary
+    // (NetGameBrowser.GameEntry.KnownDifficulty -> NetProtocol.TryDifficulty). Null = a tier
+    // this build does not know, which is a normal case for a stranger on a newer build.
+    // Rig for that branch: ?gamebrowser=fallback.
+    public static string DifficultyName(Settings.DifficultyLevel? difficulty)
     {
-        if (difficulty < 0 || difficulty > (int)Settings.DifficultyLevel.Inzane)
-        {
-            return "?";
-        }
-        return ((Settings.DifficultyLevel)difficulty).ToString().Replace('_', ' ');
+        return difficulty.HasValue ? difficulty.Value.ToString().Replace('_', ' ') : "?";
     }
 }

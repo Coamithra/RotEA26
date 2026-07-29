@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using EvilAliens;
@@ -16,6 +16,12 @@ namespace EvilAliensWeb.Compat.Net
     // (NetLobby.JoinWithCode); the host is mid-level, so the join becomes join-in-progress.
     public static class NetGameBrowser
     {
+        // A listing is DISPLAY-ONLY, so its enums take the SENTINEL policy rather than being
+        // rejected (wire-enum contract: NetProtocol). A game whose level or difficulty this
+        // build does not know is a NORMAL production case -- a stranger on a newer build --
+        // and hiding the row would hide a joinable game. The raw ints stay for the log line;
+        // the checked nullables beside them are what the carousel reads, so no consumer has
+        // to cast, and null means "not a value this build knows".
         public sealed class GameEntry
         {
             public string Code = "";
@@ -24,6 +30,12 @@ namespace EvilAliensWeb.Compat.Net
             public int Players;
             public int AgeSec;
             public int PingMs = -1; // -1 = not measured yet -> the carousel shows "--"
+
+            public Levels? KnownLevel =>
+                NetProtocol.TryLevel(Level, out Levels l) ? l : (Levels?)null;
+
+            public Settings.DifficultyLevel? KnownDifficulty =>
+                NetProtocol.TryDifficulty(Difficulty, out Settings.DifficultyLevel d) ? d : (Settings.DifficultyLevel?)null;
         }
 
         public static bool Active { get; private set; }
@@ -93,10 +105,10 @@ namespace EvilAliensWeb.Compat.Net
             // seat (card 4d904410), so a couch host advertises 2 or 3 taken, and this flag is
             // the only rig that ever screenshots that column. All-1 entries hid the hard-coded
             // "/2" denominator this card fixed (48ab9b2f) -- keep them varied.
-            AddFake("QX7KP", Levels.Level1, 1, 1, 34, 41);
-            AddFake("B29MT", Levels.Level2, 2, 2, 120, 88);
-            AddFake("Z4HRW", Levels.Level3, 3, Oracle.MaxPlayers - 1, 7, 152);
-            AddFake("KP8FN", Levels.ClassicAliens, 0, 1, 260, -1);
+            AddFake("QX7KP", (int)Levels.Level1, 1, 1, 34, 41);
+            AddFake("B29MT", (int)Levels.Level2, 2, 2, 120, 88);
+            AddFake("Z4HRW", (int)Levels.Level3, 3, Oracle.MaxPlayers - 1, 7, 152);
+            AddFake("KP8FN", (int)Levels.ClassicAliens, 0, 1, 260, -1);
             // Card 0d166364: two UNMAPPED entries -- the rig for SubMenuOnlineGames'
             // no-bundled-art fallback, which nothing else can reach. A listed game's Level is an
             // int off the wire from a stranger's build, so it can be a level we know but have no
@@ -111,18 +123,23 @@ namespace EvilAliensWeb.Compat.Net
             // rows the reader has to know to discount.
             if (withUnmappedArt)
             {
-                AddFake("TU7OR", Levels.Tutorial, 1, 1, 12, 22);
-                AddFake("FU7UR", (Levels)9999, 2, 2, 55, 190);
+                AddFake("TU7OR", (int)Levels.Tutorial, 1, 1, 12, 22);
+                // Card 88f87ba2: this row's DIFFICULTY is out of range too (7, against an enum
+                // that stops at Inzane=4). It is the only offline rig for the difficulty
+                // sentinel -- LevelArt.DifficultyName's "?" branch -- which every other fake
+                // and every real listing leaves unreached. Kept on the row that is already
+                // deliberately unrecognisable so the two unknowns travel together.
+                AddFake("FU7UR", 9999, 7, 2, 55, 190);
             }
             Version++;
         }
 
-        private static void AddFake(string code, Levels level, int difficulty, int players, int ageSec, int ping)
+        private static void AddFake(string code, int level, int difficulty, int players, int ageSec, int ping)
         {
             games.Add(new GameEntry
             {
                 Code = code,
-                Level = (int)level,
+                Level = level,
                 Difficulty = difficulty,
                 Players = players,
                 AgeSec = ageSec,
@@ -194,7 +211,10 @@ namespace EvilAliensWeb.Compat.Net
                             Code = code,
                             Level = GetInt(el, "level"),
                             Difficulty = GetInt(el, "difficulty"),
-                            Players = GetInt(el, "players"),
+                            // CLAMPED, not sentinelled: it is drawn as "N/<MaxPlayers>", so a
+                            // negative or absurd count is a display glitch with no branch
+                            // behind it and nothing is gained by hiding the game over it.
+                            Players = Math.Clamp(GetInt(el, "players"), 0, Oracle.MaxPlayers),
                             AgeSec = GetInt(el, "ageSec"),
                             PingMs = pingByCode.TryGetValue(code, out int p) ? p : -1,
                         });

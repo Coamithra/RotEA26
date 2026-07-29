@@ -1195,9 +1195,9 @@ internal class MenuScene : Scene
 			return;
 		}
 		EvilAliensWeb.Compat.Net.NetLobby.Tick();
-		if (EvilAliensWeb.Compat.Net.NetSession.TakePendingLaunch(out int level, out int difficulty))
+		if (EvilAliensWeb.Compat.Net.NetSession.TakePendingLaunch(out Levels level, out Settings.DifficultyLevel difficulty))
 		{
-			NetLaunchMirror((Levels)level, difficulty);
+			NetLaunchMirror(level, difficulty);
 			return;
 		}
 		if (!netStatusShown)
@@ -1248,9 +1248,13 @@ internal class MenuScene : Scene
 
 	// Client side of EvLaunch: mirror the host's pick through the exact same fade ->
 	// OnFinished -> warm -> launch path the local menus use.
-	private void NetLaunchMirror(Levels level, int difficulty)
+	// Both arguments are validated at the wire boundary (NetProtocol.TryDecodeLaunchEvent), so
+	// this can hand them straight to the real launch path. An unvalidated level would reach
+	// Game1.AddLevelComponent's throwing default arm, and an unvalidated difficulty would land
+	// in the XML-serialized Settings.CurrentDifficulty -- see the contract in NetProtocol.
+	private void NetLaunchMirror(Levels level, Settings.DifficultyLevel difficulty)
 	{
-		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)difficulty);
+		Settings.GetInstance().SetDifficultyTo(difficulty);
 		selectedLevel = level;
 		starter = ControlDevice.Keyboard;
 		HideNetStatus();

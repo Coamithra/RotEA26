@@ -1115,8 +1115,11 @@ the rest are tier-independent.
   `?aifieldpx` say "the per-tier skill row" instead of a number, because they resolve through
   `AiSkillByDifficulty` at play time off a tier that is not settled while the URL is parsed.
   A NEGATIVE value is a rejection too (the range guards), not a clamp -- except `?aiff`, which has
-  no guard and clamps 0..64. Pinned by `logic_probe`'s `ProbeAiFlagRejection`, whose control is
-  that a VALID value prints nothing.
+  no guard and clamps 0..64; an out-of-RANGE value is still clamped silently on all 14, since only
+  a value the guard cannot use at all reaches the diagnostic. Pinned by `logic_probe`'s
+  `ProbeAiFlagRejection`, whose control is that a valid value reports no rejection.
+  **This covers the 14 TUNING knobs, not everything named `?ai*`:** `?aifriends=` still swallows a
+  bad value silently, tracked with the other silent flag families as a follow-up card.
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.

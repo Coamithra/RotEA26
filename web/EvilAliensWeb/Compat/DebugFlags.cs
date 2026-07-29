@@ -2002,8 +2002,10 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						// Not nullable: AiFastForward is 0 (off) until a flag sets it, so the value in
-						// force is simply the current one. No range predicate either -- it clamps --
-						// so only an unparseable value reaches here.
+						// force is simply the current one. No range predicate either -- it clamps
+						// 0..64 like the rest of the family clamps its ceilings -- so only an
+						// unparseable value reaches here (?aiff=-1 and ?aiff=99999 are accepted and
+						// clamped, deliberately unlike ?flyspidercount's rejected ceiling).
 						RejectAiValue("aiff", val, "an integer", InForce(AiFastForward));
 					}
 					break;
@@ -2458,8 +2460,16 @@ namespace EvilAliensWeb.Compat
 		// `Override ?? PlayerShip.Default*` -- and for the two per-tier knobs (?aiaim, ?aifieldpx,
 		// which resolve through AiSkillByDifficulty at PLAY time, off a difficulty this parse has
 		// not settled yet) the words "the per-tier skill row" rather than a number that would be a
-		// guess. The three ?flyspider* sites keep their own inline WriteLines: their exact wording
-		// is pinned by tools/sim/logic_probe, and rerouting them buys nothing.
+		// guess. The ?flyspider* sites keep their own inline WriteLines: most of their wording is
+		// pinned by tools/sim/logic_probe, and rerouting them buys nothing.
+		//
+		// SCOPE, so a reader does not conclude more than holds: these are the 14 TUNING knobs.
+		// `?aifriends=<0-3>` is a co-op soak seam that still swallows a bad value silently, and is
+		// tracked as a follow-up with the other silent families (?wall*, ?spider*, ?wc*, ?holo*).
+		// Note also that every one of the 14 CLAMPS an out-of-range value rather than rejecting it
+		// (?flyspidercount goes the other way, for a reason specific to it: one fat-fingered zero
+		// there spends the boot building a million components). Only a value the guard cannot use
+		// at all reaches this helper.
 		private static void RejectAiValue(string flag, string val, string expected, string inForce)
 		{
 			Console.WriteLine("[debug] unknown ?" + flag + "= value '" + val + "' (expected "

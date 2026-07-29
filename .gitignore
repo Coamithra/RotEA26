@@ -29,6 +29,12 @@ tools/shaders/effects.mgcb
 .claude/*.local.json
 .claude/worktrees/
 
+# ---- Per-card tracker docs ---------------------------------------------------
+# Local per-card working notes, never committed (CONTRIBUTING.md "Tracker docs").
+# The second line catches a tracker named with an unflattened branch slash.
+plans/tracker_*.md
+plans/tracker_*/
+
 # ---- Python bytecode / scratch (tools/audio, tools/xnb, ...) -----------------
 __pycache__/
 *.pyc

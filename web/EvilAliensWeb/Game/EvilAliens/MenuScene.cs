@@ -1705,14 +1705,15 @@ internal class MenuScene : Scene
 		float textScale = 0.8f;
 		float backIconX = (General.SafeZone).Left;
 		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * iconScale, font.MeasureString("yo").Y * textScale);
-		// NOTE: original behaviour -- the two icons' widths are crossed here (the "back"
-		// text clears AButton's width though BButton is what sits at backIconX, and
-		// selectIconX below clears BButton's though AButton is drawn there). Harmless
-		// because small_face_a and small_face_b are the same size; left as-is so this
-		// stays a pure rename. Don't "fix" it without checking the two sprites first.
-		float backTextX = backIconX + (float)AButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
+		// Each label clears the width of the icon actually drawn beside it: BButton sits at
+		// backIconX, AButton at selectIconX. The 2008 original had the two widths CROSSED
+		// (back cleared AButton's, select cleared BButton's). That is a provable no-op today
+		// -- small_face_a and small_face_b are both 60x60 with no precompiled sibling, so the
+		// two LogicalWidth() calls return the same number -- so this changes no pixel; it is
+		// here so re-authoring either icon at a different width can't silently misplace a label.
+		float backTextX = backIconX + (float)BButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
 		float selectTextX = (float)(General.SafeZone).Right - font.MeasureString("select").X * textScale;
-		float selectIconX = selectTextX - (float)BButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
+		float selectIconX = selectTextX - (float)AButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
 		base.SpriteBatch.Draw(BButton, new Vector2(backIconX, tipsY), 0f, iconScale, center: false, Color.White);
 		base.SpriteBatch.DrawString("back", new Vector2(backTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
 		base.SpriteBatch.Draw(AButton, new Vector2(selectIconX, tipsY), 0f, iconScale, center: false, Color.White);

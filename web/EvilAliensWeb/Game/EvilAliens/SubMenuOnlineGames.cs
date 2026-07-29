@@ -82,7 +82,7 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		RemoveAllEntries();
 		// Card 0d166364: report any entry whose level resolved to no bundled art. That branch is
 		// only reachable off the wire, so nothing but a live stranger's build -- or
-		// ?gamebrowser's deliberately unmapped fake entries -- exercises it, and until this line
+		// ?gamebrowser=fallback's deliberately unmapped fake entries -- exercises it, and until this line
 		// existed a broken fallback would have failed in TOTAL SILENCE, since EnsureArt's catch
 		// absorbs throws. Asserted by tools/headless/probes/gamebrowser_fallback.txt.
 		//

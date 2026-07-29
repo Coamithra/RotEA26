@@ -2431,10 +2431,16 @@ namespace EvilAliensWeb.Compat
 					}
 					else
 					{
+						// GameBrowserFallback is deliberately NOT written here: a repeated flag
+						// (?gamebrowser=fallback&gamebrowser=falback) keeps the earlier VALID
+						// value, per the ?flyspiderflatten convention, and the message names what
+						// is actually in force rather than what the typo would have set.
 						GameBrowser = true;
-						GameBrowserFallback = false;
 						Console.WriteLine("[debug] unknown ?gamebrowser= value '" + val
-							+ "' (expected fallback) -- ignored, listing the real-looking entries only");
+							+ "' (expected fallback) -- ignored, listing "
+							+ (GameBrowserFallback
+								? "the unmapped entries too"
+								: "the real-looking entries only"));
 					}
 					if (GameBrowser)
 					{
@@ -3054,8 +3060,10 @@ namespace EvilAliensWeb.Compat
 		// reason written where it sits: ?shake and ?bgfreeze take a number OR an on/off spelling,
 		// so only a value that is neither reaches the diagnostic (reading a typo'd number as
 		// "off" was the worse bug -- it turned the very effect under test off); ?pos reports per
-		// AXIS; ?level keeps its own older wording; the ?flyspider*, ?net, ?teampartner and
-		// ?splashvariant sites keep inline WriteLines.
+		// AXIS; ?level keeps its own older wording; the ?flyspider*, ?net, ?teampartner,
+		// ?splashvariant and ?gamebrowser sites keep inline WriteLines. NOTE ?gamebrowser is on
+		// that list rather than among the silent booleans above: it WAS a plain on/off flag and
+		// became value-carrying (=fallback) in card 0d166364's follow-up.
 		private static void RejectFlagValue(string flag, string val, string expected, string inForce)
 		{
 			Console.WriteLine("[debug] unknown ?" + flag + "= value '" + val + "' (expected "

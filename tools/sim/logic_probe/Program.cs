@@ -1204,45 +1204,61 @@ internal static class Program
     // of the carousel wants every row to look like a real game.
     //
     // The whole point is the SPLIT, so what is asserted is that the two spellings disagree.
-    // Mutation-tested with the pre-card form (`GameBrowser = IsOn(val)`, i.e. the value ignored):
-    // 2 FAIL -- `=fallback` stops adding the entries AND starts reporting itself as unknown, which
-    // is the pair no other edit here produces. The ?flyspiderflatten shape, and the same reason: a
-    // typo would otherwise silently run the appearance rig while the run is labelled as the
-    // fallback one, and its missing rows look exactly like the bug.
+    // The ?flyspiderflatten shape, and the same reason: a typo would otherwise silently run the
+    // appearance rig while the run is labelled as the fallback one, and its missing rows look
+    // exactly like the bug.
+    //
+    // MUTATION-TESTED THREE WAYS, each hitting a different check:
+    //   * the whole pre-card case body (`GameBrowser = IsOn(val)`, no value, no diagnostic):
+    //     6 FAIL -- `=fallback` stops booting the browser at all (IsOn says no), and the typo
+    //     path loses both its rejection message and its browser.
+    //   * deleting `GameBrowserFallback = false` from the bare-flag branch: 1 FAIL, the CLEARS
+    //     check alone.
+    //   * deleting it from the off branch: 3 FAIL, including the restore guard at the bottom.
+    // The last two are the reason for the ordering rule below -- before an earlier revision was
+    // corrected, BOTH of those deletions still gave ALL PASS.
     private static int ProbeGameBrowserFlag(Assembly asm)
     {
         Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
         const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         MethodInfo parse = flags.GetMethod("Parse", anyStatic);
-        if (parse == null)
+        PropertyInfo browserProp = flags.GetProperty("GameBrowser", anyStatic);
+        PropertyInfo fallbackProp = flags.GetProperty("GameBrowserFallback", anyStatic);
+        if (parse == null || browserProp == null || fallbackProp == null)
         {
-            Console.WriteLine("FAIL: could not reflect DebugFlags.Parse -- renamed or moved?");
+            Console.WriteLine("FAIL: could not reflect the targets (Parse=" + (parse != null)
+                + " GameBrowser=" + (browserProp != null)
+                + " GameBrowserFallback=" + (fallbackProp != null) + ") -- renamed or moved?");
             return 2;
         }
         Func<string, object> get = name => flags.GetProperty(name, anyStatic).GetValue(null);
         Func<string, bool> browser = query =>
         {
             RunParse(parse, query);
-            return (bool)get("GameBrowser");
-        };
-        Func<string, bool> fallback = query =>
-        {
-            RunParse(parse, query);
-            return (bool)get("GameBrowserFallback");
+            return (bool)browserProp.GetValue(null);
         };
 
         Console.WriteLine("[logic_probe] ?gamebrowser= (card 0d166364 follow-up)");
 
-        Check("bare ?gamebrowser boots the browser", browser("?gamebrowser"), null);
-        Check("bare ?gamebrowser does NOT add the unmapped entries",
-            !(bool)get("GameBrowserFallback"), "this is the appearance rig");
+        // ORDER MATTERS IN THIS SET, and the two "does NOT add" checks are why. Read them as
+        // "this spelling CLEARS the fallback", not merely "leaves it unset": each is preceded by
+        // a =fallback run that turns it ON, because GameBrowserFallback starts false and an
+        // assertion made from that state passes on a build with the assignment deleted (measured
+        // -- an earlier revision of this set had exactly that hole, twice). The scenario is real:
+        // ?gamebrowser=fallback&gamebrowser would otherwise strand the unmapped rows in an
+        // appearance shot.
         Check("?gamebrowser=fallback boots the browser", browser("?gamebrowser=fallback"), null);
         Check("?gamebrowser=fallback adds the unmapped entries",
             (bool)get("GameBrowserFallback"), null);
+        Check("bare ?gamebrowser boots the browser", browser("?gamebrowser"), null);
+        Check("bare ?gamebrowser CLEARS the unmapped entries",
+            !(bool)get("GameBrowserFallback"), "this is the appearance rig");
         // It hijacks the boot either way -- the two rigs differ ONLY in the two entries.
         Check("=fallback still implies SkipSplash + AutoStart",
             (bool)get("SkipSplash") && (bool)get("AutoStart"), null);
-        Check("?gamebrowser=0 turns both off", !browser("?gamebrowser=0"), null);
+        // Same ordering rule: turn it on, THEN assert the off spelling clears it.
+        RunParse(parse, "?gamebrowser=fallback");
+        Check("?gamebrowser=0 turns the browser off", !browser("?gamebrowser=0"), null);
         Check("?gamebrowser=0 clears the fallback too",
             !(bool)get("GameBrowserFallback"), "an off spelling must not strand it set");
 
@@ -1252,8 +1268,18 @@ internal static class Program
         string outBad = FirstLine(RunParse(parse, "?gamebrowser=falback"));
         Check("bad ?gamebrowser= is reported", outBad.Contains("unknown ?gamebrowser="), outBad);
         Check("bad ?gamebrowser= still boots the browser", (bool)get("GameBrowser"), null);
-        Check("bad ?gamebrowser= does NOT enable the fallback entries",
+        Check("bad ?gamebrowser= does not enable the fallback entries",
             !(bool)get("GameBrowserFallback"), null);
+        // ... and it does not CLEAR them either: a repeated flag keeps the earlier VALID value,
+        // so the typo is genuinely ignored rather than quietly resetting the rig. This pair is
+        // what makes "ignored" in the message true; the two halves need opposite prior states,
+        // which is why the typo is run twice.
+        RunParse(parse, "?gamebrowser=fallback");
+        string outBadAfter = FirstLine(RunParse(parse, "?gamebrowser=falback"));
+        Check("bad ?gamebrowser= preserves the fallback already in force",
+            (bool)get("GameBrowserFallback"), null);
+        Check("... and the message names what is in force, not what the typo would have set",
+            outBadAfter.Contains("the unmapped entries too"), outBadAfter);
         // CONTROL: a VALID value reports nothing, so a helper that printed unconditionally fails
         // here and only here.
         Check("?gamebrowser=fallback reports nothing",

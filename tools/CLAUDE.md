@@ -134,11 +134,17 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   opposite things: the appearance screenshot wants four real-looking games, the fallback probe
   wants two rows on levels with no bundled art. What is asserted is that the two spellings
   DISAGREE, plus the `?flyspiderflatten` rejection shape (a typo is reported, boots the bare rig,
-  and never silently enables the fallback one). Mutation-tested with the pre-card
-  `GameBrowser = IsOn(val)`: 2 FAIL -- `=fallback` stops adding the entries and starts reporting
-  itself as unknown. Its control is that a valid value reports nothing, and it restores
+  and neither enables NOR clears the fallback -- a repeated flag keeps the earlier valid value).
+  Mutation-tested three ways: the whole pre-card case body (`GameBrowser = IsOn(val)`) turns 6
+  FAIL; deleting `GameBrowserFallback = false` from the bare branch turns 1; from the off branch,
+  3. Its control is that a valid value reports nothing, and it restores
   `gamebrowser`/`skipsplash`/`autostart` on the way out (and asserts the restore took) so a later
   `Probe*` does not inherit a browser-hijacked boot.
+  **It also carries the ORDERING lesson, which generalises to any flag-state probe here.** Two
+  of its checks assert that a spelling CLEARS a flag, and both originally ran while that flag was
+  still at its `false` default -- so both passed on a build with the assignment deleted (measured;
+  a cold reviewer caught it). A "does not set X" assertion is only worth anything if something
+  earlier in the set actually set X. Turn it on first, then assert the clear.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

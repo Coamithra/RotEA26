@@ -441,8 +441,7 @@ public class Quad
 
 	private Vector3 convertToVector3(float direction)
 	{
-		Vector2 val = default(Vector2);
-		(val) = new Vector2(Convert.ToSingle(Math.Cos(direction)), -1f * Convert.ToSingle(Math.Sin(direction)));
+		Vector2 val = new Vector2(Convert.ToSingle(Math.Cos(direction)), -1f * Convert.ToSingle(Math.Sin(direction)));
 		return new Vector3(val, 0f);
 	}
 }

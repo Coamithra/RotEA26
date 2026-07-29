@@ -112,6 +112,21 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
   change. It is strictly WEAKER (it also hides differences a rename could never introduce), so use
   the default for a pure rename. Its own negative control: a clean tree plus one flipped constant
   reports DIFFERENT under `--optimize`.
+  - **It does NOT fold a dead struct `initobj`, so MOST dead initializers are out of its reach**
+    (card `cbdf0a6f`, measured over 5 sites). Roslyn has no dead-store elimination for `initobj`:
+    it drops the initializer only when it eliminates the LOCAL ITSELF, which for
+    `T x = default(T); (x) = expr;` means only the pure-return-temp shape (`...; return x;` --
+    `AlienDrawableGameComponent.getFrameRectangle`, the positive control, commit `8bd1cf9`,
+    IDENTICAL; that method's `Rectangle result = ...; return result;` local is
+    deliberately LEFT standing so the control stays reproducible -- inlining it is the separate
+    pure-return-temp class). Wherever the local SURVIVES -- even for one single use as a call argument -- its
+    dead `initobj` survives with it and the hash reports DIFFERENT. It is neither the struct TYPE
+    nor the constructor's ARGUMENT SHAPE: both hypotheses were tested and killed
+    (`Rectangle`+flat folded; `Color`+flat, `Color`+nested and `Vector2`+flat all did not). That
+    the store really is dead regardless is visible in the reference decompile -- `--optimize` had
+    already inlined `FloatingText`'s construction into its call and STILL left
+    `Color color = default(Color);` standing. So a dead-initializer sweep is bounded by
+    `verify_decompiled_diff.py`, not proven by this oracle.
 - **`verify_decompiled_diff.py`** — the companion for changes the compiler legitimately DOES see:
   collapsing `bool num = held; held = num | X;` to `held |= X` (the `ldloc` moves), or collapsing
   four `x.Position - y.Position` recomputations into one local (Roslyn cannot CSE a property call).
@@ -141,15 +156,30 @@ them renumbers the method's local slots, so the byte-identical hash oracle canno
 `7d14a3cd` did it anyway, BOUNDING it with `verify_decompiled_diff.py --ref main` instead, which
 is the tool for exactly that class — and that came back IDENTICAL, i.e. not merely confined to the
 edited method but invisible to ILSpy altogether. 24 temporaries inlined, the case-block braces
-dropped with them, and that one method's redundant parens cleared in passing.
+dropped with them, and that one method's redundant parens cleared in passing. Card `cbdf0a6f`
+then FINISHED the struct-temporary class -- the last four `GamePadThumbSticks thumbSticksN =
+(stateN).ThumbSticks;` temps in `InputHandler.LeftStick`/`RightStick` -- and collapsed the 30
+provably-dead `= default(T)` initializers, both bounded the same way. Its `state`/`state2` locals
+were deliberately KEPT -- though NOT for the reason the card gave ("separate calls with different
+arguments"): WITHIN one method the two calls are identical, and they sit on mutually exclusive
+`if`/`else` branches, so there is nothing to merge. The deadzone differs only BETWEEN the two
+methods. Hoisting the call above the `if` to create something mergeable would MOVE a call site,
+which is what stops it being cosmetic.
 
-**Still deliberately not done.** That card was scoped to `UpdateKeyPads` ALONE, so the SAME temp
-shape survives four more times in the same file — `GamePadThumbSticks thumbSticksN =
-(stateN).ThumbSticks;` in `InputHandler.LeftStick`/`RightStick`. The struct-temporary class is NOT
-finished. Likewise untouched: the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead
-initializers (~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
-everywhere else. Each is its own artifact class and its own card; don't fold them into an
-unrelated change.
+**Still deliberately not done.** ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
+everywhere else in `Game/` -- its own artifact class and its own card; don't fold it into an
+unrelated change. The other 39 `= default(` occurrences also stay, and NOT because nobody got to
+them -- card `cbdf0a6f` classified all 69 and took only the 30 provably-dead ones (see the initobj
+bullet above): **7 field-by-field inits** (`AnimatedSprite`, `BrainBoss`, `Floor`, `GameEventList`,
+`MyMath`, `Vibrator`, `Wall`), where the default does definite-assignment work; **29 where the
+assignment is CONDITIONAL or hoisted out of a loop**, so ADJACENCY cannot settle them and each
+needs its own per-path analysis. Do NOT read that as "these are live": spot-checking says most are
+not (`SpriteBatchWrapper`'s eight `zero` sites assign in BOTH the `if` and the `else`), while
+`ComponentBin`'s `T val = default(T);` -- a search loop that may match nothing, then
+`if (val != null)` -- genuinely is. That one is why the sweep refused to guess. Collapsible work,
+not forbidden ground; and **3
+non-declarations**, including `SpriteBatchWrapper`'s `Vector3 fogColor = default(Vector3)` DEFAULT
+PARAMETER, which a naive `= default(` sweep would corrupt into a signature change.
 
 ## Shaders — `tools/shaders/`
 

@@ -156,8 +156,7 @@ internal class InstructionsMenu : DrawableGameComponent
 			break;
 		case HelpText.Displays.Powerups:
 		{
-			Color color2 = default(Color);
-			(color2) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
+			Color color2 = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
 			spriteBatch.Flush();
 			string text2 = "Enhancements";
@@ -194,8 +193,7 @@ internal class InstructionsMenu : DrawableGameComponent
 		}
 		case HelpText.Displays.Combo:
 		{
-			Color color = default(Color);
-			(color) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
+			Color color = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 			string text = "Power Up";
 			spriteBatch.DrawMetalString(font, text, new Vector2(400f, 100f), color, 0f, font.MeasureString(text) / 2f, 1.5f);
 			spriteBatch.Flush();
@@ -236,8 +234,7 @@ internal class InstructionsMenu : DrawableGameComponent
 
 	private void ExplainPowerup(Powerup.PowerupType powerupType, float y, string p)
 	{
-		Color color = default(Color);
-		(color) = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
+		Color color = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;
 		string text = Powerup.PowerUpString(powerupType);
 		Vector2 position = new Vector2(80f, y);

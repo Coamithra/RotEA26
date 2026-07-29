@@ -235,8 +235,7 @@ internal class BackgroundImage
 		// Tile placement is PIXEL-space: use each texture's LOGICAL (pre-pad) size, not the padded
 		// .Width/.Height, or a padded .dds advances/wraps ~pad px too far and leaves a transparent
 		// gap between tiles (the DXT mult-of-4 + --padtest canary; unpadded png is a no-op here).
-		Vector2 offset = default(Vector2);
-		(offset) = new Vector2(0f, 0f);
+		Vector2 offset = new Vector2(0f, 0f);
 		for (int i = 0; i < tiles.GetLength(0); i++)
 		{
 			offset.Y = 0f;

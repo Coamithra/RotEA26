@@ -198,8 +198,7 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 				break;
 			case Displays.Powerups:
 			{
-				Color color2 = default(Color);
-				(color2) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+				Color color2 = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 				spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
 				spriteBatch.Flush();
 				string text2 = "Enhancements";
@@ -236,8 +235,7 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 			}
 			case Displays.Combo:
 			{
-				Color color = default(Color);
-				(color) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+				Color color = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 				string text = "Combos";
 				spriteBatch.DrawString(font, text, new Vector2(400f, 100f), color, 0f, font.MeasureString(text) / 2f, 1.5f, (SpriteEffects)0, 0f);
 				spriteBatch.Flush();
@@ -280,8 +278,7 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 
 	private void ExplainPowerup(Powerup.PowerupType powerupType, float y, string p)
 	{
-		Color color = default(Color);
-		(color) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+		Color color = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;
 		string text = Powerup.PowerUpString(powerupType);
 		// The powerup label is left-aligned at x=80 and the description starts at x=120.

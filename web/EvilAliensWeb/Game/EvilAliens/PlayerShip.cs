@@ -1132,8 +1132,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		float steerRange = 150f;
 		float minSteerStrength = 0f;
 		float maxSteerStrength = 4f;
-		Vector2 steerTarget = default(Vector2);
-		(steerTarget) = new Vector2(float.MaxValue, float.MaxValue);
+		Vector2 steerTarget = new Vector2(float.MaxValue, float.MaxValue);
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{

@@ -161,12 +161,10 @@ generate much of the art/audio referenced here.
   SpriteBatch for nothing. `Draw` starts its grid at `position - realsize`, so for any layer whose
   `realsize` matches its tile the first column sits exactly on the boundary at scroll phase 0 —
   **and only X ever scrolls, so `position.Y` stays 0 forever and the whole top ROW of every
-  `[1,1]` layer was in this case on every frame of ordinary play.** Measured per frame before/after:
-  Mars parallax layers 4 → 2 drawn each unfrozen (half of every layer's draws were wasted) and
-  4 → 1 at `?bgfreeze=0`; alien base 9/9/6 → 4/4/4 at `?bgfreeze=0`; the holodeck's two `grid3`
-  layers drop 22 and 33 tiles at phase 0. The census prints the pre-card count alongside the live
-  one (`drawn 108 (pre-ef55b76e 130)`), so the size of the win stays reproducible from HEAD rather
-  than quotable only from a build that no longer exists. **Do NOT loosen it back to `>=`.**
+  `[1,1]` layer was in this case on every frame of ordinary play** — half of every Mars parallax
+  layer's draws per frame were zero-area. The census prints the pre-card count alongside the live
+  one (`drawn 108 (pre-ef55b76e 130)`), so the size of the win stays reproducible from HEAD.
+  **Do NOT loosen it back to `>=`.**
   **Why it changes no pixel:** the destination quad spans `[-w, 0]`, which contains no pixel
   centre, so it rasterises nothing — and `RenderScale.Matrix` is a pure scale, so that holds in
   render space too. Corroborated by a 40-image pre/post pixel diff (five backgrounds × eight

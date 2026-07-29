@@ -73,6 +73,10 @@ public class Unlockables : Savable
 		}
 	}
 
+	// ?unlockall unlocks every gated item in memory (MenuScene.Initialize); saving that would
+	// make the debug flag permanent. See Savable.SuppressSave.
+	protected override bool SuppressSave => EvilAliensWeb.Compat.DebugFlags.UnlockAll;
+
 	protected override void saveData(StorageContainer c)
 	{
 		string path = c.Path + "Unlockables.xml";

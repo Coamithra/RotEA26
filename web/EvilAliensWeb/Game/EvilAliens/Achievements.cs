@@ -125,6 +125,10 @@ public class Achievements : Savable
 		}
 	}
 
+	// ?unlockall marks all ten awardments unlocked in memory (MenuScene.Initialize); saving
+	// that would make the debug flag permanent. See Savable.SuppressSave.
+	protected override bool SuppressSave => EvilAliensWeb.Compat.DebugFlags.UnlockAll;
+
 	protected override void saveData(StorageContainer c)
 	{
 		string path = c.Path + "Achievements.xml";

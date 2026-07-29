@@ -157,6 +157,21 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   not refuse), each with a valid frame beside it. Mutation-tested three ways: widening a bound
   by 1 turns the cross-check FAIL naming the value, narrowing it turns 2 FAIL, and reverting
   `TryDecodeLaunchEvent` to the pre-card bare casts turns its 2 refusal rows FAIL.
+- **Tenth case set: the in-process net wire** (card 25ad0659) -- and the one case set that
+  restates NOTHING. It invokes `Compat/Net/NetWireTest.Run()`, the SAME suite `eaNetWire.test()`
+  runs in the browser and `eval NetWireTest` runs under eahl; what it adds is a browserless runner
+  with an exit code, which is what makes the wire a CI-able gate. That is the
+  `ProbeTeamPartnerSeat` precedent (invoke the browser suite's own predicates rather than
+  re-writing them, so the two cannot drift). It works here only because `NetWireTest` is
+  deliberately Game-free -- keep it so, or this case set is the first thing to break.
+  Two guards make a green run mean something: every SECTION HEADER must be present (a suite that
+  threw or returned early cannot pass on the FAIL lines it never printed), and a FLOOR on the PASS
+  count, meant to be RAISED when legs are added and never lowered to make a run green.
+  Mutation-tested three ways against the wire itself, each isolated, and the counts here are
+  FAILING LEGS (not the probe's own `FAILURE(S)` line, which is one higher): dropping the
+  per-recipient clone turns **1** (the aliasing leg); delivering inline instead of queueing turns
+  **3**; taking the Pump budget per endpoint instead of up front turns exactly **1** -- the upward
+  (`p0 -> p1`) direction and not the downward one, which is why the suite drives both.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
@@ -183,6 +198,14 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
   There is NO mirror to drift: a method added there is callable here immediately.
 - **`--nodraw` is ~1 ms/frame** (~17x real time); rendered is ~5.5 ms. An `eaAiBench.soak`-style
   run that needed a foregrounded tab can just run in the background here.
+- **REBUILD `tools/headless` after ANY `Game/`/`Compat/` edit -- `dotnet build web/EvilAliensWeb`
+  does NOT cover it.** It source-links those trees into its own exe, so a build of the WASM project
+  alone leaves `eahl.exe` running the OLD code while every other check sees the new one. The
+  failure is silent and plausible: a mutation test reads as "the assertion is insensitive" and a
+  fix reads as "still broken" (both observed while writing card 25ad0659's probes). Same trap
+  `tools/sim/aiwallnav` documents from the other direction -- it references the built DLL, so
+  there you must rebuild the GAME first. Rule of thumb: `dotnet build web/EvilAliensWeb -c Debug &&
+  dotnet build tools/headless -c Debug` before any probe run that follows a source edit.
 - **It does NOT replace the browser pass.** Trimming, IndexedDB saves, WebGL-specific shader
   behaviour, the `index.html` JS layer and real WebRTC only fail in Chrome. The `CONTRIBUTING.md`
   gate is unchanged -- this gets you to the frame/number faster, it is not the final smoke check.

@@ -434,6 +434,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
+  `eaNetWire.test()` (the in-process net wire + every wire-level codec round trip — card
+  25ad0659; needs no session, level or second tab, and also runs under `logic_probe`),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),

@@ -383,6 +383,19 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSnapshotTest.Run();
 		}
 
+		// JS bridge for the in-process wire + wire-level codec round trips (eaNetWire in
+		// wwwroot/index.html, card 25ad0659). Drives NetWire/InMemoryTransport -- the transport
+		// contract two browser-only impls could only be observed to satisfy incidentally -- then
+		// puts every codec's real frames on it and decodes what the far endpoint received, which
+		// no encode/decode pair can do (a matching pair of wrong offsets passes one). Needs no
+		// Game, no session and no level, which is what also makes it runnable from
+		// tools/sim/logic_probe with no browser at all.
+		[JSInvokable("debugNetWireTest")]
+		public static string NetWireTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetWireTest.Run();
+		}
+
 		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
 		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
 		// then drives the real PowerupData exp curve over two divergent combo streams -- running

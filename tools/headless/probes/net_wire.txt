@@ -1,0 +1,55 @@
+# PROBE: the in-process net wire and every wire-level codec round trip.
+#
+# PINS: card 25ad0659 step 1 -- Compat/Net/InMemoryTransport (the NetWire switch) and
+# Compat/Net/NetWireTest. Two things with no end-to-end coverage before it: the INetTransport
+# CONTRACT (both shipped impls are browser-only, so "the lane bit survives", "the senderId is the
+# sender", "a bye reaches the peers", "the payload is not the caller's buffer" were only ever
+# observed incidentally in a two-window run whose rates are meaningless), and the codec round trip
+# THROUGH a transport rather than as an encode/decode pair -- a layout slip that writes and reads
+# the same wrong offset passes a pair and fails in play.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line, they name what they check. Two shapes to expect.
+# A section-1 failure is the wire itself, and it invalidates every scenario built on it (a
+# transport that delivers inline, or aliases the sender's buffer, makes an ordering or a
+# cross-peer assertion pass for the wrong reason). A section-3 failure is a wire LAYOUT change:
+# if a protocol field moved deliberately, the version byte must move with it (NetSession's header
+# records why) and this probe's expectations are what tell you which message you actually touched.
+#
+# WHY A PROBE AND NOT JUST logic_probe: it is BOTH. The identical suite runs under
+# `dotnet run --project tools/sim/logic_probe` (ProbeNetWire, with an assertion-count floor) and
+# under eahl here, because they fail differently -- logic_probe loads the assembly cold into the
+# desktop CLR, this one runs it inside the real booted game where a static initialiser or a
+# ServiceHelper touch introduced later would throw. NetWireTest is deliberately Game-free; if it
+# ever stops being so, this leg is where that shows up first.
+#
+# THE POSITIVE IS THE `69 passed, 0 failed` TALLY, not the absence of FAIL lines. `expect-not FAIL`
+# alone would pass on a run where the eval never happened (a renamed DebugInput method makes `eval`
+# report an unknown command, prints no FAIL, and the probe would go green over nothing). The tally
+# also catches a suite that silently stopped running sections -- the count is the number at the
+# time of writing and is meant to be RAISED when legs are added, never lowered.
+#
+# IT OVERLAPS net_selftests.txt ON PURPOSE, and outlives it. That probe is a REFACTOR-ERA net --
+# it exists to hold card 25ad0659's steps 2-4 to the pre-refactor behaviour of eleven cards' worth
+# of suites, and once the de-static work has landed and settled it is a candidate for pruning. This
+# one is the wire's OWN permanent probe: it is where the section-header assertions live (which is
+# what catches a suite that threw or returned early rather than one that failed), and it is what a
+# future change to InMemoryTransport or to a NetProtocol layout should be run against. If you are
+# tempted to fold them together, fold net_selftests INTO this one, not the other way round.
+#
+# No level, no session, no gamepad, no content: the suite is pure bytes. `?menu&noattract` only
+# keeps the attract demo from taking the scene over mid-window.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval NetWireTest
+
+expect \[netwire\] in-process wire \+ wire-level codec round trips
+expect 1\. transport contract
+expect 2\. NetImpairment composed over an endpoint
+expect 3\. codec round trips through the wire
+expect 4\. stream-lane reorder \+ dedup
+expect \[netwire\] 69 passed, 0 failed
+expect-not FAIL
+quit

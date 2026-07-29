@@ -92,7 +92,13 @@ namespace EvilAliensWeb.Compat.Net
             }
             check("entry 0 levels round-trip in enum order", levels0);
 
-            bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx, out byte s1, out int c1, out Powerup.PowerupType? t1, out _);
+            // Entry 1 gets its OWN scratch array. Sharing `rx` made every assertion below depend
+            // on decode ORDER -- the out-of-range-level check 20 lines down read `rx` after an
+            // intervening decode of ENTRY 0 had refilled it with entry 0's levels, and had been
+            // FAILING on main since it landed. A buffer per entry removes the dependency rather
+            // than documenting it.
+            int[] rx1 = new int[NetProtocol.HudLevelCount];
+            bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx1, out byte s1, out int c1, out Powerup.PowerupType? t1, out _);
             check("entry 1 decodes independently (slot 3, no active powerup)",
                 got1 && s1 == 3 && !t1.HasValue);
             // Card 88f87ba2: an activeType that is neither a real type nor the sentinel folds
@@ -100,12 +106,13 @@ namespace EvilAliensWeb.Compat.Net
             byte[] bogusType = (byte[])packet.Clone();
             const int entry0ActiveTypeOffset = 2 + 3;   // header, then [slot][combo:2] of entry 0
             bogusType[entry0ActiveTypeOffset] = 200;
+            int[] rxBogus = new int[NetProtocol.HudLevelCount];
             check("an out-of-enum activeType decodes as 'no powerup', not as a cast",
-                NetProtocol.TryDecodeHudState(bogusType, 0, rx, out _, out _, out Powerup.PowerupType? tBad, out _)
+                NetProtocol.TryDecodeHudState(bogusType, 0, rxBogus, out _, out _, out Powerup.PowerupType? tBad, out _)
                     && !tBad.HasValue);
             // A byte-wide field would have returned 255 here and underpaid the slot's boss share.
             check("a combo past 255 survives the wire intact", got1 && c1 == 400);
-            check("out-of-range level clamps to 4", got1 && rx[NetProtocol.HudLevelCount - 1] == 4);
+            check("out-of-range level clamps to 4", got1 && rx1[NetProtocol.HudLevelCount - 1] == 4);
 
             bool got2 = NetProtocol.TryDecodeHudState(packet, 2, rx, out _, out int c2, out _, out _);
             check("a combo past ushort saturates rather than wrapping", got2 && c2 == ushort.MaxValue);

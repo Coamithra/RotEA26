@@ -60,7 +60,9 @@
 # exists to catch (measured -- it did).
 #
 # THE TWO ASSERTIONS BEFORE THE MARK are the boot leg (card 2367b39c). Under ?menu the splash is
-# skipped and the warm pump never runs, so all twelve decode inside ScreenshotSaver.Init during
+# skipped and Start is auto-pressed on frame 1, so the pump has warmed at most one asset -- and the
+# menu's own twelve are queued AHEAD of the stock shots -- so all twelve decode inside
+# ScreenshotSaver.Init during
 # boot. That is the debug path, not a regression -- and since that card Init brackets the loop as
 # a labelled warm, so it reports as ONE `stockshots warm:` summary instead of twelve COLD lines.
 # Asserting on that summary pins the new attribution AND counts the set: a level dropped from the

@@ -256,8 +256,9 @@ namespace EvilAliensWeb.Compat
         //   * ScreenshotSaver.Init, labelled "stockshots", around its whole twelve-asset loop.
         //     That loop warms the SAME list Game1.QueueMenuWarm queues, so on a full-splash boot
         //     the pump got there first and these are cache hits -- zero decodes, no summary. On a
-        //     splash-SKIPPING boot (?menu / ?skipsplash / ?autostart, or a player mashing Start
-        //     inside ~24 ticks) the pump never ran and all twelve really do decode here. They
+        //     splash-SKIPPING boot (?menu / ?skipsplash / ?autostart, or a player double-tapping
+        //     past the splash inside ~24 ticks) the pump has not REACHED them yet -- the menu's
+        //     own twelve are queued ahead of them -- so they really do decode here. They
         //     used to report as twelve COLD gaps sitting at the top of every ?loadlog capture,
         //     which is what this label replaces with one line.
         //

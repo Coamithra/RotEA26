@@ -695,11 +695,37 @@ public class Game1 : Game
 	// per-tick pump could finish — worst case this is the old synchronous batch decode.
 	// Deliberately leaves idleWarmQueue alone: nothing there is needed for the menu, and
 	// blocking the menu on ~20 background tiles would trade a hidden warm for a visible wait.
+	//
+	// Reports itself under ?loadlog when it actually had work (card cccd763a). Reaching this
+	// with a non-empty queue means the pump never got its ~24 ticks -- a debug boot, or a
+	// player who double-tapped past the splash -- so the whole remainder decodes in ONE
+	// synchronous tick here, and that tick was previously unmeasurable: the per-asset
+	// Warm<T> brackets are UNLABELLED (so LoadProfiler prints nothing for them) and
+	// NoteFrame's [hitch] watchdog returns early under the (boot) sentinel. Add the
+	// `stockshots warm` ms to this one for the whole Press-Start -> menu handoff; the two
+	// are disjoint, because ScreenshotSaver.Init has already decoded whatever stock shots
+	// the pump did not reach, which is why this counts QUEUE ENTRIES (some are cache hits
+	// by now) and times the wall clock rather than claiming a decode count.
+	//
+	// A full-splash boot drains nothing here and stays silent -- no line, no Stopwatch.
 	private void DrainWarmQueue()
 	{
+		if (warmQueue.Count == 0)
+		{
+			return;
+		}
+		int drained = warmQueue.Count;
+		System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
 		while (warmQueue.Count > 0)
 		{
 			warmQueue.Dequeue()();
+		}
+		sw.Stop();
+		if (EvilAliensWeb.Compat.DebugFlags.LoadLog)
+		{
+			System.Console.WriteLine($"[loadprofile] menu warm drain: {drained} assets still queued, "
+				+ $"{(int)Math.Round(sw.Elapsed.TotalMilliseconds)}ms -- the splash was skipped or "
+				+ "mashed past, so this is ONE synchronous tick on the Press-Start -> menu handoff");
 		}
 	}
 

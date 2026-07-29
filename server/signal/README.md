@@ -184,7 +184,7 @@ stake.
 tolerates it, but a CRLF `rotea.service` will not parse if it is ever installed,
 so normalise the whole staged directory rather than remembering which files care.
 
-Deploying the server does **not** publish the game — GitHub Pages is a separate
-manual `workflow_dispatch`. A client feature needs both, and the game browser's
-`browse` filters on build hash, so listers and browsers only see each other when
-they run the same published build.
+Deploying the server does **not** publish the game — that is a separate manual
+step, `python tools/deploy_web.py` (see `docs/DEPLOY.md`). A client feature needs
+both, and the game browser's `browse` filters on build hash, so listers and
+browsers only see each other when they run the same published build.

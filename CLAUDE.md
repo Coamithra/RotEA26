@@ -1,8 +1,13 @@
 # CLAUDE.md — Revenge of the Evil Aliens (web port)
 
 Porting a recovered 2008 **XBLIG** (XNA 3.x, C#) to run in the browser via **KNI**
-(a MonoGame fork with a Blazor WebAssembly / WebGL backend). Output = a static site,
-**deployed publicly at https://coamithra.github.io/RotEA26/**.
+(a MonoGame fork with a Blazor WebAssembly / WebGL backend). Output = a static site.
+
+**Hosting is mid-migration.** The public site is still GitHub Pages
+(https://coamithra.github.io/RotEA26/, and badly stale). Its replacement is
+**https://haraldmaassen.com/RotEA26/** — a sibling of Meridian on the shared Hetzner host, and
+the target `tools/deploy_web.py` ships to. The first Hetzner deploy has NOT run yet; until it
+does, Pages is what players get. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 This file is how to *work* in the repo. Detail lives next to the code:
 
@@ -11,6 +16,7 @@ This file is how to *work* in the repo. Detail lives next to the code:
 | [`web/EvilAliensWeb/CLAUDE.md`](web/EvilAliensWeb/CLAUDE.md) | game/engine architecture + per-feature notes (render path, input, saves, debug flags, webcam, walls, bosses, ...) |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | the offline asset pipelines (audio, shaders, textures, font, backgrounds, ...) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | the step-by-step card → worktree → PR runbook |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | publishing the game + the signaling server (neither happens on merge) |
 | `plans/plan.md` | historical artifact — the archived staged plan (full per-stage detail) |
 
 ## Project tracking (Trello — local backend)
@@ -269,13 +275,20 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   Evidence: `plans/plan.md` Stage 3.
 - **Content paths are CASE-SENSITIVE on the live host (not on Windows).** Asset root is
   `wwwroot/Content` (capital C), everything lowercase under it; every request must match — a
-  casing mismatch passes locally and 404s on GitHub Pages (black screen). Verify new assets ON THE
-  LIVE URL, not just locally.
-- **Hosting:** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI, rewrites
-  `<base href>` to `/RotEA26/`, adds `.nojekyll` + `404.html`, stamps `window.eaBuildHash`
-  (online co-op's peers-run-identical-binary check — dev builds keep `'dev'`), deploys via
-  `actions/deploy-pages` — triggered MANUALLY (`workflow_dispatch`). The dev build keeps
-  `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
+  casing mismatch passes locally and 404s on the live host (black screen). True of BOTH hosts —
+  Pages and the Apache box are equally case-sensitive. Verify new assets ON THE LIVE URL, not just
+  locally; `python tools/check_deploy.py` probes it, wrong-case control included.
+- **Hosting — full runbook in [`docs/DEPLOY.md`](docs/DEPLOY.md); nothing deploys on merge.**
+  `python tools/deploy_web.py` publishes `-c Release` from a throwaway detached checkout (so no
+  untracked `wwwroot/` file can ship), rewrites `<base href>` to `/RotEA26/`, stamps
+  `window.eaBuildHash`, and SFTPs the result to the shared Hetzner host incrementally. The dev
+  build keeps `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
+  **The build hash is the co-op compatibility key** (peers-run-identical-binary check; dev builds
+  keep `'dev'`, which also shows the FPS HUD). Its recipe is inherited verbatim from the retired
+  Pages workflow and pinned by `python tools/deploy_web.py --selftest` — that self-test is now the
+  only record of it, so treat a FAIL as "I am about to split the player base", not as a stale test.
+  The old `.github/workflows/deploy.yml` (Pages, `workflow_dispatch`) still exists and still works;
+  it is slated for deletion once the Hetzner cutover is verified live.
 - **Publish trimming:** `PublishTrimmed=true` + `TrimMode=partial` (NOT full — full strips the
   XmlSerializer save types + KNI's reflection factories → white screen);
   `InvariantGlobalization=true` (so even Debug is culture-invariant — no culture-dependent

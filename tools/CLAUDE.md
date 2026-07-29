@@ -17,6 +17,30 @@ a `blender` exe, the `../animgen` ComfyUI venv, `pymusiclooper`, PyAV. Raw sourc
 gitignored dirs (`new_assets_raw/`, `tools/*/source/`); the committed wwwroot artifacts are the
 products of record.
 
+## Publishing -- `deploy_web.py` / `check_deploy.py`
+
+The only tools here that touch the OUTSIDE WORLD, and the only ones that are not idempotent.
+**Full runbook: [`docs/DEPLOY.md`](../docs/DEPLOY.md); read it before running either.** The
+essentials for an agent that stumbles on them:
+
+- **`deploy_web.py` publishes the game and SFTPs it to https://haraldmaassen.com/RotEA26/.** Never
+  run the bare command speculatively -- it writes to a live public site. `--build-only` (no
+  network, no credentials) and `--dry-run` are the safe rehearsals; `--list` is read-only.
+  It publishes from a **throwaway detached checkout**, so nothing uncommitted can ship.
+- **`--selftest` pins the `eaBuildHash` recipe** against a fixed tree and a captured value.
+  That hash is the online-co-op compatibility key -- peers with different hashes cannot see or
+  join each other -- and the retired `.github/workflows/deploy.yml` it was ported from is going
+  away, so this self-test is the recipe's only surviving specification. Mutation-tested (separator,
+  path prefix and sort order each flip it to FAIL). A FAIL means the player base is about to split.
+  **The hash identifies a PUBLISH, not a commit** -- building one commit twice gives two different
+  hashes (measured: 3 runs, 3 values, identical 638-file payload), because `blazor.boot.json`
+  carries per-assembly integrity hashes and `dotnet publish` is not byte-reproducible. `Content/`
+  IS stable (copied verbatim; diffs identical). So never recompute a hash to check a deploy -- use
+  the one the deploy printed -- and note a rollback gets a NEW hash rather than restoring the old.
+- **`check_deploy.py` verifies a deployed URL** over plain HTTP, stdlib only, exit non-zero on
+  failure. Its case-sensitivity probes carry their own negative control (a wrong-cased path that
+  must 404), so a green run cannot come from a forgiving host.
+
 ## Headless logic oracle -- `tools/sim/logic_probe/`
 
 **A PURE static method in the game can be verified with no browser at all** (card e6927ef8).

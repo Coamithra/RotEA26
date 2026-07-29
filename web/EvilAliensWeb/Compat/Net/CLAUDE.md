@@ -10,15 +10,49 @@ are repo-root-relative; `Compat/`, `Game/` and `wwwroot/` are relative to `web/E
 Distributed-authority state replication (NOT lockstep): each peer owns its own ship
 completely (input read untouched, zero added latency); the wire carries ship STATE, never
 inputs; the other peer's ship is an interpolated puppet.
-Shipped so far: card 11.1 (net skeleton + ship mirroring over a BroadcastChannel loopback),
-card 11.2 (host world authority: client enemy puppets, world snapshots, generous claims,
-score sync), card 11.3 (level-script beat replication, host-broadcast reset/victory,
-replicated pause, TeamChallenge soft tether) and card 11.4 (real WebRTC transport, room-code
-signaling on the shared VPS, menu-driven Host/Join lobby, build-hash handshake, match-end
-semantics). Card 11.5 adds the hardening pass: powerup pickups replicate to the collector's HUD
-slot, ONE match-end path, a drop-verdict grace window with a waiting-for-peer banner,
-and the WebcamAliens net-lobby refusal explains itself. Remaining: the TURN go/no-go and
-interpolation feel, both gated on real-network playtests.
+**Shipped so far** -- grounded in the board's Done list; most card ids also name a bullet below.
+
+- **Stages 11.1-11.4:** net skeleton + ship mirroring over a BroadcastChannel loopback (11.1);
+  host world authority -- client enemy puppets, world snapshots, generous claims, score sync
+  (11.2); level-script beat replication, host-broadcast reset/victory, replicated pause,
+  TeamChallenge soft tether (11.3); real WebRTC transport, room-code signaling on the shared
+  VPS, menu-driven Host/Join lobby, build-hash handshake, match-end semantics (11.4).
+- **Stage 11.5 round 1** (card `4717d3cf`): the hardening pass -- powerup pickups replicate to
+  the collector's HUD slot, ONE match-end path, a drop-verdict grace window with a
+  waiting-for-peer banner, and the WebcamAliens net-lobby refusal explains itself. The graceful
+  reject is card `3dedf206`, an 11.4 review follow-up folded into this stage.
+- **Public game browser + join-in-progress** (`2001fbd8`; two-window pass `c0398370`): a running
+  single-player game LISTS itself, strangers browse and join mid-level, ping is measured; a late
+  joiner is caught up on deep mid-level background/doodad state (`45a4e48d`).
+- **Four seats -- local co-op AND online co-op at once** (`4d904410`): host-allocated,
+  identity-mapped roster slots, couch players on either peer, 4-wide score sync. Hardened by the
+  slot-grant negotiation (`c0229c57`, protocol v8) and the stale-menu-roster reset (`ee96ea61`).
+  **4-player online already works** as two peers with a couch partner each (`2e0f908b`); 3-4
+  separate MACHINES do not.
+- **Host kick / kick+block** (`0b8a300b`): the host's only agency under a remote pause, on a
+  self-reported peer-identity token (protocol v6).
+- **Score + per-slot HUD correctness:** the awarded AMOUNT is replicated, not the combo
+  (`b0ab09ec`, v7); a slot's combo and powerup progression belong to its OWNER (`1a3ad45a`, v9,
+  `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`).
+- **Diagnostics + rigs:** fake lag/loss/jitter (`40334a8f`), the snapshot unknown-id split and
+  `snapTurn` (`48ab9b2f`), decorative swarms as one on/off beat (`9a3175d0`, v10), the
+  standing-purge-filter races (`74403f83`), the signaling server deployed (`8c3c18da`).
+
+**Remaining.** The TURN go/no-go and interpolation/jitter feel are the only Stage 11.5 pieces
+still open, and both are gated on real-network playtests this rig cannot run -- card `4717d3cf`
+sits in the board's "For me" column for exactly that, and card `6fb406bc` (Stage 11.11) carries
+the same TURN question. N-peer online (3-4 separate MACHINES) is designed but unbuilt:
+`plans/4p-online-coop.md`, Stages 11.7-11.11 in "Later". Open net cards in Backlog: `ac375753`
+(two-window net pass), `25ad0659` (headless net sim + de-static refactor), `1cd47879` (a
+single-tab live browser pass -- only its IndexOutOfRange block is net), and `ca4fd94f`, which is
+mid-level whole-scene switches (InsaneBossI): still a real JIP gap, and worth knowing it spent a
+while mis-closed as Done with no code behind it before an audit moved it back -- see **Known JIP
+gaps** under *Public game browser & join-in-progress*. Deferred to "Later" rather than
+stage-sequenced: `816a8286` (replicate mechanical-friend ships), `1ec29347` (mid-boss arrival
+puppet fidelity), `2da92af9` (public-list abuse bounds), `98217618` (kick a peer who isn't
+pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
+
+## Core debug flags (per-feature flags live with their feature)
 
 - **Flags:** `?net=host` / `?net=join` opt a session in (in `Active`); `?room=<name>` picks
   the loopback room (BroadcastChannel `eanet-<room>`, default `dev` -- parallel test pairs
@@ -43,6 +77,9 @@ interpolation feel, both gated on real-network playtests.
   verification for the reject handshake + its teardown grace). **No `?net` flag = the net layer is never constructed
   -- a plain boot is byte-identical single-player, and single-player NEVER contacts any
   server. Hard invariants; keep them.**
+
+## Transport & artificial impairment
+
 - **Transport is an interface** (`Compat/Net/INetTransport`): a STREAM lane
   (unreliable-class -- consumers must tolerate drops/reorder) + a RELIABLE lane (ordered,
   guaranteed), `OnData`/`OnPeerBye` events. Impl #1 `BroadcastChannelTransport` ->
@@ -53,7 +90,9 @@ interpolation feel, both gated on real-network playtests.
   lanes ("s" unordered `maxRetransmits:0`, "r" reliable). A 1-byte `0x00` reliable frame
   is the JS-level pagehide "bye" (0x00 is reserved -- C# msg types start at 0x01). STUN =
   free Google servers, NO TURN in v1 (~10-15% of NAT pairs get a clean "could not
-  connect"; 11.5 owns the TURN decision). Nothing above the interface may assume loopback
+  connect"; the TURN go/no-go is still OPEN and needs a real-world connect-failure rate --
+  carried by card `4717d3cf` (Stage 11.5, "For me") and card `6fb406bc` (Stage 11.11)).
+  Nothing above the interface may assume loopback
   reliability.
 - **Artificial impairment (`Compat/Net/NetImpairment`, card 40334a8f) is what makes the
   drop-tolerance paths testable at all.** BroadcastChannel never loses or reorders a packet, so
@@ -93,6 +132,9 @@ interpolation feel, both gated on real-network playtests.
     Written in place of a `tools/sim/` python mirror on purpose: the policy is small enough that
     a mirror would drift from the C# and prove nothing. Reliable lane must read `drop=0
     reorder=0` in every configuration, including `loss=100`.
+
+## Signaling, menu lobby & handshake
+
 - **Signaling (card 11.4): room codes on the shared Hetzner VPS** (root CLAUDE.md has the
   box details). `server/signal/` in THIS repo = a FastAPI/uvicorn dumb relay (mints 5-char
   codes, no 0/O/1/I; relays SDP/ICE between exactly 2 peers; room TTL 10 min; `python
@@ -134,6 +176,9 @@ interpolation feel, both gated on real-network playtests.
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
+
+## Protocol, NetIds & the replicable set
+
 - **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
@@ -240,6 +285,9 @@ interpolation feel, both gated on real-network playtests.
     both peers hold (host = latch, client = live spawners) and which IS diffable; `eaNetBgTest()`
     gained the matching round-trip leg, and `?netscript` fires both kinds so the two-window run
     covers them.
+
+## World authority, puppets & snapshots
+
 - **World authority (card 11.2): the host runs the real sim, a join peer mirrors it.**
   Client sim-split at two choke points: `GameScene.UpdateNormal` skips `eventList.Update`
   (spawners/the level script only act in GameEvent.Update) and `ComponentBin.Add` swallows
@@ -322,6 +370,9 @@ interpolation feel, both gated on real-network playtests.
   are reached via small `internal Net*` accessors at the bottom of the game type itself
   (see UFO.cs). Contract + author rules: NetTypeRegistry.cs header; worked example:
   UfoDescriptor.cs.
+
+## Claims, score & per-slot HUD
+
 - **GENEROUS at-least-once claims -- no arbitration, no rejection path.** Kills: local
   hit-testing runs the REAL per-type death on whichever peer observed it (explosion,
   sound, score, combo paid locally); the client's removal seam sends `EvClaim(netId,
@@ -457,6 +508,9 @@ interpolation feel, both gated on real-network playtests.
     separate browsers can only pair via `?rtc` + signaling. Plan net verification around
     one-tab round trips (this test, `eaNetBgTest`) and treat a two-window run as a
     smoke check whose absolute rates are meaningless.
+
+## Roster slots, seating & the remote ship
+
 - **Roster slots are HOST-ALLOCATED and identity-mapped (card 4d904410 -- local co-op AND
   online co-op at once).** The oracle slot IS the wire slot on both peers; there is no
   host-relative translation anywhere (the old `TranslateSlot` 0<->1 mirror and the
@@ -626,6 +680,9 @@ interpolation feel, both gated on real-network playtests.
   restore it, so "host white / joiner purple" holds for DEFAULT colours; nothing normalises the
   two peers' hue tables.) The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
+
+## Metrics & verification
+
 - **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable
   `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,
   extrap ~0, pops 0 (pop = a step no ship could physically make: > 2x MaxSpeed x realDt
@@ -680,6 +737,9 @@ interpolation feel, both gated on real-network playtests.
   `pops`/`pupPops`/`buf`/`extrap` off a hidden or unfocused tab are meaningless (the FPS HUD
   says so on its own readout), so every smoothness or feel verdict still needs two focused
   windows.
+
+## Level-script beats, reset & victory
+
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
@@ -700,6 +760,9 @@ interpolation feel, both gated on real-network playtests.
   win trigger lives in the host-only script); the client runs its own `Victory()` from it,
   achievements included. `GameScene.NetActiveScene` (static, set in Initialize / cleared
   in Terminate) is how NetSession reaches the private state machine.
+
+## Host kick / block
+
 - **Host kick / kick+block (card 0b8a300b) -- the host's ONLY agency under a remote pause.**
   A remote pause freezes our world via `ComponentBin.Push`, which disables every collection
   component **including `GameScene`** -- so the host's own pause trigger never runs, and the
@@ -747,6 +810,9 @@ interpolation feel, both gated on real-network playtests.
     screenshot. **`?netfakepeer=<s>` is REQUIRED for any two-tab test** -- both dev tabs share
     one `localStorage`, so they present the SAME peer id and blocking the joiner would block
     yourself (the `?netfakehash=` trick, same reason).
+
+## Pause, tether & 11.2 replication follow-ups
+
 - **Pause is a replicated event; the triggers stay local (card 11.3):** the local pause
   push / every resume path sends EvPause on/off. The receiving side freezes via
   `Collection.Push()` under a `NetPauseOverlay` ("OTHER PLAYER PAUSED") -- no interactive
@@ -789,6 +855,9 @@ interpolation feel, both gated on real-network playtests.
   cheat >= 2 to spawn any AI friend). The whole path is dormant unless the cheat is on.
   `ControlDevice.RemoteFriend` is APPEND-ONLY. (NOTE: the game-browser JIP attach path below is a
   separate session and does not stream friends -- its listing stays refused while `Friends>0`.)
+
+## Hardening & known limits
+
 - **Hardening pass (card 4717d3cf / 11.5):**
   - **A powerup collected by EITHER peer drives that peer's HUD slot.** `PlayerShip.CollidesWith`
     is the only `SetPowerup` caller and is gated to the local ship, and each peer numbers its
@@ -833,6 +902,9 @@ interpolation feel, both gated on real-network playtests.
   above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
   checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the
   puppet clock.
+
+## Public game browser & join-in-progress
+
 - **Public game browser + join-in-progress (card 2001fbd8, design `plans/net-game-browser.md`):**
   a running single-player game can be LISTED so strangers find + join it, with NO `NetSession`
   constructed until someone actually arrives.

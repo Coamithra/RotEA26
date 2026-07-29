@@ -328,9 +328,11 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
     (else a tuple-typed field, `List<(int, Rectangle)> hits = ...;`, matches as `List<`) and a
     statement head (else an array-initializer element, `new Color(46, 125, 201),`, matches as
     `Color` -- `new` is the one keyword that is both a modifier and an expression head, and a
-    constructor can never be declared `new`). A declaration that completes on its own line
-    (`=> expr;`, `{ get; set; }`) opens no scope, or every following field files under that
-    property until the type's closing brace.
+    constructor can never be declared `new`). Its return type must START with a word character, or a
+    wrapped continuation line (`? MyMath.AngleToVector(x)`) matches -- punctuation-headed, so the
+    statement-keyword guard cannot see it. A declaration that completes on its own line opens no
+    scope, TYPES INCLUDED (`=> expr;`, `{ get; set; }`, `enum Mode { off, on }`) -- otherwise every
+    following declaration files under it until the ENCLOSING type's closing brace.
   - **`--selftest`'s safety net is an EXACT WHITELIST of the attributions a fixture may produce, not
     a blacklist of statement keywords** -- a phantom member is named after whichever identifier the
     regex latched onto, which no keyword list can anticipate. Measured: with the blacklist in place,

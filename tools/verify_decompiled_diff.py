@@ -99,8 +99,12 @@ MEMBER_RE = re.compile(
 # otherwise parses as an impl named `AngleToVector` (143 such lines in this assembly), and every
 # hunk after it files under that phantom. This is the same trap the mandatory modifier guards
 # against in MEMBER_RE, and it needs its own guard here because a modifier cannot be required.
+# The return type must START with a word character: the trailing class allows `?`, `,` and `.` for
+# nullable/array/generic/qualified types, and without the anchor a wrapped continuation line
+# (`? MyMath.AngleToVector(x)`) matches as a member -- one that STATEMENT_HEAD_RE cannot see,
+# because its head is punctuation rather than a keyword.
 EXPLICIT_IMPL_RE = re.compile(
-    r'^(?P<indent>\s*)[\w<>\[\],.?]+\s+[\w<>]+(?:\.[\w<>]+)*\.(?P<name>[\w<>]+)\s*(?:\(|\{|=>)')
+    r'^(?P<indent>\s*)\w[\w<>\[\],.?]*\s+[\w<>]+(?:\.[\w<>]+)*\.(?P<name>[\w<>]+)\s*(?:\(|\{|=>)')
 # The first token of that pattern is a RETURN TYPE, so it can only be an identifier or a builtin
 # type keyword. Any other keyword there means the line is a statement, not a declaration.
 STATEMENT_HEAD_RE = re.compile(
@@ -149,13 +153,23 @@ def decompile(dll, outdir, label):
         return [l for l in fh.read().split('\n') if not IL_COMMENT_RE.match(l)]
 
 
+def completes_on_one_line(line):
+    """Is this declaration's whole body on this line, so that it opens no scope?
+
+    `=> expr;` and `{ get; set; }` for a member, `enum Mode { off, on }` for a type. Leaving a scope
+    open for one of those files every following declaration under it, all the way to the ENCLOSING
+    type's closing brace (measured for the member case: 220 lines across 25 sites, worst run 80).
+    """
+    stripped = line.rstrip()
+    return (line.count('{') == line.count('}')
+            and (stripped.endswith(';') or stripped.endswith('}')))
+
+
 def member_at(line):
     """-> (name, body_indent) for a member DECLARATION on this line, else None.
 
     `body_indent` is the indent whose closing brace ends the member, or None when the declaration
-    COMPLETES on its own line (`=> expr;`, `{ get; set; }`) and so opens no scope at all. Leaving a
-    scope open for one of those would file every following field under that property, all the way to
-    the type's own closing brace (220 lines across 25 sites here, worst run 80).
+    completes on its own line.
     """
     m = MEMBER_RE.match(line)
     if m is None and not STATEMENT_HEAD_RE.match(line):
@@ -175,10 +189,7 @@ def member_at(line):
     # alternative as a member named `List<`. No real member name carries a lone angle bracket.
     if name is None or name.count('<') != name.count('>'):
         return None
-    stripped = line.rstrip()
-    complete = (line.count('{') == line.count('}')
-                and (stripped.endswith(';') or stripped.endswith('}')))
-    return name, (None if complete else m.group('indent'))
+    return name, (None if completes_on_one_line(line) else m.group('indent'))
 
 
 def enclosing(lines):
@@ -205,6 +216,8 @@ def enclosing(lines):
             types.append((t.group(2), indent))
             cur_member, member_indent = '<declarations>', None
             out.append(attribution())
+            if completes_on_one_line(line):
+                types.pop()             # `public enum Mode { off, on }` -- no body follows
             continue
         c = CLOSE_RE.match(line)
         if c:
@@ -286,6 +299,13 @@ public class Widget
 \t\treturn MyMath.AngleToVector(_direction);
 \t}
 
+\tpublic Vector2 Wrapped(bool flag)
+\t{
+\t\treturn flag
+\t\t\t? MyMath.AngleToVector(a)
+\t\t\t: MyMath.AngleToVector(b);
+\t}
+
 \tpublic struct Inner
 \t{
 \t\tpublic float Depth;
@@ -307,6 +327,13 @@ public class Widget
 \t\tcount = 7;
 \t}
 
+\tpublic enum Flag { none, some }
+
+\tpublic void AfterFlag()
+\t{
+\t\tcount = 9;
+\t}
+
 \tOracle IOracleService.Oracle => this;
 
 \tvoid IDisposable.Dispose()
@@ -324,15 +351,25 @@ SHAPES_EXPECT = {
     'return "w";': 'Widget.Name',
     # a call statement is not an explicit interface implementation
     'return MyMath.AngleToVector(_direction);': 'Widget.Facing',
+    # ... nor is a wrapped continuation line, whose head is punctuation rather than a keyword
+    '? MyMath.AngleToVector(a)': 'Widget.Wrapped',
     # ... while a real one, expression-bodied and modifier-less, still is
     'Oracle IOracleService.Oracle => this;': 'Widget.Oracle',
-    # a tuple-typed field is not a constructor, and the field after it is not inside one
-    'private Vector2 lastMousePos;': 'Widget.<declarations>',
-    # an array-initializer element is an object creation, not a constructor declaration
+    # neither a tuple-typed field nor an array-initializer element is a constructor
+    'private readonly List<(int index, Rectangle rect)> entryHitBounds = new List<(int, Rectangle)>();':
+        'Widget.<declarations>',
     'new Color(46, 125, 201),': 'Widget.<declarations>',
+    # ... and the declaration after each is untouched. These two are BELT, not braces: because both
+    # phantoms above complete on their own line they never open a scope, so a single reverted guard
+    # is caught by the needle above or by the whitelist, not here. They would catch the pair of
+    # guards failing together.
+    'private Vector2 lastMousePos;': 'Widget.<declarations>',
     'private int paletteIndex;': 'Widget.<declarations>',
     # a declaration that completes on its own line does not swallow the next one
     'public event ExitMenu OnExit;': 'Widget.<declarations>',
+    # ... which is as true of a one-line TYPE as of a one-line member
+    'public enum Flag { none, some }': 'Widget.Flag.<declarations>',
+    'count = 9;': 'Widget.AfterFlag',
     # a nested type's own members are qualified by it ...
     'public float Depth;': 'Widget.Inner.<declarations>',
     'Depth = 0f;': 'Widget.Inner.Reset',
@@ -346,8 +383,10 @@ SHAPES_ALLOWED = {
     # close, which is the fault this fixture exists to catch
     '<none>.<declarations>',
     'Widget.<declarations>', 'Widget.Count', 'Widget.IsEntering', 'Widget.Name', 'Widget.Widget',
-    'Widget.Step', 'Widget.Facing', 'Widget.After', 'Widget.Oracle', 'Widget.Dispose',
+    'Widget.Step', 'Widget.Facing', 'Widget.Wrapped', 'Widget.After', 'Widget.Oracle',
+    'Widget.Dispose',
     'Widget.Inner.<declarations>', 'Widget.Inner.Reset', 'Widget.Inner.Mode.<declarations>',
+    'Widget.Flag.<declarations>', 'Widget.AfterFlag',
 }
 
 # VERBATIM ilspycmd output (ILSpy 8.2.0, EvilAliensWeb.dll, decompiled lines 1959-2012 = the whole
@@ -485,7 +524,7 @@ def main():
     ap = argparse.ArgumentParser(
         description='Diff the decompiled C# of a refactor against its branch point.')
     ap.add_argument('--selftest', action='store_true',
-                    help='check member attribution against a fixture; no build, no git')
+                    help='check member attribution against the fixtures; no build, no git')
     ap.add_argument('--ref', default='HEAD', help='git ref to compare against (default HEAD)')
     ap.add_argument('--full', action='store_true',
                     help='print the entire unified diff, not just the per-method summary')

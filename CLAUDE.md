@@ -194,7 +194,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
   `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aithreatlead= ?aibossbias=
-  ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with `?aiplayer`.
+  ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiscanrows= ?aicrosspenalty=`. Pair with `?aiplayer`.
   **Per-tier AI skill** (card c10e3e7f): the threat-field and aim-spread knobs resolve through
   `PlayerShip.AiSkillByDifficulty[]`, keyed off `Settings.EffectiveDifficulty` (the LOCK-aware
   tier -- attract demos lock Hard). `eaAiBench()` prints the resolved row; the `?ai*` overrides

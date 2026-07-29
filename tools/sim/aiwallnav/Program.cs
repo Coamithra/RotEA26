@@ -67,6 +67,8 @@ internal static class Program
     private static int Main(string[] args)
     {
         float? react = null;
+        int? scanRows = null;
+        float? crossPenalty = null;
         bool ladder = false;
         var only = new List<int>();
         foreach (string a in args)
@@ -75,6 +77,18 @@ internal static class Program
             {
                 if (!TryNum(a, out float v)) { Console.Error.WriteLine("not a number: " + a); Usage(); return 2; }
                 react = v;
+            }
+            else if (a.StartsWith("--scanrows="))
+            {
+                // INT, like ?aiscanrows= -- it counts grid rows, so refusing `4.7` here keeps a
+                // mislabelled sweep (one that silently benched the default depth) impossible.
+                if (!TryInt(a, out int n)) { Console.Error.WriteLine("not a whole number of rows: " + a); Usage(); return 2; }
+                scanRows = n;
+            }
+            else if (a.StartsWith("--crosspenalty="))
+            {
+                if (!TryNum(a, out float v)) { Console.Error.WriteLine("not a number: " + a); Usage(); return 2; }
+                crossPenalty = v;
             }
             else if (a.StartsWith("--grid="))
             {
@@ -112,14 +126,12 @@ internal static class Program
         tSettings.GetField("_difficultyLevel", BindingFlags.NonPublic | BindingFlags.Instance)
                  .SetValue(settings, Enum.Parse(tSettings.GetNestedType("DifficultyLevel"), "Very_Hard"));
 
-        if (react.HasValue)
-        {
-            // Through the REAL ?aireact knob, so the override path being exercised is the shipped
-            // one rather than a second copy of the resolution rule.
-            asm.GetType("EvilAliensWeb.Compat.DebugFlags")
-               .GetProperty("AiWallReactionMs", BindingFlags.Public | BindingFlags.Static)
-               .SetValue(null, react);
-        }
+        // Through the REAL ?ai* knobs, so the override path being exercised is the shipped one
+        // rather than a second copy of the resolution rule. Left null => PlayerShip reads its
+        // baked Default* const, which is why a bare run is the shipped configuration.
+        if (react.HasValue) SetAiOverride("AiWallReactionMs", react.Value);
+        if (scanRows.HasValue) SetAiOverride("AiWallScanRows", scanRows.Value);
+        if (crossPenalty.HasValue) SetAiOverride("AiWallCrossPenalty", crossPenalty.Value);
 
         // Grids are extracted BEFORE the table starts printing: Wall.Setup drives KNI's
         // TitleContainer, whose loader writes three lines to stdout, and mid-table that noise
@@ -147,7 +159,9 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("ai wall-nav bench -- real PlayerShip code, grid difficulty=Very_Hard, ship box="
             + (ShipHalf * 2).ToString(CultureInfo.InvariantCulture) + "px"
-            + (react.HasValue ? ", WallReactionMs=" + react.Value.ToString(CultureInfo.InvariantCulture) : ""));
+            + (react.HasValue ? ", WallReactionMs=" + react.Value.ToString(CultureInfo.InvariantCulture) : "")
+            + (scanRows.HasValue ? ", WallScanRows=" + scanRows.Value.ToString(CultureInfo.InvariantCulture) : "")
+            + (crossPenalty.HasValue ? ", WallCrossPenalty=" + crossPenalty.Value.ToString(CultureInfo.InvariantCulture) : ""));
 
         foreach (int rung in ladder ? new[] { 0, 1, 2, 3, 4 } : new[] { VeryHardRung })
         {
@@ -176,16 +190,30 @@ internal static class Program
 
     private static void Usage()
     {
-        Console.WriteLine("usage: dotnet run --project tools/sim/aiwallnav [--react=<ms>] [--grid=<n>] [--ladder]");
-        Console.WriteLine("  --react=<ms>  set PlayerShip's WallReactionMs (same DebugFlags property as ?aireact)");
-        Console.WriteLine("  --grid=<n>    bench only wall variation n (repeatable)");
-        Console.WriteLine("  --ladder      repeat the table at all five difficulty scroll speeds");
+        Console.WriteLine("usage: dotnet run --project tools/sim/aiwallnav [--react=<ms>] [--scanrows=<n>]");
+        Console.WriteLine("                                               [--crosspenalty=<c>] [--grid=<n>] [--ladder]");
+        Console.WriteLine("  --react=<ms>        set PlayerShip's WallReactionMs   (DebugFlags property ?aireact writes)");
+        Console.WriteLine("  --scanrows=<n>      set PlayerShip's WallScanRows     (?aiscanrows -- a whole number of rows)");
+        Console.WriteLine("  --crosspenalty=<c>  set PlayerShip's WallCrossPenalty (?aicrosspenalty)");
+        Console.WriteLine("  --grid=<n>          bench only wall variation n (repeatable)");
+        Console.WriteLine("  --ladder            repeat the table at all five difficulty scroll speeds");
         Console.WriteLine();
         Console.WriteLine("Build the game first: dotnet build web/EvilAliensWeb -c Debug");
     }
 
     private static bool TryNum(string arg, out float value) =>
         float.TryParse(arg.Substring(arg.IndexOf('=') + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+
+    private static bool TryInt(string arg, out int value) =>
+        int.TryParse(arg.Substring(arg.IndexOf('=') + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+    // The bench writes DebugFlags directly rather than going through Parse: Parse reads a whole
+    // URL query, and these are already-typed values. The RESOLUTION rule (?? Default) is still
+    // the shipped one, which is the part that must not be duplicated here.
+    private static void SetAiOverride(string property, object value) =>
+        asm.GetType("EvilAliensWeb.Compat.DebugFlags")
+           .GetProperty(property, BindingFlags.Public | BindingFlags.Static)
+           .SetValue(null, value);
 
     // The typeof lives behind a non-inlined call so a missing//stale EvilAliensWeb.dll surfaces as
     // the caller's friendly "build the game first" rather than a JIT-time type-load failure while

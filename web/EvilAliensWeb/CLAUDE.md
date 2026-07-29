@@ -912,8 +912,8 @@ the rest are tier-independent.
     making the clamp its own oscillator.
   - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
     It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
-    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or the
-    `?aireact` knob in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or any of
+    the `?aireact` / `?aiscanrows` / `?aicrosspenalty` knobs in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
     lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
     share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
     whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
@@ -1001,7 +1001,8 @@ the rest are tier-independent.
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
-  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
+  ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair

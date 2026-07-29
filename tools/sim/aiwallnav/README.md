@@ -20,6 +20,9 @@ var4 (Level3)       3    11 |  12.9 |    0.00      0.00     0.00      0.00 |    
 ```
 
 `--react=<ms>` sets `WallReactionMs` (the same `DebugFlags` property `?aireact` writes);
+`--scanrows=<n>` and `--crosspenalty=<c>` do the same for `WallScanRows` (`?aiscanrows`) and
+`WallCrossPenalty` (`?aicrosspenalty`) -- `--scanrows=` takes a whole number of rows and exits 2
+on anything else, so a run can never be labelled with a depth it did not bench;
 `--grid=<n>` benches one variation; `--ladder` repeats the table at all five difficulty scroll
 speeds. Deterministic — no RNG anywhere, so two runs match exactly.
 
@@ -113,7 +116,8 @@ else spawning", while OwnLevel's 254–477 deg/s is the full level — walls plu
 `SkullSpawner(0f, 2f, maze: true)` and a `StarMineSpawner`. See
 `web/EvilAliensWeb/CLAUDE.md` → the AI section.
 
-`WallScanRows` and `WallCrossPenalty` were also swept during that investigation, but they are
-`private const` with no `DebugFlags` override, so **that sweep needed an edit-and-rebuild of
-`PlayerShip.cs` and cannot be reproduced with this tool as shipped**. Promote them to `?ai*`-style
-overrides first if you want to re-run it; do not cite the old figures.
+`WallScanRows` and `WallCrossPenalty` were also swept during that investigation, but at the time
+they were `private const` with no `DebugFlags` override, so that sweep needed an edit-and-rebuild
+of `PlayerShip.cs` and its figures were unreproducible -- they were dropped from the docs rather
+than published. **Card b174b00f promoted both**, so `--scanrows=` / `--crosspenalty=` now re-run it
+in one command. The old figures were never written down and should not be sought out; re-measure.

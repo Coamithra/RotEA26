@@ -469,9 +469,10 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   console app that references the BUILT `EvilAliensWeb.dll` and reflects into it, so it calls the
   real `PlayerShip.SteerThroughWall` / `ChooseGapColumn` / `ColumnScore` / `DistanceToBlockedRow` /
   `ClampIntoWallSpace` against the real `CollisionLevelMap` and the real `Wall.Setup` grids. Build
-  the game first, then `dotnet run --project tools/sim/aiwallnav` (`--react=<ms>` writes the same
-  `DebugFlags` property `?aireact` does, `--grid=<n>` picks one variation, `--ladder` repeats the
-  table at all five difficulty scroll speeds). **This is possible only because the game targets
+  the game first, then `dotnet run --project tools/sim/aiwallnav` (`--react=<ms>`, `--scanrows=<n>` and
+  `--crosspenalty=<c>` write the same `DebugFlags` properties `?aireact` / `?aiscanrows` /
+  `?aicrosspenalty` do, `--grid=<n>` picks one variation, `--ladder` repeats the table at all five
+  difficulty scroll speeds). **This is possible only because the game targets
   plain `net8.0`** despite the BlazorWebAssembly SDK -- keep it a `Reference` to the built DLL,
   never a `ProjectReference`. It binds private members by name and REFUSES to start if one has
   been renamed, rather than printing a clean-looking table of nothing.

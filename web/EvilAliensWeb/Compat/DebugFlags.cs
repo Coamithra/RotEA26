@@ -1042,6 +1042,8 @@ namespace EvilAliensWeb.Compat
 		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
 		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
 		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
+		//   ?aiscanrows=<n> rows of grid looked at when judging a column (an INT, not a float)
+		//   ?aicrosspenalty=<c> cost per blocked column the ship would have to cross
 		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
 		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
 		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
@@ -1051,6 +1053,11 @@ namespace EvilAliensWeb.Compat
 		public static float? AiWallReactionMs { get; private set; }
 
 		public static float? AiGapSwitchMargin { get; private set; }
+
+		// int?, not float? -- WallScanRows counts grid ROWS and indexes the scan loop.
+		public static int? AiWallScanRows { get; private set; }
+
+		public static float? AiWallCrossPenalty { get; private set; }
 
 		public static float? AiThreatLeadMs { get; private set; }
 
@@ -1821,6 +1828,28 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigm) && aigm >= 0f)
 					{
 						AiGapSwitchMargin = MathHelper.Min(aigm, 20f);
+					}
+					break;
+				case "aiscanrows":
+					// Parsed as an INT: WallScanRows counts grid rows, so `4.7` is not a
+					// value this knob has -- reject it rather than silently truncating to 4
+					// and reporting a sweep that never moved.
+					// 0 is DELIBERATELY allowed: it makes DistanceToBlockedRow report "nothing
+					// blocked" always, i.e. a bot that does not look ahead at all -- the same
+					// kind of skill FLOOR ?aiaim=Pi is, and the negative control a look-ahead
+					// sweep wants at one end. Capped well past any useful depth (grids run to
+					// 179 rows, but the scan is per-column per-tick).
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aisr) && aisr >= 0)
+					{
+						AiWallScanRows = (int)MathHelper.Clamp(aisr, 0, 64);
+					}
+					break;
+				case "aicrosspenalty":
+					// Cost per blocked column crossed, against WallRowWeight's 8 per row of
+					// clearance -- so the cap is where crossing dominates clearance absolutely.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicp) && aicp >= 0f)
+					{
+						AiWallCrossPenalty = MathHelper.Min(aicp, 100f);
 					}
 					break;
 				case "aithreatlead":

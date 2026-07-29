@@ -115,6 +115,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
 | `preload_paratrooper.txt` | the same, for the Paratrooper challenge (49 manifest entries) |
 | `preload_insanebossi.txt` | the same, for the Boss Train challenge (`InsaneBossI`, 82 entries — the largest section); soaks the level OUT (720 s) because the bosses arrive in sequence — see its header for the two assets a shorter window provably missed |
+| `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (card 8d6883f3): no level-select art decodes when either carousel is opened |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
@@ -122,7 +123,10 @@ level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
 `gfx/marsbg/clouds-background`; `Paratrooper|gfx/marsbg` → 17 from the same;
 `InsaneBossI|gfx/sprites` → 10 from `gfx/sprites/playersheet` (only 10 of the 53 deleted
 entries decode cold — the rest are already in the shared content cache from the boot warm,
-which is why a mutation test asserts "red, naming an asset", not a count).
+which is why a mutation test asserts "red, naming an asset", not a count). `boot_cold` goes red
+on either half it defends — restoring `AwardmentBlade`'s eager load in `LoadContent` trips its
+`awardmentblade` `expect-not`, and re-adding a `flipPureName`/`flipGlassesName` load to
+`SplashScene.LoadContent` trips the `-revenged-pure` one.
 `silence` goes red under `--audio` (`masterVolume=1 alGain=1`), which is also its standing
 negative control. `stockshots_warm` goes red naming the dropped asset when a level is deleted
 from `LevelArt.HasCarouselEntry` — tested on BOTH carousels (`Level1` →

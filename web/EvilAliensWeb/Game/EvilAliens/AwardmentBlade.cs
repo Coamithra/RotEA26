@@ -75,8 +75,37 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 		base.LoadContent();
 		batch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		content = ServiceHelper.Get<IContentManagerService>().ContentManager;
-		blade = content.Load<Texture2D>("GFX/Sprites/awardmentblade");
-		font = content.Load<SpriteFont>("GFX/Menu/menufont");
+	}
+
+	// The blade art + font are LAZY (card 57555583). This component is added in
+	// Game1.Initialize, so its LoadContent ran during base.Initialize() -- before
+	// Game1.LoadContent builds the warm queues, which is why no warm entry could ever
+	// precede it and the decode always landed on the pre-splash black screen for a
+	// component that only draws when an awardment pops. In practice this is a cache hit:
+	// Game1.QueueIdleWarm warms the sheet during the splash (and the menu's own
+	// QueueMenuWarm already warms menufont), so the decode happens off the critical path
+	// rather than when the banner animates in.
+	//
+	// Guarded, unlike the eager load it replaces: that one ran at boot, where a missing or
+	// wrong-cased asset is a black screen someone notices immediately (and check_deploy.py
+	// probes for). Reached from Draw instead, an unguarded throw would first surface when a
+	// player unlocks an awardment, mid-level. So it degrades to "no banner" the way
+	// SplashScene's channelflip and Game1's holosim degrade, and Draw skips a null blade.
+	private void EnsureContent()
+	{
+		if (blade != null && font != null)
+		{
+			return;
+		}
+		try
+		{
+			blade = content.Load<Texture2D>("GFX/Sprites/awardmentblade");
+			font = content.Load<SpriteFont>("GFX/Menu/menufont");
+		}
+		catch (System.Exception ex)
+		{
+			System.Console.WriteLine("[awardmentblade] content load failed: " + ex.Message);
+		}
 	}
 
 	public override void Update(GameTime gameTime)
@@ -88,6 +117,7 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 			{
 				return;
 			}
+			EnsureContent();
 			bladeTimer.Duration = 170f;
 			bladeTimer.Reset();
 			bladeTimer.Start();
@@ -132,6 +162,19 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 	{
 		base.Draw(gameTime);
 		batch.BlendMode = (SpriteBlendMode)1;
+		if (state != State.Idle)
+		{
+			// Belt-and-braces: Update's Idle -> Enter transition is the only way to reach a
+			// drawing state and it loads first -- but Draw is where `blade`/`font` are
+			// actually dereferenced, so it does not get to assume that.
+			EnsureContent();
+			if (blade == null || font == null)
+			{
+				// The load above failed (and said so). Run the state machine out silently
+				// rather than throwing every frame the banner would have been up.
+				return;
+			}
+		}
 		switch (state)
 		{
 		case State.Enter:

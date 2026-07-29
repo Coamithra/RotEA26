@@ -85,15 +85,26 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 	// Game1.QueueIdleWarm warms the sheet during the splash (and the menu's own
 	// QueueMenuWarm already warms menufont), so the decode happens off the critical path
 	// rather than when the banner animates in.
+	//
+	// Guarded, unlike the eager load it replaces: that one ran at boot, where a missing or
+	// wrong-cased asset is a black screen someone notices immediately (and check_deploy.py
+	// probes for). Reached from Draw instead, an unguarded throw would first surface when a
+	// player unlocks an awardment, mid-level. So it degrades to "no banner" the way
+	// SplashScene's channelflip and Game1's holosim degrade, and Draw skips a null blade.
 	private void EnsureContent()
 	{
-		if (blade == null)
+		if (blade != null && font != null)
+		{
+			return;
+		}
+		try
 		{
 			blade = content.Load<Texture2D>("GFX/Sprites/awardmentblade");
-		}
-		if (font == null)
-		{
 			font = content.Load<SpriteFont>("GFX/Menu/menufont");
+		}
+		catch (System.Exception ex)
+		{
+			System.Console.WriteLine("[awardmentblade] content load failed: " + ex.Message);
 		}
 	}
 
@@ -157,6 +168,12 @@ public class AwardmentBlade : DrawableGameComponent, IAwardmentBladeService
 			// drawing state and it loads first -- but Draw is where `blade`/`font` are
 			// actually dereferenced, so it does not get to assume that.
 			EnsureContent();
+			if (blade == null || font == null)
+			{
+				// The load above failed (and said so). Run the state machine out silently
+				// rather than throwing every frame the banner would have been up.
+				return;
+			}
 		}
 		switch (state)
 		{

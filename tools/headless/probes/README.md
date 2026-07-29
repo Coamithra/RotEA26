@@ -99,9 +99,12 @@ is actually played rather than sitting on a dead ship.
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 
-Both are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`
+All three are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`
 first) when the `Level2|gfx/marsbg` manifest lines are deleted; `silence` goes red under
-`--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
+`--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control; `boot_cold`
+goes red on either half it defends -- restoring `AwardmentBlade`'s eager load in `LoadContent`
+trips its `awardmentblade` `expect-not`, and re-adding a `flipPureName`/`flipGlassesName` load to
+`SplashScene.LoadContent` trips the `-revenged-pure` one.
 
 `Paratrooper`, `InsaneBossI` and `Demo2` are the other three levels with substantial manifest
 sections and deserve the same probe — they need challenge-carousel / attract-rotation navigation

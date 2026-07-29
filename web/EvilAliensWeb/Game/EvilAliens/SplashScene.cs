@@ -238,14 +238,11 @@ internal class SplashScene : Scene
 		{
 			effShowtime = (double)showtime + (isFlip ? (holdMs + FLIP_MS) : 0.0);
 		}
-		variantPicked = false;
+		// The variant was rolled and decoded back in LoadContent, so this is a re-statement of
+		// what PickFlipVariant already decided, not a fresh roll -- only the flip splash draws
+		// through the shader.
+		variantPicked = isFlip && (chosenNew != null) && (channelFlip != null);
 		flipSoundPlayed = false;
-		if (isFlip)
-		{
-			// The variant was rolled and decoded back in LoadContent; just re-arm the flag
-			// the line above cleared.
-			variantPicked = (chosenNew != null) && (channelFlip != null);
-		}
 	}
 
 	// ~1-in-10 reveals a portrait "pure" shot (50/50 plain vs sunglasses); otherwise
@@ -259,9 +256,12 @@ internal class SplashScene : Scene
 	private void PickFlipVariant()
 	{
 		string name;
-		string forced = EvilAliensWeb.Compat.DebugFlags.SplashVariant;
+		string forced = DebugFlags.SplashVariant;
 		if (forced != null)
 		{
+			// DebugFlags.Parse is the SOLE gate: it accepts exactly revenged/pure/glasses and
+			// reports anything else, leaving this null. So the default arm is `revenged`, not a
+			// silent catch-all -- a fourth variant added to the parser must be added here too.
 			name = forced switch
 			{
 				"pure" => flipPureName,

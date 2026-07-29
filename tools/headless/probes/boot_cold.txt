@@ -16,11 +16,13 @@
 # without it "the pure shot was not decoded" would pass 95% of the time on the BROKEN code.
 #
 # The `expect` lines are not decoration (probes README rule 1). `easplashredone` proves the run
-# reached the splash load at all and that COLD reporting still works; the `-revenged ` line
-# (trailing space -- it must not match `-revenged-pure`) proves the ONE variant a run needs is
-# still loaded, so "no pure decode" cannot pass by loading no reveal at all; and the WARM
-# manifest line proves the blade sheet is decoded by the idle warm rather than simply never
-# loaded, which is the way this change could go wrong invisibly.
+# reached the splash load at all and that COLD reporting still works; the `-revenged \d` line
+# proves the ONE variant a run needs is still loaded, so "no pure decode" cannot pass by loading
+# no reveal at all; and the WARM manifest line proves the blade sheet is decoded by the idle warm
+# rather than simply never loaded, which is the way this change could go wrong invisibly.
+#
+# That `\d` is the size field, and it is what makes the line SPECIFIC -- a bare `-revenged` also
+# matches `-revenged-pure`, and a trailing space would not work either (eahl Trim()s the pattern).
 #
 # eahl: --flags "?loadlog&noattract&splashvariant=revenged"
 
@@ -29,7 +31,7 @@ step 400 nodraw
 eval PreloadExport
 
 expect \[loadprofile\] COLD decode in \(boot\): gfx/splash/easplashredone
-expect \[loadprofile\] COLD decode in \(boot\): gfx/splash/uglysplash22-revenged
+expect \[loadprofile\] COLD decode in \(boot\): gfx/splash/uglysplash22-revenged \d
 
 expect-not COLD decode in \(boot\): gfx/sprites/awardmentblade
 expect-not COLD decode in \(boot\): gfx/splash/uglysplash22-revenged-pure

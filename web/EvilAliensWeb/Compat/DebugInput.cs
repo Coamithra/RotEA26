@@ -496,6 +496,53 @@ namespace EvilAliensWeb.Compat
 			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
 		}
 
+		// JS bridge for the awardment banner (eaAward in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugAward', 'Pacifist'). Queues an awardment
+		// through the REAL AwardmentBlade.AwardAchievement path, so the banner enters, shows
+		// and exits exactly as it would in play.
+		//
+		// Written for card d2f746d5: every in-game trigger is minutes deep behind a condition a
+		// rig cannot produce (Pacifist is 90s of not firing on Hard+, Dunce a 180s boss timer,
+		// the rest are level completions), so the banner -- and since card 57555583 the LAZY
+		// content load behind it -- had no way to be exercised at all.
+		//
+		// The two real gates are REPORTED rather than bypassed: an already-unlocked awardment
+		// and the cheat check both make AwardAchievement a silent no-op, and a debug seam whose
+		// failure looks identical to its success is worse than none. Nothing is forced -- if a
+		// gate says no, the answer is which gate, not a banner the real game would not draw.
+		[JSInvokable("debugAward")]
+		public static string Award(string awardment)
+		{
+			if (!System.Enum.TryParse<EvilAliens.Awardment>(awardment, ignoreCase: true, out var which)
+				|| !System.Enum.IsDefined(typeof(EvilAliens.Awardment), which))
+			{
+				return "[debug] eaAward: unknown awardment '" + awardment + "' (expected one of: "
+					+ string.Join(", ", System.Enum.GetNames(typeof(EvilAliens.Awardment))) + ")";
+			}
+			EvilAliens.AwardmentBlade blade;
+			try
+			{
+				blade = EvilAliens.ServiceHelper.Get<EvilAliens.IAwardmentBladeService>().get();
+			}
+			catch (System.Exception ex)
+			{
+				return "[debug] eaAward: the awardment blade is not available yet (" + ex.Message + ")";
+			}
+			if (EvilAliens.Achievements.GetInstance().GetAwardmentIsUnlocked((int)which))
+			{
+				return "[debug] eaAward: " + which + " is ALREADY UNLOCKED -- no banner (the real "
+					+ "path drops it too). Wipe the save or pick another awardment.";
+			}
+			if (EvilAliens.Settings.GetInstance().CheckForCheats())
+			{
+				return "[debug] eaAward: a cheat is active, so " + which + " is dropped -- exactly "
+					+ "as in play (Settings.CheckForCheats). No banner.";
+			}
+			blade.AwardAchievement(which);
+			return "[debug] eaAward queued " + which + " (\"" + blade.AwardmentName(which)
+				+ "\") -- the banner takes ~170ms to enter and shows for 6.5s.";
+		}
+
 		// JS bridge for the on-demand roster dump (eaNetRoster in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster'). Prints the same roster=
 		// string the 5s [net] metrics line carries, plus resets=, at the instant it is called.

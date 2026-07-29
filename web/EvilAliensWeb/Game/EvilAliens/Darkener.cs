@@ -14,8 +14,6 @@ public class Darkener : DrawableGameComponent
 
 	private string buttonTipB;
 
-	private bool displayButtonTips;
-
 	private SpriteFont font;
 
 	private Texture2D AButton;

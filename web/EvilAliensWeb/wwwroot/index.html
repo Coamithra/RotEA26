@@ -617,6 +617,16 @@
             catch (e) { console.warn('[debug] eaFlySpiders failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: pop an awardment banner right now, through the real AwardAchievement path —
+        // eaAward('Pacifist'). Every in-game trigger is minutes deep behind a condition a test
+        // rig cannot produce, so this is the only way to see the banner (and the lazy content
+        // load behind it) on demand. Reports the gate instead of a banner when the awardment is
+        // already unlocked or a cheat is active; it does not force past either.
+        window.eaAward = (awardment) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAward', String(awardment))); }
+            catch (e) { console.warn('[debug] eaAward failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: dump the net roster (slot→device seat map, live ships, primary slots) plus the
         // reset counter, right now. The [net] metrics line carries the same roster= on a 5s
         // cadence, which can straddle a whole ~2.7s reset — call this on both peers either side

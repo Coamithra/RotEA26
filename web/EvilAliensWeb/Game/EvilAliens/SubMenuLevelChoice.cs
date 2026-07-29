@@ -61,7 +61,21 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 		{
 			// The bundled fallback art, from the one table ScreenshotSaver.StockShots is
 			// also derived from -- so anything reached here was preloaded and splash-warmed.
+			//
+			// Card 0d166364: null here is an AUTHORING BUG -- MenuScene added a carousel entry
+			// for a level missing from LevelArt.ScreenshotPath -- so it is reported rather than
+			// absorbed. THE NOISE IS THE WHOLE SIGNAL and must not be quietened: level1empty is
+			// already warm, so a silent fallback leaves nothing for
+			// tools/headless/probes/stockshots_warm.txt to see. Why each caller differs:
+			// LevelArt.ScreenshotPath.
 			string imageName = LevelArt.ScreenshotPath(levels[i]);
+			if (imageName == null)
+			{
+				System.Console.WriteLine("[levelart] carousel entry " + levels[i]
+					+ " has no bundled art -- add it to LevelArt.ScreenshotPath; drawing "
+					+ LevelArt.DefaultScreenshotPath);
+				imageName = LevelArt.DefaultScreenshotPath;
+			}
 			Texture2D image;
 			if (General.ScreenshotEnabled(levels[i]))
 			{

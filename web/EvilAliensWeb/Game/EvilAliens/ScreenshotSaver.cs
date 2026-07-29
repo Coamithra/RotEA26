@@ -32,15 +32,21 @@ public class ScreenshotSaver
 	// the twelve, and the one it missed (webcamss, the challenge carousel's last entry) then
 	// decoded cold the first time the player opened Challenges.
 	//
-	// Card 8d6883f3: DERIVED, not spelled out. Every carousel level
-	// (LevelArt.HasCarouselEntry) contributes its bundled thumbnail (LevelArt.ScreenshotPath)
-	// -- the same lookup SubMenuLevelChoice draws through -- so adding a level to the carousel
-	// adds its art here for free. Deduped because two levels sharing one bundled image is legal
-	// and must not warm it twice.
-	// That cuts three hand-maintained copies to one, it does NOT make the failure impossible:
-	// HasCarouselEntry is still a hand list that has to agree with MenuScene's AddEntry* calls,
-	// and adding a carousel level while forgetting it reproduces the original bug exactly.
-	// tools/headless/probes/stockshots_warm.txt is what catches that.
+	// Card 8d6883f3: DERIVED, not spelled out. Every level with bundled art
+	// (LevelArt.ScreenshotPath returns non-null) contributes it -- the same lookup
+	// SubMenuLevelChoice draws through -- so adding a level to the carousel adds its art here
+	// for free. Deduped because two levels sharing one bundled image is legal and must not warm
+	// it twice.
+	//
+	// Card 0d166364: the membership test used to be a SECOND hand list, LevelArt.
+	// HasCarouselEntry, which had to agree with ScreenshotPath; a level in the first but missed
+	// in the second fell through ScreenshotPath's old level1empty default, the dedupe swallowed
+	// the duplicate, and the probe below stayed green. Null IS the membership answer now, so
+	// that drift cannot be written. What remains hand-kept is the agreement between
+	// ScreenshotPath and MenuScene's AddEntry* calls -- adding a carousel entry for a level with
+	// no art there reproduces the original bug, and is what
+	// tools/headless/probes/stockshots_warm.txt catches (via the loud fallback in
+	// SubMenuLevelChoice.loadScreenshots, not via a cold decode -- see that probe's header).
 	//
 	// Order is enum order, not the old hand order. It only sets the warm-queue sequence; the
 	// whole set is drained before the menu is built either way (see Game1.QueueMenuWarm).
@@ -51,11 +57,11 @@ public class ScreenshotSaver
 		List<string> paths = new List<string>();
 		foreach (Levels level in levels)
 		{
-			if (!LevelArt.HasCarouselEntry(level))
+			string path = LevelArt.ScreenshotPath(level);
+			if (path == null)
 			{
 				continue;
 			}
-			string path = LevelArt.ScreenshotPath(level);
 			if (!paths.Contains(path))
 			{
 				paths.Add(path);
@@ -85,9 +91,31 @@ public class ScreenshotSaver
 				}
 			}
 		}
-		foreach (string stockShot in StockShots)
+		// Bracket the stock-shot loop as a deliberate warm (card 2367b39c). These are the SAME
+		// twelve Game1.QueueMenuWarm queues, so on a full-splash boot the pump beat us here and
+		// every Load is a cache hit -- nothing decodes, nothing is reported. On a splash-skipping
+		// boot (?menu / ?skipsplash / ?autostart, or a player mashing Start inside ~24 ticks) the
+		// pump never ran and all twelve decode right here, and they used to report as twelve COLD
+		// gaps under the (boot) sentinel -- the top of every ?loadlog capture, discarded by hand
+		// every time (it polluted card e63601a4's investigation). Labelled, they collapse to one
+		// summary line that keeps the count and the ms.
+		//
+		// try/finally is NOT optional: unlike Game1.Warm<T> this loop has no per-asset catch, so a
+		// throwing Load would escape with the bracket still open and mute every COLD line for the
+		// rest of the session. Only the loop is bracketed -- the LoadScreenshot pass above reads
+		// saved shots off the StorageDevice, never through the content manager, so it cannot reach
+		// LoadProfiler.RecordTexture and widening the bracket would only add risk.
+		LoadProfiler.BeginWarm("stockshots");
+		try
 		{
-			contentManager.Load<Texture2D>(stockShot);
+			foreach (string stockShot in StockShots)
+			{
+				contentManager.Load<Texture2D>(stockShot);
+			}
+		}
+		finally
+		{
+			LoadProfiler.EndWarm();
 		}
 	}
 

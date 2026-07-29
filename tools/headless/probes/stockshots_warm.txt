@@ -46,6 +46,15 @@
 # carousel reads `11 textures` here, caught at BOOT, before the navigation below has run at all.
 # They sit before the mark because the mark is what throws that window away.
 #
+# **ADDING a carousel level bumps the literal to 13 -- update it here.** Card 8d6883f3 made the
+# set derive from LevelArt so an addition costs no code, and this pin is the one place that still
+# has to be told. A stale literal fails as though the addition were a regression; it is not.
+#
+# The `expect-not` under it is NOT the main anti-COLD assertion -- the summary line above already
+# fails if the bracket is gone. It covers the narrower case the summary cannot see: a
+# gfx/screenshots/* decode at boot from OUTSIDE Init's bracketed loop (a thirteenth load added
+# elsewhere), which is the card's literal acceptance criterion.
+#
 # ?unlockall so a wiped save can select the later challenges; ?invuln so the launched level
 # does not die during the settle.
 #

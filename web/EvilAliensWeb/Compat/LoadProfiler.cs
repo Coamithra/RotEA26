@@ -71,8 +71,8 @@ namespace EvilAliensWeb.Compat
         private static string _currentLevel = SentinelBoot;
         private static bool _preloadActive;
 
-        // True while Game1's warm queues are decoding an asset ON PURPOSE (BeginWarm/EndWarm
-        // bracket Game1.Warm<T>, which every queued lambda funnels through -- QueueMenuWarm's,
+        // True while a decode is happening ON PURPOSE. BeginWarm/EndWarm bracket Game1.Warm<T>,
+        // which every queued lambda funnels through -- QueueMenuWarm's,
         // QueueIdleWarm's AND the pre-launch levelWarmQueue's. The level warm is additionally
         // inside a BeginPreload/EndPreload bracket, and _preloadActive is tested FIRST below, so
         // its decodes keep counting as preloads and still reach the per-level summary.
@@ -85,7 +85,13 @@ namespace EvilAliensWeb.Compat
         // cursor2, awardmentblade -- all loaded from component LoadContent BEFORE Game1's own
         // LoadContent builds the queues, so no warm entry can ever reach them) are the real
         // signal in that block, and muting them would delete the evidence this card was filed
-        // on. Non-reentrant by construction: Warm<T> loads one asset and cannot nest.
+        // on.
+        //
+        // ScreenshotSaver.Init holds the SECOND bracket (card 2367b39c), labelled, across a
+        // twelve-Load loop -- so "one asset per bracket" is no longer the non-reentrancy
+        // argument. The real one: the two call sites cannot reach each other. Warm<T> runs from
+        // Game1's queue pump/drain and Init from StartScreen.Update, both on the one game thread,
+        // and neither a content Load nor anything it calls re-enters either. See BeginWarm.
         private static bool _warmActive;
 
         // Set by the LABELLED BeginWarm overload only (ScreenshotSaver.Init's stock-shot loop).
@@ -175,8 +181,9 @@ namespace EvilAliensWeb.Compat
                 // belongs to no level.
                 //
                 // A LABELLED bracket gets its own totals so EndWarm can print one summary line.
-                // Unlabelled (Warm<T>) brackets accumulate too -- harmless, three int writes --
-                // but never print, so the warm queues' output is unchanged.
+                // Unlabelled (Warm<T>) brackets accumulate too -- harmless, three int stores and
+                // at most one string reference -- but never print, so the queues' output is
+                // unchanged. Note ms is rounded per asset, so a fast run can total 0ms honestly.
                 _warmCount++;
                 _warmMs += ms;
                 if (ms > _warmMaxMs) { _warmMaxMs = ms; _warmSlowest = assetId; }
@@ -240,7 +247,8 @@ namespace EvilAliensWeb.Compat
 
         // Bracket deliberate decodes. See _warmActive: inside the bracket a decode is recorded
         // but never flagged Cold and never logged, because there is no frame waiting on it.
-        // Cheap enough to leave unguarded by Recording -- a bool and a reference write.
+        // Cheap enough to leave unguarded by Recording -- a bool, a string reference and four
+        // scalar resets, none of which allocate.
         //
         // TWO callers, and exactly two (card 2367b39c):
         //   * Game1.Warm<T>, unlabelled, around ONE queued asset -- all three warm queues funnel
@@ -278,10 +286,15 @@ namespace EvilAliensWeb.Compat
             // every boot would gain a noise line saying nothing happened.
             if (!Recording || label == null || _warmCount == 0)
                 return;
+            // The tail says "not a COLD gap", NOT "free". These decodes are deliberate, so they
+            // are not the preload miss a COLD line hunts -- but reaching this line at all means
+            // something decoded synchronously here, and for the stockshots bracket that is a real
+            // stall on the Press-Start -> menu handoff (Game1.QueueMenuWarm exists to prevent it).
+            // So the ms is the number to judge; do not let the prose talk a reader out of it.
             Console.WriteLine($"[loadprofile] {label} warm: {_warmCount} textures, "
                 + $"{_warmMs}ms decode total"
                 + (_warmSlowest != null ? $" (slowest {_warmSlowest} {_warmMaxMs}ms)" : "")
-                + " -- deliberate, not a gap");
+                + " -- deliberate, not a COLD gap; the ms is still time spent here");
         }
 
         public static void EndPreload()

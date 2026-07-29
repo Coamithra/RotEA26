@@ -315,10 +315,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     twelve decode at `Init` as before: that is the debug path, not a regression. Since card
     2367b39c `Init` brackets that loop as a LABELLED warm, so those twelve report as one
     `[loadprofile] stockshots warm: 12 textures, <n>ms decode total ... -- deliberate, not a gap`
-    line instead of twelve `(boot)` COLD gaps at the top of every capture. A full-splash boot
-    decodes none of them (cache hits) and prints nothing, so `boot_cold.txt`'s six-line steady
-    state is unchanged. The probe asserts the count, which is what catches a dropped carousel
-    level at BOOT rather than only via the carousel navigation.
+    line instead of twelve `(boot)` COLD gaps at the top of every capture. The tail reads "not a
+    COLD gap", NOT "free" -- reaching the line means they really did decode synchronously on the
+    Press-Start -> menu handoff, so read the ms. On a real full-splash boot the pump warms them
+    first and the bracket sees zero decodes, so nothing prints; `boot_cold.txt` is unaffected for
+    a different reason again -- it never presses Start, so `Init` does not run there at all.
+    `stockshots_warm.txt` asserts the count, which is what catches a dropped carousel level at
+    BOOT rather than only via the carousel navigation.
   - **`GFX/Help/Controls_Keyboard`/`_Joypad` are in the IDLE queue, and moving them there meant
     moving them to the shared content manager (card 4d47c5ba).** `HelpText` (every attract demo)
     and `InstructionsMenu` (every in-level pause -> Instructions) each used to own a private

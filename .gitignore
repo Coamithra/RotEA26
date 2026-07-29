@@ -29,6 +29,12 @@ tools/shaders/effects.mgcb
 .claude/*.local.json
 .claude/worktrees/
 
+# ---- Per-card tracker docs ---------------------------------------------------
+# Local per-card working notes, never committed (CONTRIBUTING.md "Tracker docs").
+# The second line catches a tracker named with an unflattened branch slash.
+plans/tracker_*.md
+plans/tracker_*/
+
 # ---- Python bytecode / scratch (tools/audio, tools/xnb, ...) -----------------
 __pycache__/
 *.pyc
@@ -127,3 +133,13 @@ tools/walls/_*.png
 # The ?texviewer scene compares each PNG against a throwaway BC3 preview built here.
 # Local dev only; production ships the real siblings from build_textures.py.
 web/EvilAliensWeb/wwwroot/Content/texviewer/
+
+# ---- REAPER peak caches (sfx editing) -----------------------------------------
+# Written next to the .wav whenever a sound is opened in REAPER; a regenerable
+# waveform-display cache, not an asset. The .wav itself ships.
+web/EvilAliensWeb/wwwroot/Content/sfx/peaks/
+*.reapeaks
+
+# eahl PreloadExport drop (boot_cold.txt calls it; the "download" lands next to --out,
+# or in the cwd when a --script run has none -- i.e. the repo root under run_probes.py).
+/preload_manifest.txt

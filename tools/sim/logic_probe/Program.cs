@@ -46,6 +46,30 @@ internal static class Program
         Console.WriteLine((ok ? "  PASS " : "  FAIL ") + label + (detail != null ? "  " + detail : ""));
     }
 
+    // Run one query through the real DebugFlags.Parse and hand back everything it PRINTED. Four
+    // case sets need this now (card 4e401005 would have been the fourth copy), and it is the only
+    // way to assert about a DIAGNOSTIC rather than a resulting value -- silence is the bug these
+    // flag sets exist to catch, and silence has no other observable.
+    private static string RunParse(MethodInfo parse, string query)
+    {
+        System.IO.TextWriter saved = Console.Out;
+        System.IO.StringWriter buf = new System.IO.StringWriter();
+        Console.SetOut(buf);
+        try { parse.Invoke(null, new object[] { query }); }
+        finally { Console.SetOut(saved); }
+        return buf.ToString();
+    }
+
+    // A captured Parse() run is usually two lines (Parse tails into Hint() whenever nothing in
+    // `Active` was set) and the diagnostic under test is the first. Detail strings are printed on
+    // the same line as their PASS/FAIL, so a raw capture would break that format -- and splitting
+    // on '\n' alone leaves a trailing '\r' on Windows.
+    private static string FirstLine(string captured)
+    {
+        string[] lines = captured.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        return lines.Length > 0 ? lines[0] : "(nothing printed)";
+    }
+
     private static int Main(string[] args)
     {
         if (args.Length < 1)
@@ -77,6 +101,30 @@ internal static class Program
         }
 
         rc = ProbeFlySpiderFlags(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeAiWallScanFlags(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeAiFlagRejection(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeFlagRejectionSweep(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeCollisionBoxLine(asm);
         if (rc != 0)
         {
             return rc;
@@ -234,21 +282,7 @@ internal static class Program
 
         // Run one query through Parse and hand back everything it printed, so an assertion can be
         // made about the DIAGNOSTIC and not just the resulting value. Silence is the old bug.
-        Func<string, string> run = query =>
-        {
-            System.IO.TextWriter saved = Console.Out;
-            System.IO.StringWriter buf = new System.IO.StringWriter();
-            Console.SetOut(buf);
-            try
-            {
-                parse.Invoke(null, new object[] { query });
-            }
-            finally
-            {
-                Console.SetOut(saved);
-            }
-            return buf.ToString();
-        };
+        Func<string, string> run = query => RunParse(parse, query);
         // Parse tails into Hint() whenever nothing in `Active` got set, so the capture is usually
         // two lines; the diagnostic under test is the first one.
         Func<string, string> firstLine = s =>
@@ -348,6 +382,688 @@ internal static class Program
         }
         Check("!IsOn is not IsExplicitlyOff", conflated < rows.Length,
             (rows.Length - conflated) + "/" + rows.Length + " rows where they genuinely differ (bare + unrecognised)");
+        return 0;
+    }
+
+    // Card b174b00f -- ?aiscanrows= / ?aicrosspenalty=, the promotion of PlayerShip's last two
+    // bare wall-nav consts to the Default* + nullable-override convention.
+    //
+    // WHY A PROBE AND NOT verify_il_identical.py, WHICH THE CARD ASKED FOR: that oracle hashes the
+    // whole assembly, and this change ADDS two consts, two DebugFlags properties, two resolving
+    // properties and two Parse cases -- so it reports DIFFERENT by construction and proves
+    // nothing. The card's real claim is BEHAVIOURAL (a null override resolves to the baked const,
+    // so a shipped build plays identically), and that splits in two: the RESOLUTION is pinned
+    // below, and the wall term's actual numbers are pinned by tools/sim/aiwallnav's default table
+    // being character-identical across the change (it is deterministic and calls the only two
+    // consumers of these constants for real).
+    //
+    // The failure mode being guarded is the same one card 6eb8dc9e named for ?flyspider*: a bench
+    // run that measures the DEFAULT path while carrying the label of the variant under test. No
+    // screenshot can show that, and this card's own blocks 2 and 3 quote numbers from these flags.
+    private static int ProbeAiWallScanFlags(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        // The RESOLVING properties are private -- they are the thing under test, so bind them by
+        // name and fail loudly rather than benching nothing, the way aiwallnav does.
+        PropertyInfo rows = ship.GetProperty("WallScanRows", anyStatic);
+        PropertyInfo penalty = ship.GetProperty("WallCrossPenalty", anyStatic);
+        FieldInfo defRows = ship.GetField("DefaultWallScanRows", anyStatic);
+        FieldInfo defPenalty = ship.GetField("DefaultWallCrossPenalty", anyStatic);
+        if (parse == null || rows == null || penalty == null || defRows == null || defPenalty == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (Parse=" + (parse != null)
+                + " WallScanRows=" + (rows != null) + " WallCrossPenalty=" + (penalty != null)
+                + " DefaultWallScanRows=" + (defRows != null) + " DefaultWallCrossPenalty=" + (defPenalty != null)
+                + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Action<string> run = query => RunParse(parse, query);
+        Func<object> liveRows = () => rows.GetValue(null);
+        Func<object> livePenalty = () => penalty.GetValue(null);
+        object bakedRows = defRows.GetValue(null);
+        object bakedPenalty = defPenalty.GetValue(null);
+
+        Console.WriteLine("[logic_probe] DebugFlags ?aiscanrows= / ?aicrosspenalty= (card b174b00f)");
+
+        // 1. The shipped configuration. Both overrides are null at process start (DebugFlags.Parse
+        // never RESETS a property -- it only assigns ones the query names, which is also why the
+        // checks below can rely on a previous case still standing), so this reads the state a
+        // shipped boot is in. It must resolve to the baked consts. NB this is a PRECONDITION of
+        // the case set, not an assertion about Parse: it holds only while nothing earlier in the
+        // process has touched these two, which is why it runs first.
+        Check("no override => the baked Default* consts",
+            Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
+            "rows=" + liveRows() + " (Default " + bakedRows + "), penalty=" + livePenalty()
+            + " (Default " + bakedPenalty + ")");
+        // ... and the consts are still the values card f4d1721f tuned against. A promotion that
+        // silently moved one would pass every other check here.
+        Check("the baked values are unchanged by the promotion",
+            Equals(bakedRows, 4) && Equals(bakedPenalty, 4f),
+            "DefaultWallScanRows=" + bakedRows + " DefaultWallCrossPenalty=" + bakedPenalty);
+
+        // 2. An override actually reaches the resolving property. Without this the flags would be
+        // inert and every sweep would quietly re-measure the default.
+        run("?aiscanrows=9&aicrosspenalty=2.5");
+        Check("overrides win over the consts",
+            Equals(liveRows(), 9) && Equals(livePenalty(), 2.5f),
+            "rows=" + liveRows() + " penalty=" + livePenalty());
+
+        // 3. THE int-vs-float POINT, which is why the card called out int? explicitly. `4.7` is not
+        // a number of grid rows. Truncating it to 4 would hand back the DEFAULT depth while the
+        // reader believes a deeper scan is in force -- a sweep that cannot move, reported as a
+        // result. So it must be refused, leaving the previous value (9) standing.
+        run("?aiscanrows=4.7");
+        Check("?aiscanrows=4.7 refused, not truncated to 4", Equals(liveRows(), 9),
+            "rows=" + liveRows() + " (a float here must not silently become the baked 4)");
+        run("?aiscanrows=8x");
+        Check("?aiscanrows=8x refused", Equals(liveRows(), 9), "rows=" + liveRows());
+        run("?aicrosspenalty=2.5q");
+        Check("?aicrosspenalty=2.5q refused", Equals(livePenalty(), 2.5f), "penalty=" + livePenalty());
+
+        // The DIAGNOSTIC these two now print is asserted with the other twelve ?ai* tuning knobs
+        // in ProbeAiFlagRejection below, so the family is covered in one place.
+
+        // 4. Clamps. 0 scan rows is ALLOWED on purpose -- it is "does not look ahead at all", the
+        // floor end of a look-ahead sweep and the same kind of deliberate skill floor ?aiaim=Pi is.
+        run("?aiscanrows=0");
+        Check("?aiscanrows=0 accepted as the no-look-ahead floor", Equals(liveRows(), 0),
+            "rows=" + liveRows());
+        run("?aiscanrows=99999");
+        Check("?aiscanrows= ceiling clamps", Equals(liveRows(), 64),
+            "the scan runs per column per tick, so it must stay bounded; rows=" + liveRows());
+        run("?aiscanrows=-3");
+        Check("?aiscanrows= negative refused", Equals(liveRows(), 64), "rows=" + liveRows());
+        run("?aicrosspenalty=99999");
+        Check("?aicrosspenalty= ceiling clamps", Equals(livePenalty(), 100f),
+            "penalty=" + livePenalty());
+        run("?aicrosspenalty=-1");
+        Check("?aicrosspenalty= negative refused", Equals(livePenalty(), 100f),
+            "penalty=" + livePenalty());
+
+        // 5. NEGATIVE CONTROL. Every check above would also pass if the resolving properties simply
+        // ignored DebugFlags and returned the consts -- checks 1 and 4 trivially, and 2/3 are only
+        // meaningful if the override path is live. Assert the two are genuinely different readings
+        // of the same knob: with an override in force the resolved value must NOT be the const.
+        run("?aiscanrows=7&aicrosspenalty=1.25");
+        Check("resolved != baked while an override is in force",
+            !Equals(liveRows(), bakedRows) && !Equals(livePenalty(), bakedPenalty)
+            && Equals(liveRows(), 7) && Equals(livePenalty(), 1.25f),
+            "rows=" + liveRows() + " vs const " + bakedRows
+            + ", penalty=" + livePenalty() + " vs const " + bakedPenalty);
+
+        // Hand the process back in the state it was found in. Parse can only ASSIGN, never clear,
+        // so a Probe* added after this one would otherwise inherit rows=7 / penalty=1.25 with no
+        // way to reach the defaults -- and would be measuring an override it never set.
+        flags.GetProperty("AiWallScanRows", anyStatic).SetValue(null, null);
+        flags.GetProperty("AiWallCrossPenalty", anyStatic).SetValue(null, null);
+        Check("case set leaves no override behind",
+            Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
+            "rows=" + liveRows() + " penalty=" + livePenalty());
+        return 0;
+    }
+
+    // Card 48b7c6b1 -- the ?ai* TUNING knobs' REJECTION diagnostic. Fourteen flags parsed as
+    // `TryParse` plus an optional range guard, with no else, so `?aireact=420x` left the baked
+    // default in force and said nothing. That is the failure card 6eb8dc9e named for ?flyspider*:
+    // a run that measures the DEFAULT path while carrying the label of the variant under test --
+    // and these fourteen are the ones whose readings get published as sweep rows, where a
+    // silently-ignored value reads as "the knob did nothing".
+    //
+    // NOT every flag whose name starts with "ai": `?aifriends=<0-3>` (a co-op soak seam, not a
+    // tuning knob) is still silent, and so is the boolean `?aiplayer`/`?aibench` pair, which
+    // cannot have a bad value. Say "the 14 tuning knobs", never "the whole ?ai* family".
+    //
+    // Silence is invisible in any frame or number, so the assertion has to be made about the
+    // OUTPUT. Three legs per flag, driven through the real DebugFlags.Parse:
+    //   1. a valid value lands AND reports no rejection  (the negative control -- a helper that
+    //      printed unconditionally, or an else placed on the wrong branch, fails here and only
+    //      here; note Parse tails into Hint() on these queries, so the capture is never EMPTY);
+    //   2. an unparseable value changes nothing, is reported, and the "staying on" clause names
+    //      THE VALUE JUST SET rather than the baked default -- the part of the ?flyspider*
+    //      precedent that is easy to get wrong, since Parse never resets a property and a repeated
+    //      flag must keep the earlier valid value;
+    //   3. a NEGATIVE value -- parseable but refused by the range guard, i.e. the second way into
+    //      the else, which a TryParse-only test would miss.
+    // Then the two per-tier knobs' wording, which cannot be a number (see below).
+    private static int ProbeAiFlagRejection(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        if (parse == null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags.Parse -- renamed or moved?");
+            return 2;
+        }
+
+        // Parse one query and hand back everything it printed. Parse tails into Hint() when nothing
+        // in `Active` is set, so a capture is usually two lines; the diagnostic is the first.
+        Func<string, string> run = query => RunParse(parse, query);
+        Func<string, object> get = name => flags.GetProperty(name, anyStatic).GetValue(null);
+        Action<string, object> set = (name, v) => flags.GetProperty(name, anyStatic).SetValue(null, v);
+
+        // flag, the DebugFlags property it writes, a valid value (chosen != the baked default, so
+        // leg 2's "names the value in force" claim is not vacuous), what that value must read back
+        // as, and the baked default as it renders in a message -- which must NOT appear.
+        var rows = new[]
+        {
+            new { Flag = "aismooth",       Prop = "AiSteerSmoothMs",       Good = "111", Want = (object)111f,  Baked = "90"   },
+            new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
+            new { Flag = "aipark",         Prop = "AiParkDemand",          Good = "3",   Want = (object)3f,    Baked = "0.95" },
+            new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
+            new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
+            new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
+            new { Flag = "aicrosspenalty", Prop = "AiWallCrossPenalty",    Good = "33",  Want = (object)33f,   Baked = ""     },
+            new { Flag = "aithreatlead",   Prop = "AiThreatLeadMs",        Good = "555", Want = (object)555f,  Baked = "700"  },
+            new { Flag = "aibossbias",     Prop = "AiPriorityBias",        Good = "0.75",Want = (object)0.75f, Baked = "0.45" },
+            new { Flag = "aiaim",          Prop = "AiAimSpreadRad",        Good = "2",   Want = (object)2f,    Baked = ""     },
+            new { Flag = "aifieldpx",      Prop = "AiThreatFieldPx",       Good = "321", Want = (object)321f,  Baked = ""     },
+            new { Flag = "aifieldsize",    Prop = "AiThreatFieldSize",     Good = "6",   Want = (object)6f,    Baked = "1.8"  },
+            new { Flag = "aifieldfall",    Prop = "AiThreatFieldFalloff",  Good = "8",   Want = (object)8f,    Baked = "3"    },
+            new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
+        };
+        // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
+        // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
+        // "(expected ...)" clause or the value being quoted back, so the check would fire on text
+        // that is not the default at all. aiaim/aifieldpx have no single baked number (per tier).
+
+        // Bind every property up front and fail LOUDLY, the way the other case sets do -- a
+        // renamed override would otherwise surface as a puzzling value mismatch inside one leg.
+        string missing = null;
+        foreach (var row in rows)
+        {
+            if (flags.GetProperty(row.Prop, anyStatic) == null) { missing ??= row.Prop; }
+        }
+        if (missing != null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags." + missing + " -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 14 knobs (card 48b7c6b1)");
+
+        // One counter and its OWN first-problem detail per leg: a shared sink attaches the
+        // diagnosis to whichever Check happens to print it, which in a mutation run put the only
+        // useful line on a PASS and left the FAIL as a bare count.
+        int landed = 0, quiet = 0, reported = 0, named = 0, negatives = 0;
+        string badLanded = null, badQuiet = null, badReported = null, badNamed = null, badNeg = null;
+        foreach (var row in rows)
+        {
+            // 1. valid value: lands, and reports no rejection.
+            string outGood = run("?" + row.Flag + "=" + row.Good);
+            if (Equals(get(row.Prop), row.Want)) { landed++; }
+            else { badLanded ??= row.Flag + " read back " + get(row.Prop) + ", wanted " + row.Want; }
+            if (!outGood.Contains("unknown")) { quiet++; }
+            else { badQuiet ??= row.Flag + "=" + row.Good + " was REPORTED: " + FirstLine(outGood); }
+
+            // 2. unparseable: unchanged, reported, names the value in force (not the baked default).
+            string outBad = run("?" + row.Flag + "=xx");
+            bool unchanged = Equals(get(row.Prop), row.Want);
+            bool says = outBad.Contains("unknown ?" + row.Flag + "= value 'xx'") && outBad.Contains("-- ignored, staying on ");
+            bool inForce = outBad.Contains(row.Good) && (row.Baked.Length == 0 || !outBad.Contains(row.Baked));
+            if (unchanged && says) { reported++; }
+            else { badReported ??= row.Flag + ": prop=" + get(row.Prop) + " said: " + FirstLine(outBad); }
+            if (inForce) { named++; }
+            else { badNamed ??= row.Flag + " does not name the in-force " + row.Good + ": " + FirstLine(outBad); }
+
+            // 3. negative: parses, fails the range guard, must be refused the same way. ?aiff is
+            //    the one flag with no range guard (it CLAMPS to 0..64), so -1 is accepted there.
+            if (row.Flag != "aiff")
+            {
+                string outNeg = run("?" + row.Flag + "=-1");
+                if (Equals(get(row.Prop), row.Want) && outNeg.Contains("unknown ?" + row.Flag + "=")) { negatives++; }
+                else { badNeg ??= row.Flag + "=-1: prop=" + get(row.Prop) + " said: " + FirstLine(outNeg); }
+            }
+        }
+        Check("a valid value lands on all 14", landed == rows.Length,
+            landed + "/" + rows.Length + (badLanded != null ? "; " + badLanded : ""));
+        Check("a valid value reports NO rejection (the control)", quiet == rows.Length,
+            quiet + "/" + rows.Length + " clean -- a helper that printed unconditionally fails here"
+            + (badQuiet != null ? "; " + badQuiet : ""));
+        Check("a bad value is refused AND reported on all 14", reported == rows.Length,
+            reported + "/" + rows.Length + (badReported != null ? "; " + badReported : ""));
+        Check("the message names the value IN FORCE, not the baked default", named == rows.Length,
+            named + "/" + rows.Length + " (Parse never resets a property, so a repeated flag keeps the"
+            + " earlier value)" + (badNamed != null ? "; " + badNamed : ""));
+        Check("a NEGATIVE value is refused AND reported on all 13 guarded flags", negatives == rows.Length - 1,
+            negatives + "/" + (rows.Length - 1) + " (?aiff has no range guard -- it clamps)"
+            + (badNeg != null ? "; " + badNeg : ""));
+
+        // ?aiaim and ?aifieldpx resolve through PlayerShip.AiSkillByDifficulty at PLAY time, off a
+        // difficulty this parse has not settled, so with no override standing there is no number to
+        // name -- and a diagnostic that can state the wrong condition is worse than one that states
+        // none. They must say which table is in force instead. (With an override standing they name
+        // it like the rest, which the table above already covered.)
+        set("AiAimSpreadRad", null);
+        set("AiThreatFieldPx", null);
+        string outAim = run("?aiaim=xx");
+        string outPx = run("?aifieldpx=xx");
+        Check("per-tier knobs name the SKILL ROW when no override stands",
+            get("AiAimSpreadRad") == null && get("AiThreatFieldPx") == null
+            && outAim.Contains("staying on the per-tier skill row")
+            && outPx.Contains("staying on the per-tier skill row"),
+            "aiaim said: " + FirstLine(outAim) + " | aifieldpx said: " + FirstLine(outPx));
+
+        // Hand the process back as it was found. Parse can only ASSIGN, so a Probe* added after
+        // this one would otherwise inherit fourteen overrides with no way to reach the defaults.
+        foreach (var row in rows)
+        {
+            set(row.Prop, row.Flag == "aiff" ? (object)0 : null);
+        }
+        int leaked = 0;
+        foreach (var row in rows)
+        {
+            object v = get(row.Prop);
+            if (row.Flag == "aiff" ? !Equals(v, 0) : v != null) { leaked++; }
+        }
+        Check("case set leaves no override behind", leaked == 0, leaked + " still set");
+        return 0;
+    }
+
+    // Card 4e401005 -- the SWEEP: every other value-carrying flag in DebugFlags.cs, after cards
+    // 6eb8dc9e (?flyspider*) and 48b7c6b1 (the 14 ?ai* knobs) established the convention. Same
+    // failure mode as those two, over ~80 more flags: `?wallsidetile=4x` ran the baked tiling
+    // while the run carried the label of the variant under test.
+    //
+    // WHY THIS SET IS SHAPED DIFFERENTLY FROM ProbeAiFlagRejection. That one knows each knob's
+    // baked default (PlayerShip exposes them as public consts) and asserts the message names the
+    // in-force value rather than that default. Here the defaults live in a dozen different game
+    // classes -- Wall, HoloSim, WebcamLevel.Tunings[], Spider, ... -- and are not reachable from
+    // Parse at all, which is exactly why these call sites say "the shipped default" instead of a
+    // number they would have to guess. So the in-force claim is proven WITHOUT restating any
+    // constant, by READING BACK what the flag actually set and requiring the message to name that:
+    //   leg 0  no override standing  -> the message says "the shipped default"   (nullable only)
+    //   leg 1  a valid value         -> it lands, and NO rejection is reported    (the control)
+    //   leg 2  an unparseable value  -> unchanged, reported, names the READ-BACK value from leg 1
+    //                                   and no longer says "the shipped default"
+    //   leg 3  a negative value      -> the same, for the flags whose guard refuses one
+    // Reading back also sidesteps every inline clamp (?holofilter caps at 2, ?aifriends at 3, ...)
+    // without this file having to know a single one of them.
+    private static int ProbeFlagRejectionSweep(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        if (parse == null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags.Parse -- renamed or moved?");
+            return 2;
+        }
+
+        Func<string, string> run = query => RunParse(parse, query);
+
+        // Flag, the DebugFlags property it writes, a value its guard accepts, and whether that
+        // guard refuses a negative (derived from the "(expected ...)" clause the call site states,
+        // so the two cannot drift). Good values are deliberately distinctive -- 0.375 / 9 -- so
+        // leg 2's "the message contains it" is not satisfied by a digit in the expected clause.
+        var rows = new[]
+        {
+            new { Flag = "slowmotraildecay", Prop = "SlowmoTrailDecay", Good = "0.375", RejectsNeg = false },
+            new { Flag = "slowmotrailstrength", Prop = "SlowmoTrailStrength", Good = "0.375", RejectsNeg = false },
+            new { Flag = "holofilter", Prop = "HoloFilter", Good = "0.375", RejectsNeg = false },
+            new { Flag = "holoburst", Prop = "HoloBurst", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hologreen", Prop = "HoloGreen", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hologreenpulse", Prop = "HoloGreenPulse", Good = "0.375", RejectsNeg = false },
+            new { Flag = "holostaticrate", Prop = "HoloStaticRate", Good = "0.375", RejectsNeg = false },
+            new { Flag = "blastactive", Prop = "BlastActiveAlpha", Good = "0.375", RejectsNeg = false },
+            new { Flag = "blasthit", Prop = "BlastHitFactor", Good = "0.375", RejectsNeg = true },
+            new { Flag = "reticlesize", Prop = "ReticleSize", Good = "0.375", RejectsNeg = true },
+            new { Flag = "blastloop", Prop = "BlastLoopSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazerchargescale", Prop = "LazerChargeScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazercapscale", Prop = "LazerCapScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazerarcs", Prop = "LazerArcRate", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazertendrilspeed", Prop = "LazerTendrilSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "lazerarclife", Prop = "LazerArcLife", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorbolts", Prop = "ConnectorBoltCount", Good = "9", RejectsNeg = true },
+            new { Flag = "connectorarcs", Prop = "ConnectorArcRate", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorjitter", Prop = "ConnectorJitter", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorpulse", Prop = "ConnectorPulse", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorglow", Prop = "ConnectorGlow", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wall3dbands", Prop = "Wall3DBands", Good = "9", RejectsNeg = true },
+            new { Flag = "walldepth", Prop = "WallDepth", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallfog", Prop = "WallFog", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallsidedark", Prop = "WallSideDark", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallsidetile", Prop = "WallSideTile", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallfacelight", Prop = "WallFaceLight", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallfaceangle", Prop = "WallFaceAngle", Good = "0.375", RejectsNeg = false },
+            new { Flag = "walltoplift", Prop = "WallTopLift", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallwisps", Prop = "WallWisps", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wallwispspeed", Prop = "WallWispSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wchearts", Prop = "WebcamHearts", Good = "9", RejectsNeg = true },
+            new { Flag = "wckills", Prop = "WebcamKills", Good = "9", RejectsNeg = true },
+            new { Flag = "wcsaucers", Prop = "WebcamSaucers", Good = "9", RejectsNeg = true },
+            new { Flag = "wcsaucerspeed", Prop = "WebcamSaucerSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcplasmaspeed", Prop = "WebcamPlasmaSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcspawn", Prop = "WebcamSpawnInterval", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcarm", Prop = "WebcamArmDelay", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wccharge", Prop = "WebcamChargeTime", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcminemax", Prop = "WebcamMineMax", Good = "9", RejectsNeg = true },
+            new { Flag = "wcminespawn", Prop = "WebcamMineSpawn", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcminelife", Prop = "WebcamMineLife", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcmothership", Prop = "WebcamMothership", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcmothershipfreeze", Prop = "WebcamMothershipFreeze", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wchitleeway", Prop = "WebcamHitLeeway", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcavoid", Prop = "WebcamAvoid", Good = "0.375", RejectsNeg = true },
+            new { Flag = "wcreturndelay", Prop = "WebcamReturnDelay", Good = "0.375", RejectsNeg = true },
+            new { Flag = "huestart", Prop = "HueStart", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hueend", Prop = "HueEnd", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hue", Prop = "HueTarget", Good = "0.375", RejectsNeg = false },
+            new { Flag = "hueloop", Prop = "HueLoopSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelpercycles", Prop = "SpiderHelperCycles", Good = "9", RejectsNeg = true },
+            new { Flag = "spiderhelperhp", Prop = "SpiderHelperHitPoints", Good = "9", RejectsNeg = true },
+            new { Flag = "spiderhelperhovery", Prop = "SpiderHelperHoverY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderhelperspeed", Prop = "SpiderHelperSpeed", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperwindup", Prop = "SpiderHelperWindupSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperfire", Prop = "SpiderHelperFireSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperlead", Prop = "SpiderHelperFireLead", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderhelperenterpower", Prop = "SpiderHelperEnterPower", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderbosshp", Prop = "SpiderBossHp", Good = "9", RejectsNeg = true },
+            new { Flag = "aifriends", Prop = "AiFriends", Good = "9", RejectsNeg = false },
+            new { Flag = "netlocal", Prop = "NetLocal", Good = "9", RejectsNeg = false },
+            new { Flag = "netlag", Prop = "NetLagMs", Good = "0.375", RejectsNeg = true },
+            new { Flag = "netloss", Prop = "NetLossPct", Good = "0.375", RejectsNeg = true },
+            new { Flag = "castbrainscale", Prop = "CastBrainScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "castbrainfps", Prop = "CastBrainFps", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderloop", Prop = "SpiderLoopSeconds", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderjumpframe", Prop = "SpiderJumpFrame", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderlandframe", Prop = "SpiderLandFrame", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderjumpx", Prop = "SpiderJumpX", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spidershadowx", Prop = "SpiderShadowX", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spidershadowy", Prop = "SpiderShadowY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spidershadowscale", Prop = "SpiderShadowScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "spiderairx", Prop = "SpiderAirX", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderairy", Prop = "SpiderAirY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderphase", Prop = "SpiderPhase", Good = "0.375", RejectsNeg = false },
+            new { Flag = "frame", Prop = "HarnessFrame", Good = "9", RejectsNeg = false },
+            new { Flag = "size", Prop = "HarnessScale", Good = "0.375", RejectsNeg = true },
+            new { Flag = "rotation", Prop = "HarnessRot", Good = "0.375", RejectsNeg = false },
+            new { Flag = "animfps", Prop = "HarnessFps", Good = "0.375", RejectsNeg = true },
+        };
+
+        Console.WriteLine("[logic_probe] DebugFlags value rejection, the remaining " + rows.Length
+            + " flags (card 4e401005)");
+
+        string missing = null;
+        foreach (var row in rows)
+        {
+            if (flags.GetProperty(row.Prop, anyStatic) == null) { missing ??= row.Flag + " -> " + row.Prop; }
+        }
+        if (missing != null)
+        {
+            Console.WriteLine("FAIL: could not reflect DebugFlags." + missing + " -- renamed or moved?");
+            return 2;
+        }
+
+        // Every property this set touches, as it stood on entry -- the restore at the end puts
+        // them back from here (the non-nullable ones have no "unset" to null out).
+        var entry = new System.Collections.Generic.Dictionary<string, object>();
+        foreach (var row in rows)
+        {
+            entry[row.Prop] = flags.GetProperty(row.Prop, anyStatic).GetValue(null);
+        }
+
+        int shipped = 0, shippedN = 0, landed = 0, quiet = 0, reported = 0, named = 0, negatives = 0, negN = 0;
+        string badShipped = null, badLanded = null, badQuiet = null, badReported = null, badNamed = null, badNeg = null;
+        foreach (var row in rows)
+        {
+            PropertyInfo p = flags.GetProperty(row.Prop, anyStatic);
+            bool nullable = Nullable.GetUnderlyingType(p.PropertyType) != null;
+
+            // 0. Nothing standing yet -> the message must SAY so rather than invent a number. This
+            //    runs before anything sets this flag, which is why the leg order matters.
+            if (nullable)
+            {
+                shippedN++;
+                string outFresh = run("?" + row.Flag + "=xx");
+                if (p.GetValue(null) == null && outFresh.Contains("staying on the shipped default")) { shipped++; }
+                else { badShipped ??= row.Flag + " with no override said: " + FirstLine(outFresh); }
+            }
+
+            // 1. A valid value lands, and reports no rejection. Asserted as a CHANGE from what
+            //    stood before, not as "not null": the seven non-nullable properties box to a
+            //    float/int that can never BE null, so a null test passes them vacuously -- and
+            //    since leg 2 derives its expectation from this same read, a deleted assignment
+            //    would then satisfy every check in the set.
+            object before = p.GetValue(null);
+            string outGood = run("?" + row.Flag + "=" + row.Good);
+            object landedVal = p.GetValue(null);
+            string inForce = Convert.ToString(landedVal, System.Globalization.CultureInfo.InvariantCulture);
+            if (!Equals(landedVal, before)) { landed++; }
+            else { badLanded ??= row.Flag + "=" + row.Good + " did not change the override (still " + before + ")"; }
+            if (!outGood.Contains("unknown")) { quiet++; }
+            else { badQuiet ??= row.Flag + "=" + row.Good + " was REPORTED: " + FirstLine(outGood); }
+
+            // 2. An unparseable value: unchanged, reported, and it names what leg 1 just set.
+            string outBad = run("?" + row.Flag + "=xx");
+            bool unchanged = Equals(p.GetValue(null), landedVal);
+            bool says = outBad.Contains("unknown ?" + row.Flag + "= value 'xx'")
+                && outBad.Contains("-- ignored, staying on ");
+            if (unchanged && says) { reported++; }
+            else { badReported ??= row.Flag + ": prop=" + p.GetValue(null) + " said: " + FirstLine(outBad); }
+            if (outBad.Contains(inForce) && !outBad.Contains("the shipped default")) { named++; }
+            else { badNamed ??= row.Flag + " does not name the in-force " + inForce + ": " + FirstLine(outBad); }
+
+            // 3. A negative value -- parseable, refused by the range guard. The second way into the
+            //    else, which a TryParse-only test would never reach.
+            if (row.RejectsNeg)
+            {
+                negN++;
+                string outNeg = run("?" + row.Flag + "=-1");
+                if (Equals(p.GetValue(null), landedVal) && outNeg.Contains("unknown ?" + row.Flag + "=")) { negatives++; }
+                else { badNeg ??= row.Flag + "=-1: prop=" + p.GetValue(null) + " said: " + FirstLine(outNeg); }
+            }
+        }
+        Check("with no override standing, the message says so", shipped == shippedN,
+            shipped + "/" + shippedN + " nullable flags" + (badShipped != null ? "; " + badShipped : ""));
+        Check("a valid value lands on all " + rows.Length, landed == rows.Length,
+            landed + "/" + rows.Length + (badLanded != null ? "; " + badLanded : ""));
+        Check("a valid value reports NO rejection (the control)", quiet == rows.Length,
+            quiet + "/" + rows.Length + " clean" + (badQuiet != null ? "; " + badQuiet : ""));
+        Check("a bad value is refused AND reported on all " + rows.Length, reported == rows.Length,
+            reported + "/" + rows.Length + (badReported != null ? "; " + badReported : ""));
+        Check("the message names the value IN FORCE, not the shipped default", named == rows.Length,
+            named + "/" + rows.Length + (badNamed != null ? "; " + badNamed : ""));
+        Check("a NEGATIVE value is refused AND reported wherever a guard refuses one",
+            negatives == negN, negatives + "/" + negN + " guarded flags"
+            + (badNeg != null ? "; " + badNeg : ""));
+
+        // Hand the process back as it was found -- Parse can only ASSIGN, so a Probe* added after
+        // this one would otherwise inherit eighty overrides with no way to reach the defaults.
+        // The non-nullable seven are restored from the values captured at entry, not nulled: they
+        // have no "unset", and leaving them swept is how the alias check below used to print
+        // `staying on 0.375` for a flag it had never touched.
+        foreach (var row in rows)
+        {
+            flags.GetProperty(row.Prop, anyStatic).SetValue(null, entry[row.Prop]);
+        }
+        int leaked = 0;
+        foreach (var row in rows)
+        {
+            if (!Equals(flags.GetProperty(row.Prop, anyStatic).GetValue(null), entry[row.Prop])) { leaked++; }
+        }
+        Check("case set leaves no override behind", leaked == 0, leaked + " still set");
+
+        // The five whose value space is not a number, so their "expected" clause and their in-force
+        // wording had to be written by hand. Each states a DIFFERENT thing in place of a number, so
+        // a copy-paste slip between them would show up nowhere else.
+        string outDir = run("?wcmothershipdir=verticl");
+        Check("?wcmothershipdir= names the orientation roll",
+            outDir.Contains("expected vertical or horizontal")
+            && outDir.Contains("staying on the random orientation roll"), FirstLine(outDir));
+        string outDiff = run("?difficulty=2");
+        Check("?difficulty= refuses the ordinal and says which spelling it wants",
+            outDiff.Contains("a tier name") && outDiff.Contains("not a number")
+            && outDiff.Contains("staying on the saved menu difficulty"), FirstLine(outDiff));
+        string outWcd = run("?wcdiff=Hrd");
+        Check("?wcdiff= names the level's own tier", outWcd.Contains("staying on the level's own tier"),
+            FirstLine(outWcd));
+        string outCol = run("?wallfogcolor=nothex");
+        Check("?wallfogcolor= states a hex example", outCol.Contains("a hex colour like #4080c8")
+            && outCol.Contains("staying on the shipped default"), FirstLine(outCol));
+        string outHarness = run("?harness");
+        Check("a BARE ?harness is reported, not silently a normal boot",
+            outHarness.Contains("unknown ?harness= value ''")
+            && outHarness.Contains("staying on no harness (a normal boot)"), FirstLine(outHarness));
+        // ... and that an ALIASED spelling reports under the name the author actually typed, which
+        // is why every call site passes `key` rather than a literal.
+        string outAlias = run("?objscale=xx");
+        Check("an alias reports under the spelling used (?objscale, not ?size)",
+            outAlias.Contains("unknown ?objscale="), FirstLine(outAlias));
+
+        // The four sites that do NOT report from a plain `else`, each of which was a behaviour bug
+        // rather than only a missing message -- so each is asserted on the STATE as well as the
+        // text.
+        //
+        // ?shake and ?bgfreeze accept a number OR an on/off spelling, and used to route anything
+        // else through IsOn, i.e. read a typo as OFF: the run then measured no shake / an
+        // unfrozen background while carrying the label of the sweep it was meant to be.
+        object shakeBefore = flags.GetProperty("ShakeAmount", anyStatic).GetValue(null);
+        string outShake = run("?shake=1.5O");
+        Check("?shake= typo is reported and does NOT turn shake off",
+            Equals(flags.GetProperty("ShakeAmount", anyStatic).GetValue(null), shakeBefore)
+            && outShake.Contains("unknown ?shake=") && outShake.Contains("a number 0..3, or on/off"),
+            "shake=" + flags.GetProperty("ShakeAmount", anyStatic).GetValue(null) + " said: " + FirstLine(outShake));
+        string outShakeOff = run("?shake=off");
+        Check("?shake=off still means off (the on/off spellings are untouched)",
+            Equals(flags.GetProperty("ShakeAmount", anyStatic).GetValue(null), 0f) && !outShakeOff.Contains("unknown"),
+            "shake=" + flags.GetProperty("ShakeAmount", anyStatic).GetValue(null));
+        flags.GetProperty("ShakeAmount", anyStatic).SetValue(null, shakeBefore);
+
+        run("?bgfreeze=250");
+        string outFreeze = run("?bgfreeze=40O");
+        Check("?bgfreeze= typo is reported and does NOT unfreeze",
+            Equals(flags.GetProperty("BgFreeze", anyStatic).GetValue(null), 250f)
+            && outFreeze.Contains("unknown ?bgfreeze="),
+            "bgfreeze=" + flags.GetProperty("BgFreeze", anyStatic).GetValue(null) + " said: " + FirstLine(outFreeze));
+        run("?bgfreeze=false");
+        Check("?bgfreeze=false still disables it", flags.GetProperty("BgFreeze", anyStatic).GetValue(null) == null,
+            "bgfreeze=" + flags.GetProperty("BgFreeze", anyStatic).GetValue(null));
+
+        // ?pos reports per AXIS, so a half-usable pair says which half was dropped -- and the
+        // usable half must still land.
+        run("?pos=123,456");
+        string outPos = run("?pos=400,3O0");
+        Check("?pos= reports the bad AXIS and keeps the good one",
+            Equals(flags.GetProperty("HarnessX", anyStatic).GetValue(null), 400f)
+            && Equals(flags.GetProperty("HarnessY", anyStatic).GetValue(null), 456f)
+            && outPos.Contains("unknown ?pos= value '3O0'") && outPos.Contains("for y in ?pos=x,y"),
+            "x=" + flags.GetProperty("HarnessX", anyStatic).GetValue(null)
+            + " y=" + flags.GetProperty("HarnessY", anyStatic).GetValue(null) + " said: " + FirstLine(outPos));
+        flags.GetProperty("HarnessX", anyStatic).SetValue(null, null);
+        flags.GetProperty("HarnessY", anyStatic).SetValue(null, null);
+
+        // A bare ?level used to dereference a null `val`: the NRE took the headless host down and,
+        // in the browser, was caught one level up as a single "flag read failed" line that
+        // silently dropped EVERY LATER FLAG in the query. So the assertion that matters is not the
+        // message -- it is that a flag after it still lands.
+        string outBareLevel = run("?level&aiscanrows=5");
+        Check("a bare ?level does not throw, and later flags still parse",
+            outBareLevel.Contains("unknown level ''")
+            && Equals(flags.GetProperty("AiWallScanRows", anyStatic).GetValue(null), 5),
+            "scanrows=" + flags.GetProperty("AiWallScanRows", anyStatic).GetValue(null)
+            + " said: " + FirstLine(outBareLevel));
+        flags.GetProperty("AiWallScanRows", anyStatic).SetValue(null, null);
+
+        return 0;
+    }
+
+    // Card 64967ea5 -- CollisionBox's box-vs-LINE predicate. The card collapsed a duplicated
+    // `(val).Intersects(val2)` (the ray-box test ran TWICE per call, once for .HasValue and once
+    // for the comparison) into one cached call. That is a COST fix, not a behaviour fix: the
+    // answer is unchanged by construction, so there is no old-vs-new behaviour to contrast and
+    // the usual "run the pre-card policy as a negative control" shape does not apply here.
+    //
+    // What this set is for, then, is the OTHER half of the claim -- that collapsing the call did
+    // not quietly change the predicate. It is a regression oracle, and it is run DIFFERENTIALLY:
+    // point it at a merge-base build of EvilAliensWeb.dll and at the branch build and the two
+    // verdict tables must be identical. (The "one call, not two" half is proven by
+    // verify_decompiled_diff.py, which shows the single surviving call site.)
+    //
+    // Expectations are derived from ray-AABB geometry, never restated from the code. The
+    // predicate has exactly two terms -- "the ray meets the box at all" and "it does so within
+    // the line's Length" -- so the set is built as PAIRS that isolate one term each: see the
+    // sensitivity note at the bottom for why that pairing IS the evidence and why an explicit
+    // control section here would only restate it.
+    private static int ProbeCollisionBoxLine(Assembly asm)
+    {
+        Type boxType = asm.GetType("EvilAliens.CollisionBox", true);
+        Type lineType = asm.GetType("EvilAliens.CollisionLine", true);
+        Type iface = asm.GetType("EvilAliens.ICollisionType", true);
+        PropertyInfo topLeft = boxType.GetProperty("TopLeft");
+        if (topLeft == null)
+        {
+            Console.WriteLine("FAIL: could not reflect CollisionBox.TopLeft -- renamed or moved?");
+            return 2;
+        }
+        Type vec2 = topLeft.PropertyType;
+        ConstructorInfo boxCtor = boxType.GetConstructor(new[] { vec2, vec2 });
+        ConstructorInfo lineCtor = lineType.GetConstructor(new[] { vec2, typeof(float), typeof(float) });
+        // TestCollision is the PUBLIC entry point and dispatches to the private TestCollisionLine
+        // for a CollisionLine, so the edited method is reached without binding a private member.
+        MethodInfo test = boxType.GetMethod("TestCollision", new[] { iface });
+        if (boxCtor == null || lineCtor == null || test == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (CollisionBox(Vector2,Vector2)="
+                + (boxCtor != null) + " CollisionLine(Vector2,float,float)=" + (lineCtor != null)
+                + " TestCollision(ICollisionType)=" + (test != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Func<float, float, object> vec = (x, y) => Activator.CreateInstance(vec2, new object[] { x, y });
+        // The box under test: design-space (100,100)..(200,200).
+        object box = boxCtor.Invoke(new object[] { vec(100f, 100f), vec(200f, 200f) });
+        // CollisionLine's DirectionalVector is MyMath.AngleToVector(direction) = (cos, sin), a UNIT
+        // vector, so the ray parameter Intersects returns is a distance in world units and compares
+        // directly against Length. Screen Y grows downward; none of the cases below depend on that
+        // beyond naming.
+        const float right = 0f;
+        const float down = (float)Math.PI / 2f;
+        const float left = (float)Math.PI;
+        const float downRight = (float)Math.PI / 4f;
+        Func<float, float, float, float, bool> hits = (ox, oy, len, dir) =>
+            (bool)test.Invoke(box, new object[] { lineCtor.Invoke(new object[] { vec(ox, oy), len, dir }) });
+
+        Console.WriteLine("[logic_probe] CollisionBox vs CollisionLine (card 64967ea5)");
+
+        // 1. Geometry: does the ray meet the box at all, given a length that cannot be the reason.
+        // Distances are chosen well clear of the box edges so no case rides a float boundary.
+        Check("aimed at the box from the left, long enough", hits(0f, 150f, 1000f, right), "enters at t=100");
+        Check("aimed AWAY from the box", !hits(0f, 150f, 1000f, left), "box is behind the origin");
+        Check("passes above the box", !hits(0f, 50f, 1000f, right), "y=50 never enters [100,200]");
+        Check("passes below the box", !hits(0f, 300f, 1000f, right), "y=300 never enters [100,200]");
+        Check("aimed at the box from above", hits(150f, 0f, 1000f, down), "enters at t=100");
+        Check("origin INSIDE the box", hits(150f, 150f, 10f, right), "a ray starting inside meets it at t=0");
+        Check("diagonal through the box", hits(50f, 60f, 1000f, downRight), "crosses x=100 at y=110");
+
+        // 2. The length term, in isolation: same origin and heading as a case above, shortened so
+        // the box is out of reach. A predicate that dropped `< collisionLine.Length` answers these
+        // exactly as it answers their long counterparts.
+        Check("too short to reach it (from the left)", !hits(0f, 150f, 50f, right), "needs 100, has 50");
+        Check("too short to reach it (from above)", !hits(150f, 0f, 50f, down), "needs 100, has 50");
+        Check("too short to reach it (diagonal)", !hits(50f, 60f, 50f, downRight), "needs ~70.7, has 50");
+        // ... and the boundary is generous rather than exact -- just past the entry distance is a
+        // hit. Kept off the exact tie (100 vs 100), which no caller depends on and which would
+        // pin a float comparison this card has no business fixing.
+        Check("just long enough", hits(0f, 150f, 100.5f, right), "needs 100, has 100.5");
+
+        // SENSITIVITY comes from the PAIRING above, and is not a separate section. Sections 1 and
+        // 2 are three matched pairs (left / above / diagonal) whose members differ in exactly one
+        // input -- Length -- and are asserted to opposite answers, so a predicate that dropped
+        // `< collisionLine.Length` cannot satisfy both halves; section 1's aimed-at vs aimed-away
+        // and its two passes-by cases do the same for the intersection term. Mutation-tested at
+        // HEAD: dropping the length term turns 3 lines FAIL, an always-true predicate turns 6.
+        //
+        // An earlier revision added three explicit `hits(A) != hits(B)` CONTROL lines on top of
+        // that. They were REDUNDANT and are deliberately gone: both sides of each were already
+        // individually asserted above, so no mutant could fail a control without first failing one
+        // of those, and their only real effect was to inflate the mutation counts (4 and 9) into
+        // looking like more discrimination than the set has. If a control is ever added back here,
+        // it has to compare a pair whose individual answers are NOT pinned elsewhere in the set --
+        // otherwise it is a restatement, not evidence.
         return 0;
     }
 }

@@ -61,6 +61,10 @@ eahl --script probe.txt         # same commands from a file; first failure exits
 | `shot <path.png>` | render the **current** state to a PNG — does not advance time |
 | `eval <method> [args…]` | call a `Compat.DebugInput` method |
 | `info` | frame counter, sim time, buffer sizes, scene |
+| `audio` | `silenced=` + the gain OpenAL itself reports |
+| `mark` | start a fresh assertion window (drop what was captured) |
+| `expect <regex>` | fail unless some captured line matches |
+| `expect-not <regex>` | fail if any captured line matches — quotes the offender |
 | `help` | list the `eval` methods with their signatures |
 | `quit` | |
 
@@ -75,6 +79,33 @@ shot out/after_fire.png
 eval ScoreDump
 quit
 ```
+
+### Assertions, and committed probes
+
+`expect` / `expect-not` match **per line** against everything the run has printed since the last
+`mark` — the game's own `Console.WriteLine` diagnostics (`[loadprofile]`, `[hitch]`, `[net]`, …)
+as well as command replies, because the console is teed into a capture buffer at boot. That is
+what turns `--script` from "a macro" into "a test": the assertion a regression check usually
+needs is *this diagnostic must NOT appear*, which the `ok`/`err` protocol alone cannot express.
+
+```
+step 150 nodraw
+mark                                    # drop the boot noise
+eval Press enter 1
+step 600 nodraw
+expect \[loadprofile\] Level2 preload:   # prove we got where we claim
+expect-not COLD decode in Level2         # the actual assertion
+```
+
+The regex is the rest of the line verbatim (no quoting needed, though one surrounding pair is
+stripped), and blank lines are matched too, so `expect-not ^$` means what it says. The buffer is
+capped; an overflow fails any assertion that would rest on the discarded part — `expect-not`
+always, and an `expect` that found nothing — because absence cannot be proven over output that
+was thrown away. An `expect` that already matched is unaffected.
+
+Checks worth re-running later live in **`probes/`** and run as a set with
+`python tools/headless/probes/run_probes.py`. Conventions, the four rules for writing one, and
+the menu-navigation crib: [`probes/README.md`](probes/README.md).
 
 `eval` binds by reflection to the **public statics on `Compat/DebugInput.cs`** — the same curated
 surface the browser console exposes (`eaPress`, `eaAiBench`, `eaTexProbe`, `eaTeamSeat`, `eaBinTest`,
@@ -102,6 +133,11 @@ its return value is printed. `help` lists what is currently available.
 - **Saves start empty every run, by design** — a leftover save silently changes unlock state,
   difficulty and the attract flow between runs. `--saves <dir>` keeps a persistent profile when
   that is the point of the test.
+- **The `[hitch]` frame watchdog does not run here.** `LoadProfiler.NoteFrame` is called only from
+  `Pages/Index.razor.cs`, which this host replaces — so a run is silent about long ticks no matter
+  how long they are. `?loadlog`'s `COLD decode` lines DO work (they are a preload-bracket fact, not
+  a timing one), as does `eval PreloadExport`. Anything phrased as "confirm the hitches stop" needs
+  Chrome.
 - **Only the boot frame has a non-synthesised dt.** `RunOneFrame()` ticks once off the wall clock to
   build the device and run `LoadContent`; every frame after it is exactly `1/--fps`. Note that the
   game itself is not fully deterministic across runs regardless (RNG seeding), so identical flags
@@ -122,6 +158,19 @@ its return value is printed. `help` lists what is currently available.
 - **The capture is the finished frame.** `Game1.Draw` ends by blitting `sceneTarget` to the back
   buffer through the gamma shader, letterboxed. `HeadlessGame` reads the back buffer between
   `Draw()` and `EndDraw()` — after bloom, post FX, gamma and the present blit, before the swap.
+- **Silent by default, at the mixer** (`HeadlessAudio.cs`): `SoundEffect.MasterVolume = 0` plus a
+  direct `alListenerf(AL_GAIN, 0)` once OpenAL is up, so a background soak does not play SFX
+  through the speakers. The device, the mixer, the `.wav` decodes and every source stay real and
+  running — only the gain is zero — so an audio-path crash still surfaces instead of being hidden.
+  `audio` reports the gain **read back out of OpenAL**, which is the only part of this you should
+  believe; `--audio` opts back in. **Do not "simplify" this to `ALSOFT_DRIVERS=null`** — that
+  looks like the elegant answer, is what this file used to do, and kills the process with an
+  `AccessViolationException` under sustained SFX play (deterministic, 3/3). Full autopsy of that
+  and of why an environment variable cannot configure OpenAL Soft from managed code: the header
+  comment in `HeadlessAudio.cs`. **Two limits came with it:** a real audio device is now opened
+  (the null backend's one genuine merit was that none was, so a box with *no* sound card is no
+  longer covered — there is no try/catch around KNI's audio bring-up), and the gain readback is
+  Windows-only, so off Windows the run is quiet but `probes/silence.txt` cannot confirm it.
 - **A fake browser, not 13 stubs** (`HeadlessJsRuntime.cs`). `Microsoft.JSInterop` is a plain
   netstandard package, so every `Compat/*Interop.cs` compiles here unchanged and this class answers
   the ~37 `ea*` calls. Stubbing the interop classes instead would have forked exactly the logic
@@ -130,9 +179,6 @@ its return value is printed. `help` lists what is currently available.
 - **Content is not copied.** `HeadlessTitleContainer` registers a `TitleContainerFactory` pointing
   at `wwwroot`, so the 282 MB `Content/` tree is read in place and a regenerated `.dds`/`.mgfxo` is
   picked up on the next run with no copy step.
-- **Silent by default** (`HeadlessAudio.cs`): `ALSOFT_DRIVERS=null` selects OpenAL Soft's
-  discard-everything backend, so a background soak does not play SFX through the speakers *and* no
-  audio device is opened — a box with no sound card still runs. `--audio` opts back in.
 - **Nothing in `web/` knows this exists.** Same isolation rule as `tools/sim/logic_probe`: no
   `ProjectReference` either way (that project targets browser-wasm and cannot be referenced from a
   desktop exe), and CI only publishes `web/EvilAliensWeb`. The shipped build is unaffected.

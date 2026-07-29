@@ -160,6 +160,21 @@ namespace EvilAliensWeb.Compat
 			return WallProfiler.Report();
 		}
 
+		// The preload-manifest export, reachable from the HEADLESS host. eahl's `eval` binds by
+		// reflection to the public statics on THIS class only (tools/headless/Program.cs), while
+		// the browser reaches the exporter directly -- window.eaPreloadExport calls
+		// DotNet.invokeMethod('EvilAliensWeb','ExportPreloadManifest') on LoadProfiler, bypassing
+		// DebugInput entirely. So without this passthrough the whole ?loadlog -> export loop is
+		// browser-only, and growing the manifest means driving Chrome. Deliberately NOT
+		// [JSInvokable]: LoadProfiler.ExportPreloadManifest already carries that attribute and
+		// index.html already binds to it, so the browser surface is unchanged.
+		// Headlessly the "download" lands as <dir of --out>/preload_manifest.txt
+		// (HeadlessJsRuntime.WriteDownload); the text is returned (and printed by `eval`) either way.
+		public static string PreloadExport()
+		{
+			return LoadProfiler.ExportPreloadManifest();
+		}
+
 		// JS bridge for the join-in-progress scenery diff (eaNetBg in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetBg'). Returns the live deep-state the
 		// JIP catch-up replays (card 45a4e48d) as one parseable line, so a joiner's scenery is
@@ -422,8 +437,10 @@ namespace EvilAliensWeb.Compat
 		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
 		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background
-		// is) through the real Draw, and censuses the live layers. See Compat/BgCullTest.cs --
-		// the cull's correctness is invisible to a screenshot, so it is read as data.
+		// is) through the real Draw, censuses the live layers, and diffs the cull against its
+		// pre-ef55b76e form across a scroll-phase sweep. See Compat/BgCullTest.cs -- the cull's
+		// correctness is invisible to a screenshot, so it is read as data (and that file's header
+		// says which of the four parts can actually fail).
 		[JSInvokable("debugBgCull")]
 		public static string BgCull()
 		{
@@ -479,6 +496,73 @@ namespace EvilAliensWeb.Compat
 			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
 		}
 
+		// JS bridge for the awardment banner (eaAward in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugAward', 'Pacifist'). Queues an awardment
+		// through the REAL AwardmentBlade.AwardAchievement path, so the banner enters, shows
+		// and exits exactly as it would in play.
+		//
+		// Written for card d2f746d5: every in-game trigger is minutes deep behind a condition a
+		// rig cannot produce (Pacifist is 90s of not firing on Hard+, Dunce a 180s boss timer,
+		// the rest are level completions), so the banner -- and since card 57555583 the LAZY
+		// content load behind it -- had no way to be exercised at all.
+		//
+		// An ALREADY-UNLOCKED awardment is RE-LOCKED first, because otherwise this seam is
+		// useless on any save that has played the game -- both AwardAchievement and
+		// AwardmentBlade.Update drop an unlocked awardment, so there is no banner to see. The
+		// re-lock is announced on its own line: a capture taken after one must never be mistaken
+		// for the untouched path.
+		//
+		// It is NOT "in memory only": the blade's own Enter transition calls
+		// SetAwardmentIsUnlocked(true) + SaveThreaded(), which rewrites the whole Achievements.xml.
+		// The save therefore ends up as it started -- but only because the banner actually runs,
+		// which is why the cheat gate below is tested BEFORE anything is mutated.
+		//
+		// The cheat gate is REPORTED rather than bypassed -- it is a live property of the run,
+		// not stale save state, and a seam whose failure looks like its success is worse than
+		// none.
+		[JSInvokable("debugAward")]
+		public static string Award(string awardment)
+		{
+			// The comma test is not decoration: Enum.TryParse accepts "FirstAct,SecondAct" as a
+			// bitwise OR even though Awardment is not [Flags], and the result passes IsDefined --
+			// so a typo'd list would quietly award something the caller never named.
+			if (awardment == null || awardment.IndexOf(',') >= 0
+				|| !System.Enum.TryParse<EvilAliens.Awardment>(awardment, ignoreCase: true, out var which)
+				|| !System.Enum.IsDefined(typeof(EvilAliens.Awardment), which))
+			{
+				return "[debug] eaAward: unknown awardment '" + awardment + "' (expected one of: "
+					+ string.Join(", ", System.Enum.GetNames(typeof(EvilAliens.Awardment))) + ")";
+			}
+			EvilAliens.AwardmentBlade blade =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IAwardmentBladeService>()?.get();
+			if (blade == null)
+			{
+				return "[debug] eaAward: the awardment blade is not available yet (the game is "
+					+ "still booting -- try again once a scene is up).";
+			}
+			// The cheat gate is tested BEFORE the re-lock, and that ORDER is the whole safety of
+			// this seam: re-locking and then bailing out would drop the unlock on the floor, and
+			// the next SaveThreaded from anywhere serialises the whole singleton -- so a cheating
+			// session would silently lose an awardment the player had really earned.
+			if (EvilAliens.Settings.GetInstance().CheckForCheats())
+			{
+				return "[debug] eaAward: a cheat is active, so " + which + " is dropped -- exactly "
+					+ "as in play (Settings.CheckForCheats). No banner, and nothing was touched.";
+			}
+			string relocked = "";
+			if (EvilAliens.Achievements.GetInstance().GetAwardmentIsUnlocked((int)which))
+			{
+				EvilAliens.Achievements.GetInstance().SetAwardmentIsUnlocked((int)which, value: false);
+				relocked = "[debug] eaAward: re-locked " + which + " for this session before awarding "
+					+ "-- this is NOT the untouched path\n";
+			}
+			blade.AwardAchievement(which);
+			// The two durations mirror AwardmentBlade.Update's bladeTimer values (170f enter,
+			// 6500f show); nothing links them, so retune both together.
+			return relocked + "[debug] eaAward queued " + which + " (\"" + blade.AwardmentName(which)
+				+ "\") -- the banner takes ~170ms to enter and shows for 6.5s.";
+		}
+
 		// JS bridge for the on-demand roster dump (eaNetRoster in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetRoster'). Prints the same roster=
 		// string the 5s [net] metrics line carries, plus resets=, at the instant it is called.
@@ -488,6 +572,34 @@ namespace EvilAliensWeb.Compat
 		public static string NetRoster()
 		{
 			return EvilAliensWeb.Compat.Net.NetSession.RosterDump();
+		}
+
+		// JS bridge for the OFFLINE roster (eaOracleRoster in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugOracleRoster'). Reads the live Oracle
+		// directly, so it needs no session, no level and no gamepads -- unlike eaNetRoster(),
+		// which early-returns without a net session and so cannot see the MENU roster, which is
+		// exactly where a seat left behind by the last level or attract demo does its damage
+		// (the menu-lobby handshake allocates from it). eaScore() also reports seated-ness per
+		// slot; what this adds is the CONTROLLER DEVICE per seat, which is what distinguishes an
+		// attract demo's leftover AI seats from a real player's.
+		[JSInvokable("debugOracleRoster")]
+		public static string OracleRoster()
+		{
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>()?.Oracle;
+			if (oracle == null)
+			{
+				return "[debug] eaOracleRoster: no oracle service (game not booted yet?)";
+			}
+			string seats = "";
+			for (int slot = 0; slot < EvilAliens.Oracle.MaxPlayers; slot++)
+			{
+				if (oracle.IsSeated(slot))
+				{
+					seats += (seats.Length > 0 ? "," : "") + slot + ":" + oracle.Controller(slot);
+				}
+			}
+			return "[debug] eaOracleRoster: players=" + oracle.Players
+				+ " seated=" + (seats.Length > 0 ? seats : "-");
 		}
 
 		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):

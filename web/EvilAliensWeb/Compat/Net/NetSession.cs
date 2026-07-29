@@ -245,6 +245,12 @@ namespace EvilAliensWeb.Compat.Net
         private static ControlDevice pendingJoinDevice;
         private static bool pendingJoinSpawn;
 
+        // Client only, ?netdropgrant: whether this session has already spent its one dropped
+        // grant. Per-SESSION, not per-page -- ResetPerSessionState clears it, so the second
+        // session in a page drops its first grant too instead of silently behaving differently
+        // from the first. See ShouldDropGrant.
+        private static bool dropGrantUsed;
+
         // Host only: slots granted to the peer that it has not streamed into yet -> deadline.
         // A grant the client silently fails to take would otherwise hold the seat forever.
         private const long GrantClaimTimeoutMs = 10000;
@@ -477,6 +483,7 @@ namespace EvilAliensWeb.Compat.Net
             localPrimarySlot = HostPrimarySlot;
             peerPrimarySlot = NetProtocol.SlotNone;
             joinRequestPending = false;
+            dropGrantUsed = false;
             grantsAwaitingStream.Clear();
             localJoinSimDone = 0;
             localJoinSimAt = 0;
@@ -1769,14 +1776,32 @@ namespace EvilAliensWeb.Compat.Net
         // would take slot 1 and leave the remote player permanently unseatable.
         private static int AllocateSeat()
         {
-            for (int slot = oracle.FirstFreeSlot(); slot >= 0; slot = oracle.FirstFreeSlot(slot + 1))
+            return AllocateSeatFrom(oracle, localPrimarySlot, peerPrimarySlot);
+        }
+
+        // The allocation itself, as a function of a roster and the two primary seats, so the
+        // reserve -> hold -> expire -> REALLOCATE cycle can be driven against a scratch Oracle
+        // with no session (eaSlotTest). That cycle is the only proof that a seat the host
+        // reclaims from an unclaimed grant is genuinely re-usable rather than merely released.
+        internal static int AllocateSeatFrom(Oracle roster, int localPrimary, int peerPrimary)
+        {
+            for (int slot = roster.FirstFreeSlot(); slot >= 0; slot = roster.FirstFreeSlot(slot + 1))
             {
-                if (slot != peerPrimarySlot && slot != localPrimarySlot)
+                if (slot != peerPrimary && slot != localPrimary)
                 {
                     return slot;
                 }
             }
             return -1;
+        }
+
+        // The grant claim clock, split out for the same reason. STRICTLY greater: a grant is
+        // still live on the tick its deadline lands, so a peer whose first stream arrives
+        // exactly then keeps the seat it was given. Argument order mirrors the `now > deadline`
+        // it replaced -- transposing the two would silently invert the predicate.
+        internal static bool GrantHasExpired(long nowMs, long deadlineMs)
+        {
+            return nowMs > deadlineMs;
         }
 
         // HOST: a client couch player pressed Start. Allocate a seat and answer; the seat is held
@@ -1815,7 +1840,7 @@ namespace EvilAliensWeb.Compat.Net
             grantScratchSlots.Clear();
             foreach (KeyValuePair<byte, long> g in grantsAwaitingStream)
             {
-                if (now > g.Value)
+                if (GrantHasExpired(now, g.Value))
                 {
                     grantScratchSlots.Add(g.Key);
                 }
@@ -1829,6 +1854,37 @@ namespace EvilAliensWeb.Compat.Net
                     Console.WriteLine("[net] released unclaimed couch grant slot=" + slot);
                 }
             }
+        }
+
+        // ?netdropgrant's decision, split out as a function of the flag so eaSlotTest() can drive
+        // the latch with no session, no transport and no flag parsing (the flag is boot-only).
+        //
+        // WHY A LATCH AT ALL. Dropping EVERY grant means no couch join can ever complete for the
+        // life of the page, so a run could only show the DROP half; one-shot lets the same run
+        // show the host reclaiming the seat and someone then taking it. The cost is a flag that
+        // outlives the thing that set it, which is the exact bug class this seam exists to hunt
+        // -- so the clearing is the load-bearing half, and it lives in ResetPerSessionState
+        // beside joinRequestPending rather than anywhere clever.
+        //
+        // Not consumed when the flag is off: an off run must leave the latch exactly as it found
+        // it, so "has this session spent its drop" never depends on how many grants went past
+        // while the seam was disabled.
+        internal static bool ShouldDropGrant(bool flagOn)
+        {
+            if (!flagOn || dropGrantUsed)
+            {
+                return false;
+            }
+            dropGrantUsed = true;
+            return true;
+        }
+
+        // Test access to the latch, so a suite can drive ShouldDropGrant without stranding a
+        // consumed flag on a live ?netdropgrant session.
+        internal static bool DropGrantUsed
+        {
+            get { return dropGrantUsed; }
+            set { dropGrantUsed = value; }
         }
 
         // CLIENT: the host answered our couch-join request. On a grant, finish the join the
@@ -1846,14 +1902,13 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             // ?netdropgrant: fail to take the grant on purpose, the way a real client can (its
-            // device got seated meanwhile, its scene changed). Read per grant, so while the flag
-            // is set NO couch join completes -- deliberately not one-shot, since a latch would
-            // need clearing on session restart and a missed reset there is the silent
-            // stale-state bug this seam exists to hunt. Dropped AFTER clearing
+            // device got seated meanwhile, its scene changed). ONE-SHOT per session, so a single
+            // run covers the drop AND the recovery -- the seat the host reclaims is proved
+            // re-takeable rather than merely released. Dropped AFTER clearing
             // joinRequestPending so this side is left exactly as a genuine failed take leaves it
             // -- no outstanding request, no seat -- and the host is the only one holding the
             // reservation. That is the state ExpireUnclaimedGrants exists to clean up.
-            if (DebugFlags.NetDropGrant)
+            if (ShouldDropGrant(DebugFlags.NetDropGrant))
             {
                 Console.WriteLine("[net] ?netdropgrant: dropping granted couch slot=" + slot
                     + " -- host should release it in " + GrantClaimTimeoutMs + "ms");

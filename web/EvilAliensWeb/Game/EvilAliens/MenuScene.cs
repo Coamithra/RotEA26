@@ -262,13 +262,13 @@ internal class MenuScene : Scene
 		levelSelector = new SubMenuLevelChoice(base.Game);
 		levelSelector.OnExit += levelSelector_OnExit;
 		levelSelector.AddEntry("Mission 1");
-		levelSelector.AddEntryData("GFX/Screenshots/level1empty", "The Evil Aliens must be repelled!", Levels.Level1);
+		levelSelector.AddEntryData("The Evil Aliens must be repelled!", Levels.Level1);
 		levelSelector.AddEntryEvent(levelSelector_levelSelected);
 		levelSelector.AddEntry("Mission 2", Unlockables.Items.Level2);
-		levelSelector.AddEntryData("GFX/Screenshots/level2empty", "Mars Attacks!", Levels.Level2);
+		levelSelector.AddEntryData("Mars Attacks!", Levels.Level2);
 		levelSelector.AddEntryEvent(levelSelector_levelSelected);
 		levelSelector.AddEntry("Mission 3", Unlockables.Items.Level3);
-		levelSelector.AddEntryData("GFX/Screenshots/level3empty", "Invade the Alien base!", Levels.Level3);
+		levelSelector.AddEntryData("Invade the Alien base!", Levels.Level3);
 		levelSelector.AddEntryEvent(levelSelector_levelSelected);
 		confirmationMenu = new ConfirmationMenu(base.Game, "Are you sure?\nThis will erase all progress..");
 		confirmationMenu.AddEntry("Yes");
@@ -279,25 +279,25 @@ internal class MenuScene : Scene
 		challengeSelector = new SubMenuLevelChoice(base.Game);
 		challengeSelector.OnExit += challengeSelector_OnExit;
 		challengeSelector.AddEntry("Space Dodge!", Unlockables.Items.SpaceDodge);
-		challengeSelector.AddEntryData("GFX/Screenshots/SpaceDodge", "Move fast and dodge the oncoming asteroids!", Levels.SpaceDodge);
+		challengeSelector.AddEntryData("Move fast and dodge the oncoming asteroids!", Levels.SpaceDodge);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Braineroids", Unlockables.Items.Braineroids);
-		challengeSelector.AddEntryData("GFX/Screenshots/ss1", "What the arcade classic could have looked like..", Levels.Braineroids);
+		challengeSelector.AddEntryData("What the arcade classic could have looked like..", Levels.Braineroids);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Evil Aliens Classic", Unlockables.Items.ClassicAliens);
-		challengeSelector.AddEntryData("GFX/Screenshots/classicss", "Can you beat the game that started it all?", Levels.ClassicAliens);
+		challengeSelector.AddEntryData("Can you beat the game that started it all?", Levels.ClassicAliens);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Paratrooper", Unlockables.Items.Paratrooper);
-		challengeSelector.AddEntryData("GFX/Screenshots/Paratrooper", "Paratrooper!", Levels.Paratrooper);
+		challengeSelector.AddEntryData("Paratrooper!", Levels.Paratrooper);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Base Pressure", Unlockables.Items.OwnLevel);
-		challengeSelector.AddEntryData("GFX/Screenshots/OwnLevel", "Can you manoeuvre through the narrow passageways?", Levels.OwnLevel);
+		challengeSelector.AddEntryData("Can you manoeuvre through the narrow passageways?", Levels.OwnLevel);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Crazy Game", Unlockables.Items.CrazyGame);
-		challengeSelector.AddEntryData("GFX/Screenshots/crazygamess", "The year is 2501. Your planet has just been overrun by an\nevil alien force known only as The Dots.\nYou managed to escape the fate of your planet by hopping\ninto your shuttle and blasting off, but The Dots are right\non your tail!\nHow long can you last before they destroy you too?", Levels.CrazyGame);
+		challengeSelector.AddEntryData("The year is 2501. Your planet has just been overrun by an\nevil alien force known only as The Dots.\nYou managed to escape the fate of your planet by hopping\ninto your shuttle and blasting off, but The Dots are right\non your tail!\nHow long can you last before they destroy you too?", Levels.CrazyGame);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Boss Train", Unlockables.Items.BossTrain);
-		challengeSelector.AddEntryData("GFX/Screenshots/InsaneBossI", "Defeat the Alien bosses for great victory", Levels.InsaneBossI);
+		challengeSelector.AddEntryData("Defeat the Alien bosses for great victory", Levels.InsaneBossI);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		challengeSelector.AddEntry("Team Challenge", Unlockables.Items.TeamChallenge);
 		// The "two players" line is the 2008 briefing; the second sentence is the web port's
@@ -306,13 +306,13 @@ internal class MenuScene : Scene
 		// decides to launch, and because an in-level banner has nowhere safe to live (one added
 		// during Startup is eaten by UpdateStartup's 1300ms Purge<AnimatedMessage>, one added in
 		// Normal collides with the script's own "Get ready!" beat).
-		challengeSelector.AddEntryData("GFX/Screenshots/teamchallengess", "Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players -- plug in a gamepad for player two,\nor an auto-pilot partner takes the second seat.", Levels.TeamChallenge);
+		challengeSelector.AddEntryData("Fly the new MX2 Dual Pilot Vessel to victory!\nRequires two players -- plug in a gamepad for player two,\nor an auto-pilot partner takes the second seat.", Levels.TeamChallenge);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		// Web-port addition, deliberately UNGATED (no Unlockables item): the remake of
 		// the 2004 webcam game the "I made this!" splash is from. The screenshot is the
 		// meme's embedded mini-screenshot (tools/webcam/build_webcam_assets.py).
 		challengeSelector.AddEntry("I Made This!");
-		challengeSelector.AddEntryData("GFX/Screenshots/webcamss", "The legendary 2004 webcam game, remade. YOU are the ship:\nyour camera puts you in the starfield. Swat the saucers with\nyour body before they blink, aim... and FIRE.\nRequires a webcam", Levels.WebcamAliens);
+		challengeSelector.AddEntryData("The legendary 2004 webcam game, remade. YOU are the ship:\nyour camera puts you in the starfield. Swat the saucers with\nyour body before they blink, aim... and FIRE.\nRequires a webcam", Levels.WebcamAliens);
 		challengeSelector.AddEntryEvent(challengeSelector_levelSelected);
 		cheatsMenu = new MenuSub1(base.Game);
 		cheatsMenu.AddEntry("Infinite Lives: " + boolToGameString(Settings.GetInstance().InfiniteLives), Unlockables.Items.InfiniteLives);
@@ -505,12 +505,16 @@ internal class MenuScene : Scene
 
 	private void confirmationMenu_YesSelected(MenuSub1 sender)
 	{
+		// SaveIgnoringSuppression, not SaveNoThread: under ?unlockall those two savables refuse
+		// to save (card 36db5d75), which would make this reset half-apply -- screenshots really
+		// deleted, Settings written, but every unlock resurrecting on the next reload. Erasing
+		// to a clean slate is the one direction suppression must not block.
 		Achievements.GetInstance().Reset();
-		Achievements.GetInstance().SaveNoThread();
+		Achievements.GetInstance().SaveIgnoringSuppression();
 		Settings.GetInstance().DisableCheats();
 		Settings.GetInstance().SaveNoThread();
 		Unlockables.GetInstance().Reset();
-		Unlockables.GetInstance().SaveNoThread();
+		Unlockables.GetInstance().SaveIgnoringSuppression();
 		ScreenshotSaver.DeleteScreenshots();
 		confirmationMenu.Remove();
 		optionsMenu.Show();
@@ -838,16 +842,16 @@ internal class MenuScene : Scene
 
 	private void optionsMenu_DifficultySelected(MenuSub1 sender)
 	{
-		int num = 1;
+		int maxDifficulty = 1;
 		if (Unlockables.GetInstance().Collection[Unlockables.Items.HarderDifficulties])
 		{
-			num = 3;
+			maxDifficulty = 3;
 		}
 		if (Unlockables.GetInstance().Collection[Unlockables.Items.InsaneDifficulty])
 		{
-			num = 4;
+			maxDifficulty = 4;
 		}
-		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)MyMath.Mod((int)(Settings.GetInstance().CurrentDifficulty + 1), num + 1));
+		Settings.GetInstance().SetDifficultyTo((Settings.DifficultyLevel)MyMath.Mod((int)(Settings.GetInstance().CurrentDifficulty + 1), maxDifficulty + 1));
 		sender.SetEntry("Difficulty: " + Settings.GetInstance().CurrentDifficulty.ToString().Replace("_", " "));
 	}
 
@@ -1354,7 +1358,13 @@ internal class MenuScene : Scene
 		base.SoundManager.PlayMusic(Songs.Sjaak);
 		// Debug (?unlockall): reveal every gated menu option (Cheats, all challenges,
 		// Level 2/3, Challenges/Awardments) and mark all awardments unlocked, so the whole
-		// menu can be walked through. Session-only (not saved) — a normal reload reverts it.
+		// menu can be walked through.
+		//
+		// Session-only, and since card 36db5d75 that is ENFORCED rather than merely claimed:
+		// Achievements and Unlockables refuse to save at all while the flag is on. It mutates
+		// both singletons and plenty of unrelated code persists them later, so finishing one
+		// level in a ?unlockall session used to make the unlock permanent. See
+		// Savable.SuppressSave for why the WRITE is suppressed rather than the mutation avoided.
 		if (DebugFlags.UnlockAll)
 		{
 			foreach (Unlockables.Items item in Game1.GetEnumValues<Unlockables.Items>())
@@ -1484,14 +1494,14 @@ internal class MenuScene : Scene
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		EnsureRenderTarget();
 		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
-		bool flag = false;
+		bool showInzaneBackdrop = false;
 		if (state != MenuState.FadeToGame)
 		{
-			flag = true;
-			flag &= Achievements.GetInstance().Data[Levels.Level1].difficulty >= Settings.DifficultyLevel.Inzane;
-			flag &= Achievements.GetInstance().Data[Levels.Level2].difficulty >= Settings.DifficultyLevel.Inzane;
-			flag &= Achievements.GetInstance().Data[Levels.Level3].difficulty >= Settings.DifficultyLevel.Inzane;
-			if (flag)
+			showInzaneBackdrop = true;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level1].difficulty >= Settings.DifficultyLevel.Inzane;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level2].difficulty >= Settings.DifficultyLevel.Inzane;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level3].difficulty >= Settings.DifficultyLevel.Inzane;
+			if (showInzaneBackdrop)
 			{
 				base.SpriteBatch.Draw(backdrop, origin, 0f, currentBackdropSize, center: true, Color.Red);
 			}
@@ -1502,12 +1512,12 @@ internal class MenuScene : Scene
 			base.SpriteBatch.Draw(vignette, new Rectangle(0, 0, 800, 600), Color.White);
 			DrawHudDecor();
 		}
-		bool flag2 = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.WebcamAliens].difficulty >= Settings.DifficultyLevel.Inzane;
+		bool allChallengesInzane = Achievements.GetInstance().Data[Levels.Braineroids].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.ClassicAliens].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.CrazyGame].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.InsaneBossI].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.OwnLevel].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.Paratrooper].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.SpaceDodge].difficulty >= Settings.DifficultyLevel.Inzane && Achievements.GetInstance().Data[Levels.WebcamAliens].difficulty >= Settings.DifficultyLevel.Inzane;
 		foreach (Star star in stars)
 		{
-			star.Draw(flag2);
+			star.Draw(allChallengesInzane);
 		}
-		if (flag && flag2)
+		if (showInzaneBackdrop && allChallengesInzane)
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Insane);
 		}
@@ -1523,16 +1533,16 @@ internal class MenuScene : Scene
 		drawButtonTips();
 		if (state == MenuState.FadeToGame)
 		{
-			int num = Convert.ToInt16(currentFade);
-			if (num < 0)
+			int fadeAlpha = Convert.ToInt16(currentFade);
+			if (fadeAlpha < 0)
 			{
-				num = 0;
+				fadeAlpha = 0;
 			}
-			if (num > 255)
+			if (fadeAlpha > 255)
 			{
-				num = 255;
+				fadeAlpha = 255;
 			}
-			fadeBackBufferToWhite(num);
+			fadeBackBufferToWhite(fadeAlpha);
 		}
 	}
 
@@ -1701,17 +1711,29 @@ internal class MenuScene : Scene
 
 	private void drawButtonTips()
 	{
-		float num = 0.5f;
-		float num2 = 0.8f;
-		float num3 = (General.SafeZone).Left;
-		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num, font.MeasureString("yo").Y * num2);
-		float num5 = num3 + (float)AButton.LogicalWidth() * num + font.MeasureString(" ").X * num2;
-		float num6 = (float)(General.SafeZone).Right - font.MeasureString("select").X * num2;
-		float num7 = num6 - (float)BButton.LogicalWidth() * num - font.MeasureString(" ").X * num2;
-		base.SpriteBatch.Draw(BButton, new Vector2(num3, num4), 0f, num, center: false, Color.White);
-		base.SpriteBatch.DrawString("back", new Vector2(num5, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
-		base.SpriteBatch.Draw(AButton, new Vector2(num7, num4), 0f, num, center: false, Color.White);
-		base.SpriteBatch.DrawString("select", new Vector2(num6, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
+		float iconScale = 0.5f;
+		float textScale = 0.8f;
+		float backIconX = (General.SafeZone).Left;
+		// Both icons sit on this baseline, so it must clear the TALLER of the two (the 2008
+		// original measured AButton's height alone).
+		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max(MathHelper.Max((float)AButton.LogicalHeight(), (float)BButton.LogicalHeight()) * iconScale, font.MeasureString("yo").Y * textScale);
+		// Each label clears the WIDTH of the icon actually drawn beside it: BButton sits at
+		// backIconX, AButton at selectIconX. The 2008 original had the two widths CROSSED
+		// (back cleared AButton's, select cleared BButton's). That is a provable no-op today
+		// -- small_face_a and small_face_b are both 60x60 with no precompiled sibling, so the
+		// two LogicalWidth() calls return the same number -- so this changes no pixel; it is
+		// here so re-authoring either icon at a different width can't silently misplace a label.
+		// Card 8d6883f3 completed the set: the height axis above, and the same two bugs in the
+		// other two verbatim copies of this layout -- Darkener.drawButtons (the pause overlay)
+		// and BragScene.drawButtons. So "an icon can be re-authored at a different size" now
+		// holds on both axes in all three.
+		float backTextX = backIconX + (float)BButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
+		float selectTextX = (float)(General.SafeZone).Right - font.MeasureString("select").X * textScale;
+		float selectIconX = selectTextX - (float)AButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
+		base.SpriteBatch.Draw(BButton, new Vector2(backIconX, tipsY), 0f, iconScale, center: false, Color.White);
+		base.SpriteBatch.DrawString("back", new Vector2(backTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
+		base.SpriteBatch.Draw(AButton, new Vector2(selectIconX, tipsY), 0f, iconScale, center: false, Color.White);
+		base.SpriteBatch.DrawString("select", new Vector2(selectTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
 	}
 
 	public override void Update(GameTime gameTime)
@@ -1735,21 +1757,23 @@ internal class MenuScene : Scene
 		UpdateRing(gameTime);
 		UpdateRingCentre(gameTime);
 		HandleStars(gameTime);
-		float num = 16.666666f;
+		float frameMs = 16.666666f;
 		// Backdrop Ken-Burns zoom. This used to be an unbounded exponential
 		// (1.0001^frames) keyed off the ever-accumulating menu timer, so the planet
 		// crept bigger with no ceiling the whole time the menu sat idle. Now it's an
 		// exponential *approach* to a 2x cap: it eases toward 2x and tapers to a stop.
 		// The approach rate is the old curve's initial per-ms growth (ln(base)/frameMs),
 		// so the zoom starts identically and only slows as it nears the cap.
-		float num2 = (float)(BackdropZoomCap - (BackdropZoomCap - 1.0) * Math.Exp(-Math.Log(1.000100016593933) / num * timer.TotalMilliseconds));
-		currentBackdropSize = originalBackdropSize * num2;
+		float curve = (float)(BackdropZoomCap - (BackdropZoomCap - 1.0) * Math.Exp(-Math.Log(1.000100016593933) / frameMs * timer.TotalMilliseconds));
+		currentBackdropSize = originalBackdropSize * curve;
 		if (state != MenuState.FadeToGame)
 		{
 			return;
 		}
-		num2 = Convert.ToSingle(Math.Pow(1.0499999523162842, (timer - fadestarted).TotalMilliseconds / (double)num));
-		currentFade = num2 * 7.5f;
+		// The same local, reused for an unrelated quantity: past this point it is the
+		// fade ramp, not the backdrop zoom above.
+		curve = Convert.ToSingle(Math.Pow(1.0499999523162842, (timer - fadestarted).TotalMilliseconds / (double)frameMs));
+		currentFade = curve * 7.5f;
 		if (!(currentFade > 255f))
 		{
 			return;
@@ -1776,21 +1800,21 @@ internal class MenuScene : Scene
 
 	private void HandleStars(GameTime gameTime)
 	{
-		float num = ((state != 0) ? 2.36f : 0.06f);
-		float num2;
-		for (num2 = Convert.ToSingle((double)num * gameTime.ElapsedGameTime.TotalMilliseconds); num2 > 1f; num2 -= 1f)
+		float starsPerMs = ((state != 0) ? 2.36f : 0.06f);
+		float starBudget;
+		for (starBudget = Convert.ToSingle((double)starsPerMs * gameTime.ElapsedGameTime.TotalMilliseconds); starBudget > 1f; starBudget -= 1f)
 		{
 			CreateStar(moveit: false);
 		}
-		float num3 = num2;
-		if (RandomHelper.RandomNextFloat(0f, 1f) <= num3)
+		float fractionalStar = starBudget;
+		if (RandomHelper.RandomNextFloat(0f, 1f) <= fractionalStar)
 		{
 			CreateStar(moveit: false);
 		}
-		Star[] array = stars.ToArray();
+		Star[] starsSnapshot = stars.ToArray();
 		bool hyperspace = state == MenuState.FadeToGame;
-		Star[] array2 = array;
-		foreach (Star star in array2)
+		Star[] starsToMove = starsSnapshot;
+		foreach (Star star in starsToMove)
 		{
 			star.Move(hyperspace, gameTime);
 			if (star.IsOffScreen(800, 600))
@@ -1803,19 +1827,19 @@ internal class MenuScene : Scene
 
 	private void CreateStar(bool moveit)
 	{
-		float num = RandomHelper.RandomNextFloat(0.001f, 0.8f);
-		float num2 = (float)Math.PI * 2f * RandomHelper.RandomNextFloat(0f, 1f);
+		float speed = RandomHelper.RandomNextFloat(0.001f, 0.8f);
+		float direction = (float)Math.PI * 2f * RandomHelper.RandomNextFloat(0f, 1f);
 		float size = RandomHelper.RandomNextFloat(0.002f, 0.005f);
 		Star star;
 		if (idleStars.Count == 0)
 		{
-			star = new Star(base.Game as Game1, stargfx, origin, size, num2, num);
+			star = new Star(base.Game as Game1, stargfx, origin, size, direction, speed);
 		}
 		else
 		{
 			star = idleStars[0];
 			idleStars.RemoveAt(0);
-			star.Reset(origin, size, num2, num);
+			star.Reset(origin, size, direction, speed);
 		}
 		stars.Add(star);
 		if (moveit)

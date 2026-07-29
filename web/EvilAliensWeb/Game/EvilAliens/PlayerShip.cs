@@ -126,6 +126,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	// choice into a plan.
 	public const float DefaultGapSwitchMargin = 1.5f;
 
+	// Rows of grid looked at when judging a column. Four rows is 267..1067px of wall depending
+	// on grid width -- past that the wall has usually scrolled into a different shape anyway.
+	public const int DefaultWallScanRows = 4;
+
+	// Cost added per blocked column the ship would have to cross to reach a gap.
+	public const float DefaultWallCrossPenalty = 4f;
+
 	// How far ahead a moving threat is projected when judging it. Radial "how far is it right
 	// now" repulsion pushes the ship ALONG the path of anything crossing the screen -- which is
 	// exactly the spider boss's screen-wide sweep. Steering by closest approach instead moves the
@@ -148,6 +155,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float WallReactionMs => EvilAliensWeb.Compat.DebugFlags.AiWallReactionMs ?? DefaultWallReactionMs;
 
 	private static float GapSwitchMargin => EvilAliensWeb.Compat.DebugFlags.AiGapSwitchMargin ?? DefaultGapSwitchMargin;
+
+	private static int WallScanRows => EvilAliensWeb.Compat.DebugFlags.AiWallScanRows ?? DefaultWallScanRows;
+
+	private static float WallCrossPenalty => EvilAliensWeb.Compat.DebugFlags.AiWallCrossPenalty ?? DefaultWallCrossPenalty;
 
 	private static float ThreatLeadMs => EvilAliensWeb.Compat.DebugFlags.AiThreatLeadMs ?? DefaultThreatLeadMs;
 
@@ -380,13 +391,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Downward hold-off while a blocked row closes and the ship is still off its gap -- buying
 	// the time the lateral move needs. Positive Y is down (screen coords).
 	private const float WallBackOff = 6f;
-
-	// Rows of grid looked at when judging a column. Four rows is 267..1067px of wall depending
-	// on grid width -- past that the wall has usually scrolled into a different shape anyway.
-	private const int WallScanRows = 4;
-
-	// Cost added per blocked column the ship would have to cross to reach a gap.
-	private const float WallCrossPenalty = 4f;
 
 	// Weight of one row of clearance in ColumnScore, relative to one tile of sideways travel.
 	// Deliberately large: crossing the whole screen is worth it to be somewhere survivable.
@@ -1132,8 +1136,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		float steerRange = 150f;
 		float minSteerStrength = 0f;
 		float maxSteerStrength = 4f;
-		Vector2 steerTarget = default(Vector2);
-		(steerTarget) = new Vector2(float.MaxValue, float.MaxValue);
+		Vector2 steerTarget = new Vector2(float.MaxValue, float.MaxValue);
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{

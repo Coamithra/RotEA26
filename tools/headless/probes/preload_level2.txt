@@ -1,0 +1,46 @@
+# PROBE: Level 2 decodes no textures during gameplay.
+#
+# PINS: wwwroot/Content/preload/manifest.txt's Level2 section (card 74b30beb). That file is
+# pure DATA with a completely silent failure mode -- delete its gfx/marsbg lines and there is
+# no build error, no failing test, and nothing to notice until someone plays Level 2 and feels
+# a ~1.2s hitch as the Mars ground tiles decode mid-flight.
+#
+# FAILURE MEANS: an asset Level 2 uses is no longer preloaded, so it is decoded during live
+# gameplay = a visible stutter. The quoted line names it. Fix by restoring the manifest entry
+# (or, if the asset is genuinely new, capture it -- see LoadProfiler's header for the
+# eaPreloadExport / MERGE-never-overwrite flow).
+#
+# THE TRAP, AND WHY THIS DRIVES THE MENU RATHER THAN ?level=Level2:
+# a ?level= boot has no splash, so Game1's QueueIdleWarm assets drain into gameplay and are
+# recorded as THAT LEVEL's cold decodes -- exactly 20 spurious gfx/game/space/* lines, measured
+# identically on Level2, Paratrooper and InsaneBossI. A probe booted that way either fails
+# always or needs a whitelist that would mask the real thing. So: main menu -> Start ->
+# one right (Mission 2) -> select -> difficulty -> select.
+#
+# The `expect` before the `expect-not` is not decoration -- it is what stops this probe passing
+# vacuously. Without it, a carousel change that landed the run on Mission 1 instead would sail
+# through, because Level 1 has almost nothing to preload and would be cold-free too.
+#
+# ?unlockall so mission 2 is selectable from a wiped save; ?invuln + ?aiplayer so the level is
+# actually PLAYED for 90 simulated seconds rather than sitting on a dead ship.
+#
+# eahl: --flags "?menu&noattract&loadlog&unlockall&invuln&aiplayer"
+
+step 150 nodraw
+eval Press enter 1
+step 90 nodraw
+
+# Everything above is boot + main menu. The (boot) cold decodes there are a different
+# population and a different card's business -- drop them so this window is Level 2's alone.
+mark
+
+eval Press right 1
+step 90 nodraw
+eval Press enter 1
+step 120 nodraw
+eval Press enter 1
+step 5400 nodraw
+
+expect \[loadprofile\] Level2 preload:
+expect-not COLD decode in Level2
+quit

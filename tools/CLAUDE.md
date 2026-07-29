@@ -17,6 +17,30 @@ a `blender` exe, the `../animgen` ComfyUI venv, `pymusiclooper`, PyAV. Raw sourc
 gitignored dirs (`new_assets_raw/`, `tools/*/source/`); the committed wwwroot artifacts are the
 products of record.
 
+## Publishing -- `deploy_web.py` / `check_deploy.py`
+
+The only tools here that touch the OUTSIDE WORLD, and the only ones that are not idempotent.
+**Full runbook: [`docs/DEPLOY.md`](../docs/DEPLOY.md); read it before running either.** The
+essentials for an agent that stumbles on them:
+
+- **`deploy_web.py` publishes the game and SFTPs it to https://haraldmaassen.com/RotEA26/.** Never
+  run the bare command speculatively -- it writes to a live public site. `--build-only` (no
+  network, no credentials) and `--dry-run` are the safe rehearsals; `--list` is read-only.
+  It publishes from a **throwaway detached checkout**, so nothing uncommitted can ship.
+- **`--selftest` pins the `eaBuildHash` recipe** against a fixed tree and a captured value.
+  That hash is the online-co-op compatibility key -- peers with different hashes cannot see or
+  join each other -- and `.github/workflows/deploy.yml`, which it was ported from, is going
+  away, so this self-test is the recipe's only surviving specification. Mutation-tested (separator,
+  path prefix and sort order each flip it to FAIL). A FAIL means the player base is about to split.
+  **The hash identifies a PUBLISH, not a commit** -- building one commit twice gives two different
+  hashes (measured: 3 runs, 3 values, identical 638-file payload), because `blazor.boot.json`
+  carries per-assembly integrity hashes and `dotnet publish` is not byte-reproducible. `Content/`
+  IS stable (copied verbatim; diffs identical). So never recompute a hash to check a deploy -- use
+  the one the deploy printed -- and note a rollback gets a NEW hash rather than restoring the old.
+- **`check_deploy.py` verifies a deployed URL** over plain HTTP, stdlib only, exit non-zero on
+  failure. Its case-sensitivity probes carry their own negative control (a wrong-cased path that
+  must 404), so a green run cannot come from a forgiving host.
+
 ## Headless logic oracle -- `tools/sim/logic_probe/`
 
 **A PURE static method in the game can be verified with no browser at all** (card e6927ef8).
@@ -56,6 +80,41 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   prior `?flyspiderbox=250` is in force. It additionally pins the `IsOn`/`IsExplicitlyOff` truth
   table (that card reordered them), including the row that matters -- a BARE flag is ON but is NOT
   explicitly off, so `!IsOn` and `IsExplicitlyOff` are genuinely different predicates.
+- **Third case set: `?aiscanrows=` / `?aicrosspenalty=`** (card b174b00f) -- the same
+  `DebugFlags.Parse` shape, pinning that an override reaches the private resolving property, that
+  a non-integer row count is REFUSED rather than truncated to the baked default (a sweep that
+  cannot move, reported as a result), and the clamps. Its negative control is that the resolved
+  value must differ from the const while an override is in force; it restores both overrides to
+  null on the way out, so a later `Probe*` does not inherit them.
+- **Fifth and sixth case sets: the flag-REJECTION diagnostics** -- `ProbeAiFlagRejection` (card
+  48b7c6b1, the 14 `?ai*` tuning knobs) and `ProbeFlagRejectionSweep` (card 4e401005, the
+  remaining 79 + five non-numeric specials). Same subject as the `?flyspider*` set, at file scale:
+  a malformed value must be REFUSED, REPORTED, and the message must name the setting actually in
+  force. **The sweep proves that last part without restating a single constant** -- it sets a
+  valid value, READS BACK what landed, and requires the message to name that; which also means it
+  never has to know about the inline clamps (`?holofilter` caps at 2, `?aifriends` at 3). Its
+  control is that a VALID value reports nothing, so a helper that printed unconditionally fails
+  there and only there. Mutation-tested three ways, each hitting a different check: dropping one
+  `else` (4 FAIL), naming the shipped default instead of the in-force value (1 FAIL, the in-force
+  check alone), and reporting unconditionally (1 FAIL, the control alone). Adding a family later
+  is adding ROWS -- the table carries the flag, its `DebugFlags` property, a value its guard
+  accepts, and whether that guard refuses a negative.
+- **Fourth case set: `CollisionBox` vs `CollisionLine`** (card 64967ea5) -- the box-vs-ray
+  predicate, driven through the PUBLIC `TestCollision(ICollisionType)` (which dispatches to the
+  private method, so no private binding is needed). **It is a REGRESSION oracle, and the card it
+  was written for had no behaviour delta at all** -- collapsing a duplicated `Intersects` call
+  cannot change an answer -- so the usual "run the pre-card policy as a negative control" shape
+  does not exist here. Two things replace it. (a) The set is run DIFFERENTIALLY: build the
+  merge-base assembly into a scratch dir and point the probe at that path, then at the branch
+  build -- the verdict tables must match. (b) Its cases are MATCHED PAIRS differing in one input
+  and asserted to opposite answers, one pair per term of the predicate, so a lost term cannot
+  satisfy both halves. Mutation-tested: dropping `< collisionLine.Length` turns 3 lines FAIL, an
+  always-true predicate turns 6.
+  **It also carries the negative lesson about explicit control lines.** It first had three
+  `hits(A) != hits(B)` CONTROL checks; both sides of each were already asserted individually
+  above, so no mutant could fail a control without first failing one of those. They discriminated
+  nothing and inflated the mutation counts (4 and 9) into looking like more than the set has.
+  A control earns its place only if the pair it compares is NOT pinned elsewhere in the set.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
@@ -93,9 +152,31 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
 - Presenting the hidden window costs ~32 ms/frame for nothing, so `EndDraw` is skipped by default
   (`--present` restores it); the capture reads the back buffer BEFORE the swap either way, after
   bloom/post/gamma, so it is the finished frame.
-- Audio is silent by default via OpenAL Soft's `null` backend -- no device is opened, so a box with
-  no sound card runs too (`--audio` opts in). `--software` routes GL through Mesa llvmpipe for a
-  machine with no GPU at all, and FAILS (exit 3) rather than quietly using the GPU.
+- **Audio is silent by default, and since card `1e476668` that is actually TRUE** (`--audio` opts
+  in). It had been a no-op for the whole of eahl's first life while this file and the README both
+  vouched for it, so every headless soak played the game's SFX at full volume -- which is how the
+  user came to be blasted by a wave of bullet noise from a background batch run. Two traps, both
+  written up in `HeadlessAudio.cs`'s header: **(1)** `ALSOFT_DRIVERS=null` (the old mechanism, and
+  still the obvious-looking one) selects a discard backend that CRASHES the process with an
+  `AccessViolationException` under sustained SFX play -- deterministic, 3/3, and uncatchable, so
+  don't "restore" it; **(2)** an environment variable cannot configure OpenAL Soft from managed
+  code at all -- `soft_oal.dll` reads it with msvcrt's `getenv`, and .NET's
+  `Environment.SetEnvironmentVariable` writes the Win32 block, not msvcrt's `_environ` table.
+  The mechanism now is `SoundEffect.MasterVolume = 0` plus `alListenerf(AL_GAIN, 0)`, with the
+  gain READ BACK out of OpenAL (`audio` command) so silence is data. Cost of dropping the null
+  backend: a box with genuinely no sound card is no longer covered.
+- **`--script` files can ASSERT, and the ones worth keeping live in `tools/headless/probes/`**
+  (card `1e476668`). `mark` / `expect <regex>` / `expect-not <regex>` match per line against
+  everything the run printed since the last `mark` -- the game's own `[loadprofile]` / `[hitch]` /
+  `[net]` console output included, since the console is teed at boot. That is what makes a SILENT
+  failure mode (a data file, a manifest, a host default) defensible: run the set with
+  `python tools/headless/probes/run_probes.py` (exit 1 on any failure). Conventions, the four
+  rules for writing a probe, and the menu-navigation crib: `tools/headless/probes/README.md`.
+  **The trap: a preload/`COLD` probe must drive the MENU, never `?level=<Name>`** -- a `?level=`
+  boot drains `QueueIdleWarm` into that level's cold population (exactly 20 spurious
+  `gfx/game/space/*` lines, measured on Level2/Paratrooper/InsaneBossI alike).
+- `--software` routes GL through Mesa llvmpipe for a machine with no GPU at all, and FAILS
+  (exit 3) rather than quietly using the GPU.
 - Same isolation rule as `logic_probe` below: nothing in `web/` references it, CI only publishes
   `web/EvilAliensWeb`, so the shipped build is untouched. Keep its `nkast.*` versions in lockstep
   with `web/EvilAliensWeb.csproj`.
@@ -103,6 +184,32 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
 ## Refactor oracles — `verify_il_identical.py` / `verify_decompiled_diff.py`
 
 Neither is codegen; both only build + inspect, so they are safe to run any number of times.
+
+- **The ON-DISK LINE ENDINGS of `.razor` are part of the hash** (card `6cdb7c62`). Razor markup
+  whitespace is embedded in the assembly as string content — `App`/`Index`'s generated
+  `BuildRenderTree` hands its literal markup, newlines and all, to `AddMarkupContent` — so the same
+  commit built from a CRLF checkout and an LF one produces different bytes. Both oracles build
+  their reference from a FRESH `git worktree add`, which always gets the checkout-canonical EOL,
+  so a working tree that has drifted reports a confident, entirely bogus DIFFERENT. That is how it
+  was found: a provably comment-only change came back DIFFERENT, and `verify_decompiled_diff`
+  bounded it to two `BuildRenderTree` string literals. **Do not read a `.cs` EOL scare into this**
+  — no compiled C# here has a multi-line string literal, and there are no embedded resources, so
+  `.razor` (and a hypothetical `.cshtml`) is the whole exposed set.
+  - The root **`.gitattributes`** pins those two to `eol=crlf` so every checkout — yours, a
+    worktree, Linux CI — agrees. It does NOT cover `.cs`, deliberately (see `build_textures.py`'s
+    `write_generated`), and a blanket `* text=auto` is out of scope by its own decision.
+  - `.gitattributes` cannot heal a file already on disk, so **`check_pinned_eol()` in
+    `verify_il_identical.py` aborts both tools (exit 2) before either build** when a pinned file
+    has drifted, naming it and printing `rm <path> && git checkout -- <path>`. It reads git's own `attr/`
+    column via `git ls-files --eol`, so an `eol=` rule added later is picked up with no code
+    change, and it never writes — the "never writes inside the repo" invariant stands.
+  - **Drift is NOT invisible, it just looks like noise:** git reports such a file as modified while
+    `git diff` prints nothing (the blob really is identical — same phantom `M` that
+    `write_generated` exists to avoid). And **`git add --renormalize` is the wrong reflex** —
+    measured, it clears the `M` and LEAVES the wrong endings on disk, i.e. it hides the symptom and
+    keeps the bug. It is also why the guard advises `rm` before `git checkout --`: plain
+    `checkout` restores ordinary drift, but is a silent no-op on a file renormalize has already
+    blessed, which would otherwise make the abort unescapable.
 
 - **`verify_il_identical.py`** — the strong oracle: a cosmetic change must produce a byte-identical
   `EvilAliensWeb.dll`. Covers renames. Full rules in root `CLAUDE.md`. **`--optimize`** (card
@@ -112,6 +219,16 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
   change. It is strictly WEAKER (it also hides differences a rename could never introduce), so use
   the default for a pure rename. Its own negative control: a clean tree plus one flipped constant
   reports DIFFERENT under `--optimize`.
+  - **It does NOT fold a dead struct `initobj`, so MOST dead initializers are out of its reach**
+    (card `cbdf0a6f`, measured over 5 sites). Roslyn has no dead-store elimination for `initobj`:
+    it drops the initializer only when it eliminates the LOCAL ITSELF — for
+    `T x = default(T); (x) = expr;` that means only the pure-return-temp shape (`...; return x;`).
+    Any surviving use of the local, even one call argument, keeps the dead `initobj` and the hash
+    reports DIFFERENT. Neither the struct type nor the constructor's argument shape predicts it
+    (both hypotheses tested and killed). So a dead-initializer sweep is bounded by
+    `verify_decompiled_diff.py`, not proven by this oracle. Positive control: commit `8bd1cf9`
+    (`AlienDrawableGameComponent.getFrameRectangle`, IDENTICAL) — its `result` local is
+    deliberately left standing so the control stays reproducible.
 - **`verify_decompiled_diff.py`** — the companion for changes the compiler legitimately DOES see:
   collapsing `bool num = held; held = num | X;` to `held |= X` (the `ldloc` moves), or collapsing
   four `x.Position - y.Position` recomputations into one local (Roslyn cannot CSE a property call).
@@ -140,16 +257,22 @@ collapsed ILSpy's `bool numN = held; held = numN | X;` pairs and the duplicated
 them renumbers the method's local slots, so the byte-identical hash oracle cannot cover it. Card
 `7d14a3cd` did it anyway, BOUNDING it with `verify_decompiled_diff.py --ref main` instead, which
 is the tool for exactly that class — and that came back IDENTICAL, i.e. not merely confined to the
-edited method but invisible to ILSpy altogether. 24 temporaries inlined, the case-block braces
-dropped with them, and that one method's redundant parens cleared in passing.
+edited method but invisible to ILSpy altogether. Card `cbdf0a6f` finished the struct-temporary
+class (the last four in `InputHandler.LeftStick`/`RightStick`) and collapsed the 30 provably-dead
+`= default(T)` initializers, both bounded the same way. The `state`/`state2` locals in those
+methods stay: they sit on mutually exclusive `if`/`else` branches so there is nothing to merge,
+and hoisting the call above the `if` would MOVE a call site, which stops it being cosmetic.
 
-**Still deliberately not done.** That card was scoped to `UpdateKeyPads` ALONE, so the SAME temp
-shape survives four more times in the same file — `GamePadThumbSticks thumbSticksN =
-(stateN).ThumbSticks;` in `InputHandler.LeftStick`/`RightStick`. The struct-temporary class is NOT
-finished. Likewise untouched: the `Vector2 v = default(Vector2); (v) = new Vector2(…);` dead
-initializers (~69 in `Game/`) and ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
-everywhere else. Each is its own artifact class and its own card; don't fold them into an
-unrelated change.
+**Still deliberately not done.** ILSpy's redundant parenthesisation (`(delta).LengthSquared()`)
+everywhere else in `Game/` -- its own artifact class and its own card; don't fold it into an
+unrelated change. 39 `= default(` occurrences remain, classified by card `cbdf0a6f`:
+**7 field-by-field inits** (`AnimatedSprite`, `BrainBoss`, `Floor`, `GameEventList`, `MyMath`,
+`Vibrator`, `Wall`), where the default does definite-assignment work; **29 where the assignment is
+CONDITIONAL or hoisted out of a loop**, needing per-path analysis -- most spot-check as collapsible
+(`SpriteBatchWrapper`'s eight `zero` sites assign in both branches) but `ComponentBin`'s search-loop
+default is genuinely read, so treat them per site, not as a batch; and **3 non-declarations**,
+including `SpriteBatchWrapper`'s `Vector3 fogColor = default(Vector3)` DEFAULT PARAMETER, which a
+naive `= default(` sweep would corrupt into a signature change.
 
 ## Shaders — `tools/shaders/`
 
@@ -165,6 +288,17 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   `music/music.json`. Re-run after changing the banks or the ElevenLabs renders. Its `main()` also
   calls `install_external.install()` and `build_music` MERGES into `music.json`, so a full rebuild
   never drops an external cue (a missing raw source leaves the committed track untouched).
+  **Three SFX are HAND-OWNED and are SKIPPED by `build_sfx` — `head_asplode.wav`,
+  `small_head_asplode.wav`, `spiderbossdeath.wav`** (`HAND_OWNED_SFX`). They are the user's Reaper
+  re-recordings (denoised; committed via PR #192), PCM_16 stereo like the rest of the fleet —
+  except `spiderbossdeath` runs at 44100 Hz where its bank original was 22050. A rebuild would
+  silently restore the noisy originals: **the failure is SILENT** — `SoundManager.GetEffect`
+  catches every load exception and caches null, so a broken or regressed sfx never announces
+  itself, it just stops sounding right. Same rule as `channelswap.wav` below. To genuinely
+  re-derive one, drop it from the set for that run; deliberately not a CLI flag. **`--selftest`**
+  pins the guard with no banks and no PyAV (monkeypatched `xact.decode`/`sf.write`; the three
+  never reach the writer, the other 16 do, plus a set-emptied negative control so an all-skipping
+  build_sfx cannot pass vacuously).
 - **`refine_loops.py`** (called as `build_audio.py`'s last step; re-runnable standalone): XACT
   looped whole waves, but WebAudio's loop is a HARD SPLICE, so a mismatched wrap CLICKS. The script
   measures each track's splice click and replaces only audibly-clicking loops with a
@@ -215,12 +349,46 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   then 127/191/223 at 3/4/5). The full chain must be shipped — KNI allocates every level and GL
   needs a mipmap-COMPLETE texture, so a short chain renders black.
   **Rebuild one asset with `--only <glob>`** rather than rewriting all ~124 committed `.dds`.
-  **Rebuild with `--padtest 100`, not the bare default.** The shipped `.dds` deliberately carry the
-  over-pad canary (web CLAUDE.md, "The canary is LEFT ON"), but `--padtest` DEFAULTS TO 0 — so a
-  plain `python tools/textures/build_textures.py` silently strips it off every texture it touches
-  and the diff looks like a harmless size win. Check `git diff --stat` on `Content/gfx/**.dds`
-  before committing a rebuild: shrinking files mean you dropped the canary.
-- **`check_pad_bleed.py`** is the guard for that gutter: it decodes every shipped `.dds` and checks
+  **Rebuild with `--padtest 100`, not the bare default** — and since card `06c6c741` the build
+  ENFORCES that rather than trusting you to remember. The shipped `.dds` deliberately carry the
+  over-pad canary (web CLAUDE.md, "The canary is LEFT ON") while `--padtest` DEFAULTS TO 0, so a
+  plain `python tools/textures/build_textures.py` used to strip it off every texture it touched and
+  the diff read as a harmless size win. `check_canary()` now compares each SELECTED asset against
+  the `.dds` already on disk and **aborts before writing anything** if this run would pad it less.
+  - **It compares the OVER-PAD (`padded - pad4(logical)`), not the padded dims** — padded dims also
+    shrink when the SOURCE PNG does, so a padded-dims rule flags a legitimate rebuild of a
+    re-exported smaller sprite whose canary is perfectly intact. All 124 committed `.dds` read
+    exactly `+100/+100` on that measure.
+  - **Firing BEFORE the build is the point**, not an implementation detail: nothing bad reaches the
+    working tree, and `check_pad_bleed`'s reassuring "ok: all 124 replicate their logical edge"
+    can never end up vouching for a run that just dropped the canary (which is the review finding
+    that created this card). `--dry-run` fires it too — a dry run whose plan ends in an abort has
+    predicted the wrong outcome.
+  - **A NEW asset is exempt** (no `.dds` on disk = no canary to lose) but gets a non-fatal `NOTE`
+    when the pad it would be built at differs from the one the rest of the fleet agrees on.
+  - **`--drop-canary` is the deliberate opt-out** and the ONLY sanctioned way to shrink the pad —
+    it is what the eventual ship rebuild at `--padtest 0` (Trello `f2621e52`) must pass.
+  - **`--selftest`** pins the rule against a case table (strip / partial shrink / minimal→minimal /
+    growth / new asset / unstamped / resized source, both ways) plus a negative control: the
+    plausible padded-dims rule must FALSE-POSITIVE on the resized-source row. It also pins the
+    GATE, not just the rule — that `--drop-canary` bypasses a real finding, that a raw-only
+    selection checks nothing, that a new asset is reported but not fatal — driving `check_canary`
+    through an injected `probe`, so no `Content` tree is needed. Mutation-tested: `<`→`<=` flips 5
+    rows, deleting the new-asset exemption 1, the padded-dims rule 1, inverting `--drop-canary` 4,
+    making the opt-out a no-op 2, disabling the gate 3.
+
+  **`--manifest-only` no longer dirties `Compat/PrecompiledTextures.cs`.** It goes through
+  `write_generated()`, which writes only when the bytes would change and preserves the file's own
+  line endings. The checkout is `core.autocrlf=true` with no `.gitattributes` rule for `.cs` (the
+  root `.gitattributes` pins `.razor`/`.cshtml` only — see the oracle section), so that file is CRLF
+  in the working tree while the script renders LF: every run used to rewrite all 143 line endings
+  and leave it MODIFIED in `git status` with an EMPTY content diff. Neither half works alone —
+  preserving the endings alone still rewrites (and bumps mtime, so MSBuild rebuilds) when nothing
+  changed, and skipping on equal content alone never matches, because LF text never equals a CRLF
+  file. The same `--selftest` covers it.
+- **`check_pad_bleed.py`** owns the DDS header parse for both scripts (`parse_dds_header`, plus
+  `read_dds_header` for the callers that want the four dims and not the ~130 MB of surface data —
+  the canary gate above). It is the guard for that gutter: it decodes every shipped `.dds` and checks
   the texel just outside the logical edge still looks like the edge it replicates (alpha-weighted,
   each texel calibrated against the image's own local across-edge step, so BC3 noise doesn't cry
   wolf). `build_textures.py` **runs it automatically** and fails the build on a regression; run it
@@ -255,7 +423,13 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 - **`build_texviewer.py`** builds the `?texviewer` comparison set into
   `wwwroot/Content/texviewer/` (`<asset>.dds` + `manifest.json`, both GITIGNORED — kept separate
   from shipped siblings so an undecided sprite is never auto-loaded). `--only <glob>`,
-  `--dry-run`, `--manifest-only`. The in-game `?texviewer` scene's Save button writes
+  `--dry-run`, `--manifest-only`. **`--only` matching nothing is an ERROR** (card `06c6c741`),
+  like `build_textures.py`'s — a typo'd glob used to build zero textures and report success. The
+  pattern is no longer `.lower()`ed either, but do not read anything into that: `fnmatch.fnmatch`
+  normcases BOTH sides on Windows, so an uppercase pattern always matched anyway and this toolchain
+  is Windows-only. The hard fail is the part that changed. (Don't "fix" either script to
+  `fnmatchcase` — that would make texviewer stricter than `build_textures.py`.)
+  The in-game `?texviewer` scene's Save button writes
   `textures.config` lines via a dev-only `POST /api/texdecide` on `web/DevServer` (serve via
   DevServer or Save 404s); after saving decisions, re-run `build_textures.py`.
 - **`build_brain_sheet.py`** builds the animated Braineroid: chroma-keys 81 magenta-backdrop
@@ -263,7 +437,13 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
   connected-component pass), decimates to 20 frames, packs a 5×4 grid of 512px cells →
   `gfx/sprites/brainanimated.png` + a blurred blue glow `brainanimatedglow.png`. Sheet is dxt in
   `textures.config`; the glow stays raw. Re-run the script then `build_textures.py` after a new
-  export.
+  export. **`CELL_W` is resolution ONLY — it does not set on-screen size**, so raising it buys
+  crispness and bytes and nothing else: `AlienDrawableGameComponent` registers `brainanimated` at
+  a *design* width of 100, so the brain covers `100 * scale` design px whatever the cell is, and
+  `Braineroid`'s 2/1/0.35 scales give 200/100/35. 512 is the point where that stops mattering —
+  design space is 800×600 and `RenderScale` caps the target at 1440px tall, so design→device tops
+  out at 2.4×, the largest brain is 480 device px, and a 512 cell is ~1.07 texel:pixel there.
+  Draw-path detail: web CLAUDE.md, "Animated Braineroid".
 
 ## Font — `tools/font/`
 
@@ -397,9 +577,10 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   console app that references the BUILT `EvilAliensWeb.dll` and reflects into it, so it calls the
   real `PlayerShip.SteerThroughWall` / `ChooseGapColumn` / `ColumnScore` / `DistanceToBlockedRow` /
   `ClampIntoWallSpace` against the real `CollisionLevelMap` and the real `Wall.Setup` grids. Build
-  the game first, then `dotnet run --project tools/sim/aiwallnav` (`--react=<ms>` writes the same
-  `DebugFlags` property `?aireact` does, `--grid=<n>` picks one variation, `--ladder` repeats the
-  table at all five difficulty scroll speeds). **This is possible only because the game targets
+  the game first, then `dotnet run --project tools/sim/aiwallnav` (`--react=<ms>`, `--scanrows=<n>` and
+  `--crosspenalty=<c>` write the same `DebugFlags` properties `?aireact` / `?aiscanrows` /
+  `?aicrosspenalty` do, `--grid=<n>` picks one variation, `--ladder` repeats the table at all five
+  difficulty scroll speeds). **This is possible only because the game targets
   plain `net8.0`** despite the BlazorWebAssembly SDK -- keep it a `Reference` to the built DLL,
   never a `ProjectReference`. It binds private members by name and REFUSES to start if one has
   been renamed, rather than printing a clean-looking table of nothing.

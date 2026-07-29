@@ -13,8 +13,6 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 {
 	private List<Texture2D> entryImages = new List<Texture2D>();
 
-	private List<string> entryImageNames = new List<string>();
-
 	private List<string> briefings = new List<string>();
 
 	private List<Levels> levels = new List<Levels>();
@@ -30,9 +28,12 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 	{
 	}
 
-	public void AddEntryData(string imageFilename, string briefing, Levels level)
+	// Card 8d6883f3: the entry's bundled image is NOT passed in -- it is looked up from the
+	// level (LevelArt.ScreenshotPath) at load time. The caller used to spell the path out, a
+	// third copy of the same twelve strings that could drift from ScreenshotSaver's preload
+	// set. This also removes one of the class's positional parallel lists.
+	public void AddEntryData(string briefing, Levels level)
 	{
-		entryImageNames.Add(imageFilename);
 		levels.Add(level);
 		briefings.Add(briefing);
 	}
@@ -56,31 +57,33 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 	private void loadScreenshots()
 	{
 		entryImages.Clear();
-		for (int i = 0; i < entryImageNames.Count; i++)
+		for (int i = 0; i < levels.Count; i++)
 		{
-			string text = entryImageNames[i];
-			Texture2D val;
+			// The bundled fallback art, from the one table ScreenshotSaver.StockShots is
+			// also derived from -- so anything reached here was preloaded and splash-warmed.
+			string imageName = LevelArt.ScreenshotPath(levels[i]);
+			Texture2D image;
 			if (General.ScreenshotEnabled(levels[i]))
 			{
-				val = ScreenshotSaver.GetScreenshot(levels[i]);
-				if (val == null)
+				image = ScreenshotSaver.GetScreenshot(levels[i]);
+				if (image == null)
 				{
-					val = Content.Load<Texture2D>(text);
+					image = Content.Load<Texture2D>(imageName);
 				}
 			}
 			else
 			{
-				val = Content.Load<Texture2D>(text);
+				image = Content.Load<Texture2D>(imageName);
 			}
-			entryImages.Add(val);
+			entryImages.Add(image);
 		}
 	}
 
 	// The selected level's name (top) and briefing (bottom) -- drawn after the carousel entries.
 	protected override void DrawCarouselOverlay(GameTime gameTime)
 	{
-		Vector2 val = font.MeasureString(menuEntries[selectedEntry]) / 2f;
-		base.SpriteBatch.DrawMetalString(font, menuEntries[selectedEntry], new Vector2(400f, 50f), Color.AliceBlue, 0f, val, 1f);
+		Vector2 textOrigin = font.MeasureString(menuEntries[selectedEntry]) / 2f;
+		base.SpriteBatch.DrawMetalString(font, menuEntries[selectedEntry], new Vector2(400f, 50f), Color.AliceBlue, 0f, textOrigin, 1f);
 		// Online co-op excludes the webcam challenge (the camera IS the controller and the
 		// mask is wall-clock local -- plans/stage11-online-coop.md). Card 11.5: say so in
 		// place of the briefing, so the blocked entry explains itself instead of silently
@@ -92,9 +95,9 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 		string briefing = (NetMode && levels[selectedEntry] == Levels.WebcamAliens)
 			? "NOT AVAILABLE IN ONLINE CO-OP\nYour camera is the controller, so this one can't\nbe shared over the network. Pick another challenge."
 			: briefings[selectedEntry];
-		val = font.MeasureString(briefing) / 2f;
-		val.Y = 0f;
-		base.SpriteBatch.DrawString(font, briefing, new Vector2(400f, 350f), Color.AliceBlue, 0f, val, 0.7f, (SpriteEffects)0, 0f);
+		textOrigin = font.MeasureString(briefing) / 2f;
+		textOrigin.Y = 0f;
+		base.SpriteBatch.DrawString(font, briefing, new Vector2(400f, 350f), Color.AliceBlue, 0f, textOrigin, 0.7f, (SpriteEffects)0, 0f);
 	}
 
 	protected override void DrawEntryAt(int entry, float step)
@@ -107,36 +110,37 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 		if (step > 1f)
 		{
 			step -= 1f;
-			float num = MathHelper.Lerp(1f, 0f, step);
-			Vector2 position = new Vector2(MathHelper.Lerp(800f, 400f, num), 200f);
-			Color color = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, num)));
-			float num2 = MathHelper.Lerp(0.25f, 0.4f, num);
-			float num3 = 800f / (float)entryImages[entry].Width;
-			float num4 = 600f / (float)entryImages[entry].Height;
-			Vector2 scale = new Vector2(num3 * num2, num4 * num2);
+			float toCentre = MathHelper.Lerp(1f, 0f, step);
+			Vector2 position = new Vector2(MathHelper.Lerp(800f, 400f, toCentre), 200f);
+			Color color = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, toCentre)));
+			float entryScale = MathHelper.Lerp(0.25f, 0.4f, toCentre);
+			float fitX = 800f / (float)entryImages[entry].Width;
+			float fitY = 600f / (float)entryImages[entry].Height;
+			Vector2 scale = new Vector2(fitX * entryScale, fitY * entryScale);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
 			base.SpriteBatch.Draw(entryImages[entry], position, 0f, scale, center: true, color);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-			DrawAchievementText(entry, position, num2, color);
+			DrawAchievementText(entry, position, entryScale, color);
 			// Mouse hit box: the screenshot is drawn centred at `position`, sized
-			// imgW*scaleX x imgH*scaleY = 800*num2 x 600*num2 (scaleX = (800/imgW)*num2).
-			RecordEntryHit(entry, position, 800f * num2, 600f * num2);
+			// imgW*scale.X x imgH*scale.Y -- fitX/fitY cancel the image dimensions,
+			// so that is exactly 800*entryScale x 600*entryScale.
+			RecordEntryHit(entry, position, 800f * entryScale, 600f * entryScale);
 		}
 		else
 		{
-			float num5 = MathHelper.Lerp(0f, 1f, step);
-			Vector2 position2 = new Vector2(MathHelper.Lerp(0f, 400f, num5), 200f);
-			Color color2 = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, num5)));
-			float num6 = MathHelper.Lerp(0.25f, 0.4f, num5);
-			float num7 = 800f / (float)entryImages[entry].Width;
-			float num8 = 600f / (float)entryImages[entry].Height;
-			Vector2 scale2 = new Vector2(num7 * num6, num8 * num6);
+			float toCentre = MathHelper.Lerp(0f, 1f, step);
+			Vector2 position2 = new Vector2(MathHelper.Lerp(0f, 400f, toCentre), 200f);
+			Color color2 = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0.3f, 1f, toCentre)));
+			float entryScale = MathHelper.Lerp(0.25f, 0.4f, toCentre);
+			float fitX = 800f / (float)entryImages[entry].Width;
+			float fitY = 600f / (float)entryImages[entry].Height;
+			Vector2 scale2 = new Vector2(fitX * entryScale, fitY * entryScale);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
 			base.SpriteBatch.Draw(entryImages[entry], position2, 0f, scale2, center: true, color2);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-			DrawAchievementText(entry, position2, num6, color2);
-			// Mouse hit box: screenshot centred at `position2`, sized 800*num6 x 600*num6.
-			RecordEntryHit(entry, position2, 800f * num6, 600f * num6);
+			DrawAchievementText(entry, position2, entryScale, color2);
+			// Mouse hit box: screenshot centred at `position2`, sized 800*entryScale x 600*entryScale.
+			RecordEntryHit(entry, position2, 800f * entryScale, 600f * entryScale);
 		}
 	}
 
@@ -153,8 +157,8 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 			{
 				difficultyLevel = Settings.DifficultyLevel.Hard;
 			}
-			string text = Achievements.GetInstance().Data[levels[entry]].difficulty.ToString().Replace('_', ' ');
-			float num = MathHelper.Lerp(2.5f, 8.75f, (float)Achievements.GetInstance().Data[levels[entry]].difficulty / (float)difficultyLevelValues.Count);
+			string label = Achievements.GetInstance().Data[levels[entry]].difficulty.ToString().Replace('_', ' ');
+			float stampScale = MathHelper.Lerp(2.5f, 8.75f, (float)Achievements.GetInstance().Data[levels[entry]].difficulty / (float)difficultyLevelValues.Count);
 			if (difficultyLevel > Achievements.GetInstance().Data[levels[entry]].difficulty)
 			{
 				Color gray = Color.Gray;
@@ -165,8 +169,8 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 				Color limeGreen = Color.LimeGreen;
 				(color) = new Color(new Vector4((limeGreen).ToVector3(), (float)(int)(color).A / 255f));
 			}
-			Vector2 val = font.MeasureString(text) / 2f;
-			base.SpriteBatch.DrawString(text, position, color, -(float)Math.PI / 12f, val, scale * num, (SpriteEffects)0, 1f);
+			Vector2 labelOrigin = font.MeasureString(label) / 2f;
+			base.SpriteBatch.DrawString(label, position, color, -(float)Math.PI / 12f, labelOrigin, scale * stampScale, (SpriteEffects)0, 1f);
 		}
 	}
 

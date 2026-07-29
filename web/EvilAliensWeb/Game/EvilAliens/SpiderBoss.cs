@@ -353,8 +353,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		if (spiderBossState == SpiderBossState.dead)
 		{
 			spriteEffects = (SpriteEffects)0;
-			Color tint = default(Color);
-			(tint) = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0f, 1f, stateTimer.TimeLeft * 3f / stateTimer.Duration)));
+			Color tint = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0f, 1f, stateTimer.TimeLeft * 3f / stateTimer.Duration)));
 			for (int i = 0; i < debrisposition.Count; i++)
 			{
 				Texture2D debrisTexture = (Texture2D)(i switch

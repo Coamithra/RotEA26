@@ -48,6 +48,14 @@ namespace EvilAliensWeb.Headless
             HeadlessTitleContainerFactory.Register(wwwroot);
 
             var saves = new HeadlessSaveStore(opt.SaveDir, opt.WipeSaves);
+            // Put the XML save tree INSIDE the --saves dir. On desktop the stub's browser
+            // default ("/eaweb_save/") is a real directory at the drive root that nothing here
+            // owns or wipes, so Achievements.xml survived every run and a ?unlockall probe
+            // poisoned every later one (card 36db5d75). The constraint is only that SetRoot
+            // precedes the first OpenContainer, which Boot() (later) guarantees -- SetRoot
+            // itself creates nothing, the first StorageContainer creates `fs/` lazily.
+            Microsoft.Xna.Framework.Storage.StorageDevice.SetRoot(
+                Path.Combine(Path.GetFullPath(opt.SaveDir), "fs"));
             _js = new HeadlessJsRuntime(saves, opt.Flags, opt.Verbose)
             {
                 DownloadDir = Path.GetDirectoryName(Path.GetFullPath(opt.OutPath ?? "out.png"))
@@ -122,6 +130,13 @@ namespace EvilAliensWeb.Headless
         {
             for (int i = 0; i < frames; i++)
             {
+                // KNI brings OpenAL up lazily on the first sound, so the mixer-level half of
+                // the mute can only be applied once a context exists -- which may happen
+                // anywhere inside a long `step`, not before it. One bool test per frame after
+                // it lands. (Hoisting this out of the loop looks like an optimisation and is
+                // a bug: a script that does the whole run in one `step 3600` would then check
+                // exactly once, before any sound had ever played, and never apply it.)
+                HeadlessAudio.Pump();
                 _total += _step;
                 var gt = new GameTime(_total, _step);
                 _game.UpdateFrame(gt);

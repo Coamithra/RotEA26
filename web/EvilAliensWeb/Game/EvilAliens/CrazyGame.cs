@@ -139,8 +139,7 @@ internal class CrazyGame : GameScene
 				num2 = 610f;
 				break;
 			}
-			Vector2 val = default(Vector2);
-			(val) = new Vector2(num, num2);
+			Vector2 val = new Vector2(num, num2);
 			float num3 = 200f;
 			foreach (PlayerShip ship in oracle.GetShips())
 			{

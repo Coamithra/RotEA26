@@ -118,12 +118,10 @@ public class InputHandler : IInputHandlerService
 		if (Settings.GetInstance().GetPlayerSettings(controller).InvertSticks)
 		{
 			GamePadState state = GamePad.GetState((PlayerIndex)i);
-			GamePadThumbSticks thumbSticks = (state).ThumbSticks;
-			return (thumbSticks).Right * new Vector2(1f, -1f);
+			return state.ThumbSticks.Right * new Vector2(1f, -1f);
 		}
 		GamePadState state2 = GamePad.GetState((PlayerIndex)i);
-		GamePadThumbSticks thumbSticks2 = (state2).ThumbSticks;
-		return (thumbSticks2).Left * new Vector2(1f, -1f);
+		return state2.ThumbSticks.Left * new Vector2(1f, -1f);
 	}
 
 	public Vector2 RightStick(int i)
@@ -139,12 +137,10 @@ public class InputHandler : IInputHandlerService
 		if (Settings.GetInstance().GetPlayerSettings(controller).InvertSticks)
 		{
 			GamePadState state = GamePad.GetState((PlayerIndex)i, (GamePadDeadZone)2);
-			GamePadThumbSticks thumbSticks = (state).ThumbSticks;
-			return (thumbSticks).Left * new Vector2(1f, -1f);
+			return state.ThumbSticks.Left * new Vector2(1f, -1f);
 		}
 		GamePadState state2 = GamePad.GetState((PlayerIndex)i, (GamePadDeadZone)2);
-		GamePadThumbSticks thumbSticks2 = (state2).ThumbSticks;
-		return (thumbSticks2).Right * new Vector2(1f, -1f);
+		return state2.ThumbSticks.Right * new Vector2(1f, -1f);
 	}
 
 	public void Update()

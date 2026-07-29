@@ -101,6 +101,9 @@ generate much of the art/audio referenced here.
   that is the accepted price: a padded-vs-logical slip is runtime-only, easy to miss, and cheap to
   ship by accident. The over-pad has been mistaken for a build accident and reported as a bug
   before, hence this note -- if you think you have found stale padtest output, you have found this.
+  Since card `06c6c741` the build ENFORCES it: `build_textures.py` aborts before writing anything
+  if a run would pad an asset LESS than the `.dds` it is replacing, so the bare default can no
+  longer strip the canary by accident. `--drop-canary` is the deliberate opt-out (tools/CLAUDE.md).
 - **A clamped source rect does NOT stop the filter reaching the pad — hence the 4px edge gutter.**
   `LinearClamp` clamps at the TEXTURE border, not at the source rect, so a destination pixel whose
   centre lands in the last half texel bilinearly blends the last content texel with texel `[LW]`.
@@ -148,9 +151,32 @@ generate much of the art/audio referenced here.
   what makes its Y term non-vacuous — for every `[1,1]` layer the Y term is trivially true.
   **Verify with console `eaBgCull()`** (`Compat/BgCullTest.cs`): sweeps the real predicate for
   soundness (a tile that intersects the screen is never culled), dry-runs whole scenario layers —
-  mirrored and TALL, shapes no shipped background uses — through the REAL `Draw`, then censuses the
-  live layers' per-frame `drawn` / `off-screen` counts. A screenshot cannot verify this cull at all,
-  since every shipping configuration errs invisibly; read the decisions as data instead.
+  mirrored and TALL, shapes no shipped background uses — through the REAL `Draw`, censuses the live
+  layers' per-frame `drawn` / `off-screen` counts, then diffs the cull against its pre-card form
+  across a scroll-phase sweep. A screenshot cannot verify this cull at all, since every shipping
+  configuration errs invisibly; read the decisions as data instead.
+- **The right/bottom edge test is STRICT `> 0` (card ef55b76e), and the tie it removed was the
+  STEADY STATE, not a rare coincidence.** The interval is half-open, so a tile whose right or
+  bottom edge lands exactly on 0 has zero on-screen area; the old `>= 0` submitted it to
+  SpriteBatch for nothing. `Draw` starts its grid at `position - realsize`, so for any layer whose
+  `realsize` matches its tile the first column sits exactly on the boundary at scroll phase 0 —
+  **and only X ever scrolls, so `position.Y` stays 0 forever and the whole top ROW of every
+  `[1,1]` layer was in this case on every frame of ordinary play** — half of every Mars parallax
+  layer's draws per frame were zero-area. The census prints the pre-card count alongside the live
+  one (`drawn 108 (pre-ef55b76e 130)`), so the size of the win stays reproducible from HEAD.
+  **Do NOT loosen it back to `>=`.**
+  **Why it changes no pixel:** the destination quad spans `[-w, 0]`, which contains no pixel
+  centre, so it rasterises nothing — and `RenderScale.Matrix` is a pure scale, so that holds in
+  render space too. Corroborated by a 40-image pre/post pixel diff (five backgrounds × eight
+  `?bgfreeze` phases, all byte-identical).
+  **Three of `eaBgCull()`'s four parts CANNOT FAIL against the current predicate — do not read a
+  green tick there as evidence.** Parts 1 and 3 are tautologies (the tightened `TileOnScreen` and
+  the suite's `Intersects` are now the same float expression); part 4's differential is one too,
+  since `KeptByOldCull` differs only by `>=` vs `>` on the same arguments, so a flip *requires*
+  zero area algebraically. They are SENTINELS for a future edit (a margin or inset would produce
+  flips with real area), not proof of today's behaviour. Only part 2 — whose arguments come from
+  the real `Draw` call sites — can fail on its own. Both differentials carry per-combination and
+  per-layer positive controls so a vacuous run reports `VACUOUS`, not `PASS`.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read
@@ -158,6 +184,75 @@ generate much of the art/audio referenced here.
   frame in <level>` for any tick > 120ms (not gated by `?loadlog`), skipping preload + boot warm-up.
   A still-hitching level is a manifest DATA gap — fix by playing with `?loadlog` +
   `eaPreloadExport()`, not by code.
+  - **The whole capture loop runs HEADLESSLY** — `eahl --repl`, then `eval PreloadExport`
+    (`DebugInput.PreloadExport`, a passthrough that exists only because `eval` binds to
+    `DebugInput` statics while the browser's `eaPreloadExport` calls `LoadProfiler` direct). The
+    "download" lands at `<dir of --out>/preload_manifest.txt`.
+  - **`[hitch]` does NOT exist headlessly.** `LoadProfiler.NoteFrame` is called from
+    `Pages/Index.razor.cs` alone, so hitch evidence is browser-only. COLD-vs-warm *is* headless-
+    valid: it is the preload-BRACKET structure, not a timing threshold.
+  - **CAPTURE FROM THE MENU PATH, never `?level=`.** A `?level=` boot has no splash, so
+    `QueueIdleWarm`'s 21 space/star assets drain into live gameplay and are recorded as that
+    level's assets — 20 junk entries. Drive the menu with `eval Press` instead (main menu ->
+    carousel -> difficulty; Challenges is 3 `down` from Start).
+  - **A level with ZERO manifest entries cannot be captured in one pass.** `WarmThenLaunch`
+    returns early when `ManifestAssets` is empty, so no bracket is opened and the level's
+    `Initialize` decodes are attributed to the `(boot)` sentinel. Seed the section from the
+    `(boot)` block immediately preceding the `<Level> preload:` line, then re-capture.
+  - **`(boot)` manifest lines are INERT** — `ManifestAssets` is only ever called with a `Levels`
+    name. Boot/menu gaps can only be fixed in `QueueMenuWarm`/`QueueIdleWarm`, i.e. code.
+  - **The warm queues are EXEMPT from the COLD report, by bracket (card 4d47c5ba).**
+    `Game1.Warm<T>` wraps every queued decode in `LoadProfiler.BeginWarm`/`EndWarm`, so an asset
+    the menu or idle warm *deliberately* decodes is recorded (and exports as `WARM`) but never
+    logged as a gap. Before that, the queues reported themselves: a `?menu&loadlog` boot printed
+    **50** `(boot)` COLD lines of which **34 were the warm queues doing their job**, and the
+    resulting unreadable list is what made card 74b30beb's follow-up name four assets that
+    cannot be warmed at all.
+    It is a BRACKET, not a `_currentLevel == SentinelBoot` mute like `NoteFrame`'s, precisely so
+    the boot decodes that are NOT warm-queue driven still surface -- they are the signal.
+  - **The `(boot)` COLD lines that REMAIN are unreachable by any warm queue -- do not "fix" them
+    by adding entries.** `QueueMenuWarm`/`QueueIdleWarm` are built in `Game1.LoadContent`, which
+    `base.Initialize()` reaches only AFTER every component's own `LoadContent` has run. So
+    `gfx/cursor2` (`MousePointer`) and the `gfx/splash/*` set (`SplashScene.AddSplash`, called
+    from `Game1.Initialize`, and into that scene's OWN content manager besides) have all
+    already decoded by the time the first queue entry is pumped. Warming them is a cache hit
+    that changes nothing, including the log line. **Reducing the set means making a boot-time
+    load LAZY or DEFERRED, not warming it**, which card 57555583 did to the two that were pure
+    waste:
+    - `SplashScene` decoded all THREE channel-flip reveals and a run shows ONE. It now rolls
+      the variant in `LoadContent` (`PickFlipVariant`) and decodes only the winner. Rolling
+      that early is safe because the scene's `rng` is its own `Random`, NOT
+      `RandomHelper.Random` -- the card's description said otherwise and was wrong.
+    - `AwardmentBlade` decoded its sheet + `menufont` at boot for a banner that only appears
+      when an awardment pops. Both loads are lazy (`EnsureContent`, called at the Idle -> Enter
+      transition and defensively in `Draw`), and `QueueIdleWarm` warms the sheet during the
+      splash so the lazy load is a cache hit. It is the IDLE queue on purpose: the banner pops
+      mid-level, it is not menu-first-frame art, and `DrainWarmQueue` is synchronous.
+    The steady state on a full-splash boot is now SIX lines -- `easplashredone`,
+    `uglysplash22`, ONE `-revenged*` variant, `splash/blank` (twice -- `Game1.blackPixel` and
+    the splash scene's own copy, from two different content managers) and `cursor2`. Anything
+    outside that is a real new gap. Pinned by `tools/headless/probes/boot_cold.txt`.
+  - **Do not reformat the `COLD decode in <Level>: <asset>` console line.** Committed headless
+    probes under `tools/headless/` grep it, so its shape is an interface. Suppressing a line
+    (as the warm bracket does) is fine; changing its wording is not.
+  - **MERGE into `manifest.txt`, never replace it.** `Serialize()` emits only the run's own
+    recordings — it never merges `Shipped()` — so overwriting the file deletes every curated
+    entry for levels the run did not play. Captured per-level sections live in one block at the
+    bottom of the file; a level must not also appear in the hand-written blocks above
+    (`WarmThenLaunch` enqueues duplicates twice).
+  - **A re-capture is a UNION with the existing section, never a blind overwrite** — a capture
+    silently comes back SHORT in two ways. (a) The content manager is shared and never unloads,
+    so anything an EARLIER level in the same process decoded is absent from a later level's
+    section (this really bit: Demo2 captured from the attract rotation runs after Demo1 and its
+    export has no `brainanimated` lines). Prefer a single-level process per capture. (b) A run
+    that ends early never reaches a level's later phases, and some entries are DEFENSIVE rather
+    than observed (`asteroidsmall1..4` is "the spawner picks one at random", not "a run saw all
+    four") — those survive only because warming them makes them reappear. Check the section did
+    not shrink.
+  - **In the BROWSER the recording is not clean-slate** — `Hydrate()` reloads the localStorage
+    learned set at boot, so an export can carry entries from earlier sessions. Headless is
+    per-process (`HeadlessJsRuntime._loadProfile` is in-memory), which is another reason to
+    capture with `eahl`.
 - **Level launches are gated by a pre-launch manifest warm.** `Game1.WarmThenLaunch` (every launch
   path incl. attract demos and `?level=`) decodes the level's manifest textures ONE per tick
   (`PumpLevelWarm`) before the scene is Added, so the browser paints between decodes (no "page
@@ -175,6 +270,41 @@ generate much of the art/audio referenced here.
   `QueueMenuWarm`, pre-level art in `QueueIdleWarm`. Menus share ONE content manager
   (`Scene.Content` == `Game1.content`), which is why warming works. `BragScene.WouldShow()` routes
   credits → menu directly on web (no signed-in gamer).
+  - **The level-select stock art is warmed too, off `ScreenshotSaver.StockShots` (card
+    4d47c5ba).** `ScreenshotSaver.Init()` loads all twelve SYNCHRONOUSLY from
+    `StartScreen.Update`, immediately BEFORE `OnFinished` -- i.e. before `DrainWarmQueue` -- so
+    they used to block the Press-Start -> menu handoff for ~350-470ms in Chrome. The pump covers
+    them during the splash instead. **`StockShots` is the single list both `Init()` and
+    `QueueMenuWarm` iterate; keep it that way** -- `Init` used to hardcode eleven of the twelve
+    and the one it missed (`webcamss`) decoded cold on first opening Challenges.
+    **Since card 8d6883f3 that list is DERIVED, and `LevelArt` is the one source** -- every
+    level with `LevelArt.HasCarouselEntry` contributes its `LevelArt.ScreenshotPath`, deduped,
+    and `SubMenuLevelChoice` resolves each entry's image through the SAME lookup instead of
+    being handed a path literal (`AddEntryData(briefing, level)`). A carousel level still needs
+    its `AddEntry`/`AddEntryData`/`AddEntryEvent` triple in `MenuScene` and BOTH `LevelArt`
+    switches (`HasCarouselEntry` and `ScreenshotPath`) -- what is gone is having to spell the
+    PATH out a second and third time, which is where the drift was. **`General.ScreenshotEnabled` is NOT the membership predicate and cannot be
+    made into one** -- it answers "does this level CAPTURE a live thumbnail" and returns the
+    `Settings.WebcamScreenshot` opt-in (default OFF) for `WebcamAliens`, so deriving off it
+    re-drops the exact asset the original bug was about.
+    **Pinned by `tools/headless/probes/stockshots_warm.txt`.** Note what it has to work around:
+    a `SubMenuLevelChoice` loads its art in its own `Initialize`, which runs when the submenu is
+    first ADDED -- i.e. when the player opens Challenges -- so a dropped level decodes in the
+    beat between the keypress and the carousel appearing, and a probe that marks its assertion
+    window after the carousel is up passes on the very regression it exists to catch.
+    A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never runs and all
+    twelve decode at `Init` as before: that is the debug path, not a regression.
+  - **`GFX/Help/Controls_Keyboard`/`_Joypad` are in the IDLE queue, and moving them there meant
+    moving them to the shared content manager (card 4d47c5ba).** `HelpText` (every attract demo)
+    and `InstructionsMenu` (every in-level pause -> Instructions) each used to own a private
+    `WebContentManager` they `Unload()`ed on removal, so the 1548x1188 pair was re-decoded on
+    every showing forever -- and **no warm and no manifest entry could ever reach them**, since
+    `WebContentManager` shares no cache between managers (this is why card 74b30beb tried
+    manifest entries, measured them still COLD, and removed them again). Both now read the pair
+    from the shared manager; the defensive re-loads that guarded against their own `Unload` are
+    gone with it. Idle rather than menu queue because `DrainWarmQueue` is synchronous and neither
+    screen is menu-first-frame art. Cost: ~3.7 MB resident for the session -- less than the old
+    per-`InstructionsMenu` copies, since every `GameScene` owns one.
 
 ## Debug flags & tuning conventions
 
@@ -182,6 +312,34 @@ generate much of the art/audio referenced here.
   `getDebugQuery` → `Pages/Index.razor.cs`). **No query = normal boot; tuning overrides are null =>
   the baked `Default*` consts, so a shipped build is byte-identical.** When the user settles on
   values, bake them into the consts and keep the flag as an A/B override.
+- **A VALUE-CARRYING flag REPORTS a value it cannot use -- never swallows it** (cards 6eb8dc9e ->
+  48b7c6b1 -> 4e401005, which finished the sweep; ~95 flags now do this). One helper,
+  `DebugFlags.RejectFlagValue`, one wording:
+  `[debug] unknown ?wallsidetile= value '4x' (expected a number > 0 and <= 32) -- ignored, staying on the shipped default`
+  (`staying on <number>` once something has actually set it, e.g. a repeated
+  `?wallsidetile=6&wallsidetile=4x`).
+  **Adding a new value-carrying case means adding its `else` too**, and there are three rules:
+  - The "staying on" clause names the setting **actually IN FORCE**, never the baked default -- a
+    repeated flag (`?wallfog=0.7&wallfog=nope`) keeps the earlier valid value, and a diagnostic
+    that can state the wrong condition is worse than one that states none. Pass
+    `InForce(<the property>)`; the nullable overloads print `the shipped default` when no override
+    stands, because most defaults live in the consuming game class and are not reachable from
+    `Parse`. Where the value space is not a number, name the mechanism instead
+    (`the per-tier skill row`, `the random orientation roll`, `the level's own tier`).
+  - It fires only on a value the guard **cannot use at all** -- unparseable, or refused by the
+    range predicate (typically a negative). An out-of-RANGE value is still CLAMPED silently
+    almost everywhere; `?flyspidercount` is the one deliberate exception.
+  - Pass **`key`**, not a string literal, so an aliased flag reports under the alias that was used
+    (`?objscale` vs `?size` -- lower-cased, since `key` is normalised) and the message cannot
+    drift from its `case` label.
+  Deliberately still silent: the on/off booleans (`IsOn`/`IsExplicitlyOff` have their own
+  convention) and the free-form identity strings (`?netfakepeer=`, `?netfakehash=`, `?bg=`,
+  `?room=`, `?code=`, `?signal=`), where any value is legal and an empty one is not a typo class.
+  **`?shake=` and `?bgfreeze=` take a number OR an on/off spelling** and report only a value that
+  is neither -- reading a typo'd number as "off" was the worse bug, since it turned off the very
+  effect the run was labelled as sweeping. `?pos=` reports per AXIS. Pinned by `logic_probe`'s
+  `ProbeFlagRejectionSweep` + `ProbeAiFlagRejection` + `ProbeFlySpiderFlags`; the control in each
+  is that a VALID value reports nothing.
 - `DebugFlags.Active` (the `[debug] flags active` console line) lists only flags that hijack
   boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
   (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
@@ -214,15 +372,19 @@ generate much of the art/audio referenced here.
   a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
-  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
+  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec, plus the stale
+  menu roster, `?netdropgrant`'s one-shot latch and couch-seat reuse -- leave-no-trace,
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
+  `eaAward('Pacifist')` (pop an awardment banner now -- every real trigger is minutes deep
+  behind a condition a rig cannot produce; see the awardment bullet under "Feature notes"),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
+  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
@@ -763,7 +925,10 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     ?wallsidetile= ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps=
     ?wallwispspeed=` ·
     fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
-    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
+    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids).
+    **`?wallsonly` also serves OwnLevel** (card b174b00f -- there it drops that level's two
+    spawners and keeps its `Walls(2)`), with **`?nowalls`** as the OwnLevel-only complement; the
+    pair is the churn-attribution rig -- see the AI section's OwnLevel row. `?walltoplift` is
     COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check
     `?hitboxes`).
   - **Verify drawing OFFLINE** (`tools/walls/preview_wall3d.py` contact sheet) — the wall scrolls
@@ -824,6 +989,38 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   `Compat/TrailerInterop.Play(youtubeId)` → `window.eaTrailer(id)` (outside `#app`):
   youtube-nocookie iframe + Back button, pauses/resumes `eaMusic` (AudioContext suspend/resume),
   refocuses the canvas on close. Ids live in `MenuScene.trailerMenu_*Selected`.
+- **Awardment banner (`AwardmentBlade`) -- pop one on demand with `eaAward('<Awardment>')`
+  (`eval Award <name>` under `eahl`), card d2f746d5.** Nothing else can reach it in a test: every
+  trigger is minutes deep behind a condition a rig cannot produce (Pacifist = 90 s of not firing
+  on Hard+, Dunce = a 180 s spider-boss timer, the rest are level completions). Since card
+  57555583 the blade's sheet + `menufont` load LAZILY on the Idle -> Enter transition, so this is
+  also the only way that load gets exercised at all.
+  - It **RE-LOCKS an already-unlocked awardment** before awarding, and says so on its own line --
+    both `AwardAchievement` and `AwardmentBlade.Update` drop an unlocked one, so without that the
+    seam does nothing on any save that has played the game. A capture taken after that line is NOT
+    the untouched path. Not "in memory only": the blade's `Enter` calls `SaveThreaded()`, so the
+    save ends up as it started only *because the banner runs*. **Hence the cheat gate
+    (`CheckForCheats`) is tested BEFORE the re-lock** -- it is reported rather than bypassed, and
+    re-locking and then bailing would drop a genuinely earned unlock on the floor.
+  - **eahl's saves now live under `--saves` and ARE clean per run (card 36db5d75).** The XML
+    container (`Achievements.xml`, `Settings.xml`, the screenshot `.dat`s) lands in
+    `<--saves>/fs/EvilAliens/`, default a temp dir wiped at boot, alongside the b64 mirror
+    `--saves` always owned.
+    - **It did NOT, until that card, and the fallout is worth recognising.** `StorageDevice.Root`
+      was the browser's `/eaweb_save/`, which on a desktop host is a real directory at the drive
+      root that nothing wiped. Any probe booting `?unlockall` (three of the committed ones do)
+      unlocks all ten awardments in memory, and the next `SaveThreaded` persisted that -- so on a
+      machine that had ever run one, EVERY later run read all ten as unlocked and
+      `AwardAchievement` dropped every award. It cost card 57555583 a long investigation into a
+      Pacifist award that was being dropped, not missed.
+    - **A pre-existing `C:\eaweb_save\` is now orphaned cruft that nothing reads.** Delete it if
+      you like; leaving it changes nothing. Note the saves it holds are NOT migrated.
+    - **`?unlockall` cannot poison a save any more, anywhere** -- `Achievements` and
+      `Unlockables` refuse to save while it is set (`Savable.SuppressSave`). Saves already
+      poisoned by the old behaviour are NOT healed retroactively, in the browser or on disk:
+      unlike `Settings.Invulnerability` (whose loader forces `false`, since a `true` there can
+      only be fallout), an unlocked awardment is indistinguishable from an earned one, so a
+      blanket heal would erase real progress.
 - **Splash channel-swap SFX:** the "I made this!" splash channel-flips the old meme into the
   revenged image (`channelflip.fx`); `SplashScene.Update` fires `PlayCue("channelswap")` once when
   the glitch starts (gated on `variantPicked`, one-shot via `flipSoundPlayed`). Autoplay caveat: the
@@ -831,6 +1028,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   (suspended AudioContext) — **don't add a click-to-start gate to "fix" it**; the project boots
   straight through by design. The cue's owner is `tools/audio/pick_channelswap.py` (see
   tools/CLAUDE.md).
+  **`?splashvariant=revenged|pure|glasses`** pins which reveal the flip lands on (card 57555583)
+  -- the two portrait shots are a 5% branch each, so they are otherwise unreachable on demand for
+  a screenshot, and the roll now also decides which texture is decoded at all. An unrecognised
+  value is REPORTED and falls back to the random roll; null = roll as normal, so a shipped build
+  is unchanged.
 
 ### The AI player (`ControlDevice.AI`) + the AI bench (card f4d1721f)
 
@@ -886,8 +1088,8 @@ the rest are tier-independent.
     making the clamp its own oscillator.
   - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
     It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
-    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or the
-    `?aireact` knob in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid, or any
+    of the `?aireact` / `?aiscanrows` / `?aicrosspenalty` knobs, in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
     lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
     share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
     whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
@@ -959,13 +1161,33 @@ the rest are tier-independent.
   - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
     candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
     not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
-    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`; but
-    **`?aireact` `420 -> 80ms` moved nothing** (contacts `0 -> 0`, turn `22 -> 18 deg/s`, progress
-    `7/8 -> 7/8`) and **`?aithreatlead` `700 -> 80ms` moved nothing** (deaths `11 -> 10`). Both
-    were dropped from the table rather than shipped as dials that do nothing.
-    **`contacts` cannot see wall look-ahead at all** -- `ClampIntoWallSpace` is a hard override
-    that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
-    either knob to the table without an instrument that can actually see it.
+    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`.
+  - **`?aireact` and `?aithreatlead` were dropped as "dials that do nothing". That verdict is
+    RETIRED (card b174b00f): both have large authority and the original RIGS were blind.** Each
+    was a single run (n=1, on fights this file itself calls +-30% noise) and each happened to pick
+    the one rig where its knob is inert. Re-measured through `eahl` with no browser, N=6,
+    Very_Hard:
+    - **`?aireact` 80 / 420 / 2000ms** on `?level=OwnLevel&wallsonly` -- deterministic, since with
+      the spawners gone all six runs are identical and any movement is pure signal: turn
+      **88 / 229 / 944 deg/s**, contacts **0 / 0 / 13**, and at 2000ms the level stops completing
+      (`prog 5/5 -> 4/5`). Level 3's grids read 22 / 29 / 115 over the same sweep, which is exactly
+      why the original Level-3 isolation saw `420 -> 80ms` move nothing. It doesn't move much
+      THERE.
+    - **`?aithreatlead` 80 / 700 / 2000ms** on **CrazyGame** (30 homing bullets, no walls): deaths
+      **15.3 / 3.8 / 7.0** and progress **~6 / ~20 / ~16 of 21**, with the 80 and 700 ranges not
+      overlapping on either measure. The baked 700 sits near an interior optimum. On the SPIDERBOSS
+      rig -- the original's -- it still moves nothing (deaths 6.2 / 6.0 / 5.8, ranges fully
+      overlapping), which is a fact about that rig and not about the knob.
+    - **The 80ms CrazyGame row is the durable caution.** It posts the LOWEST churn anywhere in the
+      sweep (117 deg/s against 411 at the baked value) while dying three times as often: the bot
+      has stopped dodging, and a bot that has stopped dodging is smooth. **Never read `turn` as
+      quality without a survival column beside it.**
+    Whether either knob should be TIER-SCALED is therefore an OPEN tuning question with a working
+    instrument, not a closed one. Choosing per-tier values is its own measurement campaign and is
+    deliberately not done here.
+    **`contacts` still cannot see wall look-ahead on a level with enemies** -- `ClampIntoWallSpace`
+    is a hard override that runs however far ahead the bot looked, so it floors the metric; the
+    reading above can see it because a walls-only rig lets `turn` carry the signal instead.
   - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
     tier (and Level3's wall SCROLL SPEED is `4.3 * GetDifficultyValue / 16.667`, i.e. 0.090 px/ms
     at Easy to 0.310 at Inzane -- the `0.43 *` variant is `Level3.popTestSlow`, `?wallpoptest`
@@ -975,8 +1197,13 @@ the rest are tier-independent.
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
-  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
+  ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
+  A malformed value on any of the 14 is REPORTED and ignored, never swallowed, per the file-wide
+  value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
+  4e401005). The one wrinkle specific to this family: `?aiaim`/`?aifieldpx` name "the per-tier
+  skill row" as the in-force setting when no override stands. Pinned by `ProbeAiFlagRejection`.
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.
@@ -1056,27 +1283,56 @@ before hunting a blind spot in any future stalled-level report.
     sum-of-repulsions model is the shape that churns; it is the natural rig for the next
     bullet-hell attempt.
   - **OwnLevel is the only challenge with WALLS** and the only one scoring `contacts` (13/1/4).
-    Its churn (`turn` 254-477 deg/s) runs far above the ~70 deg/s the parent card settled Level 3
-    at. **That 4-7x gap is NOT a wall-nav defect, and reading it as one cost card b4972696 its
-    premise** -- the two figures come from rigs that differ by more than the grid. The ~70 deg/s
-    baseline is from **`?wallsonly`**, i.e. `Level3.PopulateWallsOnly`, whose own comment says it
-    runs the wall sections "with nothing else spawning"; OwnLevel's 254-477 is the WHOLE level,
-    where `Walls(game, 2)` runs concurrently with a continuous `SkullSpawner(0f, 2f, maze: true)`
-    and (Very_Hard+) a `StarMineSpawner`. Scroll speed is NOT the confounder -- `?wallsonly` calls
-    the same 4.3x `speedup` OwnLevel uses. So it is walls-alone against walls-plus-a-sustained-
-    enemy-stream, and the extra churn belongs to the same sum-of-repulsions problem CrazyGame
-    shows at 389-450 deg/s with **no walls at all**, which is the band OwnLevel sits in.
-    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser) at the real
-    Very_Hard wall scroll: on OwnLevel's grid `ChooseGapColumn` switches **0.52/s against var3's
-    0.43/s** -- 1.2x, one switch every two seconds -- and the lateral push flips sign 0.17/s vs
-    0.16/s. Neither can produce 3-5 heading reversals/s. OwnLevel's grid IS the hardest of the
-    five, but by modest ratios: `clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77, `contact/s`
-    0.06 vs 0.03. The one big gap is the share of ticks with a blocked row inside reach --
-    **25.0% vs 4.5%** -- so the maze really is tighter; it just does not convert that into
-    proportional churn. `--react=2000` shifts `urgency%`/`clampX/s` but leaves switching, sign
-    flips and contacts unchanged everywhere, so there is no tuning win in the look-ahead either.
-    **Before attributing any churn on a walled level to the walls, match the rigs** -- suppress
-    the spawners, or bench the grid offline.
+    Its churn (`turn` 254-477 deg/s) runs far above Level 3's wall sections. **That gap IS the
+    walls -- an earlier revision of this file concluded the opposite, and card b174b00f measured
+    it directly: the hypothesis lost.**
+    The old comparison really was confounded, so the critique stands even though the conclusion
+    drawn from it does not: the Level-3 baseline is a **`?wallsonly`** run (`PopulateWallsOnly`,
+    whose own comment says "with nothing else spawning") while OwnLevel's 254-477 was the WHOLE
+    level -- `Walls(game, 2)` alongside a continuous `SkullSpawner(0f, 2f, maze: true)` and a
+    Very_Hard+ `StarMineSpawner`. Scroll speed was never the confounder (`?wallsonly` calls the
+    same 4.3x `speedup`). But suppressing either half resolves it the other way. `?wallsonly` and
+    `?nowalls` both work on OwnLevel now. Measured with `eahl`, Very_Hard, N=6, each run soaked by
+    `eval AiBenchRun 60` x3:
+
+    | OwnLevel, one rig | `turn` deg/s |
+    |---|---|
+    | walls only (`?wallsonly`) | **229** (deterministic -- all 6 runs identical) |
+    | spawners only (`?nowalls`) | **~55** (41-67 over 14 runs) |
+    | full level | **404** (304-525) |
+    | *Level 3 walls only, same rig* | **29** (deterministic) |
+
+    **`?invuln` must be OFF, and that cuts against the habit** -- every other doc line pairs
+    `?wallsonly` with it. With `?invuln` on the bot cannot die, the checkpoint rewind never fires,
+    and the same boot reads 426 deg/s / 3 contacts / VICTORY instead. The rigs verbatim:
+    `?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard[&wallsonly|&nowalls]` and
+    `?level=Level3&aiplayer&aibench&difficulty=Very_Hard&wallsonly`.
+    **The two walls-only rigs are not the same SHAPE, which bounds the ratio**: Level 3 loops six
+    sections (variations 1/0/3, twice) and is still running at 180 sim-seconds, while OwnLevel has
+    a single `Walls(2)` and reaches victory at ~60, freezing its rate there. Both are rates over
+    the ticks they ran, so they compare as rates -- but this is grid-against-grid, not
+    run-against-run, and a soak length describes the command, not OwnLevel's window.
+
+    So OwnLevel's grid ALONE churns **7.9x Level 3's grid alone**; the enemy stream alone accounts
+    for 61 deg/s; and the two together are superadditive (404 against a 290 sum), which is the
+    sum-of-repulsions model gaining another set of competing terms. **`?nowalls` is the control
+    that makes the walls-only number readable at all** -- without it, "the walls are innocent" and
+    "suppressing events broke the rig" are the same quiet number.
+    (The Level-3 walls-only baseline re-measures at **29 deg/s on this rig, not the ~70** long
+    quoted here from card f4d1721f's browser run. The 7.9x is a within-rig ratio, which is the
+    comparison that carries; the absolute discrepancy across rigs is unexplained and worth
+    remembering before quoting either figure on its own.)
+  - **`tools/sim/aiwallnav`'s columns do NOT predict heading churn, and leaning on them to
+    exonerate the walls was the actual error.** Its gap-switch (0.52 vs 0.43/s), lateral sign-flip
+    (0.17 vs 0.16/s) and clamp (`clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77) ratios are all
+    real measurements, and all read 1.2-1.8x where the live churn is 7.9x. The one column that
+    DOES track it is **`urgency%` -- 25.0% vs 4.5%, 5.6x** -- the share of ticks with a blocked row
+    inside reach. The bench states its own limit ("the WALL TERM ONLY -- `turn deg/s` is the whole
+    steering sum"); honour it. **Read `urgency%` as the churn proxy** and treat every other column
+    as a claim about routing mechanics rather than about the heading.
+    **Before attributing churn on a walled level to the walls (or away from them), match the
+    rigs** -- suppress the spawners with `?wallsonly`, keep `?nowalls` as the control, and never
+    compare a whole-level figure against a walls-only one.
 - **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into
   `Oracle.GetBaddies`.** Its `LooksLikeEnemy` is a deliberately name-shaped heuristic, so it
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),

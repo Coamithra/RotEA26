@@ -3,7 +3,9 @@
 //
 // The game saves to the in-memory WASM filesystem (see StorageStub.cs): settings,
 // unlockables, awardments (Achievements.xml) and the level-select screenshots all
-// land under /eaweb_save/EvilAliens/. That tree is lost on reload, so we mirror it
+// land under StorageDevice.Root + "EvilAliens/" -- in the browser /eaweb_save/, which
+// is what this file is about (a desktop host repoints it; see StorageStub). That tree
+// is lost on reload, so we mirror it
 // to the browser: the StorageStub hydrates MEMFS from here before the first read
 // and flushes changed files back here on every container Dispose.
 //

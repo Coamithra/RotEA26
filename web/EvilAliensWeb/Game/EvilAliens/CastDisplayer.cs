@@ -482,8 +482,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		texture = null;
 		sound.PlayCue("expl2");
 		sound.PlayCue("hit_boss");
-		Vector2 val = default(Vector2);
-		(val) = new Vector2(400f, 80f);
+		Vector2 val = new Vector2(400f, 80f);
 		UberExplosion(val);
 		UberExplosion(val - new Vector2(100f, 0f));
 		UberExplosion(val + new Vector2(100f, 0f));
@@ -770,8 +769,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		}
 		if (spiderdeadtimer.Active)
 		{
-			Color val = default(Color);
-			(val) = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0f, 1f, spiderdeadtimer.TimeLeft * 3f / stateTimer.Duration)));
+			Color val = new Color(new Vector4(1f, 1f, 1f, MathHelper.Lerp(0f, 1f, spiderdeadtimer.TimeLeft * 3f / stateTimer.Duration)));
 			for (int i = 0; i < debrisposition.Count; i++)
 			{
 				Texture2D val2 = (Texture2D)(i switch
@@ -840,8 +838,7 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 					num5 /= columns;
 					int num6 = texture.LogicalHeight() - (rows - 1) * separatingspace;
 					num6 /= rows;
-					Rectangle source = default(Rectangle);
-					(source) = new Rectangle(num4 * (num5 + separatingspace), num3 * (num6 + separatingspace), num5, num6);
+					Rectangle source = new Rectangle(num4 * (num5 + separatingspace), num3 * (num6 + separatingspace), num5, num6);
 					spriteBatch.Draw(texture, source, val3 + new Vector2(0f, num), rotation, scale / textureScale, center: true, color, spriteEffects);
 				}
 			}

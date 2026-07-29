@@ -87,9 +87,17 @@ internal class BackgroundImage
 	// under-tests any layer drawn bigger than its art. Neither could show on a shipped
 	// background -- nothing sets mirrorX/mirrorY and every live tile is square or wider than
 	// tall -- which is exactly why eaBgCull() reads the decisions as data.
+	//
+	// The right/bottom test is STRICT (card ef55b76e). The interval is half-open, so a tile whose
+	// right or bottom edge lands exactly on 0 covers zero on-screen area: its quad spans [-w, 0],
+	// no pixel centre falls inside, nothing reaches the framebuffer -- that argument (plus a
+	// pre/post pixel diff) is what proves the tightening changes no pixel; eaBgCull()'s
+	// differential is a SENTINEL against a future margin/inset, not proof (BgCullTest header).
+	// Not a rare tie: only X ever scrolls, so position.Y stays 0 forever and the whole top ROW of
+	// every [1,1] layer hit exact-zero on every frame of play.
 	internal static bool TileOnScreen(float x, float y, int tileW, int tileH, float scale)
 	{
-		return x + (float)tileW * scale >= 0f && x < 800f && y + (float)tileH * scale >= 0f && y < 600f;
+		return x + (float)tileW * scale > 0f && x < 800f && y + (float)tileH * scale > 0f && y < 600f;
 	}
 
 	private void NoteTile(bool drawn, float x, float y, Texture2D tile)
@@ -225,8 +233,7 @@ internal class BackgroundImage
 		// Tile placement is PIXEL-space: use each texture's LOGICAL (pre-pad) size, not the padded
 		// .Width/.Height, or a padded .dds advances/wraps ~pad px too far and leaves a transparent
 		// gap between tiles (the DXT mult-of-4 + --padtest canary; unpadded png is a no-op here).
-		Vector2 offset = default(Vector2);
-		(offset) = new Vector2(0f, 0f);
+		Vector2 offset = new Vector2(0f, 0f);
 		for (int i = 0; i < tiles.GetLength(0); i++)
 		{
 			offset.Y = 0f;

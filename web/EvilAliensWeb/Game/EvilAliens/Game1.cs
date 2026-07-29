@@ -191,9 +191,12 @@ public class Game1 : Game
 	// queued entries become free cache hits afterwards; either order is safe.
 	// Known minor edge: a ?level= boot into a NON-space level (e.g. Level2/Mars) never
 	// calls SetSpace, so the leftovers trickle-decode one-per-tick during early gameplay
-	// (each sub-watchdog, ~40ms .dds / ~20ms star PNG) and ?loadlog logs them as COLD
-	// against that level — don't let eaPreloadExport bake space tiles into a non-space
-	// level's manifest set from such a run. Debug-only boots; accepted.
+	// (each sub-watchdog, ~40ms .dds / ~20ms star PNG). Debug-only boots; accepted.
+	// They no longer log as COLD against that level (card 4d47c5ba brackets every warm),
+	// and LoadProfiler.RecordTexture now DROPS a warm that lands outside the (boot)
+	// sentinel rather than filing it under the level -- so eaPreloadExport can no longer
+	// bake the space tile set into a non-space level's manifest section from such a run,
+	// which is what the COLD lines used to be the (noisy) warning about.
 	private readonly Queue<Action> idleWarmQueue = new Queue<Action>();
 
 	// Pre-launch LEVEL warm (card fe25712a): a level's whole preload used to decode
@@ -591,16 +594,37 @@ public class Game1 : Game
 		// main thread. Warming it here moves that decode off the first-show path -- a small
 		// fixed cost paid every boot (like the rest of this list) to kill the pop.
 		EnqueueWarm<Texture2D>("GFX/Menu/evilskull");
+		// The level-select carousel's stock art (card 4d47c5ba). ScreenshotSaver.Init() loads
+		// all twelve SYNCHRONOUSLY the instant Start is pressed -- it runs from
+		// StartScreen.Update immediately BEFORE OnFinished, i.e. before DrainWarmQueue -- so
+		// they used to land as one ~350-470ms block on the Press Start -> menu handoff, the
+		// last thing between the player and the menu. Queued here they are pumped during the
+		// splash (which has ~1000 idle ticks for a queue of ~24) and Init() becomes cache hits.
+		//
+		// Queued AFTER the menu-critical set above on purpose: warmQueue is FIFO and
+		// DrainWarmQueue's contract is "the menu's own art is decoded before the menu is
+		// built", so nothing may be inserted ahead of it. The drain does no work for these
+		// either way -- Init() has already decoded whatever the pump did not reach.
+		//
+		// ScreenshotSaver owns the list so the warm set and the load set cannot drift.
+		foreach (string stockShot in ScreenshotSaver.StockShots)
+		{
+			EnqueueWarm<Texture2D>(stockShot);
+		}
 	}
 
 	// Space-background tile set (card 97727578). Background.SetSpace() loads all of these
 	// synchronously inside a level's Initialize() — BEFORE base.Initialize() reaches the
-	// LoadContent preload bracket — so neither PreloadGraphicalContent nor the manifest can
-	// ever warm them first, and the FIRST space scene of a session paid ~0.5s extra on its
-	// loading tick (12 nebula .dds uploads + 8 star PNG decodes + a shader compile). The
-	// shared content manager never unloads mid-session, so warming once at boot turns every
-	// SetSpace into cache hits. Low-priority (idleWarmQueue): needed before the first LEVEL,
-	// not before the menu.
+	// LoadContent preload bracket — so PreloadGraphicalContent cannot warm them first. (Nor
+	// could the manifest when this was written; WarmThenLaunch's pre-launch warm now runs
+	// BEFORE Initialize, so a manifest entry does reach these — that is how the identical
+	// SetMars/marsbg gap is fixed, card 74b30beb. Boot-warming stays the better fit here:
+	// SetSpace is used by most levels, so paying once per session beats listing the set on
+	// every one of them.) The FIRST space scene of a session paid ~0.5s extra on its loading
+	// tick (12 nebula .dds uploads + 8 star PNG decodes + a shader compile). The shared
+	// content manager never unloads mid-session, so warming once at boot turns every SetSpace
+	// into cache hits. Low-priority (idleWarmQueue): needed before the first LEVEL, not
+	// before the menu.
 	private void QueueIdleWarm()
 	{
 		for (int i = 0; i < 12; i++)
@@ -613,6 +637,30 @@ public class Game1 : Game
 		}
 		// ProceduralStarfield's crossfade shader — same first-SetSpace load moment.
 		EnqueueIdleWarm<Effect>("GFX/Effects/starwindow");
+		// The two 1548x1188 control diagrams (card 4d47c5ba). HelpText (every attract demo)
+		// and InstructionsMenu (every in-level pause -> Instructions) draw them, and both used
+		// to own a PRIVATE WebContentManager that they Unload()ed on removal -- so the pair was
+		// re-decoded on every single showing, forever. Both now read them from this shared
+		// manager, which is what makes warming them possible at all; a per-level manifest entry
+		// never could (tried and reverted in card 74b30beb: the manifest warms Game1.content,
+		// and their copies lived in a different cache).
+		//
+		// IDLE queue, not the menu queue: neither screen is menu-first-frame art, and
+		// DrainWarmQueue is synchronous -- putting 2 multi-megapixel decodes there would make a
+		// player who mashes past the splash WAIT for art that is not on screen yet, trading a
+		// hidden warm for a visible one. Same reasoning as the space tiles above.
+		EnqueueIdleWarm<Texture2D>("GFX/Help/Controls_Keyboard");
+		EnqueueIdleWarm<Texture2D>("GFX/Help/Controls_Joypad");
+		// The awardment banner's sheet (card 57555583). AwardmentBlade used to decode it in its
+		// own LoadContent -- i.e. inside base.Initialize(), BEFORE this method exists to warm
+		// anything -- so the boot always paid for a component that only draws when an awardment
+		// pops. Its load is lazy now and this is what keeps that lazy load a cache hit.
+		//
+		// IDLE queue, not the menu queue: the banner pops mid-LEVEL, it is not menu-first-frame
+		// art, and DrainWarmQueue is synchronous -- adding it to the menu queue would put its
+		// decode back on the Press-Start -> menu handoff that card 4d47c5ba just cleared. Its
+		// `menufont` is already covered by QueueMenuWarm above.
+		EnqueueIdleWarm<Texture2D>("GFX/Sprites/awardmentblade");
 	}
 
 	// Queue one asset to be warmed later (during splash idle, or the pre-menu drain).
@@ -660,6 +708,13 @@ public class Game1 : Game
 	// warming the others — and must never block boot.
 	private void Warm<T>(string assetName)
 	{
+		// Tell the load profiler this decode is deliberate, so ?loadlog stops reporting the
+		// warm queues doing their job as COLD gaps (card 4d47c5ba). All THREE queues funnel
+		// through here (menu, idle and the pre-launch levelWarmQueue) and nothing else does, so
+		// a boot decode from anywhere else still surfaces -- which is the point. The level warm
+		// also sits inside a BeginPreload/EndPreload bracket, which takes precedence, so it goes
+		// on counting as a preload rather than becoming invisible.
+		EvilAliensWeb.Compat.LoadProfiler.BeginWarm();
 		try
 		{
 			content.Load<T>(assetName);
@@ -667,6 +722,10 @@ public class Game1 : Game
 		catch (Exception ex)
 		{
 			System.Console.WriteLine("[warm] " + assetName + " warm failed: " + ex.Message);
+		}
+		finally
+		{
+			EvilAliensWeb.Compat.LoadProfiler.EndWarm();
 		}
 	}
 
@@ -723,6 +782,11 @@ public class Game1 : Game
 	// with Demo1/2/3) and the ?level= debug boot (LaunchLevelDirect). Bracketed as a
 	// preload for the LoadProfiler so the hitch watchdog doesn't flag the deliberate
 	// one-decode ticks and ?loadlog attributes the decodes to the level as preloads.
+	// Per-tick wall-clock budget for PumpLevelWarm, as Stopwatch ticks. 8ms leaves room in a
+	// 16.7ms frame for the loading-screen draw; it is a floor, not a cap -- the budget is
+	// checked AFTER each warm, so one slow decode always completes rather than being split.
+	private static readonly long LevelWarmBudgetTicks = System.Diagnostics.Stopwatch.Frequency / 125;
+
 	private void WarmThenLaunch(Levels level, Action launch)
 	{
 		if (pendingLevelLaunch != null)
@@ -748,10 +812,20 @@ public class Game1 : Game
 		pendingLevelLaunch = launch;
 	}
 
-	// Decode ONE queued level asset per tick; when the queue drains, close the preload
-	// bracket and run the deferred launch. The launch runs on its own tick (not the
-	// last decode's) so the browser gets a paint between the final warm and the level's
-	// remaining synchronous LoadContent work.
+	// Decode queued level assets until this tick's budget is spent; when the queue drains,
+	// close the preload bracket and run the deferred launch. The launch runs on its own tick
+	// (not the last decode's) so the browser gets a paint between the final warm and the
+	// level's remaining synchronous LoadContent work.
+	//
+	// BUDGETED rather than strictly one-per-tick: a captured manifest section names every
+	// texture the level touches (card 74b30beb), which is 26-82 entries, and one-per-tick
+	// would put a fixed ~0.5-1.4s floor on EVERY entry into that level. Most entries are not
+	// decodes at all -- the shared content manager never unloads mid-session, so a retry after
+	// death, a replayed challenge, or any asset an earlier level already pulled in costs
+	// nothing but a dictionary hit, and spending a whole frame on each is pure latency. A
+	// budget keeps the property that actually matters (a real multi-megabyte decode blows it
+	// on its own, so it still gets a tick to itself and the browser still paints between
+	// decodes) while a fully-cached queue drains in one tick.
 	private void PumpLevelWarm()
 	{
 		if (pendingLevelLaunch == null)
@@ -760,7 +834,13 @@ public class Game1 : Game
 		}
 		if (levelWarmQueue.Count > 0)
 		{
-			levelWarmQueue.Dequeue()();
+			long started = System.Diagnostics.Stopwatch.GetTimestamp();
+			do
+			{
+				levelWarmQueue.Dequeue()();
+			}
+			while (levelWarmQueue.Count > 0
+				&& System.Diagnostics.Stopwatch.GetTimestamp() - started < LevelWarmBudgetTicks);
 			return;
 		}
 		Action launch = pendingLevelLaunch;

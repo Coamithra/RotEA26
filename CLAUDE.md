@@ -1,16 +1,23 @@
 # CLAUDE.md — Revenge of the Evil Aliens (web port)
 
 Porting a recovered 2008 **XBLIG** (XNA 3.x, C#) to run in the browser via **KNI**
-(a MonoGame fork with a Blazor WebAssembly / WebGL backend). Output = a static site,
-**deployed publicly at https://coamithra.github.io/RotEA26/**.
+(a MonoGame fork with a Blazor WebAssembly / WebGL backend). Output = a static site.
+
+**Hosting is mid-migration.** The public site is still GitHub Pages
+(https://coamithra.github.io/RotEA26/, and badly stale). Its replacement is
+**https://haraldmaassen.com/RotEA26/** — a sibling of Meridian on the shared Hetzner host, and
+the target `tools/deploy_web.py` ships to. The first Hetzner deploy has NOT run yet; until it
+does, Pages is what players get. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 This file is how to *work* in the repo. Detail lives next to the code:
 
 | Doc | What |
 |---|---|
 | [`web/EvilAliensWeb/CLAUDE.md`](web/EvilAliensWeb/CLAUDE.md) | game/engine architecture + per-feature notes (render path, input, saves, debug flags, webcam, walls, bosses, ...) |
+| [`web/EvilAliensWeb/Compat/Net/CLAUDE.md`](web/EvilAliensWeb/Compat/Net/CLAUDE.md) | the online co-op net layer, split out of the file above (loads automatically under `Compat/Net/`) |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | the offline asset pipelines (audio, shaders, textures, font, backgrounds, ...) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | the step-by-step card → worktree → PR runbook |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | publishing the game + the signaling server (neither happens on merge) |
 | `plans/plan.md` | historical artifact — the archived staged plan (full per-stage detail) |
 
 ## Project tracking (Trello — local backend)
@@ -31,7 +38,8 @@ lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programming\F
 - **When picking up a card/task, FOLLOW [`CONTRIBUTING.md`](CONTRIBUTING.md)**: claim the card, a
   per-card worktree (mandatory; slot `wt1`..`wt8`, dev server on port `528<k>`), research → design
   → implement, the visual+console verification gate (no unit tests here), PR self-merge (deploy to
-  Pages is MANUAL — `workflow_dispatch`, not on push), and the card-close paperwork.
+  publishing is MANUAL and separate from merging — see `docs/DEPLOY.md`), and the card-close
+  paperwork.
 
 ## Build / run
 
@@ -103,6 +111,20 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     and real WebRTC can ONLY fail in the browser — as can a case-sensitive `Content/` path, which
     a local filesystem happily resolves. The Phase-5 gate (foreground Chrome, zero console
     exceptions) is unchanged; `eahl` is what you use to get the frame or the number *before* it.
+    Even for a genuinely browser-only gate, eahl is still the cheapest way to FIND the browser
+    leg's inputs: rehearse the menu key sequence headlessly (`--repl`, `eval Press ...`,
+    screenshots), then Chrome only replays a known-good script (card 2c3499f3). In Chrome, focus
+    the game tab with `window.focus()`, NEVER a synthetic click — every click on the canvas is
+    also a menu-select / fire input.
+  - **A check worth RE-RUNNING later becomes a committed probe** (card 1e476668):
+    `tools/headless/probes/*.txt` are `--script` files that assert, driven by
+    `python tools/headless/probes/run_probes.py` (exit 1 on any failure). `mark` / `expect` /
+    `expect-not` match per line against everything the run printed, the game's own
+    `[loadprofile]` / `[hitch]` / `[net]` lines included — which is the only way to defend a
+    change whose failure is SILENT (a data file, a manifest, a host default). Add one when a
+    regression would otherwise go unnoticed until someone plays the game; mutation-test it
+    first, and assert the POSITIVE too or it passes on a run that never got there. Conventions
+    + the menu-navigation crib: `tools/headless/probes/README.md`.
   - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
     scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
     `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first
@@ -154,6 +176,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **Level fast-boots** (replace a level's event list with one fight/section): `?spiderboss` ·
   `?spiders` · `?wallsonly` · `?brainboss` (bypasses the Hard+ gate). Pair with `?invuln`.
   e.g. `…:5280/?level=Level3&brainboss&invuln`.
+  **`?wallsonly` serves TWO levels** (card b174b00f): on `Level3` it loops the wall sections; on
+  `OwnLevel` it drops that level's `SkullSpawner`+`StarMineSpawner` and keeps its `Walls(2)`.
+  Same name on purpose -- it is what makes an OwnLevel churn figure comparable with a Level-3 one.
+  **`?nowalls`** is its OwnLevel-only complement and positive control (spawners live, walls gone).
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
   Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
@@ -188,8 +214,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   (ticks the real loop at a fixed 60Hz dt with no Draw) — a backgrounded tab throttles rAF *and*
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
-  `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aithreatlead= ?aibossbias=
-  ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with `?aiplayer`.
+  `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
+  ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with
+  `?aiplayer`.
   **Per-tier AI skill** (card c10e3e7f): the threat-field and aim-spread knobs resolve through
   `PlayerShip.AiSkillByDifficulty[]`, keyed off `Settings.EffectiveDifficulty` (the LOCK-aware
   tier -- attract demos lock Hard). `eaAiBench()` prints the resolved row; the `?ai*` overrides
@@ -219,6 +246,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   to reach the disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
   pad-connection masks through the real resolver + the pre-card policy as the negative control) —
   it needs no level and no gamepads. Replaces `?aiteam`.
+- **`?splashvariant=revenged|pure|glasses`** (card 57555583): pin which reveal the splash's
+  channel flip lands on. The two portrait shots are a 5% branch each, and since that card the
+  roll (in `SplashScene.LoadContent`) also decides which texture is DECODED at all -- so this
+  is both the screenshot rig for the flip and what makes the boot decode set deterministic for
+  `tools/headless/probes/boot_cold.txt`. Bad value => reported + the random roll.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.
@@ -259,13 +291,21 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   Evidence: `plans/plan.md` Stage 3.
 - **Content paths are CASE-SENSITIVE on the live host (not on Windows).** Asset root is
   `wwwroot/Content` (capital C), everything lowercase under it; every request must match — a
-  casing mismatch passes locally and 404s on GitHub Pages (black screen). Verify new assets ON THE
-  LIVE URL, not just locally.
-- **Hosting:** `.github/workflows/deploy.yml` does `dotnet publish -c Release` in CI, rewrites
-  `<base href>` to `/RotEA26/`, adds `.nojekyll` + `404.html`, stamps `window.eaBuildHash`
-  (online co-op's peers-run-identical-binary check — dev builds keep `'dev'`), deploys via
-  `actions/deploy-pages` — triggered MANUALLY (`workflow_dispatch`). The dev build keeps
-  `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
+  casing mismatch passes locally and 404s on the live host (black screen). True of BOTH hosts —
+  Pages and the Apache box are equally case-sensitive. Verify new assets ON THE LIVE URL, not just
+  locally; `python tools/check_deploy.py` probes it, wrong-case control included.
+- **Hosting — full runbook in [`docs/DEPLOY.md`](docs/DEPLOY.md); nothing deploys on merge.**
+  `python tools/deploy_web.py` publishes `-c Release` from a throwaway detached checkout (so no
+  untracked `wwwroot/` file can ship), rewrites `<base href>` to `/RotEA26/`, stamps
+  `window.eaBuildHash`, and SFTPs the result to the shared Hetzner host incrementally. The dev
+  build keeps `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
+  **The build hash is the co-op compatibility key** (peers-run-identical-binary check; dev builds
+  keep `'dev'`, which also shows the FPS HUD). Its recipe is inherited verbatim from the
+  Pages workflow and pinned by `python tools/deploy_web.py --selftest` — which becomes the only
+  record of it once that workflow goes, so treat a FAIL as "I am about to split the player base",
+  not as a stale test.
+  The old `.github/workflows/deploy.yml` (Pages, `workflow_dispatch`) still exists and still works;
+  it is slated for deletion once the Hetzner cutover is verified live.
 - **Publish trimming:** `PublishTrimmed=true` + `TrimMode=partial` (NOT full — full strips the
   XmlSerializer save types + KNI's reflection factories → white screen);
   `InvariantGlobalization=true` (so even Debug is culture-invariant — no culture-dependent
@@ -296,8 +336,8 @@ The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
   project's `/opt/rotea` is NOT a git checkout** — it is an scp'd copy of `server/signal/`, so
   there is no `git pull` to run; follow `server/signal/README.md` → "Updating an existing
   deployment" (stage to `server.new`, run `test_signal.py` there, swap, `systemctl restart rotea`).
-  **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual Pages
-  `workflow_dispatch`); a networked client feature needs both, or the live site talks to a server
+  **Merging a PR deploys nothing** — neither the server (manual) nor the game (manual, see
+  `docs/DEPLOY.md`); a networked client feature needs both, or the live site talks to a server
   that does not speak its protocol.
 - **Shared box etiquette:** it's a small CPU-only VPS (2 vCPU / 4GB RAM) also running an LLM
   server — keep resource usage modest and never stop/restart the `notzelda*` (or other

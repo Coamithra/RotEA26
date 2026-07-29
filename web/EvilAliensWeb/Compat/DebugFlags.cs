@@ -463,7 +463,28 @@ namespace EvilAliensWeb.Compat
 		// Fast-boot Level3 straight to a looping walls section (?level=Level3&wallsonly) -- mirrors
 		// ?spiderboss for Level2. Skips the whole wave sequence so the towers can be watched without
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
+		//
+		// Card b174b00f gave it a SECOND owner: OwnLevel. There it drops the level's continuous
+		// SkullSpawner and StarMineSpawner and keeps the Walls(2) section, so a churn figure can be
+		// taken from the walls ALONE -- comparing OwnLevel's full level against a Level-3
+		// ?wallsonly run is walls-plus-enemies against walls-alone, and that confound is what made
+		// the question unanswerable for two cards. Deliberately the same flag name on both levels,
+		// so the walls-only rigs are reached the same way rather than by a reader remembering.
+		// NOT the same SHAPE on both, though, and the difference bounds any ratio taken across
+		// them: Level3.PopulateWallsOnly loops six sections (variations 1/0/3, twice) and is still
+		// running after 180 sim-seconds, while OwnLevel has one Walls(2) and reaches victory at
+		// ~60. Both are rates over the ticks they ran, so they compare; the SECTIONS differ, which
+		// is exactly the grid-vs-grid question, but do not read the two as equal-length runs.
 		public static bool WallsOnly { get; private set; }
+
+		// ?nowalls (card b174b00f) -- the control for the above, currently OwnLevel only: keep the
+		// spawners, drop the Walls section. Without it a quiet ?wallsonly reading cannot be told
+		// from a rig that event suppression simply broke, because both are just a low number.
+		// MEASURED, so do not use a prediction as the sanity criterion: ?nowalls reads ~61 deg/s
+		// against walls-only's 229 and the full level's 404. The decision rule is comparative --
+		// if BOTH halves come back quiet the rig is what changed and neither number means
+		// anything; one quiet and one loud attributes the churn to the loud half.
+		public static bool NoWalls { get; private set; }
 
 		// A/B the mip chain (?nomips): WebContentManager.TryLoadDds uploads level 0 only, so every
 		// .dds falls back to plain bilinear -- the before/after for card 110153c7, where a tower
@@ -687,6 +708,14 @@ namespace EvilAliensWeb.Compat
 		// in seconds instead of playing the whole tutorial. Pair with ?level=Tutorial (+ ?invuln).
 		// See TutorialLevel.PopulatePowerUpTrainingOnly.
 		public static bool TutorialTraining { get; private set; }
+
+		// Pin the splash channel-flip's reveal variant (?splashvariant=revenged|pure|glasses).
+		// SplashScene rolls it ~90/10 (then 50/50 on the two portrait shots) and, since card
+		// 57555583, decodes ONLY the winner -- so the two portrait reveals are a 5% branch each
+		// and unreachable on demand for a screenshot. null => roll as normal, so a shipped build
+		// is unchanged. Out of `Active`: it picks between three splash images and cannot change
+		// a shared run.
+		public static string SplashVariant { get; private set; }
 
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
@@ -1042,6 +1071,8 @@ namespace EvilAliensWeb.Compat
 		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
 		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
 		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
+		//   ?aiscanrows=<n> rows of grid looked at when judging a column (an INT, not a float)
+		//   ?aicrosspenalty=<c> cost per blocked column the ship would have to cross
 		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
 		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
 		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
@@ -1051,6 +1082,11 @@ namespace EvilAliensWeb.Compat
 		public static float? AiWallReactionMs { get; private set; }
 
 		public static float? AiGapSwitchMargin { get; private set; }
+
+		// int?, not float? -- WallScanRows counts grid ROWS and indexes the scan loop.
+		public static int? AiWallScanRows { get; private set; }
+
+		public static float? AiWallCrossPenalty { get; private set; }
 
 		public static float? AiThreatLeadMs { get; private set; }
 
@@ -1102,13 +1138,17 @@ namespace EvilAliensWeb.Compat
 		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
 		public static int NetLocal { get; private set; }
 
-		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop EVERY EvSlotGrant the
-		// host answers a couch join with (not just the first: the flag is read on each grant, so
-		// while it is set no couch join can complete), instead of seating them. That is the one state the host's
+		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop the FIRST EvSlotGrant
+		// the host answers a couch join with, instead of seating it; every later grant in the
+		// same session completes normally. That is the one state the host's
 		// ExpireUnclaimedGrants path exists for (the client can silently fail to take a grant: its
 		// device got seated meanwhile, its scene changed) and the ONLY thing that reaches it --
 		// ?netlocal always takes its grant, so without this flag the expiry has no trigger at all
-		// and the seat-leak it guards against is untestable. Shipped builds are unchanged.
+		// and the seat-leak it guards against is untestable. ONE-SHOT since card ee96ea61 (it
+		// dropped every grant, so a run could only ever show the DROP half): ?netlocal=2 now
+		// covers the drop AND a subsequent successful take in one run. The latch is per SESSION
+		// and cleared by NetSession.ResetPerSessionState -- see NetSession.ShouldDropGrant.
+		// Shipped builds are unchanged.
 		public static bool NetDropGrant { get; private set; }
 
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
@@ -1233,13 +1273,21 @@ namespace EvilAliensWeb.Compat
 				case "shake":
 				case "screenshake":
 					// Bare ?shake / =true keeps the default 1; a number scales it (0 = off).
+					// The on/off fallback is DELIBERATE, but only for the on/off SPELLINGS: a
+					// typo'd number (?shake=1.5O) is not "off", and silently reading it as off
+					// turns the effect under test off entirely -- worse than ignoring it, since
+					// the run then measures no-shake while labelled as a shake sweep.
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shk))
 					{
 						ShakeAmount = (shk < 0f) ? 0f : (shk > 3f) ? 3f : shk;
 					}
-					else
+					else if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						ShakeAmount = IsOn(val) ? 1f : 0f;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number 0..3, or on/off", InForce(ShakeAmount));
 					}
 					break;
 				case "hitstop":
@@ -1253,11 +1301,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SlowmoTrailDecay = (smd < 0f) ? 0f : (smd > 0.99f) ? 0.99f : smd;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SlowmoTrailDecay));
+					}
 					break;
 				case "slowmotrailstrength":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var sms))
 					{
 						SlowmoTrailStrength = (sms < 0f) ? 0f : (sms > 1f) ? 1f : sms;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SlowmoTrailStrength));
 					}
 					break;
 				case "holofilter":
@@ -1265,11 +1323,21 @@ namespace EvilAliensWeb.Compat
 					{
 						HoloFilter = (hf < 0f) ? 0f : (hf > 2f) ? 2f : hf;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HoloFilter));
+					}
 					break;
 				case "holoburst":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hb))
 					{
 						HoloBurst = (hb < 0f) ? 0f : (hb > 2f) ? 2f : hb;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HoloBurst));
 					}
 					break;
 				case "hologreen":
@@ -1277,11 +1345,21 @@ namespace EvilAliensWeb.Compat
 					{
 						HoloGreen = (hg < 0f) ? 0f : (hg > 1f) ? 1f : hg;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HoloGreen));
+					}
 					break;
 				case "hologreenpulse":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var hgp))
 					{
 						HoloGreenPulse = (hgp < 0f) ? 0f : (hgp > 1f) ? 1f : hgp;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HoloGreenPulse));
 					}
 					break;
 				case "holostaticrate":
@@ -1289,11 +1367,21 @@ namespace EvilAliensWeb.Compat
 					{
 						HoloStaticRate = (hsr < 0f) ? 0f : (hsr > 1f) ? 1f : hsr;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HoloStaticRate));
+					}
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))
 					{
 						BlastActiveAlpha = (ba < 0f) ? 0f : (ba > 1f) ? 1f : ba;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(BlastActiveAlpha));
 					}
 					break;
 				case "blasthit":
@@ -1301,11 +1389,21 @@ namespace EvilAliensWeb.Compat
 					{
 						BlastHitFactor = bh;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(BlastHitFactor));
+					}
 					break;
 				case "reticlesize":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var rs) && rs > 0f)
 					{
 						ReticleSize = rs;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(ReticleSize));
 					}
 					break;
 				case "blastloop":
@@ -1313,11 +1411,21 @@ namespace EvilAliensWeb.Compat
 					{
 						BlastLoopSeconds = bl;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(BlastLoopSeconds));
+					}
 					break;
 				case "lazerchargescale":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lcs) && lcs > 0f)
 					{
 						LazerChargeScale = lcs;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(LazerChargeScale));
 					}
 					break;
 				case "lazercapscale":
@@ -1325,11 +1433,21 @@ namespace EvilAliensWeb.Compat
 					{
 						LazerCapScale = lcap;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(LazerCapScale));
+					}
 					break;
 				case "lazerarcs":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var larc) && larc >= 0f)
 					{
 						LazerArcRate = larc;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(LazerArcRate));
 					}
 					break;
 				case "lazertendrilspeed":
@@ -1337,11 +1455,21 @@ namespace EvilAliensWeb.Compat
 					{
 						LazerTendrilSpeed = lts;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(LazerTendrilSpeed));
+					}
 					break;
 				case "lazerarclife":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var lal) && lal > 0f)
 					{
 						LazerArcLife = lal;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(LazerArcLife));
 					}
 					break;
 				case "connectorbolts":
@@ -1349,11 +1477,21 @@ namespace EvilAliensWeb.Compat
 					{
 						ConnectorBoltCount = cbolts;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer >= 0",
+							InForce(ConnectorBoltCount));
+					}
 					break;
 				case "connectorarcs":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var carc) && carc >= 0f)
 					{
 						ConnectorArcRate = carc;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(ConnectorArcRate));
 					}
 					break;
 				case "connectorjitter":
@@ -1361,11 +1499,21 @@ namespace EvilAliensWeb.Compat
 					{
 						ConnectorJitter = cjit;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(ConnectorJitter));
+					}
 					break;
 				case "connectorpulse":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cpul) && cpul >= 0f)
 					{
 						ConnectorPulse = cpul;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(ConnectorPulse));
 					}
 					break;
 				case "connectorglow":
@@ -1373,12 +1521,20 @@ namespace EvilAliensWeb.Compat
 					{
 						ConnectorGlow = cglo;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(ConnectorGlow));
+					}
 					break;
 				case "walltowers":
 					WallTowers = IsOn(val);
 					break;
 				case "wallsonly":
 					WallsOnly = IsOn(val);
+					break;
+				case "nowalls":
+					NoWalls = IsOn(val);
 					break;
 				case "walltrace":
 					WallTrace = IsOn(val);
@@ -1394,11 +1550,21 @@ namespace EvilAliensWeb.Compat
 					{
 						Wall3DBands = w3b;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer 1..64",
+							InForce(Wall3DBands));
+					}
 					break;
 				case "walldepth":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wd) && wd > 0f && wd < 1f)
 					{
 						WallDepth = wd;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number strictly between 0 and 1",
+							InForce(WallDepth));
 					}
 					break;
 				case "wallfog":
@@ -1406,11 +1572,27 @@ namespace EvilAliensWeb.Compat
 					{
 						WallFog = wf;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WallFog));
+					}
 					break;
 				case "wallfogcolor":
 					if (TryParseHexColor(val, out var wfc))
 					{
 						WallFogColor = wfc;
+					}
+					else
+					{
+						// A colour, so the in-force value is quoted back as the hex a reader would
+						// put in the URL rather than as a Color.ToString().
+						RejectFlagValue(key, val, "a hex colour like #4080c8",
+							WallFogColor.HasValue
+								? "#" + WallFogColor.Value.R.ToString("X2", CultureInfo.InvariantCulture)
+									+ WallFogColor.Value.G.ToString("X2", CultureInfo.InvariantCulture)
+									+ WallFogColor.Value.B.ToString("X2", CultureInfo.InvariantCulture)
+								: "the shipped default");
 					}
 					break;
 				case "wallsidedark":
@@ -1418,17 +1600,32 @@ namespace EvilAliensWeb.Compat
 					{
 						WallSideDark = wsd;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WallSideDark));
+					}
 					break;
 				case "wallsidetile":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wst) && wst > 0f && wst <= 32f)
 					{
 						WallSideTile = wst;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0 and <= 32",
+							InForce(WallSideTile));
+					}
 					break;
 				case "wallfacelight":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wfl) && wfl >= 0f)
 					{
 						WallFaceLight = wfl;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WallFaceLight));
 					}
 					break;
 				case "wallfaceangle":
@@ -1437,11 +1634,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WallFaceAngle = wfa;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(WallFaceAngle));
+					}
 					break;
 				case "walltoplift":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wtl) && wtl >= 0f)
 					{
 						WallTopLift = wtl;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WallTopLift));
 					}
 					break;
 				case "wallwisps":
@@ -1449,11 +1656,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WallWisps = ww;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WallWisps));
+					}
 					break;
 				case "wallwispspeed":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wws) && wws >= 0f)
 					{
 						WallWispSpeed = wws;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WallWispSpeed));
 					}
 					break;
 				case "lazershot":
@@ -1499,11 +1716,23 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamDifficulty = wcd;
 					}
+					else
+					{
+						// Names the TIERS rather than "a difficulty": the numeric spelling this
+						// case deliberately refuses is the obvious thing to reach for next.
+						RejectFlagValue(key, val, "a tier name (Easy/Medium/Hard/Very_Hard/Inzane), not a number",
+							WebcamDifficulty.HasValue ? WebcamDifficulty.Value.ToString() : "the level's own tier");
+					}
 					break;
 				case "wchearts":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wch) && wch > 0)
 					{
 						WebcamHearts = wch;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer > 0",
+							InForce(WebcamHearts));
 					}
 					break;
 				case "wckills":
@@ -1511,11 +1740,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamKills = wck;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer > 0",
+							InForce(WebcamKills));
+					}
 					break;
 				case "wcsaucers":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wcs) && wcs > 0)
 					{
 						WebcamSaucers = wcs;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer > 0",
+							InForce(WebcamSaucers));
 					}
 					break;
 				case "wcsaucerspeed":
@@ -1523,11 +1762,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamSaucerSpeed = wcss;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamSaucerSpeed));
+					}
 					break;
 				case "wcplasmaspeed":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcps) && wcps > 0f)
 					{
 						WebcamPlasmaSpeed = wcps;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamPlasmaSpeed));
 					}
 					break;
 				case "wcspawn":
@@ -1535,11 +1784,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamSpawnInterval = wcsp;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamSpawnInterval));
+					}
 					break;
 				case "wcarm":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcar) && wcar > 0f)
 					{
 						WebcamArmDelay = wcar;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamArmDelay));
 					}
 					break;
 				case "wccharge":
@@ -1547,11 +1806,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamChargeTime = wcch;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamChargeTime));
+					}
 					break;
 				case "wcminemax":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wcmm) && wcmm > 0)
 					{
 						WebcamMineMax = wcmm;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer > 0",
+							InForce(WebcamMineMax));
 					}
 					break;
 				case "wcminespawn":
@@ -1559,11 +1828,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamMineSpawn = wcms;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamMineSpawn));
+					}
 					break;
 				case "wcminelife":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcml) && wcml > 0f)
 					{
 						WebcamMineLife = wcml;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(WebcamMineLife));
 					}
 					break;
 				case "wcmothership":
@@ -1571,14 +1850,26 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamMothership = wcmo;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WebcamMothership));
+					}
 					break;
 				case "wcmothershipdir":
-					if (!string.IsNullOrEmpty(val))
 					{
-						string d = val.Trim().ToLowerInvariant();
+						string d = val == null ? "" : val.Trim().ToLowerInvariant();
 						if (d == "vertical" || d == "horizontal")
 						{
 							WebcamMothershipDir = d;
+						}
+						else
+						{
+							// A misspelled direction is the exact silent-variant trap this sweep is
+							// about: the run reads as "forced vertical" while the choreography rolls
+							// its usual ~60/40.
+							RejectFlagValue(key, val, "vertical or horizontal",
+								WebcamMothershipDir ?? "the random orientation roll");
 						}
 					}
 					break;
@@ -1587,11 +1878,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamMothershipFreeze = wcmf;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WebcamMothershipFreeze));
+					}
 					break;
 				case "wchitleeway":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wchl) && wchl >= 0f)
 					{
 						WebcamHitLeeway = wchl;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WebcamHitLeeway));
 					}
 					break;
 				case "wcavoid":
@@ -1599,11 +1900,21 @@ namespace EvilAliensWeb.Compat
 					{
 						WebcamAvoid = wcav;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WebcamAvoid));
+					}
 					break;
 				case "wcreturndelay":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var wcrd) && wcrd >= 0f)
 					{
 						WebcamReturnDelay = wcrd;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(WebcamReturnDelay));
 					}
 					break;
 				case "wctune":
@@ -1614,11 +1925,21 @@ namespace EvilAliensWeb.Compat
 					{
 						HueStart = hs;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HueStart));
+					}
 					break;
 				case "hueend":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var he))
 					{
 						HueEnd = he;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HueEnd));
 					}
 					break;
 				case "huetarget":
@@ -1626,6 +1947,11 @@ namespace EvilAliensWeb.Compat
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ht))
 					{
 						HueTarget = ht;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(HueTarget));
 					}
 					break;
 				case "huecycle":
@@ -1637,11 +1963,21 @@ namespace EvilAliensWeb.Compat
 					{
 						HueLoopSeconds = hl;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(HueLoopSeconds));
+					}
 					break;
 				case "spiderhelpercycles":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var shc) && shc >= 1)
 					{
 						SpiderHelperCycles = shc;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer >= 1",
+							InForce(SpiderHelperCycles));
 					}
 					break;
 				case "spiderhelperhp":
@@ -1649,11 +1985,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderHelperHitPoints = shhp;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer >= 1",
+							InForce(SpiderHelperHitPoints));
+					}
 					break;
 				case "spiderhelperhovery":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shy))
 					{
 						SpiderHelperHoverY = shy;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderHelperHoverY));
 					}
 					break;
 				case "spiderhelperspeed":
@@ -1661,11 +2007,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderHelperSpeed = shs;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(SpiderHelperSpeed));
+					}
 					break;
 				case "spiderhelperwindup":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shw) && shw >= 0f)
 					{
 						SpiderHelperWindupSeconds = shw;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(SpiderHelperWindupSeconds));
 					}
 					break;
 				case "spiderhelperfire":
@@ -1673,17 +2029,32 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderHelperFireSeconds = shf;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(SpiderHelperFireSeconds));
+					}
 					break;
 				case "spiderhelperlead":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shl) && shl >= 0f)
 					{
 						SpiderHelperFireLead = shl;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(SpiderHelperFireLead));
+					}
 					break;
 				case "spiderhelperenterpower":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shep) && shep > 0f)
 					{
 						SpiderHelperEnterPower = shep;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(SpiderHelperEnterPower));
 					}
 					break;
 				case "difficulty":
@@ -1696,11 +2067,21 @@ namespace EvilAliensWeb.Compat
 					{
 						Difficulty = diff;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a tier name (Easy/Medium/Hard/Very_Hard/Inzane), not a number",
+							Difficulty.HasValue ? Difficulty.Value.ToString() : "the saved menu difficulty");
+					}
 					break;
 				case "spiderbosshp":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sbhp) && sbhp > 0)
 					{
 						SpiderBossHp = sbhp;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer > 0",
+							InForce(SpiderBossHp));
 					}
 					break;
 				case "net":
@@ -1800,11 +2181,21 @@ namespace EvilAliensWeb.Compat
 					{
 						AiSteerSmoothMs = MathHelper.Min(aism, 1000f);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSteerSmoothMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothMs));
+					}
 					break;
 				case "aireact":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aire) && aire >= 0f)
 					{
 						AiWallReactionMs = MathHelper.Min(aire, 3000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiWallReactionMs ?? EvilAliens.PlayerShip.DefaultWallReactionMs));
 					}
 					break;
 				case "aiaim":
@@ -1816,11 +2207,57 @@ namespace EvilAliensWeb.Compat
 					{
 						AiAimSpreadRad = MathHelper.Min(aiaim, MathHelper.Pi);
 					}
+					else
+					{
+						// Per-tier (PlayerShip.AimSpread resolves to Skill.AimRad): with no override
+						// standing there is no single number to name, and the tier is not settled at
+						// parse time, so say which TABLE is in force rather than guess a row.
+						RejectFlagValue(key, val, "a number >= 0",
+							AiAimSpreadRad.HasValue ? InForce(AiAimSpreadRad.Value) : "the per-tier skill row");
+					}
 					break;
 				case "aigapmargin":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigm) && aigm >= 0f)
 					{
 						AiGapSwitchMargin = MathHelper.Min(aigm, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiGapSwitchMargin ?? EvilAliens.PlayerShip.DefaultGapSwitchMargin));
+					}
+					break;
+				case "aiscanrows":
+					// Parsed as an INT: WallScanRows counts grid rows, so `4.7` is not a
+					// value this knob has -- reject it rather than silently truncating to 4
+					// and reporting a sweep that never moved.
+					// 0 is DELIBERATELY allowed: it makes DistanceToBlockedRow report "nothing
+					// blocked" always, i.e. a bot that does not look ahead at all -- the same
+					// kind of skill FLOOR ?aiaim=Pi is, and the negative control a look-ahead
+					// sweep wants at one end. The 64 ceiling is a COST bound, not a semantic
+					// one: the scan runs per column per tick, and the deepest shipped grid is
+					// 179 rows, so this does not reach the bottom of var3 by design.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aisr) && aisr >= 0)
+					{
+						AiWallScanRows = MathHelper.Clamp(aisr, 0, 64);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer >= 0",
+							InForce(AiWallScanRows ?? EvilAliens.PlayerShip.DefaultWallScanRows));
+					}
+					break;
+				case "aicrosspenalty":
+					// Cost per blocked column crossed, against WallRowWeight's 8 per row of
+					// clearance -- so the cap is where crossing dominates clearance absolutely.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicp) && aicp >= 0f)
+					{
+						AiWallCrossPenalty = MathHelper.Min(aicp, 100f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiWallCrossPenalty ?? EvilAliens.PlayerShip.DefaultWallCrossPenalty));
 					}
 					break;
 				case "aithreatlead":
@@ -1828,11 +2265,21 @@ namespace EvilAliensWeb.Compat
 					{
 						AiThreatLeadMs = MathHelper.Min(aitl, 3000f);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiThreatLeadMs ?? EvilAliens.PlayerShip.DefaultThreatLeadMs));
+					}
 					break;
 				case "aismoothurgent":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisu) && aisu >= 0f)
 					{
 						AiSteerSmoothUrgentMs = MathHelper.Min(aisu, 1000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSteerSmoothUrgentMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothUrgentMs));
 					}
 					break;
 				case "aipark":
@@ -1840,11 +2287,22 @@ namespace EvilAliensWeb.Compat
 					{
 						AiParkDemand = MathHelper.Min(aipk, 20f);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiParkDemand ?? EvilAliens.PlayerShip.DefaultSteerParkDemand));
+					}
 					break;
 				case "aifieldpx":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp >= 0f)
 					{
 						AiThreatFieldPx = MathHelper.Min(aifp, 800f);
+					}
+					else
+					{
+						// Per-tier, like ?aiaim above (PlayerShip.ThreatFieldBasePx => Skill.FieldPx).
+						RejectFlagValue(key, val, "a number >= 0",
+							AiThreatFieldPx.HasValue ? InForce(AiThreatFieldPx.Value) : "the per-tier skill row");
 					}
 					break;
 				case "aifieldsize":
@@ -1852,11 +2310,23 @@ namespace EvilAliensWeb.Compat
 					{
 						AiThreatFieldSize = MathHelper.Min(aifs, 10f);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiThreatFieldSize ?? EvilAliens.PlayerShip.DefaultThreatFieldSizeScale));
+					}
 					break;
 				case "aifieldfall":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiff2) && aiff2 > 0f)
 					{
 						AiThreatFieldFalloff = MathHelper.Min(aiff2, 12f);
+					}
+					else
+					{
+						// STRICTLY > 0 (it is the exponent of a (1-t)^p falloff), so 0 is rejected
+						// here where it is a legitimate floor for most of the family.
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiThreatFieldFalloff ?? EvilAliens.PlayerShip.DefaultThreatFieldFalloff));
 					}
 					break;
 				case "aibossbias":
@@ -1864,11 +2334,25 @@ namespace EvilAliensWeb.Compat
 					{
 						AiPriorityBias = MathHelper.Min(aibb, 1f);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiPriorityBias ?? EvilAliens.PlayerShip.DefaultPriorityTargetBias));
+					}
 					break;
 				case "aiff":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aiff))
 					{
 						AiFastForward = (int)MathHelper.Clamp(aiff, 0, 64);
+					}
+					else
+					{
+						// Not nullable: AiFastForward is 0 (off) until a flag sets it, so the value in
+						// force is simply the current one. No range predicate either -- it clamps
+						// 0..64 like the rest of the family clamps its ceilings -- so only an
+						// unparseable value reaches here (?aiff=-1 and ?aiff=99999 are accepted and
+						// clamped, deliberately unlike ?flyspidercount's rejected ceiling).
+						RejectFlagValue(key, val, "an integer", InForce(AiFastForward));
 					}
 					break;
 				case "netscript":
@@ -1879,11 +2363,21 @@ namespace EvilAliensWeb.Compat
 					{
 						AiFriends = (int)MathHelper.Clamp(aif, 0, 3);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer",
+							InForce(AiFriends));
+					}
 					break;
 				case "netlocal":
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var nloc))
 					{
 						NetLocal = (int)MathHelper.Clamp(nloc, 0, 3);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer",
+							InForce(NetLocal));
 					}
 					break;
 				case "netdropgrant":
@@ -1914,11 +2408,21 @@ namespace EvilAliensWeb.Compat
 					{
 						NetLagMs = MathHelper.Clamp(nlag, 0f, Net.NetImpairment.MaxLagMs);
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(NetLagMs));
+					}
 					break;
 				case "netloss":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var nloss) && nloss >= 0f)
 					{
 						NetLossPct = MathHelper.Clamp(nloss, 0f, Net.NetImpairment.MaxLossPct);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(NetLossPct));
 					}
 					break;
 				case "spiderboss":
@@ -2014,6 +2518,23 @@ namespace EvilAliensWeb.Compat
 							+ EvilAliens.FlyingSpider.FlattenBoxHalfDesign.ToString(CultureInfo.InvariantCulture));
 					}
 					break;
+				case "splashvariant":
+					// Reported, never swallowed -- same reason as ?flyspiderflatten= above: a typo
+					// would silently leave the RANDOM roll in force while the capture is labelled
+					// as a pinned variant, i.e. a screenshot of whatever came up.
+					if (string.Equals(val, "revenged", StringComparison.OrdinalIgnoreCase)
+						|| string.Equals(val, "pure", StringComparison.OrdinalIgnoreCase)
+						|| string.Equals(val, "glasses", StringComparison.OrdinalIgnoreCase))
+					{
+						SplashVariant = val.ToLowerInvariant();
+					}
+					else
+					{
+						Console.WriteLine("[debug] unknown ?splashvariant= value '" + val
+							+ "' (expected revenged/pure/glasses) -- ignored, staying on "
+							+ (SplashVariant ?? "the random roll"));
+					}
+					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);
 					break;
@@ -2046,11 +2567,21 @@ namespace EvilAliensWeb.Compat
 					{
 						CastBrainScale = cbs;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(CastBrainScale));
+					}
 					break;
 				case "castbrainfps":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbf) && cbf > 0f)
 					{
 						CastBrainFps = cbf;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(CastBrainFps));
 					}
 					break;
 				case "spiderloop":
@@ -2058,11 +2589,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderLoopSeconds = spl;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(SpiderLoopSeconds));
+					}
 					break;
 				case "spiderjumpframe":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjf))
 					{
 						SpiderJumpFrame = spjf;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderJumpFrame));
 					}
 					break;
 				case "spiderlandframe":
@@ -2070,11 +2611,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderLandFrame = splf;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderLandFrame));
+					}
 					break;
 				case "spiderjumpx":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spjx))
 					{
 						SpiderJumpX = spjx;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderJumpX));
 					}
 					break;
 				case "spidershadowx":
@@ -2082,11 +2633,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderShadowX = spsx;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderShadowX));
+					}
 					break;
 				case "spidershadowy":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spsy))
 					{
 						SpiderShadowY = spsy;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderShadowY));
 					}
 					break;
 				case "spidershadowscale":
@@ -2094,11 +2655,21 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderShadowScale = spss;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(SpiderShadowScale));
+					}
 					break;
 				case "spiderairx":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spax))
 					{
 						SpiderAirX = spax;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderAirX));
 					}
 					break;
 				case "spiderairy":
@@ -2106,11 +2677,23 @@ namespace EvilAliensWeb.Compat
 					{
 						SpiderAirY = spay;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(SpiderAirY));
+					}
 					break;
 				case "spiderphase":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var spph))
 					{
-						SpiderPhase = ((spph % 1f) + 1f) % 1f;					}
+						SpiderPhase = ((spph % 1f) + 1f) % 1f;
+					}
+					else
+					{
+						// Any real number is legal -- it wraps into [0,1) -- so only an unparseable
+						// one lands here.
+						RejectFlagValue(key, val, "a number", InForce(SpiderPhase));
+					}
 					break;
 				case "bgfreeze":
 					// Numeric value = freeze there; bare ?bgfreeze = freeze at design x=400 (mid-screen);
@@ -2118,30 +2701,51 @@ namespace EvilAliensWeb.Compat
 					// reads as the column 0, not as "off" -- =false is the only way to disable it.
 					// IsFinite because NumberStyles.Float accepts NaN/Infinity, and a NaN would ride
 					// through MyMath.Mod into every layer's position.X and wedge the background.
+					// Like ?shake, the on/off fallback covers the on/off SPELLINGS only: a typo'd
+					// column (?bgfreeze=40O) is not "off", and swallowing it leaves the background
+					// SCROLLING while the run is labelled as a frozen-phase capture -- which is
+					// precisely the artifact hunt this flag exists for.
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf)
 						&& float.IsFinite(bgf))
 					{
 						BgFreeze = bgf;
 					}
-					else
+					else if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						BgFreeze = IsOn(val) ? 400f : (float?)null;
 					}
+					else
+					{
+						RejectFlagValue(key, val, "a finite number, or on/off", InForce(BgFreeze));
+					}
 					break;
 				case "harness":
-						// The object name itself is the value (?harness=Spider). A bare ?harness
-						// with no value is meaningless (no object), so ignore it.
+						// The object name itself is the value (?harness=Spider). A bare ?harness with
+						// no value is meaningless (no object) -- and swallowing it boots the WHOLE
+						// GAME instead, which is the loudest version of this card's failure mode,
+						// so say so. An unknown NAME is a different matter and stays the harness
+						// scene's own business (HarnessRegistry reports it, with the valid list).
 						if (!string.IsNullOrEmpty(val))
 						{
 							Harness = val.Trim();
 							SkipSplash = true;
 							AutoStart = true;
 						}
+						else
+						{
+							RejectFlagValue(key, val, "an object name, e.g. ?harness=spider",
+								Harness ?? "no harness (a normal boot)");
+						}
 						break;
 					case "frame":
 						if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fr))
 						{
 							HarnessFrame = fr;
+						}
+						else
+						{
+							RejectFlagValue(key, val, "an integer",
+								InForce(HarnessFrame));
 						}
 						break;
 					case "play":
@@ -2164,6 +2768,11 @@ namespace EvilAliensWeb.Compat
 						{
 							HarnessScale = sc;
 						}
+						else
+						{
+							RejectFlagValue(key, val, "a number > 0",
+								InForce(HarnessScale));
+						}
 						break;
 					case "rot":
 					case "rotation":
@@ -2171,12 +2780,22 @@ namespace EvilAliensWeb.Compat
 						{
 							HarnessRot = rt;
 						}
+						else
+						{
+							RejectFlagValue(key, val, "a number",
+								InForce(HarnessRot));
+						}
 						break;
 					case "fps":
 					case "animfps":
 						if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var afps) && afps > 0f)
 						{
 							HarnessFps = afps;
+						}
+						else
+						{
+							RejectFlagValue(key, val, "a number > 0",
+								InForce(HarnessFps));
 						}
 						break;
 						case "bulletshot":
@@ -2191,7 +2810,12 @@ namespace EvilAliensWeb.Compat
 					// Enum.TryParse also accepts numeric strings ("999" -> (Levels)999) and
 					// undefined values; require a real defined member so an invalid ?level=
 					// falls into the unknown-level branch instead of booting a bogus level.
-					if (val.Length > 0 && !char.IsDigit(val[0]) && val[0] != '+' && val[0] != '-'
+					// `val` is NULL for a bare ?level (no '='), and this used to dereference it:
+					// the NRE took the headless host down outright, and in the browser
+					// Index.razor.cs caught it as one "flag read failed" line, silently dropping
+					// EVERY remaining flag in the query -- the same class of silent miscarriage
+					// this file's rejection convention exists to end.
+					if (!string.IsNullOrEmpty(val) && !char.IsDigit(val[0]) && val[0] != '+' && val[0] != '-'
 						&& Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl)
 						&& Enum.IsDefined(typeof(EvilAliens.Levels), lvl))
 					{
@@ -2217,7 +2841,18 @@ namespace EvilAliensWeb.Compat
 			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
 			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
 			// refuses Demo1/2/3, so it can never advertise an attract demo.
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			// ?unlockall is reachable on the LIVE site (this whole method parses the real URL
+			// query in Release), and since card 36db5d75 it stops Achievements and Unlockables
+			// saving at all -- which is what makes its own "session-only" promise true, but also
+			// means a session booted with it keeps NO progress: no hiscores, no level completion,
+			// no awardments. Silent progress loss deserves a line of its own, above the flag dump.
+			if (UnlockAll)
+			{
+				Console.WriteLine("[debug] ?unlockall is on -- everything is unlocked for this "
+					+ "session ONLY, and NOTHING will be saved (no hiscores, no level completion, "
+					+ "no awardments). Reload without the flag to keep progress.");
+			}
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2228,6 +2863,7 @@ namespace EvilAliensWeb.Compat
 							// Level fast-boots print only when set: they REPLACE a level's whole event list,
 							// so "why is this level not playing normally" needs an answer in the log.
 							+ (WallsOnly ? " wallsonly" : "")
+							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")
@@ -2252,20 +2888,29 @@ namespace EvilAliensWeb.Compat
 		// Parse a "?pos=x,y" value into HarnessX/HarnessY (800x600 design space). Either
 		// component may be omitted ("400," / ",300") to override just one axis; the missing
 		// one falls back to centre in HarnessScene.
+		// An unusable component is REPORTED per axis rather than as one verdict for the pair, so
+		// "?pos=400,3O0" says the Y was dropped and the X stood -- a single message could only
+		// say one or the other, and the half that landed is the confusing half.
 		private static void ParsePos(string val)
 		{
-			if (string.IsNullOrEmpty(val))
-			{
-				return;
-			}
-			string[] parts = val.Split(',');
-			if (parts.Length >= 1 && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+			string[] parts = (val ?? "").Split(',');
+			bool haveX = parts.Length >= 1 && parts[0].Length > 0;
+			bool haveY = parts.Length >= 2 && parts[1].Length > 0;
+			if (haveX && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
 			{
 				HarnessX = x;
 			}
-			if (parts.Length >= 2 && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+			else if (haveX)
+			{
+				RejectFlagValue("pos", parts[0], "a number for x in ?pos=x,y", InForce(HarnessX));
+			}
+			if (haveY && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
 			{
 				HarnessY = y;
+			}
+			else if (haveY)
+			{
+				RejectFlagValue("pos", parts[1], "a number for y in ?pos=x,y", InForce(HarnessY));
 			}
 		}
 
@@ -2306,6 +2951,62 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] no boot-hijacking debug flags. URL options: ?menu  ?noattract  "
 				+ "?level=<Name>  ?skipsplash  (see Compat/DebugFlags.cs)");
 		}
+
+		// THE REJECTION DIAGNOSTIC the value-carrying flags in this file route through, in the
+		// wording card 6eb8dc9e settled for ?flyspider* and card 48b7c6b1 took to the ?ai* knobs:
+		//   [debug] unknown ?aireact= value '420x' (expected a number >= 0) -- ignored, staying on 420
+		// A tuning flag's failure mode is not a wrong picture, it is a run that measures the
+		// DEFAULT path while carrying the label of the variant under test -- so a silently-ignored
+		// value reads as "the knob did nothing", which is the wrong conclusion recorded as a
+		// result. Card 4e401005 swept the remaining families (?wall*, ?wc*, ?holo*, ?spider*,
+		// ?lazer*, ?connector*, ?hue*, ?net*, the harness params, ...); adding a new
+		// value-carrying case means adding its `else` here too.
+		//
+		// `inForce` must be the setting ACTUALLY left standing, not the baked default: a repeated
+		// flag (?aireact=420&aireact=xx) keeps the earlier valid value, and a diagnostic that can
+		// state the wrong condition is worse than one that states none. Hence the InForce()
+		// overloads below rather than a literal at the call site.
+		//
+		// WHAT REACHES IT: only a value the guard cannot use AT ALL -- an unparseable one, or one
+		// the range predicate refuses (typically a negative). An out-of-RANGE value is CLAMPED
+		// silently across almost the whole file and stays that way; ?flyspidercount is the one
+		// deliberate exception, for a reason specific to it (one fat-fingered zero there spends
+		// the boot building a million components). The ?flyspider* sites also keep their own
+		// inline WriteLines: most of their wording is pinned by tools/sim/logic_probe, and
+		// rerouting them buys nothing.
+		//
+		// STILL DELIBERATELY SILENT, so a reader does not conclude more than holds: the on/off
+		// booleans (IsOn/IsExplicitlyOff have their own convention), and the free-form identity
+		// STRINGS (?netfakepeer=, ?netfakehash=, ?bg=, ?room=, ?code=, ?signal=) where any value
+		// is legal, an empty one is not a typo class, and there is no "expected" to state.
+		// A handful of sites report from somewhere other than a plain `else`, and each has its
+		// reason written where it sits: ?shake and ?bgfreeze take a number OR an on/off spelling,
+		// so only a value that is neither reaches the diagnostic (reading a typo'd number as
+		// "off" was the worse bug -- it turned the very effect under test off); ?pos reports per
+		// AXIS; ?level keeps its own older wording; the ?flyspider*, ?net, ?teampartner and
+		// ?splashvariant sites keep inline WriteLines.
+		private static void RejectFlagValue(string flag, string val, string expected, string inForce)
+		{
+			Console.WriteLine("[debug] unknown ?" + flag + "= value '" + val + "' (expected "
+				+ expected + ") -- ignored, staying on " + inForce);
+		}
+
+		// Invariant-culture rendering of an in-force number for RejectFlagValue. InvariantGlobalization
+		// is on project-wide, but these are diagnostics quoted back into a URL, so say it explicitly.
+		private static string InForce(float v) => v.ToString(CultureInfo.InvariantCulture);
+
+		private static string InForce(int v) => v.ToString(CultureInfo.InvariantCulture);
+
+		// The nullable overrides -- the majority. Null means no override stands, and the value in
+		// force is then the consumer's own baked constant, which lives in the game class rather
+		// than here (Wall.DefaultSideTile, HoloSim's consts, WebcamLevel.Tunings[], ...). Naming a
+		// number we would have to guess at is exactly the failure the "in force" rule exists to
+		// prevent, so say WHICH setting stands instead -- the ?aiaim "per-tier skill row" call.
+		private static string InForce(float? v) =>
+			v.HasValue ? v.Value.ToString(CultureInfo.InvariantCulture) : "the shipped default";
+
+		private static string InForce(int? v) =>
+			v.HasValue ? v.Value.ToString(CultureInfo.InvariantCulture) : "the shipped default";
 
 		// A bare flag (?menu) or =1/=true/=yes/=on means ON; =0/=false/=no/=off means OFF.
 		private static bool IsOn(string val)

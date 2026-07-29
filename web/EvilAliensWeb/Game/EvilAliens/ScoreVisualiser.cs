@@ -694,8 +694,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		if (phototimer.Active)
 		{
 			float alpha = MathHelper.SmoothStep(0f, 1f, phototimer.Normalized);
-			Color color2 = default(Color);
-			(color2) = new Color(new Vector4((snapshotcolor).ToVector3(), alpha));
+			Color color2 = new Color(new Vector4((snapshotcolor).ToVector3(), alpha));
 			float photoSsf = AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/photocamera", photocamera.LogicalWidth());
 			spriteBatch.Draw(photocamera, new Vector2(400f, (float)(General.SafeZone).Top + (float)photocamera.LogicalHeight() / photoSsf / 2f), 0f, 1f / photoSsf, center: true, color2);
 		}
@@ -722,8 +721,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			alpha = MathHelper.SmoothStep(0f, 1f, alpha);
 			Vector4 baseColor = (playercolor).ToVector4();
 			Color aliceBlue = Color.AliceBlue;
-			Color color = default(Color);
-			(color) = new Color(Vector4.Lerp(baseColor, (aliceBlue).ToVector4(), alpha));
+			Color color = new Color(Vector4.Lerp(baseColor, (aliceBlue).ToVector4(), alpha));
 			string playerLabel = i switch
 			{
 				0 => "Player 1",

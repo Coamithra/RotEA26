@@ -209,11 +209,12 @@ public class CollisionBox : ICollisionType
 
 	private bool TestCollisionLine(CollisionLine collisionLine)
 	{
-		BoundingBox val = default(BoundingBox);
-		(val) = new BoundingBox(new Vector3(TopLeft, 0f), new Vector3(BottomRight, 0f));
-		Ray val2 = default(Ray);
-		(val2) = new Ray(new Vector3(collisionLine.Origin, 0f), new Vector3(collisionLine.DirectionalVector, 0f));
-		if ((val).Intersects(val2).HasValue && (val).Intersects(val2) < collisionLine.Length)
+		BoundingBox val = new BoundingBox(new Vector3(TopLeft, 0f), new Vector3(BottomRight, 0f));
+		Ray val2 = new Ray(new Vector3(collisionLine.Origin, 0f), new Vector3(collisionLine.DirectionalVector, 0f));
+		// The 2008 original ran this ray-box test TWICE per call -- once for .HasValue and again
+		// for the comparison -- on a collision path. One call, cached: same answer, half the work.
+		float? hit = val.Intersects(val2);
+		if (hit.HasValue && hit.Value < collisionLine.Length)
 		{
 			return true;
 		}

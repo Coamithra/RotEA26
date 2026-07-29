@@ -86,45 +86,43 @@ internal class DifficultyMenu : MenuSub1
 	public override void DrawMenu(GameTime gameTime, float yoffset)
 	{
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
-		string text = "Select Difficulty..";
-		Vector2 val = font.MeasureString(text) / 2f;
-		base.SpriteBatch.DrawMetalString(text, new Vector2(400f, 100f), Color.Azure, 0f, val, 1.2f);
+		string heading = "Select Difficulty..";
+		Vector2 headingOrigin = font.MeasureString(heading) / 2f;
+		base.SpriteBatch.DrawMetalString(heading, new Vector2(400f, 100f), Color.Azure, 0f, headingOrigin, 1.2f);
 		yoffset = 40f;
-		Vector2 val2 = default(Vector2);
-		(val2) = new Vector2(400f, 300f);
-		int num = 0;
+		Vector2 menuCentre = new Vector2(400f, 300f);
+		int rowCount = 0;
 		for (int i = 0; i < difficultyLevelValues.Count; i++)
 		{
 			if (IsValid((Settings.DifficultyLevel)i))
 			{
-				num++;
+				rowCount++;
 			}
 		}
-		Vector2 position = default(Vector2);
-		(position) = new Vector2(val2.X - 75f, yoffset + val2.Y - (float)(font.LineSpacing * num) / 3f);
-		Vector2 val3 = default(Vector2);
-		for (int j = 0; j < num; j++)
+		Vector2 position = new Vector2(menuCentre.X - 75f, yoffset + menuCentre.Y - (float)(font.LineSpacing * rowCount) / 3f);
+		Vector2 entryOrigin = default(Vector2);
+		for (int j = 0; j < rowCount; j++)
 		{
-			float num5;
+			float entryScale;
 			Color aliceBlue;
 			if (j == selectedEntry)
 			{
-				float num2 = (float)gameTime.TotalGameTime.TotalSeconds;
-				float num3 = 15f / font.MeasureString(menuEntries[j]).X;
-				float num4 = MyMath.Mod(num2 / 2f, 1f);
+				float pulseTime = (float)gameTime.TotalGameTime.TotalSeconds;
+				float pulseAmount = 15f / font.MeasureString(menuEntries[j]).X;
+				float pulsePhase = MyMath.Mod(pulseTime / 2f, 1f);
 				aliceBlue = Color.AliceBlue;
-				num5 = 1f + num3 * brainPulsate.Evaluate(num4);
+				entryScale = 1f + pulseAmount * brainPulsate.Evaluate(pulsePhase);
 				aliceBlue = ((Achievements.GetInstance().Data[level].isFinished && selectedEntry <= (int)Achievements.GetInstance().Data[level].difficulty) ? Color.PaleGreen : Color.AliceBlue);
 			}
 			else if (!Achievements.GetInstance().Data[level].isFinished || j > (int)Achievements.GetInstance().Data[level].difficulty)
 			{
 				aliceBlue = Color.Gray;
-				num5 = 1f;
+				entryScale = 1f;
 			}
 			else
 			{
 				aliceBlue = Color.LimeGreen;
-				num5 = 1f;
+				entryScale = 1f;
 			}
 			if (!unLockableDataEntries[j].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[j].item))
 			{
@@ -134,9 +132,9 @@ internal class DifficultyMenu : MenuSub1
 				// shifts/scales its draw slightly, but re-hovering the already-selected row is a
 				// no-op, so the unscaled box is fine.
 				RecordEntryHit(j, new Vector2(position.X + x / 2f, position.Y), x, font.LineSpacing);
-				float num6 = (x * num5 - x) / 2f;
-				(val3) = new Vector2(num6, (float)(font.LineSpacing / 2));
-				base.SpriteBatch.DrawMetalString(font, menuEntries[j], position, aliceBlue, 0f, val3, num5);
+				float pulseShiftX = (x * entryScale - x) / 2f;
+				(entryOrigin) = new Vector2(pulseShiftX, (float)(font.LineSpacing / 2));
+				base.SpriteBatch.DrawMetalString(font, menuEntries[j], position, aliceBlue, 0f, entryOrigin, entryScale);
 				position.Y += (float)font.LineSpacing;
 			}
 		}

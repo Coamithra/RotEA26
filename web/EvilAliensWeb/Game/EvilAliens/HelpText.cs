@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -6,7 +5,12 @@ using EvilAliensWeb.Compat;
 
 namespace EvilAliens;
 
-public class HelpText : DrawableGameComponent, IComponentWatcher
+// Not an IComponentWatcher since card 4d47c5ba: the only thing the removal hook did was
+// Unload this component's private content manager, and the two control diagrams it held moved
+// to the shared one. ComponentBin keeps a persistently-maintained watcher list and notifies it
+// on EVERY add and remove, so staying registered to run two empty method bodies was pure cost --
+// a demo's HelpText lives in that list for the whole session.
+public class HelpText : DrawableGameComponent
 {
 	public enum Displays
 	{
@@ -33,8 +37,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 	private const float LAST_WAIT_DURATION = 30000f;
 
 	private Timer stateTimer = new Timer(1f, repeating: false);
-
-	private ContentManager localContent;
 
 	private Texture2D keyboardlayout;
 
@@ -68,13 +70,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		: base(game)
 	{
 		base.DrawOrder = 2000;
-		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
-		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
-	}
-
-	public void Unload()
-	{
-		localContent.Unload();
 	}
 
 	public override void Initialize()
@@ -89,16 +84,11 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		content = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		inputHandler = ServiceHelper.Get<IInputHandlerService>().InputHandler;
 		sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
+		// base.Initialize() runs the LoadContent OVERRIDE. The bare base.LoadContent() that
+		// used to follow it was always a no-op (non-virtual, the empty
+		// DrawableGameComponent body) -- it was scaffolding for the explicit re-loads that sat
+		// after it, and those went with the private content manager in card 4d47c5ba.
 		base.Initialize();
-		base.LoadContent();
-		// KNI runs LoadContent() once per component instance EVER (guarded), but each
-		// demo's HelpText is a boot-time singleton that Unload()s itself on removal
-		// (OnComponentRemoved) and is re-added on every attract run. Re-load the
-		// localContent textures every showing: a no-op cache hit while nothing was
-		// unloaded, a fresh decode after Unload() — otherwise a demo's second attract
-		// cycle draws disposed textures.
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 	}
 
 	public void SetDisplay(Displays display)
@@ -109,8 +99,15 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 	protected override void LoadContent()
 	{
 		base.LoadContent();
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
+		// The two control diagrams come from the SHARED content manager (card 4d47c5ba).
+		// They used to live in a private WebContentManager this component Unload()ed on
+		// removal, so every attract cycle re-decoded 2x 1548x1188 -- and nothing could warm
+		// them, since a warm populates the shared cache and WebContentManager shares none.
+		// Shared, they are decoded once per session by Game1.QueueIdleWarm and this is a
+		// cache hit; nothing disposes them, so the defensive re-load in Initialize that
+		// guarded against the Unload is gone with it.
+		keyboardlayout = content.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = content.Load<Texture2D>("GFX/Help/Controls_Joypad");
 		blankTexture = content.Load<Texture2D>("GFX/Menu/blank");
 		powerupbubble = content.Load<Texture2D>("GFX/Sprites/powerupbw");
 		font = content.Load<SpriteFont>("GFX/Menu/menufont");
@@ -198,8 +195,7 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 				break;
 			case Displays.Powerups:
 			{
-				Color color2 = default(Color);
-				(color2) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+				Color color2 = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 				spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
 				spriteBatch.Flush();
 				string text2 = "Enhancements";
@@ -236,8 +232,7 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 			}
 			case Displays.Combo:
 			{
-				Color color = default(Color);
-				(color) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+				Color color = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 				string text = "Combos";
 				spriteBatch.DrawString(font, text, new Vector2(400f, 100f), color, 0f, font.MeasureString(text) / 2f, 1.5f, (SpriteEffects)0, 0f);
 				spriteBatch.Flush();
@@ -280,8 +275,7 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 
 	private void ExplainPowerup(Powerup.PowerupType powerupType, float y, string p)
 	{
-		Color color = default(Color);
-		(color) = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
+		Color color = new Color(new Vector4(0.37f, 0.63f, 1f, visibility));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;
 		string text = Powerup.PowerUpString(powerupType);
 		// The powerup label is left-aligned at x=80 and the description starts at x=120.
@@ -301,15 +295,4 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		currentlyDisplaying = Displays.Keyboard;
 	}
 
-	public void OnComponentRemoved(GameComponentCollectionEventArgs e)
-	{
-		if (e.GameComponent == this)
-		{
-			Unload();
-		}
-	}
-
-	public void OnComponentAdded(GameComponentCollectionEventArgs e)
-	{
-	}
 }

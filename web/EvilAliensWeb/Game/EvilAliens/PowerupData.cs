@@ -179,8 +179,7 @@ public class PowerupData : DrawableGameComponent
 			scale = MathHelper.SmoothStep(1f, 3f, zoomT);
 			drawPos += new Vector2(15f, 15f) * (scale - 1f);
 		}
-		Vector2 barOffset = default(Vector2);
-		(barOffset) = new Vector2(-16f, 13f);
+		Vector2 barOffset = new Vector2(-16f, 13f);
 		batch.BlendMode = (SpriteBlendMode)1;
 		Color barColor = Powerup.PowerUpColor(type);
 		if (type == Powerup.PowerupType.OneUp)

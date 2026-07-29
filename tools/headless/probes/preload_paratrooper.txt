@@ -1,0 +1,81 @@
+# PROBE: the Paratrooper challenge decodes no textures during gameplay.
+#
+# PINS: wwwroot/Content/preload/manifest.txt's Paratrooper section (49 entries, the third
+# largest). Same silent failure mode as preload_level2: that file is pure DATA, so a dropped
+# line produces no build error and no failing test, only a stutter the next time somebody
+# plays the level.
+#
+# FAILURE MEANS: an asset Paratrooper uses is no longer preloaded, so it is decoded during
+# live gameplay = a visible stutter. The quoted line names it. Fix by restoring the manifest
+# entry (or, if the asset is genuinely new, capture it -- see LoadProfiler's header for the
+# eaPreloadExport / MERGE-never-overwrite flow).
+#
+# THE TRAP, AND WHY THIS DRIVES THE MENU RATHER THAN ?level=Paratrooper:
+# a ?level= boot has no splash, so Game1's QueueIdleWarm assets drain into gameplay and are
+# recorded as THAT LEVEL's cold decodes -- exactly 20 spurious gfx/game/space/* lines, measured
+# identically on Level2, Paratrooper and InsaneBossI. A probe booted that way either fails
+# always or needs a whitelist that would mask the real thing. So: main menu -> Challenges ->
+# carousel index 3 -> select -> difficulty -> select.
+#
+# Paratrooper is the FOURTH challenge (MenuScene.cs: Space Dodge, Braineroids, Evil Aliens
+# Classic, Paratrooper, ...), and the carousel opens on Space Dodge -- hence three rights, as
+# three SEPARATE taps: `eval Press right 3` is a three-tick HOLD, not three presses, and moves
+# the carousel once.
+#
+# THE SOAK DELIBERATELY OUTLASTS THE LEVEL. The bot finishes Paratrooper around frame ~5540
+# (~82 simulated seconds); the window runs to ~5840. LoadProfiler._currentLevel persists past a
+# level by design (see its comment: "a hitch on the menu AFTER playing carries the last level's
+# name"), so the tail attributes post-level menu decodes to Paratrooper too. That is wanted, not
+# tolerated -- it extends the assertion over the results/menu path -- and it is what makes the
+# length robust: the exact finishing frame moves with the AI, so a window trimmed to just before
+# it would be the fragile choice. Measured clean over five runs.
+#
+# THE TWO ASSERTIONS BELOW THE SOAK ARE BOTH ANTI-VACUITY GUARDS, and neither is decoration:
+#   - the `expect ... preload:` pins WHICH level loaded, so a carousel reorder that landed the
+#     run on a different challenge cannot sail through (the `expect-not` only ever mentions
+#     Paratrooper, so it would find nothing and pass).
+#   - the `expect ... s0=` pins that the level was PLAYED rather than merely entered. Without
+#     it, a change that wedged or instantly killed the bot at spawn would still preload, still
+#     match the line above, and still go green over a window containing no gameplay. The
+#     ScoreDump is sampled MID-level (the score component is gone once the run is back on the
+#     menu, so a sample after the soak prints nothing at all). The floor is three digits, i.e.
+#     >= 100, against a measured 445/540/600 over three runs -- a progress check, not a
+#     performance one; widen the margin rather than tightening it.
+#
+# ?unlockall so the challenge is selectable from a wiped save; ?invuln + ?aiplayer so the level
+# is actually played rather than sitting on a dead ship.
+#
+# eahl: --flags "?menu&noattract&loadlog&unlockall&invuln&aiplayer"
+
+step 150 nodraw
+eval Press down 1
+step 10 nodraw
+eval Press down 1
+step 10 nodraw
+eval Press down 1
+step 10 nodraw
+eval Press enter 1
+step 90 nodraw
+
+# Everything above is boot + main menu. The (boot) cold decodes there are a different
+# population and a different card's business -- drop them so this window is Paratrooper's
+# alone. Nothing here depends on how MANY of them there are.
+mark
+
+eval Press right 1
+step 10 nodraw
+eval Press right 1
+step 10 nodraw
+eval Press right 1
+step 30 nodraw
+eval Press enter 1
+step 120 nodraw
+eval Press enter 1
+step 2400 nodraw
+eval ScoreDump
+step 3000 nodraw
+
+expect \[loadprofile\] Paratrooper preload:
+expect \[score\] .*s0=[1-9][0-9][0-9]
+expect-not COLD decode in Paratrooper
+quit

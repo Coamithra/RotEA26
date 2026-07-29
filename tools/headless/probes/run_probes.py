@@ -70,8 +70,9 @@ def read_meta(path):
     return argv, summary
 
 
-# Generous: the slowest committed probe plays 90 simulated seconds of a level and takes
-# ~2s. This is not a performance budget, it is a deadlock guard -- a wedged eahl (a scene
+# Generous: the slowest committed probe (preload_insanebossi) plays a level out over 720
+# simulated seconds and takes ~3.5s. This is not a performance budget, it is a deadlock
+# guard -- a wedged eahl (a scene
 # that never advances, a modal pause) would otherwise hang the runner forever with
 # capture_output swallowing every clue, which is the worst outcome for something an agent
 # leaves running unattended.

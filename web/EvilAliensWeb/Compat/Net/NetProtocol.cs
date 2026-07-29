@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using EvilAliens;
 using Microsoft.Xna.Framework;
 
@@ -85,6 +85,15 @@ namespace EvilAliensWeb.Compat.Net
         //
         // Adding a wire enum means adding its validator here AND a row in logic_probe's
         // ProbeWireEnums. Both halves are required -- see the maintenance note below.
+        //
+        // ONE KNOWN EXEMPTION, and it is temporary: `NetBackgroundOp`. NetSession's
+        // EvBackground case still does a bare `(NetBackgroundOp)data[4]` cast, because a
+        // concurrent card (ca4fd94f) owns that enum and its decode path. It does not crash
+        // today only because GameScene.NetApplyBackgroundOp's switch has no default arm, so
+        // an unknown op silently no-ops -- that is luck, not this contract. It is also NOT
+        // covered by the Enum.IsDefined cross-check below, so an appended member there is
+        // unguarded in both directions. Fold it in once that card has landed; until then,
+        // read the sentence above as "every wire enum except this one".
         //
         // Three policies. Pick by what the field DOES, not by how bad the value looks:
         //   REJECT   -- the decoder returns false and the whole message is dropped. Use

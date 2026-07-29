@@ -606,7 +606,7 @@ internal class MenuScene : Scene
 				sender.Remove();
 				return;
 			}
-			EvilAliensWeb.Compat.Net.NetSession.SendLaunch(selectedLevel, (int)Settings.GetInstance().CurrentDifficulty);
+			EvilAliensWeb.Compat.Net.NetSession.SendLaunch(selectedLevel, Settings.GetInstance().CurrentDifficulty);
 		}
 		fadestarted = timer;
 		currentFade = 0f;

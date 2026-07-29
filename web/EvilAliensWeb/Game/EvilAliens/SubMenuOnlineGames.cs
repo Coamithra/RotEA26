@@ -23,9 +23,9 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 	private List<NetGameBrowser.GameEntry> games = new List<NetGameBrowser.GameEntry>();
 
 	// Keyed on the RAW wire level, not on Levels: a listed game's level is an int off the wire
-	// and may not be a member of our enum at all (card 88f87ba2 -- NetGameBrowser.GameEntry
-	// carries the checked Levels? beside it). Keying on the raw value is what lets two
-	// different unknown levels keep separate cache entries and separate report lines.
+	// and may not be a member of our enum at all, so a `Levels` key here would be a value the
+	// type says cannot exist (card 88f87ba2 -- NetGameBrowser.GameEntry carries the checked
+	// Levels? beside the raw int, and this cache is the one place that still needs the raw).
 	private readonly Dictionary<int, Texture2D> artCache = new Dictionary<int, Texture2D>();
 
 	private Texture2D fallbackArt;

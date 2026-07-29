@@ -1,4 +1,4 @@
-﻿// Headless oracle for PURE game logic: reflection-loads the built EvilAliensWeb.dll into the
+// Headless oracle for PURE game logic: reflection-loads the built EvilAliensWeb.dll into the
 // DESKTOP CLR and calls a static method directly, so a decision can be verified with no browser,
 // no WASM runtime and no rig at all.
 //
@@ -1308,9 +1308,12 @@ internal static class Program
     // oracle available for this card and needs no rig at all.
     //
     // Four sections, and the shape of each matters:
-    //   1. POSITIVE CONTROL. Every declared member of every covered enum must be ACCEPTED and
-    //      come back unchanged. Without it a validator that refused everything would sail
-    //      through sections 2-4, since they only ever assert refusals.
+    //   1. Every declared member of every covered enum must be ACCEPTED and come back
+    //      UNCHANGED. The acceptance half is subsumed by section 2 (which compares against
+    //      IsDefined in both directions, so a refuse-everything validator fails it on every
+    //      member); what this section adds that nothing else checks is that the value handed
+    //      back is the one that went in -- a validator that accepted correctly but returned
+    //      default(T) would pass section 2 and every refusal row.
     //   2. CONTIGUITY CROSS-CHECK against Enum.IsDefined across the whole 0..255 wire-byte
     //      domain. This is the expectation stated INDEPENDENTLY of the implementation: the
     //      validators use an explicit `raw <= (int)LastMember` bound, which silently assumes the
@@ -1371,7 +1374,7 @@ internal static class Program
             return new ValueTuple<bool, object>(ok, a[1]);
         };
 
-        // ---- 1. POSITIVE CONTROL: every declared member is accepted and round-trips ----------
+        // ---- 1. every declared member is accepted and comes back UNCHANGED -------------------
         foreach ((string method, string enumTypeName) in table)
         {
             Type et = asm.GetType(enumTypeName, true);
@@ -1468,20 +1471,29 @@ internal static class Program
         Check("EvLaunch: a truncated frame is refused",
             !decodeLaunch(new byte[] { 0x30, 15, 0, 0, 5 }).Item1, null);
 
-        Func<byte[], bool> decodeUnlock = frame =>
+        // The Item2/Item3 payloads matter as much as the bool: a decoder that returned true
+        // with default(T) in the out params would satisfy a boolean-only control while
+        // handing the caller the WRONG unlock.
+        Func<byte[], ValueTuple<bool, object, object>> decodeUnlock = frame =>
         {
             object[] a = { frame, null, null, null, null };
-            return (bool)unlockDec.Invoke(null, a);
+            bool ok = (bool)unlockDec.Invoke(null, a);
+            return new ValueTuple<bool, object, object>(ok, a[1], a[2]);
         };
         byte goodItem = Convert.ToByte(Enum.Parse(items, "Challenges"));
-        Check("EvUnlock: a valid frame decodes",
-            decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)4, goodItem, (byte)0, (byte)0, "x" })), null);
+        Type unlockTypeEnum = asm.GetType("EvilAliens.AnimatedMessage+UnlockType", true);
+        ValueTuple<bool, object, object> okUnlock = decodeUnlock((byte[])unlockEnc.Invoke(null,
+            new object[] { (ushort)4, goodItem, Convert.ToByte(Enum.Parse(unlockTypeEnum, "cheat")), (byte)0, "x" }));
+        Check("EvUnlock: a valid frame decodes to the item and unlock type sent",
+            okUnlock.Item1 && Equals(okUnlock.Item2, Enum.Parse(items, "Challenges"))
+                && Equals(okUnlock.Item3, Enum.Parse(unlockTypeEnum, "cheat")),
+            okUnlock.Item1 ? okUnlock.Item2 + "/" + okUnlock.Item3 : "REFUSED");
         // Same class as the difficulty above: an unknown item becomes a dictionary KEY in
         // Unlockables.Collection and kills every later Unlockables.xml write.
         Check("EvUnlock: an out-of-enum ITEM is refused",
-            !decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)5, (byte)200, (byte)0, (byte)0, "x" })), null);
+            !decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)5, (byte)200, (byte)0, (byte)0, "x" })).Item1, null);
         Check("EvUnlock: an out-of-enum UNLOCK TYPE is refused",
-            !decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)6, goodItem, (byte)200, (byte)0, "x" })), null);
+            !decodeUnlock((byte[])unlockEnc.Invoke(null, new object[] { (ushort)6, goodItem, (byte)200, (byte)0, "x" })).Item1, null);
 
         // EvMessage takes the CLAMP policy instead, and the difference is deliberate: dropping a
         // script beat would lose the level's story text on the joiner only, where an unknown
@@ -1505,16 +1517,28 @@ internal static class Program
         Check("EvMessage: a valid style survives the clamp untouched",
             goodStyle.Item1 && Equals(goodStyle.Item2, Enum.Parse(msgTypeEnum, "redwarning")),
             goodStyle.Item1 ? goodStyle.Item2.ToString() : "REFUSED");
+        // ... and so does a valid SPEECH cue. Without this the clamp row above passes on a
+        // SpeechOrNone hard-wired to Nothing, which would silently mute every replicated beat.
+        Check("EvMessage: a valid speech cue survives the clamp untouched",
+            goodStyle.Item1 && Convert.ToInt32(goodStyle.Item3) == 1,
+            goodStyle.Item1 ? goodStyle.Item3.ToString() : "REFUSED");
 
-        Func<byte[], bool> decodeSwarm = frame =>
+        // Payload asserted for the same reason as EvUnlock above.
+        Func<byte[], ValueTuple<bool, object, object, object>> decodeSwarm = frame =>
         {
             object[] a = { frame, null, null, null };
-            return (bool)swarmDec.Invoke(null, a);
+            bool ok = (bool)swarmDec.Invoke(null, a);
+            return new ValueTuple<bool, object, object, object>(ok, a[1], a[2], a[3]);
         };
-        Check("EvCosmeticSwarm: a valid kind decodes",
-            decodeSwarm((byte[])swarmEnc.Invoke(null, new object[] { (ushort)9, (byte)0, true, 5.5f })), null);
+        Type kindEnum = asm.GetType("EvilAliensWeb.Compat.Net.NetCosmeticKind", true);
+        ValueTuple<bool, object, object, object> okSwarm = decodeSwarm((byte[])swarmEnc.Invoke(null,
+            new object[] { (ushort)9, Convert.ToByte(Enum.Parse(kindEnum, "BackgroundAsteroids")), true, 5.5f }));
+        Check("EvCosmeticSwarm: a valid frame decodes to the kind, on-flag and rate sent",
+            okSwarm.Item1 && Equals(okSwarm.Item2, Enum.Parse(kindEnum, "BackgroundAsteroids"))
+                && (bool)okSwarm.Item3 && Math.Abs((float)okSwarm.Item4 - 5.5f) < 1e-6f,
+            okSwarm.Item1 ? okSwarm.Item2 + "/" + okSwarm.Item3 + "/" + okSwarm.Item4 : "REFUSED");
         Check("EvCosmeticSwarm: an out-of-enum kind is refused",
-            !decodeSwarm((byte[])swarmEnc.Invoke(null, new object[] { (ushort)10, (byte)200, true, 5.5f })), null);
+            !decodeSwarm((byte[])swarmEnc.Invoke(null, new object[] { (ushort)10, (byte)200, true, 5.5f })).Item1, null);
 
         // ---- 3b. THE SENTINEL'S DISPLAY CONTRACT ---------------------------------------------
         // The browser LISTING keeps an unknown value rather than refusing it, so what has to

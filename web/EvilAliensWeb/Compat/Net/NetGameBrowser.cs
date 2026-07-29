@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using EvilAliens;
@@ -211,10 +211,13 @@ namespace EvilAliensWeb.Compat.Net
                             Code = code,
                             Level = GetInt(el, "level"),
                             Difficulty = GetInt(el, "difficulty"),
-                            // CLAMPED, not sentinelled: it is drawn as "N/<MaxPlayers>", so a
-                            // negative or absurd count is a display glitch with no branch
-                            // behind it and nothing is gained by hiding the game over it.
-                            Players = Math.Clamp(GetInt(el, "players"), 0, Oracle.MaxPlayers),
+                            // FLOORED at 0, deliberately NOT capped at MaxPlayers. It is drawn
+                            // as "N/<MaxPlayers>" and nothing branches on it, so the only
+                            // question is what reads most honestly: capping 99 to 4 would make
+                            // a nonsense row look like a genuinely FULL game and get skipped
+                            // over, where "99/4" is visibly absurd. A negative has no such
+                            // reading and is just wrong, so it goes.
+                            Players = Math.Max(GetInt(el, "players"), 0),
                             AgeSec = GetInt(el, "ageSec"),
                             PingMs = pingByCode.TryGetValue(code, out int p) ? p : -1,
                         });

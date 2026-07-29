@@ -539,7 +539,7 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Host side: called from the menu's difficulty pick just before the fade to game.
-        public static void SendLaunch(Levels level, int difficulty)
+        public static void SendLaunch(Levels level, Settings.DifficultyLevel difficulty)
         {
             if (!IsHost || !PeerUp)
             {
@@ -2797,8 +2797,11 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     Console.WriteLine("[net] refused launch: level/difficulty off the wire is not in this build"
                         + (data.Length >= 6 ? " (level=" + data[4] + " difficulty=" + data[5] + ")" : " (truncated)"));
+                    // Wording covers BOTH refusals -- the decoder fails on an unknown level,
+                    // an unknown difficulty or a short frame, and naming only the mission
+                    // would be simply untrue for a joiner refused over the tier.
                     EndMatchPeerGone("launch not understood",
-                        "Update required\nThe host is playing a mission this version does not have\n(reload the page)");
+                        "Update required\nThe host picked a mission or difficulty\nthis version does not have\n(reload the page)");
                     return;
                 }
                 pendingLaunchLevel = launchLevel;

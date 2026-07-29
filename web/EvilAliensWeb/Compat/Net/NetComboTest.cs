@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 using EvilAliens;
 using Microsoft.Xna.Framework;
@@ -98,7 +98,8 @@ namespace EvilAliensWeb.Compat.Net
             // Card 88f87ba2: an activeType that is neither a real type nor the sentinel folds
             // into the SAME null, so a consumer has one case to handle rather than two.
             byte[] bogusType = (byte[])packet.Clone();
-            bogusType[2 + NetProtocol.HudSlotBytes * 0 + 3] = 200;
+            const int entry0ActiveTypeOffset = 2 + 3;   // header, then [slot][combo:2] of entry 0
+            bogusType[entry0ActiveTypeOffset] = 200;
             check("an out-of-enum activeType decodes as 'no powerup', not as a cast",
                 NetProtocol.TryDecodeHudState(bogusType, 0, rx, out _, out _, out Powerup.PowerupType? tBad, out _)
                     && !tBad.HasValue);

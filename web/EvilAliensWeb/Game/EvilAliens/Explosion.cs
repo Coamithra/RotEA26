@@ -226,8 +226,7 @@ internal class Explosion : AlienDrawableGameComponent
 
 	public override void Update(GameTime gameTime)
 	{
-		Vector2 backgroundSpeed = oracle.BackgroundSpeed;
-		base.Speed = MathHelper.Lerp((backgroundSpeed).Length() * 0.45f, 0f, backgroundimpulsetimer.Normalized);
+		base.Speed = MathHelper.Lerp(oracle.BackgroundSpeed.Length() * 0.45f, 0f, backgroundimpulsetimer.Normalized);
 		base.Direction = MyMath.VectorToAngle(oracle.BackgroundSpeed);
 		if (collisiontimer.Active && collisiontimer.TimeElapsed > 200f)
 		{

@@ -389,6 +389,17 @@ internal abstract class GameScene : Scene
 
 	internal void NetApplyBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op, Vector2 v)
 	{
+		// SetAlienBaseN swaps layer 0's texture and so indexes backgroundLayers[0], which a space
+		// scene does not have (its starfield is procedural and the layer list is empty). The
+		// legitimate orderings can never do that -- Level 3 is an alien base throughout, and a
+		// catch-up burst replays the scene op first -- but a publicly listed game has a stranger
+		// on the far end, and an IndexOutOfRange here takes the level down. Pre-existing hole,
+		// not one this card's ops introduced.
+		if (IsNetAlienBaseTextureOp(op) && !Background.NetHasBaseLayer)
+		{
+			Console.WriteLine("[net] ignoring " + op + " with no alien-base layer to switch");
+			return;
+		}
 		switch (op)
 		{
 		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSpeed:
@@ -426,6 +437,41 @@ internal abstract class GameScene : Scene
 			break;
 		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetDoodadPos:
 			Background.NetSetDoodadPos(v);
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneSpace:
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneMars:
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneAlienBase:
+			NetApplySceneChange(op);
+			break;
+		}
+	}
+
+	private static bool IsNetAlienBaseTextureOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op)
+	{
+		return op == EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase2
+			|| op == EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase3
+			|| op == EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase4
+			|| op == EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase5
+			|| op == EvilAliensWeb.Compat.Net.NetBackgroundOp.SetAlienBase6;
+	}
+
+	// The host's script swapped the whole backdrop mid-level (card ca4fd94f). Only InsaneBossI
+	// does that today, and its swaps carry side effects beyond the backdrop -- hence the virtual:
+	// a level whose Go* handler does more than call the setter overrides this and mirrors the
+	// rest. Everything a level mirrors here must be LOCAL: the music already replicates as its own
+	// EvMusic beat, and world contents are host-authoritative.
+	internal virtual void NetApplySceneChange(EvilAliensWeb.Compat.Net.NetBackgroundOp op)
+	{
+		switch (op)
+		{
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneSpace:
+			Background.SetSpace();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneMars:
+			Background.SetMars();
+			break;
+		case EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneAlienBase:
+			Background.SetAlienBase();
 			break;
 		}
 	}
@@ -1062,6 +1108,10 @@ internal abstract class GameScene : Scene
 		pausestopper.Reset();
 		pausestopper.Stop();
 		Background.Reset();
+		// Arm the scene-swap replication for this play (card ca4fd94f). Deliberately NOT folded
+		// into Reset(): every scene setter calls that too, so it cannot tell a level entry from a
+		// mid-level swap. Initialize can, and a checkpoint revert does not re-run it.
+		Background.NetBeginLevel();
 		((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)Background);
 		((Collection<IGameComponent>)(object)base.Game.Components).Add((IGameComponent)(object)Foreground);
 		eventList.Reset();
@@ -1267,6 +1317,19 @@ internal abstract class GameScene : Scene
 		WaitEvent waitEvent = new WaitEvent(base.Game, 2f);
 		waitEvent.OnFinished += delegate
 		{
+			// The whole-SCENE swap (card ca4fd94f) leads, because a scene setter runs Reset() and
+			// would wipe the doodad/speed/belt state the next beat sets -- this order leaves the
+			// end of the script covering every catch-up leg at once. It goes to the ALIEN BASE
+			// rather than anywhere else on purpose: that also parks the level on a scene with a
+			// base layer, which is what gives the SetAlienBaseN beat below (and so that leg of the
+			// catch-up) its first rig on a space level.
+			Background.SetAlienBase();
+		};
+		eventList.AddEvent(waitEvent, halting: true);
+		eventList.AddHalt();
+		waitEvent = new WaitEvent(base.Game, 2f);
+		waitEvent.OnFinished += delegate
+		{
 			Background.QueueAndromeda();
 			Background.SetSpeed(new Vector2(0f, 1f) / 16.666666f);
 			// Left engaged on purpose: this is the one rig that parks a level in the
@@ -1297,6 +1360,10 @@ internal abstract class GameScene : Scene
 		waitEvent.OnFinished += delegate
 		{
 			base.SoundManager.PlayMusic(Songs.Level3);
+			// The floor-texture switch, which only works because the scene beat above parked us on
+			// an alien base. Left switched for the rest of the script so the catch-up's
+			// SetAlienBaseN leg is live at the end of a run.
+			Background.SetAlienBase2();
 		};
 		eventList.AddEvent(waitEvent, halting: true);
 		eventList.AddHalt();
@@ -1962,6 +2029,13 @@ internal abstract class GameScene : Scene
 		}
 		if (_timer.TotalMilliseconds > 2700.0)
 		{
+			// The script is about to run for the first time, so whatever backdrop is up now is the
+			// one this level's Initialize built -- i.e. the one a join peer gets for free. Both
+			// call orders are settled by here (Level1 sets its scene BEFORE base.Initialize(),
+			// InsaneBossI after), and NetNoteEntryScene is one-shot per Initialize, so the Startup
+			// a checkpoint revert passes back through cannot re-capture a swapped scene as the
+			// entry -- which would silently drop the latch a joiner needs.
+			Background.NetNoteEntryScene();
 			_state = GameState.Normal;
 			_timer = TimeSpan.Zero;
 		}

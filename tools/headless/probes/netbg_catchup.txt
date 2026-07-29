@@ -1,0 +1,58 @@
+# PROBE: the join-in-progress scenery catch-up replays every leg, including the whole-scene swap.
+#
+# PINS: card ca4fd94f's mid-level scene replication, and with it the four older catch-up legs
+# (card 45a4e48d) that `?netscript` fires. The subject is `GameScene.NetCatchUpSelfTest` --
+# capture the burst a joiner would be sent, wipe the scenery back to what its own Initialize
+# leaves, replay through the real client apply path, diff the state line.
+#
+# FAILURE MEANS: a peer joining a level mid-run sees different scenery from the host's for the
+# rest of the level. Nothing throws and nothing logs -- the joiner just quietly plays a
+# different-looking game -- which is the entire reason this is a committed probe and not a
+# screenshot. Read the quoted line: the `ops=` list names the legs the run actually replayed,
+# and the `host:`/`joiner:`/`caught:` triple shows which field failed to come back.
+#
+# THREE ASSERTIONS, AND NONE OF THEM IS DECORATION -- each was mutation-tested separately:
+#   - `ops=(none)` on the FIRST self-test is the level-ENTRY control. A scene setter run by a
+#     level's own Initialize must NOT be replicated (both peers run their own, and replaying it
+#     costs a joiner a second hyperspace fade at every co-op level start). Written as a positive
+#     `expect` rather than an `expect-not` so it cannot pass on a run that never got there.
+#     Goes red if `Background.NoteScene` starts latching before the entry scene is captured.
+#   - `ops=SetSceneAlienBase,SetSpeed,SetAlienBase2,...` pins that the second self-test really
+#     exercised every leg, in the order the catch-up sends them. The scene op MUST lead: applying
+#     a scene setter runs `Background.Reset()`, which clears the doodad, the belt and the scroll
+#     baseline, so any leg replayed before it is wiped. Goes red (scene op absent) if the latch is
+#     assigned BEFORE that Reset instead of after it -- the trap this card was about -- or if
+#     `GameScene.UpdateStartup` stops calling `NetNoteEntryScene`.
+#   - the `joiner :` pair is the ANTI-VACUITY guard, and it is the one to keep. `NetTestWipe` has
+#     to rebuild the level's ENTRY scene; without that the layers stay on the swapped-to scene, so
+#     the round trip compares the host's backdrop against itself. That mutation still prints PASS
+#     with the full `ops=` list -- only these two lines catch it.
+#     **It takes BOTH, and the `expect-not` is the load-bearing half.** `expect` matches ANY line
+#     in the window and this run prints two `joiner :` lines, so the healthy first one satisfies
+#     a bare `expect` however broken the second is -- measured: the vacuous-wipe mutation went
+#     GREEN until the `expect-not` was added. The positive stays because an absence assertion
+#     alone would pass on a run that printed no `joiner :` line at all.
+#
+# WHY LEVEL 1 REACHES AN ALIEN BASE AT ALL: `?netscript` replaces the level's event list with the
+# compressed beat script, whose first background beat is a whole-scene swap TO the alien base --
+# which is also what gives the `SetAlienBase2` leg a rig on a space level (before this card it had
+# none, and the self-test said so by naming its ops). `?invuln` so a death cannot revert to a
+# checkpoint and re-run the beats mid-window.
+#
+# The frame counts are the beat script's, not tuning: the first self-test sits before any beat has
+# fired, the second after the last background beat and before the script's Victory takes the scene
+# down (`NetActiveScene` goes null and the self-test would report `no level`).
+#
+# eahl: --flags "?level=Level1&netscript&invuln"
+
+step 200 nodraw
+eval NetBgTest
+step 1800 nodraw
+eval NetBgTest
+
+expect \[netbgtest\] PASS ops=\(none\)
+expect \[netbgtest\] PASS ops=SetSceneAlienBase,SetSpeed,SetAlienBase2,EngageBeltSlowdown,QueueAndromeda,SetDoodadPos
+expect joiner : speed=0,0 base=- belt=0 doodad=-
+expect-not joiner : .*base=GFX/
+expect-not \[netbgtest\] FAIL
+quit

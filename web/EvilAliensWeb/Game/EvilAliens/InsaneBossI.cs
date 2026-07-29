@@ -223,6 +223,32 @@ internal class InsaneBossI : GameScene
 		waitEvent.OnFinished += Victory;
 	}
 
+	// Online co-op (card ca4fd94f): this is the one level whose script swaps the whole backdrop
+	// mid-run, so a join peer -- whose event list never runs -- gets the swap off the wire. The
+	// base call switches the backdrop; this mirrors the rest of the matching Go* handler.
+	//
+	// Two things the handlers do are deliberately NOT mirrored. PlayMusic already replicates as
+	// its own EvMusic beat, so re-firing it here would fight that. Collection.Purge<Ball> is
+	// host-authoritative: the host's purge broadcasts an EvDeath per removal and the client's
+	// puppets die from those -- purging locally would strand their ids.
+	//
+	// spawnType is not mirrored either, so a client respawning inside the Mars section enters
+	// from the south rather than the west. Local and cosmetic (it only picks the entry point in
+	// SpawnPlayer/SpawnAllPlayers, and the ship's real position replicates), but it is a known
+	// difference rather than a fix.
+	internal override void NetApplySceneChange(EvilAliensWeb.Compat.Net.NetBackgroundOp op)
+	{
+		base.NetApplySceneChange(op);
+		if (op == EvilAliensWeb.Compat.Net.NetBackgroundOp.SetSceneMars)
+		{
+			Collection.Add((GameComponent)(object)f);
+		}
+		else
+		{
+			Collection.Remove((GameComponent)(object)f);
+		}
+	}
+
 	private void halt(GameEvent sender)
 	{
 		Background.SetSpeed(new Vector2(-0.2f, 0f) / 16.666666f);

@@ -43,11 +43,8 @@ still open, and both are gated on real-network playtests this rig cannot run -- 
 sits in the board's "For me" column for exactly that, and card `6fb406bc` (Stage 11.11) carries
 the same TURN question. N-peer online (3-4 separate MACHINES) is designed but unbuilt:
 `plans/4p-online-coop.md`, Stages 11.7-11.11 in "Later". Open net cards in Backlog: `ac375753`
-(two-window net pass), `25ad0659` (headless net sim + de-static refactor), `1cd47879` (a
-single-tab live browser pass -- only its IndexOutOfRange block is net), and `ca4fd94f`, which is
-mid-level whole-scene switches (InsaneBossI): still a real JIP gap, and worth knowing it spent a
-while mis-closed as Done with no code behind it before an audit moved it back -- see **Known JIP
-gaps** under *Public game browser & join-in-progress*. Deferred to "Later" rather than
+(two-window net pass), `25ad0659` (headless net sim + de-static refactor) and `1cd47879` (a
+single-tab live browser pass -- only its IndexOutOfRange block is net). Deferred to "Later" rather than
 stage-sequenced: `816a8286` (replicate mechanical-friend ships), `1ec29347` (mid-boss arrival
 puppet fidelity), `2da92af9` (public-list abuse bounds), `98217618` (kick a peer who isn't
 pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
@@ -744,9 +741,10 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
   banner spawns (the unlock is also GRANTED on the join peer -- it played the level too),
-  the mid-level `Background` ops (`SetSpeed`/`Queue*`/belt slowdowns/`SetAlienBase2..6`;
-  the wire opcode enum `NetBackgroundOp` is APPEND-ONLY; Initialize-time setters are NOT
-  hooked -- both peers run their own scene Initialize), `SoundManager.PlayMusic/StopMusic`
+  the mid-level `Background` ops (`SetSpeed`/`Queue*`/belt slowdowns/`SetAlienBase2..6`, and
+  since card ca4fd94f the whole-SCENE setters when a SCRIPT runs one mid-level; the wire opcode
+  enum `NetBackgroundOp` is APPEND-ONLY; a scene setter run at Initialize is still not
+  replicated -- both peers run their own), `SoundManager.PlayMusic/StopMusic`
   (client applies via `NetApplyMusic`, deduped against the playing cue so the boot-time
   track never restarts), and the checkpoint callback (client mirrors `score.Save()` so a
   later reset restores the same baseline). Any future boss code calling these primitives
@@ -1034,12 +1032,9 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     watch as no evidence at all.
   - **Known JIP gaps -> follow-up cards (`plans/net-game-browser-followups.md`):** mechanical-friend
     ships unreplicated (listing refused while `Friends>0`); a mid-boss arrival hits the
-    best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). (The
-    deep mid-level background/doodad gap is largely closed -- see the catch-up bullet below --
-    but a RESIDUAL piece remains: the whole-scene setters `SetSpace`/`SetMars`/`SetAlienBase`
-    are Initialize-time and unhooked, yet `InsaneBossI` calls them MID-level (`GoAlienBase`/
-    `GoSpace`/`GoMars`), and that level is listable. A peer joining after one of those still
-    sees the scene the level started in.)
+    best-effort puppet limit; public-list abuse surface (rate limiting / hiding a room). The deep
+    mid-level scenery gap is closed -- see the catch-up bullet below and the scene-swap bullet
+    under it.
 - **Deep mid-level scenery catch-up for a late joiner (card 45a4e48d):** a peer arriving
   mid-level runs its OWN scene Initialize, so it holds the level's INITIAL background + music and
   -- the script being host-only -- can never reach the beats that already fired. The host replays
@@ -1071,10 +1066,52 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     ops it replayed, and all three lines). The state line deliberately reports the state the ops
     CONSUME (`targetscrollspeed`, the live layer-0 texture name), never the `netLast*` latches --
     printing the latches would make the round trip a tautology. It names the replayed ops because
-    a leg the level never fired is simply absent, and a PASS must not be read as covering it (the
-    `SetAlienBaseN` leg has no rig: `?netscript` is Level 1, whose `SetSpace` scene has no base
-    layer to switch). `eaNetBg()` alone dumps the live state for a two-window comparison. Both are
+    a leg the level never fired is simply absent, and a PASS must not be read as covering it.
+    `eaNetBg()` alone dumps the live state for a two-window comparison. Both are
     console-only; the self-test is destructive (Reset re-runs the hyperspace entry).
+    **`?netscript` reaches all five legs at once, and the order of its beats is why**: it swaps
+    the whole scene to the ALIEN BASE first, which is what lets the `SetAlienBase2` beat after it
+    switch a floor layer at all -- on Level 1, whose own `SetSpace` scene has none. Committed as
+    `tools/headless/probes/netbg_catchup.txt`.
   - Music RATE (`SetMusicRate`, the BrainBoss HP sweep) still does NOT replicate -- it is driven
     per-tick from a client-frozen boss `Update`, so it belongs to the mid-boss puppet-fidelity
     follow-up, not here.
+- **A whole-SCENE swap mid-level replicates too (card ca4fd94f, ops `SetSceneSpace`/`SetSceneMars`/
+  `SetSceneAlienBase`).** A scene setter run at level Initialize is not replicated -- both peers
+  run their own -- but `InsaneBossI` calls `SetSpace`/`SetMars`/`SetAlienBase` MID-level between
+  boss phases, and a client's event list never runs, so without this it kept the level's opening
+  backdrop for the rest of the run. **Not only a JIP gap:** a peer paired at the lobby was equally
+  wrong, so the fix is the ordinary emit-at-the-primitive one and the catch-up latch falls out of it.
+  - **The latch is assigned AFTER the setter's own `Reset()`, and that is the whole trick** --
+    every scene setter ends with `Reset()`, which clears the catch-up latches (rightly: level
+    entry goes through it too), so a latch set before it is wiped by the setter it describes.
+    `netLastScene` is therefore NOT cleared in `Reset()`; `GameScene.Initialize` clears it via
+    `Background.NetBeginLevel()`.
+  - **"Initialize-time" is not decidable inside a setter**, so `Background` is TOLD: the entry
+    scene is captured once per play at the Startup -> Normal edge (`NetNoteEntryScene`), when the
+    script is about to run. `NetActiveScene` is already non-null during a level's own Initialize;
+    the levels call their setter before or after `base.Initialize()` inconsistently (Level1 before,
+    InsaneBossI after); and a checkpoint revert re-enters Startup mid-level, which is why the
+    capture is one-shot per `Initialize` rather than per Startup.
+  - **The scene op replays FIRST**, before speed/base/belt/doodad: applying it runs `Reset()`,
+    which would wipe any leg sent before it, and it is what guarantees `SetAlienBaseN` lands on a
+    scene that has a base layer. `NetTestWipe` rebuilds the ENTRY scene for the same reason --
+    without it the self-test compares the host's backdrop against itself and passes vacuously.
+  - A swap also re-points `targetscrollspeed` at the scene's own baseline: `Reset()` clears
+    `netLastSpeed` while leaving the old target, so a `SetSpeed` before the swap left the host
+    reporting a scroll target no joiner could reach (and an in-flight ramp dragging the new
+    scene's scroll toward the old scene's). Found by the InsaneBossI round trip -- `halt()`
+    then `GoAlienBase`.
+  - **A level whose mid-level swap has side effects beyond the backdrop overrides
+    `GameScene.NetApplySceneChange`** -- InsaneBossI mirrors its `Floor` add/remove there. Only
+    LOCAL side effects belong in it: the music already replicates as its own `EvMusic` beat, and
+    its `Purge<Ball>` is host-authoritative (the host's purge broadcasts an `EvDeath` per removal,
+    so a local purge would strand puppet ids). **KNOWN LIMIT:** `spawnType` is not mirrored, so a
+    client respawning inside the Mars section enters from the south rather than the west.
+  - The scenes with NO wire op (holodeck / classic variants) are Initialize-only. A mid-level swap
+    to one is REPORTED on the `[net]` line rather than silently latching null -- silence there
+    would reproduce this very card's bug one level up.
+  - **No protocol bump.** The enum is append-only and an older peer ignores an unknown op, so it
+    degrades to exactly the pre-card behaviour (the level's opening backdrop) with no desync --
+    unlike `EvCosmeticSwarm`, which had an old peer expecting per-entity spawns that stopped
+    coming and so forced v10.

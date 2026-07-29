@@ -119,14 +119,16 @@ Neither is codegen; both only build + inspect, so they are safe to run any numbe
     `write_generated`), and a blanket `* text=auto` is out of scope by its own decision.
   - `.gitattributes` cannot heal a file already on disk, so **`check_pinned_eol()` in
     `verify_il_identical.py` aborts both tools (exit 2) before either build** when a pinned file
-    has drifted, naming it and printing `git checkout -- <path>`. It reads git's own `attr/`
+    has drifted, naming it and printing `rm <path> && git checkout -- <path>`. It reads git's own `attr/`
     column via `git ls-files --eol`, so an `eol=` rule added later is picked up with no code
     change, and it never writes — the "never writes inside the repo" invariant stands.
   - **Drift is NOT invisible, it just looks like noise:** git reports such a file as modified while
     `git diff` prints nothing (the blob really is identical — same phantom `M` that
     `write_generated` exists to avoid). And **`git add --renormalize` is the wrong reflex** —
     measured, it clears the `M` and LEAVES the wrong endings on disk, i.e. it hides the symptom and
-    keeps the bug.
+    keeps the bug. It is also why the guard advises `rm` before `git checkout --`: plain
+    `checkout` restores ordinary drift, but is a silent no-op on a file renormalize has already
+    blessed, which would otherwise make the abort unescapable.
 
 - **`verify_il_identical.py`** — the strong oracle: a cosmetic change must produce a byte-identical
   `EvilAliensWeb.dll`. Covers renames. Full rules in root `CLAUDE.md`. **`--optimize`** (card

@@ -73,9 +73,11 @@ Use the first form while editing and the second once the work is committed -- af
 handing back a meaningless green tick.
 
 Exits 0 when identical (refactor proven behaviour-preserving), 1 when it differs, 2 on a
-build or plumbing failure. Note the asymmetry: a 1 is a definite finding, while IDENTICAL is
-only as good as the assumption that nothing but names moved -- it says nothing about whether
-the new names are any good.
+build or plumbing failure -- including the EOL DRIFT abort, which fires BEFORE either build
+when a file whose line endings .gitattributes pins has drifted in the working tree, because
+the verdict would be a lie (see check_pinned_eol). Note the asymmetry: a 1 is a definite
+finding, while IDENTICAL is only as good as the assumption that nothing but names moved --
+it says nothing about whether the new names are any good.
 """
 import argparse
 import hashlib
@@ -195,13 +197,22 @@ def check_pinned_eol(root):
     Driven off `git ls-files --eol`, whose attr/ column is git's OWN attribute resolution --
     so this needs no hardcoded extension list and picks up any eol= rule added later.
 
-    It only ever READS: the fix is printed, never applied. `git add --renormalize` is
-    deliberately not the advice -- measured, it BLESSES the bad state (clears the modified
-    flag, leaves the wrong endings on disk), which is worse than doing nothing.
+    What it checks is "the working tree matches the pins HEAD declares", NOT "both sides of
+    the comparison agree": ls-files resolves attributes from the WORKING TREE's
+    .gitattributes, while the reference worktree checks out under the REFERENCE commit's. So
+    a --ref that predates a pin is not covered -- on this box that is inert (core.autocrlf
+    already yields the pinned flavour), and it stops mattering once the pin is an ancestor.
+
+    It only ever READS: the fix is printed, never applied.
     """
     proc = run(['git', 'ls-files', '--eol', '-z'], cwd=root, check=False)
     if proc.returncode != 0:
-        return  # not fatal: a git that cannot list files will fail louder a moment later
+        # Not fatal -- but say so, or a git that cannot list files silently downgrades this
+        # to no guard at all, which is the exact confidently-wrong verdict it exists to stop.
+        first = (proc.stderr or 'no stderr').strip().splitlines()[:1]
+        sys.stderr.write(f'warning: EOL guard skipped, git ls-files failed: '
+                         f'{first[0] if first else "no stderr"}\n')
+        return
     bad = []
     for entry in proc.stdout.split('\0'):
         if '\t' not in entry:
@@ -219,7 +230,7 @@ def check_pinned_eol(root):
             continue
         for style in ('crlf', 'lf'):
             if f'eol={style}' in attr and worktree != f'w/{style}':
-                bad.append((path.strip(), style, worktree[2:]))
+                bad.append((path, style, worktree[2:]))
     if not bad:
         return
     sys.stderr.write(
@@ -232,12 +243,14 @@ def check_pinned_eol(root):
     sys.stderr.write(
         '\nRestore them from the index, then re-run:\n\n')
     for path, _, _ in bad:
-        sys.stderr.write(f'  git checkout -- "{path}"\n')
+        sys.stderr.write(f'  rm "{path}" && git checkout -- "{path}"\n')
     sys.stderr.write(
-        '\nThat works even though the diff is empty, because git does still consider such a\n'
-        'file modified. Do NOT reach for `git add --renormalize` -- measured, it BLESSES the\n'
-        'drift (clears the modified flag, leaves the wrong endings on disk) instead of\n'
-        'undoing it, and the next run of this script would then be back to lying to you.\n')
+        '\nThe rm is not superstition. Plain `git checkout --` does fix ORDINARY drift (git\n'
+        'reports such a file as modified even though its diff is empty), but it is a silent\n'
+        'no-op once `git add --renormalize` has been run over the file -- and renormalize is\n'
+        'exactly the reflex to avoid here: measured, it clears the modified flag and LEAVES\n'
+        'the wrong endings on disk, so it hides the symptom, keeps the bug, and would strand\n'
+        'you in this abort with no advice that works. Deleting first restores both states.\n')
     sys.exit(EXIT_ERROR)
 
 

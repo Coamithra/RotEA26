@@ -6,8 +6,8 @@
 # and all. So a .razor file's ON-DISK EOL changes EvilAliensWeb.dll's bytes,
 # which makes it part of tools/verify_il_identical.py's hash.
 #
-# Without a rule here that is decided by core.autocrlf plus whatever wrote the
-# file last, and it drifts silently: git reports such a file as modified but
+# Without a rule here, that is decided by core.autocrlf plus whatever wrote the
+# file last, and it drifts quietly: git reports such a file as modified but
 # prints an EMPTY diff (the blob is identical), which reads as noise and gets
 # ignored -- and then the oracle reports DIFFERENT for a provably cosmetic
 # change, because its reference side always comes from a FRESH checkout. That

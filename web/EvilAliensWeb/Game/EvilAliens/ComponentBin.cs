@@ -49,7 +49,9 @@ public class ComponentBin : IComponentBinService
 
 	ComponentBin IComponentBinService.ComponentBin => this;
 
-	// The owning Game — for the eaBinTest console suite (Compat/BinTest.cs).
+	// The owning Game, for a console suite that has the bin but not the Game (the two reachable
+	// service locators are separate). Kept a bare accessor rather than a named caller list, which
+	// rots on every new one.
 	internal Game Game => game;
 
 	public void FullReset()
@@ -406,7 +408,9 @@ public class ComponentBin : IComponentBinService
 	// filter and the client add-gate both divert silently (that is the point — ordinary game
 	// code must not have to care), but a caller that ADOPTS what it just added does: the net
 	// layer's ship puppets keep a reference and gate their retry on it being null, so adopting
-	// a diverted ship strands that player for the rest of the session (card 74403f83).
+	// a diverted ship points that reference at a ship the world does not have (card 74403f83 --
+	// for ONE tick, not the session; NetSession.SpawnPuppet's own comment has the measurement,
+	// and an earlier revision of this line overstated it).
 	// Returning false is the caller's cue to leave its reference clear and let the retry fire
 	// next tick, once TopOfTickFlush has expired the filter.
 	public bool TryAdd(GameComponent component)

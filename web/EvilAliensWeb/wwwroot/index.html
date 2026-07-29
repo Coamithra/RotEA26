@@ -523,6 +523,18 @@
             }
         };
 
+        // Debug: the reset / TryAdd ship-puppet spawn scenario (card 25ad0659 step 1b). Pairs a
+        // real CLIENT session to a scripted host over the in-process wire and drives
+        // NetSession.SpawnPuppet / SpawnFriend through an EvReset that purges from inside the rx
+        // drain -- proving the puppet is NOT adopted while the standing filter is live, IS adopted
+        // on the next tick, and that the oracle seat is reused rather than re-allocated.
+        // DESTRUCTIVE: needs a live level and leaves the scene in its reset branch, so run it in a
+        // throwaway ?level=Level2&invuln boot, never in a game you care about. Prints PASS/FAIL.
+        window.eaNetResetSpawn = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetResetSpawn')); }
+            catch (e) { console.warn('[debug] eaNetResetSpawn failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so

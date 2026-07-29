@@ -396,6 +396,19 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetWireTest.Run();
 		}
 
+		// JS bridge for the reset / TryAdd ship-puppet spawn scenario (eaNetResetSpawn in
+		// wwwroot/index.html, card 25ad0659 step 1b). Pairs a REAL client session to a scripted
+		// host over an in-process NetWire and drives NetSession.SpawnPuppet / SpawnFriend through
+		// an EvReset that purges from inside the rx drain -- the only purge site that can reach
+		// their bin.TryAdd branch. **DESTRUCTIVE**: it needs a live GameScene and leaves the scene
+		// in its reset branch, so run it in a throwaway ?level= boot (it refuses outright if a real
+		// session is up, and restores the roster either way).
+		[JSInvokable("debugNetResetSpawn")]
+		public static string NetResetSpawn()
+		{
+			return EvilAliensWeb.Compat.Net.NetResetSpawnTest.Run();
+		}
+
 		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
 		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
 		// then drives the real PowerupData exp curve over two divergent combo streams -- running

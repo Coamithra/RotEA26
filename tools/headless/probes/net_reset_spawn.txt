@@ -1,0 +1,86 @@
+# PROBE: an EvReset purging from inside the rx drain must not let SpawnPuppet/SpawnFriend adopt a
+# ship the ComponentBin diverted.
+#
+# PINS: card 74403f83's two ship-puppet spawn sites (NetSession.SpawnPuppet,
+# NetSession.Friends.SpawnFriend) END TO END, which is what card 25ad0659 step 1b added. The fix
+# itself shipped in PR #160 but was only ever proven at the PRIMITIVE -- eaBinTest scenario 5 is a
+# bare ComponentBin.TryAdd landed/diverted pair. Reaching the real call sites needs a live session
+# with a host-granted peer slot and buffered ship samples, so until this probe there was nothing
+# that could tell the fix from its absence at the sites that have it.
+#
+# WHAT IT ASSERTS, in the suite's own three legs (Compat/Net/NetResetSpawnTest.cs has the full
+# reasoning): NEGATIVE -- the LoseLife / UpdateWin / UpdateResetting purges are flushed before the
+# drain, so both callers' gates are shut and NEITHER SEAT is even allocated; POSITIVE -- an EvReset
+# purges from inside the drain, where the local ship's death is still merely QUEUED, so both
+# callers DO take their seat and both TryAdds are refused with nothing adopted; POSITIVE -- one
+# TopOfTickFlush later the identical sequence adopts both puppets in those same seats.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line, they name what they check. A leg-2 failure
+# ("TryAdd was refused, so no ... puppet was adopted") is the card's own defect back: a puppet
+# adopted but absent from the world. A leg-1 failure means a spawn gate stopped requiring a local
+# ship, which makes the NEGATIVE claim in that file wrong and the whole scenario reachable from
+# purge sites it says it is not. A leg-3 failure means the retry no longer fires.
+#
+# THE POSITIVE IS THE `31 passed` TALLY. Leg 3 is ALSO leg 1's and leg 2's positive control -- it
+# runs the identical send/pump/Update sequence and DOES adopt, so their "nothing happened"
+# assertions cannot be passing because the scripted peer's frames never arrived. Each leg
+# additionally asserts the endpoint's RxDelivered advanced by exactly the frames it sent, and leg 0
+# asserts the roster PRECONDITION, so a boot with a different roster reports rather than asserting
+# about the wrong thing. `expect-not FAIL` is here as well but is the weaker half: it passes on a
+# run where the eval never happened (a renamed DebugInput method), which the tally catches.
+#
+# MUTATION-TESTED SIX WAYS, each isolated, each a REVERT of something the suite claims (counts are
+# failing LEGS):
+#   * SpawnPuppet back to the pre-card `bin.Add` + unconditional adopt -> **1** (leg 2's remote
+#     assertion, and ONLY that one -- see the note below).
+#   * SpawnFriend the same way -> **1** (leg 2's friend assertion).
+#   * drop `Collection.Purge<PlayerShip>()` from GameScene.NetApplyReset -> **6**. This is the one
+#     that proves leg 2 is not passing for some other reason: with no filter armed, both TryAdds
+#     land and both puppets are adopted early.
+#   * drop `FindLocalShip() != null` from ManagePuppet's spawn gate -> **1** (leg 1's
+#     "SpawnPuppet was never entered").
+#   * drop it from TickFriends' spawn gate -> **1** (leg 1's SpawnFriend twin).
+#   * drop `pendingPurges.Clear()` from ComponentBin.TopOfTickFlush -> **12** (the filter never
+#     expires, so nothing is ever adopted).
+#
+# READ THAT FIRST MUTATION CAREFULLY -- it is only ONE leg, and the reason corrects a claim card
+# 74403f83 left in two CLAUDE.md files and in SpawnPuppet's own comment. Those say adopting a
+# diverted ship strands the remote player "for the rest of the session"; it does not.
+# `ManagePuppet` (and `TickFriends`) open by RELEASING a puppet the oracle does not hold
+# (`!oracle.GetShips().Contains(puppet)`), and that block has been there since Stage 11.1
+# (`6f36aae`), long before the fix -- so the pre-card bug self-heals on the NEXT tick and its real
+# window is one tick, not the session. The fix is still right (adopting something that is not in
+# the world is wrong, and the release is a safety net rather than the intended path), but the
+# severity claim is overstated. Leg 2's single assertion is therefore the load-bearing one here;
+# do not add legs expecting the broken code to stay broken into leg 3.
+#
+# DESTRUCTIVE, which is why this probe is a whole process to itself (the runner gives every probe
+# one anyway). It pairs a real session onto the live level, moves the local player's seat and
+# applies a real EvReset, so the scene ends in its reset branch. The suite restores the roster and
+# asserts it did (leg 4); nothing here is re-usable by a later assertion in the same run.
+#
+# ?level=Level2 for a level that is simply running with one keyboard player and a live ship (the
+# suite's leg-0 precondition -- the Mechanical Friends cheat or a partner-seating level would seat
+# a second slot and the suite would report rather than assert), and ?invuln so the 200-frame settle
+# cannot lose that ship.
+#
+# eahl: --flags "?level=Level2&invuln"
+
+step 200 nodraw
+mark
+eval NetResetSpawn
+
+# The session really ran on the in-process wire, and the log line says so. That line used to
+# print "WebRTC" for an InMemoryTransport -- the one line telling you which wire a run is on,
+# naming the wrong one -- and this probe is the only thing in the repo that reaches a live session
+# over it, so without this the lie can come back for free.
+expect \[net\] session start role=join .* transport=InMemory
+expect \[netreset\] EvReset -> SpawnPuppet/SpawnFriend TryAdd
+expect 1\. NEGATIVE
+expect 2\. POSITIVE -- EvReset purges inside the drain
+expect 3\. POSITIVE -- next tick, filter expired
+expect 4\. teardown
+expect \[netreset\] 31 passed, 0 failed
+expect-not FAIL
+expect-not SKIP
+quit

@@ -97,7 +97,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   no browser and no JS.** Created only by `NetWire(int peers)` (its owner and switch, max 8);
   `wire[i]` is the endpoint. `NetSession.StartWith` already takes an arbitrary `INetTransport`, so
   a scenario can put one end into a live session and drive the other by hand (the reachable entry
-  points are `StartMenuSession` / `StartListedSession`; `StartWith` itself is private).
+  points are `StartMenuSession` / `StartListedSession` and, for a scenario, `StartForTest`;
+  `StartWith` itself is private).
   - **The peer count is a PARAMETER, not 2.** Per-`(src,dst)` queues and a fan-out `Dispatch`,
     even though the protocol is 2-peer, so the N-peer stages (`plans/4p-online-coop.md`,
     11.7-11.11) add contexts rather than rebuilding the rig. Anything written against it must
@@ -132,6 +133,37 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     **It is deliberately Game-free and reads NO real clock**, which is what lets it also run under
     `tools/sim/logic_probe` (`ProbeNetWire`, browserless + exit code) and makes it non-flaky;
     keep it that way. Committed as `tools/headless/probes/net_wire.txt`.
+- **A scenario needing a LIVE session over that wire uses `NetSession.StartForTest` (card
+  25ad0659), and `eaNetResetSpawn()` is the first one.** `StartForTest` is neither a menu nor a
+  listed session, deliberately: `menuSession` makes `HandleHello` refuse a peer while
+  `DebugFlags.Active` is set, and every scenario needing a live world boots with `?level=`, so a
+  menu session would reject its own scripted pairing. Three read-only seams go with it --
+  `LocalBuildHash` (a scripted hello must carry it; READ, never recomputed, or it drifts from
+  `StartWith`'s own `?netfakehash`-aware expression), `HasRemotePuppet` and
+  `HasFriendPuppet(slot)`.
+  - **The scenario: `Compat/Net/NetResetSpawnTest.cs`** -- one real CLIENT session on `wire[0]`,
+    a scripted host on `wire[1]`, and card 74403f83's two ship-puppet spawn sites driven END TO
+    END. Its subject is that `SpawnPuppet` / `SpawnFriend` must not ADOPT a ship
+    `ComponentBin.TryAdd` refused. **Only `NetApplyReset` can reach that branch**, because it
+    purges from inside the rx drain where the local ship's death is still merely QUEUED, so
+    `FindLocalShip()` is non-null and the caller's gate is open; the `LoseLife` / `UpdateWin` /
+    `UpdateResetting` purges are flushed by `collectionHelper.Update()` before the drain and
+    both gates are shut -- which the suite asserts as its NEGATIVE leg, by the SEATS (neither
+    `Remote` nor `RemoteFriend` is even allocated, which is what tells "the caller was never
+    entered" from "TryAdd refused").
+  - **It is the one DESTRUCTIVE suite in this directory.** It needs a live `GameScene`, moves the
+    local player's seat and applies a real `EvReset`, so the scene ends in its reset branch. It
+    restores the roster and asserts it did, and refuses to run with a real session up -- but run
+    it in a throwaway `?level=Level2&invuln` boot, never in a game you care about. That is also
+    why it is **absent from `net_selftests.txt`** and has its own
+    `tools/headless/probes/net_reset_spawn.txt`, like `netbg_catchup.txt`.
+  - **It cannot run under `logic_probe`** (`Game`, `ServiceHelper` and a `GameScene`, all three
+    of that tool's documented limits) -- unlike `eaNetWire.test`. eahl is its only headless
+    runner.
+  - It reads the REAL clock, since `NetSession.Update` does. Every leg re-sends both streams
+    immediately before its `Update`, which re-arms both real-clock windows that could bite (the
+    500 ms `FriendTimeoutMs`, the 8 s drop verdict); measured deterministic 31/31 over 10
+    consecutive runs. If it ever flakes, the fix is the injected clock, not a looser assertion.
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
   code** (card 25ad0659): `eaNetWire.test`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
   `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`. They were

@@ -181,7 +181,9 @@ internal static class BinTest
 		// 5. TryAdd reports whether the add actually LANDED (card 74403f83). This is the
 		// contract the net layer's two ship-puppet spawn sites branch on: they keep a
 		// reference to what they add and gate their retry on it being null, so adopting a
-		// component the filter diverted strands that player for the rest of the session.
+		// component the filter diverted points that reference at a ship the world does not
+		// have. This is the PRIMITIVE; the two call sites are covered end to end by
+		// Compat/Net/NetResetSpawnTest.cs, which also measured the window at one tick.
 		bin.Purge<TestAlien>();
 		TestAlien f = new TestAlien(game);
 		Check("TryAdd reports a diverted add", !bin.TryAdd((GameComponent)(object)f));

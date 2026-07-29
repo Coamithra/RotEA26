@@ -1273,13 +1273,21 @@ namespace EvilAliensWeb.Compat
 				case "shake":
 				case "screenshake":
 					// Bare ?shake / =true keeps the default 1; a number scales it (0 = off).
+					// The on/off fallback is DELIBERATE, but only for the on/off SPELLINGS: a
+					// typo'd number (?shake=1.5O) is not "off", and silently reading it as off
+					// turns the effect under test off entirely -- worse than ignoring it, since
+					// the run then measures no-shake while labelled as a shake sweep.
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var shk))
 					{
 						ShakeAmount = (shk < 0f) ? 0f : (shk > 3f) ? 3f : shk;
 					}
-					else
+					else if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						ShakeAmount = IsOn(val) ? 1f : 0f;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number 0..3, or on/off", InForce(ShakeAmount));
 					}
 					break;
 				case "hitstop":
@@ -2693,14 +2701,22 @@ namespace EvilAliensWeb.Compat
 					// reads as the column 0, not as "off" -- =false is the only way to disable it.
 					// IsFinite because NumberStyles.Float accepts NaN/Infinity, and a NaN would ride
 					// through MyMath.Mod into every layer's position.X and wedge the background.
+					// Like ?shake, the on/off fallback covers the on/off SPELLINGS only: a typo'd
+					// column (?bgfreeze=40O) is not "off", and swallowing it leaves the background
+					// SCROLLING while the run is labelled as a frozen-phase capture -- which is
+					// precisely the artifact hunt this flag exists for.
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bgf)
 						&& float.IsFinite(bgf))
 					{
 						BgFreeze = bgf;
 					}
-					else
+					else if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						BgFreeze = IsOn(val) ? 400f : (float?)null;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a finite number, or on/off", InForce(BgFreeze));
 					}
 					break;
 				case "harness":
@@ -2794,7 +2810,12 @@ namespace EvilAliensWeb.Compat
 					// Enum.TryParse also accepts numeric strings ("999" -> (Levels)999) and
 					// undefined values; require a real defined member so an invalid ?level=
 					// falls into the unknown-level branch instead of booting a bogus level.
-					if (val.Length > 0 && !char.IsDigit(val[0]) && val[0] != '+' && val[0] != '-'
+					// `val` is NULL for a bare ?level (no '='), and this used to dereference it:
+					// the NRE took the headless host down outright, and in the browser
+					// Index.razor.cs caught it as one "flag read failed" line, silently dropping
+					// EVERY remaining flag in the query -- the same class of silent miscarriage
+					// this file's rejection convention exists to end.
+					if (!string.IsNullOrEmpty(val) && !char.IsDigit(val[0]) && val[0] != '+' && val[0] != '-'
 						&& Enum.TryParse<EvilAliens.Levels>(val, ignoreCase: true, out var lvl)
 						&& Enum.IsDefined(typeof(EvilAliens.Levels), lvl))
 					{
@@ -2856,20 +2877,29 @@ namespace EvilAliensWeb.Compat
 		// Parse a "?pos=x,y" value into HarnessX/HarnessY (800x600 design space). Either
 		// component may be omitted ("400," / ",300") to override just one axis; the missing
 		// one falls back to centre in HarnessScene.
+		// An unusable component is REPORTED per axis rather than as one verdict for the pair, so
+		// "?pos=400,3O0" says the Y was dropped and the X stood -- a single message could only
+		// say one or the other, and the half that landed is the confusing half.
 		private static void ParsePos(string val)
 		{
-			if (string.IsNullOrEmpty(val))
-			{
-				return;
-			}
-			string[] parts = val.Split(',');
-			if (parts.Length >= 1 && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+			string[] parts = (val ?? "").Split(',');
+			bool haveX = parts.Length >= 1 && parts[0].Length > 0;
+			bool haveY = parts.Length >= 2 && parts[1].Length > 0;
+			if (haveX && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
 			{
 				HarnessX = x;
 			}
-			if (parts.Length >= 2 && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+			else if (haveX)
+			{
+				RejectFlagValue("pos", parts[0], "a number for x in ?pos=x,y", InForce(HarnessX));
+			}
+			if (haveY && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
 			{
 				HarnessY = y;
+			}
+			else if (haveY)
+			{
+				RejectFlagValue("pos", parts[1], "a number for y in ?pos=x,y", InForce(HarnessY));
 			}
 		}
 
@@ -2911,7 +2941,7 @@ namespace EvilAliensWeb.Compat
 				+ "?level=<Name>  ?skipsplash  (see Compat/DebugFlags.cs)");
 		}
 
-		// THE REJECTION DIAGNOSTIC every value-carrying flag in this file routes through, in the
+		// THE REJECTION DIAGNOSTIC the value-carrying flags in this file route through, in the
 		// wording card 6eb8dc9e settled for ?flyspider* and card 48b7c6b1 took to the ?ai* knobs:
 		//   [debug] unknown ?aireact= value '420x' (expected a number >= 0) -- ignored, staying on 420
 		// A tuning flag's failure mode is not a wrong picture, it is a run that measures the
@@ -2936,8 +2966,14 @@ namespace EvilAliensWeb.Compat
 		//
 		// STILL DELIBERATELY SILENT, so a reader does not conclude more than holds: the on/off
 		// booleans (IsOn/IsExplicitlyOff have their own convention), and the free-form identity
-		// STRINGS (?netfakepeer=, ?netfakehash=, ?bg=, ?room=, ?code=) where an empty value is not
-		// a typo class and there is no "expected" to state.
+		// STRINGS (?netfakepeer=, ?netfakehash=, ?bg=, ?room=, ?code=, ?signal=) where any value
+		// is legal, an empty one is not a typo class, and there is no "expected" to state.
+		// A handful of sites report from somewhere other than a plain `else`, and each has its
+		// reason written where it sits: ?shake and ?bgfreeze take a number OR an on/off spelling,
+		// so only a value that is neither reaches the diagnostic (reading a typo'd number as
+		// "off" was the worse bug -- it turned the very effect under test off); ?pos reports per
+		// AXIS; ?level keeps its own older wording; the ?flyspider*, ?net, ?teampartner and
+		// ?splashvariant sites keep inline WriteLines.
 		private static void RejectFlagValue(string flag, string val, string expected, string inForce)
 		{
 			Console.WriteLine("[debug] unknown ?" + flag + "= value '" + val + "' (expected "

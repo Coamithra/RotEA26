@@ -777,6 +777,7 @@ internal static class Program
             new { Flag = "spidershadowscale", Prop = "SpiderShadowScale", Good = "0.375", RejectsNeg = true },
             new { Flag = "spiderairx", Prop = "SpiderAirX", Good = "0.375", RejectsNeg = false },
             new { Flag = "spiderairy", Prop = "SpiderAirY", Good = "0.375", RejectsNeg = false },
+            new { Flag = "spiderphase", Prop = "SpiderPhase", Good = "0.375", RejectsNeg = false },
             new { Flag = "frame", Prop = "HarnessFrame", Good = "9", RejectsNeg = false },
             new { Flag = "size", Prop = "HarnessScale", Good = "0.375", RejectsNeg = true },
             new { Flag = "rotation", Prop = "HarnessRot", Good = "0.375", RejectsNeg = false },
@@ -797,6 +798,14 @@ internal static class Program
             return 2;
         }
 
+        // Every property this set touches, as it stood on entry -- the restore at the end puts
+        // them back from here (the non-nullable ones have no "unset" to null out).
+        var entry = new System.Collections.Generic.Dictionary<string, object>();
+        foreach (var row in rows)
+        {
+            entry[row.Prop] = flags.GetProperty(row.Prop, anyStatic).GetValue(null);
+        }
+
         int shipped = 0, shippedN = 0, landed = 0, quiet = 0, reported = 0, named = 0, negatives = 0, negN = 0;
         string badShipped = null, badLanded = null, badQuiet = null, badReported = null, badNamed = null, badNeg = null;
         foreach (var row in rows)
@@ -814,12 +823,17 @@ internal static class Program
                 else { badShipped ??= row.Flag + " with no override said: " + FirstLine(outFresh); }
             }
 
-            // 1. A valid value lands, and reports no rejection.
+            // 1. A valid value lands, and reports no rejection. Asserted as a CHANGE from what
+            //    stood before, not as "not null": the seven non-nullable properties box to a
+            //    float/int that can never BE null, so a null test passes them vacuously -- and
+            //    since leg 2 derives its expectation from this same read, a deleted assignment
+            //    would then satisfy every check in the set.
+            object before = p.GetValue(null);
             string outGood = run("?" + row.Flag + "=" + row.Good);
             object landedVal = p.GetValue(null);
             string inForce = Convert.ToString(landedVal, System.Globalization.CultureInfo.InvariantCulture);
-            if (landedVal != null) { landed++; }
-            else { badLanded ??= row.Flag + "=" + row.Good + " left the override null"; }
+            if (!Equals(landedVal, before)) { landed++; }
+            else { badLanded ??= row.Flag + "=" + row.Good + " did not change the override (still " + before + ")"; }
             if (!outGood.Contains("unknown")) { quiet++; }
             else { badQuiet ??= row.Flag + "=" + row.Good + " was REPORTED: " + FirstLine(outGood); }
 
@@ -857,6 +871,22 @@ internal static class Program
             negatives == negN, negatives + "/" + negN + " guarded flags"
             + (badNeg != null ? "; " + badNeg : ""));
 
+        // Hand the process back as it was found -- Parse can only ASSIGN, so a Probe* added after
+        // this one would otherwise inherit eighty overrides with no way to reach the defaults.
+        // The non-nullable seven are restored from the values captured at entry, not nulled: they
+        // have no "unset", and leaving them swept is how the alias check below used to print
+        // `staying on 0.375` for a flag it had never touched.
+        foreach (var row in rows)
+        {
+            flags.GetProperty(row.Prop, anyStatic).SetValue(null, entry[row.Prop]);
+        }
+        int leaked = 0;
+        foreach (var row in rows)
+        {
+            if (!Equals(flags.GetProperty(row.Prop, anyStatic).GetValue(null), entry[row.Prop])) { leaked++; }
+        }
+        Check("case set leaves no override behind", leaked == 0, leaked + " still set");
+
         // The five whose value space is not a number, so their "expected" clause and their in-force
         // wording had to be written by hand. Each states a DIFFERENT thing in place of a number, so
         // a copy-paste slip between them would show up nowhere else.
@@ -884,13 +914,60 @@ internal static class Program
         Check("an alias reports under the spelling used (?objscale, not ?size)",
             outAlias.Contains("unknown ?objscale="), FirstLine(outAlias));
 
-        // Hand the process back as it was found -- Parse can only ASSIGN, so a Probe* added after
-        // this one would otherwise inherit eighty overrides with no way to reach the defaults.
-        foreach (var row in rows)
-        {
-            PropertyInfo p = flags.GetProperty(row.Prop, anyStatic);
-            if (Nullable.GetUnderlyingType(p.PropertyType) != null) { p.SetValue(null, null); }
-        }
+        // The four sites that do NOT report from a plain `else`, each of which was a behaviour bug
+        // rather than only a missing message -- so each is asserted on the STATE as well as the
+        // text.
+        //
+        // ?shake and ?bgfreeze accept a number OR an on/off spelling, and used to route anything
+        // else through IsOn, i.e. read a typo as OFF: the run then measured no shake / an
+        // unfrozen background while carrying the label of the sweep it was meant to be.
+        object shakeBefore = flags.GetProperty("ShakeAmount", anyStatic).GetValue(null);
+        string outShake = run("?shake=1.5O");
+        Check("?shake= typo is reported and does NOT turn shake off",
+            Equals(flags.GetProperty("ShakeAmount", anyStatic).GetValue(null), shakeBefore)
+            && outShake.Contains("unknown ?shake=") && outShake.Contains("a number 0..3, or on/off"),
+            "shake=" + flags.GetProperty("ShakeAmount", anyStatic).GetValue(null) + " said: " + FirstLine(outShake));
+        string outShakeOff = run("?shake=off");
+        Check("?shake=off still means off (the on/off spellings are untouched)",
+            Equals(flags.GetProperty("ShakeAmount", anyStatic).GetValue(null), 0f) && !outShakeOff.Contains("unknown"),
+            "shake=" + flags.GetProperty("ShakeAmount", anyStatic).GetValue(null));
+        flags.GetProperty("ShakeAmount", anyStatic).SetValue(null, shakeBefore);
+
+        run("?bgfreeze=250");
+        string outFreeze = run("?bgfreeze=40O");
+        Check("?bgfreeze= typo is reported and does NOT unfreeze",
+            Equals(flags.GetProperty("BgFreeze", anyStatic).GetValue(null), 250f)
+            && outFreeze.Contains("unknown ?bgfreeze="),
+            "bgfreeze=" + flags.GetProperty("BgFreeze", anyStatic).GetValue(null) + " said: " + FirstLine(outFreeze));
+        run("?bgfreeze=false");
+        Check("?bgfreeze=false still disables it", flags.GetProperty("BgFreeze", anyStatic).GetValue(null) == null,
+            "bgfreeze=" + flags.GetProperty("BgFreeze", anyStatic).GetValue(null));
+
+        // ?pos reports per AXIS, so a half-usable pair says which half was dropped -- and the
+        // usable half must still land.
+        run("?pos=123,456");
+        string outPos = run("?pos=400,3O0");
+        Check("?pos= reports the bad AXIS and keeps the good one",
+            Equals(flags.GetProperty("HarnessX", anyStatic).GetValue(null), 400f)
+            && Equals(flags.GetProperty("HarnessY", anyStatic).GetValue(null), 456f)
+            && outPos.Contains("unknown ?pos= value '3O0'") && outPos.Contains("for y in ?pos=x,y"),
+            "x=" + flags.GetProperty("HarnessX", anyStatic).GetValue(null)
+            + " y=" + flags.GetProperty("HarnessY", anyStatic).GetValue(null) + " said: " + FirstLine(outPos));
+        flags.GetProperty("HarnessX", anyStatic).SetValue(null, null);
+        flags.GetProperty("HarnessY", anyStatic).SetValue(null, null);
+
+        // A bare ?level used to dereference a null `val`: the NRE took the headless host down and,
+        // in the browser, was caught one level up as a single "flag read failed" line that
+        // silently dropped EVERY LATER FLAG in the query. So the assertion that matters is not the
+        // message -- it is that a flag after it still lands.
+        string outBareLevel = run("?level&aiscanrows=5");
+        Check("a bare ?level does not throw, and later flags still parse",
+            outBareLevel.Contains("unknown level ''")
+            && Equals(flags.GetProperty("AiWallScanRows", anyStatic).GetValue(null), 5),
+            "scanrows=" + flags.GetProperty("AiWallScanRows", anyStatic).GetValue(null)
+            + " said: " + FirstLine(outBareLevel));
+        flags.GetProperty("AiWallScanRows", anyStatic).SetValue(null, null);
+
         return 0;
     }
 

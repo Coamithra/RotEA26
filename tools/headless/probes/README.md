@@ -140,15 +140,17 @@ drop `BringUp`'s catch and the run dies with `err NoAudioHardwareException`, and
 `--fake-no-audio-device` a no-op and it fails on its `NO AUDIO DEVICE` expect rather than
 passing on a run that had a device all along. `stockshots_warm` goes red when a level is deleted from `LevelArt.ScreenshotPath` — tested on
 BOTH carousels (`Level1`, `WebcamAliens`), because an earlier revision that opened only the
-challenge carousel passed the `Level1` mutation. **Since card 0d166364 the red line names the
-LEVEL, not the asset, and that substitution is the point**: collapsing `HasCarouselEntry` into a
-nullable `ScreenshotPath` means a dropped level now resolves to `null` in the carousel too and
-falls back to the already-warm `level1empty`, so *nothing decodes cold*. The `expect-not COLD`
-line alone goes GREEN on the `WebcamAliens` mutation (measured). What catches it is the
-`[levelart] carousel entry` warning `SubMenuLevelChoice.loadScreenshots` prints on that
-fallback. Both assertions are kept: `COLD` still covers regressions on the
-`ScreenshotSaver`/`QueueMenuWarm` side that the warning cannot see — and the `Level1` mutation
-trips both, because `level1empty` is warm only *because* `Level1` maps to it.
+challenge carousel passed the `Level1` mutation. **Since card 0d166364 its `expect-not COLD`
+line can no longer catch that on its own**: collapsing `HasCarouselEntry` into a nullable
+`ScreenshotPath` means a dropped level now resolves to `null` in the carousel too and falls back
+to the already-warm `level1empty`, so *nothing decodes cold* — with only that line, the
+`WebcamAliens` mutation passes green (measured). Its three assertions now catch three different
+things and none is redundant: `stockshots warm: 12 textures` counts the derived set and fires
+first on a deleted level (reads 11); `[levelart] carousel entry` is the only one that catches
+the drift the card is about — a `MenuScene` carousel entry authored for a level with no
+`ScreenshotPath` row, where `StockShots` is still twelve and the count passes happily
+(measured with `Levels.Tutorial`: boot count and COLD both green, that line alone red); and
+`COLD` still covers the `ScreenshotSaver`/`QueueMenuWarm` side neither of the others sees.
 `gamebrowser_fallback` goes red with `unmappedArt=none` when `EnsureArt`'s null guard is
 reverted. Note what that mutation does NOT produce: an exception. `EnsureArt` wraps its
 `Content.Load` in `catch (Exception)`, so a broken fallback throws, gets absorbed, and draws the

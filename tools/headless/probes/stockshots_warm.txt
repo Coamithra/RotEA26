@@ -12,18 +12,27 @@
 # first opening Challenges, unnoticed for however long it had been true. Fix by restoring the
 # level to LevelArt.ScreenshotPath, NOT by re-hardcoding a list.
 #
-# TWO ASSERTIONS, AND SINCE CARD 0d166364 THE SECOND ONE IS THE LIVE ONE. Read this before
-# touching either. The probe used to rest entirely on the COLD line, because a level dropped
-# from the old LevelArt.HasCarouselEntry lost its warm slot while SubMenuLevelChoice still
-# resolved its real path -- so the carousel went and fetched it and the decode was visible.
-# 0d166364 collapsed HasCarouselEntry into ScreenshotPath returning null, and that KILLS the
-# cold signal: a level dropped from ScreenshotPath now resolves to null in the carousel too,
-# which falls back to GFX/Screenshots/level1empty -- an asset that is ALREADY WARM. Nothing
-# decodes, and the COLD assertion alone goes green on the exact mutation it exists to catch
-# (measured, both carousels). The `[levelart] carousel entry` warning that
-# SubMenuLevelChoice.loadScreenshots prints on that fallback is what makes the drop visible now,
-# and it names the LEVEL rather than the asset path. Keep both: COLD still defends the preload
-# set against changes on the ScreenshotSaver/QueueMenuWarm side, which the warning cannot see.
+# THE COLD ASSERTION CAN NO LONGER CATCH A DROPPED LEVEL ON ITS OWN (card 0d166364). Read this
+# before deleting anything here as redundant. The probe originally rested entirely on the COLD
+# line, because a level dropped from the old LevelArt.HasCarouselEntry lost its warm slot while
+# SubMenuLevelChoice still resolved its REAL path -- so the carousel went and fetched it and the
+# decode was visible. 0d166364 collapsed HasCarouselEntry into ScreenshotPath returning null,
+# and that kills the signal: a dropped level now resolves to null in the carousel too and falls
+# back to GFX/Screenshots/level1empty, which is ALREADY WARM. Nothing decodes. Measured: with
+# only the COLD line, the WebcamAliens mutation passes green.
+#
+# So a drop is caught by the other two, and they catch DIFFERENT things -- neither is redundant:
+#   * `stockshots warm: 12 textures` (the boot leg, card 2367b39c) counts the derived set, so it
+#     fires first and hardest on a level deleted from ScreenshotPath: it reads 11.
+#   * `[levelart] carousel entry` is the ONLY one that catches the drift this card is actually
+#     about -- a carousel entry authored in MenuScene for a level with NO ScreenshotPath row.
+#     StockShots is still twelve in that state and the boot count passes happily; the warning
+#     SubMenuLevelChoice.loadScreenshots prints on its fallback is the sole evidence, and it
+#     names the LEVEL rather than an asset path. Measured, not assumed: authoring a
+#     `levelSelector` entry for Levels.Tutorial leaves the boot count and COLD both GREEN and
+#     turns this line alone red, naming Tutorial.
+# COLD stays because it still covers regressions on the ScreenshotSaver/QueueMenuWarm side that
+# neither of the others can see.
 #
 # WHY IT OPENS BOTH CAROUSELS: `SubMenuLevelChoice.loadScreenshots` loads EVERY entry's image
 # in one loop, so merely opening a carousel demands all of its art -- no walking required. But

@@ -88,6 +88,16 @@ namespace EvilAliensWeb.Compat
         // on. Non-reentrant by construction: Warm<T> loads one asset and cannot nest.
         private static bool _warmActive;
 
+        // Set by the LABELLED BeginWarm overload only (ScreenshotSaver.Init's stock-shot loop).
+        // Non-null => EndWarm prints a one-line summary naming this bracket, instead of the
+        // decodes vanishing without trace. Warm<T> passes no label, so the three warm queues
+        // are byte-for-byte unchanged: one asset per bracket has nothing worth summarising.
+        private static string _warmLabel;
+
+        // Per-labelled-warm running totals, for that summary. Same shape as the preload set below.
+        private static int _warmCount, _warmMs, _warmMaxMs;
+        private static string _warmSlowest;
+
         // Per-preload running totals, for the one-line summary on EndPreload.
         private static int _preloadCount, _preloadMs, _preloadMaxMs;
         private static string _preloadSlowest;
@@ -163,6 +173,13 @@ namespace EvilAliensWeb.Compat
                 // its size, but never flagged Cold and never logged. Not folded into the preload
                 // counters either -- those summarise one level's bracket, and a warm decode
                 // belongs to no level.
+                //
+                // A LABELLED bracket gets its own totals so EndWarm can print one summary line.
+                // Unlabelled (Warm<T>) brackets accumulate too -- harmless, three int writes --
+                // but never print, so the warm queues' output is unchanged.
+                _warmCount++;
+                _warmMs += ms;
+                if (ms > _warmMaxMs) { _warmMaxMs = ms; _warmSlowest = assetId; }
             }
             else
             {
@@ -221,24 +238,50 @@ namespace EvilAliensWeb.Compat
             _preloadCount = 0; _preloadMs = 0; _preloadMaxMs = 0; _preloadSlowest = null;
         }
 
-        // Bracket ONE deliberate warm-queue decode (Game1.Warm<T>). See _warmActive: inside the
-        // bracket a decode is recorded but never flagged Cold and never logged, because there is
-        // no frame waiting on it. Cheap enough to leave unguarded by Recording -- two bool writes.
+        // Bracket deliberate decodes. See _warmActive: inside the bracket a decode is recorded
+        // but never flagged Cold and never logged, because there is no frame waiting on it.
+        // Cheap enough to leave unguarded by Recording -- a bool and a reference write.
+        //
+        // TWO callers, and exactly two (card 2367b39c):
+        //   * Game1.Warm<T>, unlabelled, around ONE queued asset -- all three warm queues funnel
+        //     through it. Nothing to summarise per asset, so it prints nothing.
+        //   * ScreenshotSaver.Init, labelled "stockshots", around its whole twelve-asset loop.
+        //     That loop warms the SAME list Game1.QueueMenuWarm queues, so on a full-splash boot
+        //     the pump got there first and these are cache hits -- zero decodes, no summary. On a
+        //     splash-SKIPPING boot (?menu / ?skipsplash / ?autostart, or a player mashing Start
+        //     inside ~24 ticks) the pump never ran and all twelve really do decode here. They
+        //     used to report as twelve COLD gaps sitting at the top of every ?loadlog capture,
+        //     which is what this label replaces with one line.
         //
         // INTERNAL on purpose, unlike the rest of this class's surface. A caller that opens the
         // bracket and never closes it (a missing finally, an early return between the two) mutes
         // every COLD line for the rest of the session -- the diagnostic this class exists to
         // provide, failing closed and silently. Keeping the pair unreachable from outside the
-        // assembly keeps "Warm<T> is the only caller" checkable by grep. A depth counter would
-        // not help: an unbalanced Begin leaves it stuck either way.
-        internal static void BeginWarm()
+        // assembly keeps that two-caller claim checkable by grep, and BOTH call sites close in a
+        // `finally`. A depth counter would not help: an unbalanced Begin leaves it stuck either
+        // way. Non-reentrant by construction -- neither call site can be reached from inside the
+        // other.
+        internal static void BeginWarm(string label = null)
         {
             _warmActive = true;
+            _warmLabel = label;
+            _warmCount = 0; _warmMs = 0; _warmMaxMs = 0; _warmSlowest = null;
         }
 
         internal static void EndWarm()
         {
             _warmActive = false;
+            string label = _warmLabel;
+            _warmLabel = null;
+            // Only a LABELLED bracket that actually decoded something reports. Count 0 is the
+            // normal full-splash case (the pump already warmed them) and must stay silent, or
+            // every boot would gain a noise line saying nothing happened.
+            if (!Recording || label == null || _warmCount == 0)
+                return;
+            Console.WriteLine($"[loadprofile] {label} warm: {_warmCount} textures, "
+                + $"{_warmMs}ms decode total"
+                + (_warmSlowest != null ? $" (slowest {_warmSlowest} {_warmMaxMs}ms)" : "")
+                + " -- deliberate, not a gap");
         }
 
         public static void EndPreload()

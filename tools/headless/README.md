@@ -114,7 +114,8 @@ its return value is printed. `help` lists what is currently available.
 
 ## Exit codes
 
-`0` ok · `1` a run/script failure · `2` bad arguments · `3` `--software` was asked for and is unavailable.
+`0` ok · `1` a run/script failure · `2` bad arguments · `3` `--software` was asked for and is
+unavailable · `4` `--fake-no-audio-device` could not install its `alsoft.ini`.
 
 ---
 

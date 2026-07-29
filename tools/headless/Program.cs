@@ -106,8 +106,10 @@ namespace EvilAliensWeb.Headless
                 string why = NoAudioDeviceSim.Install();
                 if (why != null)
                 {
+                    // Its own exit code, not 2: this is a runtime failure, and a caller that sees
+                    // 2 goes looking for a typo in its argv. Same reasoning as --software's 3.
                     Console.Error.WriteLine("err --fake-no-audio-device: " + why);
-                    return 2;
+                    return 4;
                 }
             }
 
@@ -124,9 +126,18 @@ namespace EvilAliensWeb.Headless
                     HeadlessAudio.BringUp();
                     Console.WriteLine("[eahl] audio    " + AudioStatus());
                     if (HeadlessAudio.Device != HeadlessAudio.DeviceState.Ok)
+                    {
                         Console.WriteLine("[eahl] audio    NO AUDIO DEVICE (" + DeviceWord(HeadlessAudio.Device)
                             + ") -- the run CONTINUES with audio dead: no SFX, and silence cannot be"
-                            + " confirmed at the mixer. See tools/headless/HeadlessAudio.cs.");
+                            + " confirmed at the mixer. See tools/headless/HeadlessAudio.cs."
+                            + (HeadlessAudio.Failure != null ? " Cause: " + HeadlessAudio.Failure : ""));
+                        // A box that HAS a device reporting none is almost always this.
+                        string stranded = NoAudioDeviceSim.StrandedIni();
+                        if (stranded != null)
+                            Console.WriteLine("[eahl] audio    NOTE a leftover " + stranded + " from an earlier"
+                                + " --fake-no-audio-device run is what disabled the device. Delete it, or pass"
+                                + " --fake-no-audio-device once to have it cleaned up on exit.");
+                    }
 
                     int rc = opt.Repl || opt.ScriptPath != null ? RunCommands(host, opt) : RunOneShot(host, opt);
                     if (opt.JsCalls)
@@ -345,14 +356,18 @@ namespace EvilAliensWeb.Headless
                 + " alGain=" + (gain.HasValue ? gain.Value.ToString("0.###", CultureInfo.InvariantCulture) : "<unreadable>");
         }
 
+        // Every member is spelled out and the fallback is derived, so a state added later reports
+        // its own name rather than silently borrowing NotTried's -- a wrong answer in the one
+        // field whose entire job is diagnosis.
         private static string DeviceWord(HeadlessAudio.DeviceState state)
         {
             switch (state)
             {
+                case HeadlessAudio.DeviceState.NotTried: return "nottried";
                 case HeadlessAudio.DeviceState.Ok: return "ok";
                 case HeadlessAudio.DeviceState.None: return "none";
                 case HeadlessAudio.DeviceState.NoLibrary: return "nolib";
-                default: return "nottried";
+                default: return state.ToString().ToLowerInvariant();
             }
         }
 

@@ -133,10 +133,10 @@ negative control. Its `lib=<unresolved>` line (added by card 72297923, which mad
 resolve OpenAL by candidate list) goes red when that list is replaced with names that do not
 exist. That line discriminates no mutant the `alGain=0` line below it would miss — a failed
 resolve makes the gain unreadable too — so it is ordered FIRST purely to make the failure name
-the cause; it earns its place as diagnosis, not as coverage. `no_audio_device` goes red both ways
-that matter: drop `BringUp`'s catch and the run dies with `err NoAudioHardwareException`, and make
-`--fake-no-audio-device` a no-op and it fails on its `NO AUDIO DEVICE` expect rather than passing
-on a run that had a device all along. `stockshots_warm` goes red naming the dropped asset when a level is deleted
+the cause; it earns its place as diagnosis, not as coverage. `no_audio_device` goes red both ways that matter:
+drop `BringUp`'s catch and the run dies with `err NoAudioHardwareException`, and make
+`--fake-no-audio-device` a no-op and it fails on its `NO AUDIO DEVICE` expect rather than
+passing on a run that had a device all along. `stockshots_warm` goes red naming the dropped asset when a level is deleted
 from `LevelArt.HasCarouselEntry` — tested on BOTH carousels (`Level1` →
 `gfx/screenshots/level1empty`, `WebcamAliens` → `gfx/screenshots/webcamss`), because an
 earlier revision that opened only the challenge carousel passed the `Level1` mutation.

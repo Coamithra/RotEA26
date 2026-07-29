@@ -120,12 +120,28 @@ namespace EvilAliensWeb.Headless
 
         internal static DeviceState Device { get; private set; } = DeviceState.NotTried;
 
+        // Set once the candidate walk has run, so a box where NOTHING resolves does not re-walk
+        // all four TryLoads on every ListenerGain read. Pump self-limits via _pumpSettled; the
+        // `audio` command does not, and a probe can ask for it in a loop.
+        private static bool _resolveTried;
+
         static HeadlessAudio()
         {
             // Registered from the static ctor, which the CLR runs before the first call to any
             // static member of this type -- including the P/Invokes themselves, since a type with
             // a static ctor is not beforefieldinit.
-            NativeLibrary.SetDllImportResolver(typeof(HeadlessAudio).Assembly, ResolveOpenAl);
+            //
+            // Guarded because a throw HERE is a raw TypeInitializationException outside Main's
+            // try, i.e. a stack dump instead of the `err <Type>: <msg>` line every other failure
+            // path produces. SetDllImportResolver throws if this assembly already has a resolver;
+            // nothing else registers one today, so this is latent rather than live -- and if it
+            // ever fires, the P/Invokes simply fail to bind and the run reports lib=<unresolved>,
+            // which is a diagnosis rather than a crash.
+            try
+            {
+                NativeLibrary.SetDllImportResolver(typeof(HeadlessAudio).Assembly, ResolveOpenAl);
+            }
+            catch (InvalidOperationException) { }
         }
 
         // IntPtr.Zero for anything that is not ours, which hands the name straight back to the
@@ -134,8 +150,9 @@ namespace EvilAliensWeb.Headless
         {
             if (libraryName != OpenAlLibrary)
                 return IntPtr.Zero;
-            if (_openAl != IntPtr.Zero)
+            if (_openAl != IntPtr.Zero || _resolveTried)
                 return _openAl;
+            _resolveTried = true;
             foreach (string candidate in OpenAlCandidates)
             {
                 if (NativeLibrary.TryLoad(candidate, assembly, searchPath, out _openAl))
@@ -144,7 +161,8 @@ namespace EvilAliensWeb.Headless
                     return _openAl;
                 }
             }
-            return IntPtr.Zero;   // -> DllNotFoundException at the call site; every caller handles it
+            _openAl = IntPtr.Zero;   // TryLoad leaves it zeroed, but do not make the reader check
+            return IntPtr.Zero;      // -> DllNotFoundException at the call site; every caller handles it
         }
 
         // "the Pump has finished trying", NOT "the listener is muted" — it is also set when
@@ -181,20 +199,29 @@ namespace EvilAliensWeb.Headless
                 _ = AudioService.Current;
                 Device = DeviceState.Ok;
             }
-            catch (NoAudioHardwareException ex)
+            catch (Exception ex)
             {
-                // AudioService.Current wraps whatever the strategy ctor threw, so the
-                // missing-binaries case arrives as an inner DllNotFoundException, not as itself.
+                // Catch-all ON PURPOSE, because "never fails the run" has to hold on the boxes
+                // nobody here can test. KNI throws NoAudioHardwareException (wrapping whatever the
+                // strategy ctor threw, so a missing binary arrives as an INNER
+                // DllNotFoundException), but AudioService.Current is a static property, so a type
+                // initialisation failure arrives as TypeInitializationException, and a platform
+                // KNI ships for that we have never run could throw something else again. All of it
+                // would otherwise escape to Main and exit 1 on exactly the machines BringUp exists
+                // to survive.
+                //
+                // Nothing is SWALLOWED, though: whatever it was is reported verbatim as Failure,
+                // so an unexpected exception here reads as itself rather than as "no sound card".
                 Device = HasInner<DllNotFoundException>(ex) ? DeviceState.NoLibrary : DeviceState.None;
-                return;
-            }
-            catch (DllNotFoundException)     // in case a future KNI stops wrapping
-            {
-                Device = DeviceState.NoLibrary;
+                Failure = ex.GetType().Name + ": " + ex.Message;
                 return;
             }
             Pump();     // there is a mixer now, so the mute lands before any sound plays
         }
+
+        // Why the device is not Ok, verbatim, or null while it is. Reported alongside the
+        // NO AUDIO DEVICE line so a box nobody here can test says what actually went wrong.
+        internal static string Failure { get; private set; }
 
         private static void TouchLibrary()
         {
@@ -215,12 +242,13 @@ namespace EvilAliensWeb.Headless
         // OPENAL — which after this card's history is the difference between knowing the run
         // is silent and hoping so.
         //
-        // It has to be lazy. KNI initialises OpenAL on the FIRST sound, so at Boot there is no
-        // context and alListenerf would go nowhere. That is safe rather than a leak: the
-        // MasterVolume above is already in force by then, and KNI folds it into every source's
-        // gain when SoundManager sets inst.Volume (which it does on every branch), so the sound
-        // that triggers initialisation is itself already silent. This just adds a second,
-        // global mute at the mixer as soon as there is a mixer to mute.
+        // It STILL retries rather than assuming a mixer, even though BringUp() now calls it once
+        // at boot and it normally lands there: it has to survive the paths that reach Step with no
+        // context, and it is what keeps the mute correct if the eager bring-up is ever backed out.
+        // Landing late is safe rather than a leak — MasterVolume is already in force by then, and
+        // KNI folds it into every source's gain when SoundManager sets inst.Volume (which it does
+        // on every branch), so even the sound that triggers initialisation is itself already
+        // silent. This adds the second, global mute at the mixer.
         //
         // Cheap: one bool test per Step once it has landed.
         internal static void Pump()
@@ -243,13 +271,15 @@ namespace EvilAliensWeb.Headless
             catch (EntryPointNotFoundException) { _pumpSettled = true; }
         }
 
-        // The gain OpenAL itself reports, read through the same soft_oal.dll the game plays
-        // through. null when it CANNOT be read, so a probe says it could not confirm silence
-        // instead of passing vacuously — which is a live hazard here, not a hypothetical:
-        // OpenAL is initialised lazily on the FIRST sound, so before then there is no current
-        // context, alGetListenerf is a no-op, and the caller's variable keeps whatever it held.
-        // Seeded with NaN rather than 0 for exactly that reason: a 0 seed made an unreadable
-        // gain indistinguishable from a muted one, and every run "passed".
+        // The gain OpenAL itself reports, read through whichever binary ResolveOpenAl bound
+        // (soft_oal.dll on this box; see the header). null when it CANNOT be read, so a probe says
+        // it could not confirm silence instead of passing vacuously — which is a live hazard here,
+        // not a hypothetical: with no current context alGetListenerf is a no-op and the caller's
+        // variable keeps whatever it held. Since BringUp() opens the device at boot, the way to
+        // land in that state is now a box with NO device rather than one that has not played a
+        // sound yet — same trap, different cause, and `device=` is what tells them apart. Seeded
+        // with NaN rather than 0 for exactly that reason: a 0 seed made an unreadable gain
+        // indistinguishable from a muted one, and every run "passed".
         internal static float? ListenerGain
         {
             get
@@ -311,7 +341,25 @@ namespace EvilAliensWeb.Headless
         {
             string path = Path.Combine(AppContext.BaseDirectory, FileName);
             if (File.Exists(path))
-                return "an " + FileName + " already exists at " + path + " -- refusing to overwrite it";
+            {
+                // Adopt our OWN leftovers instead of refusing. Remove() only runs in Main's
+                // finally, so a run killed before it (Ctrl+C, a crash) strands this file next to
+                // the exe -- where it silently deafens EVERY later run on the box, including ones
+                // that never passed the flag. Refusing there would make the flag that wrote it the
+                // one thing that could not clear it. An ini we did NOT write is still a stop.
+                string existing;
+                try { existing = File.ReadAllText(path); }
+                catch (Exception ex)
+                {
+                    return "cannot read the existing " + FileName + " at " + path
+                        + " to see whether it is ours: " + ex.GetType().Name + ": " + ex.Message;
+                }
+                if (existing != Body)
+                    return "an " + FileName + " this tool did not write already exists at " + path
+                        + " -- refusing to overwrite it";
+                _installedAt = path;      // ours, stranded by an earlier run; clean it up on exit
+                return null;
+            }
             try
             {
                 File.WriteAllText(path, Body);
@@ -322,6 +370,24 @@ namespace EvilAliensWeb.Headless
             }
             _installedAt = path;
             return null;
+        }
+
+        // The path of a STRANDED ini of ours -- one sitting next to the exe that this run did not
+        // put there. Reported when the device fails to open, because "no audio device" on a box
+        // that has one is otherwise a genuinely baffling result, and this is its likeliest cause.
+        internal static string StrandedIni()
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, FileName);
+            if (path == _installedAt)
+                return null;
+            try
+            {
+                return File.Exists(path) && File.ReadAllText(path) == Body ? path : null;
+            }
+            catch (Exception)
+            {
+                return null;      // best-effort diagnosis; never let it become the failure itself
+            }
         }
 
         // Only ever removes the file this process wrote. Best-effort: the run's verdict must not

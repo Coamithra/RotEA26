@@ -455,7 +455,11 @@ internal class CreditsScene : Scene
 	// the whole session (WebContentManager.Unload now actually frees them). Fires once per
 	// removal, AFTER the scene's final Draw -- ComponentBin defers the remove to its next
 	// flush, which runs before Draw -- so no disposed texture is ever drawn; Initialize()
-	// re-loads them on the next showing. Mirrors HelpText/InstructionsMenu.
+	// re-loads them on the next showing. This is now the LAST component doing the
+	// own-manager + Unload-on-removal dance -- HelpText/InstructionsMenu were converted to the
+	// shared manager in card 4d47c5ba so their art could be warmed once at boot. Credits keeps
+	// its own deliberately: its backgrounds are a large per-showing set, not two fixed sheets,
+	// so paying the decode again beats holding them for the session.
 	public void Unload()
 	{
 		content.Unload();

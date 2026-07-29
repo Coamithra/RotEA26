@@ -527,7 +527,8 @@ def write_generated(path, text, dry):
     """Write `text` only if it would actually change the file, in the file's OWN line endings.
 
     Both halves matter, and neither works alone (Trello 06c6c741). This repo is checked out with
-    core.autocrlf=true and no .gitattributes, so the working copy of a generated .cs is CRLF while
+    core.autocrlf=true and no .gitattributes rule for .cs (the root .gitattributes pins .razor and
+    .cshtml only, because their whitespace reaches the assembly), so a generated .cs is CRLF while
     `text` is built with \\n: writing it verbatim rewrote every line ending on every run and left
     the file MODIFIED in git status with an EMPTY content diff, which looks like the build changed
     something and invites a pointless commit. Preserving the endings alone would still rewrite the

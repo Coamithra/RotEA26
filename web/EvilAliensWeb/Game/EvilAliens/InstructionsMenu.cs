@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
@@ -12,8 +11,6 @@ internal class InstructionsMenu : DrawableGameComponent
 	public delegate void ExitEvent(object sender);
 
 	private List<Texture2D> instructionTextures = new List<Texture2D>();
-
-	private ContentManager localContent;
 
 	private Texture2D keyboardlayout;
 
@@ -36,23 +33,15 @@ internal class InstructionsMenu : DrawableGameComponent
 	public InstructionsMenu(Game game)
 		: base(game)
 	{
-		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
-		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
 		base.DrawOrder = 2000;
 	}
 
 	public override void Initialize()
 	{
+		// base.Initialize() runs the LoadContent OVERRIDE; the bare base.LoadContent() that used
+		// to follow was a no-op -- see the matching note in HelpText.Initialize.
 		base.Initialize();
 		currentlyDisplaying = HelpText.Displays.Lead;
-		base.LoadContent();
-		// KNI runs LoadContent() once per component instance EVER (guarded), but this menu
-		// is a per-GameScene singleton whose Unload() (pause-menu exit) disposes the
-		// localContent textures. Re-load them every showing: a no-op cache hit while
-		// nothing was unloaded, a fresh decode after Unload() — otherwise the second
-		// pause -> Instructions draws disposed textures.
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 	}
 
 	protected override void LoadContent()
@@ -61,8 +50,12 @@ internal class InstructionsMenu : DrawableGameComponent
 		input = ServiceHelper.Get<IInputHandlerService>().InputHandler;
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		spriteBatch = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
+		// Shared content manager, not a private one (card 4d47c5ba) -- see the matching note
+		// in HelpText.LoadContent. Each GameScene owns an InstructionsMenu, so the old
+		// private managers also meant one COPY of the pair per level opened, each re-decoded
+		// on every pause -> Instructions.
+		keyboardlayout = contentManager.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = contentManager.Load<Texture2D>("GFX/Help/Controls_Joypad");
 		blankTexture = contentManager.Load<Texture2D>("GFX/Menu/blank");
 		powerupbubble = contentManager.Load<Texture2D>("GFX/Sprites/powerupbw");
 		font = contentManager.Load<SpriteFont>("GFX/Menu/menufont");
@@ -243,10 +236,5 @@ internal class InstructionsMenu : DrawableGameComponent
 		spriteBatch.Flush();
 		spriteBatch.DrawString(p, new Vector2(120f, y), color, 0f, Vector2.Zero, 0.8f, (SpriteEffects)0, 0f);
 		spriteBatch.Flush();
-	}
-
-	internal void Unload()
-	{
-		localContent.Unload();
 	}
 }

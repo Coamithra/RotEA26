@@ -115,6 +115,15 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     screenshots), then Chrome only replays a known-good script (card 2c3499f3). In Chrome, focus
     the game tab with `window.focus()`, NEVER a synthetic click — every click on the canvas is
     also a menu-select / fire input.
+  - **A check worth RE-RUNNING later becomes a committed probe** (card 1e476668):
+    `tools/headless/probes/*.txt` are `--script` files that assert, driven by
+    `python tools/headless/probes/run_probes.py` (exit 1 on any failure). `mark` / `expect` /
+    `expect-not` match per line against everything the run printed, the game's own
+    `[loadprofile]` / `[hitch]` / `[net]` lines included — which is the only way to defend a
+    change whose failure is SILENT (a data file, a manifest, a host default). Add one when a
+    regression would otherwise go unnoticed until someone plays the game; mutation-test it
+    first, and assert the POSITIVE too or it passes on a run that never got there. Conventions
+    + the menu-navigation crib: `tools/headless/probes/README.md`.
   - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
     scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
     `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first

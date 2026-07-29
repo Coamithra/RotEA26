@@ -160,6 +160,21 @@ namespace EvilAliensWeb.Compat
 			return WallProfiler.Report();
 		}
 
+		// The preload-manifest export, reachable from the HEADLESS host. eahl's `eval` binds by
+		// reflection to the public statics on THIS class only (tools/headless/Program.cs), while
+		// the browser reaches the exporter directly -- window.eaPreloadExport calls
+		// DotNet.invokeMethod('EvilAliensWeb','ExportPreloadManifest') on LoadProfiler, bypassing
+		// DebugInput entirely. So without this passthrough the whole ?loadlog -> export loop is
+		// browser-only, and growing the manifest means driving Chrome. Deliberately NOT
+		// [JSInvokable]: LoadProfiler.ExportPreloadManifest already carries that attribute and
+		// index.html already binds to it, so the browser surface is unchanged.
+		// Headlessly the "download" lands as <dir of --out>/preload_manifest.txt
+		// (HeadlessJsRuntime.WriteDownload); the text is returned (and printed by `eval`) either way.
+		public static string PreloadExport()
+		{
+			return LoadProfiler.ExportPreloadManifest();
+		}
+
 		// JS bridge for the join-in-progress scenery diff (eaNetBg in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetBg'). Returns the live deep-state the
 		// JIP catch-up replays (card 45a4e48d) as one parseable line, so a joiner's scenery is

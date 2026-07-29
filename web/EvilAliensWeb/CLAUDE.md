@@ -184,6 +184,43 @@ generate much of the art/audio referenced here.
   frame in <level>` for any tick > 120ms (not gated by `?loadlog`), skipping preload + boot warm-up.
   A still-hitching level is a manifest DATA gap — fix by playing with `?loadlog` +
   `eaPreloadExport()`, not by code.
+  - **The whole capture loop runs HEADLESSLY** — `eahl --repl`, then `eval PreloadExport`
+    (`DebugInput.PreloadExport`, a passthrough that exists only because `eval` binds to
+    `DebugInput` statics while the browser's `eaPreloadExport` calls `LoadProfiler` direct). The
+    "download" lands at `<dir of --out>/preload_manifest.txt`.
+  - **`[hitch]` does NOT exist headlessly.** `LoadProfiler.NoteFrame` is called from
+    `Pages/Index.razor.cs` alone, so hitch evidence is browser-only. COLD-vs-warm *is* headless-
+    valid: it is the preload-BRACKET structure, not a timing threshold.
+  - **CAPTURE FROM THE MENU PATH, never `?level=`.** A `?level=` boot has no splash, so
+    `QueueIdleWarm`'s 21 space/star assets drain into live gameplay and are recorded as that
+    level's assets — 20 junk entries. Drive the menu with `eval Press` instead (main menu ->
+    carousel -> difficulty; Challenges is 3 `down` from Start).
+  - **A level with ZERO manifest entries cannot be captured in one pass.** `WarmThenLaunch`
+    returns early when `ManifestAssets` is empty, so no bracket is opened and the level's
+    `Initialize` decodes are attributed to the `(boot)` sentinel. Seed the section from the
+    `(boot)` block immediately preceding the `<Level> preload:` line, then re-capture.
+  - **`(boot)` manifest lines are INERT** — `ManifestAssets` is only ever called with a `Levels`
+    name. Boot/menu gaps can only be fixed in `QueueMenuWarm`/`QueueIdleWarm`, i.e. code. Beware
+    false positives there: `RecordTexture` has no boot exemption (unlike `NoteFrame`), so an
+    asset the menu warm *deliberately* decodes still logs COLD.
+  - **MERGE into `manifest.txt`, never replace it.** `Serialize()` emits only the run's own
+    recordings — it never merges `Shipped()` — so overwriting the file deletes every curated
+    entry for levels the run did not play. Captured per-level sections live in one block at the
+    bottom of the file; a level must not also appear in the hand-written blocks above
+    (`WarmThenLaunch` enqueues duplicates twice).
+  - **A re-capture is a UNION with the existing section, never a blind overwrite** — a capture
+    silently comes back SHORT in two ways. (a) The content manager is shared and never unloads,
+    so anything an EARLIER level in the same process decoded is absent from a later level's
+    section (this really bit: Demo2 captured from the attract rotation runs after Demo1 and its
+    export has no `brainanimated` lines). Prefer a single-level process per capture. (b) A run
+    that ends early never reaches a level's later phases, and some entries are DEFENSIVE rather
+    than observed (`asteroidsmall1..4` is "the spawner picks one at random", not "a run saw all
+    four") — those survive only because warming them makes them reappear. Check the section did
+    not shrink.
+  - **In the BROWSER the recording is not clean-slate** — `Hydrate()` reloads the localStorage
+    learned set at boot, so an export can carry entries from earlier sessions. Headless is
+    per-process (`HeadlessJsRuntime._loadProfile` is in-memory), which is another reason to
+    capture with `eahl`.
 - **Level launches are gated by a pre-launch manifest warm.** `Game1.WarmThenLaunch` (every launch
   path incl. attract demos and `?level=`) decodes the level's manifest textures ONE per tick
   (`PumpLevelWarm`) before the scene is Added, so the browser paints between decodes (no "page

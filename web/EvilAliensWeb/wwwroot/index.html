@@ -9,7 +9,7 @@
 
     <!-- SEO / social (Stage 9). og:image is an absolute URL to the live host so link
          previews work when the public page is shared; the <base href> above is what CI
-         rewrites for Pages, NOT these. -->
+         the deploy rewrites, NOT these. -->
     <meta name="description" content="Revenge of the Evil Aliens — a 2008 Xbox Live Indie shoot-'em-up, recovered and ported to play in your browser. Up to 4-player couch co-op, three worlds, retro arcade mayhem." />
     <meta name="theme-color" content="#05030a" />
     <meta property="og:type" content="website" />
@@ -89,7 +89,7 @@
     <script src="webcam.js"></script>
     <!-- Online co-op WebRTC transport (card 11.4). Inert until eaRtc.host/join is called
          from the menu (or a ?net=...&rtc boot) -- a plain boot touches no server.
-         eaBuildHash is stamped with a fingerprint of the published binary by deploy.yml
+         eaBuildHash is stamped with a fingerprint of the published binary at deploy time
          (sha256 of _framework/blazor.boot.json); 'dev' means a local build. Peers must
          run the identical binary -- NetSession's hello handshake compares the hashes. -->
     <script>window.eaBuildHash = 'dev';</script>
@@ -3209,7 +3209,7 @@
          document.documentElement, so it stays visible there too.
 
          VISIBLE BY DEFAULT IN DEV BUILDS, INVISIBLE IN THE PUBLISHED ONE: keyed off
-         window.eaBuildHash === 'dev' (deploy.yml stamps a real fingerprint at publish). That
+         window.eaBuildHash === 'dev' (the deploy stamps a real fingerprint at publish). That
          is exactly "all dev builds" — Debug *and* a local Release publish — with no #if DEBUG
          and no behavioural divergence between configurations. The C# accumulators are armed by
          this panel, so a shipped build never touches a stopwatch.

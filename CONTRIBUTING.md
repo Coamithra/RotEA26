@@ -140,11 +140,16 @@ proof.
 
 ## Ship & deploy (Phase 6)
 
-- **Merging does NOT deploy.** `.github/workflows/deploy.yml` fires on `workflow_dispatch` only.
-  When ready to ship: `rtk gh workflow run "Deploy to GitHub Pages"`, confirm green with
-  `rtk gh run list`, and for anything content/path-sensitive **spot-check the LIVE URL**
-  (https://coamithra.github.io/RotEA26/) — content paths are case-sensitive there, localhost
-  isn't.
+- **Merging does NOT deploy** — not the game, not the signaling server. **A card is DONE when it
+  is merged; publishing is a separate, user-owned act.** Do not deploy at the end of a card unless
+  the card says to.
+- **The runbook is [`docs/DEPLOY.md`](docs/DEPLOY.md).** Short version: the game ships to
+  https://haraldmaassen.com/RotEA26/ via `python tools/deploy_web.py` (SFTP to the shared Hetzner
+  host), verified with `python tools/check_deploy.py`. Hosting is mid-migration — the *current*
+  public site is still GitHub Pages via `.github/workflows/deploy.yml` (`workflow_dispatch`), and
+  stays so until the first Hetzner deploy is verified.
+- For anything content/path-sensitive, **spot-check the LIVE URL** — content paths are
+  case-sensitive on both hosts, localhost isn't.
 - **Docs are split** — when a change adds a convention/flag/gotcha, update the right file:
   root `CLAUDE.md` (workflow/cross-cutting), `web/EvilAliensWeb/CLAUDE.md` (game/engine features),
   `tools/CLAUDE.md` (asset pipelines).

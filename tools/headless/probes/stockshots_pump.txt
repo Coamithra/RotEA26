@@ -16,7 +16,8 @@
 # this probe is.
 #
 # HOW IT DIFFERS FROM A DEBUG BOOT, and why the settle length is the probe: ?menu / ?skipsplash /
-# ?autostart auto-press Start on frame 1, so the pump has warmed at most one asset. The queue is
+# ?autostart auto-press Start on frame 1, so the pump gets through only the first couple of
+# entries -- the sibling probe's `menu warm drain:` line reads 22 of 24 still queued. The queue is
 # 24 entries drained one per Update tick, menu-critical twelve FIRST and the stock shots after, so
 # the stall window is ~24 ticks wide -- measured, by pressing Start at tick 7 / 13 / 19 / 23 on a
 # full-splash boot: 12 / 8 / 2 / 0 stock shots still cold. `step 200` puts this run an order of

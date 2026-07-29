@@ -322,7 +322,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     first ADDED -- i.e. when the player opens Challenges -- so a dropped level decodes in the
     beat between the keypress and the carousel appearing, and a probe that marks its assertion
     window after the carousel is up passes on the very regression it exists to catch.
-    A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never runs and all
+    A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never REACHES them
+    (the menu's own twelve are queued ahead) and all
     twelve decode at `Init` as before: that is the debug path, not a regression. Since card
     2367b39c `Init` brackets that loop as a LABELLED warm, so those twelve report as one
     `[loadprofile] stockshots warm: 12 textures, <n>ms decode total ... -- deliberate, not a gap`
@@ -342,8 +343,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     `stockshots warm:` line printing, which is `stockshots_warm.txt`'s boot-leg count. The
     residual difference is the IDLE queue's 24 entries running ~24 ticks behind: measured, a
     `?menu` boot's warm set is complete at **frame 27** and IDENTICAL IN MEMBERSHIP to a
-    1200-frame full-splash boot's (59 entries, `eval PreloadExport`). Every probe opens with
-    `step 150 nodraw`, so nothing measures inside that transient. (A `?level=` boot defers the
+    1200-frame full-splash boot's (59 entries, `eval PreloadExport`). Every probe settles at least
+    150 ticks before it asserts, so nothing measures inside that transient. (A `?level=` boot defers the
     idle queue further, behind `PumpLevelWarm` -- considered and left alone; it is the known edge
     `QueueIdleWarm` already documents, and `RecordTexture` drops those warms rather than filing
     them under the level.)

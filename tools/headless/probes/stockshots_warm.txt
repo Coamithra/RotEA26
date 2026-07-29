@@ -59,15 +59,22 @@
 # offending decode lands in the dropped window, and the probe passes on the very mutation it
 # exists to catch (measured -- it did).
 #
-# THE TWO ASSERTIONS BEFORE THE MARK are the boot leg (card 2367b39c). Under ?menu the splash is
-# skipped and Start is auto-pressed on frame 1, so the pump has warmed at most one asset -- and the
-# menu's own twelve are queued AHEAD of the stock shots -- so all twelve decode inside
-# ScreenshotSaver.Init during
-# boot. That is the debug path, not a regression -- and since that card Init brackets the loop as
-# a labelled warm, so it reports as ONE `stockshots warm:` summary instead of twelve COLD lines.
-# Asserting on that summary pins the new attribution AND counts the set: a level dropped from the
+# THE THREE ASSERTIONS BEFORE THE MARK are the boot leg (cards 2367b39c, cccd763a). Under ?menu
+# the splash is skipped and Start is auto-pressed on frame 1, so the pump gets through only the
+# first couple of entries -- and the menu's own twelve are queued AHEAD of the stock shots -- so
+# all twelve decode inside ScreenshotSaver.Init during boot. That is the debug path, not a
+# regression -- and since 2367b39c Init brackets the loop as a labelled warm, so it reports as ONE
+# `stockshots warm:` summary instead of twelve COLD lines.
+# Asserting on that summary pins the attribution AND counts the set: a level dropped from the
 # carousel reads `11 textures` here, caught at BOOT, before the navigation below has run at all.
 # They sit before the mark because the mark is what throws that window away.
+#
+# The `menu warm drain:` line is the third, and this is the only probe positioned to hold it: it
+# prints from Game1.DrainWarmQueue only on a boot that reaches the handoff with the queue still
+# non-empty, which is exactly what ?menu produces and what a full-splash probe never can. Nothing
+# else asserts that diagnostic exists, and its failure mode is silent -- you find out the next
+# time you need the number (card cccd763a). The COUNT is deliberately not pinned: it is however
+# many entries the pump had not reached, i.e. a tick-timing detail, not a contract.
 #
 # **ADDING a carousel level bumps the literal to 13 -- update it here.** Card 8d6883f3 made the
 # set derive from LevelArt so an addition costs no code, and this pin is the one place that still
@@ -85,12 +92,14 @@
 
 step 150 nodraw
 
-# The boot leg: ScreenshotSaver.Init decodes the whole stock set here (the pump never ran under
-# ?menu), and since card 2367b39c it is bracketed, so it must report as one labelled summary
-# naming all twelve -- never as COLD gaps. The count is what catches a dropped carousel level at
-# boot. Both must precede the mark, which discards this window.
+# The boot leg: ScreenshotSaver.Init decodes the whole stock set here (under ?menu the pump never
+# reaches them), and since card 2367b39c it is bracketed, so it must report as one labelled
+# summary naming all twelve -- never as COLD gaps. The count is what catches a dropped carousel
+# level at boot. The drain line is the handoff's own cost, printed right after. All three must
+# precede the mark, which discards this window.
 expect \[loadprofile\] stockshots warm: 12 textures
 expect-not COLD decode in \(boot\): gfx/screenshots/
+expect \[loadprofile\] menu warm drain:
 
 # Now drop the boot window, so the only decodes left are ones the carousel had to go and FETCH.
 # The mark must sit BEFORE the navigation below -- see the header.

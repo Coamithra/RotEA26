@@ -3,7 +3,11 @@
 //
 // The game uses the 3.x pattern: device.OpenContainer("name") -> StorageContainer,
 // then File IO against container.Path. KNI follows the 4.0 async storage API, so
-// we replace it entirely (the KNI Storage package is removed from the .csproj).
+// we replace it entirely. The KNI Storage package is still REFERENCED in the
+// .csproj, with ExcludeAssets="compile" -- it ships at runtime (the platform dll
+// is linked against it) but the compiler never sees it, so the types below are the
+// only StorageDevice/StorageContainer the game compiles against. Do not read that
+// reference as this stub being superseded.
 //
 // Backing store: the WASM in-memory filesystem (MEMFS). System.IO works there in
 // a sandbox. Stage 7 makes it PERSISTENT by mirroring the save tree to browser

@@ -61,8 +61,9 @@
          build uses nkast.Kni.Platform.Blazor.GL instead; everything above is shared. -->
     <PackageReference Include="nkast.Kni.Platform.SDL2.GL" Version="4.1.9001.*" />
 
-    <!-- web/EvilAliensWeb.csproj drops nkast.Xna.Framework.Storage on purpose: the game
-         wants the XNA *3.x* synchronous storage API, which Compat/StorageStub.cs provides.
+    <!-- Same line, same reason, as web/EvilAliensWeb.csproj: see the fuller note there and
+         keep the two in lockstep. In brief: the game wants the XNA *3.x* synchronous storage
+         API, which Compat/StorageStub.cs provides, so it must not compile against KNI's.
          The platform package drags it back in transitively, and its StorageDevice /
          StorageContainer then collide with the stub's (CS0436 x25). `ExcludeAssets=compile`
          keeps the runtime assembly (the platform dll is linked against it) while removing

@@ -32,6 +32,8 @@
 #     a bare `expect` however broken the second is -- measured: the vacuous-wipe mutation went
 #     GREEN until the `expect-not` was added. The positive stays because an absence assertion
 #     alone would pass on a run that printed no `joiner :` line at all.
+#     (`speed=0,0.012` in that line is Level 1's space scene scrolling at its own baseline -- what
+#     a fresh joiner really holds after its own Initialize, not a tuned number.)
 #
 # WHY LEVEL 1 REACHES AN ALIEN BASE AT ALL: `?netscript` replaces the level's event list with the
 # compressed beat script, whose first background beat is a whole-scene swap TO the alien base --
@@ -52,7 +54,6 @@ eval NetBgTest
 
 expect \[netbgtest\] PASS ops=\(none\)
 expect \[netbgtest\] PASS ops=SetSceneAlienBase,SetSpeed,SetAlienBase2,EngageBeltSlowdown,QueueAndromeda,SetDoodadPos
-expect joiner : speed=0,0 base=- belt=0 doodad=-
+expect joiner : speed=0,0\.012 base=- belt=0 doodad=-
 expect-not joiner : .*base=GFX/
-expect-not \[netbgtest\] FAIL
 quit

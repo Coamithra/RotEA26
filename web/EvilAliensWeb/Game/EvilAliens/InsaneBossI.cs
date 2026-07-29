@@ -249,6 +249,26 @@ internal class InsaneBossI : GameScene
 		}
 	}
 
+	// The Floor mirror above, as state -- so eaNetBgTest actually covers it and a two-window
+	// eaNetBg() diff can see it. It is read from the live collection rather than a bool this class
+	// keeps, because the thing worth checking is that the FLOOR is there, not that we remember
+	// adding it (this scene owns the only Floor in play).
+	protected override string NetSceneChangeState()
+	{
+		// Membership alone is not enough, for the reason ComponentBin.TryAdd spells out: a Remove
+		// is QUEUED to the death list and the component is still in the collection until the next
+		// flush, so "is the floor there" has to mean live NEXT tick. Without this the self-test's
+		// own wipe reads as not having happened and the floor leg passes vacuously.
+		bool live = Collection.ContainsType<Floor>() && !Collection.DEBUGdeathlistcontains((GameComponent)(object)f);
+		return "floor=" + (live ? "1" : "0");
+	}
+
+	internal override void NetSceneChangeTestWipe()
+	{
+		// A fresh joiner ran its own Initialize, which does not add the floor -- only GoMars does.
+		Collection.Remove((GameComponent)(object)f);
+	}
+
 	private void halt(GameEvent sender)
 	{
 		Background.SetSpeed(new Vector2(-0.2f, 0f) / 16.666666f);

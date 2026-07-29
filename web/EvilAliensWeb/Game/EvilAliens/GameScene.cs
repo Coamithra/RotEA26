@@ -389,15 +389,20 @@ internal abstract class GameScene : Scene
 
 	internal void NetApplyBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op, Vector2 v)
 	{
-		// SetAlienBaseN swaps layer 0's texture and so indexes backgroundLayers[0], which a space
-		// scene does not have (its starfield is procedural and the layer list is empty). The
-		// legitimate orderings can never do that -- Level 3 is an alien base throughout, and a
-		// catch-up burst replays the scene op first -- but a publicly listed game has a stranger
-		// on the far end, and an IndexOutOfRange here takes the level down. Pre-existing hole,
-		// not one this card's ops introduced.
-		if (IsNetAlienBaseTextureOp(op) && !Background.NetHasBaseLayer)
+		// SetAlienBaseN rewrites layer 0, which is only an alien-base floor on an alien-base scene:
+		// on a space scene there is no layer 0 at all (IndexOutOfRange, taking the level down) and
+		// on Mars layer 0 is the SKY, which it would quietly paint a base tile over. The
+		// legitimate orderings can never do either -- Level 3 is an alien base throughout, and a
+		// catch-up burst replays the scene op first -- but a publicly listed game has a stranger on
+		// the far end. Logged ONCE: a stranger can send these at packet rate.
+		if (IsNetAlienBaseTextureOp(op) && !Background.NetOnAlienBaseScene)
 		{
-			Console.WriteLine("[net] ignoring " + op + " with no alien-base layer to switch");
+			if (!netBadBaseOpLogged)
+			{
+				netBadBaseOpLogged = true;
+				Console.WriteLine("[net] ignoring " + op + " off the wire -- not on an alien-base scene"
+					+ " (logged once)");
+			}
 			return;
 		}
 		switch (op)
@@ -445,6 +450,8 @@ internal abstract class GameScene : Scene
 			break;
 		}
 	}
+
+	private bool netBadBaseOpLogged;
 
 	private static bool IsNetAlienBaseTextureOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op)
 	{
@@ -776,8 +783,28 @@ internal abstract class GameScene : Scene
 	// The catch-up state as one parseable line, for the eaNetBg() console dump.
 	internal string NetCatchUpStateLine()
 	{
-		return Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong
+		string line = Background.NetStateLine() + " song=" + base.SoundManager.NetCurrentSong
 			+ " cosmetic=" + NetCosmeticStateField();
+		string levelState = NetSceneChangeState();
+		return (levelState.Length == 0) ? line : line + " " + levelState;
+	}
+
+	// Whatever a level mirrors in NetApplySceneChange BEYOND the backdrop, as one field, so that
+	// mirror is visible to the eaNetBg() two-window diff and covered by the eaNetBgTest round trip
+	// -- Background's state line cannot see it, and a mirror nothing can observe is a mirror
+	// nobody notices breaking. Empty for the levels that mirror nothing, which is all but one, so
+	// their state line is unchanged.
+	protected virtual string NetSceneChangeState()
+	{
+		return "";
+	}
+
+	// The wipe half of the same seam (debug only, the eaNetBgTest round trip): put that
+	// level-specific state back to what a peer that just ran its own Initialize holds. Without it
+	// the state survives the wipe and its leg of the round trip passes vacuously -- the same trap
+	// Background.NetTestWipe's entry-scene rebuild exists for.
+	internal virtual void NetSceneChangeTestWipe()
+	{
 	}
 
 	// The decorative swarms as one field. Prints the KIND and RATE only, which both peers hold
@@ -834,6 +861,7 @@ internal abstract class GameScene : Scene
 			EvilAliensWeb.Compat.Net.NetProtocol.EncodeCosmeticSwarmEvent(0, (byte)kind, on: true, rate)));
 		int song = base.SoundManager.NetCurrentSong;
 		Background.NetTestWipe();
+		NetSceneChangeTestWipe();
 		NetClearCosmeticSwarms();
 		base.SoundManager.NetApplyMusic(-1);
 		string joiner = NetCatchUpStateLine();

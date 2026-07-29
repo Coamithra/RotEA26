@@ -149,9 +149,11 @@ public class Background : Scene
 
 	private bool netSceneEntryTaken;
 
-	// A wrapper setter's identity, claimed before it delegates to its base setter (SetSpaceClassic
-	// -> SetSpace), so the inner call records the wrapper's scene instead of the base's.
-	private BackgroundScene? netScenePending;
+	// Set by a wrapper setter (SetSpaceClassic -> SetSpace) while it delegates, so the inner
+	// setter's note is suppressed and the wrapper notes its OWN scene once it has finished. Both
+	// halves matter: the inner note would record the wrong scene (and mid-level emit the wrong
+	// backdrop), and a wrapper runs a second Reset() after it that would undo the scroll re-point.
+	private bool netSceneDeferNote;
 
 	// The scene op a join-in-progress peer needs, or null while we are still on the scene its own
 	// Initialize will build. Assigned AFTER the setter's own Reset() (see NoteScene).
@@ -636,7 +638,9 @@ public class Background : Scene
 	// Called as the LAST statement of every scene setter, which means AFTER the Reset() they all
 	// end with. That ordering is the whole trick: Reset() clears the catch-up latches (it is
 	// reached from level entry too, where they must go), so a latch assigned before it would be
-	// wiped by the very setter it describes.
+	// wiped by the very setter it describes. The three WRAPPER setters keep that true by DEFERRING
+	// their inner setter's note (netSceneDeferNote) and noting once they have finished -- they run
+	// a second Reset() of their own, which would otherwise undo the scroll re-point below.
 	//
 	// A setter run at level Initialize is not replicated: both peers run their own, and telling a
 	// joiner to re-enter the scene it just built costs it a second hyperspace fade for nothing.
@@ -644,17 +648,12 @@ public class Background : Scene
 	// a client that already followed us away from it has to be told to come back.
 	private void NoteScene(BackgroundScene scene)
 	{
-		if (netScenePending.HasValue)
-		{
-			scene = netScenePending.Value;
-			netScenePending = null;
-		}
-		netScene = scene;
-		if (!netSceneEntryTaken)
+		if (netSceneDeferNote)
 		{
 			return;
 		}
-		// A mid-level swap rebuilds the scroll from the NEW scene's own baseline, which makes any
+		netScene = scene;
+		// A scene setter rebuilds the scroll from the new scene's own baseline, which makes any
 		// SetSpeed intent from before it stale -- and stale in a way that diverges peers. The
 		// Reset() we have just returned from cleared netLastSpeed (so a joiner is never told about
 		// that SetSpeed) while leaving targetscrollspeed pointing at it, so the host reported a
@@ -662,8 +661,18 @@ public class Background : Scene
 		// scene's scroll toward the old scene's target on the host alone. Re-point both at what we
 		// are actually scrolling at, which both peers reach by running this same setter.
 		// (Found by the InsaneBossI round trip: halt()'s SetSpeed, then GoAlienBase.)
+		//
+		// UNCONDITIONAL, above the entry check: a join-in-progress peer sends EvReady at its scene
+		// Initialize, ~2.7s BEFORE its own Startup -> Normal edge arms that flag, so the catch-up
+		// burst it is answered with applies its scene op while the flag is still false. Skipping
+		// the re-point there would leave the two peers' eaNetBg() lines disagreeing on speed=,
+		// which is the documented pass criterion for the whole JIP run.
 		targetscrollspeed = scrollspeed;
 		scrollspeedchangetimer.Stop();
+		if (!netSceneEntryTaken)
+		{
+			return;
+		}
 		EvilAliensWeb.Compat.Net.NetBackgroundOp? op = SceneWireOp(scene);
 		if (!op.HasValue)
 		{
@@ -699,7 +708,7 @@ public class Background : Scene
 		netSceneEntryTaken = false;
 		netSceneEntry = BackgroundScene.None;
 		netLastScene = null;
-		netScenePending = null;
+		netSceneDeferNote = false;
 	}
 
 	// The level script is about to run for the first time this play, so whatever scene is up now
@@ -754,9 +763,12 @@ public class Background : Scene
 	// simply keeps its own.
 	// Debug only (the eaNetBgTest round-trip): put the scenery back to what a peer that just ran
 	// its own scene Initialize would hold, so the replayed burst has something real to restore.
-	// Reset() covers the doodad, the belt and the latches; targetscrollspeed is cleared on top
+	// Reset() covers the doodad, the belt and the latches; targetscrollspeed is re-pointed on top
 	// because Reset() leaves it (it only rewinds the LIVE scrollspeed), and a stale target would
-	// make the speed leg of the diff pass without the burst doing anything.
+	// make the speed leg of the diff pass without the burst doing anything. It is re-pointed at
+	// the scene's own scroll rather than ZEROED because that is what a real fresh joiner holds --
+	// its Initialize ran a scene setter, and NoteScene re-points there. Zeroing it would leave the
+	// wipe stricter than reality and fail every level whose script never calls SetSpeed.
 	//
 	// What this canNOT wipe is the alien-base tile: Reset() deliberately leaves layer 0 alone and
 	// the level's initial texture name isn't recoverable from here, so a SetAlienBaseN in the
@@ -771,7 +783,7 @@ public class Background : Scene
 			NetTestApplyEntryScene();
 		}
 		Reset();
-		targetscrollspeed = Vector2.Zero;
+		targetscrollspeed = scrollspeed;
 		scrollspeedchangetimer.Stop();
 	}
 
@@ -808,10 +820,16 @@ public class Background : Scene
 			+ " doodad=" + doodad;
 	}
 
-	// Whether there is a layer 0 for SetAlienBaseN to switch at all -- false for the procedural
-	// space scenes, whose layer list is empty. Read by GameScene.NetApplyBackgroundOp before it
-	// hands a wire op to one of them.
-	internal bool NetHasBaseLayer => backgroundLayers != null && backgroundLayers.Count > 0;
+	// Whether layer 0 is an alien-base FLOOR, i.e. whether SetAlienBaseN has anything it may
+	// legitimately switch. Read by GameScene.NetApplyBackgroundOp before it hands a wire op to one
+	// of them.
+	//
+	// Deliberately the tracked SCENE and not "does a layer 0 exist": every scene except the
+	// procedural space ones has layers, so a layer-count test would happily let a wire
+	// SetAlienBase2 paint a base tile over the MARS SKY -- reachable since mid-level scene swaps
+	// began replicating, because a client can now be on Mars mid-level at all.
+	internal bool NetOnAlienBaseScene => netScene == BackgroundScene.AlienBase
+		|| netScene == BackgroundScene.AlienBaseDark;
 
 	// The floor tile layer 0 is actually showing (or switching to) -- what SetAlienBaseN really
 	// changes, as opposed to the op we remembered running.
@@ -1383,12 +1401,14 @@ public class Background : Scene
 
 	public void SetSpaceClassic()
 	{
-		// Claim the identity before delegating, so the inner SetSpace's NoteScene records THIS
-		// scene rather than plain space (and, mid-level, cannot emit a wrong-backdrop op).
-		netScenePending = BackgroundScene.SpaceClassic;
+		// Defer the inner setter's note; this wrapper notes its own scene at the end (see
+		// netSceneDeferNote).
+		netSceneDeferNote = true;
 		SetSpace();
 		scrollspeedreset = new Vector2(0f, -0.2f) / 16.666666f;
 		Reset();
+		netSceneDeferNote = false;
+		NoteScene(BackgroundScene.SpaceClassic);
 	}
 
 	// Trigger one deliberate "projection hiccup". Called by the simulator levels
@@ -1500,10 +1520,12 @@ public class Background : Scene
 	public void SetSimpleSpaceClassic()
 	{
 		// See SetSpaceClassic.
-		netScenePending = BackgroundScene.SimpleSpaceClassic;
+		netSceneDeferNote = true;
 		SetSimpleSpace();
 		scrollspeedreset = new Vector2(0f, -0.2f) / 16.666666f;
 		Reset();
+		netSceneDeferNote = false;
+		NoteScene(BackgroundScene.SimpleSpaceClassic);
 	}
 
 	public void QueueEarthSim()
@@ -1539,10 +1561,12 @@ public class Background : Scene
 	public void SetAlienBaseDark()
 	{
 		// See SetSpaceClassic.
-		netScenePending = BackgroundScene.AlienBaseDark;
+		netSceneDeferNote = true;
 		SetAlienBase();
 		oscilatereach = 0.5f;
 		oscilatespeed = 0f;
 		Reset();
+		netSceneDeferNote = false;
+		NoteScene(BackgroundScene.AlienBaseDark);
 	}
 }

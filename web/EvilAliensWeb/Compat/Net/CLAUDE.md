@@ -60,8 +60,10 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   AI-friend replication (note the budget is `Friends+1` TOTAL ships incl. the remote, so with a
   peer connected you need `aifriends>=2` to spawn any AI friend); `?netscript` (pair with `?level=Level1`) replaces the level's event list with
   a compressed ~60s script firing every replicated beat type (message, warning, background
-  ops, checkpoints, music switch, victory) -- the purpose-built two-tab verification for
-  script replication (`GameScene.PopulateNetScriptTest`). Card 11.4 adds `?rtc` (a
+  ops incl. a whole-SCENE swap to the alien base, checkpoints, music switch, victory) -- the
+  purpose-built two-tab verification for script replication
+  (`GameScene.PopulateNetScriptTest`). It looks nothing like Level 1 on purpose: it is a beat
+  rig, and the alien-base swap is what gives the floor-texture and scene legs any coverage. Card 11.4 adds `?rtc` (a
   `?net=` boot uses the REAL WebRtcTransport: host prints its room code to the console,
   join passes it via `?code=ABCDE`) and `?signal=<url>` (override the signaling server;
   a local rig runs `uvicorn main:app --port 8091` in `server/signal` and boots with
@@ -1108,6 +1110,10 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     its `Purge<Ball>` is host-authoritative (the host's purge broadcasts an `EvDeath` per removal,
     so a local purge would strand puppet ids). **KNOWN LIMIT:** `spawnType` is not mirrored, so a
     client respawning inside the Mars section enters from the south rather than the west.
+    Its mirror is covered like the backdrop: `GameScene.NetSceneChangeState` puts it in the
+    `eaNetBg()` line (`floor=`) and `NetSceneChangeTestWipe` removes it for the round trip, so the
+    leg is non-vacuous. Both read "live NEXT tick" -- `ComponentBin.Remove` is queued, so a
+    membership test alone reports a floor the wipe has already dropped.
   - The scenes with NO wire op (holodeck / classic variants) are Initialize-only. A mid-level swap
     to one is REPORTED on the `[net]` line rather than silently latching null -- silence there
     would reproduce this very card's bug one level up.

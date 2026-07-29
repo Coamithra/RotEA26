@@ -1,0 +1,39 @@
+# PROBE: InsaneBossI's mid-level scene swap replicates its FLOOR as well as its backdrop.
+#
+# PINS: the one `GameScene.NetApplySceneChange` override in the game (card ca4fd94f).
+# `netbg_catchup.txt` covers the mechanism on the `?netscript` rig, but that rig only ever runs
+# the BASE implementation -- this is the only probe that runs the real `GoMars` handler and the
+# override that mirrors it, on the only level that has one.
+#
+# FAILURE MEANS: a peer joining during the Mars section of Boss Train sees the Mars backdrop with
+# no ground shadows and no `Floorbottom`, because the host added a `Floor` its joiner never heard
+# about. Purely visual, entirely silent, and only ever visible to the second player -- the reason
+# it is a probe.
+#
+# THE ASSERTIONS:
+#   - `ops=SetSceneMars` proves the run actually reached `GoMars` rather than asserting over a
+#     level still in its opening space section (where every floor field would read 0 and the
+#     probe would go green having tested nothing).
+#   - `host : ... floor=1` / `joiner : ... floor=0` is the anti-vacuity pair. `Collection.Remove`
+#     is QUEUED, so the self-test's own wipe does not take effect within the tick it runs in --
+#     `InsaneBossI.NetSceneChangeState` therefore reads "live NEXT tick" the way
+#     `ComponentBin.TryAdd` does. Before that, `joiner` read `floor=1` and the leg passed
+#     vacuously. Drop the `Collection.Add` from the override and `caught` comes back `floor=0`,
+#     failing the PASS.
+#
+# TIMING: the Mars section is entered around frame ~4300 and left around ~14000; frame 7200 sits
+# mid-window and was measured identical over three runs, with the window's edges probed at 4800
+# and 10800. It is an AI-played fight, so treat the window as generous rather than exact -- if
+# this ever goes red at `ops=`, check WHICH scene the state line names before suspecting the
+# replication. `?invuln` so a death cannot rewind the level to a pre-GoMars checkpoint;
+# `?aiplayer` so the fight is actually fought.
+#
+# eahl: --flags "?level=InsaneBossI&invuln&aiplayer"
+
+step 7200 nodraw
+eval NetBgTest
+
+expect \[netbgtest\] PASS ops=SetSceneMars
+expect host   : .*base=GFX/MarsBG/.*floor=1
+expect joiner : .*floor=0
+quit

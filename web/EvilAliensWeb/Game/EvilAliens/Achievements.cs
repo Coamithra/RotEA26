@@ -127,6 +127,12 @@ public class Achievements : Savable
 
 	// ?unlockall marks all ten awardments unlocked in memory (MenuScene.Initialize); saving
 	// that would make the debug flag permanent. See Savable.SuppressSave.
+	//
+	// Deliberately NOT retroactive, unlike Settings' load-time Invulnerability = false heal: a
+	// `true` there can only be fallout from the old ?invuln bug, whereas an unlocked awardment
+	// is indistinguishable from an earned one. A save already poisoned by the pre-card
+	// behaviour stays poisoned rather than risk erasing real progress; the in-game
+	// Options -> reset is the deliberate way out.
 	protected override bool SuppressSave => EvilAliensWeb.Compat.DebugFlags.UnlockAll;
 
 	protected override void saveData(StorageContainer c)

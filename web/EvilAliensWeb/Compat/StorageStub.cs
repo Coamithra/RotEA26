@@ -29,8 +29,18 @@ namespace Microsoft.Xna.Framework.Storage
 
         internal StorageContainer(string path)
         {
-            Path = path.EndsWith("/") ? path : path + "/";
+            Path = EnsureTrailingSeparator(path);
             try { Directory.CreateDirectory(Path); } catch { /* MEMFS best effort */ }
+        }
+
+        // Accepts BOTH separators, because the browser default is a '/' MEMFS path while a
+        // desktop host hands us a native one -- the two tests must agree, or a root that
+        // already ends in '\' gets a second separator glued on. Appends '/' either way:
+        // .NET accepts it on Windows, and PersistentSave's mirror keys are built by
+        // Substring-ing this prefix off, so keeping one spelling keeps those keys stable.
+        internal static string EnsureTrailingSeparator(string path)
+        {
+            return path.EndsWith("/") || path.EndsWith("\\") ? path : path + "/";
         }
 
         public bool IsDisposed { get; private set; }
@@ -75,7 +85,7 @@ namespace Microsoft.Xna.Framework.Storage
             if (PersistentSave.Hydrated)
                 throw new InvalidOperationException(
                     "StorageDevice.SetRoot must be called before the first OpenContainer");
-            Root = path.EndsWith("/") || path.EndsWith("\\") ? path : path + "/";
+            Root = StorageContainer.EnsureTrailingSeparator(path);
         }
 
         public bool IsConnected => true;

@@ -56,6 +56,22 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   prior `?flyspiderbox=250` is in force. It additionally pins the `IsOn`/`IsExplicitlyOff` truth
   table (that card reordered them), including the row that matters -- a BARE flag is ON but is NOT
   explicitly off, so `!IsOn` and `IsExplicitlyOff` are genuinely different predicates.
+- **Third case set: `?aiscanrows=` / `?aicrosspenalty=`** (card b174b00f) -- the same
+  `DebugFlags.Parse` shape, pinning that an override reaches the private resolving property, that
+  a non-integer row count is REFUSED rather than truncated to the baked default (a sweep that
+  cannot move, reported as a result), and the clamps. Its negative control is that the resolved
+  value must differ from the const while an override is in force; it restores both overrides to
+  null on the way out, so a later `Probe*` does not inherit them.
+- **Fourth case set: `CollisionBox` vs `CollisionLine`** (card 64967ea5) -- the box-vs-ray
+  predicate, driven through the PUBLIC `TestCollision(ICollisionType)` (which dispatches to the
+  private method, so no private binding is needed). **It is a REGRESSION oracle, and the card it
+  was written for had no behaviour delta at all** -- collapsing a duplicated `Intersects` call
+  cannot change an answer -- so the usual "run the pre-card policy as a negative control" shape
+  does not exist here. Two things replace it: the set is run DIFFERENTIALLY (build the
+  merge-base assembly into a scratch dir and point the probe at that path, then at the branch
+  build; the verdict tables must match), and it carries three CONTROL pairs that each differ in
+  exactly one input, so a predicate that lost a term splits them. Mutation-tested: dropping
+  `< collisionLine.Length` turns 4 lines FAIL, an always-true predicate turns 9.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

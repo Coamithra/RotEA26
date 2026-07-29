@@ -88,6 +88,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeCollisionBoxLine(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -484,6 +490,103 @@ internal static class Program
         Check("case set leaves no override behind",
             Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
             "rows=" + liveRows() + " penalty=" + livePenalty());
+        return 0;
+    }
+
+    // Card 64967ea5 -- CollisionBox's box-vs-LINE predicate. The card collapsed a duplicated
+    // `(val).Intersects(val2)` (the ray-box test ran TWICE per call, once for .HasValue and once
+    // for the comparison) into one cached call. That is a COST fix, not a behaviour fix: the
+    // answer is unchanged by construction, so there is no old-vs-new behaviour to contrast and
+    // the usual "run the pre-card policy as a negative control" shape does not apply here.
+    //
+    // What this set is for, then, is the OTHER half of the claim -- that collapsing the call did
+    // not quietly change the predicate. It is a regression oracle, and it is run DIFFERENTIALLY:
+    // point it at a merge-base build of EvilAliensWeb.dll and at the branch build and the two
+    // verdict tables must be identical. (The "one call, not two" half is proven by
+    // verify_decompiled_diff.py, which shows the single surviving call site.)
+    //
+    // Expectations are derived from ray-AABB geometry, never restated from the code. The
+    // predicate has exactly two terms -- "the ray meets the box at all" and "it does so within
+    // the line's Length" -- so the set is built as PAIRS that isolate one term each, and the
+    // sensitivity section below asserts each pair actually splits. A set that could not fail
+    // would be worth nothing here, and with no old behaviour to contrast that is the only
+    // sensitivity evidence available inside the probe.
+    private static int ProbeCollisionBoxLine(Assembly asm)
+    {
+        Type boxType = asm.GetType("EvilAliens.CollisionBox", true);
+        Type lineType = asm.GetType("EvilAliens.CollisionLine", true);
+        Type iface = asm.GetType("EvilAliens.ICollisionType", true);
+        PropertyInfo topLeft = boxType.GetProperty("TopLeft");
+        if (topLeft == null)
+        {
+            Console.WriteLine("FAIL: could not reflect CollisionBox.TopLeft -- renamed or moved?");
+            return 2;
+        }
+        Type vec2 = topLeft.PropertyType;
+        ConstructorInfo boxCtor = boxType.GetConstructor(new[] { vec2, vec2 });
+        ConstructorInfo lineCtor = lineType.GetConstructor(new[] { vec2, typeof(float), typeof(float) });
+        // TestCollision is the PUBLIC entry point and dispatches to the private TestCollisionLine
+        // for a CollisionLine, so the edited method is reached without binding a private member.
+        MethodInfo test = boxType.GetMethod("TestCollision", new[] { iface });
+        if (boxCtor == null || lineCtor == null || test == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (CollisionBox(Vector2,Vector2)="
+                + (boxCtor != null) + " CollisionLine(Vector2,float,float)=" + (lineCtor != null)
+                + " TestCollision(ICollisionType)=" + (test != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Func<float, float, object> vec = (x, y) => Activator.CreateInstance(vec2, new object[] { x, y });
+        // The box under test: design-space (100,100)..(200,200).
+        object box = boxCtor.Invoke(new object[] { vec(100f, 100f), vec(200f, 200f) });
+        // CollisionLine's DirectionalVector is MyMath.AngleToVector(direction) = (cos, sin), a UNIT
+        // vector, so the ray parameter Intersects returns is a distance in world units and compares
+        // directly against Length. Screen Y grows downward; none of the cases below depend on that
+        // beyond naming.
+        const float right = 0f;
+        const float down = (float)Math.PI / 2f;
+        const float left = (float)Math.PI;
+        const float downRight = (float)Math.PI / 4f;
+        Func<float, float, float, float, bool> hits = (ox, oy, len, dir) =>
+            (bool)test.Invoke(box, new object[] { lineCtor.Invoke(new object[] { vec(ox, oy), len, dir }) });
+
+        Console.WriteLine("[logic_probe] CollisionBox vs CollisionLine (card 64967ea5)");
+
+        // 1. Geometry: does the ray meet the box at all, given a length that cannot be the reason.
+        // Distances are chosen well clear of the box edges so no case rides a float boundary.
+        Check("aimed at the box from the left, long enough", hits(0f, 150f, 1000f, right), "enters at t=100");
+        Check("aimed AWAY from the box", !hits(0f, 150f, 1000f, left), "box is behind the origin");
+        Check("passes above the box", !hits(0f, 50f, 1000f, right), "y=50 never enters [100,200]");
+        Check("passes below the box", !hits(0f, 300f, 1000f, right), "y=300 never enters [100,200]");
+        Check("aimed at the box from above", hits(150f, 0f, 1000f, down), "enters at t=100");
+        Check("origin INSIDE the box", hits(150f, 150f, 10f, right), "a ray starting inside meets it at t=0");
+        Check("diagonal through the box", hits(50f, 60f, 1000f, downRight), "crosses x=100 at y=110");
+
+        // 2. The length term, in isolation: same origin and heading as a case above, shortened so
+        // the box is out of reach. A predicate that dropped `< collisionLine.Length` answers these
+        // exactly as it answers their long counterparts.
+        Check("too short to reach it (from the left)", !hits(0f, 150f, 50f, right), "needs 100, has 50");
+        Check("too short to reach it (from above)", !hits(150f, 0f, 50f, down), "needs 100, has 50");
+        Check("too short to reach it (diagonal)", !hits(50f, 60f, 50f, downRight), "needs ~70.7, has 50");
+        // ... and the boundary is generous rather than exact -- just past the entry distance is a
+        // hit. Kept off the exact tie (100 vs 100), which no caller depends on and which would
+        // pin a float comparison this card has no business fixing.
+        Check("just long enough", hits(0f, 150f, 100.5f, right), "needs 100, has 100.5");
+
+        // 3. SENSITIVITY. Each pair below differs in exactly ONE input, so a live term must make
+        // the two answers differ. Without this the section above could be satisfied by a predicate
+        // that had lost a term (or by one that always answered `false`), and a green run would be
+        // worth nothing -- the eaNetScore.test() rule, in the only form available for a change
+        // with no behaviour delta to contrast.
+        Check("CONTROL: only Length differs => the length term is live",
+            hits(0f, 150f, 1000f, right) != hits(0f, 150f, 50f, right),
+            "same origin and heading, 1000 vs 50");
+        Check("CONTROL: only direction differs => the intersection term is live",
+            hits(0f, 150f, 1000f, right) != hits(0f, 150f, 1000f, left),
+            "same origin and length, toward vs away");
+        Check("CONTROL: only origin Y differs => the box bounds are live",
+            hits(0f, 150f, 1000f, right) != hits(0f, 50f, 1000f, right),
+            "same heading and length, y=150 vs y=50");
         return 0;
     }
 }

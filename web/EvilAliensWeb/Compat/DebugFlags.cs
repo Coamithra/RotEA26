@@ -465,17 +465,25 @@ namespace EvilAliensWeb.Compat
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
 		//
 		// Card b174b00f gave it a SECOND owner: OwnLevel. There it drops the level's continuous
-		// SkullSpawner and StarMineSpawner and keeps the Walls(2) section, which is what makes an
-		// OwnLevel churn figure comparable with the ~70 deg/s Level-3 baseline -- that baseline is
-		// a ?wallsonly number, and comparing it against OwnLevel's FULL level (walls plus a
-		// sustained enemy stream) is the confound that cost card b4972696 its premise. Same flag on
-		// both levels deliberately: the rigs are then matched by name, not by a reader remembering.
+		// SkullSpawner and StarMineSpawner and keeps the Walls(2) section, so a churn figure can be
+		// taken from the walls ALONE -- comparing OwnLevel's full level against a Level-3
+		// ?wallsonly run is walls-plus-enemies against walls-alone, and that confound is what made
+		// the question unanswerable for two cards. Deliberately the same flag name on both levels,
+		// so the walls-only rigs are reached the same way rather than by a reader remembering.
+		// NOT the same SHAPE on both, though, and the difference bounds any ratio taken across
+		// them: Level3.PopulateWallsOnly loops six sections (variations 1/0/3, twice) and is still
+		// running after 180 sim-seconds, while OwnLevel has one Walls(2) and reaches victory at
+		// ~60. Both are rates over the ticks they ran, so they compare; the SECTIONS differ, which
+		// is exactly the grid-vs-grid question, but do not read the two as equal-length runs.
 		public static bool WallsOnly { get; private set; }
 
-		// ?nowalls (card b174b00f) -- the POSITIVE CONTROL for the above, currently OwnLevel only:
-		// keep the spawners, drop the Walls section. Without it a low ?wallsonly churn reading
-		// cannot distinguish "the walls are innocent" from "suppressing events broke the rig",
-		// because both look like a quiet number. Expect it to stay HIGH.
+		// ?nowalls (card b174b00f) -- the control for the above, currently OwnLevel only: keep the
+		// spawners, drop the Walls section. Without it a quiet ?wallsonly reading cannot be told
+		// from a rig that event suppression simply broke, because both are just a low number.
+		// MEASURED, so do not use a prediction as the sanity criterion: ?nowalls reads ~61 deg/s
+		// against walls-only's 229 and the full level's 404. The decision rule is comparative --
+		// if BOTH halves come back quiet the rig is what changed and neither number means
+		// anything; one quiet and one loud attributes the churn to the loud half.
 		public static bool NoWalls { get; private set; }
 
 		// A/B the mip chain (?nomips): WebContentManager.TryLoadDds uploads level 0 only, so every
@@ -1853,11 +1861,12 @@ namespace EvilAliensWeb.Compat
 					// 0 is DELIBERATELY allowed: it makes DistanceToBlockedRow report "nothing
 					// blocked" always, i.e. a bot that does not look ahead at all -- the same
 					// kind of skill FLOOR ?aiaim=Pi is, and the negative control a look-ahead
-					// sweep wants at one end. Capped well past any useful depth (grids run to
-					// 179 rows, but the scan is per-column per-tick).
+					// sweep wants at one end. The 64 ceiling is a COST bound, not a semantic
+					// one: the scan runs per column per tick, and the deepest shipped grid is
+					// 179 rows, so this does not reach the bottom of var3 by design.
 					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aisr) && aisr >= 0)
 					{
-						AiWallScanRows = (int)MathHelper.Clamp(aisr, 0, 64);
+						AiWallScanRows = MathHelper.Clamp(aisr, 0, 64);
 					}
 					break;
 				case "aicrosspenalty":

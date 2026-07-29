@@ -126,12 +126,44 @@ internal static class Program
         tSettings.GetField("_difficultyLevel", BindingFlags.NonPublic | BindingFlags.Instance)
                  .SetValue(settings, Enum.Parse(tSettings.GetNestedType("DifficultyLevel"), "Very_Hard"));
 
-        // Through the REAL ?ai* knobs, so the override path being exercised is the shipped one
-        // rather than a second copy of the resolution rule. Left null => PlayerShip reads its
-        // baked Default* const, which is why a bare run is the shipped configuration.
-        if (react.HasValue) SetAiOverride("AiWallReactionMs", react.Value);
-        if (scanRows.HasValue) SetAiOverride("AiWallScanRows", scanRows.Value);
-        if (crossPenalty.HasValue) SetAiOverride("AiWallCrossPenalty", crossPenalty.Value);
+        // Applied by handing the REAL DebugFlags.Parse a synthesized query -- the same code path
+        // the URL flags take, so the clamps and the reject-out-of-range rules are the shipped ones
+        // and not a second copy that can drift. Writing the properties directly (as this did
+        // originally) skips every one of those guards: --scanrows=-3 was accepted, benched
+        // identically to 0, and printed "-3" in the header, which is precisely the mislabelled run
+        // this tool exists to make impossible.
+        var query = new List<string>();
+        if (react.HasValue) query.Add("aireact=" + react.Value.ToString(CultureInfo.InvariantCulture));
+        if (scanRows.HasValue) query.Add("aiscanrows=" + scanRows.Value.ToString(CultureInfo.InvariantCulture));
+        if (crossPenalty.HasValue) query.Add("aicrosspenalty=" + crossPenalty.Value.ToString(CultureInfo.InvariantCulture));
+        if (query.Count > 0)
+        {
+            MethodInfo parse = asm.GetType("EvilAliensWeb.Compat.DebugFlags")
+                .GetMethod("Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            TextWriter savedOut = Console.Out;
+            Console.SetOut(TextWriter.Null);
+            try { parse.Invoke(null, new object[] { "?" + string.Join("&", query) }); }
+            finally { Console.SetOut(savedOut); }
+        }
+
+        // Read the values back OUT of PlayerShip and report those, never the ones asked for. The
+        // resolving properties are the arbiter: anything Parse refused or clamped shows up here as
+        // the value actually in force, so the header can no longer disagree with the table under
+        // it. A run is labelled with what it benched or it is not labelled at all.
+        string inForce = ""
+            + (react.HasValue ? ", WallReactionMs=" + Resolved("WallReactionMs") : "")
+            + (scanRows.HasValue ? ", WallScanRows=" + Resolved("WallScanRows") : "")
+            + (crossPenalty.HasValue ? ", WallCrossPenalty=" + Resolved("WallCrossPenalty") : "");
+        if (scanRows.HasValue && Resolved("WallScanRows") != scanRows.Value.ToString(CultureInfo.InvariantCulture))
+        {
+            Console.Error.WriteLine("--scanrows=" + scanRows.Value + " was refused or clamped by DebugFlags"
+                + " -- benching " + Resolved("WallScanRows") + " rows instead");
+        }
+        if (crossPenalty.HasValue && Resolved("WallCrossPenalty") != crossPenalty.Value.ToString(CultureInfo.InvariantCulture))
+        {
+            Console.Error.WriteLine("--crosspenalty=" + crossPenalty.Value.ToString(CultureInfo.InvariantCulture)
+                + " was refused or clamped by DebugFlags -- benching " + Resolved("WallCrossPenalty") + " instead");
+        }
 
         // Grids are extracted BEFORE the table starts printing: Wall.Setup drives KNI's
         // TitleContainer, whose loader writes three lines to stdout, and mid-table that noise
@@ -159,9 +191,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("ai wall-nav bench -- real PlayerShip code, grid difficulty=Very_Hard, ship box="
             + (ShipHalf * 2).ToString(CultureInfo.InvariantCulture) + "px"
-            + (react.HasValue ? ", WallReactionMs=" + react.Value.ToString(CultureInfo.InvariantCulture) : "")
-            + (scanRows.HasValue ? ", WallScanRows=" + scanRows.Value.ToString(CultureInfo.InvariantCulture) : "")
-            + (crossPenalty.HasValue ? ", WallCrossPenalty=" + crossPenalty.Value.ToString(CultureInfo.InvariantCulture) : ""));
+            + inForce);
 
         foreach (int rung in ladder ? new[] { 0, 1, 2, 3, 4 } : new[] { VeryHardRung })
         {
@@ -207,13 +237,15 @@ internal static class Program
     private static bool TryInt(string arg, out int value) =>
         int.TryParse(arg.Substring(arg.IndexOf('=') + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
 
-    // The bench writes DebugFlags directly rather than going through Parse: Parse reads a whole
-    // URL query, and these are already-typed values. The RESOLUTION rule (?? Default) is still
-    // the shipped one, which is the part that must not be duplicated here.
-    private static void SetAiOverride(string property, object value) =>
-        asm.GetType("EvilAliensWeb.Compat.DebugFlags")
-           .GetProperty(property, BindingFlags.Public | BindingFlags.Static)
-           .SetValue(null, value);
+    // What PlayerShip's own resolving property returns right now -- i.e. the value the methods
+    // under test will actually read, after DebugFlags has had its say. Private, like everything
+    // else this bench reaches for.
+    private static string Resolved(string property) =>
+        Convert.ToString(
+            asm.GetType("EvilAliens.PlayerShip")
+               .GetProperty(property, BindingFlags.NonPublic | BindingFlags.Static)
+               .GetValue(null),
+            CultureInfo.InvariantCulture);
 
     // The typeof lives behind a non-inlined call so a missing//stale EvilAliensWeb.dll surfaces as
     // the caller's friendly "build the game first" rather than a JIT-time type-load failure while

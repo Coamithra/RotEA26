@@ -789,7 +789,10 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     ?wallsidetile= ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps=
     ?wallwispspeed=` ·
     fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
-    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
+    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids).
+    **`?wallsonly` also serves OwnLevel** (card b174b00f -- there it drops that level's two
+    spawners and keeps its `Walls(2)`), with **`?nowalls`** as the OwnLevel-only complement; the
+    pair is the churn-attribution rig -- see the AI section's OwnLevel row. `?walltoplift` is
     COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check
     `?hitboxes`).
   - **Verify drawing OFFLINE** (`tools/walls/preview_wall3d.py` contact sheet) — the wall scrolls
@@ -912,8 +915,8 @@ the rest are tier-independent.
     making the clamp its own oscillator.
   - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
     It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
-    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or any of
-    the `?aireact` / `?aiscanrows` / `?aicrosspenalty` knobs in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid, or any
+    of the `?aireact` / `?aiscanrows` / `?aicrosspenalty` knobs, in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
     lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
     share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
     whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
@@ -1112,14 +1115,26 @@ before hunting a blind spot in any future stalled-level report.
     level -- `Walls(game, 2)` alongside a continuous `SkullSpawner(0f, 2f, maze: true)` and a
     Very_Hard+ `StarMineSpawner`. Scroll speed was never the confounder (`?wallsonly` calls the
     same 4.3x `speedup`). But suppressing either half resolves it the other way. `?wallsonly` and
-    `?nowalls` both work on OwnLevel now; on ONE rig (`eahl`, Very_Hard, 180 sim-seconds, N=6):
+    `?nowalls` both work on OwnLevel now. Measured with `eahl`, Very_Hard, N=6, each run soaked by
+    `eval AiBenchRun 60` x3:
 
     | OwnLevel, one rig | `turn` deg/s |
     |---|---|
     | walls only (`?wallsonly`) | **229** (deterministic -- all 6 runs identical) |
-    | spawners only (`?nowalls`) | **61** (49-65) |
+    | spawners only (`?nowalls`) | **~55** (41-67 over 14 runs) |
     | full level | **404** (304-525) |
     | *Level 3 walls only, same rig* | **29** (deterministic) |
+
+    **`?invuln` must be OFF, and that cuts against the habit** -- every other doc line pairs
+    `?wallsonly` with it. With `?invuln` on the bot cannot die, the checkpoint rewind never fires,
+    and the same boot reads 426 deg/s / 3 contacts / VICTORY instead. The rigs verbatim:
+    `?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard[&wallsonly|&nowalls]` and
+    `?level=Level3&aiplayer&aibench&difficulty=Very_Hard&wallsonly`.
+    **The two walls-only rigs are not the same SHAPE, which bounds the ratio**: Level 3 loops six
+    sections (variations 1/0/3, twice) and is still running at 180 sim-seconds, while OwnLevel has
+    a single `Walls(2)` and reaches victory at ~60, freezing its rate there. Both are rates over
+    the ticks they ran, so they compare as rates -- but this is grid-against-grid, not
+    run-against-run, and a soak length describes the command, not OwnLevel's window.
 
     So OwnLevel's grid ALONE churns **7.9x Level 3's grid alone**; the enemy stream alone accounts
     for 61 deg/s; and the two together are superadditive (404 against a 290 sum), which is the

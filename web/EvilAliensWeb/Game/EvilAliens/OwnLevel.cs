@@ -52,23 +52,38 @@ internal class OwnLevel : GameScene
 	// DEBUG (card b174b00f): ?wallsonly drops this level's two spawners and keeps the walls;
 	// ?nowalls does the opposite. Neither set = the shipped level, unchanged.
 	//
-	// They exist to ATTRIBUTE this level's AI heading churn. OwnLevel measures 254-477 deg/s
-	// against Level 3's ~70, and that 4-7x gap was read as a wall-nav defect -- but the ~70 comes
-	// from Level3.PopulateWallsOnly, which by its own comment spawns "nothing else", while the
-	// 254-477 is the WHOLE level: Walls(2) running concurrently with a continuous SkullSpawner and
-	// (Very_Hard+) a StarMineSpawner. So it compares walls-alone against walls-plus-a-sustained-
-	// enemy-stream, and no amount of care with the wall grid can settle it. ?wallsonly here makes
-	// the two rigs the same rig -- which is why it reuses Level 3's flag name rather than minting
-	// an OwnLevel-specific one.
+	// They exist to ATTRIBUTE this level's AI heading churn, and they have DONE so -- the answer
+	// is below, because a reader who stops at the setup leaves with the hypothesis that lost.
 	//
-	// ?nowalls is the POSITIVE CONTROL and is not optional: a quiet ?wallsonly reading on its own
-	// cannot distinguish "the walls are innocent" from "suppressing events broke the rig". If the
-	// walls really are innocent, ?nowalls stays high and ?wallsonly drops. If BOTH go quiet, the
-	// rig is what changed and neither number means anything.
+	// The setup: OwnLevel measures 254-477 deg/s where Level 3's wall sections measure far less,
+	// and that gap was read first as a wall-nav defect and then as NOT one. Both readings were
+	// unsafe, because the Level-3 figure comes from Level3.PopulateWallsOnly (which by its own
+	// comment spawns "nothing else") while OwnLevel's is the WHOLE level: Walls(2) running
+	// concurrently with a continuous SkullSpawner and a Very_Hard+ StarMineSpawner. Walls-alone
+	// against walls-plus-a-sustained-enemy-stream settles nothing either way. ?wallsonly reaches
+	// OwnLevel's walls alone -- reusing Level 3's flag name rather than minting an OwnLevel one --
+	// and ?nowalls is the control that keeps a quiet reading honest (both halves quiet would mean
+	// the suppression broke the rig, not that the walls are innocent).
+	//
+	// THE RESULT (eahl, Very_Hard, N=6, no ?invuln): walls only 229 deg/s, spawners only 61, full
+	// level 404, Level 3 walls only 29. So this grid alone churns ~7.9x Level 3's grid alone: the
+	// churn IS the walls, the enemy stream contributes about a seventh of it, and the two are
+	// superadditive. Full numbers and the rig caveats: web/EvilAliensWeb/CLAUDE.md, the OwnLevel
+	// row of the challenge-level completion matrix.
 	protected override void PopulateEventList()
 	{
 		bool wallsOnly = EvilAliensWeb.Compat.DebugFlags.WallsOnly;
 		bool noWalls = EvilAliensWeb.Compat.DebugFlags.NoWalls;
+		if (wallsOnly && noWalls)
+		{
+			// The two are complements, so together they would suppress EVERYTHING: a silent,
+			// clean-looking empty level reporting turn=0deg/s -- a bench run measuring nothing
+			// while carrying a label, which is the failure this whole card is about. ?wallsonly
+			// wins because it is the primary rig; ?nowalls is its control.
+			System.Console.WriteLine("[debug] ?wallsonly and ?nowalls are complements and cannot both apply"
+				+ " -- ignoring ?nowalls, running OwnLevel walls-only");
+			noWalls = false;
+		}
 
 		Wait(1f);
 		MessageEvent messageEvent = new MessageEvent(base.Game, "Get ready!", SoundManager.Texts.GetReady);

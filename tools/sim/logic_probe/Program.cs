@@ -407,9 +407,12 @@ internal static class Program
 
         Console.WriteLine("[logic_probe] DebugFlags ?aiscanrows= / ?aicrosspenalty= (card b174b00f)");
 
-        // 1. The shipped configuration. A bare boot must resolve to the baked consts -- this is the
-        // byte-identical claim the card actually makes, restated as behaviour.
-        run("?");
+        // 1. The shipped configuration. Both overrides are null at process start (DebugFlags.Parse
+        // never RESETS a property -- it only assigns ones the query names, which is also why the
+        // checks below can rely on a previous case still standing), so this reads the state a
+        // shipped boot is in. It must resolve to the baked consts. NB this is a PRECONDITION of
+        // the case set, not an assertion about Parse: it holds only while nothing earlier in the
+        // process has touched these two, which is why it runs first.
         Check("no override => the baked Default* consts",
             Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
             "rows=" + liveRows() + " (Default " + bakedRows + "), penalty=" + livePenalty()
@@ -472,6 +475,15 @@ internal static class Program
             && Equals(liveRows(), 7) && Equals(livePenalty(), 1.25f),
             "rows=" + liveRows() + " vs const " + bakedRows
             + ", penalty=" + livePenalty() + " vs const " + bakedPenalty);
+
+        // Hand the process back in the state it was found in. Parse can only ASSIGN, never clear,
+        // so a Probe* added after this one would otherwise inherit rows=7 / penalty=1.25 with no
+        // way to reach the defaults -- and would be measuring an override it never set.
+        flags.GetProperty("AiWallScanRows", anyStatic).SetValue(null, null);
+        flags.GetProperty("AiWallCrossPenalty", anyStatic).SetValue(null, null);
+        Check("case set leaves no override behind",
+            Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
+            "rows=" + liveRows() + " penalty=" + livePenalty());
         return 0;
     }
 }

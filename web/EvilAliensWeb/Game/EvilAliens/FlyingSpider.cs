@@ -387,17 +387,11 @@ internal class FlyingSpider : KillableAlien
 				AwardScore(isComboGenerator, other);
 			}
 			BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
-			BloodExplosion bloodExplosion2 = bloodExplosion;
-			Vector2 position = base.Position;
-			Vector2 speedVector = base.SpeedVector;
-			bloodExplosion2.Setup(position, 5f, 0.75f, MathHelper.Min((speedVector).Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
+			bloodExplosion.Setup(base.Position, 5f, 0.75f, MathHelper.Min(base.SpeedVector.Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
 			bloodExplosion.MakeGreen();
 			collection.Add((GameComponent)(object)bloodExplosion);
 			bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
-			BloodExplosion bloodExplosion3 = bloodExplosion;
-			Vector2 position2 = base.Position;
-			Vector2 speedVector2 = base.SpeedVector;
-			bloodExplosion3.Setup(position2, 3f, 0.5f, MathHelper.Min((speedVector2).Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
+			bloodExplosion.Setup(base.Position, 3f, 0.5f, MathHelper.Min(base.SpeedVector.Length(), 0.24f), MyMath.VectorToAngle(base.SpeedVector));
 			bloodExplosion.MakeGreen();
 			collection.Add((GameComponent)(object)bloodExplosion);
 			if (RandomHelper.RandomNextFloat(0f, 1f) <= 0.2f)

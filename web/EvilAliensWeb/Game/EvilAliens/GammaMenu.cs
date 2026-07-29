@@ -113,16 +113,16 @@ public class GammaMenu : Scene
 	{
 		float barScale = 1f;
 		Vector2 barPos = new Vector2((float)(415 - barUnlit.LogicalWidth() / 2), 205f);
-		Vector2 barPosCopy = barPos;
+		Vector2 unlitBarPos = barPos;
 		Vector2 barOffset = new Vector2(-16f, 13f);
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		Color aliceBlue = Color.AliceBlue;
 		float barAlpha = 1f;
-		base.SpriteBatch.Draw(barUnlit, barPosCopy + barOffset, 0f, Vector2.One * barScale, center: false, new Color(aliceBlue, barAlpha));
-		float gammaFraction = 1f - (Settings.GetInstance().Gamma - 0.6f) / 1.6f;
-		if (gammaFraction > 0f)
+		base.SpriteBatch.Draw(barUnlit, unlitBarPos + barOffset, 0f, Vector2.One * barScale, center: false, new Color(aliceBlue, barAlpha));
+		float darknessFraction = 1f - (Settings.GetInstance().Gamma - 0.6f) / 1.6f;
+		if (darknessFraction > 0f)
 		{
-			float litWidth = (float)Math.Round(21f + 75f * gammaFraction);
+			float litWidth = (float)Math.Round(21f + 75f * darknessFraction);
 			base.SpriteBatch.Draw(barLit, new Rectangle(0, 0, (int)litWidth, barLit.LogicalHeight()), barPos + barOffset, 0f, 1f, center: false, new Color(aliceBlue, barAlpha));
 			base.SpriteBatch.Draw(barEdge, barPos + barOffset + new Vector2(litWidth, 0f), 0f, Vector2.One, center: false, new Color(aliceBlue, barAlpha));
 		}
@@ -166,16 +166,16 @@ public class GammaMenu : Scene
 		}
 		Settings.GetInstance().Gamma = MathHelper.Clamp(Settings.GetInstance().Gamma, 0.6f, 2.2f);
 		curframe = (curframe + ufoAnimation.fps * (float)gameTime.ElapsedGameTime.TotalSeconds) % (float)(ufoAnimation.rows * ufoAnimation.columns);
-		bool confirmPressed = false;
+		bool dismissPressed = false;
 		for (int k = 0; k < 4; k++)
 		{
-			confirmPressed |= base.InputHandler.PadPressed(PadKeys.A, k);
-			confirmPressed |= base.InputHandler.PadPressed(PadKeys.B, k);
-			confirmPressed |= base.InputHandler.PadPressed(PadKeys.Back, k);
-			confirmPressed |= base.InputHandler.PadPressed(PadKeys.Start, k);
+			dismissPressed |= base.InputHandler.PadPressed(PadKeys.A, k);
+			dismissPressed |= base.InputHandler.PadPressed(PadKeys.B, k);
+			dismissPressed |= base.InputHandler.PadPressed(PadKeys.Back, k);
+			dismissPressed |= base.InputHandler.PadPressed(PadKeys.Start, k);
 		}
-		confirmPressed |= base.InputHandler.Pressed(MyKeys.Enter);
-		if ((confirmPressed | base.InputHandler.Pressed(MyKeys.Esc)) && this.OnFinished != null)
+		dismissPressed |= base.InputHandler.Pressed(MyKeys.Enter);
+		if ((dismissPressed | base.InputHandler.Pressed(MyKeys.Esc)) && this.OnFinished != null)
 		{
 			this.OnFinished(this);
 		}

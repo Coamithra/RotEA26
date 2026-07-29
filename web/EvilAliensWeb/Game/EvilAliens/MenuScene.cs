@@ -1484,14 +1484,14 @@ internal class MenuScene : Scene
 		base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 		EnsureRenderTarget();
 		base.GraphicsDevice.SetRenderTarget(0, myRenderTarget);
-		bool allStoryInzane = false;
+		bool showInzaneBackdrop = false;
 		if (state != MenuState.FadeToGame)
 		{
-			allStoryInzane = true;
-			allStoryInzane &= Achievements.GetInstance().Data[Levels.Level1].difficulty >= Settings.DifficultyLevel.Inzane;
-			allStoryInzane &= Achievements.GetInstance().Data[Levels.Level2].difficulty >= Settings.DifficultyLevel.Inzane;
-			allStoryInzane &= Achievements.GetInstance().Data[Levels.Level3].difficulty >= Settings.DifficultyLevel.Inzane;
-			if (allStoryInzane)
+			showInzaneBackdrop = true;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level1].difficulty >= Settings.DifficultyLevel.Inzane;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level2].difficulty >= Settings.DifficultyLevel.Inzane;
+			showInzaneBackdrop &= Achievements.GetInstance().Data[Levels.Level3].difficulty >= Settings.DifficultyLevel.Inzane;
+			if (showInzaneBackdrop)
 			{
 				base.SpriteBatch.Draw(backdrop, origin, 0f, currentBackdropSize, center: true, Color.Red);
 			}
@@ -1507,7 +1507,7 @@ internal class MenuScene : Scene
 		{
 			star.Draw(allChallengesInzane);
 		}
-		if (allStoryInzane && allChallengesInzane)
+		if (showInzaneBackdrop && allChallengesInzane)
 		{
 			ServiceHelper.Get<IAwardmentBladeService>().get().AwardAchievement(Awardment.Insane);
 		}
@@ -1705,6 +1705,11 @@ internal class MenuScene : Scene
 		float textScale = 0.8f;
 		float backIconX = (General.SafeZone).Left;
 		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * iconScale, font.MeasureString("yo").Y * textScale);
+		// NOTE: original behaviour -- the two icons' widths are crossed here (the "back"
+		// text clears AButton's width though BButton is what sits at backIconX, and
+		// selectIconX below clears BButton's though AButton is drawn there). Harmless
+		// because small_face_a and small_face_b are the same size; left as-is so this
+		// stays a pure rename. Don't "fix" it without checking the two sprites first.
 		float backTextX = backIconX + (float)AButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
 		float selectTextX = (float)(General.SafeZone).Right - font.MeasureString("select").X * textScale;
 		float selectIconX = selectTextX - (float)BButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
@@ -1748,6 +1753,8 @@ internal class MenuScene : Scene
 		{
 			return;
 		}
+		// The same local, reused for an unrelated quantity: past this point it is the
+		// fade ramp, not the backdrop zoom above.
 		curve = Convert.ToSingle(Math.Pow(1.0499999523162842, (timer - fadestarted).TotalMilliseconds / (double)frameMs));
 		currentFade = curve * 7.5f;
 		if (!(currentFade > 255f))
@@ -1789,8 +1796,8 @@ internal class MenuScene : Scene
 		}
 		Star[] starsSnapshot = stars.ToArray();
 		bool hyperspace = state == MenuState.FadeToGame;
-		Star[] starsSnapshotCopy = starsSnapshot;
-		foreach (Star star in starsSnapshotCopy)
+		Star[] starsToMove = starsSnapshot;
+		foreach (Star star in starsToMove)
 		{
 			star.Move(hyperspace, gameTime);
 			if (star.IsOffScreen(800, 600))

@@ -526,6 +526,7 @@ internal class MenuSub1 : Scene
 			if (i == selectedEntry)
 			{
 				float pulseAmount = 15f / font.MeasureString(menuEntries[i]).X;
+				// Same clock as `time` above, read a second time -- not a second clock.
 				float pulseTime = (float)gameTime.TotalGameTime.TotalSeconds;
 				float pulsePhase = MyMath.Mod(pulseTime / 2f, 1f);
 				color = MenuTheme.Selected;

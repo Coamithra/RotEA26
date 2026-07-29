@@ -62,7 +62,7 @@ Precedent over invention, per the two shipped slices:
   numberings — `MenuSub1.DrawMenu` (528-530), `PlayerSettingsMenu.drawSetting` (190-192),
   `DifficultyMenu.DrawMenu` (110-112). All three compute `15f/textWidth`, `TotalSeconds`, and
   `MyMath.Mod(t/2, 1)` feeding `brainPulsate.Evaluate(...)`. They get ONE set of names across the
-  group (`pulseAmount` / `nowSeconds` / `pulsePhase`, with the `num4` it scales becoming
+  group (`pulseAmount` / `pulseTime` / `pulsePhase`, with the `num4` it scales becoming
   `entryScale`). Uniformity here is the main reason the card kept the group together.
 - **Never shadow a field of the class or its base** — `AlienDrawableGameComponent` has
   `protected Color color`, so a `Color val` local becomes `tint` (slice 2's precedent, e.g.

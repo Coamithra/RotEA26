@@ -492,6 +492,34 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSession.RosterDump();
 		}
 
+		// JS bridge for the OFFLINE roster (eaOracleRoster in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugOracleRoster'). Reads the live Oracle
+		// directly, so it needs no session, no level and no gamepads -- unlike eaNetRoster(),
+		// which early-returns without a net session and so cannot see the MENU roster, which is
+		// exactly where a seat left behind by the last level or attract demo does its damage
+		// (the menu-lobby handshake allocates from it). eaScore() also reports seated-ness per
+		// slot; what this adds is the CONTROLLER DEVICE per seat, which is what distinguishes an
+		// attract demo's leftover AI seats from a real player's.
+		[JSInvokable("debugOracleRoster")]
+		public static string OracleRoster()
+		{
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>()?.Oracle;
+			if (oracle == null)
+			{
+				return "[debug] eaOracleRoster: no oracle service (game not booted yet?)";
+			}
+			string seats = "";
+			for (int slot = 0; slot < EvilAliens.Oracle.MaxPlayers; slot++)
+			{
+				if (oracle.IsSeated(slot))
+				{
+					seats += (seats.Length > 0 ? "," : "") + slot + ":" + oracle.Controller(slot);
+				}
+			}
+			return "[debug] eaOracleRoster: players=" + oracle.Players
+				+ " seated=" + (seats.Length > 0 ? seats : "-");
+		}
+
 		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCouchJoin'). Makes the same
 		// NetSession.TrySeatLocalJoin call a real gamepad Start press makes. HOST-SIDE that

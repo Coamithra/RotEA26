@@ -214,7 +214,7 @@ public class CollisionBox : ICollisionType
 		// The 2008 original ran this ray-box test TWICE per call -- once for .HasValue and again
 		// for the comparison -- on a collision path. One call, cached: same answer, half the work.
 		float? hit = val.Intersects(val2);
-		if (hit.HasValue && hit < collisionLine.Length)
+		if (hit.HasValue && hit.Value < collisionLine.Length)
 		{
 			return true;
 		}

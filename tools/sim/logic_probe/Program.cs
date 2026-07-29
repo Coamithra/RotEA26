@@ -507,10 +507,9 @@ internal static class Program
     //
     // Expectations are derived from ray-AABB geometry, never restated from the code. The
     // predicate has exactly two terms -- "the ray meets the box at all" and "it does so within
-    // the line's Length" -- so the set is built as PAIRS that isolate one term each, and the
-    // sensitivity section below asserts each pair actually splits. A set that could not fail
-    // would be worth nothing here, and with no old behaviour to contrast that is the only
-    // sensitivity evidence available inside the probe.
+    // the line's Length" -- so the set is built as PAIRS that isolate one term each: see the
+    // sensitivity note at the bottom for why that pairing IS the evidence and why an explicit
+    // control section here would only restate it.
     private static int ProbeCollisionBoxLine(Assembly asm)
     {
         Type boxType = asm.GetType("EvilAliens.CollisionBox", true);
@@ -573,20 +572,20 @@ internal static class Program
         // pin a float comparison this card has no business fixing.
         Check("just long enough", hits(0f, 150f, 100.5f, right), "needs 100, has 100.5");
 
-        // 3. SENSITIVITY. Each pair below differs in exactly ONE input, so a live term must make
-        // the two answers differ. Without this the section above could be satisfied by a predicate
-        // that had lost a term (or by one that always answered `false`), and a green run would be
-        // worth nothing -- the eaNetScore.test() rule, in the only form available for a change
-        // with no behaviour delta to contrast.
-        Check("CONTROL: only Length differs => the length term is live",
-            hits(0f, 150f, 1000f, right) != hits(0f, 150f, 50f, right),
-            "same origin and heading, 1000 vs 50");
-        Check("CONTROL: only direction differs => the intersection term is live",
-            hits(0f, 150f, 1000f, right) != hits(0f, 150f, 1000f, left),
-            "same origin and length, toward vs away");
-        Check("CONTROL: only origin Y differs => the box bounds are live",
-            hits(0f, 150f, 1000f, right) != hits(0f, 50f, 1000f, right),
-            "same heading and length, y=150 vs y=50");
+        // SENSITIVITY comes from the PAIRING above, and is not a separate section. Sections 1 and
+        // 2 are three matched pairs (left / above / diagonal) whose members differ in exactly one
+        // input -- Length -- and are asserted to opposite answers, so a predicate that dropped
+        // `< collisionLine.Length` cannot satisfy both halves; section 1's aimed-at vs aimed-away
+        // and its two passes-by cases do the same for the intersection term. Mutation-tested at
+        // HEAD: dropping the length term turns 3 lines FAIL, an always-true predicate turns 6.
+        //
+        // An earlier revision added three explicit `hits(A) != hits(B)` CONTROL lines on top of
+        // that. They were REDUNDANT and are deliberately gone: both sides of each were already
+        // individually asserted above, so no mutant could fail a control without first failing one
+        // of those, and their only real effect was to inflate the mutation counts (4 and 9) into
+        // looking like more discrimination than the set has. If a control is ever added back here,
+        // it has to compare a pair whose individual answers are NOT pinned elsewhere in the set --
+        // otherwise it is a restatement, not evidence.
         return 0;
     }
 }

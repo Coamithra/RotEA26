@@ -67,11 +67,17 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   private method, so no private binding is needed). **It is a REGRESSION oracle, and the card it
   was written for had no behaviour delta at all** -- collapsing a duplicated `Intersects` call
   cannot change an answer -- so the usual "run the pre-card policy as a negative control" shape
-  does not exist here. Two things replace it: the set is run DIFFERENTIALLY (build the
+  does not exist here. Two things replace it. (a) The set is run DIFFERENTIALLY: build the
   merge-base assembly into a scratch dir and point the probe at that path, then at the branch
-  build; the verdict tables must match), and it carries three CONTROL pairs that each differ in
-  exactly one input, so a predicate that lost a term splits them. Mutation-tested: dropping
-  `< collisionLine.Length` turns 4 lines FAIL, an always-true predicate turns 9.
+  build -- the verdict tables must match. (b) Its cases are MATCHED PAIRS differing in one input
+  and asserted to opposite answers, one pair per term of the predicate, so a lost term cannot
+  satisfy both halves. Mutation-tested: dropping `< collisionLine.Length` turns 3 lines FAIL, an
+  always-true predicate turns 6.
+  **It also carries the negative lesson about explicit control lines.** It first had three
+  `hits(A) != hits(B)` CONTROL checks; both sides of each were already asserted individually
+  above, so no mutant could fail a control without first failing one of those. They discriminated
+  nothing and inflated the mutation counts (4 and 9) into looking like more than the set has.
+  A control earns its place only if the pair it compares is NOT pinned elsewhere in the set.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

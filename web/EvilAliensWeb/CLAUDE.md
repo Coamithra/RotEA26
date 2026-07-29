@@ -1064,8 +1064,10 @@ the rest are tier-independent.
   as the net layer's observed velocity, kept independent because the AI must work with no session.)
 - **Steering is low-passed as a VECTOR (`DefaultSteerSmoothMs` 90).** `DoAIMove` sums a dozen
   competing terms and `Move()` consumes only the resulting ANGLE, so when the big terms nearly
-  cancelled a tiny residual swung the heading right round -- measured at ~1050 deg/s inside a
-  Level-3 wall versus ~20 deg/s on an open screen. Smoothing the vector makes opposing votes cancel
+  cancelled a tiny residual swung the heading right round -- measured at ~1050 deg/s on a Level-3
+  run versus ~20 deg/s on an open screen. (A whole-LEVEL figure, not a walls-only one -- card
+  21bb6849; see the churn note under the completion matrix before comparing it to anything.)
+  Smoothing the vector makes opposing votes cancel
   toward zero (the ship coasts, which is correct) while a sustained vote still converges in a few
   frames. Rate-limiting the ANGLE instead is wrong: it forces a genuine 180 reversal the long way
   round.
@@ -1171,10 +1173,13 @@ the rest are tier-independent.
     - **`?aireact` on `?level=OwnLevel` (walls + spawners) -- deaths / VICTORIES of 30:**
       80ms **3.2 / 28** · 200ms 6.6 / 25 · **420ms (anchor) 3.8 / 25** · 500ms 7.0 / 20 ·
       550ms 8.7 / 16 · 600ms **15.1 / 0**.
-      Below the anchor is not a degradation at all -- 80ms matches it on survival and churns
-      LESS (`turn` 198 vs 404 deg/s) -- so the only degrading direction is a LONGER look-ahead,
-      which models nothing recognisable as a novice. And that direction has ~130ms of usable band
-      before a cliff that costs the level outright.
+      Below the anchor there is no MONOTONE direction to walk: victories are flat (28 / 25 / 25)
+      and deaths go 3.2 -> 6.6 -> 3.8, i.e. the 200ms row is worse than both its neighbours. A
+      ladder cannot be built on that whichever way you read it -- and 80ms, the far end, is if
+      anything BETTER than the anchor (same survival, and it churns LESS: `turn` 198 vs 404
+      deg/s). So the only degrading direction is a LONGER look-ahead, which models nothing
+      recognisable as a novice -- and it has ~130ms of usable band before a cliff that costs the
+      level outright.
     - On the deterministic **walls-only** rigs the knob moves `turn` and nothing else until it
       breaks. OwnLevel, at 80/200/300/**420**/600/800/1200/2000ms:
       88 / 86 / 166 / **229** / 647 / 919 / 948 / 944 deg/s, contacts 0 up to the anchor then
@@ -1192,17 +1197,21 @@ the rest are tier-independent.
       Fisher p ~ 0.03) -- a 3.5x change, one step above total collapse.
     - **And at 200ms it is INERT on every other rig**, N=30 against the anchor: SpaceDodge 12.9
       vs 12.6 deaths, Level3 6.9 vs 6.0 (prog 22.6 vs 24.2), Level1 5.1 vs 4.6 (prog 25.8 vs
-      28.7) -- every range overlapping. So a tier row would change exactly one challenge level.
+      28.7) -- every range overlapping. (Add SPIDERBOSS, from b174b00f: inert there even at 80ms,
+      deaths 6.2 / 6.0 / 5.8 across 80 / 700 / 2000.) So a tier row would change exactly one
+      challenge level.
     - **N=6 IS NOT ENOUGH ON CRAZYGAME, AND NEITHER IS N=10.** b174b00f read the anchor at 3.8
       deaths over N=6; an N=10 pass during this campaign read it at **1.9 deaths and 10 of 10
       victories**, which made 700ms look like a sharp point optimum. N=15 (5.3) and N=30 (5.5)
       both refute that. The knob's real shape only appears at N>=30 -- treat any CrazyGame figure
       below that as a hypothesis, not a measurement. (The file-wide "under ~30% is noise" rule
       says the same thing; this rig is worse than the rule suggests.)
-    - **The 80ms row is the durable caution.** It posts the LOWEST churn anywhere in either sweep
-      (127 deg/s against 426 at the anchor) while dying five times as often and winning zero of
-      30: the bot has stopped dodging, and a bot that has stopped dodging is smooth. **Never read
-      `turn` as quality without a survival column beside it.**
+    - **The CrazyGame 80ms row is the durable caution** (name the rig -- the `?aireact` sweep has
+      an 80ms row too, and it is the BEST row in its sweep, not the worst). It posts the lowest
+      churn in the CrazyGame sweep by a wide margin (127 deg/s against 426 at the anchor) while
+      dying five times as often and winning zero of 30: the bot has stopped dodging, and a bot
+      that has stopped dodging is smooth. **Never read `turn` as quality without a survival
+      column beside it.**
     **`contacts` still cannot see wall look-ahead on a level with enemies** -- `ClampIntoWallSpace`
     is a hard override that runs however far ahead the bot looked, so it floors the metric; the
     walls-only readings above can see it because they let `turn` carry the signal instead.
@@ -1227,9 +1236,10 @@ the rest are tier-independent.
   with `?aiplayer` and `?difficulty=Very_Hard`.
 - **Where it stands (card f4d1721f, Very Hard unless noted).** Spider boss 36 deaths and the
   fight never resolving -> 17 and resolving; Level 3 stalled forever at event 53/60 -> kills the
-  BrainBoss; heading churn ~1050 deg/s -> 70, reversals 6.5/s -> 1.3 -- a **whole-level** Level-3
-  pair, NOT a walls-only one (card 21bb6849; that grid alone reads 29 deg/s / 0.42 revs, so the
-  two do not compare). It does NOT clear a
+  BrainBoss; heading churn ~1050 deg/s -> 70, reversals 6.5/s -> 1.3 -- **a before/after of the
+  FIX, not a rig baseline, and specifically NOT a walls-only one** (card 21bb6849: that grid
+  reads 29 deg/s / 0.42 revs and no difficulty tier moves it near 70, while the whole level reads
+  161; ~70 reproduces on neither rig today, so don't quote it as either). It does NOT clear a
   story level on Very Hard (L1 game over at event 19/64, L2 at 45/104, L3 at 19/60) -- it dies to
   sustained bullet fire, and the sum-of-repulsions model is the wrong shape for bullet hell;
   "pick the safest reachable spot" is the next move. Level 1 on Medium is a VICTORY with 1 death.
@@ -1338,15 +1348,18 @@ before hunting a blind spot in any future stalled-level report.
     sum-of-repulsions model gaining another set of competing terms. **`?nowalls` is the control
     that makes the walls-only number readable at all** -- without it, "the walls are innocent" and
     "suppressing events broke the rig" are the same quiet number.
-    (**The Level-3 walls-only baseline is 29 deg/s, and the ~70 long quoted beside it here was
-    never a walls-only figure** -- card 21bb6849 settled it, headlessly. 29 is deterministic and
-    survives every explanation tried: run LENGTH (`turn` is a cumulative average, and over
-    t=10..180s it reads 0 / 9 / 44 / 36 / 31 / 29 / 25 / 22 / 19 ... 29 -- it never approaches
-    70), `?invuln` (identical; this rig scores no deaths either way) and coarse dt
-    (`--fps 60/30/15` -> 29 / 25 / 31). A FULL Level 3 with the spawners live reads **81 / 190 /
-    110** over N=3, so ~70 is consistent with a whole-level figure and not with this rig. Quote
-    29 for the GRID and the whole-level range for the LEVEL; the 7.9x above is a within-rig
-    ratio and is unaffected either way.)
+    (**The Level-3 walls-only baseline is 29 deg/s, and the ~70 long quoted beside it here is NOT
+    a figure this rig produces** -- card 21bb6849 chased it headlessly and could not reach 70 on
+    the walls-only rig under any condition. 29 is the t=180s value and it is deterministic; four
+    hypotheses died: run LENGTH (`turn` is a cumulative average, so it drifts with soak time --
+    but over t=10..180s it only ranges 19-44 and never approaches 70), `?invuln` (identical, and
+    this rig scores no deaths either way), coarse dt (`--fps 60/30/15` -> 29 / 25 / 31) and
+    DIFFICULTY, which drives the wall scroll speed (Easy..Inzane reads 5 / 13 / 19 / **29** / 16,
+    Inzane falling back because it starts dying). Meanwhile the FULL level with spawners live
+    reads **161 deg/s [104-243] over N=30** -- also not 70, but the nearer of the two by far.
+    So: 70 is somewhere between the two rigs and belongs to neither as measured today. **Quote 29
+    for the GRID and 161 for the LEVEL; do not quote ~70 as a walls-only number.** The 7.9x above
+    is a within-rig ratio and is unaffected either way.)
   - **`tools/sim/aiwallnav`'s columns do NOT predict heading churn, and leaning on them to
     exonerate the walls was the actual error.** Its gap-switch (0.52 vs 0.43/s), lateral sign-flip
     (0.17 vs 0.16/s) and clamp (`clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77) ratios are all

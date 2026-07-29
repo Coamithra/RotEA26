@@ -267,8 +267,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// separate the pilot from the enemies:
 	//   AimRad         Level1, 15deg -> 57.3deg  : progress 50/64 -> 45/64.  KEPT
 	//   FieldPx        spiderboss, 190 -> 30px   : deaths 11 -> 14.          KEPT (weak)
-	//   WallReactionMs                                      NOT TIERABLE (card 21bb6849)
-	//   ThreatLeadMs                                        NOT TIERABLE (card 21bb6849)
+	//   WallReactionMs OwnLevel, 420 -> 600ms     : victories 25 -> 0 of 30.
+	//                                               NOT TIERABLE (card 21bb6849)
+	//   ThreatLeadMs   CrazyGame, 700 -> 200ms    : victories 23 -> 14 of 30.
+	//                                               NOT TIERABLE (card 21bb6849)
 	//
 	// **The last two are NOT excluded for being inert.** They were, originally, on one run each
 	// (n=1) that happened to pick the one rig where each is inert -- card b174b00f retired that

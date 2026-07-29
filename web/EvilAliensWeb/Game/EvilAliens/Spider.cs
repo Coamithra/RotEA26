@@ -265,17 +265,11 @@ internal class Spider : KillableAlien
 			AwardScore(isComboGenerator, other);
 		}
 		BloodExplosion bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
-		BloodExplosion bloodExplosion2 = bloodExplosion;
-		Vector2 position = base.Position;
-		Vector2 val = oracle.BackgroundSpeed + new Vector2(0f, yspeed);
-		bloodExplosion2.Setup(position, 5f, 0.75f, MathHelper.Min((val).Length(), 0.24f), MyMath.VectorToAngle(oracle.BackgroundSpeed + new Vector2(0f, yspeed)));
+		bloodExplosion.Setup(base.Position, 5f, 0.75f, MathHelper.Min((oracle.BackgroundSpeed + new Vector2(0f, yspeed)).Length(), 0.24f), MyMath.VectorToAngle(oracle.BackgroundSpeed + new Vector2(0f, yspeed)));
 		bloodExplosion.MakeGreen();
 		collection.Add((GameComponent)(object)bloodExplosion);
 		bloodExplosion = BloodExplosion.NewExplosion(collection, base.Game);
-		BloodExplosion bloodExplosion3 = bloodExplosion;
-		Vector2 position2 = base.Position;
-		Vector2 val2 = oracle.BackgroundSpeed + new Vector2(0f, yspeed);
-		bloodExplosion3.Setup(position2, 3f, 0.5f, MathHelper.Min((val2).Length(), 0.24f), MyMath.VectorToAngle(oracle.BackgroundSpeed + new Vector2(0f, yspeed)));
+		bloodExplosion.Setup(base.Position, 3f, 0.5f, MathHelper.Min((oracle.BackgroundSpeed + new Vector2(0f, yspeed)).Length(), 0.24f), MyMath.VectorToAngle(oracle.BackgroundSpeed + new Vector2(0f, yspeed)));
 		bloodExplosion.MakeGreen();
 		collection.Add((GameComponent)(object)bloodExplosion);
 		Die();

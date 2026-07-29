@@ -301,7 +301,10 @@ them renumbers the method's local slots, so the byte-identical hash oracle canno
 is the tool for exactly that class — and that came back IDENTICAL, i.e. not merely confined to the
 edited method but invisible to ILSpy altogether. Card `cbdf0a6f` finished the struct-temporary
 class (the last four in `InputHandler.LeftStick`/`RightStick`) and collapsed the 30 provably-dead
-`= default(T)` initializers, both bounded the same way. The `state`/`state2` locals in those
+`= default(T)` initializers, both bounded the same way. Card `5c6deab9` finished the
+RECEIVER/ARGUMENT-SPILL class (`Spider`/`FlyingSpider.KilledBy`, where ILSpy spilled one call's
+receiver and every argument into its own local): same oracle, and never the hash, since deleting a
+spill renumbers slots. The `state`/`state2` locals in those
 methods stay: they sit on mutually exclusive `if`/`else` branches so there is nothing to merge,
 and hoisting the call above the `if` would MOVE a call site, which stops it being cosmetic.
 

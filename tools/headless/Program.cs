@@ -23,6 +23,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using EvilAliensWeb.Compat;
 
 namespace EvilAliensWeb.Headless
@@ -70,11 +71,11 @@ namespace EvilAliensWeb.Headless
                 return 2;
             }
 
-            // Silent by default: a background soak must not play the game's SFX through
-            // the user's speakers, and a box with no sound card must not fail in audio
-            // init. Before the Game is constructed -- the device is opened during boot.
-            if (!opt.Audio)
-                HeadlessAudio.Silence();
+            // Everything the run prints from here on is captured, so `expect` / `expect-not`
+            // can assert on the game's own console diagnostics ([loadprofile], [hitch], [net],
+            // ...). Installed before boot, because a level's preload -- the thing the preload
+            // probes assert about -- happens during it.
+            ConsoleCapture.Install();
 
             // Must happen before the graphics device exists (SDL loads GL lazily).
             if (opt.Software)
@@ -94,6 +95,14 @@ namespace EvilAliensWeb.Headless
                 using (var host = new HeadlessHost(opt))
                 {
                     host.Boot();
+
+                    // Silent by default: a background soak must not play the game's SFX
+                    // through the user's speakers. AFTER Boot -- the audio device is created
+                    // during it, and nothing has played yet, so no source has latched a gain.
+                    if (!opt.Audio)
+                        HeadlessAudio.Silence();
+                    Console.WriteLine("[eahl] audio    " + AudioStatus());
+
                     int rc = opt.Repl || opt.ScriptPath != null ? RunCommands(host, opt) : RunOneShot(host, opt);
                     if (opt.JsCalls)
                         host.DumpJsCalls();
@@ -211,6 +220,40 @@ namespace EvilAliensWeb.Headless
                     case "info":
                         Console.WriteLine("ok " + host.Info());
                         return true;
+                    case "audio":
+                        // Silence as DATA. alGain is read back out of OpenAL itself, so it is
+                        // what the mixer is actually doing rather than what we asked for. See
+                        // HeadlessAudio, trap 2, for why that distinction is the whole reason
+                        // this command exists.
+                        Console.WriteLine("ok audio " + AudioStatus());
+                        return true;
+                    case "mark":
+                        // Start a fresh assertion window. Assertions deliberately do NOT reset
+                        // it (asserting twice over one window is the common case), so this is
+                        // the only reset.
+                        ConsoleCapture.Mark();
+                        Console.WriteLine("ok mark");
+                        return true;
+                    case "expect":
+                    case "expect-not":
+                    {
+                        string pattern = Remainder(line, cmd);
+                        if (pattern.Length == 0)
+                            throw new ArgumentException("usage: " + cmd + " <regex>");
+                        bool want = cmd == "expect";
+                        string[] hits = ConsoleCapture.Match(pattern, out bool truncated);
+                        if (truncated)
+                            throw new InvalidOperationException(
+                                "the capture window overflowed and older output was dropped, so this "
+                                + "assertion cannot be trusted -- add a `mark` closer to what you assert on");
+                        if (want && hits.Length == 0)
+                            throw new InvalidOperationException("expect /" + pattern + "/ matched nothing");
+                        if (!want && hits.Length > 0)
+                            throw new InvalidOperationException("expect-not /" + pattern + "/ matched "
+                                + hits.Length + " line(s), first: " + hits[0]);
+                        Console.WriteLine("ok " + cmd + " " + hits.Length + " match(es)");
+                        return true;
+                    }
                     case "help":
                         Console.WriteLine("ok " + DebugBridge.List());
                         return true;
@@ -220,7 +263,8 @@ namespace EvilAliensWeb.Headless
                         Console.WriteLine("ok bye");
                         return true;
                     default:
-                        throw new ArgumentException("unknown command '" + cmd + "' (try: step, shot, eval, info, help, quit)");
+                        throw new ArgumentException("unknown command '" + cmd
+                            + "' (try: step, shot, eval, info, audio, mark, expect, expect-not, help, quit)");
                 }
             }
             catch (Exception ex)
@@ -230,6 +274,29 @@ namespace EvilAliensWeb.Headless
                 Console.WriteLine("err " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
+        }
+
+        // Everything after the command word, verbatim. `expect` takes a REGEX, which may hold
+        // spaces, '|', '"' and anything else Split() would mangle, so it must not go through
+        // Split at all. One layer of surrounding quotes is stripped for the people who add
+        // them out of habit.
+        private static string Remainder(string line, string cmd)
+        {
+            string rest = line.Substring(cmd.Length).Trim();
+            if (rest.Length >= 2 && rest[0] == '"' && rest[rest.Length - 1] == '"')
+                rest = rest.Substring(1, rest.Length - 2);
+            return rest;
+        }
+
+        // silenced= is what we ASKED for; alGain= is what OpenAL itself reports. Printing both
+        // is the point: the previous silencing mechanism asked and was ignored, silently, for
+        // the whole of eahl's first life (HeadlessAudio, trap 2).
+        private static string AudioStatus()
+        {
+            float? gain = HeadlessAudio.ListenerGain;
+            return "silenced=" + HeadlessAudio.Silenced
+                + " masterVolume=" + HeadlessAudio.MasterVolume.ToString("0.###", CultureInfo.InvariantCulture)
+                + " alGain=" + (gain.HasValue ? gain.Value.ToString("0.###", CultureInfo.InvariantCulture) : "<unreadable>");
         }
 
         // Whitespace split honouring "quoted runs", so `eval Press "left" 30` works.
@@ -341,8 +408,15 @@ REPL (boot once, then drive it)
     shot <path.png>        render the CURRENT state to a PNG (does not advance)
     eval <method> [args]   call a Compat.DebugInput method (the eaPress/eaAiBench surface)
     info                   frame counter, sim time, buffer sizes, scene
+    audio                  silenced= + the gain OpenAL itself reports
+    mark                   start a fresh assertion window (drop captured output)
+    expect <regex>         FAIL unless some captured line matches
+    expect-not <regex>     FAIL if any captured line matches (quotes the offender)
     help                   list the eval methods
     quit
+
+  Committed regression probes live in tools/headless/probes/ and run through
+  tools/headless/probes/run_probes.py -- see probes/README.md.
 
 OPTIONS
   --flags <query>   the URL query the browser would get, e.g. ""?level=Level3&brainboss&invuln""
@@ -355,12 +429,109 @@ OPTIONS
   --nodraw          update only, no rendering. Much faster for behaviour/timing soaks.
   --content <dir>   path to web/EvilAliensWeb/wwwroot (found automatically by default)
   --saves <dir>     persist saves here (default: a temp dir, wiped, so runs start clean)
-  --audio           let the game make noise (default: silent, and no audio device is
-                    opened at all, so a box with no sound card still runs)
+  --audio           let the game make noise (default: silent -- the mixer, the decodes and
+                    every source still run, the gain is just zero)
   --software        rasterize on the CPU via Mesa llvmpipe, for machines with no GPU
   --mesa <dll>      path to Mesa's opengl32.dll (implies --software)
   --jscalls         dump which browser (ea*) calls the game made
   --verbose         report unhandled JS calls and full stack traces");
+        }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // ConsoleCapture — tees everything the run prints into an in-process buffer.
+    //
+    // WHY: a committed probe's most valuable assertion is usually "this diagnostic must NOT
+    // appear" -- no `COLD decode in Level2`, no `[hitch]`, no `[net] desync`. Those are
+    // Console.WriteLine output from the GAME, not the reply to any command, so the ok/err line
+    // protocol could not reach them and a script could not assert on them at all. Teeing the
+    // console makes every diagnostic the game already prints assertable, with no game-side
+    // code and no second surface to keep in sync (see probes/README.md).
+    //
+    // Assertions match PER LINE, so `^`/`$` anchor to a line without RegexOptions.Multiline
+    // and a failure can quote the offending line rather than the whole transcript.
+    //
+    // The buffer is capped, and an overflow is treated as a FAILURE rather than trimmed
+    // quietly: absence cannot be proven over output that was thrown away, so a truncated
+    // window must never let an `expect-not` pass.
+    // -----------------------------------------------------------------------------------
+    internal static class ConsoleCapture
+    {
+        private const int MaxChars = 8 * 1024 * 1024;
+
+        private static readonly StringBuilder Buffer = new StringBuilder();
+        private static readonly object Gate = new object();
+        private static bool _overflowed;
+        private static bool _installed;
+
+        internal static void Install()
+        {
+            if (_installed)
+                return;
+            _installed = true;
+            Console.SetOut(new Tee(Console.Out));
+            Console.SetError(new Tee(Console.Error));
+        }
+
+        internal static void Mark()
+        {
+            lock (Gate)
+            {
+                Buffer.Clear();
+                _overflowed = false;
+            }
+        }
+
+        internal static string[] Match(string pattern, out bool truncated)
+        {
+            var re = new Regex(pattern, RegexOptions.CultureInvariant);
+            string text;
+            lock (Gate)
+            {
+                truncated = _overflowed;
+                text = Buffer.ToString();
+            }
+            var hits = new List<string>();
+            foreach (string ln in text.Split('\n'))
+            {
+                string s = ln.TrimEnd('\r');
+                if (s.Length > 0 && re.IsMatch(s))
+                    hits.Add(s);
+            }
+            return hits.ToArray();
+        }
+
+        private static void Record(string s)
+        {
+            if (s == null)
+                return;
+            lock (Gate)
+            {
+                if (Buffer.Length + s.Length > MaxChars)
+                {
+                    _overflowed = true;
+                    return;
+                }
+                Buffer.Append(s);
+            }
+        }
+
+        // Forwards to the real console AND records. Write(char) is what the TextWriter base
+        // routes every unoverridden overload through, so overriding it alone would be correct;
+        // the string overloads are here because they are the hot path.
+        private sealed class Tee : TextWriter
+        {
+            private readonly TextWriter _inner;
+            internal Tee(TextWriter inner) { _inner = inner; }
+
+            public override Encoding Encoding => _inner.Encoding;
+            public override IFormatProvider FormatProvider => _inner.FormatProvider;
+
+            public override void Write(char value) { _inner.Write(value); Record(value.ToString()); }
+            public override void Write(string value) { _inner.Write(value); Record(value); }
+            public override void WriteLine(string value) { _inner.WriteLine(value); Record(value); Record("\n"); }
+            public override void WriteLine() { _inner.WriteLine(); Record("\n"); }
+            public override void Flush() { _inner.Flush(); }
         }
     }
 

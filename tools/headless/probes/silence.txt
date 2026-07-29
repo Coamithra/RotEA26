@@ -1,0 +1,27 @@
+# PROBE: a default eahl run is silent, and provably so at the mixer.
+#
+# PINS: HeadlessAudio. A background soak must never play the game's SFX through the
+# user's speakers -- an agent cannot hear it, so nothing else would notice.
+#
+# FAILURE MEANS: the run is (or may be) audible. Read the quoted `ok audio` line:
+#   masterVolume=1  -> the mute was not applied at all
+#   alGain=1        -> SoundEffect.MasterVolume no longer reaches OpenAL's listener gain,
+#                      or something re-asserted it mid-run
+#   alGain=<unreadable> -> OpenAL never initialised, or soft_oal.dll stopped resolving.
+#                      NOT a pass: silence was not confirmed, so it is reported as a failure
+#                      rather than skipped. If audio simply never came up, step further.
+#
+# WHY A LEVEL AND NOT THE MENU: KNI brings OpenAL up lazily on the FIRST sound, and menu
+# navigation does not produce one. Until then there is no context and the gain cannot be
+# read back at all. 1800 frames of Level 1 with the auto-pilot firing does it (4/4 runs).
+#
+# The negative control is not scripted, it is a flag: the same probe under --audio must
+# FAIL with masterVolume=1 alGain=1. Re-run it that way if you ever doubt this file.
+#
+# eahl: --flags "?level=Level1&invuln&aiplayer"
+
+step 1800 nodraw
+mark
+audio
+expect ^ok audio silenced=True masterVolume=0 alGain=0$
+quit

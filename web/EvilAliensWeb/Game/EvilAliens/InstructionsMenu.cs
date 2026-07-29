@@ -75,37 +75,37 @@ internal class InstructionsMenu : DrawableGameComponent
 		{
 			displayNext();
 		}
-		bool flag = false;
-		flag |= input.Pressed(MyKeys.Esc);
+		bool backPressed = false;
+		backPressed |= input.Pressed(MyKeys.Esc);
 		for (int i = 0; i < 4; i++)
 		{
-			flag |= input.PadPressed(PadKeys.Back, i);
-			flag |= input.PadPressed(PadKeys.B, i);
+			backPressed |= input.PadPressed(PadKeys.Back, i);
+			backPressed |= input.PadPressed(PadKeys.B, i);
 		}
-		bool flag2 = false;
-		flag2 |= input.Pressed(MyKeys.Enter);
-		flag2 |= input.Pressed(MyKeys.Right);
+		bool nextPressed = false;
+		nextPressed |= input.Pressed(MyKeys.Enter);
+		nextPressed |= input.Pressed(MyKeys.Right);
 		for (int j = 0; j < 4; j++)
 		{
-			flag2 |= input.PadPressed(PadKeys.Start, j);
-			flag2 |= input.PadPressed(PadKeys.A, j);
-			flag2 |= input.PadPressed(PadKeys.RT, j);
+			nextPressed |= input.PadPressed(PadKeys.Start, j);
+			nextPressed |= input.PadPressed(PadKeys.A, j);
+			nextPressed |= input.PadPressed(PadKeys.RT, j);
 		}
-		bool flag3 = false;
-		flag3 |= input.Pressed(MyKeys.Left);
+		bool prevPressed = false;
+		prevPressed |= input.Pressed(MyKeys.Left);
 		for (int k = 0; k < 4; k++)
 		{
-			flag3 |= input.PadPressed(PadKeys.LT, k);
+			prevPressed |= input.PadPressed(PadKeys.LT, k);
 		}
-		if (flag && this.OnExit != null)
+		if (backPressed && this.OnExit != null)
 		{
 			this.OnExit(this);
 		}
-		if (flag2)
+		if (nextPressed)
 		{
 			displayNext();
 		}
-		if (flag3)
+		if (prevPressed)
 		{
 			displayPrevious();
 		}
@@ -159,73 +159,73 @@ internal class InstructionsMenu : DrawableGameComponent
 			Color color2 = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 			spriteBatch.Draw(powerupbubble, new Vector2(400f, 100f), 0f, 2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/powerupbw", powerupbubble.LogicalWidth()), center: true, color2);
 			spriteBatch.Flush();
-			string text2 = "Enhancements";
-			spriteBatch.DrawMetalString(font, text2, new Vector2(400f, 180f), color2, 0f, font.MeasureString(text2) / 2f, 1.5f);
+			string heading = "Enhancements";
+			spriteBatch.DrawMetalString(font, heading, new Vector2(400f, 180f), color2, 0f, font.MeasureString(heading) / 2f, 1.5f);
 			spriteBatch.Flush();
-			float num3 = 220f;
-			float num4 = 40f;
+			float rowY = 220f;
+			float rowStep = 40f;
 			for (int j = 0; j < 6; j++)
 			{
 				switch (j)
 				{
 				case 0:
-					ExplainPowerup(Powerup.PowerupType.Blast, num3, "Bomb");
+					ExplainPowerup(Powerup.PowerupType.Blast, rowY, "Bomb");
 					break;
 				case 1:
-					ExplainPowerup(Powerup.PowerupType.FirePower, num3, "Increased rate of fire");
+					ExplainPowerup(Powerup.PowerupType.FirePower, rowY, "Increased rate of fire");
 					break;
 				case 2:
-					ExplainPowerup(Powerup.PowerupType.Range, num3, "Increased range");
+					ExplainPowerup(Powerup.PowerupType.Range, rowY, "Increased range");
 					break;
 				case 3:
-					ExplainPowerup(Powerup.PowerupType.Option, num3, "Shield");
+					ExplainPowerup(Powerup.PowerupType.Option, rowY, "Shield");
 					break;
 				case 4:
-					ExplainPowerup(Powerup.PowerupType.Linker, num3, "(Multiplayer) Enables docking");
+					ExplainPowerup(Powerup.PowerupType.Linker, rowY, "(Multiplayer) Enables docking");
 					break;
 				case 5:
-					ExplainPowerup(Powerup.PowerupType.OneUp, num3, "Extra life");
+					ExplainPowerup(Powerup.PowerupType.OneUp, rowY, "Extra life");
 					break;
 				}
-				num3 += num4;
+				rowY += rowStep;
 			}
 			break;
 		}
 		case HelpText.Displays.Combo:
 		{
 			Color color = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
-			string text = "Power Up";
-			spriteBatch.DrawMetalString(font, text, new Vector2(400f, 100f), color, 0f, font.MeasureString(text) / 2f, 1.5f);
+			string line = "Power Up";
+			spriteBatch.DrawMetalString(font, line, new Vector2(400f, 100f), color, 0f, font.MeasureString(line) / 2f, 1.5f);
 			spriteBatch.Flush();
-			text = "Hit enemies to Power Up your current Enhancement.";
-			spriteBatch.DrawString(font, text, new Vector2(400f, 140f), color, 0f, new Vector2((font.MeasureString(text) / 2f).X, 0f), 0.8f, (SpriteEffects)0, 0f);
+			line = "Hit enemies to Power Up your current Enhancement.";
+			spriteBatch.DrawString(font, line, new Vector2(400f, 140f), color, 0f, new Vector2((font.MeasureString(line) / 2f).X, 0f), 0.8f, (SpriteEffects)0, 0f);
 			spriteBatch.Flush();
-			float num = 220f;
-			float num2 = 40f;
+			float rowY = 220f;
+			float rowStep = 40f;
 			for (int i = 0; i < 6; i++)
 			{
 				switch (i)
 				{
 				case 0:
-					ExplainPowerup(Powerup.PowerupType.Blast, num, "Larger bombs");
+					ExplainPowerup(Powerup.PowerupType.Blast, rowY, "Larger bombs");
 					break;
 				case 1:
-					ExplainPowerup(Powerup.PowerupType.FirePower, num, "Exploding bullets");
+					ExplainPowerup(Powerup.PowerupType.FirePower, rowY, "Exploding bullets");
 					break;
 				case 2:
-					ExplainPowerup(Powerup.PowerupType.Range, num, "Bouncing bullets");
+					ExplainPowerup(Powerup.PowerupType.Range, rowY, "Bouncing bullets");
 					break;
 				case 3:
-					ExplainPowerup(Powerup.PowerupType.Option, num, "Faster shields");
+					ExplainPowerup(Powerup.PowerupType.Option, rowY, "Faster shields");
 					break;
 				case 4:
-					ExplainPowerup(Powerup.PowerupType.Linker, num, "(Multiplayer) Faster respawn");
+					ExplainPowerup(Powerup.PowerupType.Linker, rowY, "(Multiplayer) Faster respawn");
 					break;
 				case 5:
-					ExplainPowerup(Powerup.PowerupType.OneUp, num, "?");
+					ExplainPowerup(Powerup.PowerupType.OneUp, rowY, "?");
 					break;
 				}
-				num += num2;
+				rowY += rowStep;
 			}
 			break;
 		}
@@ -236,10 +236,10 @@ internal class InstructionsMenu : DrawableGameComponent
 	{
 		Color color = new Color(new Vector4(0.37f, 0.63f, 1f, 1f));
 		SpriteBatchWrapper spriteBatchWrapper = spriteBatch;
-		string text = Powerup.PowerUpString(powerupType);
+		string name = Powerup.PowerUpString(powerupType);
 		Vector2 position = new Vector2(80f, y);
-		Color val = Powerup.PowerUpColor(powerupType);
-		spriteBatchWrapper.DrawString(text, position, new Color(new Vector4((val).ToVector3(), 1f)), 0f, Vector2.Zero, 0.8f, (SpriteEffects)0, 0f);
+		Color tint = Powerup.PowerUpColor(powerupType);
+		spriteBatchWrapper.DrawString(name, position, new Color(new Vector4((tint).ToVector3(), 1f)), 0f, Vector2.Zero, 0.8f, (SpriteEffects)0, 0f);
 		spriteBatch.Flush();
 		spriteBatch.DrawString(p, new Vector2(120f, y), color, 0f, Vector2.Zero, 0.8f, (SpriteEffects)0, 0f);
 		spriteBatch.Flush();

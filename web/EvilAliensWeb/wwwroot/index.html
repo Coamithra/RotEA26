@@ -626,6 +626,13 @@
             catch (e) { console.warn('[debug] eaNetRoster failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the OFFLINE roster, readable with no net session -- eaNetRoster() refuses
+        // without one, and the menu is precisely where a stale seat matters.
+        window.eaOracleRoster = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugOracleRoster')); }
+            catch (e) { console.warn('[debug] eaOracleRoster failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: seat a couch player right now, the way a gamepad Start press does. Host-side it
         // works BEFORE a peer pairs (unlike ?netlocal, which is PeerUp-gated), which is the only
         // way to fill the host roster ahead of a joiner and so reach the RejectFull path. On a

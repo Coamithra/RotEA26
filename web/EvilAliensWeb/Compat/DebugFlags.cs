@@ -1130,13 +1130,17 @@ namespace EvilAliensWeb.Compat
 		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
 		public static int NetLocal { get; private set; }
 
-		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop EVERY EvSlotGrant the
-		// host answers a couch join with (not just the first: the flag is read on each grant, so
-		// while it is set no couch join can complete), instead of seating them. That is the one state the host's
+		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop the FIRST EvSlotGrant
+		// the host answers a couch join with, instead of seating it; every later grant in the
+		// same session completes normally. That is the one state the host's
 		// ExpireUnclaimedGrants path exists for (the client can silently fail to take a grant: its
 		// device got seated meanwhile, its scene changed) and the ONLY thing that reaches it --
 		// ?netlocal always takes its grant, so without this flag the expiry has no trigger at all
-		// and the seat-leak it guards against is untestable. Shipped builds are unchanged.
+		// and the seat-leak it guards against is untestable. ONE-SHOT since card ee96ea61 (it
+		// dropped every grant, so a run could only ever show the DROP half): ?netlocal=2 now
+		// covers the drop AND a subsequent successful take in one run. The latch is per SESSION
+		// and cleared by NetSession.ResetPerSessionState -- see NetSession.ShouldDropGrant.
+		// Shipped builds are unchanged.
 		public static bool NetDropGrant { get; private set; }
 
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to

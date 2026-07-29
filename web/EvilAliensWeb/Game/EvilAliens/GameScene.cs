@@ -1772,6 +1772,18 @@ internal abstract class GameScene : Scene
 			{
 			}
 		}
+		// Unseat everyone on the way OUT, not just on the way in (card ee96ea61). The launch
+		// paths all ResetPlayers() before they seat, so between a scene ending and the next
+		// launch the roster used to hold whatever the last level or attract demo left behind --
+		// and that window is exactly where the menu-lobby handshake runs. NetSession's host-side
+		// allocator reads the roster unguarded (its client twin LocalBlockedSlots is guarded),
+		// so an attract demo's leftover seats reached FirstMutuallyFreeSlot and could answer a
+		// perfectly good joiner with RejectFull, or push their primary onto the wrong HUD panel.
+		// Cheap and total: PlayerInfo.Reset() only clears isPlaying, so no score, hue or unlock
+		// progress rides on this. LAST in the method deliberately -- OnFinished above has
+		// already queued the next scene (credits/menu), and neither seats anyone, so nothing in
+		// this teardown's own flow can be undone by it.
+		oracle.ResetPlayers();
 	}
 
 	private void checkScreenShot()

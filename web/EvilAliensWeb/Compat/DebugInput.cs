@@ -506,10 +506,16 @@ namespace EvilAliensWeb.Compat
 		// the rest are level completions), so the banner -- and since card 57555583 the LAZY
 		// content load behind it -- had no way to be exercised at all.
 		//
-		// The two real gates are REPORTED rather than bypassed: an already-unlocked awardment
-		// and the cheat check both make AwardAchievement a silent no-op, and a debug seam whose
-		// failure looks identical to its success is worse than none. Nothing is forced -- if a
-		// gate says no, the answer is which gate, not a banner the real game would not draw.
+		// An ALREADY-UNLOCKED awardment is RE-LOCKED first (in memory, never saved), because
+		// otherwise this seam is useless on any save that has played the game -- both
+		// AwardAchievement and AwardmentBlade.Update drop an unlocked awardment, so there is no
+		// banner to see. That re-lock is announced on its own line: a capture taken after one
+		// must never be mistaken for the untouched path. The banner's own Enter transition then
+		// re-unlocks and saves it, exactly as in play.
+		//
+		// The cheat gate is REPORTED rather than bypassed -- it is a live property of the run,
+		// not stale save state, and a seam whose failure looks like its success is worse than
+		// none.
 		[JSInvokable("debugAward")]
 		public static string Award(string awardment)
 		{
@@ -528,18 +534,20 @@ namespace EvilAliensWeb.Compat
 			{
 				return "[debug] eaAward: the awardment blade is not available yet (" + ex.Message + ")";
 			}
+			string relocked = "";
 			if (EvilAliens.Achievements.GetInstance().GetAwardmentIsUnlocked((int)which))
 			{
-				return "[debug] eaAward: " + which + " is ALREADY UNLOCKED -- no banner (the real "
-					+ "path drops it too). Wipe the save or pick another awardment.";
+				EvilAliens.Achievements.GetInstance().SetAwardmentIsUnlocked((int)which, value: false);
+				relocked = "[debug] eaAward: re-locked " + which + " for this session before awarding "
+					+ "-- this is NOT the untouched path\n";
 			}
 			if (EvilAliens.Settings.GetInstance().CheckForCheats())
 			{
-				return "[debug] eaAward: a cheat is active, so " + which + " is dropped -- exactly "
-					+ "as in play (Settings.CheckForCheats). No banner.";
+				return relocked + "[debug] eaAward: a cheat is active, so " + which + " is dropped "
+					+ "-- exactly as in play (Settings.CheckForCheats). No banner.";
 			}
 			blade.AwardAchievement(which);
-			return "[debug] eaAward queued " + which + " (\"" + blade.AwardmentName(which)
+			return relocked + "[debug] eaAward queued " + which + " (\"" + blade.AwardmentName(which)
 				+ "\") -- the banner takes ~170ms to enter and shows for 6.5s.";
 		}
 

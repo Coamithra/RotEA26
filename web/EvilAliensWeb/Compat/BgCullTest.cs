@@ -25,20 +25,30 @@ namespace EvilAliensWeb.Compat;
 //     is a CALL-SITE defect in the mirrorX blocks and so invisible to part 1;
 //  3. a census of the live layers -- the integration evidence, and where the Mars ground's
 //     wasted off-screen row shows up as a number;
-//  4. a differential against the pre-ef55b76e `>=` predicate -- the evidence that tightening
-//     the boundary changes no pixel.
+//  4. a differential against the pre-ef55b76e `>=` predicate, swept across scroll phases -- the
+//     standing guard that tightening the boundary drops only tiles with nothing to draw.
 //
-// READ THIS BEFORE TRUSTING PART 1 OR PART 3. Since card ef55b76e tightened the cull to a strict
-// `> 0`, TileOnScreen and Intersects are the SAME float expression, so part 1's tightness check
-// and part 3's "of which off-screen 0" are now tautologies -- they cannot fail, and a green tick
-// from either proves nothing on its own. What still carries weight:
-//   * part 2, where the predicate's arguments come from the REAL Draw call sites while the truth
-//     is computed from independently recorded extents, so a call site passing the wrong texture,
-//     offset or scale still fails;
-//   * part 4, which restates the OLD predicate and asserts every decision the tightening flips is
-//     a tile of exactly zero on-screen area -- i.e. that no pixel can change;
-//   * part 3's numbers on a build from BEFORE the tightening, which is where the size of the win
-//     was measured.
+// READ THIS BEFORE READING ANY GREEN TICK HERE AS EVIDENCE. Three of the four parts assert
+// something that, against the CURRENT predicate, cannot fail:
+//   * parts 1 and 3, because card ef55b76e tightened the cull to a strict `> 0`, which makes
+//     TileOnScreen and Intersects the SAME float expression -- so the tightness check and the
+//     census' "of which off-screen 0" are now tautologies;
+//   * part 4's own assertion, because KeptByOldCull differs from TileOnScreen ONLY by `>=` vs
+//     `>` on the same arguments, so a flipped decision REQUIRES `x+w == 0 || y+h == 0` -- the
+//     difference set is a subset of the zero-area set algebraically, not empirically.
+// None of that makes them worthless, but their value is as SENTINELS against a future edit, not
+// as proof of today's behaviour. A margin or an inset added to TileOnScreen would start producing
+// flips with real area and part 4 would catch it; part 4 also re-derives the extents from the
+// trace rather than the call site, so it catches argument drift there.
+//
+// The actual proof that the tightening is pixel-neutral is the half-open-interval argument in
+// BackgroundImage.TileOnScreen's comment -- a tile spanning [-w, 0] contains no pixel centre, so
+// it rasterises nothing. It was corroborated by a 40-image pre/post pixel diff over five
+// backgrounds x eight scroll phases (all identical), not by this suite.
+//
+// What carries weight here on its own: part 2, where the predicate's arguments come from the REAL
+// Draw call sites while the truth is computed from independently recorded extents, so a call site
+// passing the wrong texture, offset or scale still fails.
 internal static class BgCullTest
 {
 	private const float ScreenW = 800f;
@@ -65,7 +75,7 @@ internal static class BgCullTest
 
 	// Zero on-screen area: the tile's right or bottom edge lands exactly on the screen's origin
 	// edge. Painting one is a no-op, which is why part 4 can call the tightening pixel-neutral.
-	private static bool ZeroArea(float x, float y, float w, float h)
+	private static bool TouchesOriginEdgeExactly(float x, float y, float w, float h)
 	{
 		return x + w == 0f || y + h == 0f;
 	}
@@ -86,6 +96,10 @@ internal static class BgCullTest
 	// fractions a scrolling layer really passes through. 0 is the case this card is about and
 	// must stay in the set; the rest are the fractional coverage a single ?bgfreeze frame cannot
 	// give, including one just short of a full wrap.
+	//
+	// Part 2 deliberately keeps its own SHORTER inline set rather than using this one: it runs 72
+	// configurations and sweeps both axes, so 9x9 phases each would be 5832 dry runs for no extra
+	// coverage of what part 2 is actually for (the mirrorX/mirrorY call sites). Don't "unify" them.
 	private static readonly float[] Phases = { 0f, 1f / 64f, 0.037f, 0.13f, 0.25f, 0.5f, 0.61f, 0.87f, 0.999f };
 
 	private static string F(float v)
@@ -143,7 +157,9 @@ internal static class BgCullTest
 		int cases = 0;
 		int flipped = 0;
 		int flippedWithArea = 0;
+		int combosNeverAtBoundary = 0;
 		string firstFlipped = null;
+		string firstVacuousCombo = null;
 		foreach ((int W, int H, string Name) shape in Shapes)
 		{
 			foreach (float scale in Scales)
@@ -153,6 +169,7 @@ internal static class BgCullTest
 				int here = 0;
 				int culledVisible = 0;
 				int keptOffScreen = 0;
+				int flippedHere = 0;
 				string firstCulled = null;
 				string firstKept = null;
 				foreach (float x in Axis(w, ScreenW))
@@ -179,12 +196,14 @@ internal static class BgCullTest
 								firstKept = "e.g. at (" + F(x) + "," + F(y) + ") the tile covers x " + F(x) + ".." + F(x + w) + " y " + F(y) + ".." + F(y + h);
 							}
 						}
-						// What the tightening actually changed, and the proof it is invisible:
-						// every flipped decision must be a zero-area tile.
+						// What the tightening actually changed. Counted per (shape, scale) as well as
+						// in total, so a combination whose sweep never reaches the boundary shows up
+						// instead of hiding behind another one's count.
 						if (KeptByOldCull(x, y, w, h) != kept)
 						{
 							flipped++;
-							if (!ZeroArea(x, y, w, h))
+							flippedHere++;
+							if (!TouchesOriginEdgeExactly(x, y, w, h))
 							{
 								flippedWithArea++;
 								if (firstFlipped == null)
@@ -196,6 +215,14 @@ internal static class BgCullTest
 					}
 				}
 				string what = shape.Name + " x" + F(scale);
+				if (flippedHere == 0)
+				{
+					combosNeverAtBoundary++;
+					if (firstVacuousCombo == null)
+					{
+						firstVacuousCombo = what;
+					}
+				}
 				// Soundness: never drop a tile the player would have seen. This is the property
 				// the old expression violated.
 				Check("sound  " + what, culledVisible == 0 && here > 0, culledVisible == 0 ? null : culledVisible + " VISIBLE tiles culled; " + firstCulled);
@@ -206,10 +233,17 @@ internal static class BgCullTest
 		}
 		sb.Append("  info  ").Append(cases).Append(" cases; ").Append(flipped)
 			.Append(" decisions differ from the pre-ef55b76e `>= 0` cull\n");
-		// The pixel-neutrality claim, over the whole sweep: the tightening may only ever drop a
-		// tile that had no area to draw. Its POSITIVE control is `flipped` above -- if that ever
-		// reads 0 the sweep stopped reaching the boundary at all and this check is vacuous.
-		Check("differential: every flipped decision is zero-area", flippedWithArea == 0 && flipped > 0, flippedWithArea == 0 ? flipped + " flipped, all zero-area" : flippedWithArea + " of " + flipped + " flipped tiles had REAL on-screen area; " + firstFlipped);
+		// The tightening may only ever drop a tile that had no area to draw. The POSITIVE CONTROL
+		// is per (shape, scale): every combination must actually reach the boundary, or its leg of
+		// the assertion proved nothing. Note the failure message must never restate the claim --
+		// a vacuous run and a violated run are different problems and read identically otherwise.
+		Check("differential: every flipped decision is zero-area",
+			flippedWithArea == 0 && combosNeverAtBoundary == 0,
+			flippedWithArea != 0
+				? flippedWithArea + " of " + flipped + " flipped tiles had REAL on-screen area; " + firstFlipped
+				: combosNeverAtBoundary != 0
+					? "VACUOUS: " + combosNeverAtBoundary + " shape/scale combinations never reached the boundary (first: " + firstVacuousCombo + ") -- nothing was compared there"
+					: flipped + " flipped across all " + (Shapes.Length * Scales.Length) + " combinations, all zero-area");
 
 		// ---- 2. scenario layers through the real Draw --------------------------------
 		sb.Append("[bgcull] 2. scenario layers, dry-run through the real Draw\n");
@@ -304,11 +338,16 @@ internal static class BgCullTest
 			int sweptTiles = 0;
 			int sweptFlipped = 0;
 			int sweptWithArea = 0;
+			int layersNeverAtBoundary = 0;
 			string firstSweptFlipped = null;
-			void Sweep(IReadOnlyList<BackgroundImage> layers)
+			string firstVacuousLayer = null;
+			void Sweep(string which, IReadOnlyList<BackgroundImage> layers)
 			{
-				foreach (BackgroundImage layer in layers)
+				for (int i = 0; i < layers.Count; i++)
 				{
+					BackgroundImage layer = layers[i];
+					string label = which + " " + i + " " + (layer.texturenames != null && layer.texturenames.GetLength(0) > 0 ? layer.texturenames[0, 0] : "?");
+					int flippedHere = 0;
 					// Leave no trace: the live scroll position is restored exactly, and a dry run
 					// is already barred from advancing the layer's switchTimer.
 					Vector2 saved = layer.position;
@@ -327,12 +366,16 @@ internal static class BgCullTest
 										continue;
 									}
 									sweptFlipped++;
-									if (!ZeroArea(t.X, t.Y, t.W, t.H))
+									flippedHere++;
+									if (!TouchesOriginEdgeExactly(t.X, t.Y, t.W, t.H))
 									{
 										sweptWithArea++;
 										if (firstSweptFlipped == null)
 										{
-											firstSweptFlipped = "tile at (" + F(t.X) + "," + F(t.Y) + ") spanning " + F(t.W) + "x" + F(t.H);
+											// Name the layer AND the phase: a failure here is a pixel
+											// popping somewhere in a live background, and the position
+											// alone does not say where to go looking.
+											firstSweptFlipped = label + " at phase (" + F(px) + "," + F(py) + "): tile at (" + F(t.X) + "," + F(t.Y) + ") spanning " + F(t.W) + "x" + F(t.H);
 										}
 									}
 								}
@@ -343,13 +386,44 @@ internal static class BgCullTest
 					{
 						layer.position = saved;
 					}
+					// Per-layer coverage, REPORTED not asserted -- a layer that never reaches the
+					// boundary contributes nothing to the assertion, and the total would otherwise
+					// hide that behind the layers that did. It is NOT a failure: whether the tie is
+					// reachable at all is a property of the layer's float geometry. The Mars ground
+					// is the standing example -- 12 different-width tiles at size 1/3.238, so its
+					// accumulated widths never land exactly on realsize.X, and on Y its band misses
+					// too (971/3.238 = 299.876, not the 300 it sits at). Its census correctly reads
+					// `drawn 3 (pre-ef55b76e 3)`: the tightening does not affect it either way.
+					if (flippedHere == 0)
+					{
+						layersNeverAtBoundary++;
+						if (firstVacuousLayer == null)
+						{
+							firstVacuousLayer = label;
+						}
+					}
 				}
 			}
-			Sweep(live.CullTestBackgroundLayers);
-			Sweep(live.CullTestForegroundLayers);
+			Sweep("bg", live.CullTestBackgroundLayers);
+			Sweep("fg", live.CullTestForegroundLayers);
 			sb.Append("  info  ").Append(sweptTiles).Append(" tile visits over ").Append(Phases.Length * Phases.Length)
-				.Append(" phases per layer; ").Append(sweptFlipped).Append(" decisions differ from the pre-ef55b76e cull\n");
-			Check("phase sweep: no flipped tile had on-screen area", sweptWithArea == 0 && sweptFlipped > 0, sweptWithArea == 0 ? sweptFlipped + " flipped, all zero-area -- the tightening cannot change a pixel at any phase" : sweptWithArea + " of " + sweptFlipped + " would have POPPED; " + firstSweptFlipped);
+				.Append(" phases per layer; ").Append(sweptFlipped).Append(" decisions differ from the pre-ef55b76e cull");
+			if (layersNeverAtBoundary != 0)
+			{
+				sb.Append("; ").Append(layersNeverAtBoundary).Append(" layer(s) never reach the boundary at any phase (first: ")
+					.Append(firstVacuousLayer).Append(") -- unaffected by the tightening, see the comment above");
+			}
+			sb.Append('\n');
+			// The assertion is global: no flipped tile may have had area. Its positive control is
+			// that SOME layer reached the boundary -- a run where none did compared nothing at all
+			// and must not report PASS.
+			Check("phase sweep: no flipped tile had on-screen area",
+				sweptWithArea == 0 && sweptFlipped > 0,
+				sweptWithArea != 0
+					? sweptWithArea + " of " + sweptFlipped + " would have POPPED; " + firstSweptFlipped
+					: sweptFlipped == 0
+						? "VACUOUS: no layer reached the boundary at any phase -- nothing was compared"
+						: sweptFlipped + " flipped, all zero-area -- the tightening cannot change a pixel at any phase");
 		}
 
 		sb.Append("PASS ").Append(pass).Append("  FAIL ").Append(fail).Append('\n');
@@ -406,8 +480,16 @@ internal static class BgCullTest
 			List<BackgroundImage.TracedTile> log = Capture(layer);
 			int drawn = 0;
 			int wasted = 0;
+			int drawnByOldCull = 0;
 			foreach (BackgroundImage.TracedTile t in log)
 			{
+				// The pre-ef55b76e count is carried alongside the live one so the size of that
+				// card's win stays a REPRODUCIBLE number. Without it "drawn 108 (was 130)" could
+				// only ever be quoted from a build that no longer exists.
+				if (KeptByOldCull(t.X, t.Y, t.W, t.H))
+				{
+					drawnByOldCull++;
+				}
 				if (t.Drawn)
 				{
 					drawn++;
@@ -423,6 +505,7 @@ internal static class BgCullTest
 				.Append("  size ").Append(F(layer.size))
 				.Append("  visited ").Append(log.Count)
 				.Append("  drawn ").Append(drawn)
+				.Append(" (pre-ef55b76e ").Append(drawnByOldCull).Append(')')
 				.Append("  of which off-screen ").Append(wasted);
 			// Mid-crossfade (the 5s window after SetAlienBase2..6) Draw runs the outgoing AND
 			// incoming pass, so these counts read ~2x steady state under a name that only

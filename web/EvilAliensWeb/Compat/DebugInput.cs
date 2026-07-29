@@ -422,8 +422,10 @@ namespace EvilAliensWeb.Compat
 		// JS bridge for the background tile-cull oracle (eaBgCull in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugBgCull'). Sweeps the real cull predicate,
 		// dry-runs scenario layers (incl. mirrored and TALL ones, which no shipped background
-		// is) through the real Draw, and censuses the live layers. See Compat/BgCullTest.cs --
-		// the cull's correctness is invisible to a screenshot, so it is read as data.
+		// is) through the real Draw, censuses the live layers, and diffs the cull against its
+		// pre-ef55b76e form across a scroll-phase sweep. See Compat/BgCullTest.cs -- the cull's
+		// correctness is invisible to a screenshot, so it is read as data (and that file's header
+		// says which of the four parts can actually fail).
 		[JSInvokable("debugBgCull")]
 		public static string BgCull()
 		{

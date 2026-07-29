@@ -148,10 +148,10 @@ generate much of the art/audio referenced here.
   what makes its Y term non-vacuous — for every `[1,1]` layer the Y term is trivially true.
   **Verify with console `eaBgCull()`** (`Compat/BgCullTest.cs`): sweeps the real predicate for
   soundness (a tile that intersects the screen is never culled), dry-runs whole scenario layers —
-  mirrored and TALL, shapes no shipped background uses — through the REAL `Draw`, censuses the
-  live layers' per-frame `drawn` / `off-screen` counts, then diffs the cull against its pre-card
-  form across a phase sweep. A screenshot cannot verify this cull at all,
-  since every shipping configuration errs invisibly; read the decisions as data instead.
+  mirrored and TALL, shapes no shipped background uses — through the REAL `Draw`, censuses the live
+  layers' per-frame `drawn` / `off-screen` counts, then diffs the cull against its pre-card form
+  across a scroll-phase sweep. A screenshot cannot verify this cull at all, since every shipping
+  configuration errs invisibly; read the decisions as data instead.
 - **The right/bottom edge test is STRICT `> 0` (card ef55b76e), and the tie it removed was the
   STEADY STATE, not a rare coincidence.** The interval is half-open, so a tile whose right or
   bottom edge lands exactly on 0 has zero on-screen area; the old `>= 0` submitted it to
@@ -161,14 +161,21 @@ generate much of the art/audio referenced here.
   `[1,1]` layer was in this case on every frame of ordinary play.** Measured per frame before/after:
   Mars parallax layers 4 → 2 drawn each unfrozen (half of every layer's draws were wasted) and
   4 → 1 at `?bgfreeze=0`; alien base 9/9/6 → 4/4/4 at `?bgfreeze=0`; the holodeck's two `grid3`
-  layers drop 22 and 33 tiles at phase 0. **Do NOT loosen it back to `>=`.**
-  The claim that this changes no pixel is PROVEN, not assumed: `eaBgCull()` part 4 restates the
-  pre-card predicate and asserts every decision the tightening flips is a zero-area tile, over a
-  9x9 phase grid per live layer — so it covers all phases, unlike one frozen `?bgfreeze` frame.
-  **Parts 1 and 3 are now TAUTOLOGIES and must not be read as evidence on their own**: the
-  tightened `TileOnScreen` and the suite's `Intersects` truth function are the same float
-  expression, so part 1's tightness check and part 3's "of which off-screen 0" cannot fail. The
-  weight sits in part 2 (arguments come from the real `Draw` call sites) and part 4.
+  layers drop 22 and 33 tiles at phase 0. The census prints the pre-card count alongside the live
+  one (`drawn 108 (pre-ef55b76e 130)`), so the size of the win stays reproducible from HEAD rather
+  than quotable only from a build that no longer exists. **Do NOT loosen it back to `>=`.**
+  **Why it changes no pixel:** the destination quad spans `[-w, 0]`, which contains no pixel
+  centre, so it rasterises nothing — and `RenderScale.Matrix` is a pure scale, so that holds in
+  render space too. Corroborated by a 40-image pre/post pixel diff (five backgrounds × eight
+  `?bgfreeze` phases, all byte-identical).
+  **Three of `eaBgCull()`'s four parts CANNOT FAIL against the current predicate — do not read a
+  green tick there as evidence.** Parts 1 and 3 are tautologies (the tightened `TileOnScreen` and
+  the suite's `Intersects` are now the same float expression); part 4's differential is one too,
+  since `KeptByOldCull` differs only by `>=` vs `>` on the same arguments, so a flip *requires*
+  zero area algebraically. They are SENTINELS for a future edit (a margin or inset would produce
+  flips with real area), not proof of today's behaviour. Only part 2 — whose arguments come from
+  the real `Draw` call sites — can fail on its own. Both differentials carry per-combination and
+  per-layer positive controls so a vacuous run reports `VACUOUS`, not `PASS`.
 - **Preload / hitch tooling (`Compat/LoadProfiler.cs`):** `?loadlog` times every texture decode,
   flags decodes outside a level's preload phase, accumulates a per-level set the preloader feeds
   back, and exports via console `eaPreloadExport()` → `wwwroot/Content/preload/manifest.txt` (read

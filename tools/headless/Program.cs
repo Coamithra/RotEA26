@@ -77,6 +77,14 @@ namespace EvilAliensWeb.Headless
             // probes assert about -- happens during it.
             ConsoleCapture.Install();
 
+            // Silent by default: a background soak must not play the game's SFX through the
+            // user's speakers. BEFORE the host is constructed, because Boot() runs a whole
+            // Update+Draw frame (RunOneFrame) and a sound played in it would otherwise be
+            // audible. SoundEffect.MasterVolume is a plain static and needs no audio device;
+            // the mixer-level half of the mute is what has to wait, and does (HeadlessAudio.Pump).
+            if (!opt.Audio)
+                HeadlessAudio.Silence();
+
             // Must happen before the graphics device exists (SDL loads GL lazily).
             if (opt.Software)
             {
@@ -95,13 +103,12 @@ namespace EvilAliensWeb.Headless
                 using (var host = new HeadlessHost(opt))
                 {
                     host.Boot();
-
-                    // Silent by default: a background soak must not play the game's SFX
-                    // through the user's speakers. AFTER Boot -- the audio device is created
-                    // during it, and nothing has played yet, so no source has latched a gain.
-                    if (!opt.Audio)
-                        HeadlessAudio.Silence();
-                    Console.WriteLine("[eahl] audio    " + AudioStatus());
+                    // No alGain here on purpose: OpenAL does not exist until the first sound,
+                    // so a gain printed at boot would ALWAYS read <unreadable> and every run
+                    // would carry what looks like a warning. Ask for it with `audio` once the
+                    // run has stepped far enough to make a sound.
+                    Console.WriteLine("[eahl] audio    silenced=" + HeadlessAudio.Silenced
+                        + " masterVolume=" + HeadlessAudio.MasterVolume.ToString("0.###", CultureInfo.InvariantCulture));
 
                     int rc = opt.Repl || opt.ScriptPath != null ? RunCommands(host, opt) : RunOneShot(host, opt);
                     if (opt.JsCalls)
@@ -237,15 +244,20 @@ namespace EvilAliensWeb.Headless
                     case "expect":
                     case "expect-not":
                     {
-                        string pattern = Remainder(line, cmd);
+                        string pattern = Remainder(line);
                         if (pattern.Length == 0)
                             throw new ArgumentException("usage: " + cmd + " <regex>");
                         bool want = cmd == "expect";
                         string[] hits = ConsoleCapture.Match(pattern, out bool truncated);
-                        if (truncated)
+                        // Truncation invalidates ABSENCE only. A match that was found is still
+                        // a match, so a positive `expect` that already matched is unaffected --
+                        // it is `expect-not`, and an `expect` that found nothing, that cannot be
+                        // trusted over output which was thrown away.
+                        if (truncated && (!want || hits.Length == 0))
                             throw new InvalidOperationException(
-                                "the capture window overflowed and older output was dropped, so this "
-                                + "assertion cannot be trusted -- add a `mark` closer to what you assert on");
+                                "the capture window overflowed and older output was dropped, so "
+                                + cmd + " /" + pattern + "/ cannot be trusted -- add a `mark` closer "
+                                + "to what you assert on");
                         if (want && hits.Length == 0)
                             throw new InvalidOperationException("expect /" + pattern + "/ matched nothing");
                         if (!want && hits.Length > 0)
@@ -280,9 +292,15 @@ namespace EvilAliensWeb.Headless
         // spaces, '|', '"' and anything else Split() would mangle, so it must not go through
         // Split at all. One layer of surrounding quotes is stripped for the people who add
         // them out of habit.
-        private static string Remainder(string line, string cmd)
+        //
+        // Split at the first whitespace rather than by the command NAME's length: Split()
+        // strips quotes, so `"expect" foo` would leave cmd two chars shorter than the text it
+        // came from and the offset would silently slice the pattern mid-way.
+        private static string Remainder(string line)
         {
-            string rest = line.Substring(cmd.Length).Trim();
+            int sp = line.IndexOf(' ');
+            if (sp < 0) sp = line.IndexOf('\t');
+            string rest = sp < 0 ? "" : line.Substring(sp + 1).Trim();
             if (rest.Length >= 2 && rest[0] == '"' && rest[rest.Length - 1] == '"')
                 rest = rest.Substring(1, rest.Length - 2);
             return rest;
@@ -494,8 +512,10 @@ OPTIONS
             var hits = new List<string>();
             foreach (string ln in text.Split('\n'))
             {
+                // Blank lines are matched too, so `expect-not ^$` means what it says. (Skipping
+                // them would make a whole class of pattern silently unmatchable.)
                 string s = ln.TrimEnd('\r');
-                if (s.Length > 0 && re.IsMatch(s))
+                if (re.IsMatch(s))
                     hits.Add(s);
             }
             return hits.ToArray();

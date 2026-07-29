@@ -29,7 +29,7 @@ supplies per-probe boot flags and runs the set — so any probe can be run by ha
 
 ```sh
 tools/headless/bin/Debug/net8.0/eahl.exe --script tools/headless/probes/silence.txt \
-    --flags "?level=Level1&invuln&aiplayer"
+    --flags "?level=Level1&invuln"
 ```
 
 Layout:
@@ -65,8 +65,9 @@ Four rules, each of which has already cost something:
 2. **`mark` away the boot noise.** Boot decodes ~20 assets and logs them under `(boot)`; other
    cards own that population. Scope the window to your subject.
 3. **Never assert absence over a truncated window.** You do not have to police this — the
-   capture buffer is capped and an overflow makes `expect-not` FAIL rather than pass on
-   evidence it threw away — but if you see that error, add a `mark` closer to the assertion.
+   capture buffer is capped and an overflow fails `expect-not` (and a fruitless `expect`)
+   rather than passing on evidence it threw away — but if you see that error, add a `mark`
+   closer to the assertion.
 4. **Mutation-test it before committing.** Break the thing it defends and watch it go red; the
    probe's header should say what you broke. Same standard `tools/sim/logic_probe` and the
    texture canary are held to.
@@ -94,7 +95,7 @@ is actually played rather than sitting on a dead ship.
 
 | file | pins |
 |---|---|
-| `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested |
+| `silence.txt` | a default `eahl` run is silent, confirmed at OpenAL's listener gain — not merely requested. **Windows-only**: the readback P/Invokes `soft_oal.dll`, so elsewhere it reports `alGain=<unreadable>` and fails. Add the platform library names to `HeadlessAudio` rather than relaxing the assertion |
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
 
 Both are mutation-tested. `preload_level2` goes red (17 lines, `gfx/marsbg/clouds-background`

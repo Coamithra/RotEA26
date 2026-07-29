@@ -98,8 +98,10 @@ expect-not COLD decode in Level2         # the actual assertion
 ```
 
 The regex is the rest of the line verbatim (no quoting needed, though one surrounding pair is
-stripped). The buffer is capped and an overflow makes `expect-not` **fail** rather than pass —
-absence cannot be proven over output that was discarded.
+stripped), and blank lines are matched too, so `expect-not ^$` means what it says. The buffer is
+capped; an overflow fails any assertion that would rest on the discarded part — `expect-not`
+always, and an `expect` that found nothing — because absence cannot be proven over output that
+was thrown away. An `expect` that already matched is unaffected.
 
 Checks worth re-running later live in **`probes/`** and run as a set with
 `python tools/headless/probes/run_probes.py`. Conventions, the four rules for writing one, and
@@ -165,7 +167,10 @@ its return value is printed. `help` lists what is currently available.
   looks like the elegant answer, is what this file used to do, and kills the process with an
   `AccessViolationException` under sustained SFX play (deterministic, 3/3). Full autopsy of that
   and of why an environment variable cannot configure OpenAL Soft from managed code: the header
-  comment in `HeadlessAudio.cs`.
+  comment in `HeadlessAudio.cs`. **Two limits came with it:** a real audio device is now opened
+  (the null backend's one genuine merit was that none was, so a box with *no* sound card is no
+  longer covered — there is no try/catch around KNI's audio bring-up), and the gain readback is
+  Windows-only, so off Windows the run is quiet but `probes/silence.txt` cannot confirm it.
 - **A fake browser, not 13 stubs** (`HeadlessJsRuntime.cs`). `Microsoft.JSInterop` is a plain
   netstandard package, so every `Compat/*Interop.cs` compiles here unchanged and this class answers
   the ~37 `ea*` calls. Stubbing the interop classes instead would have forked exactly the logic

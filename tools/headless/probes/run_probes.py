@@ -12,7 +12,7 @@ Exit 0 = every probe passed, 1 = at least one failed, 2 = the runner itself coul
 Each probe is a plain `eahl --script` file, so any single one can also be run by hand:
 
     tools/headless/bin/Debug/net8.0/eahl.exe --script tools/headless/probes/silence.txt \
-        --flags "?level=Level1&invuln&aiplayer"
+        --flags "?level=Level1&invuln"
 
 The runner exists to supply those per-probe flags (from the `# eahl:` directive in the file)
 and to run the set. Every probe gets its OWN PROCESS: a fresh boot, wiped saves, and no state
@@ -36,7 +36,7 @@ EAHL = os.path.join(REPO, "tools", "headless", "bin", "Debug", "net8.0",
 # as an ordinary comment, so a probe file stays runnable by hand with no runner involved.
 DIRECTIVE = re.compile(r"^#\s*eahl:\s*(.+?)\s*$")
 
-# The first non-comment, non-blank line of a probe doubles as its one-line summary.
+# `# PROBE: <text>` -- the probe's one-line summary, shown by --list and on a failure.
 SUMMARY = re.compile(r"^#\s*PROBE:\s*(.+?)\s*$")
 
 
@@ -53,6 +53,10 @@ def read_meta(path):
     argv, summary = [], ""
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
+            # lstrip first, matching eahl's own comment handling (it Trim()s before
+            # testing for '#'), or an indented comment ends the header scan here while
+            # staying a comment there -- and the probe silently runs with no flags.
+            line = line.lstrip()
             if not line.startswith("#"):
                 if line.strip():
                     break          # header is over once real commands start
@@ -66,9 +70,24 @@ def read_meta(path):
     return argv, summary
 
 
+# Generous: the slowest committed probe plays 90 simulated seconds of a level and takes
+# ~2s. This is not a performance budget, it is a deadlock guard -- a wedged eahl (a scene
+# that never advances, a modal pause) would otherwise hang the runner forever with
+# capture_output swallowing every clue, which is the worst outcome for something an agent
+# leaves running unattended.
+TIMEOUT_S = 300
+
+
 def run(path, extra_argv, verbose):
     cmd = [EAHL, "--script", path] + extra_argv
-    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                              timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired as ex:
+        out = (ex.stdout or "") + (ex.stderr or "")
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        return "timeout", out + "\nerr eahl did not exit within %ds\n" % TIMEOUT_S, cmd
     out = (proc.stdout or "") + (proc.stderr or "")
     if verbose:
         sys.stdout.write(out)
@@ -128,7 +147,7 @@ def main():
         if rc == 0:
             print("PASS")
         else:
-            print("FAIL (exit %d)" % rc)
+            print("FAIL (%s)" % ("timeout" if rc == "timeout" else "exit %d" % rc))
             failed.append(name)
             print("    %s" % summary)
             print("    %s" % " ".join(shlex.quote(c) for c in cmd))

@@ -1,27 +1,39 @@
 # PROBE: a default eahl run is silent, and provably so at the mixer.
 #
 # PINS: HeadlessAudio. A background soak must never play the game's SFX through the
-# user's speakers -- an agent cannot hear it, so nothing else would notice.
+# user's speakers -- an agent cannot hear it, so nothing else would notice. It was
+# broken for the whole of eahl's first life precisely because nothing was watching.
 #
 # FAILURE MEANS: the run is (or may be) audible. Read the quoted `ok audio` line:
-#   masterVolume=1  -> the mute was not applied at all
-#   alGain=1        -> SoundEffect.MasterVolume no longer reaches OpenAL's listener gain,
-#                      or something re-asserted it mid-run
+#   masterVolume=1      -> the mute was not applied at all
+#   alGain=1            -> HeadlessAudio.Pump never landed, or something re-asserted the
+#                          listener gain mid-run
 #   alGain=<unreadable> -> OpenAL never initialised, or soft_oal.dll stopped resolving.
-#                      NOT a pass: silence was not confirmed, so it is reported as a failure
-#                      rather than skipped. If audio simply never came up, step further.
+#                          NOT a pass: silence was not confirmed, so it is reported as a
+#                          failure rather than skipped. Note the readback is Windows-only
+#                          (see HeadlessAudio's header) -- off Windows this probe cannot
+#                          pass, and the fix is to add the platform library names there,
+#                          never to relax the assertion.
 #
-# WHY A LEVEL AND NOT THE MENU: KNI brings OpenAL up lazily on the FIRST sound, and menu
-# navigation does not produce one. Until then there is no context and the gain cannot be
-# read back at all. 1800 frames of Level 1 with the auto-pilot firing does it (4/4 runs).
+# WHY IT FIRES A SHOT: KNI brings OpenAL up lazily on the FIRST sound, and until then the
+# gain cannot be read back at all. Menu navigation produces no sound, so the probe has to
+# make one -- and it makes it DELIBERATELY, with the player's own gun, rather than idling
+# in a level and hoping the auto-pilot shoots. 400 frames is the level intro settling; the
+# ship does not exist to fire before that. Reliable 5/5.
 #
 # The negative control is not scripted, it is a flag: the same probe under --audio must
 # FAIL with masterVolume=1 alGain=1. Re-run it that way if you ever doubt this file.
 #
-# eahl: --flags "?level=Level1&invuln&aiplayer"
+# eahl: --flags "?level=Level1&invuln"
 
-step 1800 nodraw
+step 400 nodraw
+eval Press fire 60
+step 200 nodraw
 mark
 audio
-expect ^ok audio silenced=True masterVolume=0 alGain=0$
+
+# Asserted per field rather than against the whole AudioStatus() line, so adding a field to
+# it does not turn every future run red for the wrong reason.
+expect ^ok audio .*\bmasterVolume=0\b
+expect ^ok audio .*\balGain=0\b
 quit

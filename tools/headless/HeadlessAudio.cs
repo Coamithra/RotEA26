@@ -48,10 +48,18 @@
 //     from here, use an alsoft.ini next to the exe — GetProcPath/ReadALConfig loads it
 //     unconditionally — not an environment variable.
 //
-// Apply() must run once the audio device exists, i.e. AFTER the Game has booted; the gain
-// is read back from OpenAL itself (ListenerGain / alGetListenerf) so silence is assertable
-// as DATA rather than by ear — see the `audio` script command and probes/silence.txt.
+// Silence() is called BEFORE the Game is constructed (Boot runs a whole frame, and a sound
+// played in it would be audible); Pump() applies the mixer half later, when there is a mixer.
+// The gain is read back out of OpenAL itself (ListenerGain / alGetListenerf) so silence is
+// assertable as DATA rather than by ear — see the `audio` script command and probes/silence.txt.
 // --audio opts back in when hearing the game is the actual point.
+//
+// WINDOWS ONLY, by omission. The DllImports below name soft_oal.dll; elsewhere KNI loads
+// libopenal.so.1 / libopenal.dylib, so Pump takes the DllNotFoundException path, the
+// mixer-level mute never lands and ListenerGain reports <unreadable> — which fails
+// probes/silence.txt rather than passing it. MasterVolume still silences (it is managed and
+// platform-agnostic), so a non-Windows run is quiet but cannot PROVE it. Nobody has run eahl
+// off Windows yet; if you do, add the platform library names here rather than relaxing the probe.
 // ---------------------------------------------------------------------------
 using System;
 using System.Runtime.InteropServices;
@@ -65,10 +73,14 @@ namespace EvilAliensWeb.Headless
 
         internal static bool Silenced { get; private set; }
 
-        private static bool _listenerMuted;
+        // "the Pump has finished trying", NOT "the listener is muted" — it is also set when
+        // the interop is unavailable, precisely so a hopeless Pump stops retrying every frame.
+        // ListenerGain, not this flag, is the evidence that the mute landed.
+        private static bool _pumpSettled;
 
-        // Call after Boot(): nothing has played yet at that point, so no source has already
-        // latched a gain off a non-zero MasterVolume.
+        // Call BEFORE the Game is constructed. MasterVolume is a plain managed static and needs
+        // no audio device, while Boot() runs a full Update+Draw frame -- so applying it after
+        // Boot would leave exactly one frame in which a sound could be heard.
         internal static void Silence()
         {
             SoundEffect.MasterVolume = 0f;
@@ -91,17 +103,17 @@ namespace EvilAliensWeb.Headless
         // Cheap: one bool test per Step once it has landed.
         internal static void Pump()
         {
-            if (_listenerMuted || !Silenced)
+            if (_pumpSettled || !Silenced)
                 return;
             try
             {
                 if (alcGetCurrentContext() == IntPtr.Zero)
                     return;
                 alListenerf(AL_GAIN, 0f);
-                _listenerMuted = true;
+                _pumpSettled = true;
             }
-            catch (DllNotFoundException) { _listenerMuted = true; }      // stop retrying
-            catch (EntryPointNotFoundException) { _listenerMuted = true; }
+            catch (DllNotFoundException) { _pumpSettled = true; }      // hopeless; stop retrying
+            catch (EntryPointNotFoundException) { _pumpSettled = true; }
         }
 
         // The gain OpenAL itself reports, read through the same soft_oal.dll the game plays

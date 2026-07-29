@@ -599,12 +599,12 @@ public class Game1 : Game
 	// could the manifest when this was written; WarmThenLaunch's pre-launch warm now runs
 	// BEFORE Initialize, so a manifest entry does reach these — that is how the identical
 	// SetMars/marsbg gap is fixed, card 74b30beb. Boot-warming stays the better fit here:
-	// SetSpace is used by most levels, so paying once per session beats once per level.)
-	// The FIRST space scene of a session paid ~0.5s extra on its
-	// loading tick (12 nebula .dds uploads + 8 star PNG decodes + a shader compile). The
-	// shared content manager never unloads mid-session, so warming once at boot turns every
-	// SetSpace into cache hits. Low-priority (idleWarmQueue): needed before the first LEVEL,
-	// not before the menu.
+	// SetSpace is used by most levels, so paying once per session beats listing the set on
+	// every one of them.) The FIRST space scene of a session paid ~0.5s extra on its loading
+	// tick (12 nebula .dds uploads + 8 star PNG decodes + a shader compile). The shared
+	// content manager never unloads mid-session, so warming once at boot turns every SetSpace
+	// into cache hits. Low-priority (idleWarmQueue): needed before the first LEVEL, not
+	// before the menu.
 	private void QueueIdleWarm()
 	{
 		for (int i = 0; i < 12; i++)
@@ -727,6 +727,11 @@ public class Game1 : Game
 	// with Demo1/2/3) and the ?level= debug boot (LaunchLevelDirect). Bracketed as a
 	// preload for the LoadProfiler so the hitch watchdog doesn't flag the deliberate
 	// one-decode ticks and ?loadlog attributes the decodes to the level as preloads.
+	// Per-tick wall-clock budget for PumpLevelWarm, as Stopwatch ticks. 8ms leaves room in a
+	// 16.7ms frame for the loading-screen draw; it is a floor, not a cap -- the budget is
+	// checked AFTER each warm, so one slow decode always completes rather than being split.
+	private static readonly long LevelWarmBudgetTicks = System.Diagnostics.Stopwatch.Frequency / 125;
+
 	private void WarmThenLaunch(Levels level, Action launch)
 	{
 		if (pendingLevelLaunch != null)
@@ -752,10 +757,20 @@ public class Game1 : Game
 		pendingLevelLaunch = launch;
 	}
 
-	// Decode ONE queued level asset per tick; when the queue drains, close the preload
-	// bracket and run the deferred launch. The launch runs on its own tick (not the
-	// last decode's) so the browser gets a paint between the final warm and the level's
-	// remaining synchronous LoadContent work.
+	// Decode queued level assets until this tick's budget is spent; when the queue drains,
+	// close the preload bracket and run the deferred launch. The launch runs on its own tick
+	// (not the last decode's) so the browser gets a paint between the final warm and the
+	// level's remaining synchronous LoadContent work.
+	//
+	// BUDGETED rather than strictly one-per-tick: a captured manifest section names every
+	// texture the level touches (card 74b30beb), which is 26-82 entries, and one-per-tick
+	// would put a fixed ~0.5-1.4s floor on EVERY entry into that level. Most entries are not
+	// decodes at all -- the shared content manager never unloads mid-session, so a retry after
+	// death, a replayed challenge, or any asset an earlier level already pulled in costs
+	// nothing but a dictionary hit, and spending a whole frame on each is pure latency. A
+	// budget keeps the property that actually matters (a real multi-megabyte decode blows it
+	// on its own, so it still gets a tick to itself and the browser still paints between
+	// decodes) while a fully-cached queue drains in one tick.
 	private void PumpLevelWarm()
 	{
 		if (pendingLevelLaunch == null)
@@ -764,7 +779,13 @@ public class Game1 : Game
 		}
 		if (levelWarmQueue.Count > 0)
 		{
-			levelWarmQueue.Dequeue()();
+			long started = System.Diagnostics.Stopwatch.GetTimestamp();
+			do
+			{
+				levelWarmQueue.Dequeue()();
+			}
+			while (levelWarmQueue.Count > 0
+				&& System.Diagnostics.Stopwatch.GetTimestamp() - started < LevelWarmBudgetTicks);
 			return;
 		}
 		Action launch = pendingLevelLaunch;

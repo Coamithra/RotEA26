@@ -206,8 +206,21 @@ generate much of the art/audio referenced here.
   - **MERGE into `manifest.txt`, never replace it.** `Serialize()` emits only the run's own
     recordings — it never merges `Shipped()` — so overwriting the file deletes every curated
     entry for levels the run did not play. Captured per-level sections live in one block at the
-    bottom of the file and are replaced WHOLESALE per level; a level must not also appear in the
-    hand-written blocks above (`WarmThenLaunch` enqueues duplicates twice).
+    bottom of the file; a level must not also appear in the hand-written blocks above
+    (`WarmThenLaunch` enqueues duplicates twice).
+  - **A re-capture is a UNION with the existing section, never a blind overwrite** — a capture
+    silently comes back SHORT in two ways. (a) The content manager is shared and never unloads,
+    so anything an EARLIER level in the same process decoded is absent from a later level's
+    section (this really bit: Demo2 captured from the attract rotation runs after Demo1 and its
+    export has no `brainanimated` lines). Prefer a single-level process per capture. (b) A run
+    that ends early never reaches a level's later phases, and some entries are DEFENSIVE rather
+    than observed (`asteroidsmall1..4` is "the spawner picks one at random", not "a run saw all
+    four") — those survive only because warming them makes them reappear. Check the section did
+    not shrink.
+  - **In the BROWSER the recording is not clean-slate** — `Hydrate()` reloads the localStorage
+    learned set at boot, so an export can carry entries from earlier sessions. Headless is
+    per-process (`HeadlessJsRuntime._loadProfile` is in-memory), which is another reason to
+    capture with `eahl`.
 - **Level launches are gated by a pre-launch manifest warm.** `Game1.WarmThenLaunch` (every launch
   path incl. attract demos and `?level=`) decodes the level's manifest textures ONE per tick
   (`PumpLevelWarm`) before the scene is Added, so the browser paints between decodes (no "page

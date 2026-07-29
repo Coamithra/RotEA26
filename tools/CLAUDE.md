@@ -115,6 +115,20 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   above, so no mutant could fail a control without first failing one of those. They discriminated
   nothing and inflated the mutation counts (4 and 9) into looking like more than the set has.
   A control earns its place only if the pair it compares is NOT pinned elsewhere in the set.
+- **Seventh case set: `LevelArt.ScreenshotPath`** (card 0d166364) -- the level-select art table,
+  after it absorbed the `HasCarouselEntry` predicate by returning `null` for a level with no
+  bundled art. **A lookup table can only be restated**, so the twelve path rows prove little on
+  their own and the set says so; the evidence is the other three sections. (a) The DERIVATION:
+  `ScreenshotSaver.StockShots` is recomputed from `ScreenshotPath` over the enum and compared
+  against the field the game really warms, so a `StockShots` that grew a hardcoded entry back,
+  lost one, or stopped deduping fails -- not a restatement, a property. (b) The negative control
+  is the pre-card `_ => "GFX/Screenshots/level1empty"` default: no level outside the table may
+  answer that string, even though it is still the legal answer for `Level1`, whose art it is.
+  (c) The OFF-THE-WIRE values (`(Levels)9999`, `(Levels)(-1)`), which nothing in the repo covered
+  before -- a listed game's level arrives as an int from a stranger's build, and those are what
+  the deleted default was protecting. Mutation-tested: restoring that default turns 12 FAIL.
+  Note `ScreenshotSaver`'s static init loads fine here despite the limits above -- it only walks
+  the enum and sizes an array, touching no engine service.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

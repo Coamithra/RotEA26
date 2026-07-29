@@ -118,7 +118,8 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `preload_insanebossi.txt` | the same, for the Boss Train challenge (`InsaneBossI`, 82 entries — the largest section); soaks the level OUT (720 s) because the bosses arrive in sequence — see its header for the two assets a shorter window provably missed |
 | `preload_demo{1,2,3}.txt` | the same, for the three attract demos (`?demo=<n>` pins which one the idle menu drops into). Each also asserts the `(boot)` sentinel stays clean -- see the block below for why that third line is the one that matters |
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
-| `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (card 8d6883f3): no level-select art decodes when either carousel is opened |
+| `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (cards 8d6883f3, 0d166364): no level-select art decodes when either carousel is opened, and no entry falls back to the default art |
+| `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
 level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
@@ -137,10 +138,24 @@ resolve makes the gain unreadable too — so it is ordered FIRST purely to make 
 the cause; it earns its place as diagnosis, not as coverage. `no_audio_device` goes red both ways that matter:
 drop `BringUp`'s catch and the run dies with `err NoAudioHardwareException`, and make
 `--fake-no-audio-device` a no-op and it fails on its `NO AUDIO DEVICE` expect rather than
-passing on a run that had a device all along. `stockshots_warm` goes red naming the dropped asset when a level is deleted
-from `LevelArt.HasCarouselEntry` — tested on BOTH carousels (`Level1` →
-`gfx/screenshots/level1empty`, `WebcamAliens` → `gfx/screenshots/webcamss`), because an
-earlier revision that opened only the challenge carousel passed the `Level1` mutation.
+passing on a run that had a device all along. `stockshots_warm` goes red when a level is deleted from `LevelArt.ScreenshotPath` — tested on
+BOTH carousels (`Level1`, `WebcamAliens`), because an earlier revision that opened only the
+challenge carousel passed the `Level1` mutation. **Since card 0d166364 its `expect-not COLD`
+line can no longer catch that on its own**: collapsing `HasCarouselEntry` into a nullable
+`ScreenshotPath` means a dropped level now resolves to `null` in the carousel too and falls back
+to the already-warm `level1empty`, so *nothing decodes cold* — with only that line, the
+`WebcamAliens` mutation passes green (measured). Its three assertions now catch three different
+things and none is redundant: `stockshots warm: 12 textures` counts the derived set and fires
+first on a deleted level (reads 11); `[levelart] carousel entry` is the only one that catches
+the drift the card is about — a `MenuScene` carousel entry authored for a level with no
+`ScreenshotPath` row, where `StockShots` is still twelve and the count passes happily
+(measured with `Levels.Tutorial`: boot count and COLD both green, that line alone red); and
+`COLD` still covers the `ScreenshotSaver`/`QueueMenuWarm` side neither of the others sees.
+`gamebrowser_fallback` goes red with `unmappedArt=none` when `EnsureArt`'s null guard is
+reverted. Note what that mutation does NOT produce: an exception. `EnsureArt` wraps its
+`Content.Load` in `catch (Exception)`, so a broken fallback throws, gets absorbed, and draws the
+identical picture — which is why the probe reads a line reported from what `EnsureArt` recorded
+while resolving, and why that line must never be re-derived from `LevelArt` at the report site.
 
 **`preload_insanebossi` additionally has a two-line mutation, and it is the sharp one:** deleting
 just `InsaneBossI|gfx/base/756` and `|gfx/base/2331-v5` goes red only because the soak runs the

@@ -941,7 +941,10 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     code surfaces ~every 15 s (the existing intermittent rhythm, never a static banner). The
     `bool showPressStart` became an index `promptPhase` (drawn `% (listed ? 3 : 2)`).
   - **Flags:** `?gamebrowser` boots straight to the carousel with injected FAKE entries (no
-    server) for a screenshot; `?netjip` lets a `?level=` (`DebugFlags.Active`) host list anyway
+    server) for a screenshot -- four real-looking games; `?gamebrowser=fallback` appends two on
+    levels with NO bundled art (card 0d166364), the only offline rig for `EnsureArt`'s fallback,
+    kept off the bare flag because they would be junk rows in an appearance shot;
+    `?netjip` lets a `?level=` (`DebugFlags.Active`) host list anyway
     for the two-window JIP metrics test (it also drops the debug-flag bit from its hello so a
     clean joiner won't reject it).
   - **Verify:** `server/signal/test_signal.py` (registry/browse/build-filter/ping-relay/full->

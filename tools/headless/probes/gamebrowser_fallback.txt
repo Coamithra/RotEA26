@@ -4,6 +4,13 @@
 # deliberately unmapped fake entries in NetGameBrowser.InjectFakeGames that are the only way to
 # reach it offline.
 #
+# NOTE THE FLAG VALUE: `?gamebrowser=fallback`, not bare `?gamebrowser`. The bare flag is the
+# APPEARANCE rig (card 2001fbd8) and lists four real-looking games; the two unmapped entries are
+# wrong for it, since both draw Mission 1's art under the generic "Mission" title and a reader
+# of that screenshot would have to know to discount them. Booting this probe with the bare flag
+# prints NO line at all (four entries, every one of them mapped) and so fails the expect below.
+# That is the intended behaviour, not a bug to work around by loosening the assertion.
+#
 # WHY IT EXISTS: card 0d166364 collapsed LevelArt's two parallel switches into one nullable
 # ScreenshotPath, which meant deleting a `_ => "GFX/Screenshots/level1empty"` default that was
 # DELIBERATE. A listed game's Level arrives off the wire as an int from a stranger's build, so
@@ -37,7 +44,7 @@
 # the very thing being asserted. The window is the whole run, which is short (no navigation, no
 # level load) and well inside the capture cap.
 #
-# eahl: --flags "?gamebrowser&noattract"
+# eahl: --flags "?gamebrowser=fallback&noattract"
 
 step 240 nodraw
 

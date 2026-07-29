@@ -1203,6 +1203,16 @@ namespace EvilAliensWeb.Compat
 		// ?gamebrowser pattern. Hijacks boot => SkipSplash + AutoStart, and is in Active.
 		public static bool GameBrowser { get; private set; }
 
+		// ?gamebrowser=fallback: the same boot, but NetGameBrowser.InjectFakeGames also lists two
+		// levels with no bundled art -- one in our Levels enum with no carousel slot, one not in
+		// the enum at all. That is the only offline way to reach SubMenuOnlineGames.EnsureArt's
+		// no-art branch, which is otherwise reachable only from a real stranger's build off the
+		// wire (card 0d166364). Split from the bare flag (card 0d166364 follow-up) because the
+		// two rigs want opposite things: an APPEARANCE screenshot wants every row to look like a
+		// real game, and two rows drawing Mission 1's art under the generic "Mission" title are
+		// noise you have to mentally discount. Bare ?gamebrowser is therefore the clean rig again.
+		public static bool GameBrowserFallback { get; private set; }
+
 		// ?netjip: the two-window join-in-progress test. Pair with ?level=<Name> (+ ?invuln):
 		// the host boots straight into a level, solo, and LISTS it despite the debug boot
 		// (NetListing's eligibility normally refuses a DebugFlags.Active / cheating host, so
@@ -2399,7 +2409,39 @@ namespace EvilAliensWeb.Compat
 					NetDropGrant = IsOn(val);
 					break;
 				case "gamebrowser":
-					GameBrowser = IsOn(val);
+					// Bare ?gamebrowser is the appearance rig (real-looking entries only).
+					// ?gamebrowser=fallback adds the two unmapped entries. An unrecognised value
+					// is REPORTED and treated as bare, for the ?teampartner reason: a typo would
+					// otherwise silently run the appearance rig while the run is labelled as the
+					// fallback one, and the missing entries look exactly like the bug.
+					if (val != null && val.Trim().ToLowerInvariant() == "fallback")
+					{
+						GameBrowser = true;
+						GameBrowserFallback = true;
+					}
+					else if (IsOn(val))
+					{
+						GameBrowser = true;
+						GameBrowserFallback = false;
+					}
+					else if (IsExplicitlyOff(val))
+					{
+						GameBrowser = false;
+						GameBrowserFallback = false;
+					}
+					else
+					{
+						// GameBrowserFallback is deliberately NOT written here: a repeated flag
+						// (?gamebrowser=fallback&gamebrowser=falback) keeps the earlier VALID
+						// value, per the ?flyspiderflatten convention, and the message names what
+						// is actually in force rather than what the typo would have set.
+						GameBrowser = true;
+						Console.WriteLine("[debug] unknown ?gamebrowser= value '" + val
+							+ "' (expected fallback) -- ignored, listing "
+							+ (GameBrowserFallback
+								? "the unmapped entries too"
+								: "the real-looking entries only"));
+					}
 					if (GameBrowser)
 					{
 						SkipSplash = true;
@@ -3018,8 +3060,10 @@ namespace EvilAliensWeb.Compat
 		// reason written where it sits: ?shake and ?bgfreeze take a number OR an on/off spelling,
 		// so only a value that is neither reaches the diagnostic (reading a typo'd number as
 		// "off" was the worse bug -- it turned the very effect under test off); ?pos reports per
-		// AXIS; ?level keeps its own older wording; the ?flyspider*, ?net, ?teampartner and
-		// ?splashvariant sites keep inline WriteLines.
+		// AXIS; ?level keeps its own older wording; the ?flyspider*, ?net, ?teampartner,
+		// ?splashvariant and ?gamebrowser sites keep inline WriteLines. NOTE ?gamebrowser is on
+		// that list rather than among the silent booleans above: it WAS a plain on/off flag and
+		// became value-carrying (=fallback) in card 0d166364's follow-up.
 		private static void RejectFlagValue(string flag, string val, string expected, string inForce)
 		{
 			Console.WriteLine("[debug] unknown ?" + flag + "= value '" + val + "' (expected "

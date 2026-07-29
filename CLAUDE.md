@@ -181,7 +181,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   Same name on purpose -- it is what makes an OwnLevel churn figure comparable with a Level-3 one.
   **`?nowalls`** is its OwnLevel-only complement and positive control (spawners live, walls gone).
 - **Online game browser** (card 2001fbd8): `?gamebrowser` boots straight to the "Join Online
-  Game" carousel with injected fake entries (no server); `?netjip` pairs with `?level=<Name>`
+  Game" carousel with injected fake entries (no server) -- four real-looking games, the
+  APPEARANCE rig. **`?gamebrowser=fallback`** adds two entries whose level has no bundled art
+  (one with no carousel slot, one not in the `Levels` enum at all), which is the only offline
+  way to reach `SubMenuOnlineGames.EnsureArt`'s no-art branch -- otherwise reachable only from a
+  real stranger's build off the wire (card 0d166364). Kept apart because those two rows draw
+  Mission 1's art under the generic "Mission" title and would be noise in an appearance shot;
+  a value that is neither is reported and treated as bare. `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
 - **Host kick / block** (card 0b8a300b): `?netkickshot` (pair with `?level=<Name>`) parks the
   host's remote-pause kick menu over a live level with no peer, for a screenshot;

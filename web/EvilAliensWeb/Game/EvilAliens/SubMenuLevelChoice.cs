@@ -139,7 +139,7 @@ internal class SubMenuLevelChoice : SubMenuCarousel
 			base.SpriteBatch.Draw(entryImages[entry], position, 0f, scale, center: true, color);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)1;
 			DrawAchievementText(entry, position, entryScale, color);
-			// Mouse hit box: screenshot centred at `position2`, sized 800*entryScale x 600*entryScale.
+			// Mouse hit box: screenshot centred at `position`, sized 800*entryScale x 600*entryScale.
 			RecordEntryHit(entry, position, 800f * entryScale, 600f * entryScale);
 		}
 	}

@@ -86,6 +86,19 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   cannot move, reported as a result), and the clamps. Its negative control is that the resolved
   value must differ from the const while an override is in force; it restores both overrides to
   null on the way out, so a later `Probe*` does not inherit them.
+- **Fifth and sixth case sets: the flag-REJECTION diagnostics** -- `ProbeAiFlagRejection` (card
+  48b7c6b1, the 14 `?ai*` tuning knobs) and `ProbeFlagRejectionSweep` (card 4e401005, the
+  remaining 79 + five non-numeric specials). Same subject as the `?flyspider*` set, at file scale:
+  a malformed value must be REFUSED, REPORTED, and the message must name the setting actually in
+  force. **The sweep proves that last part without restating a single constant** -- it sets a
+  valid value, READS BACK what landed, and requires the message to name that; which also means it
+  never has to know about the inline clamps (`?holofilter` caps at 2, `?aifriends` at 3). Its
+  control is that a VALID value reports nothing, so a helper that printed unconditionally fails
+  there and only there. Mutation-tested three ways, each hitting a different check: dropping one
+  `else` (4 FAIL), naming the shipped default instead of the in-force value (1 FAIL, the in-force
+  check alone), and reporting unconditionally (1 FAIL, the control alone). Adding a family later
+  is adding ROWS -- the table carries the flag, its `DebugFlags` property, a value its guard
+  accepts, and whether that guard refuses a negative.
 - **Fourth case set: `CollisionBox` vs `CollisionLine`** (card 64967ea5) -- the box-vs-ray
   predicate, driven through the PUBLIC `TestCollision(ICollisionType)` (which dispatches to the
   private method, so no private binding is needed). **It is a REGRESSION oracle, and the card it

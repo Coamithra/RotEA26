@@ -312,6 +312,34 @@ generate much of the art/audio referenced here.
   `getDebugQuery` → `Pages/Index.razor.cs`). **No query = normal boot; tuning overrides are null =>
   the baked `Default*` consts, so a shipped build is byte-identical.** When the user settles on
   values, bake them into the consts and keep the flag as an A/B override.
+- **A VALUE-CARRYING flag REPORTS a value it cannot use -- never swallows it** (cards 6eb8dc9e ->
+  48b7c6b1 -> 4e401005, which finished the sweep; ~95 flags now do this). One helper,
+  `DebugFlags.RejectFlagValue`, one wording:
+  `[debug] unknown ?wallsidetile= value '4x' (expected a number > 0 and <= 32) -- ignored, staying on the shipped default`
+  (`staying on <number>` once something has actually set it, e.g. a repeated
+  `?wallsidetile=6&wallsidetile=4x`).
+  **Adding a new value-carrying case means adding its `else` too**, and there are three rules:
+  - The "staying on" clause names the setting **actually IN FORCE**, never the baked default -- a
+    repeated flag (`?wallfog=0.7&wallfog=nope`) keeps the earlier valid value, and a diagnostic
+    that can state the wrong condition is worse than one that states none. Pass
+    `InForce(<the property>)`; the nullable overloads print `the shipped default` when no override
+    stands, because most defaults live in the consuming game class and are not reachable from
+    `Parse`. Where the value space is not a number, name the mechanism instead
+    (`the per-tier skill row`, `the random orientation roll`, `the level's own tier`).
+  - It fires only on a value the guard **cannot use at all** -- unparseable, or refused by the
+    range predicate (typically a negative). An out-of-RANGE value is still CLAMPED silently
+    almost everywhere; `?flyspidercount` is the one deliberate exception.
+  - Pass **`key`**, not a string literal, so an aliased flag reports under the alias that was used
+    (`?objscale` vs `?size` -- lower-cased, since `key` is normalised) and the message cannot
+    drift from its `case` label.
+  Deliberately still silent: the on/off booleans (`IsOn`/`IsExplicitlyOff` have their own
+  convention) and the free-form identity strings (`?netfakepeer=`, `?netfakehash=`, `?bg=`,
+  `?room=`, `?code=`, `?signal=`), where any value is legal and an empty one is not a typo class.
+  **`?shake=` and `?bgfreeze=` take a number OR an on/off spelling** and report only a value that
+  is neither -- reading a typo'd number as "off" was the worse bug, since it turned off the very
+  effect the run was labelled as sweeping. `?pos=` reports per AXIS. Pinned by `logic_probe`'s
+  `ProbeFlagRejectionSweep` + `ProbeAiFlagRejection` + `ProbeFlySpiderFlags`; the control in each
+  is that a VALID value reports nothing.
 - `DebugFlags.Active` (the `[debug] flags active` console line) lists only flags that hijack
   boot/levels (`?level=`, `?brainboss`, `?texviewer`, ...). Pure render/feel toggles
   (`?metalscore`, `?slowmotrail`, `?holofilter`, shake/hitstop, reticle size, ...) stay OUT of it.
@@ -1172,8 +1200,8 @@ the rest are tier-independent.
   no guard and clamps 0..64; an out-of-RANGE value is still clamped silently on all 14, since only
   a value the guard cannot use at all reaches the diagnostic. Pinned by `logic_probe`'s
   `ProbeAiFlagRejection`, whose control is that a valid value reports no rejection.
-  **This covers the 14 TUNING knobs, not everything named `?ai*`:** `?aifriends=` still swallows a
-  bad value silently, tracked with the other silent flag families as a follow-up card.
+  Card 4e401005 has since taken the same treatment to every other value-carrying flag in the file
+  (`?aifriends=` included) -- see "Debug flags & tuning conventions" above.
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.

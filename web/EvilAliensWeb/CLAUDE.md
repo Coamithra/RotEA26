@@ -200,9 +200,26 @@ generate much of the art/audio referenced here.
     `Initialize` decodes are attributed to the `(boot)` sentinel. Seed the section from the
     `(boot)` block immediately preceding the `<Level> preload:` line, then re-capture.
   - **`(boot)` manifest lines are INERT** — `ManifestAssets` is only ever called with a `Levels`
-    name. Boot/menu gaps can only be fixed in `QueueMenuWarm`/`QueueIdleWarm`, i.e. code. Beware
-    false positives there: `RecordTexture` has no boot exemption (unlike `NoteFrame`), so an
-    asset the menu warm *deliberately* decodes still logs COLD.
+    name. Boot/menu gaps can only be fixed in `QueueMenuWarm`/`QueueIdleWarm`, i.e. code.
+  - **The warm queues are EXEMPT from the COLD report, by bracket (card 4d47c5ba).**
+    `Game1.Warm<T>` wraps every queued decode in `LoadProfiler.BeginWarm`/`EndWarm`, so an asset
+    the menu or idle warm *deliberately* decodes is recorded (and exports as `WARM`) but never
+    logged as a gap. Before that, the queues reported themselves: a `?menu&loadlog` boot printed
+    **50** `(boot)` COLD lines of which **34 were the warm queues doing their job**, and the
+    resulting unreadable list is what made card 74b30beb's follow-up name four assets that
+    cannot be warmed at all.
+    It is a BRACKET, not a `_currentLevel == SentinelBoot` mute like `NoteFrame`'s, precisely so
+    the boot decodes that are NOT warm-queue driven still surface -- they are the signal.
+  - **The `(boot)` COLD lines that REMAIN are unreachable by any warm queue -- do not "fix" them
+    by adding entries.** `QueueMenuWarm`/`QueueIdleWarm` are built in `Game1.LoadContent`, which
+    `base.Initialize()` reaches only AFTER every component's own `LoadContent` has run. So
+    `gfx/cursor2` (`MousePointer`), `gfx/sprites/awardmentblade` (`AwardmentBlade`) and the
+    `gfx/splash/*` set (`SplashScene.AddSplash`, called from `Game1.Initialize` line ~306, and
+    into that scene's OWN content manager besides) have all already decoded by the time the first
+    queue entry is pumped. Warming them is a cache hit that changes nothing, including the log
+    line. The expected steady state is exactly those **9** lines; a tenth is a real new gap.
+  - **The `COLD decode in <Level>: <asset>` string is PROBE-PINNED** -- `tools/headless/probes/
+    preload_level2.txt` greps it. Suppressing a line is fine; reformatting one breaks that probe.
   - **MERGE into `manifest.txt`, never replace it.** `Serialize()` emits only the run's own
     recordings — it never merges `Shipped()` — so overwriting the file deletes every curated
     entry for levels the run did not play. Captured per-level sections live in one block at the
@@ -238,6 +255,26 @@ generate much of the art/audio referenced here.
   `QueueMenuWarm`, pre-level art in `QueueIdleWarm`. Menus share ONE content manager
   (`Scene.Content` == `Game1.content`), which is why warming works. `BragScene.WouldShow()` routes
   credits → menu directly on web (no signed-in gamer).
+  - **The level-select stock art is warmed too, off `ScreenshotSaver.StockShots` (card
+    4d47c5ba).** `ScreenshotSaver.Init()` loads all twelve SYNCHRONOUSLY from
+    `StartScreen.Update`, immediately BEFORE `OnFinished` -- i.e. before `DrainWarmQueue` -- so
+    they used to block the Press-Start -> menu handoff for ~350-470ms in Chrome. The pump covers
+    them during the splash instead. **`StockShots` is the single list both `Init()` and
+    `QueueMenuWarm` iterate; keep it that way** -- `Init` used to hardcode eleven of the twelve
+    and the one it missed (`webcamss`) decoded cold on first opening Challenges.
+    A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never runs and all
+    twelve decode at `Init` as before: that is the debug path, not a regression.
+  - **`GFX/Help/Controls_Keyboard`/`_Joypad` are in the IDLE queue, and moving them there meant
+    moving them to the shared content manager (card 4d47c5ba).** `HelpText` (every attract demo)
+    and `InstructionsMenu` (every in-level pause -> Instructions) each used to own a private
+    `WebContentManager` they `Unload()`ed on removal, so the 1548x1188 pair was re-decoded on
+    every showing forever -- and **no warm and no manifest entry could ever reach them**, since
+    `WebContentManager` shares no cache between managers (this is why card 74b30beb tried
+    manifest entries, measured them still COLD, and removed them again). Both now read the pair
+    from the shared manager; the defensive re-loads that guarded against their own `Unload` are
+    gone with it. Idle rather than menu queue because `DrainWarmQueue` is synchronous and neither
+    screen is menu-first-frame art. Cost: ~3.7 MB resident for the session -- less than the old
+    per-`InstructionsMenu` copies, since every `GameScene` owns one.
 
 ## Debug flags & tuning conventions
 

@@ -71,6 +71,20 @@ namespace EvilAliensWeb.Compat
         private static string _currentLevel = SentinelBoot;
         private static bool _preloadActive;
 
+        // True while Game1's warm queues are decoding an asset ON PURPOSE (BeginWarm/EndWarm
+        // bracket Game1.Warm<T>, the single funnel for both QueueMenuWarm and QueueIdleWarm).
+        // Without it every one of those ~34 boot decodes reported itself as a COLD gap -- the
+        // menu warm doing exactly its job, logged as the thing it exists to prevent -- which
+        // made the (boot) block unreadable and cost card 4d47c5ba a wrong asset list.
+        //
+        // Deliberately a BRACKET, not a blanket "_currentLevel == SentinelBoot" mute like the
+        // one NoteFrame uses: the boot decodes that are NOT warm-queue driven (the splash art,
+        // cursor2, awardmentblade -- all loaded from component LoadContent BEFORE Game1's own
+        // LoadContent builds the queues, so no warm entry can ever reach them) are the real
+        // signal in that block, and muting them would delete the evidence this card was filed
+        // on. Non-reentrant by construction: Warm<T> loads one asset and cannot nest.
+        private static bool _warmActive;
+
         // Per-preload running totals, for the one-line summary on EndPreload.
         private static int _preloadCount, _preloadMs, _preloadMaxMs;
         private static string _preloadSlowest;
@@ -123,6 +137,13 @@ namespace EvilAliensWeb.Compat
                 _preloadCount++;
                 _preloadMs += ms;
                 if (ms > _preloadMaxMs) { _preloadMaxMs = ms; _preloadSlowest = assetId; }
+            }
+            else if (_warmActive)
+            {
+                // A deliberate boot warm. Still RECORDED above (so the export keeps the asset
+                // and its size), but it is not a gap: nothing is on screen waiting for it. Not
+                // folded into the preload counters either -- those summarise one level's
+                // bracket, and a warm decode belongs to no level.
             }
             else
             {
@@ -179,6 +200,19 @@ namespace EvilAliensWeb.Compat
             _preloadActive = true;
             _wasHitch = false;   // the long preload ticks aren't hitches; start gameplay clean
             _preloadCount = 0; _preloadMs = 0; _preloadMaxMs = 0; _preloadSlowest = null;
+        }
+
+        // Bracket ONE deliberate warm-queue decode (Game1.Warm<T>). See _warmActive: inside the
+        // bracket a decode is recorded but never flagged Cold and never logged, because there is
+        // no frame waiting on it. Cheap enough to leave unguarded by Recording -- two bool writes.
+        public static void BeginWarm()
+        {
+            _warmActive = true;
+        }
+
+        public static void EndWarm()
+        {
+            _warmActive = false;
         }
 
         public static void EndPreload()

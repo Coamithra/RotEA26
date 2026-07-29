@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -34,8 +33,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 
 	private Timer stateTimer = new Timer(1f, repeating: false);
 
-	private ContentManager localContent;
-
 	private Texture2D keyboardlayout;
 
 	private Texture2D controllerlayout;
@@ -68,13 +65,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		: base(game)
 	{
 		base.DrawOrder = 2000;
-		// Web port: load unpacked web assets via WebContentManager (KNI can't read .xnb).
-		localContent = new WebContentManager((IServiceProvider)base.Game.Services, "Content");
-	}
-
-	public void Unload()
-	{
-		localContent.Unload();
 	}
 
 	public override void Initialize()
@@ -91,14 +81,6 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
 		base.Initialize();
 		base.LoadContent();
-		// KNI runs LoadContent() once per component instance EVER (guarded), but each
-		// demo's HelpText is a boot-time singleton that Unload()s itself on removal
-		// (OnComponentRemoved) and is re-added on every attract run. Re-load the
-		// localContent textures every showing: a no-op cache hit while nothing was
-		// unloaded, a fresh decode after Unload() — otherwise a demo's second attract
-		// cycle draws disposed textures.
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
 	}
 
 	public void SetDisplay(Displays display)
@@ -109,8 +91,15 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 	protected override void LoadContent()
 	{
 		base.LoadContent();
-		keyboardlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Keyboard");
-		controllerlayout = localContent.Load<Texture2D>("GFX/Help/Controls_Joypad");
+		// The two control diagrams come from the SHARED content manager (card 4d47c5ba).
+		// They used to live in a private WebContentManager this component Unload()ed on
+		// removal, so every attract cycle re-decoded 2x 1548x1188 -- and nothing could warm
+		// them, since a warm populates the shared cache and WebContentManager shares none.
+		// Shared, they are decoded once per session by Game1.QueueIdleWarm and this is a
+		// cache hit; nothing disposes them, so the defensive re-load in Initialize that
+		// guarded against the Unload is gone with it.
+		keyboardlayout = content.Load<Texture2D>("GFX/Help/Controls_Keyboard");
+		controllerlayout = content.Load<Texture2D>("GFX/Help/Controls_Joypad");
 		blankTexture = content.Load<Texture2D>("GFX/Menu/blank");
 		powerupbubble = content.Load<Texture2D>("GFX/Sprites/powerupbw");
 		font = content.Load<SpriteFont>("GFX/Menu/menufont");
@@ -298,12 +287,12 @@ public class HelpText : DrawableGameComponent, IComponentWatcher
 		currentlyDisplaying = Displays.Keyboard;
 	}
 
+	// Nothing to release on removal since card 4d47c5ba: the two control diagrams moved to
+	// the shared content manager, which this component does not own and must never Unload.
+	// The hook stays because IComponentWatcher requires it and this is the seam a future
+	// per-instance resource would be freed from.
 	public void OnComponentRemoved(GameComponentCollectionEventArgs e)
 	{
-		if (e.GameComponent == this)
-		{
-			Unload();
-		}
 	}
 
 	public void OnComponentAdded(GameComponentCollectionEventArgs e)

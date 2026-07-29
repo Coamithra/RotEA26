@@ -591,6 +591,23 @@ public class Game1 : Game
 		// main thread. Warming it here moves that decode off the first-show path -- a small
 		// fixed cost paid every boot (like the rest of this list) to kill the pop.
 		EnqueueWarm<Texture2D>("GFX/Menu/evilskull");
+		// The level-select carousel's stock art (card 4d47c5ba). ScreenshotSaver.Init() loads
+		// all twelve SYNCHRONOUSLY the instant Start is pressed -- it runs from
+		// StartScreen.Update immediately BEFORE OnFinished, i.e. before DrainWarmQueue -- so
+		// they used to land as one ~350-470ms block on the Press Start -> menu handoff, the
+		// last thing between the player and the menu. Queued here they are pumped during the
+		// splash (which has ~1000 idle ticks for a queue of ~24) and Init() becomes cache hits.
+		//
+		// Queued AFTER the menu-critical set above on purpose: warmQueue is FIFO and
+		// DrainWarmQueue's contract is "the menu's own art is decoded before the menu is
+		// built", so nothing may be inserted ahead of it. The drain does no work for these
+		// either way -- Init() has already decoded whatever the pump did not reach.
+		//
+		// ScreenshotSaver owns the list so the warm set and the load set cannot drift.
+		foreach (string stockShot in ScreenshotSaver.StockShots)
+		{
+			EnqueueWarm<Texture2D>(stockShot);
+		}
 	}
 
 	// Space-background tile set (card 97727578). Background.SetSpace() loads all of these
@@ -617,6 +634,20 @@ public class Game1 : Game
 		}
 		// ProceduralStarfield's crossfade shader — same first-SetSpace load moment.
 		EnqueueIdleWarm<Effect>("GFX/Effects/starwindow");
+		// The two 1548x1188 control diagrams (card 4d47c5ba). HelpText (every attract demo)
+		// and InstructionsMenu (every in-level pause -> Instructions) draw them, and both used
+		// to own a PRIVATE WebContentManager that they Unload()ed on removal -- so the pair was
+		// re-decoded on every single showing, forever. Both now read them from this shared
+		// manager, which is what makes warming them possible at all; a per-level manifest entry
+		// never could (tried and reverted in card 74b30beb: the manifest warms Game1.content,
+		// and their copies lived in a different cache).
+		//
+		// IDLE queue, not the menu queue: neither screen is menu-first-frame art, and
+		// DrainWarmQueue is synchronous -- putting 2 multi-megapixel decodes there would make a
+		// player who mashes past the splash WAIT for art that is not on screen yet, trading a
+		// hidden warm for a visible one. Same reasoning as the space tiles above.
+		EnqueueIdleWarm<Texture2D>("GFX/Help/Controls_Keyboard");
+		EnqueueIdleWarm<Texture2D>("GFX/Help/Controls_Joypad");
 	}
 
 	// Queue one asset to be warmed later (during splash idle, or the pre-menu drain).
@@ -664,6 +695,11 @@ public class Game1 : Game
 	// warming the others — and must never block boot.
 	private void Warm<T>(string assetName)
 	{
+		// Tell the load profiler this decode is deliberate, so ?loadlog stops reporting the
+		// warm queues doing their job as COLD gaps (card 4d47c5ba). The bracket covers BOTH
+		// queues because every queued lambda funnels through here, and only them -- a boot
+		// decode from anywhere else still surfaces, which is the point.
+		EvilAliensWeb.Compat.LoadProfiler.BeginWarm();
 		try
 		{
 			content.Load<T>(assetName);
@@ -671,6 +707,10 @@ public class Game1 : Game
 		catch (Exception ex)
 		{
 			System.Console.WriteLine("[warm] " + assetName + " warm failed: " + ex.Message);
+		}
+		finally
+		{
+			EvilAliensWeb.Compat.LoadProfiler.EndWarm();
 		}
 	}
 

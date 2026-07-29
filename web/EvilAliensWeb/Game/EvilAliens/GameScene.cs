@@ -277,7 +277,8 @@ internal abstract class GameScene : Scene
 	private void instructionsMenu_OnExit(object sender)
 	{
 		darkener.SetButtonTips("select", "back");
-		instructionsMenu.Unload();
+		// No Unload() here since card 4d47c5ba -- the control diagrams now live in the shared
+		// content manager (warmed once at boot), which this scene does not own.
 		pausedScene.Show();
 		Collection.Remove((GameComponent)(object)instructionsMenu);
 	}

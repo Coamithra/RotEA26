@@ -24,6 +24,29 @@ public class ScreenshotSaver
 	// Disposed + cleared once composited so it never leaks into a later level's shot.
 	private static Texture2D pendingOverlay;
 
+	// The stock level-select art: what the carousel draws for a level the player has no
+	// saved screenshot of yet (SubMenuLevelChoice.loadScreenshots falls back to these).
+	// ONE list with two consumers -- Init() below, which loads them through the shared
+	// content manager, and Game1.QueueMenuWarm, which pre-decodes them during the splash so
+	// Init()'s loads are cache hits. They MUST NOT drift: Init() used to hardcode eleven of
+	// the twelve, and the one it missed (webcamss, the challenge carousel's last entry) then
+	// decoded cold the first time the player opened Challenges.
+	internal static readonly string[] StockShots =
+	{
+		"GFX/Screenshots/level1empty",
+		"GFX/Screenshots/level2empty",
+		"GFX/Screenshots/level3empty",
+		"GFX/Screenshots/SpaceDodge",
+		"GFX/Screenshots/ss1",
+		"GFX/Screenshots/classicss",
+		"GFX/Screenshots/Paratrooper",
+		"GFX/Screenshots/OwnLevel",
+		"GFX/Screenshots/crazygamess",
+		"GFX/Screenshots/InsaneBossI",
+		"GFX/Screenshots/teamchallengess",
+		"GFX/Screenshots/webcamss"
+	};
+
 	public static void Init()
 	{
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
@@ -45,17 +68,10 @@ public class ScreenshotSaver
 				}
 			}
 		}
-		contentManager.Load<Texture2D>("GFX/Screenshots/level1empty");
-		contentManager.Load<Texture2D>("GFX/Screenshots/level2empty");
-		contentManager.Load<Texture2D>("GFX/Screenshots/level3empty");
-		contentManager.Load<Texture2D>("GFX/Screenshots/SpaceDodge");
-		contentManager.Load<Texture2D>("GFX/Screenshots/ss1");
-		contentManager.Load<Texture2D>("GFX/Screenshots/classicss");
-		contentManager.Load<Texture2D>("GFX/Screenshots/Paratrooper");
-		contentManager.Load<Texture2D>("GFX/Screenshots/OwnLevel");
-		contentManager.Load<Texture2D>("GFX/Screenshots/crazygamess");
-		contentManager.Load<Texture2D>("GFX/Screenshots/InsaneBossI");
-		contentManager.Load<Texture2D>("GFX/Screenshots/teamchallengess");
+		foreach (string stockShot in StockShots)
+		{
+			contentManager.Load<Texture2D>(stockShot);
+		}
 	}
 
 	public static Texture2D GetScreenshot(Levels level)

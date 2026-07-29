@@ -1,0 +1,22 @@
+# PROBE: attract demo 2 decodes no textures during playback.
+#
+# PINS: wwwroot/Content/preload/manifest.txt's Demo2 section (card e63601a4 -- the 10 gaps it
+# added, on top of the marsbg/spider set card 74b30beb captured). Demo2 is the Mars demo, so a
+# regression here costs the marsloop tiles as well as the shared HUD/player art.
+#
+# FAILURE MEANS: an asset Demo2 uses is no longer preloaded and is decoded during live
+# playback. The quoted line names it. Fix by restoring the manifest entry.
+#
+# See preload_demo1.txt for the full reasoning behind the three assertions, the ?demo= flag
+# and the attract-vs-?level= route -- it is identical here and not repeated.
+#
+# eahl: --flags "?menu&loadlog&demo=2"
+
+step 400 nodraw
+mark
+step 4600 nodraw
+
+expect      \[loadprofile\] Demo2 preload:
+expect-not  COLD decode in Demo2
+expect-not  COLD decode in \(boot\): gfx/sprites/playersheet
+quit

@@ -1,0 +1,43 @@
+# PROBE: attract demo 1 decodes no textures during playback.
+#
+# PINS: wwwroot/Content/preload/manifest.txt's Demo1 section (card e63601a4). The attract
+# demos are the FIRST thing a player who lets the menu idle ever sees, and all three were
+# cold-decoding mid-playback -- Demo1 the worst at 12 assets, including the 1260x680
+# playersheet. Same silent failure mode as every preload_* probe: the manifest is pure DATA,
+# so a dropped line produces no build error and no failing test, just a stutter in the demo.
+#
+# FAILURE MEANS: an asset Demo1 uses is no longer preloaded and is decoded during live
+# playback. The quoted line names it. Fix by restoring the manifest entry (or capture it --
+# LoadProfiler's header has the eaPreloadExport / MERGE-never-overwrite flow).
+#
+# WHY ?demo=1 EXISTS AND WHY THIS PROBE NEEDS IT: MenuScene.mainMenu_DemoSelected picks
+# Demo1/2/3 with RandomHelper.Random.Next(3) off an unseeded Random, so without the flag this
+# probe would land on its subject one run in three. A --script file cannot branch or retry.
+#
+# AND WHY IT DRIVES THE ATTRACT PATH RATHER THAN ?level=Demo1: a ?level= boot has no splash,
+# so Game1's QueueIdleWarm assets drain into gameplay and are recorded as that level's cold
+# decodes -- 20 spurious gfx/game/space/* lines. The attract route is the only clean one.
+#
+# THE THIRD ASSERTION IS THE SHARP ONE, and it is not decoration. Deleting Demo1's manifest
+# lines does not merely remove the warm: WarmThenLaunch returns EARLY on an empty section, so
+# no preload bracket is opened at all and the decodes are logged against the "(boot)" sentinel
+# instead of Demo1. `expect-not COLD decode in Demo1` would then pass vacuously -- and the
+# `expect ... Demo1 preload:` above it would STILL match, because that summary line comes from
+# GameScene.LoadContent's BeginPreload/EndPreload bracket, which runs whatever the manifest
+# section holds (PreloadGraphicalContent is called inside it, not the opener). Only the
+# (boot) guard catches that case. Measured: it is exactly how Demo3 hid its 12 gaps.
+#
+# Window: mark at frame 400 (boot + the idle warm queue have drained by then), the attract
+# timeout fires at 20 s = frame 1200, and the soak runs to frame 5000 (~83 s of demo).
+# Verified clean to frame 17400 (~290 s, two attract launches) before trimming to this.
+#
+# eahl: --flags "?menu&loadlog&demo=1"
+
+step 400 nodraw
+mark
+step 4600 nodraw
+
+expect      \[loadprofile\] Demo1 preload:
+expect-not  COLD decode in Demo1
+expect-not  COLD decode in \(boot\): gfx/sprites/playersheet
+quit

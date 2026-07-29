@@ -972,7 +972,20 @@ internal class MenuScene : Scene
 		state = MenuState.FadeToGame;
 		nextState = NextState.StartLevel;
 		starter = ControlDevice.AI;
-		switch (RandomHelper.Random.Next(3))
+		// Debug (?demo=1|2|3): pin the roll so one demo can be reached on demand -- capturing a
+		// demo's preload gaps needs ONE demo per process (the content manager is shared), and a
+		// committed probe cannot retry, so an unseeded roll made both a coin flip (card e63601a4).
+		// Unset => the normal random pick, so a shipped build is unchanged.
+		// The draw happens either way and its result is then DISCARDED: RandomHelper.Random is the
+		// shared stream, so short-circuiting it would shift every later roll in a pinned run --
+		// including UFO.MakeSmall's landed-sheet pick, which is exactly what the demos' manifest
+		// entries hedge against. A pinned capture must sample the same stream a real launch does.
+		int demoRoll = RandomHelper.Random.Next(3);
+		if (DebugFlags.DemoPick.HasValue)
+		{
+			demoRoll = DebugFlags.DemoPick.Value - 1;
+		}
+		switch (demoRoll)
 		{
 		case 0:
 			selectedLevel = Levels.Demo1;

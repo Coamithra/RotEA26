@@ -200,6 +200,19 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     returns early when `ManifestAssets` is empty, so no bracket is opened and the level's
     `Initialize` decodes are attributed to the `(boot)` sentinel. Seed the section from the
     `(boot)` block immediately preceding the `<Level> preload:` line, then re-capture.
+    **It also makes such a level READ AS CLEAN, which is how Demo3 hid 12 cold decodes**
+    (card e63601a4): no `COLD decode in Demo3` line was ever printed, and the
+    `[loadprofile] Demo3 preload:` summary still was -- that line comes from
+    `GameScene.LoadContent`'s own `BeginPreload`/`EndPreload` bracket, which runs whatever the
+    manifest section holds. A level with an empty section is
+    not evidence of anything -- check the `(boot)` block before believing it.
+  - **The ATTRACT DEMOS capture through `?demo=<1|2|3>`** (card e63601a4). The idle menu picks
+    Demo1/2/3 with an unseeded `RandomHelper.Random.Next(3)` in
+    `MenuScene.mainMenu_DemoSelected`, so without the flag reaching a chosen demo is a coin
+    flip. It pins the roll only -- it is NOT the off-switch of `?nodemo`/`?noattract`, which
+    unwire the idle timeout so no demo runs at all. ONE demo per process (the shared content
+    manager makes every later demo warm), boot `?menu&loadlog&demo=<n>` and let it idle ~20 s.
+    Pinned by `tools/headless/probes/preload_demo{1,2,3}.txt`.
   - **`(boot)` manifest lines are INERT** — `ManifestAssets` is only ever called with a `Levels`
     name. Boot/menu gaps can only be fixed in `QueueMenuWarm`/`QueueIdleWarm`, i.e. code.
   - **The warm queues are EXEMPT from the COLD report, by bracket (card 4d47c5ba).**

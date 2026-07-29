@@ -116,6 +116,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `preload_level2.txt` | Level 2's `Content/preload/manifest.txt` section: no texture decodes during gameplay |
 | `preload_paratrooper.txt` | the same, for the Paratrooper challenge (49 manifest entries) |
 | `preload_insanebossi.txt` | the same, for the Boss Train challenge (`InsaneBossI`, 82 entries — the largest section); soaks the level OUT (720 s) because the bosses arrive in sequence — see its header for the two assets a shorter window provably missed |
+| `preload_demo{1,2,3}.txt` | the same, for the three attract demos (`?demo=<n>` pins which one the idle menu drops into). Each also asserts the `(boot)` sentinel stays clean -- see the block below for why that third line is the one that matters |
 | `boot_cold.txt` | card 57555583's two lazy boot decodes (splash flip variants, `AwardmentBlade`) stay lazy |
 | `stockshots_warm.txt` | `ScreenshotSaver.StockShots` covers every carousel entry (card 8d6883f3): no level-select art decodes when either carousel is opened |
 
@@ -148,20 +149,33 @@ reached late — which is how the soak length was chosen. Re-run that mutation, 
 if you ever shorten the window. `silence` goes red
 under `--audio` (`masterVolume=1 alGain=1`), which is also its standing negative control.
 
-**`Demo2` has no probe, deliberately** (card 454cbeae, measured — do not "finish the set"
-without re-measuring). Two independent blockers:
+**The three attract demos each have a probe now (card e63601a4), and the two blockers that
+used to make them impossible are both gone.** This block used to say `Demo2` could not be
+probed; what follows is what changed, because both halves generalise.
 
-1. **It cannot be reached deterministically by the attract path a valid preload probe
-   requires.** (`?level=Demo2` boots it fine — and walks straight into the `QueueIdleWarm` trap
-   above, which is the whole reason the attract path is the only usable route.)
-   `MenuScene.mainMenu_DemoSelected` picks
-   `RandomHelper.Random.Next(3)` → Demo1/2/3 uniformly on every attract launch, off an
-   unseeded `new Random()`. There is no "demo 1 first" ordering and no debug seam to force one,
-   and a `--script` file cannot branch or retry, so any Demo2 probe is a `(2/3)^attempts` coin
-   flip.
-2. **It is not cold-free on `main` anyway.** A run that did land on Demo2 logged **10** COLD
-   decodes (`gfx/sprites/playersheet` 1260x680, `explosion`, `smoke`, `photocamera`,
-   `bombicon`, `gfx/hud/barlit`/`barunlit2`/`barlitedge`, `gfx/menu/powerbar`,
-   `gfx/game/blank`); Demo1 logs those 10 plus `ufometpootjes` and `smallship_landed`. The
-   `Demo*` manifest sections have a real gap — a probe would be red on a clean tree. That gap
-   is its own card.
+1. **Reaching one deterministically.** `MenuScene.mainMenu_DemoSelected` picks Demo1/2/3 with
+   `RandomHelper.Random.Next(3)` off an unseeded `Random`, and a `--script` file cannot branch
+   or retry -- so any demo probe was a `(2/3)^attempts` coin flip. **`?demo=<1|2|3>` pins the
+   roll.** It is NOT the off-switch of `?nodemo`/`?noattract` (those unwire the idle timeout so
+   no demo launches at all). `?level=Demo2` is still the wrong route -- it walks into the
+   `QueueIdleWarm` trap above, which is why the attract path is the only usable one.
+2. **They were not cold-free.** Demo1 logged 12 COLD decodes, Demo2 10, Demo3 12; the manifest
+   sections were short. Fixed by the same card.
+
+**Demo3 is why every one of these probes asserts on `(boot)` as well as on its own level.**
+Demo3 had NO manifest section, and `WarmThenLaunch` returns EARLY on an empty one -- so no
+preload bracket opened and its 12 decodes were logged against the `(boot)` sentinel. It
+therefore READ as the clean demo. `expect-not COLD decode in Demo3` passes vacuously in that
+state, and the `expect \[loadprofile\] Demo3 preload:` above it still matches, because that
+summary line comes from `GameScene.LoadContent`'s `BeginPreload`/`EndPreload` bracket, which
+runs whatever the manifest section holds (`PreloadGraphicalContent` is called inside it, not
+the opener).
+Only `expect-not COLD decode in \(boot\): gfx/sprites/playersheet` catches it -- verified by
+deleting the whole section, which goes red on exactly that line while the other two pass.
+
+Each `preload_demo*` is therefore mutation-tested TWO ways. A PARTIAL delete (one line) goes red
+on the level's own `expect-not`, naming the asset -- `Demo1|gfx/sprites/playersheet`,
+`Demo2|gfx/sprites/explosion`, `Demo3|gfx/base/756`. A WHOLE-section delete goes red on the
+`(boot)` guard instead, with the level's own `expect-not` passing on 0 matches. **Re-run the
+whole-section one if you ever touch these** -- it is the case the guard exists for, and it is the
+one a partial delete cannot reach.

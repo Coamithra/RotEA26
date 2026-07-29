@@ -251,6 +251,12 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   roll (in `SplashScene.LoadContent`) also decides which texture is DECODED at all -- so this
   is both the screenshot rig for the flip and what makes the boot decode set deterministic for
   `tools/headless/probes/boot_cold.txt`. Bad value => reported + the random roll.
+- **`?demo=<1|2|3>`** (card e63601a4): pin WHICH attract demo the idle main menu drops into.
+  `MenuScene.mainMenu_DemoSelected` otherwise rolls it unseeded per launch, so a chosen demo
+  was unreachable on demand -- which is what made the demos' preload gaps hard to capture and
+  impossible to probe. **Not the off-switch of `?nodemo`/`?noattract`** -- those disable attract
+  entirely; this only pins which one the roll picks. Bad value => reported + the random roll.
+  Capture ONE demo per process (the content manager is shared, so a second demo is warm).
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

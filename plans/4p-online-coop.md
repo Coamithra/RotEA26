@@ -34,7 +34,7 @@ play together.
 > Caveat on the run above: both tabs were **hidden** (background tabs of a non-foreground window),
 > so its `pops`/`pupPops` numbers are not a health verdict. The claim being made is the
 > roster/ship *structure*, which is not timing-derived — a stalled peer's seats are held, not
-> freed. See the structural-check note in `web/EvilAliensWeb/CLAUDE.md` for why that survives
+> freed. See the structural-check note in `web/EvilAliensWeb/Compat/Net/CLAUDE.md` for why that survives
 > hidden-tab throttling and what it does not license.
 
 ## Already N-wide — no work needed

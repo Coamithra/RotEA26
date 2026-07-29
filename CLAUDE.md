@@ -14,6 +14,7 @@ This file is how to *work* in the repo. Detail lives next to the code:
 | Doc | What |
 |---|---|
 | [`web/EvilAliensWeb/CLAUDE.md`](web/EvilAliensWeb/CLAUDE.md) | game/engine architecture + per-feature notes (render path, input, saves, debug flags, webcam, walls, bosses, ...) |
+| [`web/EvilAliensWeb/Compat/Net/CLAUDE.md`](web/EvilAliensWeb/Compat/Net/CLAUDE.md) | the online co-op net layer, split out of the file above (loads automatically under `Compat/Net/`) |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | the offline asset pipelines (audio, shaders, textures, font, backgrounds, ...) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | the step-by-step card → worktree → PR runbook |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | publishing the game + the signaling server (neither happens on merge) |

@@ -1,0 +1,100 @@
+# PROBE: every level-select carousel entry's stock art is preloaded, none decodes cold.
+#
+# PINS: ScreenshotSaver.StockShots, which since card 8d6883f3 is DERIVED -- every level with
+# LevelArt.HasCarouselEntry contributes its LevelArt.ScreenshotPath, deduped. Both consumers
+# (ScreenshotSaver.Init and Game1.QueueMenuWarm) iterate that one list, and SubMenuLevelChoice
+# resolves each carousel entry's image through the same ScreenshotPath lookup.
+#
+# FAILURE MEANS: a carousel entry's art is no longer in the preloaded set, so it decodes
+# (900x700, ~30-40ms in Chrome) the first time the player opens that carousel. The quoted line
+# names the asset. That is EXACTLY the bug card 4d47c5ba fixed: ScreenshotSaver.Init hardcoded
+# eleven of the twelve and the one it missed -- gfx/screenshots/webcamss, the challenge
+# carousel's LAST entry -- decoded cold on first opening Challenges, unnoticed for however long
+# it had been true. Fix by restoring the level to LevelArt.HasCarouselEntry / ScreenshotPath,
+# NOT by re-hardcoding a list.
+#
+# WHY IT OPENS BOTH CAROUSELS: `SubMenuLevelChoice.loadScreenshots` loads EVERY entry's image
+# in one loop, so merely opening a carousel demands all of its art -- no walking required. But
+# there are TWO of them, `levelSelector` (the three missions) and `challengeSelector` (the nine
+# challenges), each with its own Initialize. Opening only Challenges leaves level1/2/3empty
+# undemanded, and a probe that did that PASSED with Levels.Level1 deleted from
+# HasCarouselEntry (measured). So: Start Game to open the mission carousel, back out, then
+# Challenges.
+#
+# THE POSITIVE CONTROL is the launch at the end. `expect-not COLD ... gfx/screenshots/` passes
+# beautifully on a run that never opened a carousel at all -- and it very nearly shipped that
+# way here, because ?autostart silently swallows menu keypresses and the whole run sat on the
+# main menu looking green. `[loadprofile] TeamChallenge preload:` can only be reached by
+# navigating into the CHALLENGE carousel and walking seven entries along it, so it proves the
+# window this probe asserts over is the real one. Boot with ?menu (what the other menu-driven
+# probe uses), never ?autostart. The mission leg has no equivalent control of its own: it is
+# covered transitively, since the same keypress stream has to have worked to reach the launch.
+#
+# WHERE THE `mark` GOES, and this is the whole probe: a SubMenuLevelChoice loads its entry art
+# in its own Initialize, which KNI runs when the submenu is first ADDED -- i.e. the moment the
+# player opens that carousel, not when the MenuScene is built. So a dropped level's art decodes
+# in the beat between pressing select and the carousel appearing. Mark AFTER the settle but
+# BEFORE navigating: a mark placed after the carousel is up sits one step too late, the
+# offending decode lands in the dropped window, and the probe passes on the very mutation it
+# exists to catch (measured -- it did).
+#
+# Under ?menu the splash is skipped and the warm pump never runs, so all twelve decode inside
+# ScreenshotSaver.Init during boot. That is the debug path, not a regression, and is what the
+# mark drops -- leaving the carousel's own late fetch, which is the signal.
+#
+# ?unlockall so a wiped save can select the later challenges; ?invuln so the launched level
+# does not die during the settle.
+#
+# eahl: --flags "?menu&noattract&loadlog&unlockall&invuln"
+
+step 150 nodraw
+
+# Boot decodes the whole stock set (ScreenshotSaver.Init) under the (boot) sentinel; that is
+# the set being defended, and dropping it here is what leaves only decodes the carousel had to
+# go and FETCH. The mark must sit BEFORE the navigation below -- see the header.
+mark
+
+# Start Game -> the MISSION carousel (its Initialize decodes level1/2/3empty), then back out.
+eval Press enter 1
+step 90 nodraw
+eval Press esc 1
+step 90 nodraw
+
+# Main menu -> Challenges (three down from Start), then into the carousel. Its Initialize
+# decodes all nine challenge thumbnails.
+eval Press down 1
+step 90 nodraw
+eval Press down 1
+step 90 nodraw
+eval Press down 1
+step 90 nodraw
+eval Press enter 1
+step 90 nodraw
+
+# Walk to Team Challenge (index 7 of 9) and launch it -- the positive control. The walk buys no
+# extra COLD coverage (the carousel already loaded every entry above); it is only how the run
+# reaches a launchable entry, and how the control proves the navigation worked.
+eval Press right 1
+step 30 nodraw
+eval Press right 1
+step 30 nodraw
+eval Press right 1
+step 30 nodraw
+eval Press right 1
+step 30 nodraw
+eval Press right 1
+step 30 nodraw
+eval Press right 1
+step 30 nodraw
+eval Press right 1
+step 60 nodraw
+
+# Difficulty screen, then select.
+eval Press enter 1
+step 120 nodraw
+eval Press enter 1
+step 240 nodraw
+
+expect \[loadprofile\] TeamChallenge preload:
+expect-not COLD decode in .*: gfx/screenshots/
+quit

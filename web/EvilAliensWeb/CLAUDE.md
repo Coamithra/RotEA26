@@ -277,6 +277,21 @@ generate much of the art/audio referenced here.
     them during the splash instead. **`StockShots` is the single list both `Init()` and
     `QueueMenuWarm` iterate; keep it that way** -- `Init` used to hardcode eleven of the twelve
     and the one it missed (`webcamss`) decoded cold on first opening Challenges.
+    **Since card 8d6883f3 that list is DERIVED, and `LevelArt` is the one source** -- every
+    level with `LevelArt.HasCarouselEntry` contributes its `LevelArt.ScreenshotPath`, deduped,
+    and `SubMenuLevelChoice` resolves each entry's image through the SAME lookup instead of
+    being handed a path literal (`AddEntryData(briefing, level)`). A carousel level still needs
+    its `AddEntry`/`AddEntryData`/`AddEntryEvent` triple in `MenuScene` and BOTH `LevelArt`
+    switches (`HasCarouselEntry` and `ScreenshotPath`) -- what is gone is having to spell the
+    PATH out a second and third time, which is where the drift was. **`General.ScreenshotEnabled` is NOT the membership predicate and cannot be
+    made into one** -- it answers "does this level CAPTURE a live thumbnail" and returns the
+    `Settings.WebcamScreenshot` opt-in (default OFF) for `WebcamAliens`, so deriving off it
+    re-drops the exact asset the original bug was about.
+    **Pinned by `tools/headless/probes/stockshots_warm.txt`.** Note what it has to work around:
+    a `SubMenuLevelChoice` loads its art in its own `Initialize`, which runs when the submenu is
+    first ADDED -- i.e. when the player opens Challenges -- so a dropped level decodes in the
+    beat between the keypress and the carousel appearing, and a probe that marks its assertion
+    window after the carousel is up passes on the very regression it exists to catch.
     A `?skipsplash`/`?menu` boot auto-presses Start on frame ~1, so the pump never runs and all
     twelve decode at `Init` as before: that is the debug path, not a regression.
   - **`GFX/Help/Controls_Keyboard`/`_Joypad` are in the IDLE queue, and moving them there meant

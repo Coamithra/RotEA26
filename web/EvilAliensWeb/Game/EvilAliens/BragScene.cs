@@ -281,20 +281,27 @@ public class BragScene : Scene
 		}
 	}
 
+	// The brag screen's button tips -- the third copy of MenuScene.drawButtonTips' layout
+	// (Darkener.drawButtons is the other), carrying the same two 2008 icon-metric bugs and
+	// fixed the same way: the baseline clears the TALLER icon rather than AButton's alone, and
+	// each label clears the width of the icon actually drawn beside it instead of the other
+	// one's. No-op today (small_face_a and small_face_b are both 60x60 with no precompiled
+	// sibling), so no pixel moves; it is what makes "either icon can be re-authored at a
+	// different size" true everywhere rather than in two places out of three.
 	private void drawButtons(string A, string B)
 	{
-		float num = 0.5f;
-		float num2 = 0.8f;
-		float num3 = (General.SafeZone).Left;
-		float num4 = (float)(General.SafeZone).Bottom - MathHelper.Max((float)AButton.LogicalHeight() * num, font.MeasureString("yo").Y * num2);
-		float num5 = num3 + (float)AButton.LogicalWidth() * num + font.MeasureString(" ").X * num2;
-		float num6 = (float)(General.SafeZone).Right - font.MeasureString(A).X * num2;
-		float num7 = num6 - (float)BButton.LogicalWidth() * num - font.MeasureString(" ").X * num2;
+		float iconScale = 0.5f;
+		float textScale = 0.8f;
+		float tipBIconX = (General.SafeZone).Left;
+		float tipsY = (float)(General.SafeZone).Bottom - MathHelper.Max(MathHelper.Max((float)AButton.LogicalHeight(), (float)BButton.LogicalHeight()) * iconScale, font.MeasureString("yo").Y * textScale);
+		float tipBTextX = tipBIconX + (float)BButton.LogicalWidth() * iconScale + font.MeasureString(" ").X * textScale;
+		float tipATextX = (float)(General.SafeZone).Right - font.MeasureString(A).X * textScale;
+		float tipAIconX = tipATextX - (float)AButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
-		spriteBatchWrapper.Draw(BButton, new Vector2(num3, num4), 0f, num, center: false, Color.White);
-		spriteBatchWrapper.DrawString(B, new Vector2(num5, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
-		spriteBatchWrapper.Draw(AButton, new Vector2(num7, num4), 0f, num, center: false, Color.White);
-		spriteBatchWrapper.DrawString(A, new Vector2(num6, num4), Color.AliceBlue, 0f, centered: false, num2, (SpriteEffects)0, 1f);
+		spriteBatchWrapper.Draw(BButton, new Vector2(tipBIconX, tipsY), 0f, iconScale, center: false, Color.White);
+		spriteBatchWrapper.DrawString(B, new Vector2(tipBTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
+		spriteBatchWrapper.Draw(AButton, new Vector2(tipAIconX, tipsY), 0f, iconScale, center: false, Color.White);
+		spriteBatchWrapper.DrawString(A, new Vector2(tipATextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
 	}
 
 	public override void Update(GameTime gameTime)

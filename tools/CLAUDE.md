@@ -126,6 +126,32 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
 
 Neither is codegen; both only build + inspect, so they are safe to run any number of times.
 
+- **The ON-DISK LINE ENDINGS of `.razor` are part of the hash** (card `6cdb7c62`). Razor markup
+  whitespace is embedded in the assembly as string content — `App`/`Index`'s generated
+  `BuildRenderTree` hands its literal markup, newlines and all, to `AddMarkupContent` — so the same
+  commit built from a CRLF checkout and an LF one produces different bytes. Both oracles build
+  their reference from a FRESH `git worktree add`, which always gets the checkout-canonical EOL,
+  so a working tree that has drifted reports a confident, entirely bogus DIFFERENT. That is how it
+  was found: a provably comment-only change came back DIFFERENT, and `verify_decompiled_diff`
+  bounded it to two `BuildRenderTree` string literals. **Do not read a `.cs` EOL scare into this**
+  — no compiled C# here has a multi-line string literal, and there are no embedded resources, so
+  `.razor` (and a hypothetical `.cshtml`) is the whole exposed set.
+  - The root **`.gitattributes`** pins those two to `eol=crlf` so every checkout — yours, a
+    worktree, Linux CI — agrees. It does NOT cover `.cs`, deliberately (see `build_textures.py`'s
+    `write_generated`), and a blanket `* text=auto` is out of scope by its own decision.
+  - `.gitattributes` cannot heal a file already on disk, so **`check_pinned_eol()` in
+    `verify_il_identical.py` aborts both tools (exit 2) before either build** when a pinned file
+    has drifted, naming it and printing `rm <path> && git checkout -- <path>`. It reads git's own `attr/`
+    column via `git ls-files --eol`, so an `eol=` rule added later is picked up with no code
+    change, and it never writes — the "never writes inside the repo" invariant stands.
+  - **Drift is NOT invisible, it just looks like noise:** git reports such a file as modified while
+    `git diff` prints nothing (the blob really is identical — same phantom `M` that
+    `write_generated` exists to avoid). And **`git add --renormalize` is the wrong reflex** —
+    measured, it clears the `M` and LEAVES the wrong endings on disk, i.e. it hides the symptom and
+    keeps the bug. It is also why the guard advises `rm` before `git checkout --`: plain
+    `checkout` restores ordinary drift, but is a silent no-op on a file renormalize has already
+    blessed, which would otherwise make the abort unescapable.
+
 - **`verify_il_identical.py`** — the strong oracle: a cosmetic change must produce a byte-identical
   `EvilAliensWeb.dll`. Covers renames. Full rules in root `CLAUDE.md`. **`--optimize`** (card
   `0c624f9d`) additionally folds away dead stores and unused locals, which is what a refactor that
@@ -294,7 +320,8 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 
   **`--manifest-only` no longer dirties `Compat/PrecompiledTextures.cs`.** It goes through
   `write_generated()`, which writes only when the bytes would change and preserves the file's own
-  line endings. The checkout is `core.autocrlf=true` with no `.gitattributes`, so that file is CRLF
+  line endings. The checkout is `core.autocrlf=true` with no `.gitattributes` rule for `.cs` (the
+  root `.gitattributes` pins `.razor`/`.cshtml` only — see the oracle section), so that file is CRLF
   in the working tree while the script renders LF: every run used to rewrite all 143 line endings
   and leave it MODIFIED in `git status` with an EMPTY content diff. Neither half works alone —
   preserving the endings alone still rewrites (and bumps mtime, so MSBuild rebuilds) when nothing

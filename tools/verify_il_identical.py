@@ -73,9 +73,11 @@ Use the first form while editing and the second once the work is committed -- af
 handing back a meaningless green tick.
 
 Exits 0 when identical (refactor proven behaviour-preserving), 1 when it differs, 2 on a
-build or plumbing failure. Note the asymmetry: a 1 is a definite finding, while IDENTICAL is
-only as good as the assumption that nothing but names moved -- it says nothing about whether
-the new names are any good.
+build or plumbing failure -- including the EOL DRIFT abort, which fires BEFORE either build
+when a file whose line endings .gitattributes pins has drifted in the working tree, because
+the verdict would be a lie (see check_pinned_eol). Note the asymmetry: a 1 is a definite
+finding, while IDENTICAL is only as good as the assumption that nothing but names moved --
+it says nothing about whether the new names are any good.
 """
 import argparse
 import hashlib
@@ -176,6 +178,82 @@ def cache_path(root, commit, toolchain):
     return os.path.join(tempfile.gettempdir(), f'rotea_il_baseline_{key}.json')
 
 
+def check_pinned_eol(root):
+    """Abort if a file whose EOL .gitattributes PINS has drifted in the working tree.
+
+    The reference side of every comparison here is materialized by a fresh `git worktree
+    add`, so it always gets the pinned EOL. The working tree does not have to: nothing
+    rewrites EOL on an existing file, so a tool (or an editor) that saves a .razor with the
+    wrong endings leaves it that way forever. Razor markup whitespace is embedded in the
+    assembly as string content, so the two sides then compile to different bytes and this
+    script reports DIFFERENT for a change that is provably cosmetic -- see .gitattributes,
+    and card 6cdb7c62, where exactly that burned a full investigation.
+
+    git will NOT save you from it. A pure-EOL drift shows up as a modified file with an
+    EMPTY `git diff` (the blob is byte-identical, so there is genuinely nothing to commit),
+    which reads as noise. Hence this guard, and hence it runs BEFORE the two builds rather
+    than explaining a red verdict afterwards.
+
+    Driven off `git ls-files --eol`, whose attr/ column is git's OWN attribute resolution --
+    so this needs no hardcoded extension list and picks up any eol= rule added later.
+
+    What it checks is "the working tree matches the pins HEAD declares", NOT "both sides of
+    the comparison agree": ls-files resolves attributes from the WORKING TREE's
+    .gitattributes, while the reference worktree checks out under the REFERENCE commit's. So
+    a --ref that predates a pin is not covered -- on this box that is inert (core.autocrlf
+    already yields the pinned flavour), and it stops mattering once the pin is an ancestor.
+
+    It only ever READS: the fix is printed, never applied.
+    """
+    proc = run(['git', 'ls-files', '--eol', '-z'], cwd=root, check=False)
+    if proc.returncode != 0:
+        # Not fatal -- but say so, or a git that cannot list files silently downgrades this
+        # to no guard at all, which is the exact confidently-wrong verdict it exists to stop.
+        first = (proc.stderr or 'no stderr').strip().splitlines()[:1]
+        sys.stderr.write(f'warning: EOL guard skipped, git ls-files failed: '
+                         f'{first[0] if first else "no stderr"}\n')
+        return
+    bad = []
+    for entry in proc.stdout.split('\0'):
+        if '\t' not in entry:
+            continue
+        meta, path = entry.split('\t', 1)
+        # `i/lf    w/crlf  attr/text eol=crlf    ` -- the attr column can itself contain
+        # spaces, so it is the REST of the line, not a whitespace-delimited field.
+        fields = meta.split(None, 2)
+        if len(fields) < 3:
+            continue
+        worktree, attr = fields[1], fields[2].strip()
+        # w/none is an empty file and w/-text a binary one: neither HAS line endings to
+        # drift, so flagging them would be a permanent false alarm.
+        if worktree not in ('w/lf', 'w/crlf', 'w/mixed'):
+            continue
+        for style in ('crlf', 'lf'):
+            if f'eol={style}' in attr and worktree != f'w/{style}':
+                bad.append((path, style, worktree[2:]))
+    if not bad:
+        return
+    sys.stderr.write(
+        'EOL DRIFT -- refusing to compare, the verdict would be meaningless.\n\n'
+        'These files have line endings .gitattributes pins them away from. The reference\n'
+        'build comes from a fresh checkout (pinned), the working tree does not, so the two\n'
+        'would compile to different bytes for no semantic reason:\n\n')
+    for path, want, got in bad:
+        sys.stderr.write(f'  {path}  (pinned {want}, on disk {got})\n')
+    sys.stderr.write(
+        '\nRestore them from the index, then re-run:\n\n')
+    for path, _, _ in bad:
+        sys.stderr.write(f'  rm "{path}" && git checkout -- "{path}"\n')
+    sys.stderr.write(
+        '\nThe rm is not superstition. Plain `git checkout --` does fix ORDINARY drift (git\n'
+        'reports such a file as modified even though its diff is empty), but it is a silent\n'
+        'no-op once `git add --renormalize` has been run over the file -- and renormalize is\n'
+        'exactly the reflex to avoid here: measured, it clears the modified flag and LEAVES\n'
+        'the wrong endings on disk, so it hides the symptom, keeps the bug, and would strand\n'
+        'you in this abort with no advice that works. Deleting first restores both states.\n')
+    sys.exit(EXIT_ERROR)
+
+
 def resolve_ref(root, ref):
     """Resolve `ref` to the MERGE-BASE with HEAD, not to its tip.
 
@@ -233,6 +311,7 @@ def main():
         BUILD_FLAGS.append('-p:Optimize=true')
 
     root = repo_root()
+    check_pinned_eol(root)
     print(f'IL-identity check  (repo {root})'
           f'{"  [optimized -- weaker oracle, see module docstring]" if args.optimize else ""}',
           flush=True)

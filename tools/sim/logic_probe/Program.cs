@@ -82,6 +82,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiWallScanFlags(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -348,6 +354,136 @@ internal static class Program
         }
         Check("!IsOn is not IsExplicitlyOff", conflated < rows.Length,
             (rows.Length - conflated) + "/" + rows.Length + " rows where they genuinely differ (bare + unrecognised)");
+        return 0;
+    }
+
+    // Card b174b00f -- ?aiscanrows= / ?aicrosspenalty=, the promotion of PlayerShip's last two
+    // bare wall-nav consts to the Default* + nullable-override convention.
+    //
+    // WHY A PROBE AND NOT verify_il_identical.py, WHICH THE CARD ASKED FOR: that oracle hashes the
+    // whole assembly, and this change ADDS two consts, two DebugFlags properties, two resolving
+    // properties and two Parse cases -- so it reports DIFFERENT by construction and proves
+    // nothing. The card's real claim is BEHAVIOURAL (a null override resolves to the baked const,
+    // so a shipped build plays identically), and that splits in two: the RESOLUTION is pinned
+    // below, and the wall term's actual numbers are pinned by tools/sim/aiwallnav's default table
+    // being character-identical across the change (it is deterministic and calls the only two
+    // consumers of these constants for real).
+    //
+    // The failure mode being guarded is the same one card 6eb8dc9e named for ?flyspider*: a bench
+    // run that measures the DEFAULT path while carrying the label of the variant under test. No
+    // screenshot can show that, and this card's own blocks 2 and 3 quote numbers from these flags.
+    private static int ProbeAiWallScanFlags(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        // The RESOLVING properties are private -- they are the thing under test, so bind them by
+        // name and fail loudly rather than benching nothing, the way aiwallnav does.
+        PropertyInfo rows = ship.GetProperty("WallScanRows", anyStatic);
+        PropertyInfo penalty = ship.GetProperty("WallCrossPenalty", anyStatic);
+        FieldInfo defRows = ship.GetField("DefaultWallScanRows", anyStatic);
+        FieldInfo defPenalty = ship.GetField("DefaultWallCrossPenalty", anyStatic);
+        if (parse == null || rows == null || penalty == null || defRows == null || defPenalty == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (Parse=" + (parse != null)
+                + " WallScanRows=" + (rows != null) + " WallCrossPenalty=" + (penalty != null)
+                + " DefaultWallScanRows=" + (defRows != null) + " DefaultWallCrossPenalty=" + (defPenalty != null)
+                + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Action<string> run = query =>
+        {
+            System.IO.TextWriter saved = Console.Out;
+            Console.SetOut(System.IO.TextWriter.Null);
+            try { parse.Invoke(null, new object[] { query }); }
+            finally { Console.SetOut(saved); }
+        };
+        Func<object> liveRows = () => rows.GetValue(null);
+        Func<object> livePenalty = () => penalty.GetValue(null);
+        object bakedRows = defRows.GetValue(null);
+        object bakedPenalty = defPenalty.GetValue(null);
+
+        Console.WriteLine("[logic_probe] DebugFlags ?aiscanrows= / ?aicrosspenalty= (card b174b00f)");
+
+        // 1. The shipped configuration. Both overrides are null at process start (DebugFlags.Parse
+        // never RESETS a property -- it only assigns ones the query names, which is also why the
+        // checks below can rely on a previous case still standing), so this reads the state a
+        // shipped boot is in. It must resolve to the baked consts. NB this is a PRECONDITION of
+        // the case set, not an assertion about Parse: it holds only while nothing earlier in the
+        // process has touched these two, which is why it runs first.
+        Check("no override => the baked Default* consts",
+            Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
+            "rows=" + liveRows() + " (Default " + bakedRows + "), penalty=" + livePenalty()
+            + " (Default " + bakedPenalty + ")");
+        // ... and the consts are still the values card f4d1721f tuned against. A promotion that
+        // silently moved one would pass every other check here.
+        Check("the baked values are unchanged by the promotion",
+            Equals(bakedRows, 4) && Equals(bakedPenalty, 4f),
+            "DefaultWallScanRows=" + bakedRows + " DefaultWallCrossPenalty=" + bakedPenalty);
+
+        // 2. An override actually reaches the resolving property. Without this the flags would be
+        // inert and every sweep would quietly re-measure the default.
+        run("?aiscanrows=9&aicrosspenalty=2.5");
+        Check("overrides win over the consts",
+            Equals(liveRows(), 9) && Equals(livePenalty(), 2.5f),
+            "rows=" + liveRows() + " penalty=" + livePenalty());
+
+        // 3. THE int-vs-float POINT, which is why the card called out int? explicitly. `4.7` is not
+        // a number of grid rows. Truncating it to 4 would hand back the DEFAULT depth while the
+        // reader believes a deeper scan is in force -- a sweep that cannot move, reported as a
+        // result. So it must be refused, leaving the previous value (9) standing.
+        run("?aiscanrows=4.7");
+        Check("?aiscanrows=4.7 refused, not truncated to 4", Equals(liveRows(), 9),
+            "rows=" + liveRows() + " (a float here must not silently become the baked 4)");
+        run("?aiscanrows=8x");
+        Check("?aiscanrows=8x refused", Equals(liveRows(), 9), "rows=" + liveRows());
+        run("?aicrosspenalty=2.5q");
+        Check("?aicrosspenalty=2.5q refused", Equals(livePenalty(), 2.5f), "penalty=" + livePenalty());
+
+        // NOTE, deliberately not asserted as a diagnostic: unlike ?flyspider*, the ?ai* family
+        // rejects a bad value SILENTLY -- ?aireact, ?aigapmargin and the other ten all do. These
+        // two follow their family rather than splitting it. The guarded path is the one that
+        // produces published numbers: tools/sim/aiwallnav's --scanrows= exits 2 on a non-integer
+        // instead of benching the default. Making the whole ?ai* family report is its own card.
+
+        // 4. Clamps. 0 scan rows is ALLOWED on purpose -- it is "does not look ahead at all", the
+        // floor end of a look-ahead sweep and the same kind of deliberate skill floor ?aiaim=Pi is.
+        run("?aiscanrows=0");
+        Check("?aiscanrows=0 accepted as the no-look-ahead floor", Equals(liveRows(), 0),
+            "rows=" + liveRows());
+        run("?aiscanrows=99999");
+        Check("?aiscanrows= ceiling clamps", Equals(liveRows(), 64),
+            "the scan runs per column per tick, so it must stay bounded; rows=" + liveRows());
+        run("?aiscanrows=-3");
+        Check("?aiscanrows= negative refused", Equals(liveRows(), 64), "rows=" + liveRows());
+        run("?aicrosspenalty=99999");
+        Check("?aicrosspenalty= ceiling clamps", Equals(livePenalty(), 100f),
+            "penalty=" + livePenalty());
+        run("?aicrosspenalty=-1");
+        Check("?aicrosspenalty= negative refused", Equals(livePenalty(), 100f),
+            "penalty=" + livePenalty());
+
+        // 5. NEGATIVE CONTROL. Every check above would also pass if the resolving properties simply
+        // ignored DebugFlags and returned the consts -- checks 1 and 4 trivially, and 2/3 are only
+        // meaningful if the override path is live. Assert the two are genuinely different readings
+        // of the same knob: with an override in force the resolved value must NOT be the const.
+        run("?aiscanrows=7&aicrosspenalty=1.25");
+        Check("resolved != baked while an override is in force",
+            !Equals(liveRows(), bakedRows) && !Equals(livePenalty(), bakedPenalty)
+            && Equals(liveRows(), 7) && Equals(livePenalty(), 1.25f),
+            "rows=" + liveRows() + " vs const " + bakedRows
+            + ", penalty=" + livePenalty() + " vs const " + bakedPenalty);
+
+        // Hand the process back in the state it was found in. Parse can only ASSIGN, never clear,
+        // so a Probe* added after this one would otherwise inherit rows=7 / penalty=1.25 with no
+        // way to reach the defaults -- and would be measuring an override it never set.
+        flags.GetProperty("AiWallScanRows", anyStatic).SetValue(null, null);
+        flags.GetProperty("AiWallCrossPenalty", anyStatic).SetValue(null, null);
+        Check("case set leaves no override behind",
+            Equals(liveRows(), bakedRows) && Equals(livePenalty(), bakedPenalty),
+            "rows=" + liveRows() + " penalty=" + livePenalty());
         return 0;
     }
 }

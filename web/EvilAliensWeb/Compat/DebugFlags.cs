@@ -463,7 +463,28 @@ namespace EvilAliensWeb.Compat
 		// Fast-boot Level3 straight to a looping walls section (?level=Level3&wallsonly) -- mirrors
 		// ?spiderboss for Level2. Skips the whole wave sequence so the towers can be watched without
 		// minutes of play per iteration. Pair with ?invuln. See Level3.PopulateWallsOnly.
+		//
+		// Card b174b00f gave it a SECOND owner: OwnLevel. There it drops the level's continuous
+		// SkullSpawner and StarMineSpawner and keeps the Walls(2) section, so a churn figure can be
+		// taken from the walls ALONE -- comparing OwnLevel's full level against a Level-3
+		// ?wallsonly run is walls-plus-enemies against walls-alone, and that confound is what made
+		// the question unanswerable for two cards. Deliberately the same flag name on both levels,
+		// so the walls-only rigs are reached the same way rather than by a reader remembering.
+		// NOT the same SHAPE on both, though, and the difference bounds any ratio taken across
+		// them: Level3.PopulateWallsOnly loops six sections (variations 1/0/3, twice) and is still
+		// running after 180 sim-seconds, while OwnLevel has one Walls(2) and reaches victory at
+		// ~60. Both are rates over the ticks they ran, so they compare; the SECTIONS differ, which
+		// is exactly the grid-vs-grid question, but do not read the two as equal-length runs.
 		public static bool WallsOnly { get; private set; }
+
+		// ?nowalls (card b174b00f) -- the control for the above, currently OwnLevel only: keep the
+		// spawners, drop the Walls section. Without it a quiet ?wallsonly reading cannot be told
+		// from a rig that event suppression simply broke, because both are just a low number.
+		// MEASURED, so do not use a prediction as the sanity criterion: ?nowalls reads ~61 deg/s
+		// against walls-only's 229 and the full level's 404. The decision rule is comparative --
+		// if BOTH halves come back quiet the rig is what changed and neither number means
+		// anything; one quiet and one loud attributes the churn to the loud half.
+		public static bool NoWalls { get; private set; }
 
 		// A/B the mip chain (?nomips): WebContentManager.TryLoadDds uploads level 0 only, so every
 		// .dds falls back to plain bilinear -- the before/after for card 110153c7, where a tower
@@ -1042,6 +1063,8 @@ namespace EvilAliensWeb.Compat
 		//   ?aismooth=<ms>   steering low-pass time constant (the anti-jitter lever)
 		//   ?aireact=<ms>    wall look-ahead, in milliseconds of closing travel
 		//   ?aigapmargin=<t> tiles a rival gap must beat the committed one by
+		//   ?aiscanrows=<n> rows of grid looked at when judging a column (an INT, not a float)
+		//   ?aicrosspenalty=<c> cost per blocked column the ship would have to cross
 		//   ?aithreatlead=<ms> how far ahead a moving threat is projected
 		//   ?aibossbias=<f>  distance discount applied to level-halting bosses when targeting
 		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
@@ -1051,6 +1074,11 @@ namespace EvilAliensWeb.Compat
 		public static float? AiWallReactionMs { get; private set; }
 
 		public static float? AiGapSwitchMargin { get; private set; }
+
+		// int?, not float? -- WallScanRows counts grid ROWS and indexes the scan loop.
+		public static int? AiWallScanRows { get; private set; }
+
+		public static float? AiWallCrossPenalty { get; private set; }
 
 		public static float? AiThreatLeadMs { get; private set; }
 
@@ -1102,13 +1130,17 @@ namespace EvilAliensWeb.Compat
 		// EffectiveController puts them on the AI branch). Shipped builds are unchanged (0 = off).
 		public static int NetLocal { get; private set; }
 
-		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop EVERY EvSlotGrant the
-		// host answers a couch join with (not just the first: the flag is read on each grant, so
-		// while it is set no couch join can complete), instead of seating them. That is the one state the host's
+		// ?netdropgrant (card af0eb00a): CLIENT-side -- deliberately drop the FIRST EvSlotGrant
+		// the host answers a couch join with, instead of seating it; every later grant in the
+		// same session completes normally. That is the one state the host's
 		// ExpireUnclaimedGrants path exists for (the client can silently fail to take a grant: its
 		// device got seated meanwhile, its scene changed) and the ONLY thing that reaches it --
 		// ?netlocal always takes its grant, so without this flag the expiry has no trigger at all
-		// and the seat-leak it guards against is untestable. Shipped builds are unchanged.
+		// and the seat-leak it guards against is untestable. ONE-SHOT since card ee96ea61 (it
+		// dropped every grant, so a run could only ever show the DROP half): ?netlocal=2 now
+		// covers the drop AND a subsequent successful take in one run. The latch is per SESSION
+		// and cleared by NetSession.ResetPerSessionState -- see NetSession.ShouldDropGrant.
+		// Shipped builds are unchanged.
 		public static bool NetDropGrant { get; private set; }
 
 		// Artificial network impairment (card 40334a8f, plans/net-impairment.md), applied to
@@ -1379,6 +1411,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "wallsonly":
 					WallsOnly = IsOn(val);
+					break;
+				case "nowalls":
+					NoWalls = IsOn(val);
 					break;
 				case "walltrace":
 					WallTrace = IsOn(val);
@@ -1823,6 +1858,29 @@ namespace EvilAliensWeb.Compat
 						AiGapSwitchMargin = MathHelper.Min(aigm, 20f);
 					}
 					break;
+				case "aiscanrows":
+					// Parsed as an INT: WallScanRows counts grid rows, so `4.7` is not a
+					// value this knob has -- reject it rather than silently truncating to 4
+					// and reporting a sweep that never moved.
+					// 0 is DELIBERATELY allowed: it makes DistanceToBlockedRow report "nothing
+					// blocked" always, i.e. a bot that does not look ahead at all -- the same
+					// kind of skill FLOOR ?aiaim=Pi is, and the negative control a look-ahead
+					// sweep wants at one end. The 64 ceiling is a COST bound, not a semantic
+					// one: the scan runs per column per tick, and the deepest shipped grid is
+					// 179 rows, so this does not reach the bottom of var3 by design.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aisr) && aisr >= 0)
+					{
+						AiWallScanRows = MathHelper.Clamp(aisr, 0, 64);
+					}
+					break;
+				case "aicrosspenalty":
+					// Cost per blocked column crossed, against WallRowWeight's 8 per row of
+					// clearance -- so the cap is where crossing dominates clearance absolutely.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicp) && aicp >= 0f)
+					{
+						AiWallCrossPenalty = MathHelper.Min(aicp, 100f);
+					}
+					break;
 				case "aithreatlead":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
 					{
@@ -2217,7 +2275,7 @@ namespace EvilAliensWeb.Compat
 			// exactly the peer that needs it most. Knock-on: a ?noattract game now LISTS publicly
 			// and no longer sets the hello debug bit. Both are intended -- ComputeEligible still
 			// refuses Demo1/2/3, so it can never advertise an attract demo.
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -2228,6 +2286,7 @@ namespace EvilAliensWeb.Compat
 							// Level fast-boots print only when set: they REPLACE a level's whole event list,
 							// so "why is this level not playing normally" needs an answer in the log.
 							+ (WallsOnly ? " wallsonly" : "")
+							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
 							+ (FlySpiders ? (FlySpidersForeground ? " flyspiders=fg" : " flyspiders") : "")

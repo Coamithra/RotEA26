@@ -277,7 +277,8 @@ generate much of the art/audio referenced here.
   a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
-  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec; leave-no-trace,
+  `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec, plus the stale
+  menu roster, `?netdropgrant`'s one-shot latch and couch-seat reuse -- leave-no-trace,
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
@@ -286,6 +287,7 @@ generate much of the art/audio referenced here.
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
+  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
@@ -826,7 +828,10 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     ?wallsidetile= ?wallfacelight= ?wallfaceangle= ?walltoplift= ?wall3dbands= ?wallwisps=
     ?wallwispspeed=` ·
     fast-boot `?level=Level3&wallsonly` (+ `eaWalls` panel) · diagnostics `?walltrace` (logs
-    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids). `?walltoplift` is
+    POP IN/OUT) + `?level=Level3&wallpoptest` (ten slow-scroll poptest grids).
+    **`?wallsonly` also serves OwnLevel** (card b174b00f -- there it drops that level's two
+    spawners and keeps its `Walls(2)`), with **`?nowalls`** as the OwnLevel-only complement; the
+    pair is the churn-attribution rig -- see the AI section's OwnLevel row. `?walltoplift` is
     COSMETIC ONLY (collision unmoved — the sprite drifts off its hitbox; keep small, check
     `?hitboxes`).
   - **Verify drawing OFFLINE** (`tools/walls/preview_wall3d.py` contact sheet) — the wall scrolls
@@ -949,8 +954,8 @@ the rest are tier-independent.
     making the clamp its own oscillator.
   - **Bench a GRID offline with `tools/sim/aiwallnav`, not by booting the level** (card b4972696).
     It reflects into the built `EvilAliensWeb.dll` and calls these very methods against the real
-    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid or the
-    `?aireact` knob in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
+    `Wall.Setup` grids, so it is the shipped code rather than a mirror, and it A/Bs a grid, or any
+    of the `?aireact` / `?aiscanrows` / `?aicrosspenalty` knobs, in seconds with no browser. Per grid it reports `ChooseGapColumn` switches/s,
     lateral sign flips/s, `ClampIntoWallSpace` X-reversals and upward forces/s, contacts/s and the
     share of ticks under urgency. **It is the wall term ONLY** -- `turn deg/s` / `revs/s` are the
     whole steering sum, so a claim about the BOT still needs `?aibench`. **Rebuild the game before
@@ -1022,13 +1027,33 @@ the rest are tier-independent.
   - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
     candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
     not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
-    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`; but
-    **`?aireact` `420 -> 80ms` moved nothing** (contacts `0 -> 0`, turn `22 -> 18 deg/s`, progress
-    `7/8 -> 7/8`) and **`?aithreatlead` `700 -> 80ms` moved nothing** (deaths `11 -> 10`). Both
-    were dropped from the table rather than shipped as dials that do nothing.
-    **`contacts` cannot see wall look-ahead at all** -- `ClampIntoWallSpace` is a hard override
-    that runs regardless of how far ahead the bot looked, so it floors the metric. Don't re-add
-    either knob to the table without an instrument that can actually see it.
+    `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`.
+  - **`?aireact` and `?aithreatlead` were dropped as "dials that do nothing". That verdict is
+    RETIRED (card b174b00f): both have large authority and the original RIGS were blind.** Each
+    was a single run (n=1, on fights this file itself calls +-30% noise) and each happened to pick
+    the one rig where its knob is inert. Re-measured through `eahl` with no browser, N=6,
+    Very_Hard:
+    - **`?aireact` 80 / 420 / 2000ms** on `?level=OwnLevel&wallsonly` -- deterministic, since with
+      the spawners gone all six runs are identical and any movement is pure signal: turn
+      **88 / 229 / 944 deg/s**, contacts **0 / 0 / 13**, and at 2000ms the level stops completing
+      (`prog 5/5 -> 4/5`). Level 3's grids read 22 / 29 / 115 over the same sweep, which is exactly
+      why the original Level-3 isolation saw `420 -> 80ms` move nothing. It doesn't move much
+      THERE.
+    - **`?aithreatlead` 80 / 700 / 2000ms** on **CrazyGame** (30 homing bullets, no walls): deaths
+      **15.3 / 3.8 / 7.0** and progress **~6 / ~20 / ~16 of 21**, with the 80 and 700 ranges not
+      overlapping on either measure. The baked 700 sits near an interior optimum. On the SPIDERBOSS
+      rig -- the original's -- it still moves nothing (deaths 6.2 / 6.0 / 5.8, ranges fully
+      overlapping), which is a fact about that rig and not about the knob.
+    - **The 80ms CrazyGame row is the durable caution.** It posts the LOWEST churn anywhere in the
+      sweep (117 deg/s against 411 at the baked value) while dying three times as often: the bot
+      has stopped dodging, and a bot that has stopped dodging is smooth. **Never read `turn` as
+      quality without a survival column beside it.**
+    Whether either knob should be TIER-SCALED is therefore an OPEN tuning question with a working
+    instrument, not a closed one. Choosing per-tier values is its own measurement campaign and is
+    deliberately not done here.
+    **`contacts` still cannot see wall look-ahead on a level with enemies** -- `ClampIntoWallSpace`
+    is a hard override that runs however far ahead the bot looked, so it floors the metric; the
+    reading above can see it because a walls-only rig lets `turn` carry the signal instead.
   - **Comparing tiers end-to-end cannot verify any of this** -- the enemies scale with the same
     tier (and Level3's wall SCROLL SPEED is `4.3 * GetDifficultyValue / 16.667`, i.e. 0.090 px/ms
     at Easy to 0.310 at Inzane -- the `0.43 *` variant is `Level3.popTestSlow`, `?wallpoptest`
@@ -1038,7 +1063,8 @@ the rest are tier-independent.
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
-  ?aigapmargin= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`
+  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
+  ?aifieldsize= ?aifieldfall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
@@ -1119,27 +1145,56 @@ before hunting a blind spot in any future stalled-level report.
     sum-of-repulsions model is the shape that churns; it is the natural rig for the next
     bullet-hell attempt.
   - **OwnLevel is the only challenge with WALLS** and the only one scoring `contacts` (13/1/4).
-    Its churn (`turn` 254-477 deg/s) runs far above the ~70 deg/s the parent card settled Level 3
-    at. **That 4-7x gap is NOT a wall-nav defect, and reading it as one cost card b4972696 its
-    premise** -- the two figures come from rigs that differ by more than the grid. The ~70 deg/s
-    baseline is from **`?wallsonly`**, i.e. `Level3.PopulateWallsOnly`, whose own comment says it
-    runs the wall sections "with nothing else spawning"; OwnLevel's 254-477 is the WHOLE level,
-    where `Walls(game, 2)` runs concurrently with a continuous `SkullSpawner(0f, 2f, maze: true)`
-    and (Very_Hard+) a `StarMineSpawner`. Scroll speed is NOT the confounder -- `?wallsonly` calls
-    the same 4.3x `speedup` OwnLevel uses. So it is walls-alone against walls-plus-a-sustained-
-    enemy-stream, and the extra churn belongs to the same sum-of-repulsions problem CrazyGame
-    shows at 389-450 deg/s with **no walls at all**, which is the band OwnLevel sits in.
-    Measured offline with `tools/sim/aiwallnav` (the real wall-nav code, no browser) at the real
-    Very_Hard wall scroll: on OwnLevel's grid `ChooseGapColumn` switches **0.52/s against var3's
-    0.43/s** -- 1.2x, one switch every two seconds -- and the lateral push flips sign 0.17/s vs
-    0.16/s. Neither can produce 3-5 heading reversals/s. OwnLevel's grid IS the hardest of the
-    five, but by modest ratios: `clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77, `contact/s`
-    0.06 vs 0.03. The one big gap is the share of ticks with a blocked row inside reach --
-    **25.0% vs 4.5%** -- so the maze really is tighter; it just does not convert that into
-    proportional churn. `--react=2000` shifts `urgency%`/`clampX/s` but leaves switching, sign
-    flips and contacts unchanged everywhere, so there is no tuning win in the look-ahead either.
-    **Before attributing any churn on a walled level to the walls, match the rigs** -- suppress
-    the spawners, or bench the grid offline.
+    Its churn (`turn` 254-477 deg/s) runs far above Level 3's wall sections. **That gap IS the
+    walls -- an earlier revision of this file concluded the opposite, and card b174b00f measured
+    it directly: the hypothesis lost.**
+    The old comparison really was confounded, so the critique stands even though the conclusion
+    drawn from it does not: the Level-3 baseline is a **`?wallsonly`** run (`PopulateWallsOnly`,
+    whose own comment says "with nothing else spawning") while OwnLevel's 254-477 was the WHOLE
+    level -- `Walls(game, 2)` alongside a continuous `SkullSpawner(0f, 2f, maze: true)` and a
+    Very_Hard+ `StarMineSpawner`. Scroll speed was never the confounder (`?wallsonly` calls the
+    same 4.3x `speedup`). But suppressing either half resolves it the other way. `?wallsonly` and
+    `?nowalls` both work on OwnLevel now. Measured with `eahl`, Very_Hard, N=6, each run soaked by
+    `eval AiBenchRun 60` x3:
+
+    | OwnLevel, one rig | `turn` deg/s |
+    |---|---|
+    | walls only (`?wallsonly`) | **229** (deterministic -- all 6 runs identical) |
+    | spawners only (`?nowalls`) | **~55** (41-67 over 14 runs) |
+    | full level | **404** (304-525) |
+    | *Level 3 walls only, same rig* | **29** (deterministic) |
+
+    **`?invuln` must be OFF, and that cuts against the habit** -- every other doc line pairs
+    `?wallsonly` with it. With `?invuln` on the bot cannot die, the checkpoint rewind never fires,
+    and the same boot reads 426 deg/s / 3 contacts / VICTORY instead. The rigs verbatim:
+    `?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard[&wallsonly|&nowalls]` and
+    `?level=Level3&aiplayer&aibench&difficulty=Very_Hard&wallsonly`.
+    **The two walls-only rigs are not the same SHAPE, which bounds the ratio**: Level 3 loops six
+    sections (variations 1/0/3, twice) and is still running at 180 sim-seconds, while OwnLevel has
+    a single `Walls(2)` and reaches victory at ~60, freezing its rate there. Both are rates over
+    the ticks they ran, so they compare as rates -- but this is grid-against-grid, not
+    run-against-run, and a soak length describes the command, not OwnLevel's window.
+
+    So OwnLevel's grid ALONE churns **7.9x Level 3's grid alone**; the enemy stream alone accounts
+    for 61 deg/s; and the two together are superadditive (404 against a 290 sum), which is the
+    sum-of-repulsions model gaining another set of competing terms. **`?nowalls` is the control
+    that makes the walls-only number readable at all** -- without it, "the walls are innocent" and
+    "suppressing events broke the rig" are the same quiet number.
+    (The Level-3 walls-only baseline re-measures at **29 deg/s on this rig, not the ~70** long
+    quoted here from card f4d1721f's browser run. The 7.9x is a within-rig ratio, which is the
+    comparison that carries; the absolute discrepancy across rigs is unexplained and worth
+    remembering before quoting either figure on its own.)
+  - **`tools/sim/aiwallnav`'s columns do NOT predict heading churn, and leaning on them to
+    exonerate the walls was the actual error.** Its gap-switch (0.52 vs 0.43/s), lateral sign-flip
+    (0.17 vs 0.16/s) and clamp (`clampX/s` 1.12 vs 0.61, `clampUp/s` 1.16 vs 0.77) ratios are all
+    real measurements, and all read 1.2-1.8x where the live churn is 7.9x. The one column that
+    DOES track it is **`urgency%` -- 25.0% vs 4.5%, 5.6x** -- the share of ticks with a blocked row
+    inside reach. The bench states its own limit ("the WALL TERM ONLY -- `turn deg/s` is the whole
+    steering sum"); honour it. **Read `urgency%` as the churn proxy** and treat every other column
+    as a claim about routing mechanics rather than about the heading.
+    **Before attributing churn on a walled level to the walls (or away from them), match the
+    rigs** -- suppress the spawners with `?wallsonly`, keep `?nowalls` as the control, and never
+    compare a whole-level figure against a walls-only one.
 - **`eaAiBench.world()` has three standing FALSE POSITIVES -- do not "fix" them into
   `Oracle.GetBaddies`.** Its `LooksLikeEnemy` is a deliberately name-shaped heuristic, so it
   flags the SCENE class itself (`ClassicAliens`, `InsaneBossI` -- they contain "Alien"/"Boss"),
@@ -1723,6 +1778,33 @@ interpolation feel, both gated on real-network playtests.
       `RejectFull` ("Game full"). The host's own game SURVIVES that -- `Stop()` does not exit a
       level and `NetListing.ComputeEligible` needs `!NetSession.Active`, so a listed host drops
       back to single-player and re-lists. Verify with `eaSlotTest()`.
+  - **The roster is cleared on the way OUT of a scene as well as in (card ee96ea61).**
+    `GameScene.Terminate` ends with `oracle.ResetPlayers()`. Before that only the launch paths
+    reset it, so between a scene ending and the next launch the roster held whatever the last
+    level or attract demo left behind -- and that window is where BOTH menu-lobby handshakes and
+    the join-in-progress joiner hello run. The client side was already guarded
+    (`LocalBlockedSlots` returns 0 with no `GameScene`), but **`HostOccupiedSlots` reads the
+    roster raw**, so an attract demo could make a host answer a good joiner with `RejectFull`
+    ("Game full") with no real players aboard, or grant them slot 2 instead of 1 for the whole
+    session. Safe because `PlayerInfo.Reset()` only clears `isPlaying` -- score lives in
+    `ScoreVisualiser`, unlocks in `Achievements`, and the hue is deliberately left alone. It is
+    LAST in `Terminate`: `OnFinished` fires mid-method and has already queued the next scene
+    (credits/menu), neither of which seats anyone.
+    **Do not add a second menu-guard to `HostOccupiedSlots` instead** -- the reset is the root
+    cause and covers `AllocateSeat`/`HandleJoinRequest` too.
+  - **Read the OFFLINE roster with `eaOracleRoster()`** (`eval OracleRoster` under `eahl`).
+    `eaNetRoster()` early-returns without a net session, so it cannot see the menu roster at
+    all -- which is exactly where a stale seat does its damage. Needs no session, level or
+    gamepad. (`eaScore()` also shows seated-ness; what this adds is the DEVICE per seat, which
+    is what tells an attract demo's leftover AI seats from a real player.)
+    **The repro, headless and flag-free:** `eahl --repl --flags "?menu"`, `step 1500 nodraw` to
+    idle past the 20s attract timeout, `eval Press esc 2` back to the menu, `eval OracleRoster`.
+    Pre-fix the demo's seats are still there afterwards (`players=1 seated=0:AI`, or more --
+    slot 0 always, plus 3 on a 20% roll and 1 on a further 40%); post-fix `players=0`.
+    Do NOT read `info`'s `scene=` to tell whether the demo ran -- it reports the booted level and
+    stays `Level2`/`menu` throughout; the roster dump is the signal. `eaSlotTest()` covers what that stale
+    roster then COSTS at the allocator, but it seats its scratch roster by hand and never
+    reaches `Terminate` -- so it cannot substitute for this run.
   - **Every seat-taking path must use `NetSession.LocalPrimarySlot`**, not "the first free
     slot": `Game1.MenuFinished`, `Game1.LaunchLevelDirect` (the `?level=` boot -- a `?net=join`
     tab pairs WHILE it boots, so the grant can land before the seat is taken) and
@@ -1787,15 +1869,27 @@ interpolation feel, both gated on real-network playtests.
     LOOP flag, so it needs neither the HUD nor `?nofps`. Cost: the client runs far above vsync,
     which inflates `pupPops`/`dup`/`snapUnk` around id churn -- read those as not comparable to
     a normal-rate run, while roster/adopt/`resets` assertions stay valid.
-  - **`?netdropgrant` (client) is the only trigger for `ExpireUnclaimedGrants`.** The host holds
+  - **`?netdropgrant` (client) is the only trigger for `ExpireUnclaimedGrants`, and it is
+    ONE-SHOT (card ee96ea61).** The host holds
     a granted couch seat as `RemoteFriend` until the peer's first stream for it lands; a client
     that silently fails to take the grant would otherwise leak that seat for the session (and the
     game stops being re-listable). `?netlocal` always TAKES its grant, so the expiry path had no
-    trigger at all -- this flag drops **every** `EvSlotGrant` (it is read per grant, not
-    one-shot, so while it is set no couch join completes) after clearing `joinRequestPending`,
-    leaving this side exactly as a genuine failed take does. Expect the host to log
+    trigger at all -- this flag drops the **first** `EvSlotGrant` of a session after clearing
+    `joinRequestPending`, leaving this side exactly as a genuine failed take does, and lets every
+    later grant through. Expect the host to log
     `granted peer couch join slot=N` then `released unclaimed couch grant slot=N` ~10s later
     (`GrantClaimTimeoutMs`), and the seat to leave `roster=` rather than leak.
+    - **It dropped EVERY grant until card ee96ea61**, so a run could only show the DROP half and
+      "the reclaimed seat is re-usable" went unverified. `?netlocal=2` now covers both halves in
+      one run. Note the second join lands ~3s after the first while `GrantClaimTimeoutMs` is 10s,
+      so it is handed a DIFFERENT free seat -- proving recovery, not reuse. For reuse proper,
+      wait out the release and call `eaNetCouchJoin()`, or just read `eaSlotTest()`, which drives
+      the whole reserve -> hold -> expire -> reallocate cycle as data.
+    - **The latch is per SESSION and the clearing is the load-bearing half** -- a flag outliving
+      the thing that set it is the exact bug class this seam exists to hunt, so it lives in
+      `NetSession.ResetPerSessionState` beside `joinRequestPending`, and `eaSlotTest()` asserts a
+      teardown clears it (driving `ResetPerSessionState` directly, since `Stop()` early-returns
+      with nothing Active and would make the leg vacuous -- the `eaKickTest()` precedent).
   - **`RejectFull` needs `eaNetCouchJoin()`, NOT `?netlocal`.** Reaching it means the host roster
     is already full when a joiner says hello, which means couch players seated BEFORE pairing --
     and `TickLocalJoinSim` is deliberately gated behind `PeerUp` (pre-pairing, `AllocateSeat`
@@ -2106,8 +2200,9 @@ interpolation feel, both gated on real-network playtests.
     forever (`pri=0/0` vs `pri=0/1`), the joiner never built a remote puppet (`remoteShip=0`,
     `buf=0ms`), and NOTHING surfaced to the player.
     **It was reachable with no debug flags at all**, which is the part worth remembering: the
-    menu's roster is whatever the last scene left behind (`GameScene.Terminate` does NOT reset
-    it; only the launch paths' `ResetPlayers()` do), and the attract demo seats MORE than one --
+    menu's roster was whatever the last scene left behind (`GameScene.Terminate` did NOT reset
+    it; only the launch paths' `ResetPlayers()` did -- card ee96ea61 has since made Terminate
+    reset it too, see the roster-slots bullet), and the attract demo seats MORE than one --
     `mainMenu_DemoSelected` seats slot 0, then `Demo1/2/3.Initialize` adds 3 more on a 20% roll
     and 1 more on a further 40% roll. So "idle at the menu -> attract demo -> key out -> Online
     Co-op -> Join" left slot 1 seated ~60% of the time, and a couch session backed out to the

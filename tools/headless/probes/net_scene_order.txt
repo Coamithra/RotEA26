@@ -1,0 +1,32 @@
+# PROBE: reset / pause / checkpoint reach a REAL GameScene in order, and a reset arriving
+# mid-pause does not strand the world frozen.
+#
+# PINS: scenario 6 of the step-4 harness (card 25ad0659) -- NetSession's EvReset / EvPause /
+# EvCheckpoint handlers, NetScene.Current as the route to the scene, and ComponentBin's pause
+# stack. All three failure modes are silent: a beat applied on the wrong edge changes no
+# counter, and a world left frozen looks exactly like a world where nothing happens to be
+# moving.
+#
+# WHY IT IS NOT IN net_selftests.txt: it needs a live level, and it is DESTRUCTIVE -- it pairs a
+# real client session onto the running scene and applies a real EvReset, leaving the scene in its
+# reset branch. Same reasoning, and the same separate-probe answer, as net_reset_spawn.txt.
+#
+# FAILURE MEANS one of: the ordered reliable lane stopped being ordered by the time it reached
+# the scene; a repeated pause on-edge latched a freeze one off-edge cannot clear (a world frozen
+# for the rest of the session while the peer believes it resumed); or a reset applied under a
+# held pause unfroze the world early, or failed to be unfrozen by the peer's resume. The suite
+# names which.
+#
+# THE COUNT IS ASSERTED, not `expect-not FAIL`: this suite SKIPS itself with no level up, and an
+# absence assertion passes on a run that never got there.
+#
+# eahl: --flags "?level=Level2&invuln&noattract"
+
+step 300 nodraw
+mark
+
+eval NetSceneOrder
+
+expect \[netorder\] 16 passed, 0 failed
+expect-not FAIL
+quit

@@ -361,9 +361,44 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     machine's uptime and the packet is never delivered at all. The boolean flag legs compare
     equal-to-source and so cannot tell two members wired to each other apart on a boot where both
     are false; that is stated in the suite rather than papered over.
+- **THE SCENARIO HARNESS (card 25ad0659 step 4) -- `eaNetScenarios()` + `eaNetSceneOrder()`.**
+  The six scenarios the design doc specced, each driving ONE REAL `NetSession` over one endpoint
+  of a `NetWire` while a SCRIPTED peer drives the other with real `NetProtocol.Encode*` frames.
+  Two entry points because they cost different things:
+  - **`eaNetScenarios()` (`Compat/Net/NetScenarioTest.cs`, 48 assertions) is MENU-ONLY and
+    leave-no-trace**, the `eaNetSnap` shape. Scenarios 1-4 run a real HOST session (the three
+    generous-claim shapes plus the OneUp overlap); scenario 5 stops it and runs a real CLIENT
+    session for the id churn. Real `UFO`s and `Powerup`s are planted into the LIVE bin so
+    `NetIdRegistry` allocates real ids through the real `ComponentAdded` seam -- which is what
+    makes the claim path non-vacuous, since `HandleClaim`'s live branch runs the real per-type
+    `KilledBy`. The roster, the score panels and `Lives` are restored AND asserted restored.
+    A leg of `net_selftests.txt`.
+  - **`eaNetSceneOrder()` (`NetSceneOrderTest.cs`, 15 assertions) needs a LEVEL and is
+    DESTRUCTIVE**, like `eaNetResetSpawn`: reset/pause/checkpoint ordering is about what a REAL
+    `GameScene` does with the transitions, so a stand-in scene would make every assertion about
+    the stand-in. Own probe, `net_scene_order.txt`.
+  - **Production cost is ONE getter** (`NetSession.Metrics`) plus `ComponentBin.FreezeDepth`.
+    `NetMetrics` has no reset, so every scenario asserts on DELTAS across its own frames rather
+    than zeroing a counter the `[net]` line is also reporting.
+  - **Scenario 5 supplies its own `INetScene`, and that is honest here** -- the client rx paths
+    gate on "is a scene up", and nothing in that scenario is about what a scene DOES. Scenario 6
+    is the opposite case and decorates the live one.
+  - **TWO MEASURED GAPS, reported as `info` lines rather than asserted.** Two claims for one
+    `netId` inside ONE `DrainRx` pay the SECOND claimant nothing -- the death record it would be
+    paid from is written by `OnHostDeath` at the `ComponentRemoved` seam, one flush later -- and
+    in that same window nothing masks the live-branch payer either. A TICK APART both hold, which
+    is what the scenarios assert. **Neither is reachable on today's wire**: the protocol is
+    2-peer, a client sends exactly one `EvClaim` per local gameplay death, and a puppet dies
+    locally once, so two claims for one id cannot both come from the one peer that can send them.
+    Both become reachable at N peers (`plans/4p-online-coop.md`). Reported rather than pinned
+    because the rule here is not to write a test that expects broken code to stay broken.
+  - **The id-churn scenario IS the item-1 residual `pupPops` probe.** It reports the count across
+    a purge+replay with the stream lane reordered ahead of the reliable one, and asserts only the
+    bound the design claims (churn alone must not pop a puppet per churned id). Measured 0 over
+    12 ids at `snapTurn` 60ms. The card's scope on that burst is PROPOSE, not fix.
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
   code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaNetEntity`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
-  `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`. They were
+  `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`, `eaNetScenarios`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never
   happened, and several of these suites SKIP legs they cannot reach, which is not a pass. Raise a

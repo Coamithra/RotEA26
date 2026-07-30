@@ -8,7 +8,7 @@
 # WHY IT EXISTS: card 25ad0659 is a four-step de-static refactor of NetSession / NetPuppets /
 # NetIdRegistry -- ~108 pieces of per-session static state moving into instances behind static
 # facades, under 227 external reference sites. The facade keeps the call sites identical, so the
-# failure mode is not a compile error: it is one of these decisions quietly changing. These eleven
+# failure mode is not a compile error: it is one of these decisions quietly changing. These twelve
 # suites already cover the decisions (slot negotiation, the kick/block predicate and its v6 codec,
 # snapshot unknown-id attribution, the score ledger and the EvDeath wire, the per-slot HUD codec
 # and OwnsSlot, the cosmetic-swarm predicate, the bin's purge filter and the puppet exemption, the
@@ -17,13 +17,13 @@
 #
 # THE ARGUMENT FOR THIS FILE, IN ONE FACT: when it was written, `eaNetCombo.test()` had been
 # FAILING ON MAIN and nobody knew. Eleven cards' worth of self-tests that nothing ever runs are
-# not a regression net; they are eleven console calls a human made once.
+# not a regression net; they are twelve console calls, eleven of them a human made once.
 #
 # FAILURE MEANS: the quoted line names the suite. Go and read that suite's own FAIL lines -- each
 # prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
 # probe by loosening an expectation: these are all-or-nothing tallies on purpose.
 #
-# ELEVEN SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
+# TWELVE SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
 # already cost something in this repo: (a) an `expect-not` passes on a run where the eval never
 # happened, which a renamed DebugInput method silently produces; (b) several of these suites SKIP
 # legs they cannot reach (NetCosmetic's client apply path needs a level, NetKickTest's
@@ -65,6 +65,7 @@ eval NetCosmetic
 eval BinTest
 eval TeamSeat
 eval NetSimTest 150 20 60 200
+eval NetScenarios
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
 expect \[netwire\] 69 passed, 0 failed
@@ -96,6 +97,12 @@ expect \[cosmetictest\] PASS \(15/15 checks\)
 expect \[bin\] 27 passed, 0 failed
 # the TeamChallenge seat resolver over every pad mask (card e6927ef8)
 expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
+# The step-4 scenario harness, scenarios 1-5 (card 25ad0659): the three generous-claim shapes,
+# the OneUp overlap and the id-churn self-heal, each driven over a real session with a scripted
+# wire peer. Scenario 6 needs a level and has its own probe (net_scene_order.txt), like
+# eaNetResetSpawn. The two `info` lines it prints are MEASURED GAPS that are unreachable on
+# today's 2-peer wire -- read the suite header before treating either as a regression.
+expect \[netscen\] 50 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

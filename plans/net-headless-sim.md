@@ -449,10 +449,13 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      fake would make leg 2's real `Purge<PlayerShip>` vacuous). Mutation-tested: reverting the
      `EvReset` handler fails exactly one assertion, `resets=0`.
    **2c-ii (the ENTITY) is DONE, and the MEASUREMENT it was gated on came out decisively.**
-   `Compat/Net/INetEntity.cs` -- 16 members, measured over 42 call sites, implemented DIRECTLY on
+   `Compat/Net/INetEntity.cs` -- **17 members**, implemented DIRECTLY on
    `AlienDrawableGameComponent` (no adapter: it would allocate per entity per tick) -- plus
    `INetKillable` and `INetPickup`, because the layer's `is KillableAlien` (4 sites) and
-   `is Powerup` (3) are type tests an interface cannot carry.
+   `is Powerup` (3) are type tests an interface cannot carry. **17 vs the card's census of 16
+   distinct members over 42 call sites**: one of that 16 is `GetType()`, free from `object` and
+   not declared; the other 15 are; the two discriminants are the difference, and they replace
+   type tests rather than being members the cores called.
    - **EXPLICIT implementation, the OPPOSITE of 2c-i's choice and for the opposite reason.**
      `GameScene` is internal, so widening `INetScene`'s members widened nothing;
      `AlienDrawableGameComponent` is PUBLIC, so an implicit implementation would add a dozen

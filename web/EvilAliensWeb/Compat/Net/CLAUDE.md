@@ -183,8 +183,10 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   expression verbatim. **2c is split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
   `2c-ii` the ENTITY (`INetEntity`, SHIPPED), `2c-iii` entity creation. It is STILL STATIC and
   single-instance until step 3.
-  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 16 members,
-    measured over 42 call sites, implemented DIRECTLY on `AlienDrawableGameComponent` -- never
+  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 17 members
+    (the card's census measured 16 distinct ones over 42 call sites; `GetType()` is one of them
+    and comes free from `object`, and the two discriminants below replace type tests rather than
+    calls), implemented DIRECTLY on `AlienDrawableGameComponent` -- never
     via an adapter, which would allocate per entity on a per-puppet-per-tick path. Plus two
     sub-interfaces, `INetKillable` and `INetPickup`, because the layer's `is KillableAlien` (4
     sites) and `is Powerup` (3) are TYPE TESTS an interface cannot carry: each subtype answers

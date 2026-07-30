@@ -8,8 +8,13 @@ namespace EvilAliensWeb.Compat.Net
     // The third of the de-static refactor's seams, after INetHost (the clock, the dev flags and
     // the four ServiceHelper services) and INetScene (the live GameScene). This one is the
     // union of everything NetPuppets / NetIdRegistry / NetSession read or write ON a replicated
-    // component -- 16 members, MEASURED over 42 call sites, which is what lets those three
-    // cores stop naming AlienDrawableGameComponent.
+    // component, which is what lets those three cores stop naming AlienDrawableGameComponent.
+    //
+    // SEVENTEEN members, and the arithmetic against the card's census is worth stating because
+    // the two figures do NOT match: that census measured 16 distinct members over 42 call sites.
+    // One of its 16 is `GetType()` (the descriptor lookup), which comes free from object and is
+    // not declared here; the other 15 are. The two discriminants below are the difference --
+    // they are not "members the cores call" at all, they are what REPLACES two type tests.
     //
     // IMPLEMENTED DIRECTLY ON AlienDrawableGameComponent, never via an adapter object: the
     // Net* accessors at the bottom of that class already ARE the implementation, and an adapter

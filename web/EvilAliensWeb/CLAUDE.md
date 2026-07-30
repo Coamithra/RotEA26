@@ -879,10 +879,17 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
     grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
     stays representative. **A bench boot is now byte-deterministic** (card 1cd47879): a bench
-    spider pins its wing-flap phase, swivel phase and tilt exactly as the sprite harness does, and
-    tints by grid slot instead of rolling, so two boots at the same N differ ONLY in the flag under
-    test -- which is what makes a swarm-vs-per capture pair diffable instead of eyeballable. Live
-    play (and the un-pinned `?flyspiders` stream) keeps every roll. Bench spiders are also forced `Collides = false`, which for the
+    spider pins its wing-flap phase, swivel phase and tilt exactly as the sprite harness does
+    (`FlyingSpider.PosePinned`), and tints from its grid slot instead of rolling, so two boots at
+    the same N differ ONLY in the flag under test -- which is what makes a swarm-vs-per capture
+    pair diffable instead of eyeballable. The pin REWINDS both timers rather than just skipping
+    `Randomize()`: `NewFlyingSpider` recycles, so a pinned spider out of the pool would otherwise
+    inherit the last one's phase. Live play (and the un-pinned `?flyspiders` stream) keeps every
+    roll. The bench REPORTS the pin as `pose=pinned` on its `[flyspiders] bench:` line -- read
+    back off the spiders it just added, not restated from the predicate -- and
+    `tools/headless/probes/flyspider_bench.txt` asserts it, because a spider that started rolling
+    again would change no behaviour and no other output, and only quietly make every capture pair
+    below incomparable. Bench spiders are also forced `Collides = false`, which for the
     FOREGROUND variant is a real change from live play -- otherwise the player would shoot the
     pinned population down mid-run and an un-invulned ship could be killed by the grid it is
     measuring. So a foreground bench sits out the collision pass and is a DRAW-cost rig (GL calls
@@ -914,7 +921,7 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
     **The swarm variant preserves the per-spider silhouette, and that is now measured, not
     argued** (same card, `?level=Level2&flyspiders&flyspidercount=N`, swarm vs per): **N=1
     byte-identical** (the union of one box IS that box), **N=4** -- the largest grid that does not
-    overlap -- 49 pixels differing by at most 2/765 summed, i.e. RT rounding. It differs only where
+    overlap -- 5 pixels differing by at most 1/765 summed, i.e. RT rounding. It differs only where
     two SPIDERS overlap, and there it removes double-brightening rather than changing shape: over
     the fog band at N=40 the peak deviation from a spider-free frame runs none 57 > per 37 > swarm
     28. At alpha 0.2 over Mars dust that is not perceptible, which is what let it ship as the

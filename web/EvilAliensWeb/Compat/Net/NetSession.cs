@@ -397,10 +397,14 @@ namespace EvilAliensWeb.Compat.Net
         private static void StartWith(Game g, bool host, INetTransport t, string room, bool asMenuSession, bool asListedSession)
         {
             game = g;
-            oracle = ServiceHelper.Get<IOracleService>().Oracle;
-            bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
-            sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
-            score = ServiceHelper.Get<IScoreService>().Score;
+            // The four services arrive through the host since step 2b -- ServiceHelperNetHost
+            // holds these four lookups verbatim. Resolved ONCE here, exactly as before: the
+            // fields below are what the ~84 call sites read, so where they came from is the only
+            // thing this card changes.
+            oracle = NetHost.Current.Oracle;
+            bin = NetHost.Current.ComponentBin;
+            sound = NetHost.Current.SoundManager;
+            score = NetHost.Current.Score;
             isHost = host;
             menuSession = asMenuSession;
             listedSession = asListedSession;

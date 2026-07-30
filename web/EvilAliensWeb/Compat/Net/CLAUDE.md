@@ -168,14 +168,36 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     job). Leg **3b** was added with the pin and is the only leg here that discriminates on the
     clock: it moves ONLY the virtual clock past `FriendTimeoutMs` and requires the friend puppet
     to explode while the primary remote, on the 3 s peer timeout, does not -- so it pins WHICH
-    deadline fired. 35/35 now.
-- **The net cores read the clock and the dev flags through ONE injected seam, `INetHost`** (card
-  25ad0659 step 2a; the plan's 2a/2b/2c split is in `plans/net-headless-sim.md`). `NetSession`,
-  `NetPuppets` and `NetImpairment` no longer touch `Environment.TickCount64`, `DebugFlags` or
-  `WebRtcInterop` directly -- they go through `NetHost.Current`, whose production value is
-  `ServiceHelperNetHost` and holds each expression verbatim. Step 2b adds the four `ServiceHelper`
-  services to the same interface, 2c `INetEntity` / `INetScene`; it is STILL STATIC and
-  single-instance until step 3.
+    deadline fired. Leg **0b** came with step 2b and is the seam's other half: it counts the
+    four services' reads THROUGH `INetHost` during `StartForTest`, which is the only place in the
+    repo a real session starts headlessly and therefore the only place that read can be counted.
+    39/39 now.
+- **The net cores read the clock, the dev flags AND the four services through ONE injected seam,
+  `INetHost`** (card 25ad0659 steps 2a + 2b; the plan's 2a/2b/2c split is in
+  `plans/net-headless-sim.md`). `NetSession`, `NetPuppets` and `NetImpairment` no longer touch
+  `Environment.TickCount64`, `DebugFlags`, `WebRtcInterop` or `ServiceHelper` directly -- they go
+  through `NetHost.Current`, whose production value is `ServiceHelperNetHost` and holds each
+  expression verbatim. 2c adds `INetEntity` / `INetScene`; it is STILL STATIC and single-instance
+  until step 3.
+  - **2b is FOUR members (`Oracle`, `ComponentBin`, `Score`, `SoundManager`), not the ~31 the
+    plan's seam table implies, and the reason generalises.** The cores make 84 calls on those
+    services across 27 distinct members, but they all read a field cached ONCE in
+    `NetSession.StartWith` / `NetPuppets.Enable` -- so what has to move is the six
+    `ServiceHelper.Get<>()` LOOKUPS (`ServiceHelper` being a process-global registry is the actual
+    blocker), not the calls. Forwarding all 27 would also drag `PlayerShip` /
+    `AlienDrawableGameComponent` into this interface, which is 2c's job to do properly.
+    It buys nothing toward Game-freedom and is not meant to: all four service constructors take a
+    `Game`, and the harness runs under eahl, which has one.
+  - **A core left reading `ServiceHelper` is INVISIBLE today** -- it changes no behaviour until
+    step 3 puts two peers in one process and they quietly share an `Oracle`. So the leg that
+    covers 2b COUNTS reads through the seam rather than comparing values: `NetResetSpawnTest`
+    leg 0b installs a read-counting host over the pinned clock during a real `StartForTest` and
+    requires oracle 1, bin 2, sound 1, score 2 (bin and score twice because a client session also
+    runs `NetPuppets.Enable`). Exact counts, not a floor. Copy the instrument at 2c.
+  - **`eaNetHost()` deliberately does NOT cover the four**, and adding a leg for them would cost
+    it the Game-freedom that makes it a `logic_probe` case set -- `ServiceHelper.Get<T>()`
+    dereferences a static `Game` that loader never sets, and no `Oracle`/`ComponentBin`/
+    `ScoreVisualiser`/`SoundManager` can be built there to compare against. Its header says so.
   - **A scenario swaps it and hands it back: `NetHost.Current = new PinnedNetHost()`, restore in a
     `finally`.** Assigning `null` restores production, so teardown needs no bookkeeping and the
     layer can never hold a null host (a frozen or absent clock reads as "the peer stopped
@@ -186,8 +208,14 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `?net=` / `?rtc` / `?room=` directly -- it is the composition root and decides whether a
     session exists at all, which no injected host can answer. `NetListing` / `NetLobby` /
     `NetGameBrowser` / `WebRtcTransport` are lobby-and-listing plumbing a scenario never
-    constructs (`NetListing` keeps its own `NowMs`). `NetWaitOverlay`'s clock read is a Draw-time
-    pulse alpha, not cadence.
+    constructs (`NetListing` keeps its own `NowMs` and, since 2b, its own oracle lookup).
+    `NetWaitOverlay`'s clock read is a Draw-time pulse alpha, not cadence.
+    2b adds two more of the same kind: `NetPauseOverlay`/`NetWaitOverlay`'s Draw-time
+    `IContentManagerService` + `ISpriteBatchWrapperService` lookups (not among the four services
+    the cores reach through), and the five sibling test SUITES -- `NetComboTest`,
+    `NetCosmeticTest`, `NetResetSpawnTest`, `NetSlotTest`, `NetSnapshotTest` -- which read the
+    registry on purpose, because asserting against the LIVE world is their job. Step 4's
+    scenarios are the ones that go through a host.
   - **Verify with `eaNetHost()`** (`Compat/Net/NetHostTest.cs`, 32 assertions; also `ProbeNetHost`
     under `logic_probe` and a leg of `net_selftests.txt`). It asserts the two halves separately,
     because they fail differently: the production host maps 1:1 onto what each call site read

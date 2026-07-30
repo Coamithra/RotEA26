@@ -16,7 +16,13 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > PR #231 (`dce0772`) -- the in-process wire, its self-test, a `logic_probe` case set and two
 > committed probes. **Step 1b shipped next** -- `Compat/Net/NetResetSpawnTest.cs`
 > (`eaNetResetSpawn()`), `NetSession.StartForTest` + three read-only seams, and
-> `tools/headless/probes/net_reset_spawn.txt`. Next up: **2a**.
+> `tools/headless/probes/net_reset_spawn.txt`.
+>
+> **PARKED after 1b (2026-07-30). Card `25ad0659` is back in Backlog with a PARKED comment that
+> carries the full resume brief -- read that comment first.** Remaining: **2a**, 2b, 2c, 3, 4.
+> Nothing of 2a was started, so `main` is a clean stopping point: everything shipped so far is
+> additive scaffolding plus one test-only fix, and **2a is the first step that touches the running
+> co-op path** -- which is exactly why it was not begun in a session that could not finish it.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -313,9 +319,8 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      test.
    - **The one thing it has to fake is `SpawnAllPlayers`' respawn of the local seat**, because
      `NetApplyReset` purges `PlayerShip` and the retry legs need a non-null `FindLocalShip()`.
-     Done with the game's own three lines and flagged at each site. Step 2a's clock does not help
-     here; what would is an `INetScene` seam (2c) that lets a scenario drive the reset choreography
-     without `Draw`.
+     Step 2a's clock does NOT fix it -- **filed as 2c work under "Steps 2a/2b/2c" below**, which is
+     where whoever plans 2c will trip over it.
    - **The client must be granted slot >= 1.** `AdoptGrantedPrimarySlot` sets
      `peerPrimarySlot = HostPrimarySlot` (0), so slot 0 has to be free for the peer's own puppet --
      i.e. the scenario reproduces the dev `?net=join` `MoveSeat` path, and granting slot 0 would
@@ -343,6 +348,25 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    Never as a percentage of a small phase: 10% of 0.3ms is nothing and would trigger a fallback to
    real added complexity for no gain. The simple direct-interface design is the DEFAULT; the
    generic-core fallback has to earn it.
+   **2c ALSO OWES 1b A DEBT, and it is the only outstanding one: `INetScene` should let a scenario
+   drive the RESET CHOREOGRAPHY.** `NetResetSpawnTest` has to FAKE `SpawnAllPlayers`' respawn of the
+   local seat, because `NetApplyReset` purges `PlayerShip` and its two retry legs need a non-null
+   `FindLocalShip()`; the real path there is `Resetting -> Startup`, i.e. ~3 s of game time plus a
+   background crossfade that needs `Draw`, which no headless scenario can drive. **2a's injected
+   clock does NOT fix this** (the wait is game-time and Draw-gated, not wall-clock), so do not
+   expect it to fall out of 2a -- it is 2c work. When `INetScene` lands, revisit
+   `NetResetSpawnTest.RespawnLocalShip` and delete the fake; its own comment lists the four ways it
+   is not a faithful copy, and all four exist only because the real respawn is unreachable.
+   **Sizing note for 2a, measured on `fa12140` rather than the "9" above:** 10 real
+   `Environment.TickCount64` reads sit in the net layer -- `NetSession.NowMs`, `NetListing.NowMs`,
+   `NetImpairment` (1, at receive), `NetPuppets` (7, of which **2 are inside `WireRoundTripTest`**
+   and are the biggest determinism win). `NetWaitOverlay`'s read is a Draw-time pulse alpha, NOT
+   cadence -- leave it. On the flag side the split is sharper than the doc's flat "12 `DebugFlags.*`":
+   **`NetPuppets` and `NetIdRegistry` read ZERO**, `NetSession` reads 22 (11 of them just
+   `NetLog` log guards) and `NetImpairment` 3; every other `DebugFlags` / `WebRtcInterop` use in the
+   directory is lobby / listing / game-browser / `WebRtcTransport` plumbing the sim never
+   constructs, so it is OUT of the seam. The two `WebRtcInterop` calls that ARE in scope are
+   `BuildHash()` and `PeerId()`, both in `StartWith`.
 4. **Step 3** -- move state into `*Core` instances behind the static facades; `NetContext.Current`
    is the single production instance. Every external call site unchanged. **Start with
    `NetIdRegistry`**: zero external references, so it is the cheapest rehearsal of the pattern.

@@ -180,9 +180,43 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   `plans/net-headless-sim.md`). `NetSession`, `NetPuppets` and `NetImpairment` no longer touch
   `Environment.TickCount64`, `DebugFlags`, `WebRtcInterop` or `ServiceHelper` directly -- they go
   through `NetHost.Current`, whose production value is `ServiceHelperNetHost` and holds each
-  expression verbatim. **2c is split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
-  `2c-ii` the ENTITY (`INetEntity`, SHIPPED), `2c-iii` entity creation. It is STILL STATIC and
-  single-instance until step 3.
+  expression verbatim. **2c was split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
+  `2c-ii` the ENTITY (`INetEntity`, SHIPPED), `2c-iii` entity creation (**MEASURED AND DECLINED**,
+  next bullet). It is STILL STATIC and single-instance, and after the re-plan it stays that way
+  unless step 3 is ever justified.
+  - **THE SEAM IS FINISHED AT 2c-ii. `2c-iii` (entity CREATION) was measured and declined, and
+    the reason generalises: its motivation was "the sim never constructs a `Game`", which is
+    dead.** The harness runs under `eahl`, which HAS one, and `NetSnapshotTest` /
+    `NetPuppetBench` already build and drive REAL replicable entities headlessly. Measured on
+    `9bdbc5a`: moving `INetTypeDescriptor`'s four entity-typed members onto `INetEntity` is
+    **~80 signature edits** (4 declarations + 6 sites in `NetTypeDescriptor<T>` + **70
+    overrides** across the six descriptor files -- 29 `CreatePuppet`, 15 `ApplyStateExtra`, 15
+    `EncodeStateExtra`, 11 `EncodeSpawnExtra`) for no behaviour change and no capability, since
+    the sim uses the production descriptor table anyway. The creation calls (5
+    `Explosion.NewExplosion`, 1 `new Bullet`, 2 `new PlayerShip`, 2 `bin.Recycle<PlayerShip>()`)
+    all read the `game`/`bin` fields already, and faking them would make the real death paths
+    vacuous -- strictly worse evidence.
+  - **The three remaining `(AlienDrawableGameComponent)e.Comp` downcasts are SAFE BY
+    CONSTRUCTION -- that is the invariant, not an accident to tidy up later.**
+    `NetTypeRegistry.TryGet` matches the EXACT runtime type against a table whose every entry is
+    an `AlienDrawableGameComponent` subclass, and `CreatePuppet` returns that type, so
+    `NetPuppets.ApplySnapshotState` / `NetSession.OnHostSpawn` / `NetSession.SendWorldSnapshot`
+    cannot fail. An `INetEntity` implementer that is NOT one could only reach them by being added
+    to that table -- which is what would have to change first.
+  - **TWO PEERS WITH INDEPENDENT WORLDS IN ONE PROCESS IS UNREACHABLE, and knowing why saves the
+    next person a step-3 sizing.** `ComponentBin`'s only ctor does `collection = game.Components`,
+    and `Oracle` (2 subscriptions + 5 scans) and `CollisionHandler` (2 subscriptions) bind to that
+    same collection -- so two contexts under one `Game` share one world and the host context's
+    `NetIdRegistry` would allocate ids for the client context's puppets. The other three services
+    are already fine per-instance (`ScoreVisualiser` has ZERO `Components` references,
+    `SoundManager` only stores the `Game`, `Oracle` ships `DetachFromComponents()` for
+    `NetSlotTest`'s scratch roster). **So a scenario drives ONE real context and scripts its peers
+    onto the wire** -- step 1b's shape -- and step 3's de-static move is off the critical path.
+    Full re-plan, including what a second-collection `ComponentBin` would cost, in
+    `plans/net-headless-sim.md`.
+  - **`NetSession.HandleClaim` reads NO scene** -- only `NetIdRegistry` / `bin` / `score` /
+    `Explosion` / `NetPuppets.KillerAgent`. So the claim scenarios are MENU-runnable and
+    leave-no-trace-able (the `eaNetSnap` shape), NOT destructive like `eaNetResetSpawn`.
   - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 17 members
     (the card's census measured 16 distinct ones over 42 call sites; `GetType()` is one of them
     and comes free from `object`, and the two discriminants below replace type tests rather than

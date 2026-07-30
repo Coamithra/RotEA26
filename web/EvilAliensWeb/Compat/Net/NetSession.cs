@@ -1174,7 +1174,8 @@ namespace EvilAliensWeb.Compat.Net
             }
             NetBaseState state = CaptureBaseState(e, NowMs);
             // Cast back for the descriptor: its extras surface is deliberately still on the
-            // concrete type after step 2c-ii (2c-iii owns it -- see INetEntity's header).
+            // concrete type: 2c-iii measured moving it and DECLINED, so this cast is permanent
+            // and is safe by construction -- see INetEntity's header for the argument.
             int extraLen = e.Descriptor.EncodeSpawnExtra((AlienDrawableGameComponent)e.Comp, extraScratch, 0);
             transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, e.Id, e.TypeIdx, state, extraScratch, extraLen));
             metrics.EventsTx++;

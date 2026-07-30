@@ -193,7 +193,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     the discriminant with `this`, the base with null.
     `PuppetInfo.Comp`, `NetIdRegistry.Entry.Comp` and the kill-note table now hold `INetEntity`.
   - **Implemented EXPLICITLY, which is the OPPOSITE of 2c-i's choice, for the opposite reason.**
-    `INetScene`'s 14 members were widened to `public` because `GameScene` is itself internal, so
+    `INetScene`'s 15 members were widened to `public` because `GameScene` is itself internal, so
     widening widened nothing. `AlienDrawableGameComponent` is PUBLIC, so an implicit
     implementation would add a dozen net-only names to a game type's API to satisfy an internal
     seam. `Position` / `Enabled` / `IsDead` are already public and satisfy their members
@@ -206,7 +206,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     back, VISIBLY, rather than the interface exposing a `GameComponent` and defeating itself in
     one member; that coupling is about the shared `Game.Components`, and it is 2c-iii's plus step
     3's. (b) The DESCRIPTOR extras (`EncodeSpawnExtra`/`EncodeStateExtra`/`ApplyStateExtra`),
-    which would mean editing a parameter type in ~40 overrides across seven files for no
+    which would mean editing a parameter type in 41 overrides across six descriptor files (eight in all,
+    counting `DescriptorBase`'s three virtuals and `NetTypeRegistry`'s three declarations) for no
     behaviour change; 2c-iii owns that surface, `CreatePuppet` included, so the three call sites
     cast. (c) The INBOUND hooks `NoteKill` / `NotePowerupTaken` keep their concrete parameter
     types -- they are the GAME calling the net layer, and a concrete argument converts for free,
@@ -218,7 +219,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     wrong member of the same type -- `float INetEntity.NetScale => rotation;` compiles and
     silently swaps two floats -- and (ii) a subtype that stops answering a discriminant, which
     would turn every remote powerup pickup into an explosion. `NetEntityTest` (`eaNetEntity()`,
-    39 assertions, a leg of `net_selftests.txt`) covers exactly those two: every member driven to
+    38 assertions, a leg of `net_selftests.txt`) covers exactly those two: every member driven to
     a DISTINCT value and compared against the member it claims to front, and the `is` tests run
     beside the discriminants as the control, on four entity shapes, with a non-degeneracy check
     so a discriminant hard-wired either way cannot pass. Mutation-tested four ways, each isolated
@@ -236,17 +237,27 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     carries a positive control (the puppets must actually have MOVED -- a `Drive` that
     early-returned would otherwise time at a beautiful 0 us) and asserts its own population.
   - **The numbers, and read the WASM row -- the desktop one understates it.** Per puppet, before
-    -> after: desktop CLR (eahl) **61 -> 68 ns (+15%)**, WASM (Chrome) **775 -> 978 ns (+26%)**.
+    -> after, at MATCHED run ordinals: desktop CLR (eahl) **+4% to +19% depending on N**, WASM
+    (Chrome) **+25% at N=128 and +28% at N=512** (780 -> 972, 769 -> 984 ns).
     WASM is ~12x the desktop cost per puppet AND takes a bigger relative hit, so a desktop-only
     reading would have been the wrong evidence. In absolute terms at **N=512** -- far past any
     real world, since the `?flyspiders` JIP rig measures `liveIds` 17-19 and a big world is ~320
     -- the seam costs **+0.11 ms/frame in WASM, i.e. +0.66% of the frame budget**; at N=128 it is
     +0.02 ms. So the plan's DEFAULT stands: the simple direct interface wins and **the
     generic-core fallback did not earn it**. Do not re-open that without re-running the bench.
-  - **GOTCHA -- `eaNetPuppetBench` and `eaNetEntity` are MENU-ONLY** (they skip themselves over a
-    live session, level or attract demo, like `eaNetSnap`), and the bench is best run under eahl,
-    where no rAF paces the loop. Its numbers are reproducible to ~0.01% back-to-back on desktop
-    and vary a few percent in the browser.
+  - **`eaNetPuppetBench` is MENU-ONLY; `eaNetEntity` is NOT, and the difference is deliberate.**
+    The bench builds real puppets into the world and so skips itself over a live session, level
+    or attract demo exactly as `eaNetSnap` does. The entity suite constructs its four entities
+    and never adds one to the bin or to `Game.Components`, so it is safe at any point in play and
+    carries no gate; run it wherever you like. Both are still driven from the menu by
+    `net_selftests.txt`, which is what the tallies there are measured under.
+  - **GOTCHA -- the bench's FIRST invocation in a process reads ~24% high**, and the 64-call
+    warm-up does not remove it (measured, desktop n=128: 8.87 us then 7.06 / 7.13 / 7.15,
+    reproduced across two processes; later runs settle to well under 1%). So compare LIKE WITH
+    LIKE -- both sides of an A/B at the same run ordinal, or discard each process's first run.
+    The desktop delta above is of the same order as that bias, which is why **the WASM row is the
+    one the verdict rests on**; it was taken at matched ordinals in fresh page loads.
+    Best run under eahl either way -- no rAF paces the loop there.
   - **The scene is a SECOND seam, `NetScene.Current` (card 25ad0659 step 2c-i).** `GameScene`
     implements `INetScene` (15 members: the host-broadcast transitions, the catch-up replay, the
     three readbacks `NetSession` branches on, the kick menu and `SpawnPlayer`), and the session's

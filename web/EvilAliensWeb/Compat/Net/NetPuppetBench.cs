@@ -90,6 +90,19 @@ namespace EvilAliensWeb.Compat.Net
                     NetBaseState state = SpawnState(i);
                     NetPuppets.OnSnapshotEntry((ushort)(IdBase + i), 0, state, noExtras, 0, 0,
                         out _, out SnapUnknownKind kind);
+                    // Collect AS WE GO, not after the loop: an ABORT below returns from inside
+                    // the try, and the finally can only take back what `built` already holds.
+                    // Collecting afterwards left every puppet built so far orphaned in
+                    // Game.Components with nothing tracking it -- Disable() clears the id maps
+                    // but does not remove components -- which is exactly what this file's
+                    // header promises never happens.
+                    foreach (GameComponent item in CollectBullets(game))
+                    {
+                        if (!before.Contains(item) && !built.Contains(item))
+                        {
+                            built.Add(item);
+                        }
+                    }
                     if (kind != SnapUnknownKind.Rebuilt)
                     {
                         sb.Append("  ABORT puppet ").Append(i).Append(" was not built (kind=")
@@ -97,19 +110,20 @@ namespace EvilAliensWeb.Compat.Net
                         return sb.ToString();
                     }
                 }
-                foreach (GameComponent item in CollectBullets(game))
-                {
-                    if (!before.Contains(item))
-                    {
-                        built.Add(item);
-                    }
-                }
 
                 // Give every puppet a SECOND snapshot, which is what puts it into steady state:
                 // HasSnapshot goes true, so Drive's scale-lerp branch runs and the dead-reckon
-                // is the live-play one rather than the spawn-tick special case. The offset is
-                // small (under SnapThresholdPx), so it arms the correction blend instead of
-                // counting a pop -- the ordinary case.
+                // is the live-play one rather than the spawn-tick special case.
+                //
+                // WHAT THIS BENCH DOES NOT MEASURE, stated rather than implied: the offset below
+                // is under SnapThresholdPx, so it arms the correction blend -- but
+                // CorrectionWindowMs is 150 ms and the warm-up alone advances ~1066 ms of virtual
+                // time, so the blend has fully drained before the stopwatch starts and
+                // `CorrectionMsLeft > 0f` is a dead branch for every TIMED call. So this is the
+                // correction-FREE steady state. Re-arming inside the timed loop would fold
+                // OnSnapshotEntry's own cost into the figure, which is a different measurement;
+                // the branch is a couple of float ops either way, and the seam A/B this exists
+                // for does not touch it.
                 for (int i = 0; i < n; i++)
                 {
                     NetBaseState state = SpawnState(i);
@@ -134,14 +148,23 @@ namespace EvilAliensWeb.Compat.Net
 
                 // Warm up: first-call JIT of Drive and the descriptor path would otherwise land
                 // entirely in iteration 0 and dominate a short run.
+                //
+                // IT DOES NOT REMOVE THE FIRST-CALL-PER-PROCESS BIAS, and that is measured, not
+                // assumed: the FIRST NetPuppetBench invocation in a process reads ~24% high and
+                // only later ones settle (desktop, n=128: 8.87 us then 7.06 / 7.13 / 7.15,
+                // reproduced across two processes). So COMPARE LIKE WITH LIKE -- either discard
+                // each process's first run, or make both sides of an A/B the same ordinal.
+                // Back-to-back runs after that settle to well under 1%; a cold first run does not.
                 for (int i = 0; i < 64; i++)
                 {
                     NetPuppets.Drive(DtMs);
                 }
 
-                // POSITIVE CONTROL: the warm-up must actually have moved the puppets. Without
-                // it a Drive that early-returned (a disabled layer, an empty live list) would
-                // still be timed, at a beautiful 0 us, and read as a spectacular result.
+                // POSITIVE CONTROL: the TIMED loop must actually have moved the puppets --
+                // probeStart is sampled after the warm-up, so it is the timed calls this
+                // brackets. Without it a Drive that early-returned (a disabled layer, an empty
+                // live list) would still be timed, at a beautiful 0 us, and read as a
+                // spectacular result.
                 Vector2 probeStart = ((AlienDrawableGameComponent)built[0]).Position;
 
                 Stopwatch sw = Stopwatch.StartNew();

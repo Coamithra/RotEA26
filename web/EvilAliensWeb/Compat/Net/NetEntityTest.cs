@@ -70,10 +70,11 @@ namespace EvilAliensWeb.Compat.Net
             e.NetScale = 5.75f;
             Check("NetRotation writes `rotation` (4.5)", probe.rotation == 4.5f);
             Check("NetScale writes `scale` (5.75)", probe.scale == 5.75f);
-            // The cross-check the two above cannot make on their own: a write that landed in
-            // the OTHER field would leave this one at the value section 1 set.
-            Check("writing NetRotation did not touch `scale`", probe.scale == 5.75f);
-            Check("writing NetScale did not touch `rotation`", probe.rotation == 4.5f);
+            // The two above already catch a write SWAPPED BETWEEN THEM (each would leave the
+            // other field at its section-1 value). What they cannot catch is a write that
+            // landed in the THIRD field of the trio -- nothing here writes `curframe` through
+            // the seam, so it must still hold what section 1 put in it.
+            Check("neither write touched `curframe`", probe.curframe == 3.75f);
 
             probe.Position = new Vector2(11f, 13f);
             Check("Position is the seam's own property", e.Position == new Vector2(11f, 13f));
@@ -97,7 +98,14 @@ namespace EvilAliensWeb.Compat.Net
 
             probe.NetProbePointValue = 1234f;
             Check("NetPointValue fronts the class member (1234)", e.NetPointValue == 1234f);
-            Check("IsDead fronts the class member", e.IsDead == probe.IsDead);
+            // NO-FORWARD MEMBER, and this leg says so rather than implying coverage it has not:
+            // IsDead (like Position and Enabled above) is already public, so it satisfies the
+            // interface IMPLICITLY and both sides of this comparison resolve to the same member.
+            // There is no wiring here to get wrong, so this cannot fail -- it is a sentinel for
+            // someone later adding an explicit forward, not evidence about today. (Position and
+            // Enabled at least round-trip a value; this one does not even do that.) Same
+            // honesty NetHostTest applies to its equal-to-source boolean legs.
+            Check("IsDead needs no forward -- implicit, so this cannot fail", e.IsDead == probe.IsDead);
 
             // ---- 2. the frame methods route to the real wrapping implementations ----------
             //

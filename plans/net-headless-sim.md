@@ -465,7 +465,8 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      collection identity (the bin calls and the two `GameComponent`-keyed maps cast back visibly
      rather than the interface exposing a `GameComponent` and defeating itself); the DESCRIPTOR
      extras, which 2c-iii owns along with `CreatePuppet` and which would otherwise mean a
-     parameter-type edit in ~40 overrides for no behaviour change; and the inbound `NoteKill` /
+     parameter-type edit in 41 overrides across six descriptor files (eight in all) for no
+     behaviour change; and the inbound `NoteKill` /
      `NotePowerupTaken` hooks, so **no game call site outside `Compat/Net` changed at all**.
    - **THIS DOC'S INSTRUMENT WAS WRONG.** `FrameSection.UpdNet` brackets `NetSession.Update` +
      `NetListing.Tick` in `Game1.UpdateInner`. `NetPuppets.Drive` -- the per-puppet-per-tick loop
@@ -479,7 +480,8 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      (the puppets must have MOVED -- a `Drive` that early-returned would time at 0 us and read as
      a triumph) and asserts its own population.
    - **The verdict, and the WASM row is the one that counts.** ns/puppet before -> after: desktop
-     CLR (eahl) **61 -> 68 (+15%)**, WASM (Chrome) **775 -> 978 (+26%)** -- WASM is ~12x the
+     CLR (eahl) **+4% to +19% depending on N**, WASM (Chrome) **780 -> 972 at N=128 (+25%) and
+     769 -> 984 at N=512 (+28%)** -- WASM is ~12x the
      desktop per-puppet cost AND takes the bigger relative hit, so a desktop-only reading would
      have been the wrong evidence. Absolute, at **N=512** (far past any real world: the
      `?flyspiders` JIP rig measures `liveIds` 17-19, a big world ~320), the seam costs
@@ -489,7 +491,7 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    - **Verification is shaped differently from 2a/2b/2c-i, deliberately.** Those redirected a
      lookup through a holder, so a missed site did identical work and had to be COUNTED. Here the
      core fields changed TYPE, so a missed site does not compile -- the compiler IS the
-     exhaustiveness check. `NetEntityTest` (`eaNetEntity()`, 39 assertions, a leg of
+     exhaustiveness check. `NetEntityTest` (`eaNetEntity()`, 38 assertions, a leg of
      `net_selftests.txt`) covers only what the compiler cannot: a forward wired to the wrong
      member of the same type (every member driven to a DISTINCT value, compared against the
      member it claims to front) and a subtype that stops answering a discriminant (the `is` tests

@@ -29,10 +29,13 @@ namespace EvilAliensWeb.Compat.Net
     //    the NEXT slice's (2c-iii, entity creation) plus step 3's: it is about the shared
     //    Game.Components collection, not about the entity type.
     // 2. DESCRIPTOR EXTRAS. INetTypeDescriptor's EncodeSpawnExtra / EncodeStateExtra /
-    //    ApplyStateExtra still take the concrete type, so the four call sites that reach a
-    //    descriptor cast. Moving those signatures would mean editing the parameter type in
-    //    ~40 overrides across seven files for no behaviour change; the descriptor surface is
-    //    2c-iii's, and it owns CreatePuppet already.
+    //    ApplyStateExtra still take the concrete type, so the THREE call sites that reach a
+    //    descriptor cast (NetPuppets.ApplySnapshotState, NetSession.OnHostSpawn and
+    //    NetSession.SendWorldSnapshot; CreatePuppet needs none -- it RETURNS the concrete
+    //    type). Moving those signatures would mean editing the parameter type in 41 overrides
+    //    across six descriptor files -- eight files in all, once DescriptorBase's three
+    //    virtuals and NetTypeRegistry's three declarations are counted -- for no behaviour
+    //    change. The descriptor surface is 2c-iii's, and it owns CreatePuppet already.
     // 3. THE INBOUND HOOKS. NetSession.NoteKill / NotePowerupTaken keep their concrete
     //    parameter types: they are the GAME calling the net layer, not the net layer reading
     //    an entity, and a concrete argument converts to this interface for free. So no game
@@ -47,7 +50,7 @@ namespace EvilAliensWeb.Compat.Net
     // The interface is INTERNAL and AlienDrawableGameComponent is PUBLIC, so the Net* members
     // are implemented EXPLICITLY rather than widened to public -- the opposite of the choice
     // 2c-i made for INetScene, and for the opposite reason: GameScene is itself internal, so
-    // widening its 14 members widened nothing, whereas widening here would grow a public game
+    // widening its 15 members widened nothing, whereas widening here would grow a public game
     // type's API by a dozen names purely to satisfy a private seam. Position / Enabled /
     // IsDead are already public and satisfy their members implicitly, for free.
     internal interface INetEntity

@@ -594,8 +594,13 @@
         // The FPS HUD cannot answer this — Drive runs inside base.Update, so it is buried in
         // UpdComponents, while UpdNet covers only NetSession.Update. Run from the MAIN MENU;
         // it skips itself over a live session or level. Prefer eahl: rAF paces nothing there.
+        // Defaults are n=128 / iters=2000, and they apply ONLY when the argument is omitted —
+        // a supplied 0 is passed through so the C# guard can report it ("n must be 1..512"),
+        // the value-carrying-flag convention. `|| 128` would have swallowed it.
         window.eaNetPuppetBench = (n, iters) => {
-            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetPuppetBench', n | 0 || 128, iters | 0 || 2000)); }
+            const N = (n === undefined) ? 128 : (n | 0);
+            const I = (iters === undefined) ? 2000 : (iters | 0);
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetPuppetBench', N, I)); }
             catch (e) { console.warn('[debug] eaNetPuppetBench failed (game not booted yet?): ' + e.message); }
         };
 

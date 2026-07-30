@@ -38,6 +38,11 @@ plans/tracker_*/
 # ---- Python bytecode / scratch (tools/audio, tools/xnb, ...) -----------------
 __pycache__/
 *.pyc
+# Local virtualenvs. server/signal/README.md tells you to create one right there,
+# so without this the signaling server's venv sits in `git status` waiting to be
+# committed by accident.
+venv/
+.venv/
 tools/audio/_t2.ogg
 
 # ---- Stage-12 custom-font build (tools/font/build_revenge_font.py) ------------

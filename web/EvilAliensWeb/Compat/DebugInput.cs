@@ -383,6 +383,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSnapshotTest.Run();
 		}
 
+		// JS bridge for the step-4 scenario harness (eaNetScenarios in wwwroot/index.html, card
+		// 25ad0659). Five scenarios over ONE real session with a scripted wire peer: the three
+		// generous-claim shapes, the OneUp overlap, and the id-churn self-heal that carries the
+		// residual first-wipe pupPops probe. Menu-only and leave-no-trace; scenario 6 is
+		// NetSceneOrder below, which needs a level.
+		[JSInvokable("debugNetScenarios")]
+		public static string NetScenarios()
+		{
+			return EvilAliensWeb.Compat.Net.NetScenarioTest.Run();
+		}
+
 		// JS bridge for the INetEntity seam (eaNetEntity in wwwroot/index.html, card 25ad0659
 		// step 2c-ii). The compiler already covers the migration -- the core fields changed
 		// TYPE, so no call site can still read the concrete one. What it cannot cover is a

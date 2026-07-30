@@ -578,6 +578,15 @@
             catch (e) { console.warn('[debug] eaNetSnap failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the co-op scenario harness (card 25ad0659 step 4) — the generous-claim
+        // contract driven end to end over an in-process wire, plus the id-churn self-heal and
+        // its pupPops probe. Prints PASS/FAIL. Run from the MAIN MENU: it starts and stops real
+        // sessions and plants real entities, so it skips itself over a live session or level.
+        window.eaNetScenarios = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScenarios')); }
+            catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the INetEntity seam (card 25ad0659 step 2c-ii) — that every explicit forward
         // on AlienDrawableGameComponent fronts the member it claims to (driven to DISTINCT
         // values, so a swap of two floats cannot pass), and that the NetKillable/NetPickup

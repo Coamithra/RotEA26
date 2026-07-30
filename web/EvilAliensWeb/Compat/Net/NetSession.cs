@@ -385,6 +385,12 @@ namespace EvilAliensWeb.Compat.Net
         // StartWith's own expression, and the only symptom would be a pairing the scenario
         // cannot explain. Still true with the host injected: a scenario that sets its own
         // BuildHash still reads the hash back from here rather than re-hashing it.
+        // The live counters, for a scenario harness (card 25ad0659 step 4). READ-ONLY by
+        // construction -- NetMetrics has no reset, so a scenario asserts on DELTAS across its own
+        // frames rather than zeroing a counter the [net] line is also reporting. Same shape as
+        // step 1b's seams: the whole production cost of a scenario is a getter.
+        internal static NetMetrics Metrics => metrics;
+
         internal static ulong LocalBuildHash => localBuildHash;
 
         // Is the remote peer's PRIMARY ship puppet currently adopted? The subject of

@@ -20,7 +20,10 @@ namespace EvilAliensWeb.Compat.Net
     {
         internal sealed class Entry
         {
-            public AlienDrawableGameComponent Comp;
+            // Through INetEntity since step 2c-ii. `entries` below still keys on the
+            // GameComponent, because the seam this registry hangs off IS the collection's own
+            // add/remove events -- identity is deliberately not on INetEntity (see its header).
+            public INetEntity Comp;
             public ushort Id;
             public byte TypeIdx;
             public INetTypeDescriptor Descriptor;
@@ -98,7 +101,7 @@ namespace EvilAliensWeb.Compat.Net
         private static void Components_ComponentAdded(object src, GameComponentCollectionEventArgs args)
         {
             if (args.GameComponent is GameComponent gc && !entries.ContainsKey(gc)
-                && gc is AlienDrawableGameComponent comp && !comp.NetCosmeticOnly
+                && gc is INetEntity comp && !comp.NetCosmeticOnly
                 && NetTypeRegistry.TryGet(gc, out byte typeIdx, out INetTypeDescriptor desc))
             {
                 Entry e = new Entry

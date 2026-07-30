@@ -260,8 +260,8 @@ namespace EvilAliensWeb.Compat.Net
         // Kill attribution: who landed the killing blow, recorded just before the per-type
         // death cascades into removal (KillableAlien.HitBy / claim handling), consumed at
         // the removal seam on either side.
-        private static readonly Dictionary<AlienDrawableGameComponent, byte> killNotes = new Dictionary<AlienDrawableGameComponent, byte>();
-        private static readonly Queue<AlienDrawableGameComponent> killNoteOrder = new Queue<AlienDrawableGameComponent>();
+        private static readonly Dictionary<INetEntity, byte> killNotes = new Dictionary<INetEntity, byte>();
+        private static readonly Queue<INetEntity> killNoteOrder = new Queue<INetEntity>();
 
         // Host: recently-dead replicables so late/overlapping claims still pay generously,
         // exactly once per (entity, slot). Bounded FIFO.
@@ -1086,7 +1086,7 @@ namespace EvilAliensWeb.Compat.Net
             NoteKillSlot(comp, slot >= 0 && slot < 8 ? (byte)slot : NetProtocol.KillerNone);
         }
 
-        internal static void NoteKillSlot(AlienDrawableGameComponent comp, byte slot)
+        internal static void NoteKillSlot(INetEntity comp, byte slot)
         {
             if (!Active)
             {
@@ -1133,7 +1133,7 @@ namespace EvilAliensWeb.Compat.Net
         // sound cue is what only this path can do: it belongs to the pickup INSTANT.
         // Idempotent: the collector's own side already ran the local path and never reaches
         // a settle branch for its own pickup (its entity is gone before the echo arrives).
-        internal static void ApplyRemotePowerup(Powerup powerup, byte slot)
+        internal static void ApplyRemotePowerup(INetPickup powerup, byte slot)
         {
             // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
             // slot is a raw wire byte, so a corrupt or mismatched peer must not index past
@@ -1142,7 +1142,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            score.SetPowerup(powerup.type, slot);
+            score.SetPowerup(powerup.NetPickupType, slot);
             // Only the powerup INDICATOR is mirrored. The local path also does AddBomb for
             // PowerupType.Blast, deliberately not mirrored here: the spend side (NetDoBlast)
             // does not decrement bombs on the remote either, so replicating the increment
@@ -1150,11 +1150,11 @@ namespace EvilAliensWeb.Compat.Net
             sound.PlayCue("powerup"); // local co-op plays it for either collector too
             if (NetHost.Current.NetLog)
             {
-                Console.WriteLine("[net] remote powerup " + powerup.type + " -> slot " + slot);
+                Console.WriteLine("[net] remote powerup " + powerup.NetPickupType + " -> slot " + slot);
             }
         }
 
-        internal static byte TakeKillNote(AlienDrawableGameComponent comp)
+        internal static byte TakeKillNote(INetEntity comp)
         {
             if (killNotes.TryGetValue(comp, out byte slot))
             {
@@ -1173,7 +1173,9 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             NetBaseState state = CaptureBaseState(e, NowMs);
-            int extraLen = e.Descriptor.EncodeSpawnExtra(e.Comp, extraScratch, 0);
+            // Cast back for the descriptor: its extras surface is deliberately still on the
+            // concrete type after step 2c-ii (2c-iii owns it -- see INetEntity's header).
+            int extraLen = e.Descriptor.EncodeSpawnExtra((AlienDrawableGameComponent)e.Comp, extraScratch, 0);
             transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, e.Id, e.TypeIdx, state, extraScratch, extraLen));
             metrics.EventsTx++;
             if (NetHost.Current.NetLog)
@@ -1194,7 +1196,8 @@ namespace EvilAliensWeb.Compat.Net
             // generous payout the host still credits with its own live combo (card 11.2), not
             // a replay of the award below.
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
-            RecordDeath(e.Id, pos, points, killer, e.Comp is Powerup pu && pu.type == Powerup.PowerupType.OneUp);
+            RecordDeath(e.Id, pos, points, killer,
+                e.Comp.NetPickup is INetPickup pu && pu.NetPickupType == Powerup.PowerupType.OneUp);
             if (!PeerUp)
             {
                 return;
@@ -1217,7 +1220,7 @@ namespace EvilAliensWeb.Compat.Net
         // NetId entry for the death broadcast a tick later (the ComponentBin defers removal, so a
         // single "last award" static could not bridge the gap); the client books it as a
         // provisional credit its own EvDeath will replace. Offline / no session: one bool test.
-        internal static void NoteAward(AlienDrawableGameComponent comp, int slot, float amount)
+        internal static void NoteAward(INetEntity comp, int slot, float amount)
         {
             if (!Active || amount <= 0f || slot < 0 || slot >= NetProtocol.MaxSlots)
             {
@@ -1225,7 +1228,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (isHost)
             {
-                if (NetIdRegistry.TryGetByComp(comp, out NetIdRegistry.Entry e))
+                if (NetIdRegistry.TryGetByComp((GameComponent)comp, out NetIdRegistry.Entry e))
                 {
                     (e.Awards ??= new float[NetProtocol.MaxSlots])[slot] += amount;
                 }
@@ -1306,7 +1309,7 @@ namespace EvilAliensWeb.Compat.Net
                 // Fit check BEFORE consuming the cursor slot or capturing state --
                 // CaptureBaseState advances the entity's observed-velocity baseline, so a
                 // skipped entry must not touch it (it leads the next packet instead).
-                int extraLen = e.Descriptor.EncodeStateExtra(e.Comp, extraScratch, 0);
+                int extraLen = e.Descriptor.EncodeStateExtra((AlienDrawableGameComponent)e.Comp, extraScratch, 0);
                 if (off + NetProtocol.SnapshotEntryBaseBytes + extraLen > snapshotScratch.Length)
                 {
                     break;
@@ -1330,7 +1333,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static NetBaseState CaptureBaseState(NetIdRegistry.Entry e, long now)
         {
-            AlienDrawableGameComponent c = e.Comp;
+            INetEntity c = e.Comp;
             Vector2 pos = c.Position;
             // Observed velocity: differentiate real positions between this entity's snapshot
             // turns -- robust for enemies that move Position directly (arcs, easing) where
@@ -1347,10 +1350,10 @@ namespace EvilAliensWeb.Compat.Net
             {
                 Pos = pos,
                 Vel = vel,
-                Rotation = c.rotation,
-                CurFrame = c.curframe,
-                Scale = c.scale,
-                Hp = c is KillableAlien k ? k.NetHitPoints : 0,
+                Rotation = c.NetRotation,
+                CurFrame = c.NetCurFrame,
+                Scale = c.NetScale,
+                Hp = c.NetKillable is INetKillable k ? k.NetHitPoints : 0,
             };
         }
 
@@ -2908,26 +2911,26 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     NoteKillSlot(e.Comp, killerSlot); // attribution for the death broadcast
                 }
-                if (e.Comp is KillableAlien killable && killerSlot != NetProtocol.KillerNone)
+                if (e.Comp.NetKillable is INetKillable killable && killerSlot != NetProtocol.KillerNone)
                 {
                     killable.NetKill(NetPuppets.KillerAgent(killerSlot, e.Comp.Position), isComboGenerator: true);
                     if (!e.Comp.IsDead)
                     {
-                        bin.Remove((GameComponent)(object)e.Comp);
+                        bin.Remove((GameComponent)e.Comp);
                     }
                 }
                 else
                 {
                     // Non-killable replicable (EvilBullet swept by a blast, Powerup pickup,
                     // Asteroid...): settle it directly, pay any claimant its points.
-                    if (e.Comp is Powerup p)
+                    if (e.Comp.NetPickup is INetPickup p)
                     {
-                        p.taken = true;
+                        p.NetMarkTaken();
                         ApplyRemotePowerup(p, killerSlot);
                         // Lives are host-authoritative (EvScoreSync sends them verbatim), so a
                         // client-collected extra life must be applied HERE or the next sync
                         // silently reverts it. Other powerup effects are per-ship on the collector.
-                        if (p.type == Powerup.PowerupType.OneUp && killerSlot != NetProtocol.KillerNone)
+                        if (p.NetPickupType == Powerup.PowerupType.OneUp && killerSlot != NetProtocol.KillerNone)
                         {
                             score.AddLife();
                         }

@@ -1,10 +1,10 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
-public class Powerup : AlienDrawableGameComponent
+public class Powerup : AlienDrawableGameComponent, EvilAliensWeb.Compat.Net.INetPickup
 {
 	public enum PowerupType
 	{
@@ -19,6 +19,21 @@ public class Powerup : AlienDrawableGameComponent
 	public bool taken;
 
 	public PowerupType type;
+
+	// ---- Online co-op replication seam (card 25ad0659 step 2c-ii) ------------------------
+	// This is the type the net layer's three `is Powerup` tests were asking about, so it
+	// answers the INetEntity discriminant with itself. A pickup is COLLECTED, not killed, and
+	// the settle paths branch on that: without it a remote pickup takes the generic
+	// death-burst branch, i.e. an explosion where the other player picked something up.
+	private protected override EvilAliensWeb.Compat.Net.INetPickup NetPickupSelf => this;
+
+	PowerupType EvilAliensWeb.Compat.Net.INetPickup.NetPickupType => type;
+
+	// Fronts the public `taken` field -- an interface cannot expose a field.
+	void EvilAliensWeb.Compat.Net.INetPickup.NetMarkTaken()
+	{
+		taken = true;
+	}
 
 	private Vector2 impulse;
 

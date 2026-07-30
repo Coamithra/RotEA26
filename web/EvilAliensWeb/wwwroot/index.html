@@ -578,6 +578,27 @@
             catch (e) { console.warn('[debug] eaNetSnap failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the INetEntity seam (card 25ad0659 step 2c-ii) — that every explicit forward
+        // on AlienDrawableGameComponent fronts the member it claims to (driven to DISTINCT
+        // values, so a swap of two floats cannot pass), and that the NetKillable/NetPickup
+        // discriminants agree exactly with the `is KillableAlien` / `is Powerup` tests they
+        // replaced. Prints PASS/FAIL. Leave-no-trace — nothing it builds enters the world.
+        window.eaNetEntity = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetEntityTest')); }
+            catch (e) { console.warn('[debug] eaNetEntity failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
+        // puppets in the world through the real self-heal path and times NetPuppets.Drive,
+        // reporting ABSOLUTE us/call, ns/puppet and the share of the 16.7ms frame budget.
+        // The FPS HUD cannot answer this — Drive runs inside base.Update, so it is buried in
+        // UpdComponents, while UpdNet covers only NetSession.Update. Run from the MAIN MENU;
+        // it skips itself over a live session or level. Prefer eahl: rAF paces nothing there.
+        window.eaNetPuppetBench = (n, iters) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetPuppetBench', n | 0 || 128, iters | 0 || 2000)); }
+            catch (e) { console.warn('[debug] eaNetPuppetBench failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the online co-op primary-slot negotiation (card c0229c57) — what the client
         // does with a grant (DecideSlotAdopt), what the host grants once it can see the
         // joiner's roster (FirstMutuallyFreeSlot + its convergence), the v8 handshake codec,

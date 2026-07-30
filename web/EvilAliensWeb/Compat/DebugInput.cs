@@ -383,6 +383,30 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSnapshotTest.Run();
 		}
 
+		// JS bridge for the INetEntity seam (eaNetEntity in wwwroot/index.html, card 25ad0659
+		// step 2c-ii). The compiler already covers the migration -- the core fields changed
+		// TYPE, so no call site can still read the concrete one. What it cannot cover is a
+		// mis-wired explicit forward (two floats swap silently) or a missing discriminant
+		// (Powerup not answering NetPickup turns every remote pickup into an explosion), so
+		// this drives every member to a DISTINCT value and runs the `is` tests as the control.
+		[JSInvokable("debugNetEntityTest")]
+		public static string NetEntityTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetEntityTest.Run();
+		}
+
+		// JS bridge for the pinned many-puppet drive bench (eaNetPuppetBench in
+		// wwwroot/index.html, card 25ad0659 step 2c-ii). Puts n real puppets in the world
+		// through the real self-heal path and times NetPuppets.Drive in a plain loop, in
+		// ABSOLUTE microseconds. The FrameProfiler cannot answer this: Drive runs inside
+		// base.Update, so it lands in UpdComponents under the whole world, while UpdNet covers
+		// only NetSession.Update. Best headless -- no rAF paces this loop.
+		[JSInvokable("debugNetPuppetBench")]
+		public static string NetPuppetBench(int n, int iters)
+		{
+			return EvilAliensWeb.Compat.Net.NetPuppetBench.Run(n, iters);
+		}
+
 		// JS bridge for the in-process wire + wire-level codec round trips (eaNetWire in
 		// wwwroot/index.html, card 25ad0659). Drives NetWire/InMemoryTransport -- the transport
 		// contract two browser-only impls could only be observed to satisfy incidentally -- then

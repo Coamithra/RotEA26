@@ -10,7 +10,13 @@ using Microsoft.Xna.Framework.Storage;
 
 namespace EvilAliens;
 
-internal abstract class GameScene : Scene
+// INetScene (card 25ad0659 step 2c) is the net layer's view of this class: the fifteen members
+// NetSession reaches on the live scene, so a headless scenario can assert on the ORDER of the
+// state transitions a host broadcasts without a Game. The members it names are made `public`
+// rather than explicitly implemented -- an implicit implementation must be public, and fifteen
+// explicit stubs would be fifteen more names to keep in step. GameScene.NetActiveScene keeps its
+// concrete type; the seam is NetScene.Current, which reads through it.
+internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 {
 	protected enum PlayerSpawnType
 	{
@@ -341,7 +347,7 @@ internal abstract class GameScene : Scene
 	// ---- Online co-op (card 11.3): replicated state-machine seams -----------------------
 
 	// Client-side mirror of the host's LoseLife branch (mode = NetSession.ResetMode*).
-	internal void NetApplyReset(byte mode)
+	public void NetApplyReset(byte mode)
 	{
 		// Card b0ab09ec: drop any provisional score credits first. A reset reverts the score to
 		// the checkpoint baseline (score.Load), and the purge storm that follows removes the
@@ -374,7 +380,7 @@ internal abstract class GameScene : Scene
 		}
 	}
 
-	internal void NetApplyVictory()
+	public void NetApplyVictory()
 	{
 		if (_state == GameState.Normal)
 		{
@@ -382,12 +388,12 @@ internal abstract class GameScene : Scene
 		}
 	}
 
-	internal void NetApplyCheckpoint()
+	public void NetApplyCheckpoint()
 	{
 		score.Save();
 	}
 
-	internal void NetApplyBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op, Vector2 v)
+	public void NetApplyBackgroundOp(EvilAliensWeb.Compat.Net.NetBackgroundOp op, Vector2 v)
 	{
 		// SetAlienBaseN rewrites layer 0, which is only an alien-base floor on an alien-base scene:
 		// on a space scene there is no layer 0 at all (IndexOutOfRange, taking the level down) and
@@ -587,7 +593,7 @@ internal abstract class GameScene : Scene
 	// Idempotent: a repeated "on" replaces the spawner (the rate may have changed), an "off" for
 	// something we are not running is a no-op. Entities already in flight are left alone, which
 	// is what the host does too -- its spawner stopping does not kill what it already spawned.
-	internal void NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind kind, bool on, float rate)
+	public void NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind kind, bool on, float rate)
 	{
 		NetDropCosmeticSwarm(kind);
 		if (!on || !float.IsFinite(rate) || rate <= 0f)
@@ -770,7 +776,7 @@ internal abstract class GameScene : Scene
 	// the script being host-only (11.2 sim-split) -- will never reach those beats itself.
 	// Everything here is an ordinary reliable beat event, so the client applies it through the
 	// same paths the live ops use.
-	internal void NetReplayCatchUp()
+	public void NetReplayCatchUp()
 	{
 		Background.NetReplayCatchUp(EvilAliensWeb.Compat.Net.NetSession.OnBackgroundOp);
 		// Card 9a3175d0: and the decorative swarms, which are the same kind of "already fired,
@@ -890,7 +896,7 @@ internal abstract class GameScene : Scene
 	}
 
 	// TeamChallenge overrides this to break its tether on the peer's EvTetherBreak.
-	internal virtual void NetApplyTetherBreak()
+	public virtual void NetApplyTetherBreak()
 	{
 	}
 
@@ -899,7 +905,7 @@ internal abstract class GameScene : Scene
 	// keeps ticking while the collection is pushed). Overlap rules: if OUR pause menu is
 	// up the world is already frozen -- just remember the flag (NetSession.RemotePaused);
 	// the local resume paths re-freeze if it is still set.
-	internal void NetSetRemotePaused(bool on)
+	public void NetSetRemotePaused(bool on)
 	{
 		if (on)
 		{
@@ -938,7 +944,7 @@ internal abstract class GameScene : Scene
 	// Returns false when there was nothing to show (no freeze of ours to put it over) -- the
 	// caller MUST NOT latch its "offered" flag on a false, or the offer is silently burned and
 	// never comes back. See NetSession.TickKickOffer.
-	internal bool NetShowKickMenu()
+	public bool NetShowKickMenu()
 	{
 		if (netKickMenuUp || !netRemotePauseHeld)
 		{
@@ -1014,7 +1020,7 @@ internal abstract class GameScene : Scene
 	// Banner only -- unlike a remote PAUSE this does NOT push the collection: the world keeps
 	// running (the host stays authoritative, a client dead-reckons) because the overwhelmingly
 	// common cause is a backgrounded tab burst-sending, which self-heals in under a second.
-	internal void NetSetPeerStalled(bool on)
+	public void NetSetPeerStalled(bool on)
 	{
 		if (on == netPeerStalled)
 		{
@@ -1577,7 +1583,7 @@ internal abstract class GameScene : Scene
 	// True while the level is ending NORMALLY (shared victory / game-over wind-down):
 	// the peer's scene tearing down first is expected then, not a disconnect -- suppress
 	// the "player left" notice.
-	internal bool NetEndingNormally => _state == GameState.Victory || _state == GameState.GameOver;
+	public bool NetEndingNormally => _state == GameState.Victory || _state == GameState.GameOver;
 
 	// ---- AI bench seams (card f4d1721f) -- read-only, only called behind ?aibench ----------
 
@@ -1595,7 +1601,7 @@ internal abstract class GameScene : Scene
 		_ => null
 	};
 
-	internal void NetApplyPeerLeft()
+	public void NetApplyPeerLeft()
 	{
 		if (NetEndingNormally)
 		{
@@ -1649,7 +1655,7 @@ internal abstract class GameScene : Scene
 
 	// Spawn the ship for an already-seated slot. `slot` is the seat AddPlayer/the net allocator
 	// actually took -- never `oracle.Players - 1`, which only agrees while the table is dense.
-	internal void SpawnPlayer(ControlDevice controlDevice, int slot)
+	public void SpawnPlayer(ControlDevice controlDevice, int slot)
 	{
 		PlayerShip playerShip = Collection.Recycle<PlayerShip>();
 		if (playerShip == null)
@@ -1734,7 +1740,7 @@ internal abstract class GameScene : Scene
 	// (false while Resetting/GameOver, shipCreated during Startup, spawnPlayerNormally in
 	// Normal), so it cannot be derived from outside -- latched here for the eaNetCouchJoin
 	// debug seam, which must take the same branch a real pad press would.
-	internal bool JoinWouldSpawnNow { get; private set; }
+	public bool JoinWouldSpawnNow { get; private set; }
 
 	private void CheckPlayerJoins(bool spawnPlayer)
 	{

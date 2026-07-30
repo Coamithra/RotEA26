@@ -348,9 +348,13 @@ public class ComponentBin : IComponentBinService
 		// inside the drain itself) is still live when the host's authoritative spawns arrive —
 		// and a client that eats one diverges permanently, since NetPuppets registers the id
 		// either way and the snapshot self-heal only fires for ids it has never seen. Safe at
-		// scene teardown: EvSpawn and the snapshot path are both gated on
-		// GameScene.NetActiveScene, which Terminate nulls BEFORE its own purges, so the puppet
-		// layer is already switched off there and nothing can orphan into the next scene.
+		// scene teardown: EvSpawn and the snapshot path are both gated on NetScene.Current, whose
+		// production value IS GameScene.NetActiveScene -- which Terminate nulls BEFORE its own
+		// purges -- so the puppet layer is already switched off there and nothing can orphan into
+		// the next scene. (Card 25ad0659 step 2c-i moved that gate behind the seam. A SCENARIO
+		// holding an override keeps it non-null through Terminate, which is fine because a
+		// scenario owns its own teardown, but the production argument is the one above and it is
+		// still the field.)
 		if (IsPendingPurged(component) && !EvilAliensWeb.Compat.Net.NetPuppets.Constructing)
 		{
 			if (!((Collection<IGameComponent>)(object)collection).Contains((IGameComponent)(object)component))

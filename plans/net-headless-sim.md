@@ -27,7 +27,14 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > **2b shipped 2026-07-30** -- the four `ServiceHelper` services on the same interface.
 > **Four members, not the ~31 the seam table implies, and that is the finding**: what has to move
 > is the RESOLUTION (six `ServiceHelper.Get<>()` lookups in the cores), not the 79 call sites
-> that read the resulting cached fields. Remaining: **2c**, 3, 4.
+> that read the resulting cached fields.
+>
+> **2c is SPLIT THREE WAYS, for the same reason 2 was: measured, they are different sizes and they
+> fail differently.** `2c-i` the SCENE (`INetScene` + `NetScene.Current`) -- **shipped
+> 2026-07-30**, and it discharged step 1b's last debt: `NetResetSpawnTest`'s hand-rolled respawn
+> stand-in is deleted, both retry legs now drive the real `GameScene.SpawnPlayer`.
+> `2c-ii` the ENTITY (`INetEntity`) -- the only slice with a hot path, and the one the doc's
+> MEASURE-FIRST instruction is about. `2c-iii` entity CREATION. Remaining: **2c-ii**, 2c-iii, 3, 4.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -408,22 +415,48 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      oracle lookup, `NetPauseOverlay`/`NetWaitOverlay`'s Draw-time content/spritebatch lookups,
      and the five sibling test suites, which reach the LIVE world because asserting against it is
      their job.
-   At 2c, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
+   **2c-i (the SCENE) is DONE.** `Compat/Net/INetScene.cs` -- 15 members, measured (the doc guessed
+   14): `Level`, `NetEndingNormally`, `JoinWouldSpawnNow`, `NetApplyReset/Victory/Checkpoint/
+   BackgroundOp/CosmeticSwarm/TetherBreak/PeerLeft`, `NetSetRemotePaused`, `NetSetPeerStalled`,
+   `NetReplayCatchUp`, `NetShowKickMenu`, `SpawnPlayer`. `GameScene` implements it (the 14
+   `internal` members widened to `public` -- an implicit implementation must be, and 15 explicit
+   stubs would be 15 more names to keep in step), and `NetSession`'s 32 `GameScene.NetActiveScene`
+   reads move to `NetScene.Current`.
+   - **The production value is DERIVED, never copied**: `NetScene.Current` is
+     `override ?? GameScene.NetActiveScene`, so that field keeps its concrete type for its non-net
+     readers (`AiBench`, `DebugInput`, `NetListing`, `GameScene` itself, and three sibling test
+     suites -- of which `NetCosmeticTest` genuinely NEEDS the concrete type, since
+     `NetCosmeticSelfTest` is not on the interface) and there is no
+     second source of truth for "is a scene up" -- every world message in `NetSession` is gated on
+     that answer, so a stale copy would either drop the world on the floor or apply it into a
+     scene that has terminated. Unlike `NetHost` there is no production INSTANCE to fall back to,
+     because the honest production answer really is sometimes "no scene", and null IS that answer.
+   - **It paid step 1b's LAST outstanding debt.** `NetResetSpawnTest.RespawnLocalShip` is deleted:
+     `SpawnPlayer` is on the seam, so both retry legs drive the REAL `GameScene.SpawnPlayer` and
+     the four infidelities that stand-in documented (no `Recycle`, no `spawnType` position,
+     `startup: false`, none of the caller's cursor bookkeeping) are gone. 39 -> 42 assertions.
+   - **Verification is 2b's instrument one seam later, and for the identical reason**: a handler
+     left on `GameScene.NetActiveScene` does the IDENTICAL work today, because the seam reads
+     through that very field -- nothing diverges until step 4 supplies a scene of its own. So leg
+     3c COUNTS the arrival through a `RecordingNetScene` DECORATOR over the live scene (a blank
+     fake would make leg 2's real `Purge<PlayerShip>` vacuous). Mutation-tested: reverting the
+     `EvReset` handler fails exactly one assertion, `resets=0`.
+   At 2c-ii, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
    brackets `NetSession.Update()` in `Game1.UpdateInner`, so take the ABSOLUTE mean ms at a pinned
    replicable population (uncapped/headless, or focused -- a vsync-capped frame rate cannot see
    this) and judge the delta against the 16.7ms frame budget, plus whether p99 frame time moved.
    Never as a percentage of a small phase: 10% of 0.3ms is nothing and would trigger a fallback to
    real added complexity for no gain. The simple direct-interface design is the DEFAULT; the
    generic-core fallback has to earn it.
-   **2c ALSO OWES 1b A DEBT, and it is the only outstanding one: `INetScene` should let a scenario
-   drive the RESET CHOREOGRAPHY.** `NetResetSpawnTest` has to FAKE `SpawnAllPlayers`' respawn of the
-   local seat, because `NetApplyReset` purges `PlayerShip` and its two retry legs need a non-null
-   `FindLocalShip()`; the real path there is `Resetting -> Startup`, i.e. ~3 s of game time plus a
-   background crossfade that needs `Draw`, which no headless scenario can drive. **2a's injected
-   clock does NOT fix this** (the wait is game-time and Draw-gated, not wall-clock), so do not
-   expect it to fall out of 2a -- it is 2c work. When `INetScene` lands, revisit
-   `NetResetSpawnTest.RespawnLocalShip` and delete the fake; its own comment lists the four ways it
-   is not a faithful copy, and all four exist only because the real respawn is unreachable.
+   **1b'S DEBT IS PAID, by 2c-i -- do not re-open it.** It read: `NetResetSpawnTest` has to
+   FAKE `SpawnAllPlayers`' respawn of the local seat, because `NetApplyReset` purges
+   `PlayerShip` and its two retry legs need a non-null `FindLocalShip()`, while the real path
+   (`Resetting -> Startup`) is ~3 s of game time plus a `Draw`-gated crossfade that no
+   headless scenario can drive. `SpawnPlayer` is on `INetScene`, so both legs now call the
+   REAL `GameScene.SpawnPlayer` and `RespawnLocalShip` is deleted with all four of the
+   infidelities its own comment listed. What is still skipped is the choreography AROUND the
+   seat, which was never the debt. (2a's injected clock did NOT fix this and was never going
+   to -- the wait is game-time and Draw-gated, not wall-clock.)
    **Sizing note for 2a, measured on `fa12140` rather than the "9" above:** 10 real
    `Environment.TickCount64` reads sit in the net layer -- `NetSession.NowMs`, `NetListing.NowMs`,
    `NetImpairment` (1, at receive), `NetPuppets` (7, of which **2 are inside `WireRoundTripTest`**

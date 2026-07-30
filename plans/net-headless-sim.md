@@ -22,8 +22,12 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 >
 > **2a shipped 2026-07-30** -- `INetHost` + `ServiceHelperNetHost` + `NetHost.Current`, the
 > injected clock and the flag/fingerprint surface, with `NetHostTest` (`eaNetHost()`,
-> `ProbeNetHost`) and `NetResetSpawnTest` re-homed onto a `PinnedNetHost`. Remaining: **2b**, 2c,
-> 3, 4.
+> `ProbeNetHost`) and `NetResetSpawnTest` re-homed onto a `PinnedNetHost`.
+>
+> **2b shipped 2026-07-30** -- the four `ServiceHelper` services on the same interface.
+> **Four members, not the ~31 the seam table implies, and that is the finding**: what has to move
+> is the RESOLUTION (six `ServiceHelper.Get<>()` lookups in the cores), not the 79 call sites
+> that read the resulting cached fields. Remaining: **2c**, 3, 4.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -337,7 +341,9 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      (in two `CLAUDE.md` files, `ComponentBin.TryAdd`'s comment and `SpawnPuppet`'s own) was
      overstated. All four corrected in place; the guard stays.
 3. **Steps 2a/2b/2c** -- `INetHost` + `ServiceHelperNetHost`, split three ways because the seam is
-   45 + 18 + 14 members rather than the ~30 sketched: **2a** the injected clock (`NowMs`, replacing
+   45 + 18 + 14 members rather than the ~30 sketched (**the 45 is dead** -- it counted what the
+   cores CALL, and 2b's finding below is that only the RESOLUTION has to move, so `INetHost` is
+   11 + 4 + whatever 2c needs): **2a** the injected clock (`NowMs`, replacing
    9 `Environment.TickCount64` reads) plus the `DebugFlags` / `WebRtcInterop` consts -- FIRST,
    because the clock buys determinism for everything downstream, 1b's probe included; **2b** the
    four `ServiceHelper` services; **2c** `INetEntity` + `INetScene` + entity creation. Still
@@ -370,6 +376,38 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      starts at 0, so a wall-clock read stamps arrival at the machine's uptime and the packet is
      never delivered -- had it started high, a "not yet due" assertion would pass or fail
      depending on the box's uptime. Worth copying in 2b/2c.
+   **2b is DONE, and it is FOUR members, not the ~31 this doc's seam table implies.** Measured on
+   `b1196e0`: the cores call **27** distinct members on the four services over **84** call sites
+   (distinct members / call sites, comments excluded: `oracle` 12/39, `bin` 5/22, `score` 8/14,
+   `sound` 2/4). `oracle.IsAlive` is NOT among the 12 -- the cores never call it, and all 9 of its
+   sites are in `NetResetSpawnTest`. But the blocker named under "Layer 1" is that `ServiceHelper` is a
+   PROCESS-GLOBAL registry, so what must move is the RESOLUTION, not the calls: the six
+   `ServiceHelper.Get<>()` lookups in the cores (four in `NetSession.StartWith`, two in
+   `NetPuppets.Enable`) plus one in `NetPuppets.WireRoundTripTest`. The 79 call sites already read
+   cached fields and are untouched.
+   - Forwarding all 27 instead would rewrite every one of those sites, drag `PlayerShip` /
+     `AlienDrawableGameComponent` into `INetHost` (7 of the 27 are entity-typed) and force 2c to
+     redo them behind `INetEntity`. Same rule as 2a: move the expression, verbatim, once.
+   - **It does NOT buy Game-freedom, and is not meant to** -- all four service constructors take a
+     `Game`. Banner correction 1 is why that is fine: the harness runs under `eahl`, which HAS a
+     `Game`. Layer 2 is 2c's problem and is untouched.
+   - `NetHostTest` gained NO leg, deliberately: it is the `logic_probe` case set, so it must stay
+     Game-free, and `ServiceHelper.Get<T>()` dereferences a static `Game` that loader never sets
+     (nor can the suite build an `Oracle`/`ComponentBin`/`ScoreVisualiser`/`SoundManager` to
+     compare against -- every constructor takes a `Game`). The load-bearing leg is
+     **`NetResetSpawnTest` 0b** instead: a `RecordingNetHost` counts reads THROUGH the seam during
+     a real `StartForTest` and requires the EXACT count each core makes (oracle 1, bin 2, sound 1,
+     score 2 -- bin and score twice because a client session also runs `NetPuppets.Enable`). A
+     floor would let `Enable` regress behind `StartWith`'s own read of the same service.
+     35 -> 39 assertions. Mutation-tested six ways, one per call site, each isolated: every one
+     fails exactly one assertion and names its service.
+   - **A call site left on the registry is INVISIBLE until step 3**, which is the whole reason 0b
+     counts rather than compares: it changes no behaviour at all today and then shows up as two
+     peers quietly sharing one `Oracle`. Carry that instrument into 2c.
+   - Out of the seam on purpose, for the same reasons the 2a exclusions were: `NetListing`'s own
+     oracle lookup, `NetPauseOverlay`/`NetWaitOverlay`'s Draw-time content/spritebatch lookups,
+     and the five sibling test suites, which reach the LIVE world because asserting against it is
+     their job.
    At 2c, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
    brackets `NetSession.Update()` in `Game1.UpdateInner`, so take the ABSOLUTE mean ms at a pinned
    replicable population (uncapped/headless, or focused -- a vsync-capped frame rate cannot see

@@ -17,13 +17,22 @@
 # (card 25ad0659 step 2a) then moves ONLY the injected virtual clock and requires the session to
 # act on it, which is what proves NetSession.Update's cadence really reads the seam.
 #
+# LEG 0b (card 25ad0659 step 2b) rides along here for a reason worth stating: the four
+# ServiceHelper.Get<>() lookups the net cores made now go through INetHost, and a call site left
+# on the process-global registry is INVISIBLE today -- it changes no behaviour at all until step 3
+# puts two peers in one process and they quietly share an Oracle. This suite is the only thing in
+# the repo that starts a real session headlessly, so it is the only place that read can be
+# counted. It requires the EXACT count each core makes (oracle 1, bin 2, sound 1, score 2 -- bin
+# and score twice because a CLIENT session also runs NetPuppets.Enable); a floor would let
+# NetPuppets.Enable regress behind StartWith's own read of the same service.
+#
 # FAILURE MEANS: read the quoted PASS/FAIL line, they name what they check. A leg-2 failure
 # ("TryAdd was refused, so no ... puppet was adopted") is the card's own defect back: a puppet
 # adopted but absent from the world. A leg-1 failure means a spawn gate stopped requiring a local
 # ship, which makes the NEGATIVE claim in that file wrong and the whole scenario reachable from
 # purge sites it says it is not. A leg-3 failure means the retry no longer fires.
 #
-# THE POSITIVE IS THE `35 passed` TALLY. Leg 3 is ALSO leg 1's and leg 2's positive control -- it
+# THE POSITIVE IS THE `39 passed` TALLY. Leg 3 is ALSO leg 1's and leg 2's positive control -- it
 # runs the identical send/pump/Update sequence and DOES adopt, so their "nothing happened"
 # assertions cannot be passing because the scripted peer's frames never arrived. Each leg
 # additionally asserts the endpoint's RxDelivered advanced by exactly the frames it sent, and leg 0
@@ -47,6 +56,22 @@
 #   * NetSession.NowMs back to Environment.TickCount64 -> **1** (leg 3b's friend-timeout
 #     assertion, and only it -- the wall clock cannot hear the virtual one advance). Added by
 #     card 25ad0659 step 2a; it is the only leg here that discriminates on the clock at all.
+#
+# AND SIX MORE FOR LEG 0b (card 25ad0659 step 2b), each isolated, each a revert of ONE call site
+# back to `ServiceHelper.Get<>()`. Every one fails exactly ONE assertion and names its service:
+#   * NetSession.StartWith oracle -> oracle reads=0 · bin -> bin reads=1 · sound -> sound reads=0
+#     · score -> score reads=1
+#   * NetPuppets.Enable bin -> bin reads=1 · score -> score reads=1
+# THE SEVENTH 2b CALL SITE IS NOT REACHABLE FROM HERE AND HAS NO RUNTIME COVER, which is worth
+# stating plainly rather than implying. NetPuppets.WireRoundTripTest resolves its own score
+# lookup, and it runs under eaNetScore.test with no host installed -- so it resolves to the same
+# live ScoreVisualiser before and after the change and net_selftests.txt's `[netscore] wire PASS
+# (9/9)` leg passes identically either way. That leg is a NO-REGRESSION check, not coverage;
+# verify_decompiled_diff.py is the actual evidence that the line moved.
+# (It is also the one piece of TEST code deliberately put ON the seam, against INetHost's own
+# policy that the sibling suites stay on the registry: unlike them it does not assert about the
+# live world, it borrows a ScoreVisualiser to round-trip a wire frame through -- so a step-4
+# scenario should get its own, not the process's.)
 #
 # READ THAT FIRST MUTATION CAREFULLY -- it is only ONE leg, and the reason corrects a claim card
 # 74403f83 left in two CLAUDE.md files and in SpawnPuppet's own comment. Those say adopting a
@@ -81,12 +106,14 @@ eval NetResetSpawn
 # over it, so without this the lie can come back for free.
 expect \[net\] session start role=join .* transport=InMemory
 expect \[netreset\] EvReset -> SpawnPuppet/SpawnFriend TryAdd
+expect 0b\. the session was built through the INetHost seam
+expect 0c\. handshake
 expect 1\. NEGATIVE
 expect 2\. POSITIVE -- EvReset purges inside the drain
 expect 3\. POSITIVE -- next tick, filter expired
 expect 3b\. the session's cadence runs on the INJECTED clock
 expect 4\. teardown
-expect \[netreset\] 35 passed, 0 failed
+expect \[netreset\] 39 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

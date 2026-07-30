@@ -105,8 +105,11 @@ namespace EvilAliensWeb.Compat.Net
             }
             enabled = true;
             game = g;
-            bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
-            score = ServiceHelper.Get<IScoreService>().Score;
+            // Through the host since step 2b (see INetHost). StartWith resolves its own copies a
+            // few lines earlier in the same call -- two reads of the same seam, not one shared
+            // one, because the puppet layer is also enabled by NetSnapshotTest with no session.
+            bin = NetHost.Current.ComponentBin;
+            score = NetHost.Current.Score;
             driver = new NetPuppetDriver(g);
             g.Components.Add(driver);
             g.Components.ComponentRemoved += Components_ComponentRemoved;
@@ -518,7 +521,7 @@ namespace EvilAliensWeb.Compat.Net
         // fresh-pay vs settle branch, and the at-most-once guard.
         internal static string WireRoundTripTest()
         {
-            ScoreVisualiser sv = ServiceHelper.Get<IScoreService>().Score;
+            ScoreVisualiser sv = NetHost.Current.Score;
             ScoreVisualiser prev = score;
             score = sv;
             var before = new float[NetProtocol.MaxSlots];

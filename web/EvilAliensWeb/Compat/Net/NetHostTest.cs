@@ -38,6 +38,15 @@ namespace EvilAliensWeb.Compat.Net
     // NetResetSpawnTest, which runs on a PinnedNetHost since this card; NetPuppets' are covered
     // by the decompiled-diff review and by net_selftests.txt staying green, not by an assertion
     // here.
+    //
+    // STEP 2b'S FOUR SERVICE MEMBERS ARE ALSO NOT COVERED HERE, and cannot be: Oracle,
+    // ComponentBin, ScoreVisualiser and SoundManager all take a `Game` in their constructor, so
+    // this file can neither build one to assert identity against nor read the production host's
+    // (ServiceHelper dereferences a static Game that logic_probe never sets, so a leg here would
+    // NRE the whole suite under the one runner that most needs it green). They are covered by
+    // NetResetSpawnTest's leg 0b, which counts reads through the seam during a real
+    // StartForTest -- see that file. Adding a service leg here would cost this suite the
+    // Game-freedom that makes it a logic_probe case set at all.
     internal static class NetHostTest
     {
         public static string Run()

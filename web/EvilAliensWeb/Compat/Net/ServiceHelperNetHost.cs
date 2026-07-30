@@ -1,15 +1,23 @@
 using System;
+using EvilAliens;
 
 namespace EvilAliensWeb.Compat.Net
 {
-    // The PRODUCTION INetHost (card 25ad0659, step 2a). Every member below is literally the
-    // expression that used to sit at the call site -- this class exists to be the one place
+    // The PRODUCTION INetHost (card 25ad0659, steps 2a + 2b). Every member below is literally
+    // the expression that used to sit at the call site -- this class exists to be the one place
     // those expressions live, not to change any of them. The production path therefore never
-    // stops going through DebugFlags / WebRtcInterop / Environment.TickCount64: this IS those
-    // calls, one interface hop away.
+    // stops going through DebugFlags / WebRtcInterop / Environment.TickCount64 / ServiceHelper:
+    // this IS those calls, one interface hop away.
     //
-    // The name is forward-looking: step 2b moves the four ServiceHelper.Get<> lookups here too,
-    // at which point it earns it. In 2a it holds none, and that is not an oversight.
+    // Step 2b is what makes the name honest: the four ServiceHelper.Get<> lookups the net cores
+    // used to make -- four in NetSession.StartWith, two in NetPuppets.Enable, one in
+    // NetPuppets.WireRoundTripTest -- now resolve here.
+    //
+    // NOT null-tolerant, deliberately. `ServiceHelper.Get<T>()` dereferences a static `Game`
+    // that Game1 sets before anything constructs a session, so a null here means the process has
+    // no game at all (tools/sim/logic_probe is the one such loader) -- and swallowing that would
+    // hand the net layer a null service to fail on much later, somewhere unrelated. The call
+    // sites threw before this card too; keep it that way.
     internal sealed class ServiceHelperNetHost : INetHost
     {
         public long NowMs
@@ -81,6 +89,28 @@ namespace EvilAliensWeb.Compat.Net
         public float NetJitterMs
         {
             get { return DebugFlags.NetJitterMs; }
+        }
+
+        // ---- step 2b -----------------------------------------------------------------------
+
+        public Oracle Oracle
+        {
+            get { return ServiceHelper.Get<IOracleService>().Oracle; }
+        }
+
+        public ComponentBin ComponentBin
+        {
+            get { return ServiceHelper.Get<IComponentBinService>().ComponentBin; }
+        }
+
+        public ScoreVisualiser Score
+        {
+            get { return ServiceHelper.Get<IScoreService>().Score; }
+        }
+
+        public SoundManager SoundManager
+        {
+            get { return ServiceHelper.Get<ISoundManagerService>().SoundManager; }
         }
     }
 }

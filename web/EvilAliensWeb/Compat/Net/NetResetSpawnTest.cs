@@ -34,7 +34,14 @@ namespace EvilAliensWeb.Compat.Net
     // load-bearing one here. Do not add legs that expect the broken code to stay broken past one
     // tick; leg 3 passes under that mutation and always will.
     //
-    // THE THREE LEGS, and why they are in this order.
+    // THE LEGS, and why they are in this order.
+    //   0b. THE SERVICE SEAM, added by step 2b. The four ServiceHelper.Get<>() lookups the net
+    //      cores made now resolve through INetHost, and a call site left on the process-global
+    //      registry would change NOTHING observable today -- it only bites at step 3, as two
+    //      peers quietly sharing one Oracle. So this leg counts reads THROUGH the seam
+    //      (RecordingNetHost) during StartForTest and requires the exact number each core makes.
+    //      Mutation-tested six ways, one per call site, each isolated: reverting any one of them
+    //      fails exactly one assertion here and names the service.
     //   1. NEGATIVE. The GameScene.LoseLife / UpdateWin / UpdateResetting purges run in
     //      base.Update, and collectionHelper.Update() flushes them BEFORE the rx drain -- so by
     //      the time SpawnPuppet could run, FindLocalShip() is null and both callers' gates are
@@ -177,17 +184,56 @@ namespace EvilAliensWeb.Compat.Net
             // before the try below -- see the note there for why the ORDER matters.
             PinnedNetHost clock = new PinnedNetHost();
 
+            // ... with a read counter over it, which is leg 0b's whole instrument. It is a
+            // decorator over the decorator: the clock still pins time, and this only watches.
+            RecordingNetHost services = new RecordingNetHost(clock);
+
             // Legs 1-3 sit in a local function purely so the `!paired` bail-out can be a plain
             // `return`: `return sb.ToString()` from inside the `try` renders the report BEFORE the
             // finally's teardown has appended its own lines, so on the one path a destructive
             // suite most needs to say whether it put the roster back, it would say nothing.
             void RunLegs()
             {
+                // ---- 0b: step 2b's seam, and this is the leg that makes it load-bearing -----
+                // The four ServiceHelper.Get<>() lookups the net cores used to make now resolve
+                // through INetHost, and the ONLY way that can silently fail is a call site left
+                // reading the process-global registry -- which changes nothing today and makes
+                // two peers share one Oracle at step 3. `services` counts reads, so a missed
+                // site shows up as a ZERO here rather than as a mystery years later.
+                //
+                // The counts are exact on purpose (>= 1 would let NetPuppets.Enable regress
+                // behind StartWith's own read of the same service). Raise them if a read is
+                // genuinely added; do not relax them to a floor.
+                //
+                // They assume the puppet layer is NOT already enabled -- NetPuppets.Enable
+                // early-returns when it is, which would report bin/score reads=1 and blame a
+                // missed call site for what is really leaked state. Unreachable as things stand:
+                // the only other caller, NetSnapshotTest, skips itself while a GameScene is up
+                // (which this suite requires) and disables in a finally. If that ever changes,
+                // this leg needs a NetPuppets.Enabled precondition, not looser counts.
+                sb.Append(" 0b. the session was built through the INetHost seam (step 2b)\n");
                 NetSession.StartForTest(game, host: false, ours, Room);
+                int gotOracle = services.OracleReads;
+                int gotBin = services.BinReads;
+                int gotSound = services.SoundReads;
+                int gotScore = services.ScoreReads;
                 peer.Open(Room);
                 Check("session started as a CLIENT", NetSession.IsClient);
 
+                // A CLIENT session, so StartWith takes the NetPuppets.Enable branch -- which is
+                // why bin and score are read twice and oracle/sound once. A host session would
+                // read each once (NetIdRegistry.Enable makes no service lookup).
+                Check("oracle came from the host, once (reads=" + gotOracle + ") and IS the live one",
+                    gotOracle == 1 && ReferenceEquals(NetHost.Current.Oracle, oracle));
+                Check("bin came from the host twice -- StartWith AND NetPuppets.Enable (reads="
+                    + gotBin + ") and IS the live one",
+                    gotBin == 2 && ReferenceEquals(NetHost.Current.ComponentBin, bin));
+                Check("sound came from the host, once (reads=" + gotSound + ")", gotSound == 1);
+                Check("score came from the host twice -- StartWith AND NetPuppets.Enable (reads="
+                    + gotScore + ")", gotScore == 2);
+
                 // ---- handshake: the scripted peer is the HOST and grants us GrantedSlot ------
+                sb.Append(" 0c. handshake -- the scripted host grants us slot " + GrantedSlot + "\n");
                 // (protocolVersion, isHost, buildHash, flags, primarySlot, peerId, blockedSlots)
                 peer.SendReliable(NetProtocol.EncodeHello(NetSession.ProtocolVersion, true,
                     NetSession.LocalBuildHash, 0, GrantedSlot, PeerToken, 0));
@@ -339,7 +385,7 @@ namespace EvilAliensWeb.Compat.Net
             // ms) and the 8 s peer-drop verdict -- can elapse mid-run at all. See the FLAKINESS
             // note in the header for what that replaced.
             INetHost hostBefore = NetHost.Current;
-            NetHost.Current = clock;
+            NetHost.Current = services;
             try
             {
                 RunLegs();
@@ -364,6 +410,79 @@ namespace EvilAliensWeb.Compat.Net
 
             sb.Append(Tally(pass, fail));
             return sb.ToString();
+        }
+
+        // Leg 0b's instrument (card 25ad0659 step 2b). A pass-through INetHost that counts how
+        // often each of the four services is read THROUGH the seam. Everything else forwards
+        // untouched -- it wraps the PinnedNetHost rather than replacing it, so the clock stays
+        // pinned and the flags/fingerprints stay production.
+        //
+        // Deliberately NOT a stub that returns its own services: the assertion is "the cores
+        // stopped reading ServiceHelper", and handing the session fabricated services would test
+        // the counter and nothing else -- besides needing a second Game, which no ctor here can
+        // do without.
+        //
+        // The COUNT is the whole discriminator; the two `ReferenceEquals` beside it are close to
+        // free rather than load-bearing. All four getters return DISTINCT types with exactly one
+        // source apiece in ServiceHelper, so a mis-wired mapping does not compile -- which is why
+        // the sound and score legs do without one and lose nothing. (2a's flag surface was the
+        // opposite case: eleven same-typed members, so a swap among them was the live hazard and
+        // NetHostTest drives its impairment triple to three distinct values for exactly that.)
+        private sealed class RecordingNetHost : INetHost
+        {
+            private readonly INetHost inner;
+
+            internal int OracleReads;
+            internal int BinReads;
+            internal int ScoreReads;
+            internal int SoundReads;
+
+            internal RecordingNetHost(INetHost forwardTo)
+            {
+                inner = forwardTo ?? NetHost.Production;
+            }
+
+            public long NowMs => inner.NowMs;
+
+            public string BuildHash => inner.BuildHash;
+
+            public string PeerToken => inner.PeerToken;
+
+            public bool DebugActive => inner.DebugActive;
+
+            public bool NetJip => inner.NetJip;
+
+            public bool NetLog => inner.NetLog;
+
+            public bool NetDropGrant => inner.NetDropGrant;
+
+            public int NetLocal => inner.NetLocal;
+
+            public float NetLagMs => inner.NetLagMs;
+
+            public float NetLossPct => inner.NetLossPct;
+
+            public float NetJitterMs => inner.NetJitterMs;
+
+            public Oracle Oracle
+            {
+                get { OracleReads++; return inner.Oracle; }
+            }
+
+            public ComponentBin ComponentBin
+            {
+                get { BinReads++; return inner.ComponentBin; }
+            }
+
+            public ScoreVisualiser Score
+            {
+                get { ScoreReads++; return inner.Score; }
+            }
+
+            public SoundManager SoundManager
+            {
+                get { SoundReads++; return inner.SoundManager; }
+            }
         }
 
         // Type + message, with the inner chain flattened in (the FlattenedContentLoadException

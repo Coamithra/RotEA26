@@ -1,3 +1,5 @@
+using EvilAliens;
+
 namespace EvilAliensWeb.Compat.Net
 {
     // A VIRTUAL-CLOCK INetHost for scenarios (card 25ad0659, step 2a).
@@ -68,5 +70,18 @@ namespace EvilAliensWeb.Compat.Net
         public float NetLossPct => LossPct ?? inner.NetLossPct;
 
         public float NetJitterMs => JitterMs ?? inner.NetJitterMs;
+
+        // Step 2b's four services forward UNCONDITIONALLY -- pinning the clock must not also
+        // hand the layer a different world. A scenario wanting its own services overrides them
+        // in its own host (step 4's FakeNetHost), not by making this class a blank fake; the
+        // whole reason it is a decorator is that a rig made deterministic in TIME should change
+        // nothing else out from under the code it is testing.
+        public Oracle Oracle => inner.Oracle;
+
+        public ComponentBin ComponentBin => inner.ComponentBin;
+
+        public ScoreVisualiser Score => inner.Score;
+
+        public SoundManager SoundManager => inner.SoundManager;
     }
 }

@@ -262,7 +262,7 @@ namespace EvilAliensWeb.Compat.Net
         private static bool IsRecentlyRemoved(ushort netId)
         {
             return recentlyRemoved.TryGetValue(netId, out long at)
-                && Environment.TickCount64 - at < RecentRemovalWindowMs;
+                && NetHost.Current.NowMs - at < RecentRemovalWindowMs;
         }
 
         private static void MarkRemoved(ushort netId)
@@ -275,7 +275,7 @@ namespace EvilAliensWeb.Compat.Net
                     recentlyRemoved.Remove(recentlyRemovedOrder.Dequeue());
                 }
             }
-            recentlyRemoved[netId] = Environment.TickCount64;
+            recentlyRemoved[netId] = NetHost.Current.NowMs;
         }
 
         private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn)
@@ -568,7 +568,7 @@ namespace EvilAliensWeb.Compat.Net
                 // 4. Provisional OVER-estimate (our combo ran hotter than the host's): the
                 //    correction must land us on the host's figure exactly, not above it.
                 s0 = sv.PointScore(0);
-                scoreLedger.NoteLocal(idB, 0, 2000f, Environment.TickCount64);
+                scoreLedger.NoteLocal(idB, 0, 2000f, NetHost.Current.NowMs);
                 sv.AddScore(2000f, false, 0); // what the local kill credited
                 ApplyAwards(idB, new Vector2(0f, 0f), back);
                 Check(Near(sv.PointScore(0) - s0, 1234.5f),
@@ -588,7 +588,7 @@ namespace EvilAliensWeb.Compat.Net
                 //    compensating score change, so it is worth an explicit case.
                 s0 = sv.PointScore(0);
                 scoreLedger.NoteLocal(idC, 0, 500f,
-                    Environment.TickCount64 - (long)NetScoreLedger.AwardSettleWindowMs - 1);
+                    NetHost.Current.NowMs - (long)NetScoreLedger.AwardSettleWindowMs - 1);
                 Check(Near(UnsettledFor(0), 0f), "an aged-out provisional is swept off the books");
                 Check(Near(sv.PointScore(0) - s0, 0f), "sweeping an aged-out provisional does not move the score");
             }
@@ -631,7 +631,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             if (enabled && idByComp.TryGetValue((GameComponent)(object)comp, out ushort netId))
             {
-                scoreLedger.NoteLocal(netId, slot, amount, Environment.TickCount64);
+                scoreLedger.NoteLocal(netId, slot, amount, NetHost.Current.NowMs);
             }
         }
 
@@ -647,7 +647,7 @@ namespace EvilAliensWeb.Compat.Net
         // and gating here would make WireRoundTripTest's check of it vacuously true.
         internal static float UnsettledFor(int slot)
         {
-            return scoreLedger.Unsettled(slot, Environment.TickCount64);
+            return scoreLedger.Unsettled(slot, NetHost.Current.NowMs);
         }
 
         private static void MarkPaid(ushort netId, byte slot)
@@ -698,11 +698,13 @@ namespace EvilAliensWeb.Compat.Net
     // which also turns puppet collisions off (see CollidableOverride).
     public sealed class NetPuppetDriver : GameComponent
     {
-        // The puppet clock runs on REAL time (Environment.TickCount64 delta), never the
+        // The puppet clock runs on REAL time (the host's NowMs delta), never the
         // turbo/slow-mo/hit-stop-scaled game time Game1.Update folds into the gameTime it
         // hands components -- see NetPuppets.Drive for why (the pupPops burst). Clamped like
         // NetSession's own realDtMs so a long stall (a pause Pop re-enabling us, a tab
         // refocus) advances the dead-reckoning by at most one over-long frame, never a fling.
+        // Real time is the HOST's clock since card 25ad0659 step 2a, so a scenario driving a
+        // virtual clock advances the puppets with it rather than racing the wall clock.
         private long lastRealMs;
 
         public NetPuppetDriver(Game game)
@@ -713,7 +715,7 @@ namespace EvilAliensWeb.Compat.Net
 
         public override void Update(GameTime gameTime)
         {
-            long now = Environment.TickCount64;
+            long now = NetHost.Current.NowMs;
             float dtMs = lastRealMs == 0L
                 ? (float)gameTime.ElapsedGameTime.TotalMilliseconds
                 : MathHelper.Clamp(now - lastRealMs, 0f, 200f);

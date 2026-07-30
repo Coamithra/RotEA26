@@ -69,7 +69,8 @@ namespace EvilAliensWeb.Compat.Net
         private long lastReliableRelease;
         private long arrivalCounter;
 
-        // Explicit settings for the self-test; null => read the live DebugFlags values.
+        // Explicit settings for the self-test; null => read the live host values (which in
+        // production ARE the DebugFlags ones -- see ServiceHelperNetHost).
         private readonly float? lagOverride;
         private readonly float? lossOverride;
         private readonly float? jitterOverride;
@@ -78,14 +79,14 @@ namespace EvilAliensWeb.Compat.Net
 
         public int HeldCount => streamHeld.Count + reliableHeld.Count;
 
-        // Public because the "[net]" line reports these: logging DebugFlags directly would be
+        // Public because the "[net]" line reports these: logging the flags directly would be
         // only accidentally correct, since the wrapper re-clamps and can be constructed with
         // explicit overrides. A self-describing log has to quote what is actually in force.
-        public float LagMs => MathHelper.Clamp(lagOverride ?? DebugFlags.NetLagMs, 0f, MaxLagMs);
+        public float LagMs => MathHelper.Clamp(lagOverride ?? NetHost.Current.NetLagMs, 0f, MaxLagMs);
 
-        public float LossPct => MathHelper.Clamp(lossOverride ?? DebugFlags.NetLossPct, 0f, MaxLossPct);
+        public float LossPct => MathHelper.Clamp(lossOverride ?? NetHost.Current.NetLossPct, 0f, MaxLossPct);
 
-        public float JitterMs => MathHelper.Clamp(jitterOverride ?? DebugFlags.NetJitterMs, 0f, MaxJitterMs);
+        public float JitterMs => MathHelper.Clamp(jitterOverride ?? NetHost.Current.NetJitterMs, 0f, MaxJitterMs);
 
         public NetImpairment(INetTransport inner)
             : this(inner, null, null, null)
@@ -138,7 +139,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private void OnInnerData(byte[] payload, bool reliable, string from)
         {
-            Receive(payload, reliable, from, Environment.TickCount64);
+            Receive(payload, reliable, from, NetHost.Current.NowMs);
         }
 
         // Split out from the event handler so the self-test can drive a VIRTUAL clock -- a test
@@ -200,9 +201,10 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // Called from the top of NetSession.Update, BEFORE DrainRx, on the same
-        // Environment.TickCount64 real-time clock as the rest of the session cadence (so
-        // turbo / slow-mo / hit-stop never skew impairment). Delay granularity is therefore one
+        // Called from the top of NetSession.Update, BEFORE DrainRx, on the same host real-time
+        // clock as the rest of the session cadence (so turbo / slow-mo / hit-stop never skew
+        // impairment; and a scenario driving a virtual clock moves both together, which is why
+        // the arrival stamp in OnInnerData comes from the host too). Granularity is one
         // game tick, ~16ms -- a lag setting below that is indistinguishable from 0.
         public void Pump(long now)
         {

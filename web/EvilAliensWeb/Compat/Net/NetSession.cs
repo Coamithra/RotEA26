@@ -321,10 +321,14 @@ namespace EvilAliensWeb.Compat.Net
         // REQUIRED..."). Set on session-ending events, consumed by MenuScene.
         public static string MenuNotice { get; private set; }
 
-        private static long NowMs => Environment.TickCount64;
+        // Every cadence in this file reads through here, so injecting the host's clock (card
+        // 25ad0659 step 2a) makes the whole session drivable on a virtual clock in one line.
+        private static long NowMs => NetHost.Current.NowMs;
 
         // URL boot path (?net=host/join [&rtc]) -- called from Game1.Initialize; a plain
-        // boot (NetRole.None) constructs nothing.
+        // boot (NetRole.None) constructs nothing. Deliberately still reads DebugFlags direct:
+        // this is the COMPOSITION ROOT, deciding whether a session exists at all and which
+        // transport it gets, and no injected host can answer that -- the host is chosen after.
         public static void Start(Game g)
         {
             if (Active || DebugFlags.NetRole == NetRole.None)
@@ -377,9 +381,10 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // The hash a scripted peer's hello must carry to be accepted. READ rather than recomputed:
-        // restating HashBuildString(WebRtcInterop.BuildHash()) in a scenario would drift silently
-        // from StartWith's own expression (?netfakehash included), and the only symptom would be a
-        // pairing the scenario cannot explain.
+        // restating HashBuildString(host.BuildHash) in a scenario would drift silently from
+        // StartWith's own expression, and the only symptom would be a pairing the scenario
+        // cannot explain. Still true with the host injected: a scenario that sets its own
+        // BuildHash still reads the hash back from here rather than re-hashing it.
         internal static ulong LocalBuildHash => localBuildHash;
 
         // Is the remote peer's PRIMARY ship puppet currently adopted? The subject of
@@ -399,17 +404,11 @@ namespace EvilAliensWeb.Compat.Net
             isHost = host;
             menuSession = asMenuSession;
             listedSession = asListedSession;
-            // ?netfakehash=<s> makes this tab disagree with its peer on the build hash, driving
-            // the real peerHash-mismatch -> SendRejectOnce path on the dev rig (both dev tabs
-            // otherwise read 'dev'). Null/empty = the genuine published fingerprint. Dev-only.
-            localBuildHash = NetProtocol.HashBuildString(
-                string.IsNullOrEmpty(DebugFlags.NetFakeBuildHash) ? WebRtcInterop.BuildHash() : DebugFlags.NetFakeBuildHash);
-            // ?netfakepeer=<s> plays the same trick on the identity token, and the loopback rig
-            // NEEDS it: two dev tabs share one localStorage, so they mint the SAME eaRtc.peerId
-            // and a host blocking the joiner would block itself.
-            string peerToken = string.IsNullOrEmpty(DebugFlags.NetFakePeerId)
-                ? WebRtcInterop.PeerId()
-                : DebugFlags.NetFakePeerId;
+            // Both fingerprints arrive ALREADY resolved against ?netfakehash / ?netfakepeer --
+            // the resolution expressions moved verbatim into ServiceHelperNetHost (step 2a), so
+            // a scenario supplies two strings instead of reaching into JS interop.
+            localBuildHash = NetProtocol.HashBuildString(NetHost.Current.BuildHash);
+            string peerToken = NetHost.Current.PeerToken;
             // An EMPTY token must map to 0 ("no identity"), not to a hash: HashBuildString("")
             // returns the FNV-1a offset basis, which is a perfectly ordinary non-zero id -- so
             // every peer whose JS could not mint a token would share it, and blocking one would
@@ -716,7 +715,7 @@ namespace EvilAliensWeb.Compat.Net
             // has DebugFlags.Active, which a clean menu-session joiner would reject -- so a
             // ?netjip boot presents as clean. Every real listed host has no debug flags anyway
             // (NetListing's eligibility refuses them unless ?netjip is set).
-            return (DebugFlags.Active && !DebugFlags.NetJip) ? NetProtocol.HelloFlagDebugActive : (byte)0;
+            return (NetHost.Current.DebugActive && !NetHost.Current.NetJip) ? NetProtocol.HelloFlagDebugActive : (byte)0;
         }
 
         // GameScene lifecycle edges (card 11.4): the client announces its scene coming up
@@ -1021,7 +1020,7 @@ namespace EvilAliensWeb.Compat.Net
             transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvReset, mode));
             metrics.EventsTx++;
             metrics.Resets++;
-            if (DebugFlags.NetLog)
+            if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] tx reset mode=" + mode);
             }
@@ -1145,7 +1144,7 @@ namespace EvilAliensWeb.Compat.Net
             // does not decrement bombs on the remote either, so replicating the increment
             // alone would make the other player's bomb icons pile up and never clear.
             sound.PlayCue("powerup"); // local co-op plays it for either collector too
-            if (DebugFlags.NetLog)
+            if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] remote powerup " + powerup.type + " -> slot " + slot);
             }
@@ -1173,7 +1172,7 @@ namespace EvilAliensWeb.Compat.Net
             int extraLen = e.Descriptor.EncodeSpawnExtra(e.Comp, extraScratch, 0);
             transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, e.Id, e.TypeIdx, state, extraScratch, extraLen));
             metrics.EventsTx++;
-            if (DebugFlags.NetLog)
+            if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] tx spawn id=" + e.Id + " type=" + e.Comp.GetType().Name);
             }
@@ -1200,7 +1199,7 @@ namespace EvilAliensWeb.Compat.Net
             // nothing was awarded -- a despawn, a zero-point type, an already-awarded entity).
             transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos, e.Awards));
             metrics.EventsTx++;
-            if (DebugFlags.NetLog)
+            if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer
                     + " award=" + (e.Awards == null ? "-" : string.Join("/", e.Awards)));
@@ -1406,7 +1405,7 @@ namespace EvilAliensWeb.Compat.Net
             transport.SendReliable(NetProtocol.EncodeClaimEvent(txEventSeq++, netId, killerSlot));
             metrics.EventsTx++;
             metrics.ClaimsTx++;
-            if (DebugFlags.NetLog)
+            if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] tx claim id=" + netId + " killer=" + killerSlot);
             }
@@ -1487,7 +1486,7 @@ namespace EvilAliensWeb.Compat.Net
                 SendRejectOnce(NetProtocol.RejectBuild);
                 return;
             }
-            if (menuSession && ((peerFlags & NetProtocol.HelloFlagDebugActive) != 0 || DebugFlags.Active))
+            if (menuSession && ((peerFlags & NetProtocol.HelloFlagDebugActive) != 0 || NetHost.Current.DebugActive))
             {
                 Console.WriteLine("[net] gameplay debug flags active in a menu session -- rejecting");
                 SendRejectOnce(NetProtocol.RejectFlags);
@@ -1943,7 +1942,7 @@ namespace EvilAliensWeb.Compat.Net
             // joinRequestPending so this side is left exactly as a genuine failed take leaves it
             // -- no outstanding request, no seat -- and the host is the only one holding the
             // reservation. That is the state ExpireUnclaimedGrants exists to clean up.
-            if (ShouldDropGrant(DebugFlags.NetDropGrant))
+            if (ShouldDropGrant(NetHost.Current.NetDropGrant))
             {
                 Console.WriteLine("[net] ?netdropgrant: dropping granted couch slot=" + slot
                     + " -- host should release it in " + GrantClaimTimeoutMs + "ms");
@@ -2081,7 +2080,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void TickLocalJoinSim(long now)
         {
-            if (DebugFlags.NetLocal <= 0 || localJoinSimDone >= DebugFlags.NetLocal)
+            if (NetHost.Current.NetLocal <= 0 || localJoinSimDone >= NetHost.Current.NetLocal)
             {
                 return;
             }
@@ -2102,7 +2101,7 @@ namespace EvilAliensWeb.Compat.Net
             ControlDevice device = localJoinSimDone == 0 ? ControlDevice.Generic : ControlDevice.AI;
             localJoinSimDone++;
             localJoinSimAt = now + LocalJoinSimDelayMs; // stagger, so each join is legible in the log
-            Console.WriteLine("[net] ?netlocal: simulating couch join " + localJoinSimDone + "/" + DebugFlags.NetLocal
+            Console.WriteLine("[net] ?netlocal: simulating couch join " + localJoinSimDone + "/" + NetHost.Current.NetLocal
                 + " device=" + device);
             TrySeatLocalJoin(device, spawnPlayer: true);
         }
@@ -2543,7 +2542,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     metrics.DupSpawns++;
                 }
-                if (DebugFlags.NetLog)
+                if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx spawn id=" + id + " typeIdx=" + typeIdx);
                 }
@@ -2560,7 +2559,7 @@ namespace EvilAliensWeb.Compat.Net
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
                 NetProtocol.ReadDeathAwards(data, deathAwardScratch);
                 NetPuppets.OnRemoteDeath(id, killer, pos, deathAwardScratch);
-                if (DebugFlags.NetLog)
+                if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx death id=" + id + " killer=" + killer);
                 }
@@ -2627,7 +2626,7 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 bomber.NetDoBlast(level);
-                if (DebugFlags.NetLog)
+                if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx blast slot=" + blastSlot + " level=" + level);
                 }
@@ -2764,7 +2763,7 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 GameScene.NetActiveScene?.NetApplyReset(data[4]);
                 metrics.Resets++;
-                if (DebugFlags.NetLog)
+                if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx reset mode=" + data[4]);
                 }
@@ -2946,7 +2945,7 @@ namespace EvilAliensWeb.Compat.Net
                     bin.Remove((GameComponent)(object)e.Comp);
                 }
                 metrics.ClaimsHonored++;
-                if (DebugFlags.NetLog)
+                if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] claim honored (live kill) id=" + netId + " slot=" + killerSlot);
                 }
@@ -2968,7 +2967,7 @@ namespace EvilAliensWeb.Compat.Net
                         score.AddLife(); // overlapping collectors inside the RTT window each add one
                     }
                     metrics.ClaimsPaidDead++;
-                    if (DebugFlags.NetLog)
+                    if (NetHost.Current.NetLog)
                     {
                         Console.WriteLine("[net] claim honored (already dead, paid) id=" + netId + " slot=" + killerSlot);
                     }

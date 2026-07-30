@@ -149,6 +149,15 @@ namespace EvilAliensWeb.Compat.Net
             Oracle oracle = ServiceHelper.Get<IOracleService>().Oracle;
             ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
             Game game = bin.Game;
+            // Step 2c's scene seam, read through NetScene.Current rather than
+            // GameScene.NetActiveScene so this suite exercises the seam the cores now use. It is
+            // also what lets the two respawns below drive the REAL SpawnPlayer instead of the
+            // hand-rolled stand-in step 1b had to carry -- see the header.
+            // ... wrapped in a call counter, which is leg 3c's instrument. A DECORATOR over the
+            // live scene, not a replacement: leg 2's EvReset must still perform the real
+            // Purge<PlayerShip> from inside the drain, or every leg under it goes vacuous.
+            RecordingNetScene rec = new RecordingNetScene(NetScene.Current);
+            INetScene scene = rec;
 
             sb.Append(" 0. rig\n");
             // A single local player at slot 0 with a live ship, and slots 1/2 free. Everything
@@ -281,7 +290,7 @@ namespace EvilAliensWeb.Compat.Net
                 // ---- 2. POSITIVE: EvReset purges from INSIDE the drain ----------------------
                 sb.Append(" 2. POSITIVE -- EvReset purges inside the drain: both TryAdds refused\n");
                 bin.TopOfTickFlush();
-                RespawnLocalShip(bin, game);
+                scene.SpawnPlayer(localDevice, GrantedSlot);
                 Check("PRECONDITION the local ship is back for the reset leg",
                     oracle.IsAlive(GrantedSlot));
 
@@ -323,7 +332,7 @@ namespace EvilAliensWeb.Compat.Net
                 sb.Append(" 3. POSITIVE -- next tick, filter expired: both adopted, both seats REUSED\n");
                 bin.TopOfTickFlush();
                 Check("the flush carried the purge out", !oracle.IsAlive(GrantedSlot));
-                RespawnLocalShip(bin, game);
+                scene.SpawnPlayer(localDevice, GrantedSlot);
                 Check("PRECONDITION the local ship is back for the retry leg",
                     oracle.IsAlive(GrantedSlot));
 
@@ -376,6 +385,20 @@ namespace EvilAliensWeb.Compat.Net
                     !NetSession.HasFriendPuppet(FriendSlot));
                 Check("... and only that one -- the primary remote is on the 3 s peer timeout",
                     NetSession.HasRemotePuppet);
+
+                // ---- 3c: step 2c's scene seam -----------------------------------------------
+                // Exactly one EvReset was sent (leg 2's), and the ONLY way it can reach a scene
+                // is through NetScene.Current. A handler left on GameScene.NetActiveScene would
+                // do the identical work and leave this at zero -- which is the whole point: that
+                // divergence is invisible until step 4 supplies a scene of its own.
+                sb.Append(" 3c. the world reaches the scene through the INetScene seam\n");
+                Check("leg 2's EvReset arrived through NetScene.Current (resets=" + rec.ResetCalls
+                    + ")", rec.ResetCalls == 1);
+                // The two respawns are the rig's own, and they are here rather than in a comment
+                // because they are what replaced step 1b's hand-rolled stand-in: the real
+                // GameScene.SpawnPlayer, reached through the seam.
+                Check("both retry legs respawned via the REAL SpawnPlayer (spawns="
+                    + rec.SpawnPlayerCalls + ")", rec.SpawnPlayerCalls == 2);
             }
 
             // THE CLOCK IS PINNED FOR THE WHOLE RUN (card 25ad0659 step 2a). Installed BEFORE
@@ -386,6 +409,7 @@ namespace EvilAliensWeb.Compat.Net
             // note in the header for what that replaced.
             INetHost hostBefore = NetHost.Current;
             NetHost.Current = services;
+            NetScene.Current = rec;
             try
             {
                 RunLegs();
@@ -404,12 +428,85 @@ namespace EvilAliensWeb.Compat.Net
                 sb.Append(" 4. teardown -- the roster this suite must hand back\n");
                 Teardown(oracle, bin, game, localDevice, Check);
                 NetHost.Current = hostBefore;
+                NetScene.Current = null;
                 Check("the virtual clock is handed back (NetHost.Current restored)",
                     ReferenceEquals(NetHost.Current, hostBefore));
+                // Null hands the seam back to the live scene, so this asserts the scenario left
+                // nothing behind -- a stray override would silently outlive the run, and every
+                // world message after it would be applied into a decorator over a dead scene.
+                Check("the scene seam is handed back (no override left standing)",
+                    !NetScene.IsOverridden
+                        && ReferenceEquals(NetScene.Current, GameScene.NetActiveScene));
             }
 
             sb.Append(Tally(pass, fail));
             return sb.ToString();
+        }
+
+        // Leg 3c's instrument (card 25ad0659 step 2c). The scene twin of RecordingNetHost below,
+        // and it exists for the identical reason: a core call site left on
+        // GameScene.NetActiveScene instead of NetScene.Current behaves IDENTICALLY today -- the
+        // seam reads through that very field -- and only diverges once a scenario supplies a
+        // scene of its own, which is step 4. So the assertion has to be "the call arrived HERE",
+        // not "the call had the right effect".
+        //
+        // It wraps the live scene rather than replacing it: leg 2's EvReset must still perform
+        // the REAL Purge<PlayerShip> from inside the drain, which is the whole subject of this
+        // suite. A blank fake would make every leg below it vacuous.
+        private sealed class RecordingNetScene : INetScene
+        {
+            private readonly INetScene inner;
+
+            internal int ResetCalls;
+            internal int SpawnPlayerCalls;
+
+            internal RecordingNetScene(INetScene forwardTo)
+            {
+                inner = forwardTo;
+            }
+
+            public Levels Level => inner.Level;
+
+            public bool NetEndingNormally => inner.NetEndingNormally;
+
+            public bool JoinWouldSpawnNow => inner.JoinWouldSpawnNow;
+
+            public void NetApplyReset(byte mode)
+            {
+                ResetCalls++;
+                inner.NetApplyReset(mode);
+            }
+
+            public void NetApplyVictory() => inner.NetApplyVictory();
+
+            public void NetApplyCheckpoint() => inner.NetApplyCheckpoint();
+
+            public void NetApplyBackgroundOp(NetBackgroundOp op, Vector2 v)
+                => inner.NetApplyBackgroundOp(op, v);
+
+            public void NetApplyCosmeticSwarm(NetCosmeticKind kind, bool on, float rate)
+                => inner.NetApplyCosmeticSwarm(kind, on, rate);
+
+            public void NetApplyTetherBreak() => inner.NetApplyTetherBreak();
+
+            public void NetApplyPeerLeft() => inner.NetApplyPeerLeft();
+
+            public void NetSetRemotePaused(bool on) => inner.NetSetRemotePaused(on);
+
+            public void NetSetPeerStalled(bool on) => inner.NetSetPeerStalled(on);
+
+            public void NetReplayCatchUp() => inner.NetReplayCatchUp();
+
+            public bool NetShowKickMenu() => inner.NetShowKickMenu();
+
+            // Counted separately from ResetCalls because BOTH this suite and (in production) the
+            // scene's own reset choreography call it -- conflating them would make leg 3c's
+            // number depend on how many times the rig respawned.
+            public void SpawnPlayer(ControlDevice controlDevice, int slot)
+            {
+                SpawnPlayerCalls++;
+                inner.SpawnPlayer(controlDevice, slot);
+            }
         }
 
         // Leg 0b's instrument (card 25ad0659 step 2b). A pass-through INetHost that counts how
@@ -525,22 +622,6 @@ namespace EvilAliensWeb.Compat.Net
         {
             return string.Format(CultureInfo.InvariantCulture,
                 "[netreset] {0} passed, {1} failed\n", pass, fail);
-        }
-
-        // Stand-in for GameScene.SpawnAllPlayers' respawn of the local seat. The real
-        // choreography reaches that ~3 s of game time later via Resetting -> Startup plus a
-        // background crossfade that needs Draw; none of it is under test, and the ONLY thing the
-        // retry legs need from it is a non-null FindLocalShip(). It is deliberately NOT a faithful
-        // copy, so do not read it as one: no spawn-position spread, no Recycle (a fresh instance
-        // keeps the scenario's object identities readable -- at this point the recycle pool holds
-        // the very ships the purge and the diverted TryAdds put there), `startup: false` rather
-        // than the real respawn's entry animation, and none of the caller's cursor/score
-        // bookkeeping. All four are invisible to `oracle.IsAlive`, which is the whole requirement.
-        private static void RespawnLocalShip(ComponentBin bin, Game game)
-        {
-            PlayerShip ship = new PlayerShip(game);
-            ship.Setup(GrantedSlot, LocalShipPos, startup: false, invulnerable: true, FacingUp);
-            bin.Add((GameComponent)(object)ship);
         }
 
         // Always alive=true: the alive-flag edge belongs to the puppet DEATH path (ExplodePuppet),

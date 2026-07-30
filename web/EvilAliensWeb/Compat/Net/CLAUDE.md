@@ -171,14 +171,28 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     deadline fired. Leg **0b** came with step 2b and is the seam's other half: it counts the
     four services' reads THROUGH `INetHost` during `StartForTest`, which is the only place in the
     repo a real session starts headlessly and therefore the only place that read can be counted.
-    39/39 now.
+    42/42 now. Leg **3c** is the scene twin from 2c-i (a `RecordingNetScene` decorator over the LIVE scene counts `EvReset`'s arrival through `NetScene.Current`; a handler left on `GameScene.NetActiveScene` does identical work today, so counting is the only thing that can see it).
 - **The net cores read the clock, the dev flags AND the four services through ONE injected seam,
   `INetHost`** (card 25ad0659 steps 2a + 2b; the plan's 2a/2b/2c split is in
   `plans/net-headless-sim.md`). `NetSession`, `NetPuppets` and `NetImpairment` no longer touch
   `Environment.TickCount64`, `DebugFlags`, `WebRtcInterop` or `ServiceHelper` directly -- they go
   through `NetHost.Current`, whose production value is `ServiceHelperNetHost` and holds each
-  expression verbatim. 2c adds `INetEntity` / `INetScene`; it is STILL STATIC and single-instance
-  until step 3.
+  expression verbatim. **2c is split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
+  `2c-ii` `INetEntity`, `2c-iii` entity creation. It is STILL STATIC and single-instance until
+  step 3.
+  - **The scene is a SECOND seam, `NetScene.Current` (card 25ad0659 step 2c-i).** `GameScene`
+    implements `INetScene` (15 members: the host-broadcast transitions, the catch-up replay, the
+    three readbacks `NetSession` branches on, the kick menu and `SpawnPlayer`), and the session's
+    32 `GameScene.NetActiveScene` reads go through the holder instead. **Its production value is
+    DERIVED, not copied** -- `override ?? GameScene.NetActiveScene` -- so that field keeps its
+    concrete type for `AiBench`/`DebugInput`/`NetListing` and there is no second source of truth
+    for "is a scene up", which every world message is gated on. Null hands the seam back, as with
+    `NetHost`; unlike `NetHost` there is no production instance, because "no scene" is a real
+    production answer and null IS it.
+  - **`NetResetSpawnTest`'s respawn stand-in is GONE with it** -- `SpawnPlayer` is on the seam, so
+    both retry legs drive the real `GameScene.SpawnPlayer` and the four ways the fake differed
+    from it (no `Recycle`, no `spawnType` position, `startup: false`, no cursor bookkeeping) are
+    gone. That was step 1b's last outstanding debt.
   - **2b is FOUR members (`Oracle`, `ComponentBin`, `Score`, `SoundManager`), not the ~31 the
     plan's seam table implies, and the reason generalises.** The cores make 79 calls on those
     services across 27 distinct members, but they all read a field cached ONCE in

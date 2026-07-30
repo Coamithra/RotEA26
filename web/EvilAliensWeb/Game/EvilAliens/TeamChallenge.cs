@@ -37,7 +37,7 @@ internal class TeamChallenge : GameScene
 	}
 
 	// The peer broke the tether on its screen (or-of-either-peer, idempotent).
-	internal override void NetApplyTetherBreak()
+	public override void NetApplyTetherBreak()
 	{
 		if (connector != null)
 		{

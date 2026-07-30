@@ -27,7 +27,14 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > **2b shipped 2026-07-30** -- the four `ServiceHelper` services on the same interface.
 > **Four members, not the ~31 the seam table implies, and that is the finding**: what has to move
 > is the RESOLUTION (six `ServiceHelper.Get<>()` lookups in the cores), not the 79 call sites
-> that read the resulting cached fields. Remaining: **2c**, 3, 4.
+> that read the resulting cached fields.
+>
+> **2c is SPLIT THREE WAYS, for the same reason 2 was: measured, they are different sizes and they
+> fail differently.** `2c-i` the SCENE (`INetScene` + `NetScene.Current`) -- **shipped
+> 2026-07-30**, and it discharged step 1b's last debt: `NetResetSpawnTest`'s hand-rolled respawn
+> stand-in is deleted, both retry legs now drive the real `GameScene.SpawnPlayer`.
+> `2c-ii` the ENTITY (`INetEntity`) -- the only slice with a hot path, and the one the doc's
+> MEASURE-FIRST instruction is about. `2c-iii` entity CREATION. Remaining: **2c-ii**, 2c-iii, 3, 4.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -408,7 +415,31 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      oracle lookup, `NetPauseOverlay`/`NetWaitOverlay`'s Draw-time content/spritebatch lookups,
      and the five sibling test suites, which reach the LIVE world because asserting against it is
      their job.
-   At 2c, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
+   **2c-i (the SCENE) is DONE.** `Compat/Net/INetScene.cs` -- 15 members, measured (the doc guessed
+   14): `Level`, `NetEndingNormally`, `JoinWouldSpawnNow`, `NetApplyReset/Victory/Checkpoint/
+   BackgroundOp/CosmeticSwarm/TetherBreak/PeerLeft`, `NetSetRemotePaused`, `NetSetPeerStalled`,
+   `NetReplayCatchUp`, `NetShowKickMenu`, `SpawnPlayer`. `GameScene` implements it (the 14
+   `internal` members widened to `public` -- an implicit implementation must be, and 15 explicit
+   stubs would be 15 more names to keep in step), and `NetSession`'s 32 `GameScene.NetActiveScene`
+   reads move to `NetScene.Current`.
+   - **The production value is DERIVED, never copied**: `NetScene.Current` is
+     `override ?? GameScene.NetActiveScene`, so that field keeps its concrete type for its four
+     non-net consumers (`AiBench`, `DebugInput`, `NetListing`, `GameScene` itself) and there is no
+     second source of truth for "is a scene up" -- every world message in `NetSession` is gated on
+     that answer, so a stale copy would either drop the world on the floor or apply it into a
+     scene that has terminated. Unlike `NetHost` there is no production INSTANCE to fall back to,
+     because the honest production answer really is sometimes "no scene", and null IS that answer.
+   - **It paid step 1b's LAST outstanding debt.** `NetResetSpawnTest.RespawnLocalShip` is deleted:
+     `SpawnPlayer` is on the seam, so both retry legs drive the REAL `GameScene.SpawnPlayer` and
+     the four infidelities that stand-in documented (no `Recycle`, no `spawnType` position,
+     `startup: false`, none of the caller's cursor bookkeeping) are gone. 39 -> 42 assertions.
+   - **Verification is 2b's instrument one seam later, and for the identical reason**: a handler
+     left on `GameScene.NetActiveScene` does the IDENTICAL work today, because the seam reads
+     through that very field -- nothing diverges until step 4 supplies a scene of its own. So leg
+     3c COUNTS the arrival through a `RecordingNetScene` DECORATOR over the live scene (a blank
+     fake would make leg 2's real `Purge<PlayerShip>` vacuous). Mutation-tested: reverting the
+     `EvReset` handler fails exactly one assertion, `resets=0`.
+   At 2c-ii, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
    brackets `NetSession.Update()` in `Game1.UpdateInner`, so take the ABSOLUTE mean ms at a pinned
    replicable population (uncapped/headless, or focused -- a vsync-capped frame rate cannot see
    this) and judge the delta against the 16.7ms frame budget, plus whether p99 frame time moved.

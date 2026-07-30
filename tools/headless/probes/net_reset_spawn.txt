@@ -26,13 +26,27 @@
 # and score twice because a CLIENT session also runs NetPuppets.Enable); a floor would let
 # NetPuppets.Enable regress behind StartWith's own read of the same service.
 #
+# LEG 3c (card 25ad0659 step 2c) rides along for the same reason 0b does, one seam later. World
+# messages now reach the scene through NetScene.Current instead of GameScene.NetActiveScene, and a
+# handler left on the old field does the IDENTICAL work today -- the seam reads through that very
+# field -- so nothing observable diverges until step 4 supplies a scene of its own. A
+# RecordingNetScene decorator over the LIVE scene (not a fake: leg 2's real Purge<PlayerShip> is
+# the whole subject here) counts the arrival instead. Mutation-tested: reverting the EvReset
+# handler to GameScene.NetActiveScene fails exactly one assertion, `resets=0`.
+#
+# THE SPAWN COUNT IN 3c IS THE RECEIPT FOR A DELETED FAKE. Step 1b had to hand-roll a stand-in for
+# GameScene.SpawnAllPlayers' respawn of the local seat, and its own comment listed four ways it was
+# not a faithful copy (no Recycle, no spawnType position, startup:false, none of the caller's
+# cursor bookkeeping). SpawnPlayer is on INetScene, so both retry legs now drive the REAL one; the
+# fake and all four caveats are gone. That was the last outstanding debt step 1b filed.
+#
 # FAILURE MEANS: read the quoted PASS/FAIL line, they name what they check. A leg-2 failure
 # ("TryAdd was refused, so no ... puppet was adopted") is the card's own defect back: a puppet
 # adopted but absent from the world. A leg-1 failure means a spawn gate stopped requiring a local
 # ship, which makes the NEGATIVE claim in that file wrong and the whole scenario reachable from
 # purge sites it says it is not. A leg-3 failure means the retry no longer fires.
 #
-# THE POSITIVE IS THE `39 passed` TALLY. Leg 3 is ALSO leg 1's and leg 2's positive control -- it
+# THE POSITIVE IS THE `42 passed` TALLY. Leg 3 is ALSO leg 1's and leg 2's positive control -- it
 # runs the identical send/pump/Update sequence and DOES adopt, so their "nothing happened"
 # assertions cannot be passing because the scripted peer's frames never arrived. Each leg
 # additionally asserts the endpoint's RxDelivered advanced by exactly the frames it sent, and leg 0
@@ -112,8 +126,9 @@ expect 1\. NEGATIVE
 expect 2\. POSITIVE -- EvReset purges inside the drain
 expect 3\. POSITIVE -- next tick, filter expired
 expect 3b\. the session's cadence runs on the INJECTED clock
+expect 3c\. the world reaches the scene through the INetScene seam
 expect 4\. teardown
-expect \[netreset\] 39 passed, 0 failed
+expect \[netreset\] 42 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

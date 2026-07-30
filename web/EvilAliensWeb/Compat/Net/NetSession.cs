@@ -442,7 +442,7 @@ namespace EvilAliensWeb.Compat.Net
             Active = true;
             pendingStopAt = 0;
             pendingStopNotice = null;
-            sceneWasUp = GameScene.NetActiveScene != null;
+            sceneWasUp = NetScene.Current != null;
             pendingLaunchHas = false;
             MenuNotice = null;
             sessionStartAt = NowMs;
@@ -485,7 +485,7 @@ namespace EvilAliensWeb.Compat.Net
             if (RemotePaused)
             {
                 RemotePaused = false;
-                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+                NetScene.Current?.NetSetRemotePaused(false);
             }
             ClearPeerStalled(); // never leave the banner up over a session that no longer exists
             ResetPerSessionState();
@@ -729,7 +729,7 @@ namespace EvilAliensWeb.Compat.Net
         // one match per lobby, so tell the peer and wind the session down.
         private static void UpdateSceneEdges()
         {
-            bool sceneUp = GameScene.NetActiveScene != null;
+            bool sceneUp = NetScene.Current != null;
             if (sceneUp == sceneWasUp)
             {
                 return;
@@ -989,7 +989,7 @@ namespace EvilAliensWeb.Compat.Net
         // ABOVE the host's local mute check: a muted host still replicates script beats.
         public static void OnMusic(int song)
         {
-            if (!IsHost || !PeerUp || GameScene.NetActiveScene == null)
+            if (!IsHost || !PeerUp || NetScene.Current == null)
             {
                 return;
             }
@@ -1545,7 +1545,7 @@ namespace EvilAliensWeb.Compat.Net
         // Our OWN current seat is excluded: that is the seat we would move out of, not a blocker.
         private static byte LocalBlockedSlots()
         {
-            if (isHost || GameScene.NetActiveScene == null)
+            if (isHost || NetScene.Current == null)
             {
                 return 0;
             }
@@ -1725,7 +1725,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             SlotAdopt action = DecideSlotAdopt(localPrimarySlot, slot, peerPrimarySlot,
-                GameScene.NetActiveScene != null, oracle.IsSeated(localPrimarySlot), oracle.IsSeated(slot));
+                NetScene.Current != null, oracle.IsSeated(localPrimarySlot), oracle.IsSeated(slot));
             if (action == SlotAdopt.Settled)
             {
                 return;
@@ -1968,7 +1968,7 @@ namespace EvilAliensWeb.Compat.Net
             Console.WriteLine("[net] couch player joined slot=" + slot + " device=" + device);
             if (spawnPlayer)
             {
-                GameScene.NetActiveScene?.SpawnPlayer(device, slot);
+                NetScene.Current?.SpawnPlayer(device, slot);
             }
         }
 
@@ -2052,7 +2052,7 @@ namespace EvilAliensWeb.Compat.Net
             // or a scripted no-ship phase must leave the spawn to SpawnAllPlayers, or we hand the
             // slot a ship the very next purge eats -- a seated slot with no ship, which is the
             // "missing owner" artifact this card's own gate reads as a failure.
-            bool spawn = GameScene.NetActiveScene?.JoinWouldSpawnNow ?? false;
+            bool spawn = NetScene.Current?.JoinWouldSpawnNow ?? false;
             // TrySeatLocalJoin has five silent early returns (device already playing, roster full,
             // client not yet paired, a request already outstanding), so report what actually
             // happened rather than what was asked for: on the host the seat appears synchronously,
@@ -2088,7 +2088,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            if (GameScene.NetActiveScene == null || FindLocalShip() == null)
+            if (NetScene.Current == null || FindLocalShip() == null)
             {
                 localJoinSimAt = 0; // wait for a settled level + our own ship before joining anyone
                 return;
@@ -2179,7 +2179,7 @@ namespace EvilAliensWeb.Compat.Net
                     // menu-session client that mirrors EvLaunch); its EvReady then triggers the
                     // live-world replay below plus the deep scenery catch-up (background ops /
                     // music cue), and the 1 Hz EvScoreSync trues up score/lives.
-                    GameScene scene = GameScene.NetActiveScene;
+                    INetScene scene = NetScene.Current;
                     if (scene != null)
                     {
                         transport.SendReliable(NetProtocol.EncodeLaunchEvent(txEventSeq++,
@@ -2210,7 +2210,7 @@ namespace EvilAliensWeb.Compat.Net
         private static void EndMatchPeerGone(string reason, string notice)
         {
             // (the banner is dropped by Stop() below, which every path here goes through)
-            GameScene scene = GameScene.NetActiveScene;
+            INetScene scene = NetScene.Current;
             bool normalEnd = scene != null && scene.NetEndingNormally;
             Stop(reason, normalEnd ? null : notice);
             scene?.NetApplyPeerLeft();
@@ -2263,7 +2263,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            GameScene scene = GameScene.NetActiveScene;
+            INetScene scene = NetScene.Current;
             if (scene == null)
             {
                 return;
@@ -2300,7 +2300,7 @@ namespace EvilAliensWeb.Compat.Net
             if (RemotePaused)
             {
                 RemotePaused = false;
-                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+                NetScene.Current?.NetSetRemotePaused(false);
             }
             PeerUp = false;
             ReleasePeerSeats();
@@ -2368,7 +2368,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             peerStalled = false;
-            GameScene.NetActiveScene?.NetSetPeerStalled(false);
+            NetScene.Current?.NetSetPeerStalled(false);
         }
 
         // `recovered` distinguishes the two ways the banner drops: the stream actually came
@@ -2393,7 +2393,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             peerStalled = true;
             Console.WriteLine("[net] peer stalled (stream quiet > " + PeerStallMs + "ms) -- grace running");
-            GameScene.NetActiveScene?.NetSetPeerStalled(true);
+            NetScene.Current?.NetSetPeerStalled(true);
         }
 
         private static void PeerLost(string reason)
@@ -2434,7 +2434,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 // Never leave the world frozen by a peer that's gone.
                 RemotePaused = false;
-                GameScene.NetActiveScene?.NetSetRemotePaused(false);
+                NetScene.Current?.NetSetRemotePaused(false);
             }
         }
 
@@ -2478,7 +2478,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             lastRxStreamAt = NowMs;
             metrics.SnapRx++;
-            if (GameScene.NetActiveScene == null)
+            if (NetScene.Current == null)
             {
                 // Menu-lobby flow: the host may be in-level while we're still warming --
                 // don't build puppets into a menu world; EvReady triggers a replay once
@@ -2537,7 +2537,7 @@ namespace EvilAliensWeb.Compat.Net
             {
             case NetProtocol.EvSpawn:
             {
-                if (isHost || GameScene.NetActiveScene == null
+                if (isHost || NetScene.Current == null
                     || !NetProtocol.TryDecodeSpawnEvent(data, out ushort id, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
                 {
                     return;
@@ -2554,7 +2554,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvDeath:
             {
-                if (isHost || data.Length < NetProtocol.DeathEventBytes || GameScene.NetActiveScene == null)
+                if (isHost || data.Length < NetProtocol.DeathEventBytes || NetScene.Current == null)
                 {
                     return;
                 }
@@ -2580,7 +2580,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvScoreSync:
             {
-                if (isHost || data.Length < 5 + 4 * NetProtocol.MaxSlots || GameScene.NetActiveScene == null)
+                if (isHost || data.Length < 5 + 4 * NetProtocol.MaxSlots || NetScene.Current == null)
                 {
                     return;
                 }
@@ -2614,7 +2614,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                if (GameScene.NetActiveScene == null)
+                if (NetScene.Current == null)
                 {
                     return;
                 }
@@ -2654,7 +2654,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvMessage:
             {
-                if (isHost || GameScene.NetActiveScene == null
+                if (isHost || NetScene.Current == null
                     || !NetProtocol.TryDecodeMessageEvent(data, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text))
                 {
                     return;
@@ -2706,7 +2706,7 @@ namespace EvilAliensWeb.Compat.Net
                 Unlockables.GetInstance().SaveThreaded();
                 // The GRANT above always applies; the banner is world dressing -- skip it
                 // if our scene isn't up (menu-lobby warm race).
-                if (GameScene.NetActiveScene != null)
+                if (NetScene.Current != null)
                 {
                     AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
                     banner.Setup(text, speech, AnimatedMessage.MessageType.unlocked);
@@ -2725,7 +2725,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                GameScene.NetActiveScene?.NetApplyBackgroundOp(bgOp, v);
+                NetScene.Current?.NetApplyBackgroundOp(bgOp, v);
                 metrics.BeatsRx++;
                 break;
             }
@@ -2735,13 +2735,13 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                GameScene.NetActiveScene?.NetApplyCosmeticSwarm(kind, swarmOn, swarmRate);
+                NetScene.Current?.NetApplyCosmeticSwarm(kind, swarmOn, swarmRate);
                 metrics.BeatsRx++;
                 break;
             }
             case NetProtocol.EvMusic:
             {
-                if (isHost || data.Length < 5 || GameScene.NetActiveScene == null)
+                if (isHost || data.Length < 5 || NetScene.Current == null)
                 {
                     return;
                 }
@@ -2755,7 +2755,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                GameScene.NetActiveScene?.NetApplyCheckpoint();
+                NetScene.Current?.NetApplyCheckpoint();
                 metrics.BeatsRx++;
                 break;
             }
@@ -2765,7 +2765,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                GameScene.NetActiveScene?.NetApplyReset(data[4]);
+                NetScene.Current?.NetApplyReset(data[4]);
                 metrics.Resets++;
                 if (NetHost.Current.NetLog)
                 {
@@ -2779,7 +2779,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                GameScene.NetActiveScene?.NetApplyVictory();
+                NetScene.Current?.NetApplyVictory();
                 metrics.Victories++;
                 break;
             }
@@ -2791,7 +2791,7 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 bool on = data[4] != 0;
                 RemotePaused = on;
-                GameScene.NetActiveScene?.NetSetRemotePaused(on);
+                NetScene.Current?.NetSetRemotePaused(on);
                 if (on)
                 {
                     metrics.Pauses++;
@@ -2811,7 +2811,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvTetherBreak:
             {
-                GameScene.NetActiveScene?.NetApplyTetherBreak();
+                NetScene.Current?.NetApplyTetherBreak();
                 metrics.TetherBreaks++;
                 break;
             }
@@ -2856,7 +2856,7 @@ namespace EvilAliensWeb.Compat.Net
                 // This is the seam, not PeerConnected: a join-in-progress peer has no
                 // GameScene at pairing time, and the Initialize that gives it one would
                 // clobber anything we sent earlier with the level's INITIAL background/music.
-                GameScene.NetActiveScene?.NetReplayCatchUp();
+                NetScene.Current?.NetReplayCatchUp();
                 break;
             }
             case NetProtocol.EvLeave:

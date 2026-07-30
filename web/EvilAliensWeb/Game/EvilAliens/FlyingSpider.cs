@@ -147,15 +147,22 @@ internal class FlyingSpider : KillableAlien
 		// phase would make every boot a different pose -- and two boots that differ in pose cannot
 		// be A/B'd against each other (the ?flyspiderflatten= comparison this exists for). Pin it.
 		// Live play keeps the randomization: a swarm flapping in lockstep reads as one organism.
-		if (EvilAliensWeb.Compat.DebugFlags.Harness == null)
+		if (!PosePinned)
 		{
 			flaptimer.Randomize();
 		}
 		base.Position = new Vector2(850f, RandomHelper.RandomNextFloat(0f, 475f));
 		base.Direction = (float)Math.PI;
 		base.MaxSpeed = base.Speed;
-		rotation = RandomHelper.RandomNextFloat(-(float)Math.PI / 32f, (float)Math.PI / 32f);
-		int colorPick = netForcedColorIndex ?? RandomHelper.Random.Next(3);
+		rotation = PosePinned
+			? 0f
+			: RandomHelper.RandomNextFloat(-(float)Math.PI / 32f, (float)Math.PI / 32f);
+		// A bench spider's tint is deterministic per grid slot rather than rolled, so the grid
+		// still holds all three tints (a single-tint grid would hide a tint-dependent draw bug)
+		// while two boots at the same N tint the same slots the same way. Background spiders
+		// overwrite this a few lines down, so it only ever reaches a foreground bench.
+		int colorPick = netForcedColorIndex
+			?? (benchIndex.HasValue ? benchIndex.Value % 3 : RandomHelper.Random.Next(3));
 		switch (colorPick)
 		{
 		case 0:
@@ -187,12 +194,20 @@ internal class FlyingSpider : KillableAlien
 			base.DrawOrder = 20;
 			swiveltimer.Duration = 2700f;
 		}
-		if (EvilAliensWeb.Compat.DebugFlags.Harness == null)
+		if (!PosePinned)
 		{
 			swiveltimer.Randomize();
 		}
 		ApplyBenchPlacement();
 	}
+
+	// Both rigs that exist to be A/B'd freeze the pose, and for the same reason: two boots that
+	// differ in wing-flap phase, swivel phase or tilt cannot be compared frame against frame.
+	// The sprite harness parks ONE spider for a screenshot; ?flyspidercount= pins a whole grid of
+	// them (ApplyBenchPlacement already fixes X/Y and Speed, which is the other half of it). Live
+	// play keeps every roll -- a swarm flapping in lockstep reads as one organism.
+	private bool PosePinned =>
+		EvilAliensWeb.Compat.DebugFlags.Harness != null || benchIndex.HasValue;
 
 	// Lay the bench spiders out on a deterministic grid over the play field and freeze them in X,
 	// so the on-screen population is EXACTLY the requested N for the whole run. Speed 0 also keeps

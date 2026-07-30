@@ -860,7 +860,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   - **The honest rig is `?flyspidercount=<N>` + `?flyspiderflatten=`.** `?flyspidercount=<N>`
     replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
     grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
-    stays representative. Bench spiders are also forced `Collides = false`, which for the
+    stays representative. **A bench boot is now byte-deterministic** (card 1cd47879): a bench
+    spider pins its wing-flap phase, swivel phase and tilt exactly as the sprite harness does, and
+    tints by grid slot instead of rolling, so two boots at the same N differ ONLY in the flag under
+    test -- which is what makes a swarm-vs-per capture pair diffable instead of eyeballable. Live
+    play (and the un-pinned `?flyspiders` stream) keeps every roll. Bench spiders are also forced `Collides = false`, which for the
     FOREGROUND variant is a real change from live play -- otherwise the player would shoot the
     pinned population down mid-run and an un-invulned ship could be killed by the grid it is
     measuring. So a foreground bench sits out the collision pass and is a DRAW-cost rig (GL calls
@@ -880,12 +884,23 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   - **The flatten earns its keep visually** -- verify with `?harness=flyingspiderbg` (the fog
     variant, frozen) against `&flyspiderflatten=0`: with it off the wings read visibly more solid
     than the body (they composite to ~0.36 over a 0.2 body), with it on the silhouette fades as
-    one. The harness pins the flap/swivel phase (`Initialize` skips `Randomize()` while
-    `DebugFlags.Harness` is set) precisely so the two boots are the same pose and therefore
-    comparable; live play keeps the randomization. The swarm variant preserves the per-spider
-    silhouette exactly (identical body+wing math); it differs only where two SPIDERS overlap,
-    which also stops double-brightening -- at alpha 0.2 over Mars dust that is not perceptible,
-    which is what let it ship as the default.
+    one. The harness pins the flap/swivel phase and the tilt (`FlyingSpider.PosePinned`, which the
+    `?flyspidercount=` bench now shares) precisely so the two boots are the same pose and therefore
+    comparable; live play keeps the randomization. **Measured on the harness** (card 1cd47879,
+    `eahl`, 180 frames): the bare boot and `&flyspiderflatten=per` are BYTE-IDENTICAL -- which is
+    the check that the harness really does fall back to the per-spider path under the `Swarm`
+    default, since it adds no `FlyingSpiderSwarm` -- and `&flyspiderflatten=0` differs in 645
+    pixels, all inside an 80x45 box on the spider, peaking at 7/channel. So the mechanism is
+    confirmed and CONFINED to the wing/body overlap; "visibly" oversells it at this pose and on
+    this background.
+    **The swarm variant preserves the per-spider silhouette, and that is now measured, not
+    argued** (same card, `?level=Level2&flyspiders&flyspidercount=N`, swarm vs per): **N=1
+    byte-identical** (the union of one box IS that box), **N=4** -- the largest grid that does not
+    overlap -- 49 pixels differing by at most 2/765 summed, i.e. RT rounding. It differs only where
+    two SPIDERS overlap, and there it removes double-brightening rather than changing shape: over
+    the fog band at N=40 the peak deviation from a spider-free frame runs none 57 > per 37 > swarm
+    28. At alpha 0.2 over Mars dust that is not perceptible, which is what let it ship as the
+    default.
   - In-game the fog layer draws at alpha 0.2 over bright Mars dust, where the spiders are already
     near-invisible -- **do not try to judge the flatten from a live Level 2 screenshot**, use the
     harness stills.

@@ -84,7 +84,7 @@ The menu path, rehearsed headlessly (see `preload_level2.txt`):
 
 | | |
 |---|---|
-| main menu order | Start · Options · Tutorial · Challenges · Online Co-op · Awardments · Cheats · Exit |
+| main menu order (**`?unlockall` only** — see below) | Start · Options · Tutorial · Challenges · Online Co-op · Awardments · Cheats · Exit |
 | into a mission | `Press enter` → mission carousel (opens on Mission 1) → `Press right` per mission → `Press enter` → difficulty → `Press enter` |
 | into a challenge | `Press down` ×3 → `Press enter` → challenge carousel (opens on **Space Dodge**) → `Press right` per entry → `Press enter` → difficulty → `Press enter` |
 
@@ -96,6 +96,13 @@ rather than trusting this table if a right-count lands you somewhere unexpected:
 | index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|---|
 | entry | Space Dodge! | Braineroids | Evil Aliens Classic | **Paratrooper** | Base Pressure (`OwnLevel`) | Crazy Game | **Boss Train** (`InsaneBossI`) | Team Challenge | I Made This! (`WebcamAliens`) |
+
+**THE MAIN MENU HIDES LOCKED ENTRIES, so that row is the `?unlockall` order and a down-count from
+it is WRONG on any other boot.** `eahl`'s saves are wiped per run (card 36db5d75), so a bare
+`?menu&noattract` boot draws **five** rows — Start · Options · Tutorial · Online Co-op · Exit —
+and `down` x4 lands on **Exit**, not Online Co-op (measured, screenshot-confirmed). Challenges,
+Awardments and Cheats are `Unlockables`-gated and simply are not drawn. Either pass `?unlockall`
+so the table holds, or screenshot the menu and count what is actually on it.
 
 **`Press <key> <n>` is an n-frame HOLD, not n taps.** `eval Press down 3` moves the menu ONCE.
 Every tap is its own `eval Press` with a `step` between — this cost a rehearsal run that never

@@ -180,9 +180,47 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   `plans/net-headless-sim.md`). `NetSession`, `NetPuppets` and `NetImpairment` no longer touch
   `Environment.TickCount64`, `DebugFlags`, `WebRtcInterop` or `ServiceHelper` directly -- they go
   through `NetHost.Current`, whose production value is `ServiceHelperNetHost` and holds each
-  expression verbatim. **2c is split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
-  `2c-ii` the ENTITY (`INetEntity`, SHIPPED), `2c-iii` entity creation. It is STILL STATIC and
-  single-instance until step 3.
+  expression verbatim. **2c was split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
+  `2c-ii` the ENTITY (`INetEntity`, SHIPPED), `2c-iii` entity creation (**MEASURED AND DECLINED**,
+  next bullet). It is STILL STATIC and single-instance, and after the re-plan it stays that way
+  unless step 3 is ever justified.
+  - **THE SEAM IS FINISHED AT 2c-ii. `2c-iii` (entity CREATION) was measured and declined, and
+    the reason generalises: its motivation was "the sim never constructs a `Game`", which is
+    dead.** The harness runs under `eahl`, which HAS one, and `NetSnapshotTest` /
+    `NetPuppetBench` already build and drive REAL replicable entities headlessly. Measured on
+    `9bdbc5a`: moving `INetTypeDescriptor`'s four entity-typed members onto `INetEntity` is
+    **~80 signature edits** (4 declarations + 6 sites in `NetTypeDescriptor<T>` + **70
+    overrides** across the six descriptor files -- 29 `CreatePuppet`, 15 `ApplyStateExtra`, 15
+    `EncodeStateExtra`, 11 `EncodeSpawnExtra`) for no behaviour change and no capability, since
+    the sim uses the production descriptor table anyway. The 11 creation calls (6
+    `Explosion.NewExplosion`, 1 `new Bullet`, 2 `new PlayerShip`, 2 `bin.Recycle<PlayerShip>()`,
+    production only) all read the `game`/`bin` fields already, and faking them would make the real
+    death paths vacuous -- strictly worse evidence.
+  - **The three remaining `(AlienDrawableGameComponent)e.Comp` downcasts are SAFE BY
+    CONSTRUCTION -- that is the invariant, not an accident to tidy up later.**
+    `NetTypeRegistry.TryGet` matches the EXACT runtime type against a table whose every entry is
+    an `AlienDrawableGameComponent` subclass, and `CreatePuppet` returns that type, so
+    `NetPuppets.ApplySnapshotState` / `NetSession.OnHostSpawn` / `NetSession.SendWorldSnapshot`
+    cannot fail. An `INetEntity` implementer that is NOT one could only reach them by being added
+    to that table -- which is what would have to change first.
+  - **TWO PEERS WITH INDEPENDENT WORLDS IN ONE PROCESS IS UNREACHABLE, and knowing why saves the
+    next person a step-3 sizing.** `ComponentBin`'s only ctor does `collection = game.Components`,
+    and `Oracle` (2 subscriptions + 5 scans) and `CollisionHandler` (2 subscriptions) bind to that
+    same collection -- so two contexts under one `Game` share one world and the host context's
+    `NetIdRegistry` would allocate ids for the client context's puppets. The other three services
+    are already fine per-instance (`ScoreVisualiser` has ZERO `Components` references,
+    `SoundManager` only stores the `Game`, `Oracle` ships `DetachFromComponents()` for
+    `NetSlotTest`'s scratch roster). **So a scenario drives ONE real context and scripts its peers
+    onto the wire** -- step 1b's shape -- and step 3's de-static move is off the critical path.
+    Full re-plan, including what a second-collection `ComponentBin` would cost, in
+    `plans/net-headless-sim.md`.
+  - **`NetSession.HandleClaim` reads NO scene** -- it reaches `NetIdRegistry` / `bin` / `score` /
+    `sound` (via `ApplyRemotePowerup`'s `PlayCue`) / `Explosion` / `NetPuppets.KillerAgent`. So
+    the claim scenarios are MENU-runnable and leave-no-trace-able (the `eaNetSnap` shape), NOT
+    destructive like `eaNetResetSpawn`. **That is about the transitive closure, so it was checked
+    one level deeper**: `killable.NetKill` runs the real per-type `KilledBy` (explosions, cues,
+    `AwardScoreToAll`), and `Boss.KilledBy` is scene-free -- but check the specific types a new
+    scenario kills rather than assuming it of all of them.
   - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 17 members
     (the card's census measured 16 distinct ones over 42 call sites; `GetType()` is one of them
     and comes free from `object`, and the two discriminants below replace type tests rather than
@@ -201,15 +239,18 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     is the only reason `NetScale` / `NetRotation` / `NetCurFrame` exist -- an interface cannot
     expose a field. `NetCurFrame` is READ-ONLY on the seam: both writers wrap into the type's
     active frame range, and a bare setter would let a caller index off the sheet.
-  - **THREE THINGS ARE OFF THE SEAM ON PURPOSE, and `INetEntity`'s header says so.** (a)
-    COLLECTION IDENTITY -- the bin add/remove calls and the two `GameComponent`-keyed maps cast
-    back, VISIBLY, rather than the interface exposing a `GameComponent` and defeating itself in
-    one member; that coupling is about the shared `Game.Components`, and it is 2c-iii's plus step
-    3's. (b) The DESCRIPTOR extras (`EncodeSpawnExtra`/`EncodeStateExtra`/`ApplyStateExtra`),
+  - **THREE THINGS ARE OFF THE SEAM ON PURPOSE, and `INetEntity`'s header says so. They were
+    filed as 2c-iii's; 2c-iii measured them and DECLINED, so they are PERMANENT, not pending.**
+    (a) COLLECTION IDENTITY -- the bin add/remove calls and the two `GameComponent`-keyed maps
+    cast back, VISIBLY, rather than the interface exposing a `GameComponent` and defeating itself
+    in one member; that coupling is about the shared `Game.Components` (see the bullet above for
+    why it is unreachable rather than deferred). (b) The DESCRIPTOR extras
+    (`EncodeSpawnExtra`/`EncodeStateExtra`/`ApplyStateExtra`),
     which would mean editing a parameter type in 41 overrides across six descriptor files (eight in all,
     counting `DescriptorBase`'s three virtuals and `NetTypeRegistry`'s three declarations) for no
-    behaviour change; 2c-iii owns that surface, `CreatePuppet` included, so the three call sites
-    cast. (c) The INBOUND hooks `NoteKill` / `NotePowerupTaken` keep their concrete parameter
+    behaviour change -- 70 overrides and ~80 edits once `CreatePuppet`'s return type and the
+    declarations are counted, which is what the 2c-iii census weighed. So the three call sites
+    cast, permanently and safely. (c) The INBOUND hooks `NoteKill` / `NotePowerupTaken` keep their concrete parameter
     types -- they are the GAME calling the net layer, and a concrete argument converts for free,
     which is why **no game call site outside `Compat/Net` changed**.
   - **VERIFICATION IS SHAPED DIFFERENTLY FROM 2a/2b/2c-i, and knowing why matters.** Those three

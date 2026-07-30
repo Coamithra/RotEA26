@@ -8,9 +8,11 @@ namespace EvilAliensWeb.Compat.Net
     // scenario asks, the impairment knobs) and forwards everything else to the production host.
     // A scenario that wants determinism in TIME therefore does not silently also change the
     // build hash, the peer token or the debug flags out from under the code it is testing --
-    // which is how a "deterministic" rig quietly stops being the thing that ships. Step 4's
-    // FakeNetHost is the blank one, and it belongs with the FakeEntity/FakeScene half of the
-    // seam, not here.
+    // which is how a "deterministic" rig quietly stops being the thing that ships. There is NO
+    // blank fake to pair it with: step 4's FakeNetHost died with FakeEntity when 2c-iii was
+    // measured and declined (the sim runs under eahl, which has a Game, so the four services are
+    // real and stubbing them would make every assertion about the real world vacuous). A
+    // scenario needing different services supplies them itself -- see below.
     //
     // The clock does not tick. Nothing advances it but Advance(), so a scenario's assertions
     // about "before" and "after" mean exactly what they say, and the two real-clock windows
@@ -73,7 +75,7 @@ namespace EvilAliensWeb.Compat.Net
 
         // Step 2b's four services forward UNCONDITIONALLY -- pinning the clock must not also
         // hand the layer a different world. A scenario wanting its own services overrides them
-        // in its own host (step 4's FakeNetHost), not by making this class a blank fake; the
+        // in its own host implementation, not by making this class a blank fake; the
         // whole reason it is a decorator is that a rig made deterministic in TIME should change
         // nothing else out from under the code it is testing.
         public Oracle Oracle => inner.Oracle;

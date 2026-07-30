@@ -328,7 +328,8 @@ namespace EvilAliensWeb.Compat.Net
             //
             // The cast back is the descriptor surface, which step 2c-ii deliberately left on
             // the concrete type (INetEntity's header says why): moving it would mean editing a
-            // parameter type in ~40 overrides for no behaviour change, and 2c-iii owns it.
+            // parameter type in 41 overrides for no behaviour change. 2c-iii measured that and
+            // DECLINED it, so this cast is permanent -- and safe by construction (INetEntity).
             desc?.ApplyStateExtra((AlienDrawableGameComponent)comp, buf, extraOff, extraLen);
             return popped;
         }

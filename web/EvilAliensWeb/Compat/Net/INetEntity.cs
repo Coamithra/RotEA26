@@ -22,20 +22,33 @@ namespace EvilAliensWeb.Compat.Net
     //
     // ---- three things this seam deliberately does NOT carry -----------------------------
     //
+    // These were filed as the next slice's (2c-iii, entity creation). 2c-iii then MEASURED that
+    // surface and DECLINED it, so all three are PERMANENT properties of this seam rather than
+    // deferred work -- do not "finish the job" without a new reason, because the one the plan
+    // gave ("the host owns entity lifecycle so the sim never constructs a Game") is dead: the
+    // harness runs under eahl, which HAS a Game. Full census in plans/net-headless-sim.md.
+    //
     // 1. COLLECTION IDENTITY. The cores also hand entities to ComponentBin.Add/Remove/TryAdd
     //    and key two maps (NetPuppets.idByComp, NetIdRegistry.entries) on GameComponent. Those
     //    sites cast back, visibly, rather than this interface exposing a `GameComponent` --
-    //    which would defeat its whole purpose in one member. That coupling is real and it is
-    //    the NEXT slice's (2c-iii, entity creation) plus step 3's: it is about the shared
-    //    Game.Components collection, not about the entity type.
+    //    which would defeat its whole purpose in one member. That coupling is real, and it is
+    //    about the shared Game.Components collection rather than the entity type: ComponentBin's
+    //    only ctor binds to game.Components, and Oracle and CollisionHandler subscribe to it too,
+    //    which is why two peers with independent worlds in one process is unreachable and why
+    //    the sim drives ONE real context and scripts its peers onto the wire.
     // 2. DESCRIPTOR EXTRAS. INetTypeDescriptor's EncodeSpawnExtra / EncodeStateExtra /
     //    ApplyStateExtra still take the concrete type, so the THREE call sites that reach a
     //    descriptor cast (NetPuppets.ApplySnapshotState, NetSession.OnHostSpawn and
     //    NetSession.SendWorldSnapshot; CreatePuppet needs none -- it RETURNS the concrete
-    //    type). Moving those signatures would mean editing the parameter type in 41 overrides
-    //    across six descriptor files -- eight files in all, once DescriptorBase's three
-    //    virtuals and NetTypeRegistry's three declarations are counted -- for no behaviour
-    //    change. The descriptor surface is 2c-iii's, and it owns CreatePuppet already.
+    //    type). Moving those signatures means editing the parameter type in 41 extras overrides
+    //    across six descriptor files -- 70 overrides once CreatePuppet's return type is counted
+    //    too, and ~80 edits in all with the four interface declarations and the six sites in
+    //    NetTypeDescriptor<T>, i.e. eight files. For no behaviour change and no capability:
+    //    the sim builds REAL puppets through the production table.
+    //    THOSE THREE CASTS ARE SAFE BY CONSTRUCTION, and that is the invariant to preserve:
+    //    NetTypeRegistry.TryGet matches the EXACT runtime type against a table whose every
+    //    entry is an AlienDrawableGameComponent subclass, and CreatePuppet returns that type.
+    //    An INetEntity implementer that is NOT one could only reach them by joining that table.
     // 3. THE INBOUND HOOKS. NetSession.NoteKill / NotePowerupTaken keep their concrete
     //    parameter types: they are the GAME calling the net layer, not the net layer reading
     //    an entity, and a concrete argument converts to this interface for free. So no game

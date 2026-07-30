@@ -11,12 +11,13 @@ namespace EvilAliensWeb.Compat.Net
     // surface is bigger than the ~30 the design doc first sketched. (The doc's own "45 + 18 + 14"
     // sizing is dead for THIS interface: 45 was a count of what the cores CALL, and 2b's finding
     // is that what has to move is the resolution, not the calls -- see the 2b block below. The
-    // real total here is 11 + 4 + whatever 2c's entity creation needs.)
+    // real total here is 11 + 4 = FIFTEEN, final: 2c added nothing to THIS interface.)
     //   * 2a -- the clock, the build/identity fingerprints and the debug flags.
     //   * 2b -- the four ServiceHelper services (oracle / bin / score / sound).
-    //   * 2c -- INetEntity + INetScene + entity creation.
+    //   * 2c -- INetEntity + INetScene, both their own interfaces rather than members here;
+    //     entity creation (2c-iii) was measured and DECLINED, so nothing landed for it.
     // Everything stays STATIC and single-instance through all three; the instance cores and
-    // NetContext are step 3.
+    // NetContext are step 3, which the 2c-iii re-plan made optional and last.
     //
     // WHY THE CLOCK FIRST. Every scenario worth writing against this layer is about ORDERING
     // over time (a claim inside the RTT window, a grant expiring, a snapshot racing a reset),

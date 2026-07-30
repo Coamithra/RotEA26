@@ -36,15 +36,16 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > `2c-ii` the ENTITY (`INetEntity`) -- the only slice with a hot path, and the one this doc's
 > MEASURE-FIRST instruction is about -- **shipped 2026-07-30**, and the measurement says the
 > simple direct interface WINS (the generic-core fallback did not earn it). `2c-iii` entity
-> CREATION. Remaining: **2c-iii**, 3, 4.
+> CREATION -- **MEASURED AND DECLINED 2026-07-30**, see banner correction 3 below and the
+> census under the migration list. Remaining: **step 4** (step 3 is now OPTIONAL and last).
 >
 > **THIS DOC NAMED THE WRONG INSTRUMENT FOR 2c-ii's MEASUREMENT, and the correction is below.**
 > `FrameSection.UpdNet` brackets `NetSession.Update` + `NetListing.Tick`; the hot path it was
 > meant to catch, `NetPuppets.Drive`, runs inside `base.Update` and lands in `UpdComponents`.
 > `NetPuppetBench` (`eaNetPuppetBench`) is the rig that replaces it.
 >
-> **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
-> place below, but read this first, because each changed the plan materially:
+> **THIS DOC WAS WRITTEN 2026-07-24 AND THREE OF ITS PREMISES WERE WRONG.** All three are
+> corrected in place below, but read this first, because each changed the plan materially:
 >
 > 1. **No graphics-free core ASSEMBLY is needed** (see "Verification"). `tools/sim/logic_probe`
 >    already `AssemblyLoadContext`-loads the built `EvilAliensWeb.dll` into the desktop CLR and
@@ -60,6 +61,18 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 >    `TryAdd` one, which needs the REAL `ComponentBin` and a real `PlayerShip` and so could never
 >    have been reached by the `FakeNetHost` design at all. The scenarios sat in step 4 because this
 >    doc believed they needed the refactor; those that do not have moved to step 1b.
+> 3. **The sim CANNOT run two peers with independent WORLDS in one process, and it does not need
+>    to.** This doc's step 3 says "the sim constructs **two** `NetContext`s directly"; measured on
+>    `9bdbc5a`, the world is a process-global in exactly the way `ServiceHelper` was.
+>    `ComponentBin`'s only constructor does `collection = game.Components`, and `Oracle` (2
+>    subscriptions + 5 scans) and `CollisionHandler` (2 subscriptions) bind to that same
+>    collection -- so two contexts under one `Game` share one world, and the host context's
+>    `NetIdRegistry` would allocate ids for the client context's puppets and broadcast them back.
+>    **But all six scenarios below are reachable with ONE real context plus scripted wire peers**
+>    -- the shape step 1b already shipped -- and none of them needs both sides real at once. So
+>    **step 3 (the 108-static de-static move) is off the critical path**: step 4 comes first, and
+>    step 3 stays available for the day a scenario provably cannot be written honestly without a
+>    second REAL context. Its true blocker is named under step 3 below, and it is one constructor.
 
 ## Why it's blocked — two layers, not one
 
@@ -111,13 +124,21 @@ NOT make the code headless. `NetSession` / `NetPuppets` operate on real engine o
   (`NetTypeRegistry` + `Descriptors/*`) *constructs real puppets* (`UFO`, `Asteroid`, …) via their
   `New*+Setup` factories.
 
-`AlienDrawableGameComponent` is a `DrawableGameComponent`; constructing one needs a `Game`, and
+~~`AlienDrawableGameComponent` is a `DrawableGameComponent`; constructing one needs a `Game`, and
 KNI's only referenced platform here is `nkast.Kni.Platform.Blazor.GL` — **there is no headless
-platform**, so a console process can't `new Game()` or build a real puppet. The pure-math bits
-(`Vector2`, `MathHelper`, `GameTime`) run fine on console; the object graph does not.
+platform**, so a console process can't `new Game()` or build a real puppet.~~ **FALSE SINCE
+`tools/headless` — banner correction 1.** `eahl` links `nkast.Kni.Platform.SDL2.GL` and runs the
+real `Game1` in a hidden window, so the whole object graph is available headlessly: two shipped
+suites build real puppets there (`NetSnapshotTest` an `EvilBullet` from the MAIN MENU with no
+scene, `NetPuppetBench` up to 512).
 
-So the sim needs the core abstracted **off `Game` and off the concrete entity type**, not just
-off `ServiceHelper`.
+So the layer-2 conclusion is HALF right, and which half matters. ~~The sim needs the core
+abstracted off `Game`~~ — it does not, and everything justified by that clause is dead (the
+`FakeEntity`, the `FakeNetHost`, the host-owned entity lifecycle, 2c-iii entirely). It DID need
+the core abstracted off the concrete entity type, but for the other reason on this list: so the
+cores stop *naming* `AlienDrawableGameComponent`, which 2c-ii delivered. **What layer 2 misses
+entirely is the collection** (`ComponentBin` → `game.Components`), which is the one Game
+entanglement that genuinely blocks a second peer — banner correction 3.
 
 ## Target architecture
 
@@ -138,8 +159,10 @@ The three cores co-reference (puppets → session for claims, session → regist
 registry → session for spawn/death). Bundle them in a **`NetContext`** hub that owns one of each
 plus the host seam (below) and the transport chain (`NetImpairment` → the real transport). The
 facades read `NetContext.Current` (the game's single context, created in `Start`/`StartMenuSession`,
-cleared in `Stop`). The sim constructs **two** `NetContext`s directly and never touches
-`NetContext.Current`.
+cleared in `Stop`). ~~The sim constructs **two** `NetContext`s directly and never touches
+`NetContext.Current`.~~ **DEAD -- banner correction 3.** Two contexts in one process share one
+world, and no scenario needs a second REAL one: a scenario drives ONE real context and scripts
+its peers onto the wire. This whole section is step 3's, which is now optional and last.
 
 `NetProtocol`, `NetMetrics`, `NetBaseState`, `NetImpairment`, `ShipStateBuffer` are already pure /
 instance-friendly — land these under the sim's reach first (they need no change) so protocol and
@@ -148,8 +171,16 @@ impairment round-trips can be tested before the bigger move.
 ### 2. The host seam (`INetHost`) — off `ServiceHelper`, off `Game`, off the concrete entity
 
 One injected interface carries *everything* the cores reach outside their own state. Two impls:
-`ServiceHelperNetHost` (production, byte-identical — literally today's `ServiceHelper.Get<>` /
-`new Explosion` calls) and `FakeNetHost` (the sim, plain data objects).
+`ServiceHelperNetHost` (production, byte-identical — literally today's `ServiceHelper.Get<>`
+calls) and ~~`FakeNetHost` (the sim, plain data objects)~~.
+
+**AS SHIPPED THIS IS 15 MEMBERS AND THE SECOND IMPL IS A DECORATOR, NOT A FAKE.** 2a landed 11
+(clock, dev flags, both fingerprints) and 2b four (`Oracle`, `ComponentBin`, `Score`,
+`SoundManager`); `new Explosion` never joined it (2c-iii, declined). The sim's impl is
+`PinnedNetHost`, which pins the clock and the impairment triple and FORWARDS the rest to
+production — so a rig made deterministic in time does not silently also change the world out from
+under the code under test. There is no `FakeNetHost` and there should not be one: the four
+services are real, and stubbing them would make every assertion about the real world vacuous.
 
 The entity abstraction is the crux. Introduce **`INetEntity`** — the union of the members the net
 layer reads/writes on a replicable component. **The sketch below is INCOMPLETE.** The measured set
@@ -172,10 +203,18 @@ void NetKill(INetKiller killer, bool comboGenerator);
 void AdvanceFrame(float dtSeconds); void TickTimers(float dtMs);
 ```
 
-Production wraps `AlienDrawableGameComponent` in an adapter that forwards to the existing `Net*`
-accessors (already the seam — see `AlienDrawableGameComponent.cs` bottom, `UFO.cs`). The sim's
-`FakeEntity` is a struct-ish class with fields + a scripted `IsDead`/`NetKill`. The host owns
-entity lifecycle so the sim never constructs a `Game`:
+~~Production wraps `AlienDrawableGameComponent` in an adapter that forwards to the existing `Net*`
+accessors. The sim's `FakeEntity` is a struct-ish class with fields + a scripted `IsDead`/`NetKill`.
+The host owns entity lifecycle so the sim never constructs a `Game`:~~
+
+**ALL THREE CLAUSES ARE DEAD, and the block below is kept only so nobody re-derives it.** No
+adapter (2c-ii: it would allocate per entity per tick, and the measurement backed the direct
+interface). No `FakeEntity` -- the harness runs under `eahl`, which HAS a `Game`, and two shipped
+suites already build and drive REAL replicable entities headlessly (`NetSnapshotTest` builds an
+`EvilBullet` from the MAIN MENU with no scene; `NetPuppetBench` builds up to 512). A fake would
+also be strictly WORSE evidence: it makes `ApplyStateExtra`, `NetKill` and the real death paths
+vacuous. And no host-owned entity lifecycle, because its whole motivation was the "never
+constructs a `Game`" clause -- see the 2c-iii census under the migration list.
 
 ```
 INetEntity CreatePuppet(byte typeIdx, in NetBaseState s, ReadOnlySpan<byte> extra); // via descriptor
@@ -191,11 +230,14 @@ void PlayCue(string);  void ApplyMusic(int song);  INetScene Scene { get; }  // 
 ```
 
 `INetScene` fronts the `GameScene.NetActive*` reset/pause/victory/background/checkpoint hooks so
-the sim can assert the *ordering* of state transitions without a real scene. Descriptors: the sim
-registers a **single generic test descriptor** that round-trips `NetBaseState` into a `FakeEntity`
-(the wire `typeIdx` table stays the production one for encode/decode, but puppet *construction* in
-the sim is the fake — enough for ledger/protocol/ordering; per-type extras get their own tiny
-fakes only where a scenario needs them).
+the sim can assert the *ordering* of state transitions without a real scene. **SHIPPED at 2c-i**,
+as `INetScene` + `NetScene.Current` + `RecordingNetScene`.
+
+~~Descriptors: the sim registers a **single generic test descriptor** that round-trips
+`NetBaseState` into a `FakeEntity`.~~ **DEAD with the `FakeEntity` above.** The sim uses the
+PRODUCTION descriptor table -- which is what makes `CreatePuppet` / `ApplyStateExtra` / the real
+death paths non-vacuous -- and reaches for a hand-built entity only where a scenario genuinely
+needs a shape the table has no type for (`NetEntityTest`'s four probe shapes are the precedent).
 
 ### 3. Driver-as-`Tick`, and the in-memory transport
 
@@ -239,8 +281,29 @@ Everything the cores touch outside their own state, and where it lands:
 
 ## Scenarios (assert on ledger + `NetMetrics`)
 
-Each spins up two `NetContext`s (host + join) paired by an `InMemoryTransport`, pumps the virtual
-clock, and asserts. All are today's generous-claim invariants made executable:
+~~Each spins up two `NetContext`s (host + join) paired by an `InMemoryTransport`~~ -- **banner
+correction 3: each drives ONE REAL context and SCRIPTS its peer(s) onto the wire**, pumps the
+virtual clock, and asserts. All are today's generous-claim invariants made executable.
+
+**Which side is real, mapped against what is reachable on `9bdbc5a` -- this is what took step 3
+off the critical path.** No scenario needs both sides real at once, and 1-4 need no `GameScene`
+at all: `NetSession.HandleClaim` reaches `NetIdRegistry` / `bin` / `score` / `sound` (via
+`ApplyRemotePowerup`'s `PlayCue`) / `Explosion` / `NetPuppets.KillerAgent`, and reads no scene.
+**Spot-checked one level deeper too, because the claim is about the transitive closure and not
+just the method body:** `killable.NetKill` runs the real per-type `KilledBy`, which is where the
+explosions, cues and `AwardScoreToAll` happen -- `Boss.KilledBy` is scene-free. Confirm the
+specific types a scenario kills before leaning on this. So 1-4 are MENU-runnable and
+leave-no-trace-able (the `eaNetSnap` shape), not destructive like 1b:
+
+| # | Real side | Scripted side sends | Needs a `GameScene`? |
+|---|---|---|---|
+| 1-4 | HOST (`NetIdRegistry` live, real entities in the bin) | `EvClaim` | **no** -- menu-runnable |
+| 5 | CLIENT (`NetPuppets` live) | bulk `EvDeath` + `EvSpawn` + reordered snapshots | no |
+| 6 | CLIENT | `EvReset` / `EvPause` / `EvCheckpoint` | yes (1b's rig + `RecordingNetScene`) |
+
+Script the peer with the REAL `NetProtocol.Encode*` codecs, never a hand-rolled frame -- that is
+what stops the scripted side drifting from the encoder it stands in for, and `NetWireTest` +
+`NetResetSpawnTest` are both already written that way.
 
 1. **Kill claim (happy path).** Client hit-tests a live puppet → `EvClaim`. Assert host
    `ClaimsHonored++`, `ClaimsHonoredLive`, entity removed, killer slot credited **once** on both
@@ -464,10 +527,11 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    - **Three things stayed off the seam on purpose** (`INetEntity`'s header has the argument):
      collection identity (the bin calls and the two `GameComponent`-keyed maps cast back visibly
      rather than the interface exposing a `GameComponent` and defeating itself); the DESCRIPTOR
-     extras, which 2c-iii owns along with `CreatePuppet` and which would otherwise mean a
-     parameter-type edit in 41 overrides across six descriptor files (eight in all) for no
-     behaviour change; and the inbound `NoteKill` /
+     extras, which would mean a parameter-type edit in 41 overrides across six descriptor files
+     (eight in all) for no behaviour change; and the inbound `NoteKill` /
      `NotePowerupTaken` hooks, so **no game call site outside `Compat/Net` changed at all**.
+     All three were filed as 2c-iii's, and **2c-iii then measured them and declined** -- so they
+     are now PERMANENT properties of the seam, not deferred work. See the entry below.
    - **THIS DOC'S INSTRUMENT WAS WRONG.** `FrameSection.UpdNet` brackets `NetSession.Update` +
      `NetListing.Tick` in `Game1.UpdateInner`. `NetPuppets.Drive` -- the per-puppet-per-tick loop
      this whole measurement is about -- is called from `NetPuppetDriver.Update`, i.e. from inside
@@ -498,6 +562,32 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      run beside them as the control, over four shapes, with a non-degeneracy check). Mutation-
      tested four ways, each isolated, each failing only the legs naming its member. Not a
      `logic_probe` case set, unlike `eaNetHost` -- constructing an entity needs a `Game`.
+   **2c-iii (entity CREATION) is MEASURED AND DECLINED. Do not re-open it without a NEW reason --
+   the one this doc gave is dead.** Both halves existed to serve "the host owns entity lifecycle
+   so the sim never constructs a `Game`", which banner correction 3 (and the `FakeEntity` note
+   above) retires. Measured on `9bdbc5a`:
+   - **The DESCRIPTOR surface is ~80 signature edits for zero behaviour change and zero
+     capability.** 4 declarations on `INetTypeDescriptor`, 6 sites in `NetTypeDescriptor<T>`
+     (3 virtuals, 1 abstract, the `C()` helper, the `where T :` constraint) and **70 overrides**
+     across the six descriptor files -- 29 `CreatePuppet`, 15 `ApplyStateExtra`, 15
+     `EncodeStateExtra`, 11 `EncodeSpawnExtra`. (The "41 overrides" on the 2c-ii card comment
+     counted only the three extras, which are the ones taking the parameter; changing the
+     interface moves `CreatePuppet`'s RETURN type too.) It would buy the sim nothing, because the
+     sim builds REAL puppets through the real table.
+   - **The three casts it would remove are SAFE BY CONSTRUCTION, so document the invariant rather
+     than spend the edits.** `NetTypeRegistry.TryGet` matches the EXACT runtime type against a
+     table whose every entry is an `AlienDrawableGameComponent` subclass, and `CreatePuppet`
+     returns that type -- so `(AlienDrawableGameComponent)e.Comp` in `NetPuppets.ApplySnapshotState`
+     / `NetSession.OnHostSpawn` / `NetSession.SendWorldSnapshot` cannot fail. A future
+     `INetEntity` implementer that is NOT one could only reach them by being added to that table.
+   - **The CREATION surface is 11 sites and faking it is strictly worse evidence** -- the same
+     argument that killed `FakeEntity`. 6 `Explosion.NewExplosion` (`NetPuppets` 1,
+     `NetSession` 3, `NetSession.Friends` 2), 1 `new Bullet` (`NetPuppets.KillerAgent`'s scratch
+     killer), 2 `new PlayerShip`, 2 `bin.Recycle<PlayerShip>()` -- production only; a third
+     `new PlayerShip` is in `NetResetSpawnTest`. Every one already takes the `game`/`bin` fields,
+     which step 3 turns into instance state anyway -- so there is nothing here a seam would move.
+     (The seam-surface table above says `Explosion.NewExplosion` x4; that was the 2026-07-24
+     count and is superseded by this one.)
    **1b'S DEBT IS PAID, by 2c-i -- do not re-open it.** It read: `NetResetSpawnTest` has to
    FAKE `SpawnAllPlayers`' respawn of the local seat, because `NetApplyReset` purges
    `PlayerShip` and its two retry legs need a non-null `FindLocalShip()`, while the real path
@@ -517,36 +607,78 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    directory is lobby / listing / game-browser / `WebRtcTransport` plumbing the sim never
    constructs, so it is OUT of the seam. The two `WebRtcInterop` calls that ARE in scope are
    `BuildHash()` and `PeerId()`, both in `StartWith`.
-4. **Step 3** -- move state into `*Core` instances behind the static facades; `NetContext.Current`
-   is the single production instance. Every external call site unchanged. **Start with
-   `NetIdRegistry`**: zero external references, so it is the cheapest rehearsal of the pattern.
-5. **Step 4** -- `FakeNetHost` + the N-peer scenario harness + the remaining scenarios below + the
-   id-churn `pupPops` probe. **No CI job** (see "Verification").
+4. **Step 4 -- THE SCENARIO HARNESS. This is now the next step, and the last REQUIRED one.**
+   It was ordered after step 3 because this doc believed the scenarios needed two real contexts;
+   banner correction 3 retires that, and the scenario table above maps each of the six onto one
+   real context plus a scripted peer. It delivers the harness + the six scenarios + the id-churn
+   `pupPops` probe, and it does NOT deliver a `FakeNetHost` (dead with `FakeEntity`) and **no CI
+   job** (see "Verification"). Four things it inherits rather than builds:
+   - `NetWire` (step 1) is already an N-endpoint switch, so the peer count stays a PARAMETER.
+   - `PinnedNetHost` (2a) pins the clock, so nothing reads a real one.
+   - `NetScene.Current` + `RecordingNetScene` (2c-i) supply and observe the scene.
+   - `StartForTest` (1b) starts a real session on a wire endpoint; `Stop()` resets every piece of
+     per-session state, which is what lets one process run scenario after scenario.
+   Scenarios 1-4 are MENU-runnable (see the table), so they belong in `net_selftests.txt`;
+   5 needs no scene either; only 6 inherits 1b's destructive `?level=` rig and its own probe.
+5. **Step 3 (de-static) -- OPTIONAL, AND LAST.** Move state into `*Core` instances behind the
+   static facades; `NetContext.Current` is the single production instance; every external call
+   site unchanged. **Start with `NetIdRegistry`**: zero external references, so it is the cheapest
+   rehearsal of the pattern. It is ~108 statics under 227 reference sites -- the biggest single
+   chunk of this card -- and it buys exactly one thing: a SECOND REAL context, so a scenario's far
+   side is the real code rather than a script. **Do it only when a scenario provably cannot be
+   written honestly without that**, and mitigate the drift risk meanwhile by scripting peers with
+   the real `NetProtocol.Encode*` codecs.
+   **Its true blocker is ONE CONSTRUCTOR, and that is worth knowing before anyone sizes it again.**
+   Measured on `9bdbc5a`, three of the four services are already per-instance constructible:
+   `ScoreVisualiser(Game)` has **zero** `Components` references, `SoundManager(Game)` only stores
+   the `Game`, and `Oracle` already ships `DetachFromComponents()` (added for `NetSlotTest`'s
+   scratch roster). The odd one out is `ComponentBin`, whose only ctor does
+   `collection = game.Components` and which DEREFERENCES `game` on **exactly three lines, all in
+   that ctor** (the field is otherwise only stored and handed back bare by
+   `internal Game Game => game`) -- so a second ctor over a supplied `GameComponentCollection` is
+   a handful of lines with every existing call site unchanged, and `GameComponentCollection` is
+   publicly constructible (verified against KNI 4.1.9001).
+   **Two consequences of a non-`Game` collection, both measured in `GameStrategy`:** its
+   `Components_ComponentAdded` handler is subscribed to `Game.Components` ALONE and does three
+   things -- `Initialize()`, register updateable, register drawable. Not being updated or drawn is
+   what a headless second world WANTS; not being `Initialize()`d is not, because
+   `ComponentBin.Add`'s whole configure-then-Add contract (the one `tools/audit_add_order.py`
+   lints) assumes KNI runs `Initialize()` inside the add. A second-collection bin must call it
+   itself, or the contract silently differs between the two worlds.
 
 Each step is separately shippable and separately verifiable. Steps 2 and 3 each get an OCCLUDED
 two-window loopback run with `?fpsuncapped` on both peers, asserting the STRUCTURAL set (roster,
 `pri=`, adopt, `resets`, mirror-image seat maps, `drop`/`sgap`/`ordViol`/`seqGap`): those stay
 valid occluded, and this refactor changes no timing, so none of it needs the two genuinely visible
-windows that would seize the user's screen. **The one real-WebRTC visible two-window smoke is the
-USER'S, once, after step 3** -- write the procedure down for them (exact URLs and flags for both
-windows, the local signaling steps, the key sequence, and the console lines and values that
-constitute a pass) rather than running it, and rehearse it headlessly first so they are replaying
-a known-good script. The production path never stops going through `ServiceHelper` --
-`ServiceHelperNetHost` *is* those calls.
+windows that would seize the user's screen. The production path never stops going through
+`ServiceHelper` -- `ServiceHelperNetHost` *is* those calls.
+
+**THE USER'S ONE REAL-WEBRTC TWO-WINDOW SMOKE IS DUE NOW, and re-anchoring it is a consequence of
+banner correction 3.** It was gated on "after step 3" because step 3 was the last step expected to
+touch the running co-op path. It is not: **2c-ii was**, and it is merged (`9bdbc5a`). Step 4 adds
+test scaffolding only, and step 3 may never happen. So the smoke covers 2a + 2b + 2c-i + 2c-ii and
+is due at the end of this correction -- the procedure is `docs/net-webrtc-smoke.md`, written for
+the user to run, not run here.
 
 ## Risks / sizing
 
 - **Regression risk to shipped co-op** (steps 2–3 touch hot paths). Mitigation: the facade keeps
   call sites identical; the byte-identical adapter; a two-tab smoke after each step.
-- **`INetEntity` on the snapshot hot path.** Interface dispatch per puppet per snapshot — measure;
-  if it bites, keep the production path on the concrete type via a generic core specialized to
-  `AlienDrawableGameComponent`, and only the sim pays the interface. (Design allows either.)
-- **Descriptor fidelity in the sim** — the generic fake descriptor tests ledger/ordering, not
-  per-type puppet looks; per-type extras get fakes only as scenarios demand. Full descriptor
-  fidelity is explicitly out of scope (that's the harness/browser's job).
+  **The production-touching half is DONE** -- 2a, 2b, 2c-i and 2c-ii are merged and 2c-iii is
+  declined, so nothing that remains (step 4; step 3 if it ever happens) is on the shipped path
+  except step 3's own facade move.
+- ~~**`INetEntity` on the snapshot hot path.**~~ **ANSWERED at 2c-ii, do not re-open without
+  re-running `eaNetPuppetBench`:** +0.11 ms/frame in WASM at N=512, i.e. +0.66% of the budget, so
+  the simple direct interface stands and the generic specialised core is not justified.
+- ~~**Descriptor fidelity in the sim** — the generic fake descriptor tests ledger/ordering, not
+  per-type puppet looks.~~ **DEAD with the fake descriptor** (banner correction 3 / the
+  `FakeEntity` note): the sim uses the PRODUCTION table, so per-type fidelity is whatever the real
+  descriptor does. Full per-type *appearance* fidelity remains out of scope -- that is the sprite
+  harness' job, not the sim's.
 - **Size:** ~medium-large. Step 1 small (shipped); 1b moderate; step 2 the bulk (the seam +
-  adapters, hence the 2a/2b/2c split); step 3 mechanical but WIDE (108 statics under 227 reference
-  sites); step 4 moderate. A real card, not a 11.x tail — which is why 11.3 deferred it.
+  adapters, hence the 2a/2b/2c split -- all shipped bar 2c-iii, declined); **step 4 moderate and
+  next**; step 3 mechanical but WIDE (108 statics under 227 reference sites) and now optional.
+  A real card, not a 11.x tail — which is why 11.3 deferred it.
 - **`verify_il_identical.py` will NOT hash identically for steps 2-3, and that is EXPECTED** -- a
   seam and an instance move are real refactors, not cosmetic ones. Do not iterate trying to force
   a green tick. The instrument is `verify_decompiled_diff.py --ref main` ("is the difference

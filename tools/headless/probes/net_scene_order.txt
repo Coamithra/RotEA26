@@ -27,6 +27,6 @@ mark
 
 eval NetSceneOrder
 
-expect \[netorder\] 15 passed, 0 failed
+expect \[netorder\] 16 passed, 0 failed
 expect-not FAIL
 quit

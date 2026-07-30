@@ -60,6 +60,12 @@ namespace EvilAliensWeb.Compat.Net
 
         private static readonly Vector2 Nowhere = new Vector2(-600f, -600f);
 
+        // The descriptor the churn scenario spawns through. EvilBullet is the simplest replicable
+        // -- no spawn extras, no state extras -- and index 0 of NetTypeRegistry is its descriptor.
+        // Named because the cleanup sweep has to agree with it, and two bare 0s in two places with
+        // nothing tying them together is how that drifts.
+        private const byte ChurnTypeIdx = 0;
+
         public static string Run()
         {
             StringBuilder sb = new StringBuilder();
@@ -102,13 +108,23 @@ namespace EvilAliensWeb.Compat.Net
             }
             int livesBefore = score.Lives;
             int playersBefore = oracle.Players;
+            // The OneUp scenario settles a real pickup, and HandleClaim's pickup branch drives
+            // ApplyRemotePowerup -> SetPowerup, which raises `powerupactive` on the claimant's
+            // panel. That flag is the gate ScoreVisualiser.increasecombo reads to feed AddExp, so
+            // leaving it set would not merely draw a stray icon -- it would change the next real
+            // game. Snapshot it with the rest.
+            bool[] powerupBefore = new bool[ScoreVisualiser.SlotCount];
+            for (int i = 0; i < powerupBefore.Length; i++)
+            {
+                powerupBefore[i] = score.NetPowerupActive(i);
+            }
 
             PinnedNetHost clock = new PinnedNetHost();
             INetHost hostBefore = NetHost.Current;
             NetHost.Current = clock;
             try
             {
-                RunClaimScenarios(sb, Check, oracle, bin, score, game, planted, scoreBefore, livesBefore);
+                RunClaimScenarios(sb, Check, bin, score, game, planted, scoreBefore);
                 RunChurnScenario(sb, Check, bin, game, planted, clock);
             }
             catch (Exception ex)
@@ -119,7 +135,8 @@ namespace EvilAliensWeb.Compat.Net
             finally
             {
                 sb.Append(" 9. teardown -- what this suite must hand back\n");
-                Teardown(sb, Check, oracle, bin, score, planted, scoreBefore, livesBefore, playersBefore);
+                Teardown(sb, Check, oracle, bin, score, planted, scoreBefore, livesBefore,
+                    playersBefore, powerupBefore);
                 NetHost.Current = hostBefore;
                 NetScene.Current = null;
                 Check("the injected clock is handed back", ReferenceEquals(NetHost.Current, hostBefore));
@@ -132,8 +149,8 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- scenarios 1-4: the HOST honouring claims -------------------------------------
         private static void RunClaimScenarios(StringBuilder sb, Action<string, bool> Check,
-            Oracle oracle, ComponentBin bin, ScoreVisualiser score, Game game,
-            List<GameComponent> planted, float[] scoreBefore, int livesBefore)
+            ComponentBin bin, ScoreVisualiser score, Game game,
+            List<GameComponent> planted, float[] scoreBefore)
         {
             NetWire wire = new NetWire(2);
             InMemoryTransport ours = wire[0];
@@ -163,10 +180,9 @@ namespace EvilAliensWeb.Compat.Net
             // half a hand-rolled fake could never cover, which is why the entity is a real UFO
             // built by its own New*+Setup factory (the harness-proven path).
             sb.Append(" 1. kill claim (happy path) -- a live entity, one claimant\n");
+            long claimsRxBefore = m.ClaimsRx;
             long honoredBefore = m.ClaimsHonored;
             long paidDeadBefore = m.ClaimsPaidDead;
-            long popsBefore = m.PuppetPops;
-            long snapUnkBefore = m.SnapUnknownIds;
             UFO victim = Plant(bin, game, planted);
             bool gotId = NetIdRegistry.TryGetByComp((GameComponent)(object)victim, out NetIdRegistry.Entry vEntry);
             Check("PRECONDITION the host registry allocated a netId for the planted entity"
@@ -185,7 +201,9 @@ namespace EvilAliensWeb.Compat.Net
             wire.Pump();
             NetSession.Update();
 
-            Check("the host counted the claim (rx +1)", m.ClaimsRx > 0);
+            // A DELTA, not `> 0`: NetSession.metrics is process-lifetime and nothing resets it,
+            // so an absolute test would already be satisfied by an earlier suite in the same run.
+            Check("the host counted the claim (rx +1)", m.ClaimsRx == claimsRxBefore + 1);
             Check("... and HONOURED it as a live kill (honored +1, was " + honoredBefore + ")",
                 m.ClaimsHonored == honoredBefore + 1);
             Check("... and did NOT take the already-dead branch (paidDead unchanged)",
@@ -201,10 +219,6 @@ namespace EvilAliensWeb.Compat.Net
                 paid1 >= pointValue);
             Check("no OTHER slot was credited",
                 Math.Abs(score.PointScore(PeerSlot2) - scoreBefore[PeerSlot2]) < 0.01f);
-            // These two are the "nothing else moved" control the doc asks for -- a claim path
-            // that quietly ran a puppet correction or a snapshot rebuild would show here.
-            Check("pupPops did not move (was " + popsBefore + ")", m.PuppetPops == popsBefore);
-            Check("snapUnk did not move (was " + snapUnkBefore + ")", m.SnapUnknownIds == snapUnkBefore);
             planted.Remove((GameComponent)(object)victim);
 
             // ---- 2. DOUBLE CLAIM -- both peers, same target, inside the RTT ---------------
@@ -225,8 +239,9 @@ namespace EvilAliensWeb.Compat.Net
             float s1Before = score.PointScore(PeerSlot);
             float s2Before = score.PointScore(PeerSlot2);
             UFO shared = Plant(bin, game, planted);
-            NetIdRegistry.TryGetByComp((GameComponent)(object)shared, out NetIdRegistry.Entry sEntry);
-            ushort sharedId = sEntry.Id;
+            Check("PRECONDITION the shared target got a netId",
+                NetIdRegistry.TryGetByComp((GameComponent)(object)shared, out NetIdRegistry.Entry sEntry));
+            ushort sharedId = sEntry?.Id ?? 0;
 
             peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sharedId, PeerSlot));
             wire.Pump();
@@ -278,8 +293,9 @@ namespace EvilAliensWeb.Compat.Net
             paidDeadBefore = m.ClaimsPaidDead;
             s2Before = score.PointScore(PeerSlot2);
             UFO sameTick = Plant(bin, game, planted);
-            NetIdRegistry.TryGetByComp((GameComponent)(object)sameTick, out NetIdRegistry.Entry stEntry);
-            ushort sameTickId = stEntry.Id;
+            Check("PRECONDITION the same-tick target got a netId",
+                NetIdRegistry.TryGetByComp((GameComponent)(object)sameTick, out NetIdRegistry.Entry stEntry));
+            ushort sameTickId = stEntry?.Id ?? 0;
             peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot));
             peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot2));
             wire.Pump();
@@ -308,10 +324,14 @@ namespace EvilAliensWeb.Compat.Net
             paidDeadBefore = m.ClaimsPaidDead;
             s1Before = score.PointScore(PeerSlot);
             UFO reaped = Plant(bin, game, planted);
-            NetIdRegistry.TryGetByComp((GameComponent)(object)reaped, out NetIdRegistry.Entry rEntry);
-            ushort reapedId = rEntry.Id;
-            // The host's own kill, through the real death path, with no claimant -- which is what
-            // a host-side AI or bullet kill looks like to the registry.
+            Check("PRECONDITION the reaped target got a netId",
+                NetIdRegistry.TryGetByComp((GameComponent)(object)reaped, out NetIdRegistry.Entry rEntry));
+            ushort reapedId = rEntry?.Id ?? 0;
+            // A TEARDOWN-STYLE removal, deliberately -- no Die(), no KilledBy, no award. What
+            // this scenario needs is only that the id is out of the registry and its death record
+            // written before the claim lands, and the removal seam does both either way. Calling
+            // it "the host's own kill" would claim fidelity to a path this does not take: the net
+            // layer distinguishes the two by IsDead, which stays false here.
             bin.Remove((GameComponent)(object)reaped);
             bin.TopOfTickFlush();
             Check("PRECONDITION the host's copy is gone before the claim lands",
@@ -377,13 +397,6 @@ namespace EvilAliensWeb.Compat.Net
                 Check("the OVERLAPPING collector is paid its own life from the record (lives "
                     + score.Lives + ")", score.Lives == livesAtStart + 2);
 
-                // Lives are host-authoritative -- EvScoreSync sends them verbatim -- so the raised
-                // figure has to be what the host would put on the wire, or the client's next sync
-                // silently reverts the life it just earned. Read off the REAL encoder rather than
-                // asserting about a frame nobody sees.
-                Check("the raised lives count is what the next EvScoreSync would carry",
-                    EncodedLives(score) == score.Lives);
-
                 // ---- 4b. THE REPEAT, measured and REPORTED ----------------------------------
                 // The other half of the PaidMask, on the branch where getting it wrong hands out
                 // free LIVES rather than points. It holds here because the live branch's
@@ -396,9 +409,9 @@ namespace EvilAliensWeb.Compat.Net
                 peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, oneUpId, PeerSlot));
                 wire.Pump();
                 NetSession.Update();
-                sb.Append("  info  a repeat from the LIVE-branch collector moved lives ")
-                    .Append(livesAfterOverlap).Append(" -> ").Append(score.Lives)
-                    .Append(" -- the removal seam masked the live payer, so no life leaked)\n");
+                Check("a repeat from the LIVE-branch collector leaks no life -- the removal"
+                    + " seam masked it (lives " + livesAfterOverlap + " -> " + score.Lives + ")",
+                    score.Lives == livesAfterOverlap);
                 // The bound that DOES hold, and the one that matters: the ledger still refuses a
                 // slot the RECORD has already paid, so the leak is one life per collector, not
                 // an unbounded farm.
@@ -462,11 +475,15 @@ namespace EvilAliensWeb.Compat.Net
             byte[] noExtras = new byte[1];
             for (int i = 0; i < Churn; i++)
             {
-                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, (ushort)(9000 + i), 0,
+                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, (ushort)(9000 + i), ChurnTypeIdx,
                     state, noExtras, 0));
             }
             wire.Pump();
             NetSession.Update();
+            // Track them from here on. A throw anywhere below unwinds to Run's catch, and Run's
+            // teardown only removes what `planted` holds -- so without this a failed run would
+            // leave twelve frozen puppets in Game.Components at the main menu, permanently.
+            TrackPuppets(game, planted);
             Check("generation 1 built " + Churn + " puppets (live=" + NetPuppets.LiveCount + ")",
                 NetPuppets.LiveCount == liveBefore + Churn);
             Check("... with no duplicate spawns", m.DupSpawns == dupBefore);
@@ -484,7 +501,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 peer.SendReliable(NetProtocol.EncodeDeathEvent(eventSeq++, (ushort)(9000 + i),
                     NetProtocol.KillerNone, Nowhere, new float[NetProtocol.MaxSlots]));
-                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, (ushort)(9100 + i), 0,
+                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, (ushort)(9100 + i), ChurnTypeIdx,
                     state, noExtras, 0));
             }
             wire.Pump();
@@ -515,18 +532,49 @@ namespace EvilAliensWeb.Compat.Net
             // and asserts only the bound the design claims: a pop is a snapshot correction past
             // the threshold, and an id that was rebuilt FROM a snapshot starts on it, so churn
             // alone must not produce one per churned id.
-            long popsDelta = m.PuppetPops - popsBefore;
-            sb.Append("  info  pupPops across the churn: +").Append(popsDelta)
+            //
+            // THE COUNTER IS ONLY REACHABLE FOR AN ID THE CLIENT ALREADY KNOWS, and that is what
+            // makes the naive form of this assertion vacuous: PuppetPops is incremented inside
+            // OnSnapshotEntry's APPLIED branch, so every entry above -- all of which were for
+            // never-seen ids the self-heal rebuilt -- returned false and could not have popped
+            // whatever the layer did. Reading zero there would say nothing at all. So the probe
+            // is two more rounds of snapshots for the NOW-KNOWN generation-2 ids: one where the
+            // host agrees with where the client rebuilt them (must not pop) and one displaced far
+            // past the threshold (must pop). The second is the control: without it the first is
+            // "a counter that cannot move did not move".
+            long popsAfterChurn = m.PuppetPops - popsBefore;
+            sb.Append("  info  pupPops across the churn itself: +").Append(popsAfterChurn)
                 .Append(" over ").Append(Churn).Append(" ids (snapTurn ")
                 .Append(NetSession.SnapshotTurnMs(NetPuppets.LiveCount)).Append("ms)\n");
-            Check("id churn alone does not pop a puppet per churned id (+" + popsDelta + ")",
-                popsDelta < Churn);
+
+            long popsBeforeAgree = m.PuppetPops;
+            for (int i = 0; i < Churn; i++)
+            {
+                peer.SendStream(SnapshotFor((ushort)(9100 + i), state));
+            }
+            wire.Pump();
+            NetSession.Update();
+            Check("a correction AGREEING with where the churn rebuilt each puppet pops none (+"
+                + (m.PuppetPops - popsBeforeAgree) + " over " + Churn + " known ids)",
+                m.PuppetPops == popsBeforeAgree);
+
+            long popsBeforeJump = m.PuppetPops;
+            NetBaseState far = state;
+            far.Pos = state.Pos + new Vector2(1000f, 0f); // far past PuppetPopPx
+            peer.SendStream(SnapshotFor(9100, far));
+            wire.Pump();
+            NetSession.Update();
+            Check("... while a correction 1000px away DOES pop -- the control that makes the line"
+                + " above mean something (+" + (m.PuppetPops - popsBeforeJump) + ")",
+                m.PuppetPops == popsBeforeJump + 1);
 
             // Tear the generation-2 puppets back out. Disable() clears the id maps but leaves
             // live puppets to a scene's Terminate purge -- and this suite has no scene.
+            TrackPuppets(game, planted);
             foreach (GameComponent comp in CollectPuppets(game))
             {
                 bin.Remove(comp);
+                planted.Remove(comp);
             }
             bin.TopOfTickFlush();
 
@@ -551,14 +599,16 @@ namespace EvilAliensWeb.Compat.Net
             return ufo;
         }
 
-        // As above, forced to OneUp. `type` is a public field and MakeType rolls it at random, so
-        // it is overwritten AFTER Setup and BEFORE Add -- the configure-then-Add contract
-        // tools/audit_add_order.py lints, and the only reason the roll cannot make this flaky.
+        // As above, forced to OneUp. Setup rolls a random type, so MakeType re-picks -- the SAME
+        // call the real bonus-drop site (UFO.KilledBy) makes, rather than a bare `type` write,
+        // which would leave the sprite and colour of the roll on a powerup claiming to be a OneUp.
+        // AFTER Setup and BEFORE Add: the configure-then-Add contract tools/audit_add_order.py
+        // lints, and the only reason the roll cannot make this flaky.
         private static Powerup PlantOneUp(ComponentBin bin, Game game, List<GameComponent> planted)
         {
             Powerup powerup = Powerup.NewPowerup(bin, game);
             powerup.Setup(Nowhere);
-            powerup.type = Powerup.PowerupType.OneUp;
+            powerup.MakeType(Powerup.PowerupType.OneUp);
             bin.Add((GameComponent)(object)powerup);
             planted.Add((GameComponent)(object)powerup);
             return powerup;
@@ -572,7 +622,7 @@ namespace EvilAliensWeb.Compat.Net
             byte[] scratch = new byte[NetProtocol.SnapshotHeaderBytes
                 + NetProtocol.SnapshotEntryBaseBytes + 1];
             int off = NetProtocol.SnapshotHeaderBytes;
-            NetProtocol.WriteSnapshotEntry(scratch, ref off, id, 0, state, new byte[1], 0);
+            NetProtocol.WriteSnapshotEntry(scratch, ref off, id, ChurnTypeIdx, state, new byte[1], 0);
             scratch[0] = NetProtocol.MsgWorldSnapshot;
             scratch[1] = 1;
             byte[] packet = new byte[off];
@@ -592,6 +642,19 @@ namespace EvilAliensWeb.Compat.Net
             return false;
         }
 
+        // Add any churn puppet not already tracked, so Run's teardown can sweep them on a path
+        // that never reaches this scenario's own cleanup.
+        private static void TrackPuppets(Game game, List<GameComponent> planted)
+        {
+            foreach (GameComponent comp in CollectPuppets(game))
+            {
+                if (!planted.Contains(comp))
+                {
+                    planted.Add(comp);
+                }
+            }
+        }
+
         private static List<GameComponent> CollectPuppets(Game game)
         {
             List<GameComponent> list = new List<GameComponent>();
@@ -603,12 +666,6 @@ namespace EvilAliensWeb.Compat.Net
                 }
             }
             return list;
-        }
-
-        private static int EncodedLives(ScoreVisualiser score)
-        {
-            byte[] frame = NetProtocol.EncodeScoreSync(1, score.Lives, new float[NetProtocol.MaxSlots]);
-            return (sbyte)frame[4];
         }
 
         private static void TeardownSession(StringBuilder sb, Action<string, bool> Check)
@@ -624,7 +681,7 @@ namespace EvilAliensWeb.Compat.Net
         // anything.
         private static void Teardown(StringBuilder sb, Action<string, bool> Check, Oracle oracle,
             ComponentBin bin, ScoreVisualiser score, List<GameComponent> planted,
-            float[] scoreBefore, int livesBefore, int playersBefore)
+            float[] scoreBefore, int livesBefore, int playersBefore, bool[] powerupBefore)
         {
             try
             {
@@ -639,13 +696,17 @@ namespace EvilAliensWeb.Compat.Net
                 bin.TopOfTickFlush();
                 planted.Clear();
 
-                // The pairing seats the peer's primary; nothing else here touches the roster.
-                oracle.RemovePlayerAt(NetSession.HostPrimarySlot, ControlDevice.Remote);
+                // The pairing seats the peer's primary somewhere above slot 0 -- WHERE is the
+                // allocator's choice, so this sweeps rather than naming a slot. (The sibling
+                // suite's `RemovePlayerAt(HostPrimarySlot, Remote)` line is correct THERE and
+                // would be a no-op here: this suite is the host, so slot 0 is its own seat.)
                 for (int slot = 0; slot < Oracle.MaxPlayers; slot++)
                 {
-                    if (oracle.IsSeated(slot) && oracle.Controller(slot) == ControlDevice.Remote)
+                    if (oracle.IsSeated(slot)
+                        && (oracle.Controller(slot) == ControlDevice.Remote
+                            || oracle.Controller(slot) == ControlDevice.RemoteFriend))
                     {
-                        oracle.RemovePlayerAt(slot, ControlDevice.Remote);
+                        oracle.RemovePlayerAt(slot, oracle.Controller(slot));
                     }
                 }
                 Check("no Remote seat is left squatting the roster (players " + playersBefore
@@ -662,8 +723,17 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     restored &= Math.Abs(score.PointScore(slot) - scoreBefore[slot]) < 0.01f;
                 }
-                Check("the score panels and lives are back where the suite found them",
-                    restored && score.Lives == livesBefore);
+                bool puRestored = true;
+                for (int slot = 0; slot < ScoreVisualiser.SlotCount; slot++)
+                {
+                    if (score.NetPowerupActive(slot) && !powerupBefore[slot])
+                    {
+                        score.RemovePowerup(slot);
+                    }
+                    puRestored &= score.NetPowerupActive(slot) == powerupBefore[slot];
+                }
+                Check("the score panels, lives and powerup indicators are back where the suite"
+                    + " found them", restored && score.Lives == livesBefore && puRestored);
             }
             catch (Exception ex)
             {

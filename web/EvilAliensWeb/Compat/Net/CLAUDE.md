@@ -398,7 +398,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     12 ids at `snapTurn` 60ms. The card's scope on that burst is PROPOSE, not fix.
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
   code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaNetEntity`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
-  `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`. They were
+  `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`, `eaNetScenarios`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never
   happened, and several of these suites SKIP legs they cannot reach, which is not a pass. Raise a

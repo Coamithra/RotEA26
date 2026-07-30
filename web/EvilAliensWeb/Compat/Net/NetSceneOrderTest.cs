@@ -189,6 +189,18 @@ namespace EvilAliensWeb.Compat.Net
                     }
                     Check("the world is not left frozen (depth=" + bin.FreezeDepth + ")",
                         bin.FreezeDepth == freezeAtStart);
+                    // The scripted host granted us slot 1, so AdoptGrantedPrimarySlot MOVED the
+                    // local player off slot 0 against a live scene. Put the seat back, as the
+                    // sibling destructive suite does: the scene is left in its reset branch
+                    // either way, but SpawnAllPlayers respawns by SEAT, so a player left in the
+                    // wrong slot outlives the reset this suite is allowed to cause.
+                    Oracle oracle = ServiceHelper.Get<IOracleService>().Oracle;
+                    if (oracle.IsSeated(GrantedSlot) && !oracle.IsSeated(0))
+                    {
+                        oracle.MovePlayerSlot(GrantedSlot, 0);
+                    }
+                    Check("the local player is back in slot 0 (players=" + oracle.Players + ")",
+                        oracle.IsSeated(0) && !oracle.IsSeated(GrantedSlot));
                 }
                 catch (Exception ex)
                 {

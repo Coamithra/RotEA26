@@ -989,6 +989,14 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		return scores[player].powerupDatas[scores[player].powerup].GetProgress();
 	}
 
+	// Is a powerup indicator lit on this slot? The gate `increasecombo` reads before feeding
+	// AddExp, so it is live game state and not decoration -- a self-test that settles a real
+	// pickup has to put it back (card 25ad0659 step 4).
+	internal bool NetPowerupActive(int player)
+	{
+		return scores[player].powerupactive;
+	}
+
 	internal void RemovePowerup(int player)
 	{
 		scores[player].powerupactive = false;

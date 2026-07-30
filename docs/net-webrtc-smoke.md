@@ -35,16 +35,23 @@ three the headless and single-tab rigs structurally cannot reach:
 
 ## Setup
 
-**Two things running before you touch a browser.**
+**Two things running before you touch a browser, in TWO SEPARATE TERMINALS.**
 
-A local signaling server (do NOT point this at the deployed one — you want the identical client
-code against a server you can read):
+Terminal 1 — a local signaling server (do NOT point this at the deployed one; you want the
+identical client code against a server you can read). First run needs the venv, per
+`server/signal/README.md`:
 
 ```bash
-cd server/signal && uvicorn main:app --port 8091
+cd server/signal && python -m venv venv && venv/Scripts/pip install -r requirements.txt && venv/Scripts/uvicorn main:app --port 8091
 ```
 
-The dev server, from the repo root:
+Once the venv exists, it is just:
+
+```bash
+cd server/signal && venv/Scripts/uvicorn main:app --port 8091
+```
+
+Terminal 2 — the dev server, from the repo root:
 
 ```bash
 dotnet run --project web/DevServer -c Debug --urls http://localhost:5280
@@ -59,15 +66,22 @@ workaround for when tooling has to cover the windows. You are watching them.)
 Both windows use the same URL:
 
 ```
-http://localhost:5280/?signal=ws://localhost:8091/ws
+http://localhost:5280/?signal=ws://localhost:8091/ws&noattract
 ```
 
-**That is the whole query string, and the shortness is deliberate.** Both peers pair from the
-MENU, and a menu session refuses to pair if *either* side has a boot-hijacking debug flag set
-(`NetSession.HandleHello` on `DebugFlags.Active`) — so `?net=`, `?level=`, `?invuln` and friends
-would make this fail for a reason that has nothing to do with what you are testing. `?signal=` is
-not in `Active`, which is why it is allowed. If you want the verbose log, `&netlog` and `&binlog`
-are also safe to add to both.
+**The shortness is deliberate, and the flag you will instinctively reach for is the one that
+breaks it.** Both peers pair from the MENU, and a menu session refuses to pair if *either* side
+has a boot-hijacking debug flag set (`NetSession.HandleHello` on `DebugFlags.Active`).
+
+- **`?menu` is NOT safe** — nor `?skipsplash` / `?autostart`. All three set `SkipSplash` and
+  `AutoStart`, which are literally the first two terms of the `DebugFlags.Active` expression, so
+  the pairing would be refused and it would look like a WebRTC failure. Sit through the splash.
+  Same for `?level=`, `?invuln`, `?net=`.
+- **`&noattract` IS safe and you want it** — it is not in `Active`, and without it the main menu
+  drops into an attract demo after ~20s idle, which it certainly will while you set up the second
+  window.
+- `&netlog` and `&binlog` are also out of `Active`, so add them to both if you want the verbose
+  log. Everything else: leave it off.
 
 ---
 
@@ -82,8 +96,9 @@ a fully unlocked one. Arrow down to **Online Co-op** and press Enter. The submen
 1. **Window A — host.** Online Co-op → **Host Game**. It shows a 5-character room code and
    "waiting". Note the code.
 2. **Window B — joiner.** Online Co-op → **Join by Code** → type window A's code into the overlay.
-3. **Window A** now picks the mission and difficulty through the normal select screens. Take
-   **Mission 1 on Medium** — a story level, so both peers get a real world with real enemies, and
+3. **Window A** now picks the level. It gets a **Missions / Challenges / Cancel** picker first —
+   choose **Missions** — and then the normal mission carousel and difficulty screens. Take
+   **Mission 1 on Medium**: a story level, so both peers get a real world with real enemies, and
    Level 1's script hands the ship spawn to a beat, which is worth seeing replicate.
 4. Both windows launch. **Play for about a minute, on both.** Shoot things in each window — the
    claims are the interesting part, and an idle peer proves much less.
@@ -102,9 +117,12 @@ Read both consoles. The `[net]` metrics line prints every 5 seconds.
 [net] session start role=join room=<CODE> protocol=v10 transport=WebRTC (menu lobby)
 ```
 
-`transport=WebRTC` is the point of the whole exercise. If it says `BroadcastChannel`, the two
-windows found each other locally and **you have not tested anything here** — check `?signal=`
-reached both.
+`transport=WebRTC` is the point of the whole exercise, and on this path it is the only value it
+can print — `NetLobby` always builds a `WebRtcTransport` for a menu session, and the
+BroadcastChannel loopback is only reachable from a `?net=` boot, which the flag rules above
+forbid. So read it as a sanity check, not as a branch to diagnose. A window that never reaches
+`session start` at all fails EARLIER and visibly, at "contacting server" — that is the `?signal=`
+symptom.
 
 **The seat map — mirror images, and this is the sharpest single check.** Host and joiner should
 read as each other's reflection, with `*` marking the local seat:

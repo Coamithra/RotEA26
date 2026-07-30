@@ -287,9 +287,13 @@ virtual clock, and asserts. All are today's generous-claim invariants made execu
 
 **Which side is real, mapped against what is reachable on `9bdbc5a` -- this is what took step 3
 off the critical path.** No scenario needs both sides real at once, and 1-4 need no `GameScene`
-at all, because `NetSession.HandleClaim` reaches only `NetIdRegistry` / `bin` / `score` /
-`Explosion` / `NetPuppets.KillerAgent` -- measured, no scene read anywhere on that path. So they
-are MENU-runnable and leave-no-trace-able (the `eaNetSnap` shape), not destructive like 1b:
+at all: `NetSession.HandleClaim` reaches `NetIdRegistry` / `bin` / `score` / `sound` (via
+`ApplyRemotePowerup`'s `PlayCue`) / `Explosion` / `NetPuppets.KillerAgent`, and reads no scene.
+**Spot-checked one level deeper too, because the claim is about the transitive closure and not
+just the method body:** `killable.NetKill` runs the real per-type `KilledBy`, which is where the
+explosions, cues and `AwardScoreToAll` happen -- `Boss.KilledBy` is scene-free. Confirm the
+specific types a scenario kills before leaning on this. So 1-4 are MENU-runnable and
+leave-no-trace-able (the `eaNetSnap` shape), not destructive like 1b:
 
 | # | Real side | Scripted side sends | Needs a `GameScene`? |
 |---|---|---|---|
@@ -576,11 +580,14 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      returns that type -- so `(AlienDrawableGameComponent)e.Comp` in `NetPuppets.ApplySnapshotState`
      / `NetSession.OnHostSpawn` / `NetSession.SendWorldSnapshot` cannot fail. A future
      `INetEntity` implementer that is NOT one could only reach them by being added to that table.
-   - **The CREATION surface is 10 sites and faking it is strictly worse evidence** -- the same
-     argument that killed `FakeEntity`. 5 `Explosion.NewExplosion`, 1 `new Bullet`
-     (`NetPuppets.KillerAgent`'s scratch killer), 2 `new PlayerShip`, 2
-     `bin.Recycle<PlayerShip>()`. Every one already takes the `game`/`bin` fields, which step 3
-     turns into instance state anyway -- so there is nothing here a seam would move.
+   - **The CREATION surface is 11 sites and faking it is strictly worse evidence** -- the same
+     argument that killed `FakeEntity`. 6 `Explosion.NewExplosion` (`NetPuppets` 1,
+     `NetSession` 3, `NetSession.Friends` 2), 1 `new Bullet` (`NetPuppets.KillerAgent`'s scratch
+     killer), 2 `new PlayerShip`, 2 `bin.Recycle<PlayerShip>()` -- production only; a third
+     `new PlayerShip` is in `NetResetSpawnTest`. Every one already takes the `game`/`bin` fields,
+     which step 3 turns into instance state anyway -- so there is nothing here a seam would move.
+     (The seam-surface table above says `Explosion.NewExplosion` x4; that was the 2026-07-24
+     count and is superseded by this one.)
    **1b'S DEBT IS PAID, by 2c-i -- do not re-open it.** It read: `NetResetSpawnTest` has to
    FAKE `SpawnAllPlayers`' respawn of the local seat, because `NetApplyReset` purges
    `PlayerShip` and its two retry legs need a non-null `FindLocalShip()`, while the real path
@@ -664,7 +671,7 @@ the user to run, not run here.
   re-running `eaNetPuppetBench`:** +0.11 ms/frame in WASM at N=512, i.e. +0.66% of the budget, so
   the simple direct interface stands and the generic specialised core is not justified.
 - ~~**Descriptor fidelity in the sim** — the generic fake descriptor tests ledger/ordering, not
-  per-type puppet looks.~~ **Moot with the fake descriptor** (banner correction 3 / the
+  per-type puppet looks.~~ **DEAD with the fake descriptor** (banner correction 3 / the
   `FakeEntity` note): the sim uses the PRODUCTION table, so per-type fidelity is whatever the real
   descriptor does. Full per-type *appearance* fidelity remains out of scope -- that is the sprite
   harness' job, not the sim's.

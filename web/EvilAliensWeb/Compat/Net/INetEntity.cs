@@ -40,11 +40,11 @@ namespace EvilAliensWeb.Compat.Net
     //    ApplyStateExtra still take the concrete type, so the THREE call sites that reach a
     //    descriptor cast (NetPuppets.ApplySnapshotState, NetSession.OnHostSpawn and
     //    NetSession.SendWorldSnapshot; CreatePuppet needs none -- it RETURNS the concrete
-    //    type). Moving those signatures would mean editing the parameter type in 41 overrides
-    //    across six descriptor files -- eight files in all, once DescriptorBase's three
-    //    virtuals and NetTypeRegistry's three declarations are counted -- and ~80 signature
-    //    edits altogether with CreatePuppet's return type, for no behaviour change and no
-    //    capability: the sim builds REAL puppets through the production table.
+    //    type). Moving those signatures means editing the parameter type in 41 extras overrides
+    //    across six descriptor files -- 70 overrides once CreatePuppet's return type is counted
+    //    too, and ~80 edits in all with the four interface declarations and the six sites in
+    //    NetTypeDescriptor<T>, i.e. eight files. For no behaviour change and no capability:
+    //    the sim builds REAL puppets through the production table.
     //    THOSE THREE CASTS ARE SAFE BY CONSTRUCTION, and that is the invariant to preserve:
     //    NetTypeRegistry.TryGet matches the EXACT runtime type against a table whose every
     //    entry is an AlienDrawableGameComponent subclass, and CreatePuppet returns that type.

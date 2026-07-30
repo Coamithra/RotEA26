@@ -712,6 +712,24 @@ site now lives under:
     (`Oracle.SetController` re-points the seat, `PlayerShip.AdoptController` the live ship, so the
     slot keeps its score and its place in the tether). Only while the bot holds it -- a second pad
     joining a genuine two-human game still adds a player.
+  - **NO GAMEPAD? FAKE ONE FROM THE PAGE -- and the whole trick is the EVENT, not the override**
+    (card 1cd47879). Overriding `navigator.getGamepads` alone changes NOTHING and reads as "the
+    fake does not reach the code path": KNI never polls until a pad announces itself, because
+    `_content/nkast.Wasm.Dom/js/Window.8.0.5.js:234` subscribes `gamepadconnected` and forwards
+    `event.gamepad.index` to `nkast.Wasm.Dom`. Dispatch that event and the poll starts (the two
+    `nv.getGamepads()` sites, `Navigator.8.0.5.js:17` and `Window.8.0.5.js:291`, then run every
+    tick). The `GamepadEvent` constructor refuses a non-`Gamepad` object, so use a plain
+    `Event('gamepadconnected')` with a `gamepad` property defined on it -- the listener reads only
+    `.index`. The pad object needs `connected`, `index`, `mapping:'standard'`, 17
+    `{value,pressed,touched}` buttons, 4 axes and a timestamp that ADVANCES (`nkGamepad.
+    GetTimestamp` reads `gp.timestamp`). Standard mapping: **0 = A, 9 = Start**, 12-15 the d-pad.
+    Verified end to end this way -- `PadConnected(0)` flips, a button-9 press fires
+    `[teamchallenge] PadOne took over the auto-pilot partner seat 1`, `eaOracleRoster` reads
+    `players=2 seated=0:Keyboard,1:PadOne` (re-pointed, NOT a third player), `eaScore` shows slot
+    1 keeping its score and powerups, the tether survives, and holding an axis then really steers
+    that ship. **What a fake CANNOT prove, and what therefore stays formally open:** that a
+    physical pad enumerates over USB, and the browser quirk that a pad stays invisible until a
+    real button is pressed on it -- which is the very reason the takeover hook exists.
   - **How good the bot partner is remains unmeasured.** The completion matrix's TeamChallenge row
     is a TIMEOUT at ~90 deaths with both ships bot-driven; the only clean run (VICTORY 402s, 0
     deaths) was an `?invuln` CONTROL. So the auto-pilot makes the level playable and reachable, not

@@ -55,6 +55,7 @@ mark
 
 eval NetWireTest
 eval NetHostTest
+eval NetEntityTest
 eval SlotTest
 eval KickTest
 eval NetSnapTest
@@ -71,6 +72,12 @@ expect \[netwire\] 69 passed, 0 failed
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
 expect \[nethost\] 32 passed, 0 failed
+# the INetEntity seam (card 25ad0659 step 2c-ii) -- also the refactor's own guard rather than
+# pre-refactor state. It covers the two things the COMPILER cannot: an explicit forward wired to
+# the wrong member of the same type (two floats swap silently), and a subtype that stops answering
+# the NetKillable / NetPickup discriminant, which turns every remote powerup pickup into an
+# explosion. Not a logic_probe case set, unlike eaNetHost: constructing an entity needs a Game.
+expect \[netentity\] PASS \(38 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)

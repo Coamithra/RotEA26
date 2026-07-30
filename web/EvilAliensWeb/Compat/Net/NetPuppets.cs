@@ -50,7 +50,10 @@ namespace EvilAliensWeb.Compat.Net
 
         private sealed class PuppetInfo
         {
-            public AlienDrawableGameComponent Comp;
+            // Through INetEntity since step 2c-ii: everything the driver and the snapshot
+            // apply do to a puppet is on that seam. The bin/collection sites below cast back
+            // on purpose -- see INetEntity's header for why identity is NOT on it.
+            public INetEntity Comp;
             public byte TypeIdx;
             public Vector2 Vel;          // design px/ms from the last snapshot
             public Vector2 Correction;   // remaining position error being blended away
@@ -209,12 +212,13 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             comp.Enabled = false; // frozen from the first tick (bin.Add force-enables)
+            INetEntity entity = comp;
             PuppetInfo info = new PuppetInfo
             {
-                Comp = comp,
+                Comp = entity,
                 TypeIdx = typeIdx,
                 Vel = state.Vel,
-                TargetScale = state.Scale > 0f ? state.Scale : comp.scale,
+                TargetScale = state.Scale > 0f ? state.Scale : entity.NetScale,
             };
             ApplySnapshotState(info, state, null, null, 0, 0, isSpawn: true);
             byId[netId] = info;
@@ -284,7 +288,7 @@ namespace EvilAliensWeb.Compat.Net
         private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn)
         {
             bool popped = false;
-            AlienDrawableGameComponent comp = info.Comp;
+            INetEntity comp = info.Comp;
             if (isSpawn || !info.HasSnapshot)
             {
                 comp.Position = state.Pos;
@@ -310,18 +314,22 @@ namespace EvilAliensWeb.Compat.Net
             info.HasSnapshot = true;
             if (comp.NetSpinPerMs == 0f)
             {
-                comp.rotation = state.Rotation; // free-spinners rotate locally -- see NetSpinPerMs
+                comp.NetRotation = state.Rotation; // free-spinners rotate locally -- see NetSpinPerMs
             }
             comp.NetSetFrame(state.CurFrame);
             comp.NetSpeedVector = state.Vel; // per-type Draw reading Direction stays truthful
-            if (state.Hp > 0 && comp is KillableAlien killable)
+            if (state.Hp > 0 && comp.NetKillable is INetKillable killable)
             {
                 killable.NetApplyHp(state.Hp);
             }
             // ORDER MATTERS: state extras run LAST. The base writes above have per-type side
             // effects (NetSpeedVector's setter rewrites Direction, which zeroes Lazer's beam
             // angle) that an extra must be able to re-assert -- see Lazer.NetApplyBeam.
-            desc?.ApplyStateExtra(comp, buf, extraOff, extraLen);
+            //
+            // The cast back is the descriptor surface, which step 2c-ii deliberately left on
+            // the concrete type (INetEntity's header says why): moving it would mean editing a
+            // parameter type in ~40 overrides for no behaviour change, and 2c-iii owns it.
+            desc?.ApplyStateExtra((AlienDrawableGameComponent)comp, buf, extraOff, extraLen);
             return popped;
         }
 
@@ -340,27 +348,28 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (byId.TryGetValue(netId, out PuppetInfo info))
             {
-                AlienDrawableGameComponent comp = info.Comp;
-                remoteDeaths.Add((GameComponent)(object)comp); // never echo this back as a claim
-                if (killerSlot != NetProtocol.KillerNone && comp is KillableAlien killable)
+                INetEntity comp = info.Comp;
+                GameComponent gc = (GameComponent)comp; // identity is off the seam -- INetEntity's header
+                remoteDeaths.Add(gc); // never echo this back as a claim
+                if (killerSlot != NetProtocol.KillerNone && comp.NetKillable is INetKillable killable)
                 {
                     comp.NetSuppressAward();
                     killable.NetKill(KillerAgent(killerSlot, comp.Position), isComboGenerator: true);
                     if (!comp.IsDead)
                     {
-                        bin.Remove((GameComponent)(object)comp); // dead-guarded NetKill no-op
+                        bin.Remove(gc); // dead-guarded NetKill no-op
                     }
                     ApplyAwards(netId, comp.Position, awards);
                 }
-                else if (killerSlot != NetProtocol.KillerNone && comp is Powerup pu)
+                else if (killerSlot != NetProtocol.KillerNone && comp.NetPickup is INetPickup pu)
                 {
                     // A powerup is a PICKUP, not a kill -- it must not take the generic-burst
                     // branch below (an explosion where the other player collected). Drive the
                     // collector's HUD slot instead; see NetSession.ApplyRemotePowerup.
                     MarkPaid(netId, killerSlot);
-                    pu.taken = true;
+                    pu.NetMarkTaken();
                     NetSession.ApplyRemotePowerup(pu, killerSlot);
-                    bin.Remove((GameComponent)(object)comp);
+                    bin.Remove(gc);
                 }
                 else if (killerSlot != NetProtocol.KillerNone)
                 {
@@ -370,11 +379,11 @@ namespace EvilAliensWeb.Compat.Net
                     Explosion explosion = Explosion.NewExplosion(bin, game);
                     explosion.Setup(comp.Position, 1.2f, 1f, 0f, 0f);
                     bin.Add((GameComponent)(object)explosion);
-                    bin.Remove((GameComponent)(object)comp);
+                    bin.Remove(gc);
                 }
                 else
                 {
-                    bin.Remove((GameComponent)(object)comp); // plain despawn / fly-off
+                    bin.Remove(gc); // plain despawn / fly-off
                 }
                 return;
             }
@@ -434,7 +443,7 @@ namespace EvilAliensWeb.Compat.Net
                 live.Remove(info);
             }
             MarkRemoved(netId);
-            var comp = (AlienDrawableGameComponent)(object)gc;
+            var comp = (INetEntity)gc;
             // Claim only GAMEPLAY deaths (Die() ran => IsDead), never scene teardown purges,
             // and never deaths we ourselves applied from a host EvDeath (echo guard).
             if (remoteDeaths.Remove(gc) || !comp.IsDead)
@@ -472,7 +481,7 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < live.Count; i++)
             {
                 PuppetInfo info = live[i];
-                AlienDrawableGameComponent comp = info.Comp;
+                INetEntity comp = info.Comp;
                 comp.Enabled = false; // re-assert the freeze (pause Pop / stray enables)
                 // Hold position while the peer is stalled: the last-known velocity is stale by
                 // up to the whole grace window, and dead-reckoning on it for seconds would fling
@@ -488,11 +497,11 @@ namespace EvilAliensWeb.Compat.Net
                     info.CorrectionMsLeft -= take;
                 }
                 comp.Position += step;
-                comp.rotation += comp.NetSpinPerMs * dtMs; // no-op unless the type opted out of replicated rotation
+                comp.NetRotation += comp.NetSpinPerMs * dtMs; // no-op unless the type opted out of replicated rotation
                 comp.NetAdvanceFrame(dtSeconds);
                 if (info.HasSnapshot && info.TargetScale > 0f)
                 {
-                    comp.scale = MathHelper.Lerp(comp.scale, info.TargetScale, MathHelper.Clamp(dtMs / 100f, 0f, 1f));
+                    comp.NetScale = MathHelper.Lerp(comp.NetScale, info.TargetScale, MathHelper.Clamp(dtMs / 100f, 0f, 1f));
                 }
                 comp.NetTickTimers(realTime);
                 // Per-type child-component upkeep (e.g. an enemy's laser-charge glow) against the
@@ -630,9 +639,9 @@ namespace EvilAliensWeb.Compat.Net
         // provisional so EvScoreSync can carry it on top of the host's score until the host's
         // own figure for this entity arrives. Entities with no netId (nothing replicated, so
         // nothing to reconcile against) are ignored.
-        internal static void NoteLocalAward(AlienDrawableGameComponent comp, byte slot, float amount)
+        internal static void NoteLocalAward(INetEntity comp, byte slot, float amount)
         {
-            if (enabled && idByComp.TryGetValue((GameComponent)(object)comp, out ushort netId))
+            if (enabled && idByComp.TryGetValue((GameComponent)comp, out ushort netId))
             {
                 scoreLedger.NoteLocal(netId, slot, amount, NetHost.Current.NowMs);
             }

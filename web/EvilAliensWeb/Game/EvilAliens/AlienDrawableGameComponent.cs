@@ -7,7 +7,7 @@ using EvilAliensWeb.Compat;   // LogicalWidth/LogicalHeight — padded-dxt-safe 
 
 namespace EvilAliens;
 
-public abstract class AlienDrawableGameComponent : DrawableGameComponent, ICollidable, IComponentWatcher
+public abstract class AlienDrawableGameComponent : DrawableGameComponent, ICollidable, IComponentWatcher, EvilAliensWeb.Compat.Net.INetEntity
 {
 	public enum InterpolationOptions
 	{
@@ -787,6 +787,108 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// Read at the ComponentAdded seam, so it must be FINAL before ComponentBin.Add -- the same
 	// configure-then-Add rule tools/audit_add_order.py already lints.
 	internal virtual bool NetCosmeticOnly => false;
+
+	// ---- INetEntity (card 25ad0659 step 2c-ii) ------------------------------------------
+	// The net cores read this type through EvilAliensWeb.Compat.Net.INetEntity rather than by
+	// name. Every member above is already the implementation; these are the forwards for the
+	// ones an interface cannot reach directly.
+	//
+	// EXPLICIT, not widened to public: INetEntity is internal and this class is public, so an
+	// implicit implementation would mean making a dozen net-only seams part of a public game
+	// type's API. (INetScene took the opposite choice in 2c-i because GameScene is itself
+	// internal, so widening there widened nothing.) Position, Enabled and IsDead are already
+	// public and satisfy their members implicitly, with no forward needed.
+	//
+	// `scale`, `rotation` and `curframe` are FIELDS, which is the only reason the first three
+	// exist at all -- an interface cannot expose a field. Nothing else may read or write them
+	// through these; the fields stay the game's own.
+
+	float EvilAliensWeb.Compat.Net.INetEntity.NetRotation
+	{
+		get
+		{
+			return rotation;
+		}
+		set
+		{
+			rotation = value;
+		}
+	}
+
+	float EvilAliensWeb.Compat.Net.INetEntity.NetScale
+	{
+		get
+		{
+			return scale;
+		}
+		set
+		{
+			scale = value;
+		}
+	}
+
+	// Read-only on the seam: the host CAPTURES curframe for a snapshot, and the two writers a
+	// puppet has -- NetSetFrame (snap to a replicated frame) and NetAdvanceFrame (animate on
+	// real dt) -- both wrap into the type's active frame range. A bare setter would let a
+	// caller index off the sheet.
+	float EvilAliensWeb.Compat.Net.INetEntity.NetCurFrame => curframe;
+
+	Vector2 EvilAliensWeb.Compat.Net.INetEntity.NetSpeedVector
+	{
+		get
+		{
+			return NetSpeedVector;
+		}
+		set
+		{
+			NetSpeedVector = value;
+		}
+	}
+
+	float EvilAliensWeb.Compat.Net.INetEntity.NetPointValue => NetPointValue;
+
+	// Virtual on the class, so these forwards keep dispatching to the override -- the whole
+	// point of NetSpinPerMs (Asteroid) and NetCosmeticOnly (background FlyingSpider) is that a
+	// subtype answers differently.
+	float EvilAliensWeb.Compat.Net.INetEntity.NetSpinPerMs => NetSpinPerMs;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetCosmeticOnly => NetCosmeticOnly;
+
+	void EvilAliensWeb.Compat.Net.INetEntity.NetSetFrame(float frame)
+	{
+		NetSetFrame(frame);
+	}
+
+	void EvilAliensWeb.Compat.Net.INetEntity.NetAdvanceFrame(float dtSeconds)
+	{
+		NetAdvanceFrame(dtSeconds);
+	}
+
+	void EvilAliensWeb.Compat.Net.INetEntity.NetTickTimers(GameTime gameTime)
+	{
+		NetTickTimers(gameTime);
+	}
+
+	void EvilAliensWeb.Compat.Net.INetEntity.NetDriveExtras(GameTime gameTime)
+	{
+		NetDriveExtras(gameTime);
+	}
+
+	void EvilAliensWeb.Compat.Net.INetEntity.NetSuppressAward()
+	{
+		NetSuppressAward();
+	}
+
+	// The two discriminants. The base answers "no" to both; KillableAlien and Powerup override
+	// with `this`. Virtual rather than a type test inside this class so a future replicable
+	// subtype declares its own answer where its own code lives.
+	EvilAliensWeb.Compat.Net.INetKillable EvilAliensWeb.Compat.Net.INetEntity.NetKillable => NetKillableSelf;
+
+	EvilAliensWeb.Compat.Net.INetPickup EvilAliensWeb.Compat.Net.INetEntity.NetPickup => NetPickupSelf;
+
+	private protected virtual EvilAliensWeb.Compat.Net.INetKillable NetKillableSelf => null;
+
+	private protected virtual EvilAliensWeb.Compat.Net.INetPickup NetPickupSelf => null;
 
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)
 	{

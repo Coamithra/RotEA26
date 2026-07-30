@@ -147,7 +147,7 @@ namespace EvilAliensWeb.Compat.Net
         // moving anywhere.
         public static bool IsReplicableInstance(GameComponent c)
         {
-            return IsReplicable(c) && !(c is AlienDrawableGameComponent a && a.NetCosmeticOnly);
+            return IsReplicable(c) && !(c is INetEntity a && a.NetCosmeticOnly);
         }
     }
 }

@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
-public abstract class KillableAlien : AlienDrawableGameComponent
+public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.Compat.Net.INetKillable
 {
 	private Timer hittimer = new Timer(35f, repeating: false);
 
@@ -172,6 +172,22 @@ public abstract class KillableAlien : AlienDrawableGameComponent
 	}
 
 	// ---- Online co-op replication seams (Compat/Net, card 11.2) --------------------------
+
+	// This is the type the net layer's four `is KillableAlien` tests were asking about, so it
+	// answers the INetEntity discriminant with itself (card 25ad0659 step 2c-ii).
+	private protected override EvilAliensWeb.Compat.Net.INetKillable NetKillableSelf => this;
+
+	int EvilAliensWeb.Compat.Net.INetKillable.NetHitPoints => NetHitPoints;
+
+	void EvilAliensWeb.Compat.Net.INetKillable.NetApplyHp(int hp)
+	{
+		NetApplyHp(hp);
+	}
+
+	void EvilAliensWeb.Compat.Net.INetKillable.NetKill(ICollidable killer, bool isComboGenerator)
+	{
+		NetKill(killer, isComboGenerator);
+	}
 
 	internal int NetHitPoints => hitpoints;
 

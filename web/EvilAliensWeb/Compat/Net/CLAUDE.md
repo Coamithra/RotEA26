@@ -181,8 +181,83 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   `Environment.TickCount64`, `DebugFlags`, `WebRtcInterop` or `ServiceHelper` directly -- they go
   through `NetHost.Current`, whose production value is `ServiceHelperNetHost` and holds each
   expression verbatim. **2c is split three ways** -- `2c-i` the scene (`INetScene`, SHIPPED),
-  `2c-ii` `INetEntity`, `2c-iii` entity creation. It is STILL STATIC and single-instance until
-  step 3.
+  `2c-ii` the ENTITY (`INetEntity`, SHIPPED), `2c-iii` entity creation. It is STILL STATIC and
+  single-instance until step 3.
+  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 17 members
+    (the card's census measured 16 distinct ones over 42 call sites; `GetType()` is one of them
+    and comes free from `object`, and the two discriminants below replace type tests rather than
+    calls), implemented DIRECTLY on `AlienDrawableGameComponent` -- never
+    via an adapter, which would allocate per entity on a per-puppet-per-tick path. Plus two
+    sub-interfaces, `INetKillable` and `INetPickup`, because the layer's `is KillableAlien` (4
+    sites) and `is Powerup` (3) are TYPE TESTS an interface cannot carry: each subtype answers
+    the discriminant with `this`, the base with null.
+    `PuppetInfo.Comp`, `NetIdRegistry.Entry.Comp` and the kill-note table now hold `INetEntity`.
+  - **Implemented EXPLICITLY, which is the OPPOSITE of 2c-i's choice, for the opposite reason.**
+    `INetScene`'s 15 members were widened to `public` because `GameScene` is itself internal, so
+    widening widened nothing. `AlienDrawableGameComponent` is PUBLIC, so an implicit
+    implementation would add a dozen net-only names to a game type's API to satisfy an internal
+    seam. `Position` / `Enabled` / `IsDead` are already public and satisfy their members
+    implicitly, for free. `scale` / `rotation` / `curframe` are public FIELDS (2008 code), which
+    is the only reason `NetScale` / `NetRotation` / `NetCurFrame` exist -- an interface cannot
+    expose a field. `NetCurFrame` is READ-ONLY on the seam: both writers wrap into the type's
+    active frame range, and a bare setter would let a caller index off the sheet.
+  - **THREE THINGS ARE OFF THE SEAM ON PURPOSE, and `INetEntity`'s header says so.** (a)
+    COLLECTION IDENTITY -- the bin add/remove calls and the two `GameComponent`-keyed maps cast
+    back, VISIBLY, rather than the interface exposing a `GameComponent` and defeating itself in
+    one member; that coupling is about the shared `Game.Components`, and it is 2c-iii's plus step
+    3's. (b) The DESCRIPTOR extras (`EncodeSpawnExtra`/`EncodeStateExtra`/`ApplyStateExtra`),
+    which would mean editing a parameter type in 41 overrides across six descriptor files (eight in all,
+    counting `DescriptorBase`'s three virtuals and `NetTypeRegistry`'s three declarations) for no
+    behaviour change; 2c-iii owns that surface, `CreatePuppet` included, so the three call sites
+    cast. (c) The INBOUND hooks `NoteKill` / `NotePowerupTaken` keep their concrete parameter
+    types -- they are the GAME calling the net layer, and a concrete argument converts for free,
+    which is why **no game call site outside `Compat/Net` changed**.
+  - **VERIFICATION IS SHAPED DIFFERENTLY FROM 2a/2b/2c-i, and knowing why matters.** Those three
+    redirected a lookup through a holder, so a missed site did IDENTICAL work and had to be
+    COUNTED. Here the core fields changed TYPE, so a missed site does not compile: **the compiler
+    is the exhaustiveness check.** What it cannot see is (i) an explicit forward wired to the
+    wrong member of the same type -- `float INetEntity.NetScale => rotation;` compiles and
+    silently swaps two floats -- and (ii) a subtype that stops answering a discriminant, which
+    would turn every remote powerup pickup into an explosion. `NetEntityTest` (`eaNetEntity()`,
+    38 assertions, a leg of `net_selftests.txt`) covers exactly those two: every member driven to
+    a DISTINCT value and compared against the member it claims to front, and the `is` tests run
+    beside the discriminants as the control, on four entity shapes, with a non-degeneracy check
+    so a discriminant hard-wired either way cannot pass. Mutation-tested four ways, each isolated
+    and each failing only the legs naming its member. Not a `logic_probe` case set, unlike
+    `eaNetHost`: constructing an entity needs a `Game`.
+  - **MEASURED FIRST, and the plan named the WRONG INSTRUMENT.** `plans/net-headless-sim.md` says
+    to read `FrameSection.UpdNet`, but that bracket covers `NetSession.Update` + `NetListing.Tick`
+    only: `NetPuppets.Drive` is called from `NetPuppetDriver.Update`, i.e. inside
+    `base.Update(gameTime)`, so it lands in **`UpdComponents`** under the whole world where a few
+    percent is unreadable -- while `UpdNet` sees the host's <=16-entry snapshot encode at ~16 Hz,
+    a tiny phase, which is precisely the "10% of 0.3 ms is nothing" trap the plan warns about two
+    sentences later. **`NetPuppetBench` (`eaNetPuppetBench(n, iters)`) is the instrument that did
+    not exist**: n real puppets built through the real self-heal path, then the real `Drive` timed
+    in a plain loop, reported in ABSOLUTE microseconds and as a share of the 16.7 ms budget. It
+    carries a positive control (the puppets must actually have MOVED -- a `Drive` that
+    early-returned would otherwise time at a beautiful 0 us) and asserts its own population.
+  - **The numbers, and read the WASM row -- the desktop one understates it.** Per puppet, before
+    -> after, at MATCHED run ordinals: desktop CLR (eahl) **+4% to +19% depending on N**, WASM
+    (Chrome) **+25% at N=128 and +28% at N=512** (780 -> 972, 769 -> 984 ns).
+    WASM is ~12x the desktop cost per puppet AND takes a bigger relative hit, so a desktop-only
+    reading would have been the wrong evidence. In absolute terms at **N=512** -- far past any
+    real world, since the `?flyspiders` JIP rig measures `liveIds` 17-19 and a big world is ~320
+    -- the seam costs **+0.11 ms/frame in WASM, i.e. +0.66% of the frame budget**; at N=128 it is
+    +0.02 ms. So the plan's DEFAULT stands: the simple direct interface wins and **the
+    generic-core fallback did not earn it**. Do not re-open that without re-running the bench.
+  - **`eaNetPuppetBench` is MENU-ONLY; `eaNetEntity` is NOT, and the difference is deliberate.**
+    The bench builds real puppets into the world and so skips itself over a live session, level
+    or attract demo exactly as `eaNetSnap` does. The entity suite constructs its four entities
+    and never adds one to the bin or to `Game.Components`, so it is safe at any point in play and
+    carries no gate; run it wherever you like. Both are still driven from the menu by
+    `net_selftests.txt`, which is what the tallies there are measured under.
+  - **GOTCHA -- the bench's FIRST invocation in a process reads ~24% high**, and the 64-call
+    warm-up does not remove it (measured, desktop n=128: 8.87 us then 7.06 / 7.13 / 7.15,
+    reproduced across two processes; later runs settle to well under 1%). So compare LIKE WITH
+    LIKE -- both sides of an A/B at the same run ordinal, or discard each process's first run.
+    The desktop delta above is of the same order as that bias, which is why **the WASM row is the
+    one the verdict rests on**; it was taken at matched ordinals in fresh page loads.
+    Best run under eahl either way -- no rAF paces the loop there.
   - **The scene is a SECOND seam, `NetScene.Current` (card 25ad0659 step 2c-i).** `GameScene`
     implements `INetScene` (15 members: the host-broadcast transitions, the catch-up replay, the
     three readbacks `NetSession` branches on, the kick menu and `SpawnPlayer`), and the session's
@@ -246,7 +321,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     equal-to-source and so cannot tell two members wired to each other apart on a boot where both
     are false; that is stated in the suite rather than papered over.
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
-  code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
+  code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaNetEntity`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
   `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never

@@ -37,7 +37,17 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > MEASURE-FIRST instruction is about -- **shipped 2026-07-30**, and the measurement says the
 > simple direct interface WINS (the generic-core fallback did not earn it). `2c-iii` entity
 > CREATION -- **MEASURED AND DECLINED 2026-07-30**, see banner correction 3 below and the
-> census under the migration list. Remaining: **step 4** (step 3 is now OPTIONAL and last).
+> census under the migration list.
+>
+> **STEP 4 SHIPPED 2026-07-31 -- the scenario harness, all six scenarios. This card's required
+> work is DONE**; only the OPTIONAL step 3 remains, and no scenario has needed it.
+> `Compat/Net/NetScenarioTest.cs` (`eaNetScenarios()`, 48 assertions, menu-runnable and
+> leave-no-trace, a leg of `net_selftests.txt`) carries scenarios 1-5 including the id-churn
+> `pupPops` probe; `Compat/Net/NetSceneOrderTest.cs` (`eaNetSceneOrder()`, 15 assertions,
+> `net_scene_order.txt`) carries scenario 6, which needs a real `GameScene` and is destructive.
+> Production cost: `NetSession.Metrics` and `ComponentBin.FreezeDepth`, both read-only getters.
+> **It found two gaps in the generous-claim contract, both unreachable at 2 peers** -- see
+> step 4 under the migration list.
 >
 > **THIS DOC NAMED THE WRONG INSTRUMENT FOR 2c-ii's MEASUREMENT, and the correction is below.**
 > `FrameSection.UpdNet` brackets `NetSession.Update` + `NetListing.Tick`; the hot path it was
@@ -607,7 +617,16 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    directory is lobby / listing / game-browser / `WebRtcTransport` plumbing the sim never
    constructs, so it is OUT of the seam. The two `WebRtcInterop` calls that ARE in scope are
    `BuildHash()` and `PeerId()`, both in `StartWith`.
-4. **Step 4 -- THE SCENARIO HARNESS. This is now the next step, and the last REQUIRED one.**
+4. **Step 4 -- THE SCENARIO HARNESS. SHIPPED 2026-07-31; this was the last REQUIRED step.**
+   What landed, and the two places it differs from the sketch below: the scenarios split across
+   TWO entry points rather than one (1-5 menu-runnable in `NetScenarioTest`, 6 destructive in
+   `NetSceneOrderTest`, because scenario 6 is about what a real `GameScene` DOES and a stand-in
+   would make it vacuous), and scenarios 1-4 and 5 run SEQUENTIAL sessions rather than one, since
+   a session is one role and 1-4 need a host while 5 needs a client. **Two findings, both
+   reported rather than asserted because neither is reachable on a 2-peer wire**: two claims for
+   one `netId` inside ONE `DrainRx` pay the second claimant nothing (the death record is written
+   at the `ComponentRemoved` seam, a flush later), and in that same window nothing masks the
+   live-branch payer either. A tick apart both hold. They become reachable at N peers.
    It was ordered after step 3 because this doc believed the scenarios needed two real contexts;
    banner correction 3 retires that, and the scenario table above maps each of the six onto one
    real context plus a scripted peer. It delivers the harness + the six scenarios + the id-churn

@@ -272,7 +272,8 @@ namespace EvilAliensWeb.Compat.Net
             // protocol is 2-peer, a client sends exactly one EvClaim per local gameplay death,
             // and one puppet dies locally once -- so two claims for one netId cannot both come
             // from the one peer that can send them. It becomes reachable at N peers
-            // (plans/4p-online-coop.md), which is where the follow-up card belongs.
+            // (plans/4p-online-coop.md). FILED AS CARD 1bfcd705, which also carries the likely
+            // fix and says that when it lands, this info line becomes a real assertion.
             sb.Append(" 2b. same-tick double claim -- MEASURED, see the follow-up card\n");
             paidDeadBefore = m.ClaimsPaidDead;
             s2Before = score.PointScore(PeerSlot2);
@@ -389,7 +390,7 @@ namespace EvilAliensWeb.Compat.Net
                 // NoteKillSlot attribution is what the removal seam writes into the record -- so
                 // the slot paid live is already masked by the time a repeat arrives. It does NOT
                 // hold when the two claims share a tick: there is no record yet, so nothing
-                // masks the live payer either. Same root cause as 2b, same follow-up card.
+                // masks the live payer either. Same root cause as 2b, same follow-up card (1bfcd705).
                 sb.Append(" 4b. repeat claim from an already-paid collector -- MEASURED\n");
                 int livesAfterOverlap = score.Lives;
                 peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, oneUpId, PeerSlot));

@@ -65,6 +65,7 @@ eval NetCosmetic
 eval BinTest
 eval TeamSeat
 eval NetSimTest 150 20 60 200
+eval NetScenarios
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
 expect \[netwire\] 69 passed, 0 failed
@@ -96,6 +97,12 @@ expect \[cosmetictest\] PASS \(15/15 checks\)
 expect \[bin\] 27 passed, 0 failed
 # the TeamChallenge seat resolver over every pad mask (card e6927ef8)
 expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
+# The step-4 scenario harness, scenarios 1-5 (card 25ad0659): the three generous-claim shapes,
+# the OneUp overlap and the id-churn self-heal, each driven over a real session with a scripted
+# wire peer. Scenario 6 needs a level and has its own probe (net_scene_order.txt), like
+# eaNetResetSpawn. The two `info` lines it prints are MEASURED GAPS that are unreachable on
+# today's 2-peer wire -- read the suite header before treating either as a regression.
+expect \[netscen\] 48 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

@@ -587,6 +587,15 @@
             catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: scenario 6 of the same harness -- reset / pause / checkpoint ORDERING against
+        // a REAL GameScene. DESTRUCTIVE: it applies a real EvReset and leaves the scene in its
+        // reset branch, so run it in a throwaway ?level=Level2&invuln boot, never in a game you
+        // care about. Prints PASS/FAIL.
+        window.eaNetSceneOrder = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetSceneOrder')); }
+            catch (e) { console.warn('[debug] eaNetSceneOrder failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the INetEntity seam (card 25ad0659 step 2c-ii) — that every explicit forward
         // on AlienDrawableGameComponent fronts the member it claims to (driven to DISTINCT
         // values, so a swap of two floats cannot pass), and that the NetKillable/NetPickup

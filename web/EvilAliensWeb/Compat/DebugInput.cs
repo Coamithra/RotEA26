@@ -394,6 +394,16 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetScenarioTest.Run();
 		}
 
+		// JS bridge for scenario 6 (eaNetSceneOrder in wwwroot/index.html, card 25ad0659 step 4).
+		// Reset / pause / checkpoint ORDERING against a REAL GameScene -- which is what makes it
+		// DESTRUCTIVE and keeps it out of NetScenarios: a stand-in scene would make every
+		// assertion about the stand-in. Run it in a throwaway ?level=Level2&invuln boot.
+		[JSInvokable("debugNetSceneOrder")]
+		public static string NetSceneOrder()
+		{
+			return EvilAliensWeb.Compat.Net.NetSceneOrderTest.Run();
+		}
+
 		// JS bridge for the INetEntity seam (eaNetEntity in wwwroot/index.html, card 25ad0659
 		// step 2c-ii). The compiler already covers the migration -- the core fields changed
 		// TYPE, so no call site can still read the concrete one. What it cannot cover is a

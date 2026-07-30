@@ -143,31 +143,23 @@ internal class FlyingSpider : KillableAlien
 	public override void Initialize()
 	{
 		base.Initialize();
-		// In the sprite harness the object is frozen for a screenshot, so a randomized wing-flap
-		// phase would make every boot a different pose -- and two boots that differ in pose cannot
-		// be A/B'd against each other (the ?flyspiderflatten= comparison this exists for). Pin it.
-		// Live play keeps the randomization: a swarm flapping in lockstep reads as one organism.
-		if (EvilAliensWeb.Compat.DebugFlags.Harness == null)
+		// Pinned on the two A/B rigs, rolled in live play -- see PosePinned below.
+		if (!PosePinned)
 		{
 			flaptimer.Randomize();
 		}
 		base.Position = new Vector2(850f, RandomHelper.RandomNextFloat(0f, 475f));
 		base.Direction = (float)Math.PI;
 		base.MaxSpeed = base.Speed;
-		rotation = RandomHelper.RandomNextFloat(-(float)Math.PI / 32f, (float)Math.PI / 32f);
-		int colorPick = netForcedColorIndex ?? RandomHelper.Random.Next(3);
-		switch (colorPick)
-		{
-		case 0:
-			color = Color.DarkGray;
-			break;
-		case 1:
-			color = Color.White;
-			break;
-		case 2:
-			color = Color.DimGray;
-			break;
-		}
+		rotation = PosePinned
+			? 0f
+			: RandomHelper.RandomNextFloat(-(float)Math.PI / 32f, (float)Math.PI / 32f);
+		// A pinned rig cannot roll its tint either: the three are grossly different brightnesses,
+		// so a rolled one alone would make two boots incomparable. A BENCH spider then gets its
+		// own tint back from the grid in ApplyBenchPlacement, which is where the row and column
+		// that decorrelate it are known; this leaves the harness (one spider, no grid) on
+		// DarkGray. Background spiders overwrite the tint outright a few lines down.
+		color = TintFor(netForcedColorIndex ?? (PosePinned ? 0 : RandomHelper.Random.Next(3)));
 		startheight = base.Position.Y;
 		if (isbackground)
 		{
@@ -187,19 +179,58 @@ internal class FlyingSpider : KillableAlien
 			base.DrawOrder = 20;
 			swiveltimer.Duration = 2700f;
 		}
-		if (EvilAliensWeb.Compat.DebugFlags.Harness == null)
+		if (!PosePinned)
 		{
 			swiveltimer.Randomize();
+		}
+		else
+		{
+			// REWIND, not merely "skip Randomize", and both timers. NewFlyingSpider RECYCLES, so a
+			// pinned spider out of the pool would otherwise inherit the phase the last one died
+			// on; and the swivel Duration set just above does not rewind the timer, so even a
+			// brand-new one does not read as zero-elapsed. Either way two boots would differ.
+			flaptimer.Reset();
+			swiveltimer.Reset();
 		}
 		ApplyBenchPlacement();
 	}
 
+	// The three body tints, by roll index. Extracted only because the bench re-picks from its grid
+	// after Initialize has already picked, and two copies of the mapping would be two places to
+	// drift.
+	private static Color TintFor(int pick)
+	{
+		return pick switch
+		{
+			1 => Color.White,
+			2 => Color.DimGray,
+			_ => Color.DarkGray,
+		};
+	}
+
+	// Both rigs that exist to be A/B'd freeze the pose, and for the same reason: two boots that
+	// differ in wing-flap phase, swivel phase or tilt cannot be compared frame against frame.
+	// The sprite harness parks ONE spider for a screenshot; ?flyspidercount= pins a whole grid of
+	// them (ApplyBenchPlacement already fixes X/Y and Speed, which is the other half of it). Live
+	// play keeps every roll -- a swarm flapping in lockstep reads as one organism.
+	private bool PosePinned =>
+		EvilAliensWeb.Compat.DebugFlags.Harness != null || benchIndex.HasValue;
+
+	// What the bench REPORTS, and deliberately an OBSERVATION rather than a restatement of
+	// PosePinned: it reads the three values the pin is supposed to have produced, so an edit that
+	// drops a `Randomize()` gate (or the tilt) is caught even if PosePinned itself still says the
+	// right thing. Read straight after the Add, before any Update has advanced a timer.
+	internal bool PoseIsPinned =>
+		flaptimer.TimeElapsed == 0f && swiveltimer.TimeElapsed == 0f && rotation == 0f;
+
 	// Lay the bench spiders out on a deterministic grid over the play field and freeze them in X,
 	// so the on-screen population is EXACTLY the requested N for the whole run. Speed 0 also keeps
 	// Update's `Position.X < -100 => Die()` from ever firing, which is what removed the drift.
-	// Everything time-varying is left alone: the swivel bob still moves them vertically and the
-	// flap timer still animates the wings, so the per-frame draw work stays representative of real
-	// play — only the birth/death churn is gone.
+	// The timers still RUN -- the swivel bob still moves them vertically and the flap timer still
+	// animates the wings, so the per-frame draw work stays representative of real play -- but their
+	// phases are pinned along with the tilt (PosePinned above), so the population flaps in
+	// lockstep. That is the price of a boot-to-boot diffable capture, and it costs this rig
+	// nothing: every spider draws the same three sprites whatever phase it is at.
 	private void ApplyBenchPlacement()
 	{
 		if (!benchIndex.HasValue)
@@ -238,6 +269,15 @@ internal class FlyingSpider : KillableAlien
 		float y = ySpan * (row + 0.5f) / rows;
 		base.Position = new Vector2(x, y);
 		startheight = y;
+		// Cycle the three tints across the grid so a tint-dependent draw bug cannot hide behind a
+		// single-tint bench. Keyed on col+row, not on the raw index: `col = i % cols`, so an index
+		// mod 3 would make the tint a pure function of the COLUMN whenever cols is a multiple of 3
+		// (N=7..9, N=64..81, ...). Foreground only -- Initialize gives a background spider the flat
+		// fog tint, which is what the whole variant is.
+		if (!isbackground && !netForcedColorIndex.HasValue)
+		{
+			color = TintFor((col + row) % 3);
+		}
 	}
 
 	// Baked half-extent of the per-spider group-flatten box, in DESIGN px before `scale`. Generous

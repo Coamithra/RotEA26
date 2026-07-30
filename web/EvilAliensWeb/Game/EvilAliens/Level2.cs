@@ -494,17 +494,26 @@ internal class Level2 : GameScene
 	// the `slowdown` beat above has to have run first for that to be the level's real pace.
 	private void spawnFlyingSpiderBench(GameEvent sender)
 	{
+		bool posePinned = true;
 		for (int i = 0; i < benchCount; i++)
 		{
 			FlyingSpider spider = FlyingSpider.NewFlyingSpider(Collection, base.Game);
 			spider.Setup(benchBackground);
 			spider.SetupBench(i, benchCount);
 			Collection.Add((GameComponent)(object)spider);
+			// ComponentBin.Add runs Initialize synchronously, so the pose is already resolved.
+			posePinned &= spider.PoseIsPinned;
 		}
+		// `pose=` is asserted by tools/headless/probes/flyspider_bench.txt. Every measurement in
+		// web/EvilAliensWeb/CLAUDE.md's flatten section is a diff between two bench captures, which
+		// is only meaningful while the pose really is pinned -- and a spider that started rolling
+		// its flap phase again would change no console output and no behaviour, only quietly make
+		// every future capture pair incomparable. So the rig states its own precondition.
 		System.Console.WriteLine("[flyspiders] bench: " + benchCount + " "
 			+ (benchBackground ? "background" : "foreground") + " spiders pinned, flatten="
 			+ EvilAliensWeb.Compat.DebugFlags.FlySpiderFlatten + ", box half="
-			+ FlyingSpider.FlattenBoxHalfDesign.ToString(System.Globalization.CultureInfo.InvariantCulture));
+			+ FlyingSpider.FlattenBoxHalfDesign.ToString(System.Globalization.CultureInfo.InvariantCulture)
+			+ ", pose=" + (posePinned ? "pinned" : "ROLLED"));
 	}
 
 	private void invuln(GameEvent sender)

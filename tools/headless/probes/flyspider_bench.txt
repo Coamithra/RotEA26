@@ -1,0 +1,33 @@
+# PROBE: the ?flyspidercount= bench still spawns its full population with a PINNED pose.
+#
+# PINS: FlyingSpider.PosePinned + the Reset/Randomize branches in FlyingSpider.Initialize
+# (card 1cd47879). Every flatten measurement in web/EvilAliensWeb/CLAUDE.md's flying-spider
+# section is a DIFF between two bench captures -- swarm vs per-spider, N=1 byte-identical,
+# N=4 five pixels -- and every one of those is meaningless the moment two boots stop landing
+# the same pose.
+#
+# FAILURE MEANS: a bench spider is rolling its wing-flap phase, swivel phase or tilt again
+# (`pose=ROLLED`), so bench captures are no longer comparable boot to boot and the numbers in
+# that doc section cannot be reproduced. `pose=` is an OBSERVATION -- Level2 reads the three
+# values back off every spider it just added -- not a restatement of the predicate, so
+# dropping either Randomize gate is caught even if PosePinned still reads correctly.
+#
+# WHY THE COUNT IS ASSERTED TOO: `pose=pinned` is vacuously true of an empty bench (the loop
+# folds `true` over nothing), so a spawner that silently stopped adding spiders would pass on
+# the assertion this probe exists for. `bench: 9 background` covers it, and 9 rather than 1
+# so the 3x3 grid path (cols/rows, the per-slot tint) is exercised rather than the N=1 corner.
+#
+# NOT A DRAW CHECK: this asserts the rig's precondition, nothing about how a spider LOOKS. The
+# silhouette question is answered by screenshot pairs, which no probe here can hold.
+#
+# eahl: --flags "?level=Level2&flyspiders&flyspidercount=9&invuln&noattract"
+
+step 150 nodraw
+
+# The bench is spawned off a WaitEvent so the level's `slowdown` beat runs first (see
+# Level2.spawnFlyingSpiderBench) -- it is not up at frame 0.
+step 120 nodraw
+
+expect \[flyspiders\] bench: 9 background spiders pinned, .*pose=pinned
+expect-not pose=ROLLED
+quit

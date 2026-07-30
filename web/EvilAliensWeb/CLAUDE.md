@@ -719,6 +719,24 @@ site now lives under:
     (`Oracle.SetController` re-points the seat, `PlayerShip.AdoptController` the live ship, so the
     slot keeps its score and its place in the tether). Only while the bot holds it -- a second pad
     joining a genuine two-human game still adds a player.
+  - **NO GAMEPAD? FAKE ONE FROM THE PAGE -- and the whole trick is the EVENT, not the override**
+    (card 1cd47879). Overriding `navigator.getGamepads` alone changes NOTHING and reads as "the
+    fake does not reach the code path": KNI never polls until a pad announces itself, because
+    `_content/nkast.Wasm.Dom/js/Window.8.0.5.js:234` subscribes `gamepadconnected` and forwards
+    `event.gamepad.index` to `nkast.Wasm.Dom`. Dispatch that event and the poll starts (the two
+    `nv.getGamepads()` sites, `Navigator.8.0.5.js:17` and `Window.8.0.5.js:291`, then run every
+    tick). The `GamepadEvent` constructor refuses a non-`Gamepad` object, so use a plain
+    `Event('gamepadconnected')` with a `gamepad` property defined on it -- the listener reads only
+    `.index`. The pad object needs `connected`, `index`, `mapping:'standard'`, 17
+    `{value,pressed,touched}` buttons, 4 axes and a timestamp that ADVANCES (`nkGamepad.
+    GetTimestamp` reads `gp.timestamp`). Standard mapping: **0 = A, 9 = Start**, 12-15 the d-pad.
+    Verified end to end this way -- `PadConnected(0)` flips, a button-9 press fires
+    `[teamchallenge] PadOne took over the auto-pilot partner seat 1`, `eaOracleRoster` reads
+    `players=2 seated=0:Keyboard,1:PadOne` (re-pointed, NOT a third player), `eaScore` shows slot
+    1 keeping its score and powerups, the tether survives, and holding an axis then really steers
+    that ship. **What a fake CANNOT prove, and what therefore stays formally open:** that a
+    physical pad enumerates over USB, and the browser quirk that a pad stays invisible until a
+    real button is pressed on it -- which is the very reason the takeover hook exists.
   - **How good the bot partner is remains unmeasured.** The completion matrix's TeamChallenge row
     is a TIMEOUT at ~90 deaths with both ships bot-driven; the only clean run (VICTORY 402s, 0
     deaths) was an `?invuln` CONTROL. So the auto-pilot makes the level playable and reachable, not
@@ -867,7 +885,18 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   - **The honest rig is `?flyspidercount=<N>` + `?flyspiderflatten=`.** `?flyspidercount=<N>`
     replaces the endless 5.5/s stream with a PINNED bench: exactly N spiders on a deterministic
     grid, `Speed = 0` so none crosses off-screen and dies, timers still ticking so the draw work
-    stays representative. Bench spiders are also forced `Collides = false`, which for the
+    stays representative. **A bench boot is now byte-deterministic** (card 1cd47879): a bench
+    spider pins its wing-flap phase, swivel phase and tilt exactly as the sprite harness does
+    (`FlyingSpider.PosePinned`), and tints from its grid slot instead of rolling, so two boots at
+    the same N differ ONLY in the flag under test -- which is what makes a swarm-vs-per capture
+    pair diffable instead of eyeballable. The pin REWINDS both timers rather than just skipping
+    `Randomize()`: `NewFlyingSpider` recycles, so a pinned spider out of the pool would otherwise
+    inherit the last one's phase. Live play (and the un-pinned `?flyspiders` stream) keeps every
+    roll. The bench REPORTS the pin as `pose=pinned` on its `[flyspiders] bench:` line -- read
+    back off the spiders it just added, not restated from the predicate -- and
+    `tools/headless/probes/flyspider_bench.txt` asserts it, because a spider that started rolling
+    again would change no behaviour and no other output, and only quietly make every capture pair
+    below incomparable. Bench spiders are also forced `Collides = false`, which for the
     FOREGROUND variant is a real change from live play -- otherwise the player would shoot the
     pinned population down mid-run and an un-invulned ship could be killed by the grid it is
     measuring. So a foreground bench sits out the collision pass and is a DRAW-cost rig (GL calls
@@ -887,12 +916,23 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   - **The flatten earns its keep visually** -- verify with `?harness=flyingspiderbg` (the fog
     variant, frozen) against `&flyspiderflatten=0`: with it off the wings read visibly more solid
     than the body (they composite to ~0.36 over a 0.2 body), with it on the silhouette fades as
-    one. The harness pins the flap/swivel phase (`Initialize` skips `Randomize()` while
-    `DebugFlags.Harness` is set) precisely so the two boots are the same pose and therefore
-    comparable; live play keeps the randomization. The swarm variant preserves the per-spider
-    silhouette exactly (identical body+wing math); it differs only where two SPIDERS overlap,
-    which also stops double-brightening -- at alpha 0.2 over Mars dust that is not perceptible,
-    which is what let it ship as the default.
+    one. The harness pins the flap/swivel phase and the tilt (`FlyingSpider.PosePinned`, which the
+    `?flyspidercount=` bench now shares) precisely so the two boots are the same pose and therefore
+    comparable; live play keeps the randomization. **Measured on the harness** (card 1cd47879,
+    `eahl`, 180 frames): the bare boot and `&flyspiderflatten=per` are BYTE-IDENTICAL -- which is
+    the check that the harness really does fall back to the per-spider path under the `Swarm`
+    default, since it adds no `FlyingSpiderSwarm` -- and `&flyspiderflatten=0` differs in 645
+    pixels, all inside an 80x45 box on the spider, peaking at 7/channel. So the mechanism is
+    confirmed and CONFINED to the wing/body overlap; "visibly" oversells it at this pose and on
+    this background.
+    **The swarm variant preserves the per-spider silhouette, and that is now measured, not
+    argued** (same card, `?level=Level2&flyspiders&flyspidercount=N`, swarm vs per): **N=1
+    byte-identical** (the union of one box IS that box), **N=4** -- the largest grid that does not
+    overlap -- 5 pixels differing by at most 1/765 summed, i.e. RT rounding. It differs only where
+    two SPIDERS overlap, and there it removes double-brightening rather than changing shape: over
+    the fog band at N=40 the peak deviation from a spider-free frame runs none 57 > per 37 > swarm
+    28. At alpha 0.2 over Mars dust that is not perceptible, which is what let it ship as the
+    default.
   - In-game the fog layer draws at alpha 0.2 over bright Mars dust, where the spiders are already
     near-invisible -- **do not try to judge the flatten from a live Level 2 screenshot**, use the
     harness stills.

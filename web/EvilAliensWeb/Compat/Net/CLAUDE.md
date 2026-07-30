@@ -171,7 +171,10 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     deadline fired. Leg **0b** came with step 2b and is the seam's other half: it counts the
     four services' reads THROUGH `INetHost` during `StartForTest`, which is the only place in the
     repo a real session starts headlessly and therefore the only place that read can be counted.
-    42/42 now. Leg **3c** is the scene twin from 2c-i (a `RecordingNetScene` decorator over the LIVE scene counts `EvReset`'s arrival through `NetScene.Current`; a handler left on `GameScene.NetActiveScene` does identical work today, so counting is the only thing that can see it).
+    42/42 now. Leg **3c** is the scene twin from 2c-i: a `RecordingNetScene` DECORATOR over the
+    LIVE scene counts `EvReset`'s arrival through `NetScene.Current`. A handler left on
+    `GameScene.NetActiveScene` does identical work today, so counting is the only thing that
+    can see it.
 - **The net cores read the clock, the dev flags AND the four services through ONE injected seam,
   `INetHost`** (card 25ad0659 steps 2a + 2b; the plan's 2a/2b/2c split is in
   `plans/net-headless-sim.md`). `NetSession`, `NetPuppets` and `NetImpairment` no longer touch
@@ -185,7 +188,9 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     three readbacks `NetSession` branches on, the kick menu and `SpawnPlayer`), and the session's
     32 `GameScene.NetActiveScene` reads go through the holder instead. **Its production value is
     DERIVED, not copied** -- `override ?? GameScene.NetActiveScene` -- so that field keeps its
-    concrete type for `AiBench`/`DebugInput`/`NetListing` and there is no second source of truth
+    concrete type for its non-net readers (`AiBench`, `DebugInput`, `NetListing`, `BinTest`,
+    `NetSnapshotTest` and `NetCosmeticTest` -- that last one NEEDS it, since
+    `NetCosmeticSelfTest` is not on the interface) and there is no second source of truth
     for "is a scene up", which every world message is gated on. Null hands the seam back, as with
     `NetHost`; unlike `NetHost` there is no production instance, because "no scene" is a real
     production answer and null IS it.

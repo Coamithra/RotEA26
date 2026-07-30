@@ -423,8 +423,10 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    stubs would be 15 more names to keep in step), and `NetSession`'s 32 `GameScene.NetActiveScene`
    reads move to `NetScene.Current`.
    - **The production value is DERIVED, never copied**: `NetScene.Current` is
-     `override ?? GameScene.NetActiveScene`, so that field keeps its concrete type for its four
-     non-net consumers (`AiBench`, `DebugInput`, `NetListing`, `GameScene` itself) and there is no
+     `override ?? GameScene.NetActiveScene`, so that field keeps its concrete type for its non-net
+     readers (`AiBench`, `DebugInput`, `NetListing`, `GameScene` itself, and three sibling test
+     suites -- of which `NetCosmeticTest` genuinely NEEDS the concrete type, since
+     `NetCosmeticSelfTest` is not on the interface) and there is no
      second source of truth for "is a scene up" -- every world message in `NetSession` is gated on
      that answer, so a stale copy would either drop the world on the floor or apply it into a
      scene that has terminated. Unlike `NetHost` there is no production INSTANCE to fall back to,
@@ -446,15 +448,15 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    Never as a percentage of a small phase: 10% of 0.3ms is nothing and would trigger a fallback to
    real added complexity for no gain. The simple direct-interface design is the DEFAULT; the
    generic-core fallback has to earn it.
-   **2c ALSO OWES 1b A DEBT, and it is the only outstanding one: `INetScene` should let a scenario
-   drive the RESET CHOREOGRAPHY.** `NetResetSpawnTest` has to FAKE `SpawnAllPlayers`' respawn of the
-   local seat, because `NetApplyReset` purges `PlayerShip` and its two retry legs need a non-null
-   `FindLocalShip()`; the real path there is `Resetting -> Startup`, i.e. ~3 s of game time plus a
-   background crossfade that needs `Draw`, which no headless scenario can drive. **2a's injected
-   clock does NOT fix this** (the wait is game-time and Draw-gated, not wall-clock), so do not
-   expect it to fall out of 2a -- it is 2c work. When `INetScene` lands, revisit
-   `NetResetSpawnTest.RespawnLocalShip` and delete the fake; its own comment lists the four ways it
-   is not a faithful copy, and all four exist only because the real respawn is unreachable.
+   **1b'S DEBT IS PAID, by 2c-i -- do not re-open it.** It read: `NetResetSpawnTest` has to
+   FAKE `SpawnAllPlayers`' respawn of the local seat, because `NetApplyReset` purges
+   `PlayerShip` and its two retry legs need a non-null `FindLocalShip()`, while the real path
+   (`Resetting -> Startup`) is ~3 s of game time plus a `Draw`-gated crossfade that no
+   headless scenario can drive. `SpawnPlayer` is on `INetScene`, so both legs now call the
+   REAL `GameScene.SpawnPlayer` and `RespawnLocalShip` is deleted with all four of the
+   infidelities its own comment listed. What is still skipped is the choreography AROUND the
+   seat, which was never the debt. (2a's injected clock did NOT fix this and was never going
+   to -- the wait is game-time and Draw-gated, not wall-clock.)
    **Sizing note for 2a, measured on `fa12140` rather than the "9" above:** 10 real
    `Environment.TickCount64` reads sit in the net layer -- `NetSession.NowMs`, `NetListing.NowMs`,
    `NetImpairment` (1, at receive), `NetPuppets` (7, of which **2 are inside `WireRoundTripTest`**

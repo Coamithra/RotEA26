@@ -554,7 +554,9 @@ site now lives under:
   PERMANENTLY and SILENTLY: `OnSpawn` registered the id either way, and `OnSnapshotEntry`'s
   self-heal only rebuilds ids it has NEVER seen, so the ghost was never drawn, never collidable,
   and `snapUnk` never climbed. Safe at teardown because `EvSpawn` and the snapshot path are both
-  gated on `GameScene.NetActiveScene`, which `Terminate` nulls BEFORE its own purges.
+  gated on `NetScene.Current`, whose production value IS `GameScene.NetActiveScene` -- which
+  `Terminate` nulls BEFORE its own purges. (Card 25ad0659 step 2c-i put the seam in front of that
+  field; the production argument is unchanged and is still about the field.)
 - **A caller that ADOPTS what it adds must use `ComponentBin.TryAdd`, not `Add`.** `Add` diverts
   silently -- that is the point, ordinary game code must not have to care -- but the net layer's
   ship puppets keep the reference and gate their retry on it being null, so adopting a diverted

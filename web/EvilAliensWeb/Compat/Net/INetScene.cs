@@ -9,7 +9,7 @@ namespace EvilAliensWeb.Compat.Net
     //
     // WHAT THIS IS. Everything the net cores reach on the live GameScene: the state transitions a
     // host broadcasts (reset / victory / checkpoint / pause / tether break / peer left), the
-    // catch-up replay a join-in-progress peer needs, the two readbacks NetSession branches on
+    // catch-up replay a join-in-progress peer needs, the three readbacks NetSession branches on
     // (Level, NetEndingNormally, JoinWouldSpawnNow), the host's kick menu, and SpawnPlayer.
     // Fifteen members, measured -- the design doc guessed fourteen.
     //
@@ -73,8 +73,14 @@ namespace EvilAliensWeb.Compat.Net
         // peer that ran its own Initialize and so holds the level's OPENING backdrop.
         void NetReplayCatchUp();
 
-        // The host's only agency under a remote pause. Returns false when we hold no freeze of
-        // our own (our own pause menu was already up), which is what the caller latches on.
+        // The host's only agency under a remote pause. Returns false when there was nothing to
+        // show -- either no freeze of ours to put the menu over, or a menu already up.
+        //
+        // **THE CALLER MUST NOT LATCH ITS "OFFERED" FLAG ON A FALSE**, or the offer is silently
+        // burned and never comes back. That rule lives on GameScene.NetShowKickMenu and is
+        // restated here rather than paraphrased, because this interface -- not that class -- is
+        // what step 4's fake will be written against, and a fake that returns a bare false is
+        // exactly how the rule gets rediscovered the hard way.
         bool NetShowKickMenu();
 
         // --- seating ----------------------------------------------------------------------------
@@ -105,9 +111,11 @@ namespace EvilAliensWeb.Compat.Net
             set { overrideScene = value; }
         }
 
-        // True while a scenario holds the seam. Only diagnostics should care -- it exists so a
-        // suite can assert it handed the seam back, and so a stray override cannot masquerade as
-        // a live scene in a log line.
+        // True while a scenario holds the seam. Its ONLY job is to let a suite assert it handed
+        // the seam back: `Current` alone cannot answer that, because a live scene and an override
+        // over that same scene are both non-null and both perfectly plausible. Nothing in the
+        // shipped path reads it, and nothing should -- a core branching on "am I being tested"
+        // is how a rig stops testing the thing that ships.
         internal static bool IsOverridden => overrideScene != null;
     }
 }

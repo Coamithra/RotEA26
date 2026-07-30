@@ -58,6 +58,11 @@ namespace EvilAliensWeb.Compat.Net
     //      the pinned host does no harm rather than that the session reads it. This one moves
     //      ONLY the virtual clock -- no packets, no ticks -- and requires the session to act,
     //      straddling exactly one threshold so the assertion pins WHICH deadline fired.
+    //   3c. THE SCENE SEAM, added by step 2c-i -- 0b's shape one seam later. A handler left on
+    //      GameScene.NetActiveScene rather than NetScene.Current does the IDENTICAL work today,
+    //      because the seam reads THROUGH that very field, so counting the arrival is the only
+    //      thing that can tell them apart before step 4 supplies a scene of its own. It also
+    //      carries the receipt for step 1b's deleted respawn stand-in.
     // Leg 3 is also leg 1's and leg 2's POSITIVE CONTROL: it proves the wire, the handshake, the
     // stream decode and both spawn paths all work, so their "nothing happened" assertions cannot
     // be passing because the scripted peer's frames never arrived or were never processed. Each
@@ -71,8 +76,12 @@ namespace EvilAliensWeb.Compat.Net
     // that directly and supplies the two flush points itself. It does NOT tick the game: driving
     // the real Resetting -> Startup choreography would take ~3 s of game time plus a background
     // crossfade that needs Draw, and none of it is under test. The one thing it therefore has to
-    // stand in for is SpawnAllPlayers' respawn of the local seat -- see RespawnLocalShip, which
-    // lists the four ways it is NOT a faithful copy.
+    // supply itself is SpawnAllPlayers' respawn of the local seat, because NetApplyReset purges
+    // PlayerShip and both retry legs need a non-null FindLocalShip(). Since step 2c-i that is the
+    // REAL GameScene.SpawnPlayer, reached through INetScene -- it used to be a hand-rolled
+    // stand-in whose own comment listed four ways it was not a faithful copy (no Recycle, no
+    // spawnType position, startup: false, none of the caller's cursor bookkeeping). Nothing about
+    // the seat is faked any more; what is still skipped is the ~3 s of choreography AROUND it.
     //
     // *** THIS SUITE IS DESTRUCTIVE. It is the only one in this directory that is. ***
     // It really pairs a session onto the live level, really moves the local player's seat, and
@@ -156,8 +165,7 @@ namespace EvilAliensWeb.Compat.Net
             // ... wrapped in a call counter, which is leg 3c's instrument. A DECORATOR over the
             // live scene, not a replacement: leg 2's EvReset must still perform the real
             // Purge<PlayerShip> from inside the drain, or every leg under it goes vacuous.
-            RecordingNetScene rec = new RecordingNetScene(NetScene.Current);
-            INetScene scene = rec;
+            RecordingNetScene scene = new RecordingNetScene(NetScene.Current);
 
             sb.Append(" 0. rig\n");
             // A single local player at slot 0 with a live ship, and slots 1/2 free. Everything
@@ -392,13 +400,13 @@ namespace EvilAliensWeb.Compat.Net
                 // do the identical work and leave this at zero -- which is the whole point: that
                 // divergence is invisible until step 4 supplies a scene of its own.
                 sb.Append(" 3c. the world reaches the scene through the INetScene seam\n");
-                Check("leg 2's EvReset arrived through NetScene.Current (resets=" + rec.ResetCalls
-                    + ")", rec.ResetCalls == 1);
+                Check("leg 2's EvReset arrived through NetScene.Current (resets=" + scene.ResetCalls
+                    + ")", scene.ResetCalls == 1);
                 // The two respawns are the rig's own, and they are here rather than in a comment
                 // because they are what replaced step 1b's hand-rolled stand-in: the real
                 // GameScene.SpawnPlayer, reached through the seam.
                 Check("both retry legs respawned via the REAL SpawnPlayer (spawns="
-                    + rec.SpawnPlayerCalls + ")", rec.SpawnPlayerCalls == 2);
+                    + scene.SpawnPlayerCalls + ")", scene.SpawnPlayerCalls == 2);
             }
 
             // THE CLOCK IS PINNED FOR THE WHOLE RUN (card 25ad0659 step 2a). Installed BEFORE
@@ -409,7 +417,7 @@ namespace EvilAliensWeb.Compat.Net
             // note in the header for what that replaced.
             INetHost hostBefore = NetHost.Current;
             NetHost.Current = services;
-            NetScene.Current = rec;
+            NetScene.Current = scene;
             try
             {
                 RunLegs();
@@ -434,9 +442,11 @@ namespace EvilAliensWeb.Compat.Net
                 // Null hands the seam back to the live scene, so this asserts the scenario left
                 // nothing behind -- a stray override would silently outlive the run, and every
                 // world message after it would be applied into a decorator over a dead scene.
+                // IsOverridden is the whole check on purpose: `Current == GameScene.NetActiveScene`
+                // is what the getter's own `??` already guarantees once the override is null, so
+                // adding it would be a restatement that cannot fail, not a second assertion.
                 Check("the scene seam is handed back (no override left standing)",
-                    !NetScene.IsOverridden
-                        && ReferenceEquals(NetScene.Current, GameScene.NetActiveScene));
+                    !NetScene.IsOverridden);
             }
 
             sb.Append(Tally(pass, fail));
@@ -450,9 +460,15 @@ namespace EvilAliensWeb.Compat.Net
         // scene of its own, which is step 4. So the assertion has to be "the call arrived HERE",
         // not "the call had the right effect".
         //
-        // It wraps the live scene rather than replacing it: leg 2's EvReset must still perform
-        // the REAL Purge<PlayerShip> from inside the drain, which is the whole subject of this
-        // suite. A blank fake would make every leg below it vacuous.
+        // It forwards to the live scene rather than replacing it: leg 2's EvReset must still
+        // perform the REAL Purge<PlayerShip> from inside the drain, which is the whole subject of
+        // this suite. A blank fake would make every leg below it vacuous.
+        //
+        // `inner` is a SNAPSHOT, taken once at install. That is the very "stale copy" INetScene's
+        // own header warns about, and it is safe here for two reasons that a longer-lived
+        // decorator would not have: the suite refuses to run without a GameScene up, and the only
+        // reset it drives is ResetModeRespawn, which does not terminate one. Do not copy this
+        // into a scenario that tears a scene down -- forward per call instead.
         private sealed class RecordingNetScene : INetScene
         {
             private readonly INetScene inner;
@@ -499,9 +515,12 @@ namespace EvilAliensWeb.Compat.Net
 
             public bool NetShowKickMenu() => inner.NetShowKickMenu();
 
-            // Counted separately from ResetCalls because BOTH this suite and (in production) the
-            // scene's own reset choreography call it -- conflating them would make leg 3c's
-            // number depend on how many times the rig respawned.
+            // Counted separately from ResetCalls because these two are the RIG'S OWN calls, not
+            // arrivals from the net layer -- 3c reads them as the receipt for step 1b's deleted
+            // stand-in, which is a different claim from "the world reached the scene". (The only
+            // other caller through this seam is NetSession's couch-join grant, which this
+            // scenario never triggers; GameScene.AddPlayer calls SpawnPlayer on `this` and so can
+            // never reach a decorator at all.)
             public void SpawnPlayer(ControlDevice controlDevice, int slot)
             {
                 SpawnPlayerCalls++;

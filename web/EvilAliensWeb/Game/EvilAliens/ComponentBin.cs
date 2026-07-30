@@ -142,6 +142,13 @@ public class ComponentBin : IComponentBinService
 		}
 	}
 
+	// How many pause layers are held right now (card 25ad0659 step 4). "Is the world still
+	// frozen" is the assertion scenario 6 exists to make -- a reset that arrives mid-pause must
+	// not strand it -- and it is otherwise unobservable from outside: `inactive` is private and
+	// every component's Enabled flag is an INFERENCE about the freeze rather than the freeze
+	// itself. Read-only, so it cannot become a second way to unfreeze.
+	internal int FreezeDepth => inactive.Count;
+
 	public void Push()
 	{
 		List<GameComponent> list = new List<GameComponent>();

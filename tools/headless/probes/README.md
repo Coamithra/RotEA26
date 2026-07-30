@@ -131,6 +131,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `net_reset_spawn.txt` | card 74403f83's two ship-puppet spawn sites, END TO END (card 25ad0659 step 1b): an `EvReset` purging from inside the rx drain must not let `NetSession.SpawnPuppet` / `SpawnFriend` adopt a ship the `ComponentBin` diverted. The fix was previously proven only at the primitive (`eaBinTest` scenario 5's bare `TryAdd` pair) — reaching the real call sites needs a live session with a host-granted peer slot and buffered ship samples. **The only DESTRUCTIVE probe here**: the suite pairs a real session onto the live level and leaves the scene in its reset branch (it restores the roster and asserts it did) |
 | `gamebrowser_fallback.txt` | the online game browser draws the default shot for a level it has no bundled art for (card 0d166364) — the unmapped and out-of-enum levels that arrive off the wire from a stranger's build. Also the out-of-range DIFFICULTY on the same row (card 88f87ba2): the boundary refuses it (`unknownDifficulty=7`) and the row is still listed. Note the flag is `?gamebrowser=fallback`; the bare flag is the appearance rig and lists no unmapped entries |
 | `flyspider_bench.txt` | the `?flyspidercount=` bench spawns its full population with a PINNED pose (card 1cd47879). Every flatten measurement in web CLAUDE.md is a diff between two bench captures, so a spider that started rolling its flap phase again would change no behaviour and no other output while quietly making every future capture pair incomparable. `pose=` is read back off the spiders, not restated from the predicate; the count is asserted beside it because `pose=pinned` is vacuously true of an empty bench |
+| `net_scene_order.txt` | scenario 6 of the step-4 harness (card 25ad0659): reset / pause / checkpoint reach a REAL GameScene in the order the ordered lane carried them, a repeated pause on-edge does not latch a freeze one off-edge cannot clear, and a reset arriving mid-pause neither unfreezes the world early nor survives the peer's resume. DESTRUCTIVE, like `net_reset_spawn.txt` -- it pairs a real client session onto the running scene and applies a real `EvReset`. Scenarios 1-5 are menu-runnable and ride `net_selftests.txt` instead |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
 level's manifest lines are deleted — `Level2|gfx/marsbg` → 17 lines from
@@ -151,6 +152,11 @@ entry scene and the run still prints **PASS** with the full `ops=` list, caught 
 mutants it does NOT catch, both correctly — an unconditional `flaptimer.Randomize()` is undone by
 the pinned branch's `Reset()` (so behaviour is unchanged), and removing that `Reset()` only shows
 on a RECYCLED spider, which a bench spawned at level entry never has.
+`net_scene_order` goes red when `NetSession`'s `EvPause` handler stops forwarding to
+`NetScene.Current` (the recorder sees no pause edges, so leg 1's ORDER assertion fails naming what
+it got), and `net_selftests`' `netscen` leg goes red when `HandleClaim`'s `PaidMask` test is
+dropped -- a repeat claim from an already-paid slot then pays again, which is the whole point of
+that ledger.
 `silence` goes red under `--audio` (`masterVolume=1 alGain=1`), which is also its standing
 negative control. Its `lib=<unresolved>` line (added by card 72297923, which made the readback
 resolve OpenAL by candidate list) goes red when that list is replaced with names that do not

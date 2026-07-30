@@ -450,6 +450,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   while `UpdNet` covers only `NetSession.Update`. Args default to 128 / 2000 when OMITTED;
   menu-only, and its first run per process reads ~24% high — prefer `eahl` and compare at
   matched run ordinals),
+  `eaNetScenarios()` (the step-4 scenario harness -- card 25ad0659: the three generous-claim
+  shapes, the OneUp overlap and the id-churn self-heal, each over a real session with a
+  scripted wire peer; MENU-only and leave-no-trace, and it carries the residual first-wipe
+  `pupPops` probe),
+  `eaNetSceneOrder()` (scenario 6 of the same harness -- reset/pause/checkpoint ordering
+  against a REAL GameScene, so **destructive**: run it in a throwaway `?level=Level2&invuln`
+  boot),
   `eaNetResetSpawn()` (the reset/`TryAdd` ship-puppet spawn scenario — card 25ad0659; the ONE
   **destructive** suite here: it pairs a real session onto the live level, so run it in a
   throwaway `?level=Level2&invuln` boot),

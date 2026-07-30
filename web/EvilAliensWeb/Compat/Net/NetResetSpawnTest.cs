@@ -34,7 +34,7 @@ namespace EvilAliensWeb.Compat.Net
     // load-bearing one here. Do not add legs that expect the broken code to stay broken past one
     // tick; leg 3 passes under that mutation and always will.
     //
-    // THE THREE LEGS, and why they are in this order.
+    // THE LEGS, and why they are in this order.
     //   0b. THE SERVICE SEAM, added by step 2b. The four ServiceHelper.Get<>() lookups the net
     //      cores made now resolve through INetHost, and a call site left on the process-global
     //      registry would change NOTHING observable today -- it only bites at step 3, as two
@@ -204,6 +204,13 @@ namespace EvilAliensWeb.Compat.Net
                 // The counts are exact on purpose (>= 1 would let NetPuppets.Enable regress
                 // behind StartWith's own read of the same service). Raise them if a read is
                 // genuinely added; do not relax them to a floor.
+                //
+                // They assume the puppet layer is NOT already enabled -- NetPuppets.Enable
+                // early-returns when it is, which would report bin/score reads=1 and blame a
+                // missed call site for what is really leaked state. Unreachable as things stand:
+                // the only other caller, NetSnapshotTest, skips itself while a GameScene is up
+                // (which this suite requires) and disables in a finally. If that ever changes,
+                // this leg needs a NetPuppets.Enabled precondition, not looser counts.
                 sb.Append(" 0b. the session was built through the INetHost seam (step 2b)\n");
                 NetSession.StartForTest(game, host: false, ours, Room);
                 int gotOracle = services.OracleReads;
@@ -411,9 +418,16 @@ namespace EvilAliensWeb.Compat.Net
         // pinned and the flags/fingerprints stay production.
         //
         // Deliberately NOT a stub that returns its own services: the assertion is "the cores
-        // stopped reading ServiceHelper", and comparing against the LIVE oracle/bin is what makes
-        // it also assert that the production mapping is still 1:1. Handing the session fabricated
-        // services would test the counter and nothing else, and would need a second Game.
+        // stopped reading ServiceHelper", and handing the session fabricated services would test
+        // the counter and nothing else -- besides needing a second Game, which no ctor here can
+        // do without.
+        //
+        // The COUNT is the whole discriminator; the two `ReferenceEquals` beside it are close to
+        // free rather than load-bearing. All four getters return DISTINCT types with exactly one
+        // source apiece in ServiceHelper, so a mis-wired mapping does not compile -- which is why
+        // the sound and score legs do without one and lose nothing. (2a's flag surface was the
+        // opposite case: eleven same-typed members, so a swap among them was the live hazard and
+        // NetHostTest drives its impairment triple to three distinct values for exactly that.)
         private sealed class RecordingNetHost : INetHost
         {
             private readonly INetHost inner;

@@ -180,7 +180,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   expression verbatim. 2c adds `INetEntity` / `INetScene`; it is STILL STATIC and single-instance
   until step 3.
   - **2b is FOUR members (`Oracle`, `ComponentBin`, `Score`, `SoundManager`), not the ~31 the
-    plan's seam table implies, and the reason generalises.** The cores make 84 calls on those
+    plan's seam table implies, and the reason generalises.** The cores make 79 calls on those
     services across 27 distinct members, but they all read a field cached ONCE in
     `NetSession.StartWith` / `NetPuppets.Enable` -- so what has to move is the six
     `ServiceHelper.Get<>()` LOOKUPS (`ServiceHelper` being a process-global registry is the actual

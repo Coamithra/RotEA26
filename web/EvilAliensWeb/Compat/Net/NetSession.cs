@@ -399,7 +399,7 @@ namespace EvilAliensWeb.Compat.Net
             game = g;
             // The four services arrive through the host since step 2b -- ServiceHelperNetHost
             // holds these four lookups verbatim. Resolved ONCE here, exactly as before: the
-            // fields below are what the ~84 call sites read, so where they came from is the only
+            // fields below are what the 79 call sites read, so where they came from is the only
             // thing this card changes.
             oracle = NetHost.Current.Oracle;
             bin = NetHost.Current.ComponentBin;

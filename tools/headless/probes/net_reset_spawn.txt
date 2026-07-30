@@ -62,9 +62,16 @@
 #   * NetSession.StartWith oracle -> oracle reads=0 · bin -> bin reads=1 · sound -> sound reads=0
 #     · score -> score reads=1
 #   * NetPuppets.Enable bin -> bin reads=1 · score -> score reads=1
-# The seventh 2b call site, NetPuppets.WireRoundTripTest's own score lookup, is NOT reachable from
-# here (it runs under eaNetScore.test with no host installed) and is covered by
-# verify_decompiled_diff.py plus net_selftests.txt's `[netscore] wire PASS (9/9)` leg instead.
+# THE SEVENTH 2b CALL SITE IS NOT REACHABLE FROM HERE AND HAS NO RUNTIME COVER, which is worth
+# stating plainly rather than implying. NetPuppets.WireRoundTripTest resolves its own score
+# lookup, and it runs under eaNetScore.test with no host installed -- so it resolves to the same
+# live ScoreVisualiser before and after the change and net_selftests.txt's `[netscore] wire PASS
+# (9/9)` leg passes identically either way. That leg is a NO-REGRESSION check, not coverage;
+# verify_decompiled_diff.py is the actual evidence that the line moved.
+# (It is also the one piece of TEST code deliberately put ON the seam, against INetHost's own
+# policy that the sibling suites stay on the registry: unlike them it does not assert about the
+# live world, it borrows a ScoreVisualiser to round-trip a wire frame through -- so a step-4
+# scenario should get its own, not the process's.)
 #
 # READ THAT FIRST MUTATION CAREFULLY -- it is only ONE leg, and the reason corrects a claim card
 # 74403f83 left in two CLAUDE.md files and in SpawnPuppet's own comment. Those say adopting a

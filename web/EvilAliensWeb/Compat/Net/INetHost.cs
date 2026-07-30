@@ -8,7 +8,10 @@ namespace EvilAliensWeb.Compat.Net
     // own state for four kinds of thing: the four ServiceHelper services, the entity/scene
     // object graph, the WALL CLOCK, and a handful of dev flags baked at boot. INetHost is the
     // ONE injected seam that carries all of it. It arrives in three slices because the measured
-    // surface is 45 + 18 + 14 members, not the ~30 the design doc first sketched:
+    // surface is bigger than the ~30 the design doc first sketched. (The doc's own "45 + 18 + 14"
+    // sizing is dead for THIS interface: 45 was a count of what the cores CALL, and 2b's finding
+    // is that what has to move is the resolution, not the calls -- see the 2b block below. The
+    // real total here is 11 + 4 + whatever 2c's entity creation needs.)
     //   * 2a -- the clock, the build/identity fingerprints and the debug flags.
     //   * 2b -- the four ServiceHelper services (oracle / bin / score / sound).
     //   * 2c -- INetEntity + INetScene + entity creation.
@@ -39,6 +42,10 @@ namespace EvilAliensWeb.Compat.Net
     //     NetSlotTest, NetSnapshotTest). They reach the LIVE world on purpose -- asserting
     //     against the real oracle/bin/score IS their job -- so they keep reading the registry
     //     directly. Step 4's scenarios are the ones that read through a host.
+    //     ONE EXCEPTION, and it is what the rule is really about: NetPuppets.WireRoundTripTest
+    //     IS on the seam. It does not assert about the live world -- it BORROWS a
+    //     ScoreVisualiser to round-trip a wire frame through and puts the scores back -- so a
+    //     step-4 scenario should be handed its own rather than the process's.
     internal interface INetHost
     {
         // Real-time milliseconds. The whole net layer runs on this rather than on the GameTime
@@ -71,15 +78,16 @@ namespace EvilAliensWeb.Compat.Net
         // ---- step 2b: the four ServiceHelper services --------------------------------------
         //
         // WHY THESE ARE THE WHOLE OF 2b, and why it is four members rather than the doc's
-        // "16 oracle.* + 5 bin.* + 8 score.* + 2 sound.*". The blocker this step exists to
+        // "16 oracle.* + 5 bin.* + 8 score.* + 2 sound.*" (31). The blocker this step exists to
         // remove is named in the plan's Layer 1: `ServiceHelper` is a PROCESS-GLOBAL registry,
         // so two peers cannot hold distinct Oracles/Bins/Scores at once. What has to move is
         // therefore the RESOLUTION -- the six `ServiceHelper.Get<>()` lookups in the cores --
-        // not the 84 call sites that follow it, which already read cached fields and are
-        // unaffected by where those fields came from. Forwarding all 27 members instead would
-        // rewrite every one of those call sites, drag `PlayerShip` / `AlienDrawableGameComponent`
-        // into this interface (7 of the 27 are entity-typed), and 2c would then have to redo
-        // them behind INetEntity. Same rule as 2a: move the expression, verbatim, once.
+        // not the 79 call sites that follow it, which already read cached fields and are
+        // unaffected by where those fields came from. Forwarding all 27 distinct members
+        // (measured; the doc's 31 was an estimate) instead would rewrite every one of those call
+        // sites, drag `PlayerShip` / `AlienDrawableGameComponent` into this interface (7 of the
+        // 27 are entity-typed), and 2c would then have to redo them behind INetEntity. Same rule
+        // as 2a: move the expression, verbatim, once.
         //
         // A scenario overrides these to give each peer its own services. It does NOT buy
         // Game-freedom -- all four ctors take a `Game`, and the harness lives in the game

@@ -172,6 +172,15 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   per-recipient clone turns **1** (the aliasing leg); delivering inline instead of queueing turns
   **3**; taking the Pump budget per endpoint instead of up front turns exactly **1** -- the upward
   (`p0 -> p1`) direction and not the downward one, which is why the suite drives both.
+- **Eleventh case set: the `INetHost` seam** (card 25ad0659 step 2a) -- same shape, invoking
+  `Compat/Net/NetHostTest.Run()`. The two share `RunBrowserSuite`, which is where the
+  section-header and PASS-floor guards now live for both. What it adds over the browser run is that
+  the seam's whole point -- a virtual clock the layer actually obeys -- becomes provable with an
+  exit code, so steps 2b/2c/3/4 get a gate rather than something to remember to click.
+  Mutation-tested two ways (counts are FAILING LEGS): `NetImpairment.OnInnerData` back to
+  `Environment.TickCount64` turns **4** -- the whole injected-clock section except its "not yet
+  due" line, which is precisely why the POSITIVE assertion is the discriminator there; mis-wiring
+  `ServiceHelperNetHost.NetLossPct` to the lag flag turns **1**.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

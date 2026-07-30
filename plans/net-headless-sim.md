@@ -16,13 +16,14 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > PR #231 (`dce0772`) -- the in-process wire, its self-test, a `logic_probe` case set and two
 > committed probes. **Step 1b shipped next** -- `Compat/Net/NetResetSpawnTest.cs`
 > (`eaNetResetSpawn()`), `NetSession.StartForTest` + three read-only seams, and
-> `tools/headless/probes/net_reset_spawn.txt`.
+> `tools/headless/probes/net_reset_spawn.txt`. **Step 2a after that** -- the `INetHost` seam's
+> first slice (clock + flags + the two fingerprints), `Compat/Net/NetHostTest.cs`, and 1b's own
+> clock debt paid off.
 >
-> **PARKED after 1b (2026-07-30). Card `25ad0659` is back in Backlog with a PARKED comment that
-> carries the full resume brief -- read that comment first.** Remaining: **2a**, 2b, 2c, 3, 4.
-> Nothing of 2a was started, so `main` is a clean stopping point: everything shipped so far is
-> additive scaffolding plus one test-only fix, and **2a is the first step that touches the running
-> co-op path** -- which is exactly why it was not begun in a session that could not finish it.
+> **2a shipped 2026-07-30** -- `INetHost` + `ServiceHelperNetHost` + `NetHost.Current`, the
+> injected clock and the flag/fingerprint surface, with `NetHostTest` (`eaNetHost()`,
+> `ProbeNetHost`) and `NetResetSpawnTest` re-homed onto a `PinnedNetHost`. Remaining: **2b**, 2c,
+> 3, 4.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -341,6 +342,34 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
    because the clock buys determinism for everything downstream, 1b's probe included; **2b** the
    four `ServiceHelper` services; **2c** `INetEntity` + `INetScene` + entity creation. Still
    static, still one instance. Diff-review that every mapped call is 1:1.
+   **2a is DONE**, and what it actually landed, since some of it differs from the sketch above:
+   - `Compat/Net/INetHost.cs` (the interface + `NetHost.Current`, which restores the production
+     host on a null assignment so a scenario's `finally` is one line),
+     `ServiceHelperNetHost.cs` (each replaced expression VERBATIM -- it holds no `ServiceHelper`
+     lookups yet; 2b is what earns the name), `PinnedNetHost.cs` (a DECORATOR: pins the clock and
+     optionally the impairment triple, forwards the rest, so a rig made deterministic in time does
+     not silently also change the flags).
+   - Members: `NowMs`, `BuildHash`, `PeerToken` (both fingerprints ALREADY resolved against
+     `?netfakehash` / `?netfakepeer`, so a scenario supplies two strings and never touches JS
+     interop), `DebugActive`, `NetJip`, `NetLog`, `NetDropGrant`, `NetLocal`, `NetLagMs`,
+     `NetLossPct`, `NetJitterMs`. Eleven, not the doc's implied dozen-plus: the `NetLog` guards
+     collapse to one member, and `NetImpairment`'s explicit-override ctor already WAS a seam, so
+     its three only needed re-pointing.
+   - **`NetSession.Start()` stayed on `DebugFlags`, deliberately.** It is the composition root --
+     it decides whether a session is constructed at all and which transport it gets, which no
+     injected host can answer. Likewise `NetListing.NowMs`: the doc's own census counted it among
+     the ten clock reads, but the seam section says listing is out of scope, and out is right --
+     the sim never constructs it. So the seam moved **9** clock reads, not 10.
+   - Verification: `NetHostTest` (32 assertions) as `eaNetHost()`, `ProbeNetHost` and a leg of
+     `net_selftests.txt`; `NetResetSpawnTest` on a `PinnedNetHost` with a new leg 3b (advance ONLY
+     the virtual clock past `FriendTimeoutMs`; the friend puppet must explode and the primary
+     remote, on the 3 s peer timeout, must not), 31 -> 35 assertions. `verify_decompiled_diff.py
+     --ref main` showed 61 members, all of them edited on purpose; the 11 `NetLog` guards account
+     for 7 of the `NetSession` rows.
+   - **The clock legs are built so the POSITIVE assertion discriminates.** The virtual clock
+     starts at 0, so a wall-clock read stamps arrival at the machine's uptime and the packet is
+     never delivered -- had it started high, a "not yet due" assertion would pass or fail
+     depending on the box's uptime. Worth copying in 2b/2c.
    At 2c, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
    brackets `NetSession.Update()` in `Game1.UpdateInner`, so take the ABSOLUTE mean ms at a pinned
    replicable population (uncapped/headless, or focused -- a vsync-capped frame rate cannot see

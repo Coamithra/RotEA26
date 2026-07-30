@@ -160,12 +160,46 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   - **It cannot run under `logic_probe`** (`Game`, `ServiceHelper` and a `GameScene`, all three
     of that tool's documented limits) -- unlike `eaNetWire.test`. eahl is its only headless
     runner.
-  - It reads the REAL clock, since `NetSession.Update` does. Every leg re-sends both streams
-    immediately before its `Update`, which re-arms both real-clock windows that could bite (the
-    500 ms `FriendTimeoutMs`, the 8 s drop verdict); measured deterministic 31/31 over 10
-    consecutive runs. If it ever flakes, the fix is the injected clock, not a looser assertion.
+  - **It runs on a `PinnedNetHost` since step 2a, so it reads NO real clock.** It used to (that is
+    what `NetSession.Update` read), and it out-ran both windows that could bite -- the 500 ms
+    `FriendTimeoutMs` and the 8 s drop verdict -- by re-sending both streams immediately before
+    every `Update`; measured deterministic 31/31 over 10 consecutive runs, which is what let it
+    commit as a probe. The re-sends STAY (they also keep each leg's buffers fresh, a separate
+    job). Leg **3b** was added with the pin and is the only leg here that discriminates on the
+    clock: it moves ONLY the virtual clock past `FriendTimeoutMs` and requires the friend puppet
+    to explode while the primary remote, on the 3 s peer timeout, does not -- so it pins WHICH
+    deadline fired. 35/35 now.
+- **The net cores read the clock and the dev flags through ONE injected seam, `INetHost`** (card
+  25ad0659 step 2a; the plan's 2a/2b/2c split is in `plans/net-headless-sim.md`). `NetSession`,
+  `NetPuppets` and `NetImpairment` no longer touch `Environment.TickCount64`, `DebugFlags` or
+  `WebRtcInterop` directly -- they go through `NetHost.Current`, whose production value is
+  `ServiceHelperNetHost` and holds each expression verbatim. Step 2b adds the four `ServiceHelper`
+  services to the same interface, 2c `INetEntity` / `INetScene`; it is STILL STATIC and
+  single-instance until step 3.
+  - **A scenario swaps it and hands it back: `NetHost.Current = new PinnedNetHost()`, restore in a
+    `finally`.** Assigning `null` restores production, so teardown needs no bookkeeping and the
+    layer can never hold a null host (a frozen or absent clock reads as "the peer stopped
+    sending"). `PinnedNetHost` is a DECORATOR -- it pins the clock (and optionally the impairment
+    triple) and forwards the rest to production, so a rig made deterministic in TIME does not
+    silently also change the build hash or the flags out from under the code it is testing.
+  - **THREE THINGS ARE DELIBERATELY OUT OF THE SEAM.** `NetSession.Start()` still reads
+    `?net=` / `?rtc` / `?room=` directly -- it is the composition root and decides whether a
+    session exists at all, which no injected host can answer. `NetListing` / `NetLobby` /
+    `NetGameBrowser` / `WebRtcTransport` are lobby-and-listing plumbing a scenario never
+    constructs (`NetListing` keeps its own `NowMs`). `NetWaitOverlay`'s clock read is a Draw-time
+    pulse alpha, not cadence.
+  - **Verify with `eaNetHost()`** (`Compat/Net/NetHostTest.cs`, 32 assertions; also `ProbeNetHost`
+    under `logic_probe` and a leg of `net_selftests.txt`). It asserts the two halves separately,
+    because they fail differently: the production host maps 1:1 onto what each call site read
+    (the impairment triple driven to three DISTINCT values, so a swap among them cannot pass),
+    and the injected clock genuinely reaches the live `NetImpairment` queue over a real `NetWire`
+    endpoint. **That second section is the discriminator, and its POSITIVE assertion is what
+    discriminates** -- the virtual clock starts at 0, so a wall-clock read stamps arrival at the
+    machine's uptime and the packet is never delivered at all. The boolean flag legs compare
+    equal-to-source and so cannot tell two members wired to each other apart on a boot where both
+    are false; that is stated in the suite rather than papered over.
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
-  code** (card 25ad0659): `eaNetWire.test`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
+  code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
   `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never

@@ -436,6 +436,10 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
   `eaNetWire.test()` (the in-process net wire + every wire-level codec round trip — card
   25ad0659; needs no session, level or second tab, and also runs under `logic_probe`),
+  `eaNetHost()` (the `INetHost` seam — card 25ad0659 step 2a: the production host's 1:1 mapping
+  onto the clock/flag/fingerprint reads it replaced, plus proof the injected clock really drives
+  the live `NetImpairment` queue; needs no session, level or second tab, and runs under
+  `logic_probe`),
   `eaNetResetSpawn()` (the reset/`TryAdd` ship-puppet spawn scenario — card 25ad0659; the ONE
   **destructive** suite here: it pairs a real session onto the live level, so run it in a
   throwaway `?level=Level2&invuln` boot),

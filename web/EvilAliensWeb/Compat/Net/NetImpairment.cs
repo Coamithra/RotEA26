@@ -202,8 +202,9 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Called from the top of NetSession.Update, BEFORE DrainRx, on the same host real-time
-        // clock as the rest of the session cadence (so
-        // turbo / slow-mo / hit-stop never skew impairment). Delay granularity is therefore one
+        // clock as the rest of the session cadence (so turbo / slow-mo / hit-stop never skew
+        // impairment; and a scenario driving a virtual clock moves both together, which is why
+        // the arrival stamp in OnInnerData comes from the host too). Granularity is one
         // game tick, ~16ms -- a lag setting below that is indistinguishable from 0.
         public void Pump(long now)
         {

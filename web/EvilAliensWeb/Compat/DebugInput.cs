@@ -396,6 +396,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetWireTest.Run();
 		}
 
+		// JS bridge for the INetHost seam (eaNetHost in wwwroot/index.html, card 25ad0659 step
+		// 2a). Asserts BOTH halves of the step's claim -- that the production host still reads
+		// exactly what each call site read, and that the injected clock genuinely reaches the
+		// real NetImpairment queue (a consumer that kept its own Environment.TickCount64 would
+		// leave every downstream scenario a race). Game-free, so logic_probe runs it too.
+		[JSInvokable("debugNetHostTest")]
+		public static string NetHostTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostTest.Run();
+		}
+
 		// JS bridge for the reset / TryAdd ship-puppet spawn scenario (eaNetResetSpawn in
 		// wwwroot/index.html, card 25ad0659 step 1b). Pairs a REAL client session to a scripted
 		// host over an in-process NetWire and drives NetSession.SpawnPuppet / SpawnFriend through

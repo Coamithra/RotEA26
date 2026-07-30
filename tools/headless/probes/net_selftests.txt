@@ -23,16 +23,16 @@
 # prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
 # probe by loosening an expectation: these are all-or-nothing tallies on purpose.
 #
-# TEN SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
+# ELEVEN SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
 # already cost something in this repo: (a) an `expect-not` passes on a run where the eval never
 # happened, which a renamed DebugInput method silently produces; (b) several of these suites SKIP
 # legs they cannot reach (NetCosmetic's client apply path needs a level, NetKickTest's
 # survives-Stop() leg needs no live session) and a skipped leg is not a pass -- the tally is what
 # distinguishes them; (c) a suite that threw halfway prints neither a FAIL nor a tally.
 #
-# THE COUNTS ARE PART OF THE ASSERTION. `69`, `82/82`, `29/29`, `18`, `36`, `9/9`, `15/15`, `27`,
-# `5/5`, `17` are the figures at the time of writing; a suite that loses checks fails here rather than
-# passing faster. Raise them when checks are added.
+# THE COUNTS ARE PART OF THE ASSERTION. `69`, `32`, `82/82`, `29/29`, `18`, `36`, `9/9`, `15/15`,
+# `27`, `5/5`, `17` are the figures at the time of writing; a suite that loses checks fails here
+# rather than passing faster. Raise them when checks are added.
 # ONE SUITE CANNOT BE ASSERTED THAT WAY, and it is called out rather than quietly weaker:
 # `eaNetSim.test` prints measurements rather than a verdict, so its line asserts the INVARIANT
 # instead (below). `NetScoreLedger.SelfTest` used to be a second exception -- a bare
@@ -54,6 +54,7 @@ step 200 nodraw
 mark
 
 eval NetWireTest
+eval NetHostTest
 eval SlotTest
 eval KickTest
 eval NetSnapTest
@@ -64,8 +65,12 @@ eval BinTest
 eval TeamSeat
 eval NetSimTest 150 20 60 200
 
-# the in-process wire + the wire-level codec round trips (card 25ad0659)
+# the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
 expect \[netwire\] 69 passed, 0 failed
+# the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
+# is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
+# exit code covers "the seam is wired right" and "no decision behind it moved".
+expect \[nethost\] 32 passed, 0 failed
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)

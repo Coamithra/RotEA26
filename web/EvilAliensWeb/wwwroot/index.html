@@ -523,6 +523,15 @@
             }
         };
 
+        // Debug: the INetHost seam (card 25ad0659 step 2a). Checks that the production host still
+        // resolves every clock/flag/fingerprint read exactly as the call site did, and that the
+        // injected clock really drives the live NetImpairment queue over a real wire endpoint.
+        // Needs no session, no level and no second tab. Prints PASS/FAIL.
+        window.eaNetHost = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetHostTest')); }
+            catch (e) { console.warn('[debug] eaNetHost failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the reset / TryAdd ship-puppet spawn scenario (card 25ad0659 step 1b). Pairs a
         // real CLIENT session to a scripted host over the in-process wire and drives
         // NetSession.SpawnPuppet / SpawnFriend through an EvReset that purges from inside the rx

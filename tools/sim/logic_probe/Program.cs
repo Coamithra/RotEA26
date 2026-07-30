@@ -154,6 +154,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeNetHost(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -1594,15 +1600,9 @@ internal static class Program
     // precedent -- one suite, three runners, nothing to drift. What this adds is a BROWSERLESS
     // runner with an exit code, which is what makes the wire a CI-able gate; NetWireTest is
     // Game-free precisely so it survives this loader's limits (no ServiceHelper, no GraphicsDevice).
-    //
-    // Two guards make a green run mean something. (a) Every section header must be present, so a
-    // suite that threw or returned early cannot pass on the FAIL lines it never printed. (b) A
-    // floor on the PASS count, so deleting assertions is a failure rather than a faster pass --
-    // the number is the count at the time of writing and is meant to be raised when legs are
-    // added, never lowered to make a run green.
+    // The two guards that make a green run mean something live in RunBrowserSuite below.
     private static int ProbeNetWire(Assembly asm)
     {
-        const int MinAssertions = 69;
         string[] sections =
         {
             "1. transport contract",
@@ -1610,16 +1610,50 @@ internal static class Program
             "3. codec round trips through the wire",
             "4. stream-lane reorder + dedup",
         };
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetWireTest", sections, minAssertions: 69);
+    }
 
-        Type suite = asm.GetType("EvilAliensWeb.Compat.Net.NetWireTest", true);
+    // Card 25ad0659 (step 2a) -- the INetHost seam: the clock, the two build/identity
+    // fingerprints and the debug flags the net cores read, behind one injected interface.
+    //
+    // Same shape as ProbeNetWire above (invoke the browser suite, do not restate it), and for the
+    // same reason. What it buys over the browser run is that the seam's whole point -- a virtual
+    // clock the layer actually obeys -- is now provable with an exit code and no browser, which is
+    // what makes it a gate for steps 2b/2c/3/4 rather than something to remember to click.
+    private static int ProbeNetHost(Assembly asm)
+    {
+        string[] sections =
+        {
+            "1. NetHost.Current contract",
+            "2. ServiceHelperNetHost maps 1:1",
+            "3. the injected clock reaches NetImpairment",
+            "4. impairment knobs come from the host",
+        };
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostTest", sections, minAssertions: 32);
+    }
+
+    // Shared runner for the case sets that RESTATE NOTHING and instead invoke a browser suite's
+    // own Run() (the ProbeTeamPartnerSeat precedent -- one suite, three runners, nothing to
+    // drift). It works only for suites that are deliberately Game-free; anything touching
+    // ServiceHelper / Game / GraphicsDevice dies inside this loader's documented limits.
+    //
+    // Two guards make a green run mean something. (a) Every section header must be present, so a
+    // suite that threw or returned early cannot pass on the FAIL lines it never printed. (b) A
+    // floor on the PASS count, so deleting assertions is a failure rather than a faster pass --
+    // the number is the count at the time of writing and is meant to be raised when legs are
+    // added, never lowered to make a run green.
+    private static int RunBrowserSuite(Assembly asm, string typeName, string[] sections, int minAssertions)
+    {
+        string shortName = typeName.Substring(typeName.LastIndexOf('.') + 1);
+        Type suite = asm.GetType(typeName, true);
         MethodInfo run = suite.GetMethod("Run", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         if (run == null)
         {
-            Console.WriteLine("FAIL: could not reflect NetWireTest.Run -- renamed or moved?");
+            Console.WriteLine("FAIL: could not reflect " + shortName + ".Run -- renamed or moved?");
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] Compat/Net/NetWireTest (card 25ad0659)");
+        Console.WriteLine("[logic_probe] Compat/Net/" + shortName + " (card 25ad0659)");
         string report;
         try
         {
@@ -1630,7 +1664,7 @@ internal static class Program
             // A throw here is a real failure, not a reflection problem: the suite is Game-free, so
             // nothing in this loader's documented limits can reach it. Name the inner exception --
             // TargetInvocationException's own message says nothing.
-            Console.WriteLine("  FAIL NetWireTest threw: "
+            Console.WriteLine("  FAIL " + shortName + " threw: "
                 + (ex.InnerException != null ? ex.InnerException.ToString() : ex.ToString()));
             failures++;
             return 0;
@@ -1641,7 +1675,7 @@ internal static class Program
             // Same class as the "could not reflect" bail above: a Run() changed to return null (or
             // to void, which Invoke reports as null) would otherwise NRE out with a stack trace --
             // the one failure the TargetInvocationException catch was written to avoid.
-            Console.WriteLine("FAIL: NetWireTest.Run returned null -- signature changed?");
+            Console.WriteLine("FAIL: " + shortName + ".Run returned null -- signature changed?");
             return 2;
         }
 
@@ -1668,8 +1702,8 @@ internal static class Program
         {
             Check("section ran: " + section, report.Contains(section, StringComparison.Ordinal), null);
         }
-        Check("assertion count did not shrink", passes >= MinAssertions,
-            "passes=" + passes + " floor=" + MinAssertions);
+        Check(shortName + " assertion count did not shrink", passes >= minAssertions,
+            "passes=" + passes + " floor=" + minAssertions);
         return 0;
     }
 }

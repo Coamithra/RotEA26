@@ -47,6 +47,10 @@ namespace EvilAliensWeb.Compat.Net
     //      TryAdds are refused; nothing is adopted and nothing enters the world.
     //   3. POSITIVE, filter expired. One bin.TopOfTickFlush() -- the real tick boundary -- and the
     //      identical send/pump/Update sequence adopts both puppets, in the seats leg 2 took.
+    //   3b. THE CLOCK, added by step 2a. Legs 1-3 would pass on a wall clock too, so they show
+    //      the pinned host does no harm rather than that the session reads it. This one moves
+    //      ONLY the virtual clock -- no packets, no ticks -- and requires the session to act,
+    //      straddling exactly one threshold so the assertion pins WHICH deadline fired.
     // Leg 3 is also leg 1's and leg 2's POSITIVE CONTROL: it proves the wire, the handshake, the
     // stream decode and both spawn paths all work, so their "nothing happened" assertions cannot
     // be passing because the scripted peer's frames never arrived or were never processed. Each
@@ -72,13 +76,17 @@ namespace EvilAliensWeb.Compat.Net
     // slot on its original device with a live ship. The scene's own reset choreography then runs
     // from there. It refuses to run at all with no GameScene up or with a real session Active.
     //
-    // FLAKINESS. Unlike its Game-free siblings this DOES run on Environment.TickCount64 (that is
-    // what NetSession.Update reads), so two real-clock windows could in principle bite: the 500 ms
-    // FriendTimeoutMs and the 8 s peer-drop verdict. Every leg re-sends both streams immediately
-    // before its Update, which resets both clocks, so the exposure per leg is the handful of
-    // microseconds between the send and the Update. Measured non-flaky over 10 consecutive runs
-    // before it was committed as a probe; if it ever does flake, the fix is step 2a's injected
-    // clock, not a looser assertion.
+    // FLAKINESS -- CLOSED by step 2a, and worth knowing what it used to be. This suite drives a
+    // real NetSession, so it used to run on Environment.TickCount64 and two real-clock windows
+    // could in principle bite: the 500 ms FriendTimeoutMs and the 8 s peer-drop verdict. It
+    // out-ran them by re-sending both streams immediately before every Update, leaving an
+    // exposure of the handful of microseconds between the send and the Update -- measured
+    // non-flaky over 10 consecutive runs, which is what let it commit as a probe.
+    // Since step 2a it installs a PinnedNetHost for the whole run, so the session's clock does
+    // not advance at all unless the scenario advances it and neither window can elapse. The
+    // re-sends STAY: they are also what keeps each leg's ship/friend buffers fresh, which is a
+    // separate job from beating the clock. This is the step 2a debt the header of
+    // plans/net-headless-sim.md predicted would fall out of the injected clock, and it did.
     internal static class NetResetSpawnTest
     {
         private const string Room = "resetspawn";
@@ -164,6 +172,10 @@ namespace EvilAliensWeb.Compat.Net
             ushort friendSeq = 1;
             uint shipMs = 100;
             uint friendMs = 100;
+
+            // The session's clock for this whole run (card 25ad0659 step 2a). Installed just
+            // before the try below -- see the note there for why the ORDER matters.
+            PinnedNetHost clock = new PinnedNetHost();
 
             // Legs 1-3 sit in a local function purely so the `!paired` bail-out can be a plain
             // `return`: `return sb.ToString()` from inside the `try` renders the report BEFORE the
@@ -298,8 +310,36 @@ namespace EvilAliensWeb.Compat.Net
                     && oracle.Controller(FriendSlot) == ControlDevice.RemoteFriend);
                 Check("one ship per seat -- no duplicate was added"
                     + " (ships=" + oracle.GetShips().Count + ")", oracle.GetShips().Count == 3);
+
+                // ---- 3b. the session's OWN cadence runs on the injected clock ----------------
+                // Lettered rather than numbered because it rides on leg 3's adopted puppets and
+                // teardown is already leg 4 -- and legs print in the order they run.
+                // Legs 1-3 would pass on a wall clock too, so on their own they show the pinned
+                // host does no HARM, not that NetSession reads it. This leg discriminates: it
+                // moves ONLY the virtual clock -- no packets, no ticks -- and requires the
+                // session to act on it, which a wall-clock read cannot do. The interval is
+                // chosen to straddle exactly one threshold (FriendTimeoutMs 500 < 600 <
+                // PeerStallMs 1200 < PeerTimeoutMs 3000), so the assertion pins WHICH deadline
+                // fired rather than merely that something did.
+                sb.Append(" 3b. the session's cadence runs on the INJECTED clock\n");
+                Check("PRECONDITION both puppets are up before the clock moves",
+                    NetSession.HasRemotePuppet && NetSession.HasFriendPuppet(FriendSlot));
+                clock.Advance(600);
+                NetSession.Update();
+                Check("advancing the virtual clock past FriendTimeoutMs explodes the friend puppet",
+                    !NetSession.HasFriendPuppet(FriendSlot));
+                Check("... and only that one -- the primary remote is on the 3 s peer timeout",
+                    NetSession.HasRemotePuppet);
             }
 
+            // THE CLOCK IS PINNED FOR THE WHOLE RUN (card 25ad0659 step 2a). Installed BEFORE
+            // StartForTest, because StartWith stamps sessionStartAt from it, and handed back only
+            // after Teardown, because Stop() reads it too. Nothing advances it, so neither of the
+            // two real-clock windows this suite used to have to out-run -- FriendTimeoutMs (500
+            // ms) and the 8 s peer-drop verdict -- can elapse mid-run at all. See the FLAKINESS
+            // note in the header for what that replaced.
+            INetHost hostBefore = NetHost.Current;
+            NetHost.Current = clock;
             try
             {
                 RunLegs();
@@ -317,6 +357,9 @@ namespace EvilAliensWeb.Compat.Net
             {
                 sb.Append(" 4. teardown -- the roster this suite must hand back\n");
                 Teardown(oracle, bin, game, localDevice, Check);
+                NetHost.Current = hostBefore;
+                Check("the virtual clock is handed back (NetHost.Current restored)",
+                    ReferenceEquals(NetHost.Current, hostBefore));
             }
 
             sb.Append(Tally(pass, fail));

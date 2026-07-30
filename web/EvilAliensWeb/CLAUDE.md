@@ -440,6 +440,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   onto the clock/flag/fingerprint reads it replaced, plus proof the injected clock really drives
   the live `NetImpairment` queue; needs no session, level or second tab, and runs under
   `logic_probe`),
+  `eaNetEntity()` (the `INetEntity` seam — card 25ad0659 step 2c-ii: that every explicit forward
+  on `AlienDrawableGameComponent` fronts the member it claims to, and that the
+  `NetKillable`/`NetPickup` discriminants agree with the `is KillableAlien`/`is Powerup` tests
+  they replaced; run from the main menu),
+  `eaNetPuppetBench(n, iters)` (the pinned many-puppet drive bench — the same card's instrument:
+  n real puppets, the real `NetPuppets.Drive` timed in a plain loop, in ABSOLUTE us. The FPS HUD
+  cannot answer this — `Drive` runs inside `base.Update`, so it is buried in `UpdComponents`
+  while `UpdNet` covers only `NetSession.Update`. Menu-only; prefer `eahl`),
   `eaNetResetSpawn()` (the reset/`TryAdd` ship-puppet spawn scenario — card 25ad0659; the ONE
   **destructive** suite here: it pairs a real session onto the live level, so run it in a
   throwaway `?level=Level2&invuln` boot),

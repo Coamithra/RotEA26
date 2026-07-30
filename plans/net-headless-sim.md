@@ -33,8 +33,15 @@ exactly what this sim asserts on — and a single-puppet clock model can't reach
 > fail differently.** `2c-i` the SCENE (`INetScene` + `NetScene.Current`) -- **shipped
 > 2026-07-30**, and it discharged step 1b's last debt: `NetResetSpawnTest`'s hand-rolled respawn
 > stand-in is deleted, both retry legs now drive the real `GameScene.SpawnPlayer`.
-> `2c-ii` the ENTITY (`INetEntity`) -- the only slice with a hot path, and the one the doc's
-> MEASURE-FIRST instruction is about. `2c-iii` entity CREATION. Remaining: **2c-ii**, 2c-iii, 3, 4.
+> `2c-ii` the ENTITY (`INetEntity`) -- the only slice with a hot path, and the one this doc's
+> MEASURE-FIRST instruction is about -- **shipped 2026-07-30**, and the measurement says the
+> simple direct interface WINS (the generic-core fallback did not earn it). `2c-iii` entity
+> CREATION. Remaining: **2c-iii**, 3, 4.
+>
+> **THIS DOC NAMED THE WRONG INSTRUMENT FOR 2c-ii's MEASUREMENT, and the correction is below.**
+> `FrameSection.UpdNet` brackets `NetSession.Update` + `NetListing.Tick`; the hot path it was
+> meant to catch, `NetPuppets.Drive`, runs inside `base.Update` and lands in `UpdComponents`.
+> `NetPuppetBench` (`eaNetPuppetBench`) is the rig that replaces it.
 >
 > **THIS DOC WAS WRITTEN 2026-07-24 AND TWO OF ITS PREMISES WERE WRONG.** Both are corrected in
 > place below, but read this first, because each changed the plan materially:
@@ -441,13 +448,51 @@ these need only Layer-1 + `NetProtocol`, so they can land before the full seam.
      3c COUNTS the arrival through a `RecordingNetScene` DECORATOR over the live scene (a blank
      fake would make leg 2's real `Purge<PlayerShip>` vacuous). Mutation-tested: reverting the
      `EvReset` handler fails exactly one assertion, `resets=0`.
-   At 2c-ii, **MEASURE before choosing the entity representation.** `FrameSection.UpdNet` already
-   brackets `NetSession.Update()` in `Game1.UpdateInner`, so take the ABSOLUTE mean ms at a pinned
-   replicable population (uncapped/headless, or focused -- a vsync-capped frame rate cannot see
-   this) and judge the delta against the 16.7ms frame budget, plus whether p99 frame time moved.
-   Never as a percentage of a small phase: 10% of 0.3ms is nothing and would trigger a fallback to
-   real added complexity for no gain. The simple direct-interface design is the DEFAULT; the
-   generic-core fallback has to earn it.
+   **2c-ii (the ENTITY) is DONE, and the MEASUREMENT it was gated on came out decisively.**
+   `Compat/Net/INetEntity.cs` -- 16 members, measured over 42 call sites, implemented DIRECTLY on
+   `AlienDrawableGameComponent` (no adapter: it would allocate per entity per tick) -- plus
+   `INetKillable` and `INetPickup`, because the layer's `is KillableAlien` (4 sites) and
+   `is Powerup` (3) are type tests an interface cannot carry.
+   - **EXPLICIT implementation, the OPPOSITE of 2c-i's choice and for the opposite reason.**
+     `GameScene` is internal, so widening `INetScene`'s members widened nothing;
+     `AlienDrawableGameComponent` is PUBLIC, so an implicit implementation would add a dozen
+     net-only names to a game type's API for an internal seam. `scale`/`rotation`/`curframe` are
+     public FIELDS, which is the whole reason `NetScale`/`NetRotation`/`NetCurFrame` exist.
+   - **Three things stayed off the seam on purpose** (`INetEntity`'s header has the argument):
+     collection identity (the bin calls and the two `GameComponent`-keyed maps cast back visibly
+     rather than the interface exposing a `GameComponent` and defeating itself); the DESCRIPTOR
+     extras, which 2c-iii owns along with `CreatePuppet` and which would otherwise mean a
+     parameter-type edit in ~40 overrides for no behaviour change; and the inbound `NoteKill` /
+     `NotePowerupTaken` hooks, so **no game call site outside `Compat/Net` changed at all**.
+   - **THIS DOC'S INSTRUMENT WAS WRONG.** `FrameSection.UpdNet` brackets `NetSession.Update` +
+     `NetListing.Tick` in `Game1.UpdateInner`. `NetPuppets.Drive` -- the per-puppet-per-tick loop
+     this whole measurement is about -- is called from `NetPuppetDriver.Update`, i.e. from inside
+     `base.Update(gameTime)`, so it lands in **`UpdComponents`**, buried under every other
+     component. `UpdNet` meanwhile sees only the host's <=16-entry snapshot encode at ~16 Hz: a
+     tiny phase, which is exactly the "10% of 0.3ms" trap named two sentences later.
+   - **`NetPuppetBench` (`eaNetPuppetBench(n, iters)`) is the rig that did not exist.** n real
+     puppets built through the real self-heal path, the real `Drive` timed in a plain loop,
+     reported as ABSOLUTE us/call, ns/puppet and a share of 16.7ms. It carries a positive control
+     (the puppets must have MOVED -- a `Drive` that early-returned would time at 0 us and read as
+     a triumph) and asserts its own population.
+   - **The verdict, and the WASM row is the one that counts.** ns/puppet before -> after: desktop
+     CLR (eahl) **61 -> 68 (+15%)**, WASM (Chrome) **775 -> 978 (+26%)** -- WASM is ~12x the
+     desktop per-puppet cost AND takes the bigger relative hit, so a desktop-only reading would
+     have been the wrong evidence. Absolute, at **N=512** (far past any real world: the
+     `?flyspiders` JIP rig measures `liveIds` 17-19, a big world ~320), the seam costs
+     **+0.11 ms/frame in WASM = +0.66% of the frame budget**; +0.02 ms at N=128. **The simple
+     direct-interface design stands and the generic-core fallback is not justified** -- do not
+     re-open it without re-running the bench.
+   - **Verification is shaped differently from 2a/2b/2c-i, deliberately.** Those redirected a
+     lookup through a holder, so a missed site did identical work and had to be COUNTED. Here the
+     core fields changed TYPE, so a missed site does not compile -- the compiler IS the
+     exhaustiveness check. `NetEntityTest` (`eaNetEntity()`, 39 assertions, a leg of
+     `net_selftests.txt`) covers only what the compiler cannot: a forward wired to the wrong
+     member of the same type (every member driven to a DISTINCT value, compared against the
+     member it claims to front) and a subtype that stops answering a discriminant (the `is` tests
+     run beside them as the control, over four shapes, with a non-degeneracy check). Mutation-
+     tested four ways, each isolated, each failing only the legs naming its member. Not a
+     `logic_probe` case set, unlike `eaNetHost` -- constructing an entity needs a `Game`.
    **1b'S DEBT IS PAID, by 2c-i -- do not re-open it.** It read: `NetResetSpawnTest` has to
    FAKE `SpawnAllPlayers`' respawn of the local seat, because `NetApplyReset` purges
    `PlayerShip` and its two retry legs need a non-null `FindLocalShip()`, while the real path

@@ -671,6 +671,34 @@ site now lives under:
   `DrawMenu` override must call `RecordEntryHit` per entry or its menu won't be clickable.** The
   level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: the
   `GammaMenu`/`ScreenResizeMenu` sliders and `PlayerSettingsMenu`.
+- **A mouse click SHORTER than one tick is latched, not dropped** (card 724f2abc,
+  `Compat/MouseLatch.cs`). `InputHandler.Update` polls `Mouse.GetState()` once per tick and
+  edge-detects, so a mousedown/mouseup pair landing entirely BETWEEN two polls was never seen and
+  `Pressed(MyKeys.Mouse1)` never fired -- while the cursor POSITION survived it. **So a menu row
+  that hover-highlights on click and never invokes is THIS, not a menu bug**, and it is not
+  confined to any one menu: every `Pressed(MyKeys.Mouse1)` consumer was affected
+  (`MenuSub1.HandleMouse`, `StartScreen`, `SplashScene`'s skip). A human click is 50-150 ms
+  (3-9 ticks at 60 Hz) and was safe; a click on a hitching frame was not, and an automated one
+  never worked at all -- a CDP `left_click` holds the button for **0.9 ms** measured, so browser
+  verification of ANY menu click was impossible before this. JS pushes the mousedown edge to
+  `MouseLatch` and `InputHandler` ORs it into `held` for one tick -- the `DebugInput.Consume(i)`
+  shape, one line further up the same loop. It is a FLAG, not a counter: two clicks inside one
+  tick collapse to one rather than injecting a phantom on a later frame.
+  - **TWO scopings, both narrowing it to exactly the input being restored; keep both.** The
+    listener is on the CANVAS -- a `window` one would also fire a game press for every click on
+    the outside-`#app` UI (fullscreen button, touch D-pad, FPS HUD, tuning panels), exactly the
+    shots-eaten-by-an-overlay problem `pointer-events:none` exists to prevent, and it would fire
+    on the very panel you clicked to diagnose it. And it is `pointerdown` filtered to
+    `pointerType === 'mouse'` -- a touch tap synthesises a back-to-back mousedown/mouseup, so it
+    is a sub-tick click BY CONSTRUCTION and an ungated latch would newly fire the ship (and invoke
+    menu rows) on every tap of the canvas. **Touch deliberately gets NO new behaviour here**; it
+    has its own overlay (`#ea-touch` -> `eaHold`). Making a tap select a menu entry is a separate,
+    unverified-on-this-rig product decision, not a side effect to inherit.
+  - **No headless guard is possible**: `eahl` has no DOM and SDL2 polls the same way, so a
+    `--script` probe cannot tell the fixed code from the broken code. `logic_probe`'s
+    `ProbeMouseLatch` is the regression guard (it drives the real `InputHandler.Update` over the
+    real latch, so it covers the wiring, not just the latch); the Chrome pass is the only
+    evidence about the shipped build.
 - **Aiming cursor / reticle:** KNI never applies `IsMouseVisible` to the DOM, so C# owns
   `canvas.style.cursor` via `Compat/CursorInterop` → `eaCursor.set(mode)`: `menu` (arrow),
   `hidden` (during the level-start intro sprite), `reticle` (the reticle IS the OS cursor via

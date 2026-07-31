@@ -1206,7 +1206,8 @@ namespace EvilAliensWeb.Compat.Net
             // a replay of the award below.
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
             RecordDeath(e.Id, pos, points, killer,
-                e.Comp.NetPickup is INetPickup pu && pu.NetPickupType == Powerup.PowerupType.OneUp);
+                e.Comp.NetPickup is INetPickup pu && pu.NetPickupType == Powerup.PowerupType.OneUp,
+                e.ClaimPaidMask);
             if (!PeerUp)
             {
                 return;
@@ -1246,13 +1247,18 @@ namespace EvilAliensWeb.Compat.Net
             NetPuppets.NoteLocalAward(comp, (byte)slot, amount);
         }
 
-        private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot, bool oneUp)
+        // prepaidMask is the Entry's own ledger: the slots already paid for this death while the
+        // removal was still queued (card 1bfcd705). Folded in HERE rather than merged into
+        // whatever recentDeaths already holds for the id, so the write below stays a straight
+        // assignment and a wrapped netId can never inherit a stale mask from a previous entity.
+        private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot,
+            bool oneUp, byte prepaidMask)
         {
             DeathRecord rec = new DeathRecord
             {
                 Pos = pos,
                 Points = points,
-                PaidMask = (byte)(killerSlot < 8 ? 1 << killerSlot : 0),
+                PaidMask = (byte)(prepaidMask | (killerSlot < 8 ? 1 << killerSlot : 0)),
                 OneUp = oneUp,
             };
             if (!recentDeaths.ContainsKey(id))
@@ -2910,17 +2916,59 @@ namespace EvilAliensWeb.Compat.Net
 
         // GENEROUS at-least-once claim honoring (host). Alive -> the real per-type death
         // path credited to the claimant (authoritative children spawn here and replicate).
-        // Already dead -> pay the claimant once from the death record. Never rejected.
+        // Already settled -> pay the claimant once. Never rejected.
+        //
+        // THE LEDGER OPENS AT THE CLAIM, NOT AT THE REMOVAL FLUSH (card 1bfcd705). A settled
+        // entity does not get its recentDeaths record until OnHostDeath runs at the
+        // ComponentRemoved seam, one ComponentBin flush later, so for the rest of the tick the
+        // Entry carries the ledger instead (Entry.ClaimSettled / Entry.ClaimPaidMask) and
+        // OnHostDeath folds it into the record. Without that window covered, a second claimant
+        // landing in the same DrainRx was paid nothing at all, and a repeat from the slot just
+        // paid was refused by nothing -- unbounded on a Powerup, which never flips IsDead and so
+        // re-entered the live branch (and its AddLife) once per claim frame.
         private static void HandleClaim(ushort netId, byte killerSlot)
         {
             metrics.ClaimsRx++;
-            if (NetIdRegistry.TryGetById(netId, out NetIdRegistry.Entry e) && !e.Comp.IsDead)
+            // Is there a slot this claim can be credited to at all? Bound against the SCORE
+            // PANELS (4), not the 8 of the ledgers' PaidMask, for ApplyRemotePowerup's reason --
+            // killerSlot is a raw wire byte, and ScoreVisualiser.AddScore indexes a fixed 4-slot
+            // list, so a corrupt or mismatched peer must not reach it. An unattributed
+            // (KillerNone) or out-of-range claim is settle-only: nothing is paid, nothing masked.
+            bool payable = killerSlot != NetProtocol.KillerNone
+                && killerSlot < ScoreVisualiser.SlotCount;
+            if (NetIdRegistry.TryGetById(netId, out NetIdRegistry.Entry e))
             {
-                if (killerSlot != NetProtocol.KillerNone)
+                if (payable && (e.ClaimPaidMask & (1 << killerSlot)) != 0)
+                {
+                    return; // this slot already had its payout for this entity
+                }
+                if (e.Comp.IsDead || e.ClaimSettled)
+                {
+                    // Settled, but the removal has not flushed, so there is no record yet. Pay
+                    // from the Entry, off the very fields OnHostDeath will read a flush later.
+                    //
+                    // It pays exactly what the RECORD branch below pays -- no NoteAward, and no
+                    // ApplyRemotePowerup even though the pickup is right here on e.Comp. Both
+                    // omissions are deliberate: the death record carries neither an award array
+                    // nor a pickup type, so doing either here would make a claim worth more on
+                    // one side of a ComponentBin flush than the other, for a difference the
+                    // claimant cannot observe (a zero in e.Awards reads as "no figure" to
+                    // NetPuppets.ApplyAwards, and EvScoreSync carries the host total that
+                    // already contains this payout).
+                    if (payable)
+                    {
+                        e.ClaimPaidMask |= (byte)(1 << killerSlot);
+                        PayDeadClaim(netId, killerSlot, e.Comp.Position,
+                            (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f),
+                            e.Comp.NetPickup is INetPickup dead && dead.NetPickupType == Powerup.PowerupType.OneUp);
+                    }
+                    return;
+                }
+                if (payable)
                 {
                     NoteKillSlot(e.Comp, killerSlot); // attribution for the death broadcast
                 }
-                if (e.Comp.NetKillable is INetKillable killable && killerSlot != NetProtocol.KillerNone)
+                if (e.Comp.NetKillable is INetKillable killable && payable)
                 {
                     killable.NetKill(NetPuppets.KillerAgent(killerSlot, e.Comp.Position), isComboGenerator: true);
                     if (!e.Comp.IsDead)
@@ -2939,12 +2987,12 @@ namespace EvilAliensWeb.Compat.Net
                         // Lives are host-authoritative (EvScoreSync sends them verbatim), so a
                         // client-collected extra life must be applied HERE or the next sync
                         // silently reverts it. Other powerup effects are per-ship on the collector.
-                        if (p.NetPickupType == Powerup.PowerupType.OneUp && killerSlot != NetProtocol.KillerNone)
+                        if (p.NetPickupType == Powerup.PowerupType.OneUp && payable)
                         {
                             score.AddLife();
                         }
                     }
-                    else if (killerSlot != NetProtocol.KillerNone)
+                    else if (payable)
                     {
                         if (e.Comp.NetPointValue > 0f)
                         {
@@ -2960,6 +3008,15 @@ namespace EvilAliensWeb.Compat.Net
                     }
                     bin.Remove((GameComponent)(object)e.Comp);
                 }
+                // The live branch settles the entity exactly ONCE, whoever else claims it after
+                // this. Neither of the two branches above flips IsDead for a pickup or a plain
+                // non-killable -- both just queue the removal -- so this flag is what tells a
+                // later claim in the same tick that the settling has already happened.
+                e.ClaimSettled = true;
+                if (payable)
+                {
+                    e.ClaimPaidMask |= (byte)(1 << killerSlot);
+                }
                 metrics.ClaimsHonored++;
                 if (NetHost.Current.NetLog)
                 {
@@ -2967,27 +3024,37 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 return;
             }
-            // Already dead here: still pay the claimant, once.
-            if (killerSlot != NetProtocol.KillerNone && recentDeaths.TryGetValue(netId, out DeathRecord rec))
+            // Out of the world already: pay the claimant from the bounded death record, once.
+            if (payable && recentDeaths.TryGetValue(netId, out DeathRecord rec)
+                && (rec.PaidMask & (1 << killerSlot)) == 0)
             {
-                if (killerSlot < 8 && (rec.PaidMask & (1 << killerSlot)) == 0)
-                {
-                    rec.PaidMask |= (byte)(1 << killerSlot);
-                    recentDeaths[netId] = rec;
-                    if (rec.Points > 0)
-                    {
-                        score.AddScore(rec.Points, true, rec.Pos, killerSlot);
-                    }
-                    if (rec.OneUp)
-                    {
-                        score.AddLife(); // overlapping collectors inside the RTT window each add one
-                    }
-                    metrics.ClaimsPaidDead++;
-                    if (NetHost.Current.NetLog)
-                    {
-                        Console.WriteLine("[net] claim honored (already dead, paid) id=" + netId + " slot=" + killerSlot);
-                    }
-                }
+                rec.PaidMask |= (byte)(1 << killerSlot);
+                recentDeaths[netId] = rec;
+                PayDeadClaim(netId, killerSlot, rec.Pos, rec.Points, rec.OneUp);
+            }
+        }
+
+        // The generous payout for a claim whose target was already settled -- from the Entry
+        // while its removal is still queued, from the death record once that has flushed. ONE
+        // helper on purpose (card 1bfcd705): the two ledgers cover consecutive halves of the same
+        // window, so a claim's value must not depend on which side of a ComponentBin flush it
+        // landed. The caller owns the paid-once bookkeeping; this only pays.
+        private static void PayDeadClaim(ushort netId, byte killerSlot, Vector2 pos, ushort points, bool oneUp)
+        {
+            if (points > 0)
+            {
+                score.AddScore(points, true, pos, killerSlot);
+            }
+            if (oneUp)
+            {
+                score.AddLife(); // overlapping collectors inside the RTT window each add one
+            }
+            metrics.ClaimsPaidDead++;
+            if (NetHost.Current.NetLog)
+            {
+                // "settled", not "already dead": the pre-flush half of this reaches a Powerup
+                // whose settle path sets `taken` and never flips IsDead.
+                Console.WriteLine("[net] claim honored (already settled, paid) id=" + netId + " slot=" + killerSlot);
             }
         }
 

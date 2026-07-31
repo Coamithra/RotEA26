@@ -100,9 +100,10 @@ expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
 # The step-4 scenario harness, scenarios 1-5 (card 25ad0659): the three generous-claim shapes,
 # the OneUp overlap and the id-churn self-heal, each driven over a real session with a scripted
 # wire peer. Scenario 6 needs a level and has its own probe (net_scene_order.txt), like
-# eaNetResetSpawn. The two `info` lines it prints are MEASURED GAPS that are unreachable on
-# today's 2-peer wire -- read the suite header before treating either as a regression.
-expect \[netscen\] 50 passed, 0 failed
+# eaNetResetSpawn. Card 1bfcd705 added legs 2b/2c/3b/4c, which pin the claim ledger across the
+# ComponentBin flush that writes the death record -- 50 -> 65. The one remaining `info` line is
+# scenario 5's pupPops count, a reported measurement rather than a gap.
+expect \[netscen\] 65 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

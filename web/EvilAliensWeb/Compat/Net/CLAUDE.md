@@ -365,7 +365,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   The six scenarios the design doc specced, each driving ONE REAL `NetSession` over one endpoint
   of a `NetWire` while a SCRIPTED peer drives the other with real `NetProtocol.Encode*` frames.
   Two entry points because they cost different things:
-  - **`eaNetScenarios()` (`Compat/Net/NetScenarioTest.cs`, 48 assertions) is MENU-ONLY and
+  - **`eaNetScenarios()` (`Compat/Net/NetScenarioTest.cs`, 65 assertions) is MENU-ONLY and
     leave-no-trace**, the `eaNetSnap` shape. Scenarios 1-4 run a real HOST session (the three
     generous-claim shapes plus the OneUp overlap); scenario 5 stops it and runs a real CLIENT
     session for the id churn. Real `UFO`s and `Powerup`s are planted into the LIVE bin so
@@ -383,15 +383,13 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   - **Scenario 5 supplies its own `INetScene`, and that is honest here** -- the client rx paths
     gate on "is a scene up", and nothing in that scenario is about what a scene DOES. Scenario 6
     is the opposite case and decorates the live one.
-  - **TWO MEASURED GAPS, reported as `info` lines rather than asserted.** Two claims for one
-    `netId` inside ONE `DrainRx` pay the SECOND claimant nothing -- the death record it would be
-    paid from is written by `OnHostDeath` at the `ComponentRemoved` seam, one flush later -- and
-    in that same window nothing masks the live-branch payer either. A TICK APART both hold, which
-    is what the scenarios assert. **Neither is reachable on today's wire**: the protocol is
-    2-peer, a client sends exactly one `EvClaim` per local gameplay death, and a puppet dies
-    locally once, so two claims for one id cannot both come from the one peer that can send them.
-    Both become reachable at N peers (`plans/4p-online-coop.md`). Reported rather than pinned
-    because the rule here is not to write a test that expects broken code to stay broken.
+  - **The PRE-FLUSH claim window is legs 2b / 2c / 3b / 4c (card 1bfcd705).** The harness first
+    reported it as two measured gaps; the fix landed and they are assertions now. Each is a
+    tick-separated scenario with the flush between the claims taken away -- 2b pays a second
+    same-tick claimant, 2c requires the mask to survive into the death record, 4c requires the
+    pickup's live branch to run ONCE, and 3b is the host's own in-tick kill, the one shape of it
+    that was reachable on the 2-peer wire. Scenarios 2, 3 and 4 above are their tick-separated
+    controls. The contract itself is in the generous-claim bullet ("Claims, score & per-slot HUD").
   - **The id-churn scenario IS the item-1 residual `pupPops` probe.** It reports the count across
     a purge+replay with the stream lane reordered ahead of the reliable one, and asserts only the
     bound the design claims (churn alone must not pop a puppet per churned id). Measured 0 over
@@ -733,6 +731,25 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   shape: the real PlayerShip pickup runs instantly on the collector (a
   `NetSession.NotePowerupTaken` hook attributes it), first claim despawns the entity,
   overlapping collectors inside the RTT window BOTH keep it.
+  - **THE HOST'S LEDGER OPENS AT THE CLAIM, NOT AT THE REMOVAL FLUSH (card 1bfcd705), and it
+    takes TWO stores to say that.** `recentDeaths` cannot be the whole ledger, because
+    `OnHostDeath` only writes a record at the `ComponentRemoved` seam -- one `ComponentBin`
+    flush after the claim that settled the entity. So `NetIdRegistry.Entry` carries the ledger
+    for that window (`ClaimSettled` + `ClaimPaidMask`) and `OnHostDeath` folds the mask into the
+    record it writes (`RecordDeath`'s `prepaidMask`). Fold, never merge: `recentDeaths[id] = rec`
+    stays a straight assignment, so a wrapped netId can never inherit a stale mask, and the Entry
+    dies with the entity so nothing needs bounding.
+    - **`IsDead` is NOT "already settled".** A `Powerup`'s settle path calls `NetMarkTaken()`
+      (which sets `taken`, not `isdead`) and a plain non-killable is only `bin.Remove`d, so
+      neither flips it -- which is why `ClaimSettled` exists and is what keeps the live branch to
+      one run per entity. Without it, every same-tick claim re-ran the whole pickup path,
+      `AddLife` included: measured **one free life per claim frame** a peer could fit in one
+      `DrainRx`.
+    - **The window is one tick wide and it is reachable on the 2-peer wire**, not only at N
+      peers. `Game1.UpdateInner` runs `TopOfTickFlush` -> `base.Update` ->
+      `collectionHelper.Update` -> `DetectCollisions` -> `NetSession.Update`, so a host kill in
+      the COLLISION phase is dead-with-removal-queued when that same tick's `DrainRx` runs.
+      Scenario 3b is that shape; 2b/2c/4c are the N-peer same-tick ones.
 - **Score/lives: the AWARDED AMOUNT is replicated, not the combo (card b0ab09ec).** `EvDeath`
   carries what the host actually credited, per slot (`f32 x MaxSlots`), and that figure is
   authoritative on the client in every branch. Lives stay verbatim off `EvScoreSync`.

@@ -78,6 +78,12 @@ handshake is never needed here.
   the wrong code.
 - **Never edit `.claude/launch.json`** — it's shared; concurrent per-card edits cause port
   collisions and lost-update races between parallel agents.
+- **The Chrome tab group is SHARED across parallel agents — a browser leg is not isolated.**
+  Worktrees and ports are per-slot; Chrome is not. A sibling agent can navigate the tab you are
+  mid-verification in (observed: a tab driven to another slot's port between two assertions).
+  Open your own tab, and **re-check the URL immediately before each assertion** rather than
+  trusting the tab is where you left it — a screenshot of the wrong slot's build looks exactly
+  like a screenshot of yours.
 - **Kill your dev server before `git worktree remove`** — besides the Windows directory lock (see
   global doc), a stale server squats the slot's port and blocks the next agent who claims it.
 

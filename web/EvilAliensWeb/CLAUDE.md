@@ -684,10 +684,16 @@ site now lives under:
   `MouseLatch` and `InputHandler` ORs it into `held` for one tick -- the `DebugInput.Consume(i)`
   shape, one line further up the same loop. It is a FLAG, not a counter: two clicks inside one
   tick collapse to one rather than injecting a phantom on a later frame.
-  - **The listener is CANVAS-scoped and must stay so.** A `window` one would also fire a game
-    press for every click on the outside-`#app` UI (fullscreen button, touch D-pad, FPS HUD,
-    tuning panels) -- exactly the shots-eaten-by-an-overlay problem `pointer-events:none` exists
-    to prevent, and it would fire on the very panel you clicked to diagnose it.
+  - **TWO scopings, both narrowing it to exactly the input being restored; keep both.** The
+    listener is on the CANVAS -- a `window` one would also fire a game press for every click on
+    the outside-`#app` UI (fullscreen button, touch D-pad, FPS HUD, tuning panels), exactly the
+    shots-eaten-by-an-overlay problem `pointer-events:none` exists to prevent, and it would fire
+    on the very panel you clicked to diagnose it. And it is `pointerdown` filtered to
+    `pointerType === 'mouse'` -- a touch tap synthesises a back-to-back mousedown/mouseup, so it
+    is a sub-tick click BY CONSTRUCTION and an ungated latch would newly fire the ship (and invoke
+    menu rows) on every tap of the canvas. **Touch deliberately gets NO new behaviour here**; it
+    has its own overlay (`#ea-touch` -> `eaHold`). Making a tap select a menu entry is a separate,
+    unverified-on-this-rig product decision, not a side effect to inherit.
   - **No headless guard is possible**: `eahl` has no DOM and SDL2 polls the same way, so a
     `--script` probe cannot tell the fixed code from the broken code. `logic_probe`'s
     `ProbeMouseLatch` is the regression guard (it drives the real `InputHandler.Update` over the

@@ -985,18 +985,36 @@
             document.getElementById('theCanvas').addEventListener("pointerenter", () => eaSetOnCanvas(true));
             document.getElementById('theCanvas').addEventListener("pointerleave", () => eaSetOnCanvas(false));
 
-            // Latch a mousedown for the game tick (card 724f2abc, Compat/MouseLatch.cs).
+            // Latch a mouse press for the game tick (card 724f2abc, Compat/MouseLatch.cs).
             // InputHandler polls Mouse.GetState() once per tick and edge-detects, so a click
             // whose press and release both land BETWEEN two polls is never observed -- the
             // cursor position survives it, so a menu row hover-highlights and never invokes.
             // Measured: an automated CDP click holds the button for ~1ms, i.e. it essentially
             // never invoked anything; a human click on a hitching frame is the same bug.
-            // SCOPED TO THE CANVAS on purpose -- a window listener would also fire a game
-            // click for every press on the outside-#app UI (fullscreen button, touch D-pad,
-            // FPS HUD, tuning panels), which is what pointer-events:none exists to prevent.
-            document.getElementById('theCanvas').addEventListener("mousedown", (e) => {
+            // TWO deliberate scopings, both narrowing this to exactly the input being restored:
+            //  - THE CANVAS, not the window: a window listener would also fire a game click for
+            //    every press on the outside-#app UI (fullscreen button, touch D-pad, FPS HUD,
+            //    tuning panels), which is what pointer-events:none exists to prevent.
+            //  - pointerType MOUSE, not any pointer: a touch tap synthesises a back-to-back
+            //    mousedown/mouseup, so it is a sub-tick click BY CONSTRUCTION and would newly
+            //    start firing the ship / invoking menu rows on every tap of the canvas. Touch
+            //    has its own overlay (#ea-touch -> eaHold) and gets no new behaviour here.
+            //    Pen is excluded with it -- same reasoning, and unverifiable on this rig.
+            var eaMouseLatchFailed = false;
+            document.getElementById('theCanvas').addEventListener("pointerdown", (e) => {
+                if (e.pointerType !== 'mouse') return;
                 try { DotNet.invokeMethod('EvilAliensWeb', 'eaMouseDown', e.button | 0); }
-                catch (err) { /* game not booted yet */ }
+                catch (err) {
+                    // This listener is attached from initRenderJS, which .NET itself calls, so
+                    // the runtime is up and eaMouseDown only writes a static bool -- it cannot
+                    // legitimately throw. A failure here (renamed export, changed assembly name)
+                    // presents as "menu rows highlight but never invoke", i.e. exactly the bug
+                    // this exists to fix, so it must not be swallowed silently. Once only.
+                    if (!eaMouseLatchFailed) {
+                        eaMouseLatchFailed = true;
+                        console.warn('[input] eaMouseDown failed -- sub-tick clicks will be dropped: ' + err.message);
+                    }
+                }
             });
 
             // Pull the level-select screenshot blobs out of IndexedDB into memory BEFORE the

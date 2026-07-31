@@ -19,16 +19,20 @@ namespace EvilAliensWeb.Compat
 	// the moment it happens (wwwroot/index.html, next to eaPointerOnCanvas) and InputHandler
 	// ORs it into `held` from INSIDE the tick, so the next tick is guaranteed to see it.
 	//
-	// Deliberately a FLAG, not a counter: two real clicks inside one tick collapse to one
-	// press. Queuing the second would inject a phantom click on a later frame, which is worse
-	// than dropping a click no human made.
+	// Deliberately a FLAG, not a counter: two real clicks inside one tick collapse to one press.
+	// Queuing the second would inject a phantom click on a later frame, which is worse than
+	// dropping a click no human made. Clicks in CONSECUTIVE ticks collapse too -- `held` is
+	// continuous across them, so InputHandler's pressedAndIdle sees no rising edge on the second.
+	// So an automated click LOOP needs a gap tick between clicks, exactly as DebugInput says of
+	// repeated eaPress taps; a single click needs nothing.
 	public static class MouseLatch
 	{
-		// Indexed by MyKeys (6 = Mouse1, 7 = Mouse2) so InputHandler can pass its loop index
-		// straight through, exactly as it does for DebugInput.Consume.
-		private const int Mouse1Key = 6;
+		// Indexed by MyKeys so InputHandler can pass its loop index straight through, exactly as
+		// it does for DebugInput.Consume. Derived from the enum rather than written as 6/7, so a
+		// reordered MyKeys cannot silently latch the wrong key.
+		private const int Mouse1Key = (int)EvilAliens.MyKeys.Mouse1;
 
-		private const int Mouse2Key = 7;
+		private const int Mouse2Key = (int)EvilAliens.MyKeys.Mouse2;
 
 		private static bool mouse1;
 

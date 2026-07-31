@@ -1681,41 +1681,51 @@ internal static class Program
         Console.WriteLine("[logic_probe] Compat/MouseLatch -- the sub-tick click (card 724f2abc)");
 
         // ---- 1. the latch itself -------------------------------------------------------------
-        Func<int, bool> take = idx => (bool)consume.Invoke(null, new object[] { idx });
-        Action<int> press = button => down.Invoke(null, new object[] { button });
+        // The two ints are DIFFERENT SPACES and are named apart on purpose: pressButton takes a
+        // DOM button number (left 0, middle 1, right 2, back/forward 3/4), consumeKey takes a
+        // MyKeys index. They are silently interchangeable to the compiler.
+        const int LeftButton = 0;
+        const int MiddleButton = 1;
+        const int RightButton = 2;
+        const int BackButton = 3;
+        Func<int, bool> consumeKey = idx => (bool)consume.Invoke(null, new object[] { idx });
+        Action<int> pressButton = button => down.Invoke(null, new object[] { button });
 
         // Nothing pressed yet: the latch must not invent a click. This runs FIRST, before anything
         // sets it -- an "is clear" assertion made after a Consume would only be re-reading the
         // clear it is meant to be testing.
-        Check("an untouched latch reports nothing", !take(mouse1) && !take(mouse2), null);
+        Check("an untouched latch reports nothing", !consumeKey(mouse1) && !consumeKey(mouse2), null);
 
         // The positive control. Without it every other check here is satisfied by a Consume that
         // returns false unconditionally, which is precisely the regression being guarded.
-        press(0);
-        Check("a latched left press is reported", take(mouse1), null);
+        pressButton(LeftButton);
+        Check("a latched left press is reported", consumeKey(mouse1), null);
         // ... and for exactly ONE tick. A latch that stayed set would hold Mouse1 down forever:
         // menus would auto-invoke and the ship would fire without input.
-        Check("the press is consumed, not sticky", !take(mouse1), null);
+        Check("the press is consumed, not sticky", !consumeKey(mouse1), null);
 
         // The two buttons are independent -- a left click must not fire the right-click path.
-        press(0);
-        Check("a left press does not latch Mouse2", !take(mouse2) && take(mouse1), null);
-        press(2);
-        Check("a right press does not latch Mouse1", !take(mouse1) && take(mouse2), null);
+        pressButton(LeftButton);
+        Check("a left press does not latch Mouse2", !consumeKey(mouse2) && consumeKey(mouse1), null);
+        pressButton(RightButton);
+        Check("a right press does not latch Mouse1", !consumeKey(mouse1) && consumeKey(mouse2), null);
 
-        // Every other MyKeys index shares this call site (InputHandler passes its loop index), so
-        // a mis-scoped latch would force an unrelated key down. Enter is the one that matters --
-        // it is menu SELECT, so a false positive there invokes the selected entry by itself.
-        press(0);
-        press(2);
-        Check("a non-mouse key index never latches", !take(enter), "MyKeys.Enter = " + enter);
-        take(mouse1);
-        take(mouse2);
+        // Consume's trailing "not a mouse button" arm. DEFENSIVE, not a reachable failure today:
+        // InputHandler folds the latch in from inside `case 6:`/`case 7:` only, so unlike
+        // DebugInput.Consume -- which really is called for every index -- nothing else reaches
+        // here. It is pinned because the arm is cheap to lose and Enter is what it would cost:
+        // Enter is menu SELECT, so a false positive there invokes the selected entry by itself.
+        pressButton(LeftButton);
+        pressButton(RightButton);
+        Check("a non-mouse key index never latches", !consumeKey(enter), "MyKeys.Enter = " + enter);
+        consumeKey(mouse1);
+        consumeKey(mouse2);
 
-        // An unmapped button (middle = 1, back/forward = 3/4) is neither of the two the game reads.
-        press(1);
-        press(3);
-        Check("an unmapped mouse button latches nothing", !take(mouse1) && !take(mouse2), null);
+        // An unmapped button (middle, back/forward) is neither of the two the game reads.
+        pressButton(MiddleButton);
+        pressButton(BackButton);
+        Check("an unmapped mouse button latches nothing",
+            !consumeKey(mouse1) && !consumeKey(mouse2), null);
 
         // ---- 2. end to end through the real InputHandler --------------------------------------
         // The claim the card actually makes. InputHandler.Update reads the Keyboard/Mouse/GamePad
@@ -1739,13 +1749,17 @@ internal static class Program
         }
         Func<int, bool> isPressed = idx => (bool)pressed.Invoke(handler, new object[] { Enum.ToObject(keys, idx) });
 
-        // Baseline: no latch and no physical button, so a tick must report no press. If this were
-        // ever true the rest of the section would mean nothing.
+        // Baseline for BOTH buttons: no latch and no physical button, so a tick must report no
+        // press. This is also the guard on the one host-state dependency here -- Update reads the
+        // real Mouse.GetState(), and KNI does install a concrete input strategy under this loader,
+        // so running logic_probe with a mouse button physically held would fail HERE rather than
+        // letting the assertions below pass vacuously.
         update.Invoke(handler, null);
-        Check("no latch => no press on a plain tick", !isPressed(mouse1), null);
+        Check("no latch => no press on a plain tick", !isPressed(mouse1) && !isPressed(mouse2),
+            "fails if a real mouse button is held down while logic_probe runs");
 
         // THE ASSERTION. A press+release that never overlapped a poll still produces a press.
-        press(0);
+        pressButton(LeftButton);
         update.Invoke(handler, null);
         bool tick1 = isPressed(mouse1);
         update.Invoke(handler, null);
@@ -1755,15 +1769,26 @@ internal static class Program
         Check("and on exactly ONE tick", !tick2, "a sticky press would fire menus and the ship forever");
 
         // The same for the right button, whose case is a separate line and so a separate omission.
-        press(2);
+        pressButton(RightButton);
         update.Invoke(handler, null);
         Check("a sub-tick right click presses Mouse2", isPressed(mouse2), null);
         update.Invoke(handler, null);
 
-        // Leave nothing latched for a Probe* added after this one.
-        take(mouse1);
-        take(mouse2);
-        Check("case set leaves no press latched", !take(mouse1) && !take(mouse2), null);
+        // NEGATIVE CONTROL -- the pre-card build over the same input (the eaNetScore.test() rule;
+        // section 1 is admittedly a restatement of a three-line method, so without this the set
+        // discriminates only as far as a prose account of a mutation run). The pre-card
+        // InputHandler never consulted the latch, which is reproduced exactly by draining it
+        // BEFORE the tick: the DOM edge happened, and `held` is derived from the poll alone.
+        // It must then miss the click, which is the defect.
+        pressButton(LeftButton);
+        consumeKey(mouse1);
+        update.Invoke(handler, null);
+        Check("negative control: without the fold-in the same click is LOST", !isPressed(mouse1),
+            "a pass here means the latch is not what carried the press above");
+
+        // Leave nothing latched for a Probe* added after this one. The Check runs FIRST -- put
+        // the drains before it and it can only re-test the clear, never report a leak.
+        Check("case set leaves no press latched", !consumeKey(mouse1) && !consumeKey(mouse2), null);
         return 0;
     }
 

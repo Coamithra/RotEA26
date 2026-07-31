@@ -191,11 +191,16 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   `held |= MouseLatch.Consume(i)` WIRING, which is the line a future edit would drop. (`Update`
   reads the Keyboard/Mouse/GamePad statics; under this loader they answer with a disconnected
   default rather than throwing, which is exactly the "no button is physically down" baseline the
-  section needs. It does not skip on failure -- losing that leg is a FAIL.) Mutation-tested three
-  ways, and they hit different checks: dropping the clear in `Consume` turns 6 FAIL, hard-wiring
-  the Mouse1 arm off turns 3, and the genuine pre-card build -- deleting both
-  `held |= MouseLatch.Consume(i)` lines -- turns exactly the 2 section-2 positives while all of
-  section 1 still passes.
+  section needs -- and that baseline is ASSERTED for both buttons, so a run with a real mouse
+  button held fails there instead of passing the rest vacuously. It does not skip on failure --
+  losing that leg is a FAIL.) Its negative control is the pre-card build over the same input,
+  reproduced by draining the latch BEFORE the tick so `held` comes from the poll alone: the click
+  must then be LOST. Mutation-tested three ways, each hitting different checks (counts are FAILING
+  LEGS, one below the probe's own `FAILURE(S)` line): dropping the clear in `Consume` turns 6,
+  hard-wiring the Mouse1 arm off turns 3, and the genuine pre-card build -- deleting both
+  `held |= MouseLatch.Consume(i)` lines -- turns 3, namely the two section-2 positives plus the
+  leaves-nothing-latched check (that build never drains the latch at all), with every section-1
+  leg still passing.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

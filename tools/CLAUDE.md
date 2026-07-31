@@ -181,6 +181,21 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   `Environment.TickCount64` turns **4** -- the whole injected-clock section except its "not yet
   due" line, which is precisely why the POSITIVE assertion is the discriminator there; mis-wiring
   `ServiceHelperNetHost.NetLossPct` to the lag flag turns **1**.
+- **Twelfth case set: the sub-tick mouse click** (card 724f2abc) -- `Compat/MouseLatch`, the flag
+  that carries a DOM mousedown edge across the poll `InputHandler.Update` would otherwise miss.
+  **It is here because it cannot be anywhere else**: the defect is a DOM/game-loop timing race and
+  `eahl` has no DOM (SDL2 polls the mouse exactly as the browser path does), so a `--script` probe
+  could not tell the fixed code from the broken code. Section 1 pins the latch; section 2 is what
+  makes it more than a restatement of a three-line method -- it instantiates the REAL
+  `InputHandler` and drives `Update`/`Pressed` over the real latch, so it covers the
+  `held |= MouseLatch.Consume(i)` WIRING, which is the line a future edit would drop. (`Update`
+  reads the Keyboard/Mouse/GamePad statics; under this loader they answer with a disconnected
+  default rather than throwing, which is exactly the "no button is physically down" baseline the
+  section needs. It does not skip on failure -- losing that leg is a FAIL.) Mutation-tested three
+  ways, and they hit different checks: dropping the clear in `Consume` turns 6 FAIL, hard-wiring
+  the Mouse1 arm off turns 3, and the genuine pre-card build -- deleting both
+  `held |= MouseLatch.Consume(i)` lines -- turns exactly the 2 section-2 positives while all of
+  section 1 still passes.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

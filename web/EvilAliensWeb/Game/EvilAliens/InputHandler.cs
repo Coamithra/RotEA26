@@ -178,9 +178,16 @@ public class InputHandler : IInputHandlerService
 			{
 			case 6:
 				held |= (int)(state).LeftButton == 1;
+				// A click SHORTER than one tick is invisible to the poll above -- both samples
+				// read Released -- so the DOM mousedown edge is latched in JS and folded in here
+				// for exactly one tick (card 724f2abc, Compat/MouseLatch.cs). The cursor POSITION
+				// survives such a click, so without this a menu row hover-highlights and never
+				// invokes. Same shape as the DebugInput.Consume(i) line below, for the same reason.
+				held |= MouseLatch.Consume(i);
 				break;
 			case 7:
 				held |= (int)(state).RightButton == 1;
+				held |= MouseLatch.Consume(i);
 				break;
 			}
 			// Swallow the Esc that the browser delivers when it EXITS fullscreen on Esc, so

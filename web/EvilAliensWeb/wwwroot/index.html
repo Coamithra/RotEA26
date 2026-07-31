@@ -985,6 +985,20 @@
             document.getElementById('theCanvas').addEventListener("pointerenter", () => eaSetOnCanvas(true));
             document.getElementById('theCanvas').addEventListener("pointerleave", () => eaSetOnCanvas(false));
 
+            // Latch a mousedown for the game tick (card 724f2abc, Compat/MouseLatch.cs).
+            // InputHandler polls Mouse.GetState() once per tick and edge-detects, so a click
+            // whose press and release both land BETWEEN two polls is never observed -- the
+            // cursor position survives it, so a menu row hover-highlights and never invokes.
+            // Measured: an automated CDP click holds the button for ~1ms, i.e. it essentially
+            // never invoked anything; a human click on a hitching frame is the same bug.
+            // SCOPED TO THE CANVAS on purpose -- a window listener would also fire a game
+            // click for every press on the outside-#app UI (fullscreen button, touch D-pad,
+            // FPS HUD, tuning panels), which is what pointer-events:none exists to prevent.
+            document.getElementById('theCanvas').addEventListener("mousedown", (e) => {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'eaMouseDown', e.button | 0); }
+                catch (err) { /* game not booted yet */ }
+            });
+
             // Pull the level-select screenshot blobs out of IndexedDB into memory BEFORE the
             // first game tick, so the synchronous save-hydrate (StorageStub, on the first
             // OpenContainer a few ticks in) sees them. IndexedDB is async but the game reads

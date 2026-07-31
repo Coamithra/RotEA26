@@ -56,6 +56,11 @@ namespace EvilAliensWeb.Compat.Net
         // must pay twice.
         private const byte PeerSlot2 = 2;
 
+        // A THIRD claimant, used only as leg 2c's negative control: a slot that was never paid
+        // for that entity must still be paid, which is what stops an over-broad PaidMask fold
+        // passing the two refusals above.
+        private const byte PeerSlot3 = 3;
+
         // The host's own primary seat. Only leg 3b needs it: it kills an entity the way the HOST
         // does rather than by honouring a claim, so the kill must be attributed somewhere that is
         // neither claimant.
@@ -232,12 +237,12 @@ namespace EvilAliensWeb.Compat.Net
             // paid from the recent-death record. Neither may be paid twice, and the entity may
             // only leave the world once.
             //
-            // THE TWO CLAIMS ARE A TICK APART, and that is the faithful shape rather than a
-            // convenience. The death RECORD a second claimant is paid from is written by
-            // OnHostDeath at the ComponentRemoved seam, i.e. at the next flush -- so two claims
-            // landing in ONE DrainRx would find no record and the second would be paid nothing.
-            // Measured, and reported as scenario 2b below; it is not reachable on today's wire
-            // (see there), which is why the tick-separated pair is what this scenario asserts.
+            // THE TWO CLAIMS ARE A TICK APART, which is what makes this the CONTROL for 2b
+            // below. The death RECORD a second claimant is paid from is written by OnHostDeath
+            // at the ComponentRemoved seam, i.e. at the next flush, so the flush between these
+            // two claims is what puts the second one on the record's side of that seam. 2b sends
+            // the same pair with the flush taken away and is paid from the Entry's ledger
+            // instead (card 1bfcd705); both must hold, and they are different code.
             sb.Append(" 2. double claim -- one target, two distinct claimants inside the RTT\n");
             honoredBefore = m.ClaimsHonored;
             paidDeadBefore = m.ClaimsPaidDead;
@@ -292,6 +297,10 @@ namespace EvilAliensWeb.Compat.Net
             // tick-separated control for exactly this.
             sb.Append(" 2b. same-tick double claim -- one DrainRx, no flush between\n");
             paidDeadBefore = m.ClaimsPaidDead;
+            // Re-captured rather than reusing scenario 2's baseline: this leg asserts "+1", and
+            // reading it off a counter last taken two scenarios ago would make the message and
+            // the arithmetic disagree the moment anything above changes.
+            honoredBefore = m.ClaimsHonored;
             s1Before = score.PointScore(PeerSlot);
             s2Before = score.PointScore(PeerSlot2);
             UFO sameTick = Plant(bin, game, planted);
@@ -310,7 +319,7 @@ namespace EvilAliensWeb.Compat.Net
                 m.ClaimsPaidDead == paidDeadBefore + 1);
             Check("... and its slot really moved (+" + Round(sameTickPaidB) + ")", sameTickPaidB > 0f);
             Check("... and it settled as ONE live kill, not two (honored +1)",
-                m.ClaimsHonored == honoredBefore + 2);
+                m.ClaimsHonored == honoredBefore + 1);
             bin.TopOfTickFlush();
             Check("the same-tick pair still removed the entity exactly once",
                 !InWorld(game, (GameComponent)(object)sameTick)
@@ -339,6 +348,19 @@ namespace EvilAliensWeb.Compat.Net
                 + ", B +" + Round(score.PointScore(PeerSlot2) - s2Before) + ")",
                 Math.Abs(score.PointScore(PeerSlot) - s1Before) < 0.01f
                 && Math.Abs(score.PointScore(PeerSlot2) - s2Before) < 0.01f);
+            // The negative control, without which a fold of the WRONG mask passes everything
+            // above: a record built with a blanket 0xFF (or the prepaid bits smeared) refuses
+            // both slots just as convincingly. A slot that was never paid for this entity must
+            // still be paid, i.e. the fold carried those two bits and no others.
+            paidDeadBefore = m.ClaimsPaidDead;
+            float s3Before = score.PointScore(PeerSlot3);
+            peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot3));
+            wire.Pump();
+            NetSession.Update();
+            Check("... while a slot NEVER paid for that entity still IS (paidDead +1, +"
+                + Round(score.PointScore(PeerSlot3) - s3Before) + ")",
+                m.ClaimsPaidDead == paidDeadBefore + 1
+                && score.PointScore(PeerSlot3) - s3Before > 0f);
 
             // ---- 3. LATE CLAIM -- the host reaped it first --------------------------------
             // Same ledger, reached from the other direction: here the HOST kills the entity
@@ -430,6 +452,9 @@ namespace EvilAliensWeb.Compat.Net
                 + Round(score.PointScore(PeerSlot) - s1Before) + ")",
                 score.PointScore(PeerSlot) - s1Before > 0f);
             bin.TopOfTickFlush();
+            Check("... and the host's own kill removed it exactly once",
+                !InWorld(game, (GameComponent)(object)hostKill)
+                && !NetIdRegistry.TryGetById(hostKillId, out _));
             planted.Remove((GameComponent)(object)hostKill);
 
             // ---- 4. ONEUP OVERLAP ---------------------------------------------------------
@@ -467,7 +492,7 @@ namespace EvilAliensWeb.Compat.Net
                 Check("the OVERLAPPING collector is paid its own life from the record (lives "
                     + score.Lives + ")", score.Lives == livesAtStart + 2);
 
-                // ---- 4b. THE REPEAT, measured and REPORTED ----------------------------------
+                // ---- 4b. THE REPEAT, a tick apart ------------------------------------------
                 // The other half of the PaidMask, on the branch where getting it wrong hands out
                 // free LIVES rather than points. It holds here because the live branch's
                 // NoteKillSlot attribution is what the removal seam writes into the record -- so

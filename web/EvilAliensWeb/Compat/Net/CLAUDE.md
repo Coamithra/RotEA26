@@ -365,7 +365,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   The six scenarios the design doc specced, each driving ONE REAL `NetSession` over one endpoint
   of a `NetWire` while a SCRIPTED peer drives the other with real `NetProtocol.Encode*` frames.
   Two entry points because they cost different things:
-  - **`eaNetScenarios()` (`Compat/Net/NetScenarioTest.cs`, 65 assertions) is MENU-ONLY and
+  - **`eaNetScenarios()` (`Compat/Net/NetScenarioTest.cs`, 67 assertions) is MENU-ONLY and
     leave-no-trace**, the `eaNetSnap` shape. Scenarios 1-4 run a real HOST session (the three
     generous-claim shapes plus the OneUp overlap); scenario 5 stops it and runs a real CLIENT
     session for the id churn. Real `UFO`s and `Powerup`s are planted into the LIVE bin so

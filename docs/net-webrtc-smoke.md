@@ -1,8 +1,28 @@
-# The real-WebRTC two-window co-op smoke — YOUR run, not an agent's
+# The real-WebRTC two-window co-op smoke -- one human step, then agent-drivable
 
-**THIS ONE IS FOR YOU TO RUN. Nothing here has been run for you.** Everything else on card
+> **RUN 2026-07-31: PASS.** Every criterion below was met -- `transport=WebRTC`, mirrored seat
+> maps (`0:Keyboard*,1:Remote` `pri=0/1` against `0:Remote,1:Keyboard*` `pri=1/0`),
+> `localShip=1 remoteShip=1` both sides, `buf` 84-120ms, `drop`/`sgap`/`ordViol`/`seqGap`/
+> `extrap`/`snapBad` all 0, host `snapTx` climbing against joiner `snapRx=1738 snapEnt=20369`,
+> joiner `clTx=11` matching host `clRx=11`, `resets=9` agreeing on both, both ships drawn in both
+> windows at matching coordinates, zero console exceptions. Mission 1 / Medium.
+> **Three caveats on that run, so it is not over-claimed:** the console buffers were cleared
+> mid-run to isolate fresh metrics, so the zero-exception result covers the play window and
+> after, NOT boot and pairing; the joiner logged `snapUnk=350`, unaccounted for but with
+> `snapBad=0` (the id churn from 9 resets is the likely source); and the play was a scripted
+> fire-and-jiggle loop, which is what caused those 9 resets, so it is not representative play.
+>
+> **An agent CAN drive this, but cannot set it up.** Browser apps are grantable only at
+> computer-use `read` tier (no clicks, no typing, no window management), the Chrome MCP drives
+> only tabs in its own group, `window.open` is popup-blocked without a user gesture, and two tabs
+> in ONE window cannot both tick (only the foreground tab is `visible`). So a human must place
+> two Chrome windows side by side; after that an agent can do the whole run through `eaPress` and
+> the DOM. Measured: a covered window is not slow but effectively STOPPED -- a 5s rAF sample there
+> did not finish in 45s, against 46Hz and 100Hz once both were visible.
+
+**ONE HUMAN STEP, THEN AN AGENT CAN TAKE IT.** Everything else on card
 `25ad0659` was verified headlessly or in a single Chrome tab; this is the one check that needs two
-real browser windows talking over real WebRTC, on your screen, and it is the only thing that can
+real browser windows talking over real WebRTC, on a screen, and it is the only thing that can
 fail in a way none of the rigs can see.
 
 **Why now.** The de-static card put four seams into the live co-op path — `INetHost`'s clock and
@@ -100,6 +120,10 @@ a fully unlocked one. Arrow down to **Online Co-op** and press Enter. The submen
    choose **Missions** — and then the normal mission carousel and difficulty screens. Take
    **Mission 1 on Medium**: a story level, so both peers get a real world with real enemies, and
    Level 1's script hands the ship spawn to a beat, which is worth seeing replicate.
+   GOTCHA on the difficulty screen: it marks the selected row with a brighter metallic SHEEN, not
+   the purple highlight every other menu uses, and Very Hard / Inzane are greyed when locked. If
+   you cannot tell which row is live, step one row and watch which one changes rather than
+   guessing -- the rows are close enough in colour that a still frame is not conclusive.
 4. Both windows launch. **Play for about a minute, on both.** Shoot things in each window — the
    claims are the interesting part, and an idle peer proves much less.
 5. Open DevTools on both (F12) and read the console.

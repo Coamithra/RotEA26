@@ -38,6 +38,19 @@ namespace EvilAliensWeb.Compat.Net
             // must not cost an array each. Filled by NetSession.NoteAward during KilledBy, read
             // one tick later by OnHostDeath at the removal seam.
             public float[] Awards;
+            // The claim ledger for the window BEFORE this entity has a death record (card
+            // 1bfcd705). NetSession.recentDeaths is only written at the removal seam, one
+            // ComponentBin flush after a claim settles the entity -- so in between there is
+            // nothing to pay a second claimant from and nothing to mask the first. These two
+            // fields ARE the ledger for that window: ClaimSettled says the live settle branch
+            // has already run (the ONLY signal for a Powerup or a plain non-killable, neither of
+            // which flips IsDead), ClaimPaidMask is the paid-once bitmask per killer slot.
+            // OnHostDeath folds the mask into the record it writes, so "paid at most once per
+            // (entity, slot)" holds across the flush. Same lifetime as Awards -- per LIVE entity,
+            // gone when the entity leaves the world, which is what stops a wrapped netId ever
+            // inheriting a stale mask.
+            public byte ClaimPaidMask;
+            public bool ClaimSettled;
         }
 
         private static readonly Dictionary<GameComponent, Entry> entries = new Dictionary<GameComponent, Entry>();

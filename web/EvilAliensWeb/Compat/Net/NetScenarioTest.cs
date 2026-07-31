@@ -56,6 +56,16 @@ namespace EvilAliensWeb.Compat.Net
         // must pay twice.
         private const byte PeerSlot2 = 2;
 
+        // A THIRD claimant, used only as leg 2c's negative control: a slot that was never paid
+        // for that entity must still be paid, which is what stops an over-broad PaidMask fold
+        // passing the two refusals above.
+        private const byte PeerSlot3 = 3;
+
+        // The host's own primary seat. Only leg 3b needs it: it kills an entity the way the HOST
+        // does rather than by honouring a claim, so the kill must be attributed somewhere that is
+        // neither claimant.
+        private const byte HostSlot = 0;
+
         private const ulong PeerToken = 0x5CE7A5C0UL;
 
         private static readonly Vector2 Nowhere = new Vector2(-600f, -600f);
@@ -227,12 +237,12 @@ namespace EvilAliensWeb.Compat.Net
             // paid from the recent-death record. Neither may be paid twice, and the entity may
             // only leave the world once.
             //
-            // THE TWO CLAIMS ARE A TICK APART, and that is the faithful shape rather than a
-            // convenience. The death RECORD a second claimant is paid from is written by
-            // OnHostDeath at the ComponentRemoved seam, i.e. at the next flush -- so two claims
-            // landing in ONE DrainRx would find no record and the second would be paid nothing.
-            // Measured, and reported as scenario 2b below; it is not reachable on today's wire
-            // (see there), which is why the tick-separated pair is what this scenario asserts.
+            // THE TWO CLAIMS ARE A TICK APART, which is what makes this the CONTROL for 2b
+            // below. The death RECORD a second claimant is paid from is written by OnHostDeath
+            // at the ComponentRemoved seam, i.e. at the next flush, so the flush between these
+            // two claims is what puts the second one on the record's side of that seam. 2b sends
+            // the same pair with the flush taken away and is paid from the Entry's ledger
+            // instead (card 1bfcd705); both must hold, and they are different code.
             sb.Append(" 2. double claim -- one target, two distinct claimants inside the RTT\n");
             honoredBefore = m.ClaimsHonored;
             paidDeadBefore = m.ClaimsPaidDead;
@@ -276,21 +286,22 @@ namespace EvilAliensWeb.Compat.Net
             Check("... and moves no score",
                 Math.Abs(score.PointScore(PeerSlot2) - s2Before) < 0.01f);
 
-            // ---- 2b. THE SAME-TICK PAIR, measured and REPORTED rather than asserted --------
-            // Two claims for one netId inside a SINGLE DrainRx. The first settles the entity;
-            // the second finds it in the registry but IsDead, falls through to the death-record
-            // branch, and the record is not there yet -- so it is paid nothing. That breaks
-            // "every distinct claimant is credited", and it is a REAL gap in the contract.
-            //
-            // It is REPORTED, not asserted, because it is UNREACHABLE on today's wire and the
-            // repo's rule is not to write a test that expects broken code to stay broken. The
-            // protocol is 2-peer, a client sends exactly one EvClaim per local gameplay death,
-            // and one puppet dies locally once -- so two claims for one netId cannot both come
-            // from the one peer that can send them. It becomes reachable at N peers
-            // (plans/4p-online-coop.md). FILED AS CARD 1bfcd705, which also carries the likely
-            // fix and says that when it lands, this info line becomes a real assertion.
-            sb.Append(" 2b. same-tick double claim -- MEASURED, see the follow-up card\n");
+            // ---- 2b. THE SAME-TICK PAIR ---------------------------------------------------
+            // Scenario 2 with the flush between the two claims taken away: both land in ONE
+            // DrainRx. The first settles the entity; the second finds it in the registry but
+            // already dead, and its recentDeaths record does not exist yet -- OnHostDeath writes
+            // that at the ComponentRemoved seam, one ComponentBin flush later. Until card
+            // 1bfcd705 the second claimant was therefore paid NOTHING, breaking "every distinct
+            // claimant is credited" for the whole width of that window; the Entry's own ledger
+            // (NetIdRegistry.Entry.ClaimPaidMask) is what pays it now. Scenario 2 above is the
+            // tick-separated control for exactly this.
+            sb.Append(" 2b. same-tick double claim -- one DrainRx, no flush between\n");
             paidDeadBefore = m.ClaimsPaidDead;
+            // Re-captured rather than reusing scenario 2's baseline: this leg asserts "+1", and
+            // reading it off a counter last taken two scenarios ago would make the message and
+            // the arithmetic disagree the moment anything above changes.
+            honoredBefore = m.ClaimsHonored;
+            s1Before = score.PointScore(PeerSlot);
             s2Before = score.PointScore(PeerSlot2);
             UFO sameTick = Plant(bin, game, planted);
             Check("PRECONDITION the same-tick target got a netId",
@@ -300,19 +311,56 @@ namespace EvilAliensWeb.Compat.Net
             peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot2));
             wire.Pump();
             NetSession.Update();
+            float sameTickPaidA = score.PointScore(PeerSlot) - s1Before;
+            float sameTickPaidB = score.PointScore(PeerSlot2) - s2Before;
+            Check("the FIRST same-tick claimant was paid by the live kill (+"
+                + Round(sameTickPaidA) + ")", sameTickPaidA > 0f);
+            Check("the SECOND was paid from the Entry's ledger, before any flush (paidDead +1)",
+                m.ClaimsPaidDead == paidDeadBefore + 1);
+            Check("... and its slot really moved (+" + Round(sameTickPaidB) + ")", sameTickPaidB > 0f);
+            Check("... and it settled as ONE live kill, not two (honored +1)",
+                m.ClaimsHonored == honoredBefore + 1);
             bin.TopOfTickFlush();
-            float sameTickPaid = score.PointScore(PeerSlot2) - s2Before;
-            sb.Append("  info  second same-tick claimant paid ").Append(Round(sameTickPaid))
-                .Append(" (paidDead +").Append(m.ClaimsPaidDead - paidDeadBefore)
-                .Append("); the death record is written at the ComponentRemoved seam, one flush later\n");
-            // What IS asserted here is the half that must hold either way: a claim that pays
-            // nothing must also not double-settle the entity or leave it in the world.
             Check("the same-tick pair still removed the entity exactly once",
                 !InWorld(game, (GameComponent)(object)sameTick)
                 && !NetIdRegistry.TryGetById(sameTickId, out _));
-            Check("... and settled it as ONE live kill, not two (honored +1)",
-                m.ClaimsHonored == honoredBefore + 2);
             planted.Remove((GameComponent)(object)sameTick);
+
+            // ---- 2c. THE LEDGER SURVIVES THE FLUSH ----------------------------------------
+            // The other half of the fix, and the ONLY leg that pins it. OnHostDeath builds the
+            // death record from the Entry's mask (RecordDeath's prepaidMask), so both slots paid
+            // in the pre-flush window above are already masked in the record written for the same
+            // id a flush later. Without that fold, `recentDeaths[id] = rec` would overwrite the
+            // mask with the kill note's single bit and BOTH of these repeats would be paid a
+            // second time -- the generous contract turning into a farm at exactly the seam the
+            // card was about.
+            sb.Append(" 2c. the pre-flush ledger survives into the death record\n");
+            paidDeadBefore = m.ClaimsPaidDead;
+            s1Before = score.PointScore(PeerSlot);
+            s2Before = score.PointScore(PeerSlot2);
+            peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot));
+            peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot2));
+            wire.Pump();
+            NetSession.Update();
+            Check("neither pre-flush payee is paid again from the record (paidDead unchanged)",
+                m.ClaimsPaidDead == paidDeadBefore);
+            Check("... and neither slot moved (A +" + Round(score.PointScore(PeerSlot) - s1Before)
+                + ", B +" + Round(score.PointScore(PeerSlot2) - s2Before) + ")",
+                Math.Abs(score.PointScore(PeerSlot) - s1Before) < 0.01f
+                && Math.Abs(score.PointScore(PeerSlot2) - s2Before) < 0.01f);
+            // The negative control, without which a fold of the WRONG mask passes everything
+            // above: a record built with a blanket 0xFF (or the prepaid bits smeared) refuses
+            // both slots just as convincingly. A slot that was never paid for this entity must
+            // still be paid, i.e. the fold carried those two bits and no others.
+            paidDeadBefore = m.ClaimsPaidDead;
+            float s3Before = score.PointScore(PeerSlot3);
+            peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot3));
+            wire.Pump();
+            NetSession.Update();
+            Check("... while a slot NEVER paid for that entity still IS (paidDead +1, +"
+                + Round(score.PointScore(PeerSlot3) - s3Before) + ")",
+                m.ClaimsPaidDead == paidDeadBefore + 1
+                && score.PointScore(PeerSlot3) - s3Before > 0f);
 
             // ---- 3. LATE CLAIM -- the host reaped it first --------------------------------
             // Same ledger, reached from the other direction: here the HOST kills the entity
@@ -362,6 +410,53 @@ namespace EvilAliensWeb.Compat.Net
             Check("... while a DIFFERENT slot on the same dead id IS paid (the ledger is per"
                 + " (netId, slot), not per netId)", m.ClaimsPaidDead == paidDeadBefore + 1);
 
+            // ---- 3b. THE HOST'S OWN KILL, CLAIMED IN THE SAME TICK ------------------------
+            // Scenario 3 with the flush taken away, and the one shape of card 1bfcd705 that is
+            // reachable on TODAY'S 2-peer wire rather than only at N peers. Game1.UpdateInner
+            // runs TopOfTickFlush -> base.Update -> collectionHelper.Update -> DetectCollisions
+            // -> NetSession.Update, so a host kill in the COLLISION phase leaves the entity dead
+            // with its removal still queued when that same tick's DrainRx runs. A client claim
+            // landing in that one-tick window used to find the entity dead and no record yet, and
+            // was paid nothing -- the player lost the points for a kill they legitimately
+            // claimed, silently. The Entry's ledger is what pays it now.
+            //
+            // The kill goes through NetKill because that is the forced-kill entry the harness
+            // can reach; it runs the same real per-type KilledBy + Die as a host bullet's HitBy
+            // (it only bypasses the hittimer gate), and what this leg is about is the TIMING --
+            // dead, removal queued, no record -- which is identical either way.
+            sb.Append(" 3b. the host's own kill, claimed in the SAME tick -- reachable today\n");
+            honoredBefore = m.ClaimsHonored;
+            paidDeadBefore = m.ClaimsPaidDead;
+            s1Before = score.PointScore(PeerSlot);
+            UFO hostKill = Plant(bin, game, planted);
+            Check("PRECONDITION the host-killed target got a netId",
+                NetIdRegistry.TryGetByComp((GameComponent)(object)hostKill, out NetIdRegistry.Entry hkEntry));
+            ushort hostKillId = hkEntry?.Id ?? 0;
+            ((INetEntity)hostKill).NetKillable?.NetKill(
+                NetPuppets.KillerAgent(HostSlot, ((INetEntity)hostKill).Position), isComboGenerator: true);
+            // No flush: this is the whole point. If either half of this stops holding the leg
+            // below is vacuous -- a live entity would take the live-kill branch instead, and a
+            // deregistered one would be scenario 3 over again.
+            Check("PRECONDITION the host's copy is DEAD but still registered -- the removal has"
+                + " not flushed", ((INetEntity)hostKill).IsDead
+                && NetIdRegistry.TryGetById(hostKillId, out _));
+
+            peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, hostKillId, PeerSlot));
+            wire.Pump();
+            NetSession.Update();
+            Check("the same-tick claim did NOT run a second live kill (honored unchanged)",
+                m.ClaimsHonored == honoredBefore);
+            Check("the claimant was paid from the Entry's ledger (paidDead +1)",
+                m.ClaimsPaidDead == paidDeadBefore + 1);
+            Check("... and its slot really moved (+"
+                + Round(score.PointScore(PeerSlot) - s1Before) + ")",
+                score.PointScore(PeerSlot) - s1Before > 0f);
+            bin.TopOfTickFlush();
+            Check("... and the host's own kill removed it exactly once",
+                !InWorld(game, (GameComponent)(object)hostKill)
+                && !NetIdRegistry.TryGetById(hostKillId, out _));
+            planted.Remove((GameComponent)(object)hostKill);
+
             // ---- 4. ONEUP OVERLAP ---------------------------------------------------------
             // Lives are host-authoritative -- the next EvScoreSync sends them verbatim -- so a
             // OneUp collected on the client only survives if the HOST applies it. Two collectors
@@ -397,14 +492,13 @@ namespace EvilAliensWeb.Compat.Net
                 Check("the OVERLAPPING collector is paid its own life from the record (lives "
                     + score.Lives + ")", score.Lives == livesAtStart + 2);
 
-                // ---- 4b. THE REPEAT, measured and REPORTED ----------------------------------
+                // ---- 4b. THE REPEAT, a tick apart ------------------------------------------
                 // The other half of the PaidMask, on the branch where getting it wrong hands out
                 // free LIVES rather than points. It holds here because the live branch's
                 // NoteKillSlot attribution is what the removal seam writes into the record -- so
-                // the slot paid live is already masked by the time a repeat arrives. It does NOT
-                // hold when the two claims share a tick: there is no record yet, so nothing
-                // masks the live payer either. Same root cause as 2b, same follow-up card (1bfcd705).
-                sb.Append(" 4b. repeat claim from an already-paid collector -- MEASURED\n");
+                // the slot paid live is already masked by the time a repeat arrives. 4c below is
+                // the same pair with the flush taken away.
+                sb.Append(" 4b. repeat claim from an already-paid collector\n");
                 int livesAfterOverlap = score.Lives;
                 peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, oneUpId, PeerSlot));
                 wire.Pump();
@@ -422,6 +516,44 @@ namespace EvilAliensWeb.Compat.Net
                 Check("a repeat from a slot the RECORD has paid adds nothing -- the leak is"
                     + " bounded, not a farm (lives " + livesAfterRepeat + " -> " + score.Lives + ")",
                     score.Lives == livesAfterRepeat);
+
+                // ---- 4c. THE SAME-TICK REPEAT + OVERLAP, ON A PICKUP ----------------------
+                // The half of card 1bfcd705 that cost LIVES rather than points, and the worst of
+                // it. A Powerup's settle path calls NetMarkTaken() -- which sets `taken`, NOT
+                // `isdead` -- and queues the removal, so before the fix every same-tick claim
+                // re-entered the LIVE branch in full: measured lives +3 for (A, A, B), i.e. one
+                // free life per claim frame a peer could cram into one DrainRx, plus three
+                // ClaimsHonored for one settlement. Entry.ClaimSettled is what makes the live
+                // branch run once; Entry.ClaimPaidMask is what refuses A's repeat while still
+                // paying B. The generic non-killable arm (an EvilBullet swept by a blast: an
+                // explosion and its NetPointValue per claim) sits behind the SAME gate on the
+                // SAME line, so it needs no leg of its own.
+                sb.Append(" 4c. same-tick (A, A, B) on a pickup -- the live branch runs once\n");
+                int livesBeforeSameTick = score.Lives;
+                long honoredBeforeSameTick = m.ClaimsHonored;
+                paidDeadBefore = m.ClaimsPaidDead;
+                Powerup sameTickUp = PlantOneUp(bin, game, planted);
+                Check("PRECONDITION the same-tick OneUp got a netId",
+                    NetIdRegistry.TryGetByComp((GameComponent)(object)sameTickUp,
+                        out NetIdRegistry.Entry stuEntry));
+                ushort sameTickUpId = stuEntry?.Id ?? 0;
+                peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickUpId, PeerSlot));
+                peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickUpId, PeerSlot));
+                peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickUpId, PeerSlot2));
+                wire.Pump();
+                NetSession.Update();
+                Check("TWO collectors, THREE claims, exactly two lives (lives "
+                    + livesBeforeSameTick + " -> " + score.Lives + ")",
+                    score.Lives == livesBeforeSameTick + 2);
+                Check("... settled as ONE live pickup (honored +1)",
+                    m.ClaimsHonored == honoredBeforeSameTick + 1);
+                Check("... with the overlapping collector paid from the ledger (paidDead +1)",
+                    m.ClaimsPaidDead == paidDeadBefore + 1);
+                bin.TopOfTickFlush();
+                Check("... and the powerup left the world and the registry",
+                    !InWorld(game, (GameComponent)(object)sameTickUp)
+                    && !NetIdRegistry.TryGetById(sameTickUpId, out _));
+                planted.Remove((GameComponent)(object)sameTickUp);
             }
 
             TeardownSession(sb, Check);

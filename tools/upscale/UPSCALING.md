@@ -111,7 +111,7 @@ compensate. Fix = divide the draw scale by the factor. We did it centrally:
   also `frameTexels × scale`, so it auto-corrects). **Add the new sheet's name to that dict.**
 - **Direct draws bypass the component** and need per-site fixes: anything that hardcodes
   `Rectangle(0,0,48,48)` (ScoreVisualiser lives, PowerupEffect particles) or computes a
-  source rect + position from frame size (GammaMenu / ScreenResizeMenu UFO decorations).
+  source rect + position from frame size (the since-removed GammaMenu / ScreenResizeMenu UFO decorations).
   Grep for the texture name AND for `0, 0, 48`.
 - **The interpolation offset is resolution-independent** (`frameStride / textureWidth` =
   `193/1543` = `49/391` = 0.125), so the interpolation path needs **zero** changes. Nice.

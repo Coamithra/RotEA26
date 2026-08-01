@@ -566,6 +566,18 @@ namespace EvilAliensWeb.Compat.Net
             return n;
         }
 
+        // Test/diagnostic seam (card 72143c11): park a session-ending notice at the menus with
+        // no peer, no session and no transport. Every production writer of MenuNotice is inside
+        // Stop(), which needs a live session -- so the ONLY offline way to reach the menus'
+        // notice path (and the two-live-menus bug it used to leave behind) is to set it here.
+        // Reached through DebugInput.NetNotice. It starts and stops nothing -- but it does
+        // CLOBBER any notice already pending, so do not fire it during a real session teardown
+        // and expect the real reason to survive.
+        internal static void SetMenuNoticeForTest(string notice)
+        {
+            MenuNotice = notice;
+        }
+
         // Client side: the host picked a level in the lobby -- MenuScene polls this and
         // mirrors the launch.
         public static bool TakePendingLaunch(out Levels level, out Settings.DifficultyLevel difficulty)

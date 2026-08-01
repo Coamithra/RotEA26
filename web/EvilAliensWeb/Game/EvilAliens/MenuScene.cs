@@ -192,8 +192,6 @@ internal class MenuScene : Scene
 
 	private DifficultyMenu difficultyMenu;
 
-	private GammaMenu gammaMenu;
-
 	private TrailerScene trailerScene;
 
 	private MenuSub1 difficultyCaller;
@@ -355,10 +353,14 @@ internal class MenuScene : Scene
 		// resolution is browser-driven since the Stage-10 unified presenter (RenderScale), so
 		// the option no longer did anything (Settings.Scale is set once in Game1.LoadContent
 		// for narrow displays and never read by any draw path). Settings.Scale itself is left
-		// in place (XML-serialized, appended fields must not be removed) — just unreachable
+		// in place (it was already XML-serialized, and leaving it cost nothing) — just unreachable
 		// from the menu now. Trello card 993db245.
-		optionsMenu.AddEntry("Gamma Correction");
-		optionsMenu.AddEntryEvent(optionsMenu_GammaCorrectionSelected);
+		// "Gamma Correction" (the old XBLIG TV-calibration screen, GammaMenu + Settings.Gamma)
+		// removed -- it existed because a 2008 Xbox 360 could not know the attached TV's black
+		// point, which a colour-managed browser on an sRGB display already handles. Its default
+		// (1.0) was a measured byte-exact no-op, so nothing about the shipped look changes.
+		// Unlike Settings.Scale above, Settings.Gamma is gone from the save type too: there are
+		// no legacy players to keep compatibility for. Trello card a35c5f31.
 		playerSettingsMenu = new PlayerSettingsMenu(game, darken: true);
 		optionsMenu.AddEntry("Controller Settings");
 		optionsMenu.AddEntryEvent(optionsMenu_PlayerOptionsSelected);
@@ -387,8 +389,6 @@ internal class MenuScene : Scene
 		difficultyMenu = new DifficultyMenu(base.Game);
 		difficultyMenu.OnExit += difficultyMenu_OnExit;
 		difficultyMenu.OnDifficultySelected += difficultyMenu_difficultySelected;
-		gammaMenu = new GammaMenu(game);
-		gammaMenu.OnFinished += gammaMenu_OnFinished;
 		awardmentsMenu = new SubMenuAwardments(game);
 		List<Awardment> enumValues = Game1.GetEnumValues<Awardment>();
 		AwardmentBlade awardmentBlade = ServiceHelper.Get<IAwardmentBladeService>().get();
@@ -466,16 +466,6 @@ internal class MenuScene : Scene
 	{
 		Collection.Remove((GameComponent)(object)trailerScene);
 		trailerMenu.Show();
-	}
-
-	private void gammaMenu_OnFinished(object sender)
-	{
-		Settings.GetInstance().SaveThreaded();
-		Collection.Remove((GameComponent)(object)gammaMenu);
-		base.Visible = true;
-		base.Enabled = true;
-		((DrawableGameComponent)optionsMenu).Visible = true;
-		((GameComponent)optionsMenu).Enabled = true;
 	}
 
 	private void awardmentTextMenu_OnExit(MenuSub1 sender)
@@ -788,15 +778,6 @@ internal class MenuScene : Scene
 	{
 		Settings.GetInstance().HideSafeArea = !Settings.GetInstance().HideSafeArea;
 		sender.SetEntry("Hide Safe Area: " + boolToGameString(Settings.GetInstance().HideSafeArea));
-	}
-
-	private void optionsMenu_GammaCorrectionSelected(MenuSub1 sender)
-	{
-		Collection.Add((GameComponent)(object)gammaMenu);
-		base.Visible = false;
-		base.Enabled = false;
-		((DrawableGameComponent)optionsMenu).Visible = false;
-		((GameComponent)optionsMenu).Enabled = false;
 	}
 
 	private void optionsMenu_PlayerOptionsSelected(MenuSub1 sender)
@@ -1161,6 +1142,17 @@ internal class MenuScene : Scene
 		EvilAliensWeb.Compat.Net.WebRtcInterop.ClosePrompt();
 	}
 
+	// Test seam (card 72143c11): put this scene into the state a lobby co-op match END leaves
+	// behind, which is netMode TRUE while mainMenu is live -- nothing clears netMode across a
+	// level launch, and Initialize re-adds mainMenu on the way back. Reaching it for real needs
+	// a paired peer and a level, so it is the one precondition of that bug a headless probe
+	// cannot produce; everything downstream of it (NetUpdate's notice branch) is then the real
+	// code. It only writes the flag -- no menu is shown or hidden here.
+	internal void NetDebugForceNetMode()
+	{
+		netMode = true;
+	}
+
 	// Per-tick lobby pump: drains the JS-side phase queue, keeps the status panel's text
 	// current, advances the host to the level pick on connect, mirrors the host's launch
 	// on the client, and surfaces session-ending notices from any point in the flow.
@@ -1173,10 +1165,19 @@ internal class MenuScene : Scene
 			{
 				CloseNetFlowMenus();
 			}
-			else
-			{
-				mainMenu.RemoveInstantly(); // fresh menu re-entry after an in-level match end
-			}
+			// Card 72143c11: the main menu is closed on BOTH paths, and the netMode branch
+			// above is exactly why it has to be. `netMode` lives on this long-lived scene and
+			// NOTHING clears it across a level launch, so a lobby co-op match that ends in-level
+			// comes back here with it still true -- while Initialize has already re-added
+			// mainMenu. CloseNetFlowMenus does not touch mainMenu, so the notice used to land on
+			// top of a live main menu: its text overlapped the rows, and since MenuSub1 has no
+			// modality at all, BOTH menus ran HandleInput every tick -- arrows moved two
+			// selections and Enter invoked two entries. Removing it unconditionally is what makes
+			// the notice the only thing on screen and the only thing taking input.
+			// Collection.Remove of a menu that is not shown is a no-op (see CloseNetFlowMenus),
+			// so the lobby paths, where mainMenu is already gone, are unaffected.
+			// netStatus_CancelSelected re-Show()s it on acknowledge.
+			mainMenu.RemoveInstantly();
 			EvilAliensWeb.Compat.Net.NetLobby.Cancel();
 			netMode = true; // the status panel is net-flow UI; cleared on acknowledge
 			netNoticeUp = true;

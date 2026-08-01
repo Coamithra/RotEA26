@@ -195,6 +195,17 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
   two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
   the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
+- **Net UI screenshot/probe seams** (card group `fix/net-ui-smalls`): **`?netfakelisted=<code>`**
+  reports the game as publicly LISTED under that code with **no socket and no server**, so the
+  pause menu's "Listed online -- room XYZAB" line and `ScoreVisualiser`'s corner beacon can be
+  screenshot offline (reaching either for real needs a live server AND a level the eligibility
+  predicate accepts). Free-form identity string, out of `DebugFlags.Active` -- no session exists,
+  so it cannot alter a shared run. Console-side: **`eaNetNotice(text)`** parks a session-ending
+  notice at the menus with no peer (`|` = newline; every production writer of `MenuNotice` is
+  inside `NetSession.Stop()`), **`eaMenuNetMode()`** forces the live `MenuScene` into net-lobby
+  mode -- the one precondition of card 72143c11 a headless run cannot otherwise produce -- and
+  **`eaMenuCensus()`** lists the LIVE menus, which is the only observable that separates "drawn
+  behind" from "still taking input". Pinned by `tools/headless/probes/net_notice_menu.txt`.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new

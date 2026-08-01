@@ -15,8 +15,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   pinned one). `Game1.Draw` renders the whole frame into one offscreen `sceneTarget` sized to the
   window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it scaled+letterboxed;
   the game's `SetRenderTarget(0, null)` calls redirect there via
-  `Xna3GraphicsDeviceCompat.BaseRenderTarget`. Gamma applies on the present blit; 800x600-design
-  draws scale up via `RenderScale.Matrix` at the `SpriteBatchWrapper` Begin choke; bloom + offscreen
+  `Xna3GraphicsDeviceCompat.BaseRenderTarget`. 800x600-design draws scale up via
+  `RenderScale.Matrix` at the `SpriteBatchWrapper` Begin choke; bloom + offscreen
   targets are `RenderScale`-sized and recreated on resize. Hi-res art (menu title, splash) draws
   straight into this one scene — no separate overlay pass. A render-sized offscreen target
   composited back uses `SpriteBatchWrapper.DrawPresent` (identity); full-screen overlays use
@@ -88,8 +88,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `interpolate.fx`'s frame delta, per-vertex UVs in `Wall.DrawTowerShafts3D`, a shader feather
   window) → **actual padded** size. Whole-texture draws MUST clamp their source to `LogicalBounds()`
   (the wrapper's `Draw` overloads do — else the transparent pad reads BLACK under Opaque blend, e.g.
-  the menu frame lines / `GammaMenu` tiling). RenderTargets are never padded. A content-extent
-  shader (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
+  the menu frame lines). RenderTargets are never padded. A content-extent shader
+  (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
   `[0,1]` frame math in `tc/ContentScale`; the `SpriteBatchWrapper` sets it centrally in
   `BeginCustom`/`DrawCustom` (the render-space custom-effect batch that `ProceduralStarfield`/
   `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`.
@@ -500,7 +500,7 @@ draws for the tower pass; the two agree on the same fight.)
   canvas fires, and a clickable panel would eat every shot aimed at that corner.
 - Sections (they sum to the tick; whatever is left shows as `other`): `update` (parent) with
   `components`/`collision`/`net` sub-rows, `scene` (= `DrawInner`, all components incl. bloom),
-  `post` (slowmo trail + holo-sim), `present` (the letterbox gamma blit), **`swap`** (`EndDraw`).
+  `post` (slowmo trail + holo-sim), `present` (the letterbox blit), **`swap`** (`EndDraw`).
   **`swap` matters more than it sounds:** `Game.Tick` presents in `EndDraw`, OUTSIDE the `Draw`
   override, and WebGL commands are queued -- so a GPU-bound frame's real cost lands there. Add a
   section in one line: an enum member + `long t = FrameProfiler.Begin(); ... End(Section.X, t)`.
@@ -672,8 +672,7 @@ site now lives under:
   skipped); `MenuSub1.HandleMouse()` (gated on the `normal` state) maps the cursor to hover-select
   and `MyKeys.Mouse1` to select+invoke, either resetting the attract idle timeout. **A new
   `DrawMenu` override must call `RecordEntryHit` per entry or its menu won't be clickable.** The
-  level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: the
-  `GammaMenu`/`ScreenResizeMenu` sliders and `PlayerSettingsMenu`.
+  level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: `PlayerSettingsMenu`.
   - **On a CAROUSEL a click on a side entry only SCROLLS to it** (card e3c78bb8,
     `mouseClickSelectsBeforeActivating`, set by `SubMenuCarousel` alongside `mouseHoverSelects`).
     Only the centred entry activates, so it is two clicks to launch a level you can see but are
@@ -921,7 +920,7 @@ site now lives under:
   the time scale) or it freezes and never thaws. Draw-time cosmetics keep animating during a freeze
   by design. `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
 - **Slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up slowmo adds an accumulation-
-  buffer motion blur on the composited+bloomed `sceneTarget` before the gamma blit:
+  buffer motion blur on the composited+bloomed `sceneTarget` before the present blit:
   `trail = trail*decay + scene*(1-decay)`, mixed back with an eased `slowmoTrailMix` (~0.25s); the
   first slowmo frame seeds the trail (no dark flash). Static pixels converge to the input — no
   blow-out. Defaults decay 0.88 / strength 0.8, ON; `?slowmotrail=0` / `?slowmotraildecay=` /

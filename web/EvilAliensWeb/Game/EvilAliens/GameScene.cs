@@ -295,7 +295,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		playerOptions.Remove();
 	}
 
-	private void eventList_OnCheckPointReached(GameEventList sender)
+	private void eventList_OnCheckPointReached(GameEventList sender, GameEvent checkpoint)
 	{
 		score.Save();
 		// Online co-op: the client saves the same baseline so a later reset's score.Load()

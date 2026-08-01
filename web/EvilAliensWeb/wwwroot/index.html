@@ -712,6 +712,17 @@
             catch (e) { console.warn('[debug] eaTeamSeat failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the Boss Train's section state (card 4a3b22b7). Checks every checkpoint's declared
+        // section against a forward walk of the real script, then drives the REAL
+        // RevertToCheckpoint from the alien-base window -- the ~10s slot where a death used to rewind
+        // the script two sections while leaving the backdrop and the music on the alien base -- and
+        // reads the section + track back, with the pre-card behaviour as the negative control.
+        // DESTRUCTIVE: needs a throwaway ?level=InsaneBossI boot, not a real playthrough.
+        window.eaBossTrain = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBossTrain')); }
+            catch (e) { console.warn('[debug] eaBossTrain failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: probe the REAL texture load path for one asset (card 35834236).
         //   eaTexProbe('GFX/Base/756')  ->  .dds, 612x612 actual / 512x512 logical, 1 level
         // Reports which precompiled sibling the offline build shipped, which file the texture
@@ -1686,7 +1697,16 @@
                 {
                     if (myToken !== token) return;            // superseded before manifest resolved
                     var info = m[cue];
-                    if (!info) return;
+                    // Card 4a3b22b7: both this and the catch below used to be SILENT, and either
+                    // one leaves the PREVIOUS track playing with nothing said -- indistinguishable,
+                    // from outside, from the game never asking for the switch. Pair the [music]
+                    // line C# prints on the request with one here when the request cannot be
+                    // honoured, so "the music did not change" always names its half.
+                    if (!info)
+                    {
+                        console.warn("[music] no music.json entry for cue '" + cue + "' -- previous track keeps playing");
+                        return;
+                    }
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
                         if (!resp.ok) throw 0;
@@ -1717,7 +1737,14 @@
                         src.connect(g).connect(master);
                         src.start();
                         current = { cue: cue, src: src, gain: g };
-                    }).catch(function () { /* music is non-fatal */ });
+                    }).catch(function (e)
+                    {
+                        // Music is non-fatal and stays non-fatal -- but a failed fetch/decode is
+                        // reported now (see the manifest branch above). `current` is untouched on
+                        // this path, so the OLD track simply keeps playing forever.
+                        console.warn("[music] could not load cue '" + cue + "' (" + (info && info.file) + "): "
+                            + (e && e.message ? e.message : e) + " -- previous track keeps playing");
+                    });
                 });
             }
 

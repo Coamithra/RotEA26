@@ -101,9 +101,13 @@ expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
 # the OneUp overlap and the id-churn self-heal, each driven over a real session with a scripted
 # wire peer. Scenario 6 needs a level and has its own probe (net_scene_order.txt), like
 # eaNetResetSpawn. Card 1bfcd705 added legs 2b/2c/3b/4c, which pin the claim ledger across the
-# ComponentBin flush that writes the death record -- 50 -> 67. The one remaining `info` line is
-# scenario 5's pupPops count, a reported measurement rather than a gap.
-expect \[netscen\] 67 passed, 0 failed
+# ComponentBin flush that writes the death record -- 50 -> 67. Card 4c9448c8 added six more to
+# scenario 5 -- 67 -> 73 -- splitting `dup` by cause: three assert the churn's duplicates are ALL
+# the benign already-live shape with dupBad unmoved, and three are the negative control (an
+# EvSpawn carrying an unregistered typeIdx must move dupBad and NOT dupLive). Without that
+# control a classifier hard-wired to "already live" would pass the other three. The one
+# remaining `info` line is scenario 5's pupPops count, a reported measurement rather than a gap.
+expect \[netscen\] 73 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

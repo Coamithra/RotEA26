@@ -12,12 +12,16 @@
 > `snapBad=0` (the id churn from 9 resets is the likely source); and the play was a scripted
 > fire-and-jiggle loop, which is what caused those 9 resets, so it is not representative play.
 >
-> **An agent CAN drive this, but cannot set it up.** Browser apps are grantable only at
-> computer-use `read` tier (no clicks, no typing, no window management), the Chrome MCP drives
-> only tabs in its own group, `window.open` is popup-blocked without a user gesture, and two tabs
-> in ONE window cannot both tick (only the foreground tab is `visible`). So a human must place
-> two Chrome windows side by side; after that an agent can do the whole run through `eaPress` and
-> the DOM. Measured: a covered window is not slow but effectively STOPPED -- a 5s rAF sample there
+> **An agent CAN drive this, but cannot set it up** -- and the middle clause here was WRONG,
+> corrected 2026-08-01 by a run that drove both windows end to end. Browser apps are grantable
+> only at computer-use `read` tier (no clicks, no typing, no window management) and `window.open`
+> is popup-blocked without a user gesture, so a human must still PLACE the two windows. But the
+> Chrome MCP is not confined to its tab group the way this said: dragging a tab out DISSOLVES the
+> group (`tabs_context_mcp` then reports no group at all), yet **both tabs stay fully drivable by
+> explicit `tabId`** -- `javascript_tool`, `computer` and `read_console_messages` all worked on
+> both windows for a whole run. So: capture the tab ids BEFORE the drag, and do not rely on
+> `tabs_context_mcp` afterwards. After placement an agent can do the whole run through `eaPress`
+> and the DOM. Measured: a covered window is not slow but effectively STOPPED -- a 5s rAF sample there
 > did not finish in 45s, against 46Hz and 100Hz once both were visible.
 
 **ONE HUMAN STEP, THEN AN AGENT CAN TAKE IT.** Everything else on card

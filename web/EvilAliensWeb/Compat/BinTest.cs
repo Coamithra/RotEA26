@@ -231,7 +231,8 @@ internal static class BinTest
 				// (and the cleanup below would then evict a bullet the game still owns).
 				bool built;
 				HashSet<GameComponent> before = CollectBullets(game);
-				built = Net.NetPuppets.OnSpawn(64001, 0, state, new byte[1], 0, 0);
+				built = Net.NetPuppets.OnSpawn(64001, 0, state, new byte[1], 0, 0)
+						== Net.SpawnRejectKind.None;
 				foreach (GameComponent item in CollectBullets(game))
 				{
 					if (!before.Contains(item))

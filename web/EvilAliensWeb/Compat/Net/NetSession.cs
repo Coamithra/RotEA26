@@ -2560,9 +2560,25 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                if (!NetPuppets.OnSpawn(id, typeIdx, state, data, extraOff, extraLen))
+                // Count WHICH way it failed, not just that it did (card 4c9448c8). dup stays the
+                // sum; dupBad is the only member that means something is wrong, and it is the
+                // one the co-op verification bar asserts at 0.
+                SpawnRejectKind reject = NetPuppets.OnSpawn(id, typeIdx, state, data, extraOff, extraLen);
+                if (reject != SpawnRejectKind.None)
                 {
                     metrics.DupSpawns++;
+                    switch (reject)
+                    {
+                    case SpawnRejectKind.AlreadyLive:
+                        metrics.DupLive++;
+                        break;
+                    case SpawnRejectKind.Declined:
+                        metrics.DupDeclined++;
+                        break;
+                    default:
+                        metrics.DupBad++;
+                        break;
+                    }
                 }
                 if (NetHost.Current.NetLog)
                 {

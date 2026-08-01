@@ -75,6 +75,10 @@ namespace EvilAliensWeb.Compat.Net
         // Named because the cleanup sweep has to agree with it, and two bare 0s in two places with
         // nothing tying them together is how that drifts.
         private const byte ChurnTypeIdx = 0;
+        // A typeIdx no descriptor claims -- the dupBad negative control (card 4c9448c8). The
+        // registry is dense from 0 and far shorter than this, and the scenario asserts that
+        // rather than assuming it, so appending descriptors can never quietly make it valid.
+        private const byte UnknownTypeIdx = 254;
 
         public static string Run()
         {
@@ -594,6 +598,8 @@ namespace EvilAliensWeb.Compat.Net
 
             NetMetrics m = NetSession.Metrics;
             long dupBefore = m.DupSpawns;
+            long dupLiveBefore = m.DupLive;
+            long dupBadBefore = m.DupBad;
             long ordViolBefore = m.OrderViolations;
             long snapNewBefore = m.SnapNew;
             long snapBadBefore = m.SnapBad;
@@ -652,6 +658,37 @@ namespace EvilAliensWeb.Compat.Net
             long dupDelta = m.DupSpawns - dupBefore;
             Check("duplicate spawns are BOUNDED by the churn (+" + dupDelta + " over " + Churn
                 + " reordered ids)", dupDelta <= Churn);
+
+            // THE SPLIT (card 4c9448c8). Every duplicate this scenario produces is the benign
+            // already-live shape, so the whole delta must land in dupLive and dupBad must not
+            // move. This is the leg that makes `dup` readable: it is the live race, not a
+            // synthetic one, and before the split these were indistinguishable at the counter.
+            long dupLiveDelta = m.DupLive - dupLiveBefore;
+            Check("... and EVERY one is the benign already-live shape (dupLive +" + dupLiveDelta
+                + " == dup +" + dupDelta + ")", dupLiveDelta == dupDelta);
+            Check("... with dupBad UNMOVED (was " + dupBadBefore + ", now " + m.DupBad + ")",
+                m.DupBad == dupBadBefore);
+
+            // NEGATIVE CONTROL, and the split is worthless without it: a classifier hard-wired
+            // to answer "already live" would pass every assertion above. An EvSpawn carrying a
+            // typeIdx no descriptor claims is the registry/protocol mismatch dupBad exists for,
+            // so it must move dupBad and leave dupLive alone. 254 is unregistered by
+            // construction -- the table is dense from 0 and nowhere near that long -- and the
+            // check below asserts that rather than trusting it.
+            Check("typeIdx " + UnknownTypeIdx + " really is unregistered (the control's premise)",
+                NetTypeRegistry.Get(UnknownTypeIdx) == null);
+            long dupLiveBeforeBad = m.DupLive;
+            long dupBadBeforeBad = m.DupBad;
+            peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, 9500, UnknownTypeIdx,
+                state, noExtras, 0));
+            wire.Pump();
+            NetSession.Update();
+            Check("an unknown typeIdx counts as dupBad (+" + (m.DupBad - dupBadBeforeBad) + ")",
+                m.DupBad == dupBadBeforeBad + 1);
+            Check("... and NOT as dupLive (unchanged at " + m.DupLive + ")",
+                m.DupLive == dupLiveBeforeBad);
+            Check("... and built no puppet (live=" + NetPuppets.LiveCount + ")",
+                NetPuppets.LiveCount == liveBefore + Churn);
             Check("no death arrived for an id that was never spawned (ordViol unchanged)",
                 m.OrderViolations == ordViolBefore);
             Check("NO PUPPETS LEAKED -- generation 1 is gone and generation 2 is live (live="

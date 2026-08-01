@@ -1048,7 +1048,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
 - **Verify with LOGGED METRICS, not screenshots** (`Compat/Net/NetMetrics`): a parseable
   `[net] role=... pops=... snapTx=... clRx=...` line every 5s. Healthy: buf ~100ms,
   extrap ~0, pops 0 (pop = a step no ship could physically make: > 2x MaxSpeed x realDt
-  + 3px), drop/dup/ordViol/seqGap 0; on the world side, host `snapTx` climbing, client
+  + 3px), drop/ordViol/seqGap 0 and **dupBad** 0 (`dup` itself is NOT a 0 bar -- read its
+  split, below); on the world side, host `snapTx` climbing, client
   `snapRx/snapEnt` climbing with `snapUnk` small and non-climbing at steady state (but read
   its split -- see below), `pupPops` near 0 **judged against `snapTurn`** (next bullet),
   and the claim counters telling the kill story (`clTx` client-side ~=
@@ -1067,6 +1068,31 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   `eaKillShips()` in each console -- `Asplode()` only guards on `!IsDead`, so the helper bites
   through invulnerability, and leaving the flag on is what keeps the rest of the run from
   dying at random. `AllShipsDead` needs BOTH ships down, so fire it on both tabs.
+  **`dup` is NOT a 0 bar either, and this line used to say it was (card 4c9448c8).** An
+  EvSpawn that builds no puppet has FOUR causes and they used to share one counter, so the
+  number the co-op gate asserts on could not be judged -- exactly the snapUnk mistake one layer
+  down. Now split as `dupLive`/`dupDecl`/`dupBad`, with `dup` kept as their sum:
+  - `dupLive` = the id was already ours. **BENIGN, and bursty by nature rather than steady:**
+    the snapshot self-heal rebuilds ids off the unreliable stream lane, so the ordered EvSpawn
+    for one of those lands second, and a checkpoint revert re-spawns ids across a purge the
+    client is still settling. **Measured on a real WebRTC pairing:** a joiner arriving DURING a
+    host reset read `dup=15` on its first `[net]` line and stayed flat at 15 while `evRx` climbed
+    75 -> 134; a joiner arriving in steady state read **0 for a whole 100s soak**. Host reads 0
+    in both. So a nonzero `dup` at a join or a reset is traffic, not a leak -- and the old
+    reading that "every real session starts at ~10" was simply wrong.
+  - `dupDecl` = the descriptor declined to construct. Benign by construction; the id is marked
+    removed and the self-heal retries it after `RecentRemovalWindowMs`.
+  - `dupBad` = **the fault shape, and the one to assert at 0.** No descriptor for the typeIdx --
+    a registry/protocol mismatch, i.e. the peer is sending a type this build does not have --
+    plus the two shapes that are unreachable today and would be news if they fired (the bin
+    swallowing the add, the puppet layer not running). Note the build-hash handshake already
+    refuses a mismatched peer before a session starts, so `dupBad` is a second line of defence
+    rather than the only one; that is why it is a counter and not a teardown.
+  Classified by `NetPuppets.SpawnRejectKind` and pinned by `eaNetScenarios()` scenario 5, whose
+  churn legs assert the whole delta lands in `dupLive` with `dupBad` unmoved, **beside a negative
+  control** (an EvSpawn carrying an unregistered typeIdx must move `dupBad` and NOT `dupLive`) --
+  without which a classifier hard-wired to "already live" would pass. Mutation-tested both ways.
+
   **`snapUnk` climbing is not by itself a leak -- read the SPLIT, never the total** (card
   48ab9b2f). Three unrelated things make a snapshot entry "unknown", and the `[net]` line breaks
   them out as `snapNew`/`snapDead`/`snapBad` (`snapUnk` remains their sum):
@@ -1381,7 +1407,9 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     pick the room. **Pass looks like:** `session start role=host ... (join-in-progress)` +
     `... role=join ... (menu lobby)`, `granted joiner primary slot=1`, **mirror-image rosters**
     (`0:Keyboard*,1:Remote` `pri=0/1` vs `0:Remote,1:Keyboard*` `pri=1/0`), `localShip=1
-    remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0,
+    remoteShip=1` and `buf=` ~100ms BOTH sides, `drop`/`sgap`/`ordViol`/`seqGap`/`extrap` 0
+    and `dupBad` 0 (a nonzero `dup` at the join itself is the benign `dupLive` catch-up burst,
+    card 4c9448c8),
     **zero `[bin] purge-filter diverted`**, and identical `eaNetBg()` state lines.
   - **JIP pass trap 6 -- `pupPops`/`snapUnk` from this rig were UNREADABLE until card 48ab9b2f,
     and the two traps that made them so are still live.** The first pass logged `pupPops 207` /

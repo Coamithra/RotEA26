@@ -1,0 +1,60 @@
+# PROBE: the post-level text crawl still tapers, and the taper still fits the screen.
+#
+# PINS: CreditsScene's Star Wars-style crawl taper (card bee8f0e0). Each line is drawn at a
+# uniform scale that eases from 1+skew at the screen bottom through 1.0 at mid screen to
+# 1-skew at the top, scaled about the crawl block's own centre. The card asked for +-20%, but
+# the widest line of every crawl is ~661-669 of the 800 design px, so +20% would push its right
+# end ~36 px off screen and eat the last character -- measured, and visible in the first
+# screenshot of the card. The requested amount is therefore CLAMPED to the largest that still
+# fits: 0.081 for this crawl, 0.095 for the level-3 one, i.e. the clamp is derived from the
+# measured text rather than being a second baked constant.
+#
+# So there are two things to defend and they pull in opposite directions:
+#   1. the taper is still THERE (effective > 0) and still asked for at the card's 0.2, and
+#   2. the widest line still FITS (fit=ok).
+# Dropping either one is silent: a broken clamp clips the last word of the widest line only
+# while that line is near the bottom of a scrolling crawl (~2 s, mid-crawl, after beating a
+# level), and a zeroed default just quietly restores the flat 2008 crawl. Neither produces a
+# build error, a console exception, or anything a boot smoke test would notice.
+#
+# FAILURE MEANS: read the quoted `[crawl]` line.
+#   effective=0.000            -- the taper is gone (DefaultCrawlSkew zeroed, or the clamp is
+#                                 collapsing to 0; the crawl draws flat, as before the card).
+#   skew=<not 0.200>           -- DefaultCrawlSkew was changed. If deliberate, update this probe.
+#   fit=OVERFLOW               -- the clamp is broken or the credits text/font got wider without
+#                                 it reacting: the widest line now runs off the 800px design
+#                                 width and loses its tail. `span=` names the offending extent.
+#
+# WHY NOT PIXELS: the geometry is what fails here, and a screenshot cannot assert 0.081 vs
+# 0.2 or tell "fits with 4 px to spare" from "clipped by 4 px" at the one scroll position it
+# happens to catch. `fit=` is deliberately a VERDICT rather than the raw numbers so that the
+# probe survives a font-metric change (maxline moves, the invariant does not) -- the numbers
+# are still on the line for a human.
+#
+# NOT NODRAW: the diagnostic is emitted from CreditsScene.Draw's geometry pass.
+#
+# ANTI-VACUITY: `[crawl]` is only printed once the crawl scene is actually drawing, so a run
+# that never reached it fails the `expect` rather than passing on an assertion it never got
+# to. `?crawlpos=` parks the scroll so the frame is deterministic; the sibling probe
+# credits_crawl_clamp.txt covers the saturation path from the other side.
+#
+# MUTATION-TESTED: setting DefaultCrawlSkew to 0f makes the whole line disappear (both
+# `expect`s go red -- the Draw path short-circuits to the un-skewed 2008 call, which is also
+# exactly what ?crawlskew=0 does, so that control is covered by the same mutation). Dropping
+# the clamp (`crawlEffectiveSkew = requestedSkew`) prints
+# `skew=0.200 effective=0.200 fit=OVERFLOW span=[33.1,835.9]` -- measured, and it is the
+# card's own literal +-20% running 36px off the right edge, i.e. the reason the clamp exists.
+# Rebuild tools/headless after either mutation -- eahl links the game sources in, so a
+# web/EvilAliensWeb-only build leaves the probe testing the old binary and passing.
+#
+# eahl: --flags "?creditsshot=1&crawlpos=100&mute"
+
+# mark FIRST: the geometry is measured once per line set, so the line is printed by the
+# crawl's very first Draw -- a mark after the settle would scope the window past it.
+mark
+step 150
+expect      \[crawl\] skew=0\.200 effective=0\.[0-9]
+expect-not  \[crawl\] .* effective=0\.000
+expect      \[crawl\] .* fit=ok
+expect-not  \[crawl\] .* fit=OVERFLOW
+quit

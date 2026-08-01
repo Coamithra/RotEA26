@@ -22,6 +22,36 @@ namespace EvilAliensWeb.Compat.Net
                     // removed first, so they tick about once per RecentRemovalWindowMs.
     }
 
+    // Why an EvSpawn did not produce a live puppet (card 4c9448c8). Reported by
+    // NetPuppets.OnSpawn so NetMetrics can count the causes separately -- the single dup
+    // total they used to share is unreadable for exactly the reason snapUnk was: most of it
+    // is ordinary traffic and only one shape is a fault. Same split, one layer down.
+    public enum SpawnRejectKind
+    {
+        None = 0,     // the puppet was BUILT and landed. Not a rejection.
+        AlreadyLive,  // we already hold this id. BENIGN and expected in bursts: the snapshot
+                      // self-heal rebuilds ids off the unreliable stream lane, so the ordered
+                      // EvSpawn for one of those arrives second, and a checkpoint revert
+                      // re-spawns ids across a purge the client is still settling. Measured on
+                      // a real WebRTC pairing: 15 in one burst for a joiner that arrived DURING
+                      // a host reset, flat at 15 thereafter; 0 for the whole run of a joiner
+                      // that arrived in steady state.
+        Declined,     // the descriptor refused to construct (e.g. a Ball with no JunkBoss).
+                      // BENIGN by construction, and the id is marked removed so the snapshot
+                      // self-heal retries it after RecentRemovalWindowMs rather than every turn.
+        Unknown,      // NO DESCRIPTOR for the typeIdx. THIS IS THE FAULT SHAPE -- it means the
+                      // peer put a type on the wire this build's registry does not have, i.e. a
+                      // registry/protocol mismatch, and the world silently disagrees from here
+                      // on. Same meaning as snapBad's first cause.
+        Swallowed,    // ComponentBin.TryAdd refused. Unreachable today (Constructing exempts the
+                      // puppet layer from the standing purge filter) and logged unconditionally
+                      // where it happens -- if it ever fires that is news, not traffic.
+        Disabled,     // the puppet layer is not running. Unreachable from the EvSpawn path,
+                      // which is already gated on a client session with a scene up; counted
+                      // rather than silently dropped so "we never even looked" can never be
+                      // mistaken for "the id was already live".
+    }
+
     // Client-side world puppets (card 11.2, design: plans/stage11-online-coop.md).
     //
     // Every replicated enemy on a JOIN peer is a real game object built by its own
@@ -163,16 +193,20 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- wire -> puppets ----------------------------------------------------------------
 
-        public static bool OnSpawn(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int off, int len)
+        public static SpawnRejectKind OnSpawn(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int off, int len)
         {
-            if (!enabled || byId.ContainsKey(netId))
+            if (!enabled)
             {
-                return false;
+                return SpawnRejectKind.Disabled;
+            }
+            if (byId.ContainsKey(netId))
+            {
+                return SpawnRejectKind.AlreadyLive;
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(typeIdx);
             if (desc == null)
             {
-                return false;
+                return SpawnRejectKind.Unknown;
             }
             AlienDrawableGameComponent comp;
             bool landed;
@@ -186,7 +220,7 @@ namespace EvilAliensWeb.Compat.Net
                     // Mark the id removed so the snapshot self-heal doesn't re-attempt
                     // construction every 60ms turn -- it retries after the suppression window.
                     MarkRemoved(netId);
-                    return false;
+                    return SpawnRejectKind.Declined;
                 }
                 landed = bin.TryAdd((GameComponent)(object)comp);
             }
@@ -209,7 +243,7 @@ namespace EvilAliensWeb.Compat.Net
                 Console.WriteLine("[net] puppet add was diverted by the bin, id=" + netId
                     + " type=" + typeIdx + " -- retrying after the removal window");
                 MarkRemoved(netId);
-                return false;
+                return SpawnRejectKind.Swallowed;
             }
             comp.Enabled = false; // frozen from the first tick (bin.Add force-enables)
             INetEntity entity = comp;
@@ -224,7 +258,7 @@ namespace EvilAliensWeb.Compat.Net
             byId[netId] = info;
             idByComp[(GameComponent)(object)comp] = netId;
             live.Add(info);
-            return true;
+            return SpawnRejectKind.None;
         }
 
         public static bool OnSnapshotEntry(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
@@ -255,7 +289,12 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else
                 {
-                    kind = OnSpawn(netId, typeIdx, state, buf, extraOff, 0)
+                    // The rebuild's own reject reason is DISCARDED here on purpose: the
+                    // snapshot lane's split is Rebuilt/LeftDead/Refused, and every non-None
+                    // kind means the same thing to it -- the entry did not apply. The finer
+                    // causes are the EvSpawn lane's business (SpawnRejectKind), and folding
+                    // them in would make snapBad and dupBad count the same event twice.
+                    kind = OnSpawn(netId, typeIdx, state, buf, extraOff, 0) == SpawnRejectKind.None
                         ? SnapUnknownKind.Rebuilt
                         : SnapUnknownKind.Refused;
                 }

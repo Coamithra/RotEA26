@@ -29,11 +29,16 @@
 #      "%, &, ?, ( )".
 #  (3) KERNING: per-glyph side bearings + a tuned global spacing (SpriteFont has no
 #      pair-kern table; tracking + bearings is the lever we have).
+#  (4) EDGE HALO (card 5d8becc2): the atlas' fully-transparent texels carry the
+#      RGB of their nearest ink instead of black -- see bleed_transparent_rgb().
 #
 # Custom glyphs replace A-Z a-z 0-9 and the 12 punctuation marks; every other
 # original glyph (space + debug symbols) is carried over unchanged from the
-# *.orig backup; U+00B4 (the game's acute-accent "apostrophe") is aliased to the
-# drawn apostrophe.
+# *.orig backup, or from the LIVE font when no backup exists; U+00B4 (the game's
+# acute-accent "apostrophe") is aliased to the drawn apostrophe.
+# NOTE: the committed atlas was built with NO *.orig present, i.e. those carried
+# glyphs came from the live font -- seeding a *.orig from git history does NOT
+# reproduce it (measured: 1258 texels differ). Don't seed one.
 # Re-run after editing any sheet. Writes a preview PNG (+ a --debug montage);
 # only overwrites the live font when run with --commit.
 # ---------------------------------------------------------------------------
@@ -301,6 +306,30 @@ def to_white_alpha(crop_l):
     return Image.fromarray(rgba, 'RGBA')
 
 
+def bleed_transparent_rgb(atlas):
+    """Dilate the atlas' RGB into its fully-transparent texels (card 5d8becc2).
+
+    Alpha is STRAIGHT project-wide, so bilinear averages RGB *ignoring* alpha: a
+    sample straddling a glyph edge mixes the ink's colour with whatever colour the
+    transparent side happens to carry. Both the packing canvas and PIL's
+    alpha_composite leave that at (0,0,0), so every edge sample came back dragged
+    toward black -- a dark halo on every glyph, worst where the text is minified
+    (the atlas is SSx denser than the design quad it's drawn into). Same class of
+    bug as build_textures.py's edge_gutter(), one level down.
+
+    Each alpha==0 texel takes the RGB of its nearest alpha>0 texel; ALPHA IS NEVER
+    WRITTEN, so glyph shapes, coverage and AA are bit-for-bit unchanged.
+    """
+    a = np.array(atlas, dtype=np.uint8)      # (h,w,4) copy
+    ink = a[..., 3] > 0
+    if not ink.any() or ink.all():
+        return atlas
+    _, idx = ndimage.distance_transform_edt(~ink, return_indices=True)
+    rgb = a[..., 0:3]
+    rgb[~ink] = rgb[idx[0], idx[1]][~ink]
+    return Image.fromarray(a, 'RGBA')
+
+
 def read_orig():
     """Original menufont glyphs (from the *.orig backup if present, else live)."""
     meta = FNT_META + '.orig' if os.path.exists(FNT_META + '.orig') else FNT_META
@@ -441,6 +470,7 @@ def build(debug=False):
     atlas = Image.new('RGBA', (ATLAS_W, atlas_h), (0, 0, 0, 0))
     for ch, g in glyphs.items():
         atlas.alpha_composite(g['img'], placed[ch])
+    atlas = bleed_transparent_rgb(atlas)
 
     # ---- character table (sorted by codepoint) -----------------------------
     rec = []

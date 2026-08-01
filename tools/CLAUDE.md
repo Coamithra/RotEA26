@@ -618,6 +618,23 @@ atlas** while `Cropping`/kerning/`LineSpacing` stay design-size (see web CLAUDE.
 authored with the live editor (`editor/serve.py` after `--emit-editor`) and baked on `--commit`;
 `_diag.py` prints per-glyph baseline offsets. Revert via the `*.orig` backups.
 
+- **`bleed_transparent_rgb()` dilates the atlas' RGB into its fully-transparent texels** (card
+  `5d8becc2`), alpha untouched. Alpha is STRAIGHT project-wide, so bilinear averages RGB *ignoring*
+  alpha: whatever colour sits on the transparent side of a glyph edge is mixed into that edge. The
+  packing canvas and PIL's `alpha_composite` both leave it at `(0,0,0)`, so all 161030 transparent
+  texels were black and every glyph carried a dark halo — worst under minification, which is the
+  normal case here (the atlas is `SS`x denser than the design quad). Same class as
+  `build_textures.py`'s `edge_gutter()`, one level down. Measured on `?textshot`: 5921 pixels
+  changed, **100% of them brighter, none darker**.
+- **Do NOT seed a `*.orig` from git history.** The committed atlas was built with no backup
+  present, so `read_orig()`'s carried glyphs (space + debug symbols) came from the LIVE font;
+  a history-seeded `.orig` changes 1258 texels (measured). With none present the script reproduces
+  the committed atlas byte-for-byte, which is what makes a rebuild verifiable — `--commit` creates
+  the backups as a side effect, so delete them afterwards rather than leaving them to drift.
+- **51 of the 94 shipped RGBA PNGs under `Content/` have the same all-black transparent field**
+  (36 load as `.dds`, 15 as plain PNG) — the font was fixed under its own card; the sprite fleet
+  is untouched and unfiled.
+
 ## Cursor — `tools/cursor/`
 
 `build_cursor.py` emits the reticle ladder `wwwroot/reticle/<px>.png` for `SIZES = range(24, 97, 8)`

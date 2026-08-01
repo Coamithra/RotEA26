@@ -64,9 +64,19 @@ internal class PausedScene : MenuSub1
 			// "Instructions"/"Exit to Main Menu" every single time it was shown. Park it below
 			// the last row instead, DERIVED from the same layout DrawMenu just used, so it
 			// tracks a font or entry-count change instead of needing a second magic number.
-			// GetListCentre() reports the base layout at yoffset 0; this menu draws at +75
-			// (above), and every entry here is unlocked, so visible == menuEntries.Count.
-			float lastRowY = GetListCentre().Y + 75f + (float)(menuEntries.Count - 1) / 2f * (float)font.LineSpacing;
+			// GetListCentre() reports the CENTRE of the base layout at yoffset 0; this menu draws
+			// at +75 (above). Both it and DrawMenu skip locked entries, so the half-height must be
+			// counted the same way rather than off menuEntries.Count -- the two agree today (no
+			// pause entry is unlockable) and would silently disagree the day one is.
+			int visible = 0;
+			for (int i = 0; i < menuEntries.Count; i++)
+			{
+				if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
+				{
+					visible++;
+				}
+			}
+			float lastRowY = GetListCentre().Y + 75f + (float)(visible - 1) / 2f * (float)font.LineSpacing;
 			float lineY = lastRowY + (float)font.LineSpacing * 0.9f;
 			base.SpriteBatch.DrawString(font, line, new Vector2(400f, lineY), Color.Gold, 0f, o, 0.6f, (SpriteEffects)0, 0f);
 		}

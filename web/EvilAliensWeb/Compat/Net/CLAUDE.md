@@ -1361,8 +1361,9 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `Demo1..3`, and `Tutorial` since card df8f1ef7 (a solo scripted walkthrough is never what
     a player meant to advertise). It bounds the PUBLIC LISTING only -- it does not stop a host
     deliberately picking a level for a join-by-code game, and neither carousel offers
-    `Levels.Tutorial` anyway (it is reachable only from the main menu's own Tutorial entry). The SAME predicate gates the listing, the beacon, and the pause
-    indicator, so they can't disagree. `NetListing.Tick` runs each tick from
+    `Levels.Tutorial` anyway (it is reachable only from the main menu's own Tutorial
+    entry). The SAME predicate gates the listing, the beacon, and the pause indicator,
+    so they can't disagree. `NetListing.Tick` runs each tick from
     `Game1.UpdateInner` (right after `NetSession.Update`).
   - **Listing != session.** A listed game keeps ONE lightweight signaling WS open (via
     `eaRtc.list`, reusing the 11.4 host machinery: `{t:host}` -> code -> `{t:list}` + a ~30 s

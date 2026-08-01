@@ -430,11 +430,14 @@ namespace EvilAliensWeb.Compat
 			return "[netnotice] queued: " + notice.Replace("\n", " / ");
 		}
 
-		// Which menus are LIVE right now (card 72143c11). MenuSub1 has no modality: every menu
-		// in the collection runs HandleInput every tick, so two live menus means two selections
+		// Which menus are in the world right now (card 72143c11). MenuSub1 has no modality: a
+		// menu in the collection runs HandleInput every tick, so TWO of them means two selections
 		// moving and two entries invoked per press -- a bug that is invisible in a screenshot
 		// (the top menu draws over the other) and has no other observable. This is what a probe
 		// asserts on; nothing in the game reads it.
+		//
+		// Removal is QUEUED, so step a frame after whatever you expect to have closed a menu --
+		// see ComponentBin.InCollection for why the count is a tick behind a Remove.
 		[JSInvokable("debugMenuCensus")]
 		public static string MenuCensus()
 		{
@@ -466,7 +469,7 @@ namespace EvilAliensWeb.Compat
 		public static string MenuNetMode()
 		{
 			EvilAliens.IComponentBinService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>();
-			System.Collections.Generic.List<EvilAliens.MenuScene> scenes = svc?.ComponentBin?.Live<EvilAliens.MenuScene>();
+			System.Collections.Generic.List<EvilAliens.MenuScene> scenes = svc?.ComponentBin?.InCollection<EvilAliens.MenuScene>();
 			if (scenes == null || scenes.Count == 0)
 			{
 				return "[menunetmode] no live MenuScene -- boot ?menu first";
@@ -478,7 +481,7 @@ namespace EvilAliensWeb.Compat
 		private static System.Collections.Generic.List<EvilAliens.MenuSub1> LiveMenus()
 		{
 			EvilAliens.IComponentBinService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>();
-			return svc?.ComponentBin?.Live<EvilAliens.MenuSub1>();
+			return svc?.ComponentBin?.InCollection<EvilAliens.MenuSub1>();
 		}
 
 		// JS bridge for the pinned many-puppet drive bench (eaNetPuppetBench in

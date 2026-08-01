@@ -1889,10 +1889,9 @@ internal static class Program
         Type levels = asm.GetType("EvilAliens.Levels", true);
         const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         MethodInfo eligible = listing.GetMethod("IsNetEligibleLevel", anyStatic);
-        if (eligible == null || levels == null)
+        if (eligible == null)
         {
-            Console.WriteLine("FAIL: could not reflect the targets (IsNetEligibleLevel="
-                + (eligible != null) + " Levels=" + (levels != null) + ") -- renamed or moved?");
+            Console.WriteLine("FAIL: could not reflect NetListing.IsNetEligibleLevel -- renamed or moved?");
             return 2;
         }
         Func<string, bool> listable = name =>
@@ -1903,6 +1902,19 @@ internal static class Program
         // The refusal set, stated independently of the implementation's shape (it tests three
         // separate conditions; this is one list).
         string[] refused = { "Tutorial", "WebcamAliens", "TeamChallenge", "Demo1", "Demo2", "Demo3" };
+
+        // Every name below is fed to Enum.Parse, which THROWS on a miss -- and a stack trace
+        // instead of a FAIL line is the one way this set could report nothing useful. A renamed
+        // or deleted level is exactly the change that should land here loudly.
+        foreach (string name in refused)
+        {
+            if (Array.IndexOf(Enum.GetNames(levels), name) < 0)
+            {
+                Check("refusal-set level '" + name + "' still exists", false,
+                    "renamed or removed from Levels -- update the set");
+                return 0;
+            }
+        }
 
         // The card itself.
         Check("Tutorial is NOT listable", !listable("Tutorial"),
@@ -1939,9 +1951,10 @@ internal static class Program
                 Check(name + " should be listable", false, "not in the refusal set");
             }
         }
+        // The sweep above already FAILS per level, so this only has to catch the degenerate
+        // shape it cannot: a predicate stuck at false, which produces no per-level failure the
+        // reader can distinguish from "the refusal set grew".
         Check("the refusal set is not everything", eligibleCount > 0,
-            "eligible levels=" + eligibleCount);
-        Check("the refusal set is complete", eligibleCount == Enum.GetNames(levels).Length - refused.Length,
             "eligible=" + eligibleCount + " of " + Enum.GetNames(levels).Length);
 
         // NEGATIVE CONTROL -- the pre-card predicate over the same inputs. The assertions above

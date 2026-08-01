@@ -1041,9 +1041,11 @@ namespace EvilAliensWeb.Compat
 		// menu's "Listed online -- room XYZAB" line and ScoreVisualiser's corner beacon. Reaching
 		// either for real needs a live server plus a game the eligibility predicate accepts, which
 		// is not something a headless screenshot run can stand up.
-		// Free-form identity string (the ?netfakepeer=/?netfakehash= class), so a bad value is not
-		// a typo class and nothing is reported. Deliberately NOT part of DebugFlags.Active: no
-		// session exists, so it cannot alter a shared run.
+		// Any value is legal, so nothing is reported -- the ?netfakepeer=/?netfakehash= class of
+		// silent flag. Unlike those two it is UPPER-CASED as well as trimmed, because a real room
+		// code is upper case (the server mints them that way) and this has to render like one.
+		// Deliberately NOT part of DebugFlags.Active: no session exists, so it cannot alter a
+		// shared run.
 		// Null/empty = off; byte-identical when unset.
 		public static string NetFakeListed { get; private set; } = "";
 

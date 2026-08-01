@@ -570,8 +570,9 @@ namespace EvilAliensWeb.Compat.Net
         // no peer, no session and no transport. Every production writer of MenuNotice is inside
         // Stop(), which needs a live session -- so the ONLY offline way to reach the menus'
         // notice path (and the two-live-menus bug it used to leave behind) is to set it here.
-        // Reached through DebugInput.NetNotice; it does not start, stop or touch a session, so
-        // it is inert if one happens to be up.
+        // Reached through DebugInput.NetNotice. It starts and stops nothing -- but it does
+        // CLOBBER any notice already pending, so do not fire it during a real session teardown
+        // and expect the real reason to survive.
         internal static void SetMenuNoticeForTest(string notice)
         {
             MenuNotice = notice;

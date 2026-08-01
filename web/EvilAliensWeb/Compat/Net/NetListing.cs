@@ -58,8 +58,10 @@ namespace EvilAliensWeb.Compat.Net
             // exactly as they do for a real listing, which is the whole point of the rig.
             if (!string.IsNullOrEmpty(DebugFlags.NetFakeListed))
             {
+                // Listed only -- Eligible is deliberately left alone. It answers "could the
+                // RUNNING GAME be listed", which has no meaning here (there may be no GameScene
+                // at all), and faking it would be a claim about a predicate this flag bypasses.
                 Listed = true;
-                Eligible = true;
                 RoomCode = DebugFlags.NetFakeListed;
                 return;
             }

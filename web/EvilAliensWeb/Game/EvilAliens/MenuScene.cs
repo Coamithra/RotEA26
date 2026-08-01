@@ -170,17 +170,6 @@ internal class MenuScene : Scene
 
 	private bool netStatusShown;
 
-	// Test seam (card 72143c11): put this scene into the state a lobby co-op match END leaves
-	// behind, which is netMode TRUE while mainMenu is live -- nothing clears netMode across a
-	// level launch, and Initialize re-adds mainMenu on the way back. Reaching it for real needs
-	// a paired peer and a level, so it is the one precondition of that bug a headless probe
-	// cannot produce; everything downstream of it (NetUpdate's notice branch) is then the real
-	// code. It only writes the flag -- no menu is shown or hidden here.
-	internal void NetDebugForceNetMode()
-	{
-		netMode = true;
-	}
-
 	private bool netNoticeUp;
 
 	private SubMenuLevelChoice levelSelector;
@@ -1170,6 +1159,17 @@ internal class MenuScene : Scene
 		EvilAliensWeb.Compat.Net.NetGameBrowser.Stop();
 		browsingGames = false;
 		EvilAliensWeb.Compat.Net.WebRtcInterop.ClosePrompt();
+	}
+
+	// Test seam (card 72143c11): put this scene into the state a lobby co-op match END leaves
+	// behind, which is netMode TRUE while mainMenu is live -- nothing clears netMode across a
+	// level launch, and Initialize re-adds mainMenu on the way back. Reaching it for real needs
+	// a paired peer and a level, so it is the one precondition of that bug a headless probe
+	// cannot produce; everything downstream of it (NetUpdate's notice branch) is then the real
+	// code. It only writes the flag -- no menu is shown or hidden here.
+	internal void NetDebugForceNetMode()
+	{
+		netMode = true;
 	}
 
 	// Per-tick lobby pump: drains the JS-side phase queue, keeps the status panel's text

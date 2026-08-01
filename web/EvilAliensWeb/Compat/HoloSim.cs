@@ -3,7 +3,7 @@ using System;
 namespace EvilAliensWeb.Compat
 {
 	// Fullscreen "trial simulation" filter state (tools/shaders/src/holosim.fx, applied by
-	// Game1.ApplyHoloSim on sceneTarget right before the gamma present blit — the same seam
+	// Game1.ApplyHoloSim on sceneTarget right before the present blit — the same seam
 	// as the slowmo ghost trail).
 	//
 	// Lifecycle is POKE-driven, not scene-wired: TutorialLevel.Update calls Poke() every

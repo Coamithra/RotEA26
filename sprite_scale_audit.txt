@@ -45,7 +45,7 @@ EFF   STATUS   SPRITE (texture)                              NATIVE  ONSCR  NOTE
 2.40  TODO     splash/uglysplash22                              800    800  native-800 fullscreen; regen at >=1440 wide instead of upscale
 2.40  lowpri   preview/poster                                   800    800  upsell screen
 2.40  lowpri   credits/mars_joost                               800    800  credits backdrop
-2.40  lowpri   hud/barlit, barunlit2, barlitedge             116/20   ~116  power/gamma bars (GammaMenu, PowerupData)
+2.40  lowpri   hud/barlit, barunlit2, barlitedge             116/20   ~116  power bars (PowerupData; GammaMenu removed)
 2.40  lowpri   menu/powerbar, awardmentblade, arrow,         24-487   =nat  small UI: powerbar/blade/arrow/option/star/cursor
                option, menu/star, cursor2
 2.40  lowpri   sprites/explosion, explosionpurple, smoke        512   ~512  particle blasts (big explosions); soft glow

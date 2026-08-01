@@ -8,7 +8,7 @@
 // native-resolution overlay pass at present time. Stage 10 removes that split: the
 // ENTIRE frame is now rendered into ONE scene target sized to the window's 4:3
 // letterbox, so the legacy art is upscaled and the hi-res art is drawn at native
-// density into the same target — and they then share one bloom, one gamma, and one
+// density into the same target — and they then share one bloom and one
 // present blit.
 //
 // How it's used:

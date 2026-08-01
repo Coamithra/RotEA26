@@ -42,11 +42,17 @@
 # `eaKillShips` reports 0 and the probe would fail on its own anti-vacuity line). UpdateResetting
 # then waits 3 s before Background.CrossFade, so the seal lands ~191 frames after the kill.
 #
-# MUTATION-TESTED: reverting SealAlpha's DrawStretched call to the bare
+# MUTATION-TESTED two ways, each isolated. Reverting SealAlpha's DrawStretched call to the bare
 # `spriteBatch.Draw(whitePixel, new Rectangle(0, 0, width, height), Color.White)` drops the line
-# entirely and the `src=10x10` expect goes red; passing a null source rect instead prints
-# `src=full` and fails the same line. Rebuild tools/headless after either -- eahl links the game
-# sources in, so a `web/EvilAliensWeb`-only build leaves the probe testing the old binary.
+# entirely, so the `src=10x10` expect goes red. Widening the clamp to `texture.Bounds` -- the
+# shape a real regression takes, since it still compiles and still passes a source rect -- prints
+# `src=112x112` and fails BOTH lines. That second one is why the `expect-not` names the padded
+# canvas rather than a sentinel: 112x112 is a value this code can actually produce. It is
+# `--padtest`-coupled by construction, but only in the safe direction -- if the canary is ever
+# dropped (card f2621e52) `blank.dds` becomes 12x12, the `expect-not` stops matching anything and
+# the `src=10x10` line still carries the assertion.
+# Rebuild tools/headless after either mutation -- eahl links the game sources in, so a
+# `web/EvilAliensWeb`-only build leaves the probe testing the old binary and passing.
 #
 # eahl: --flags "?level=OwnLevel&noattract"
 
@@ -57,5 +63,5 @@ eval KillShips
 step 260
 expect      asploded 1 local ship
 expect      \[xfade\] seal .* src=10x10
-expect-not  \[xfade\] seal .* src=full
+expect-not  \[xfade\] seal .* src=112x112
 quit

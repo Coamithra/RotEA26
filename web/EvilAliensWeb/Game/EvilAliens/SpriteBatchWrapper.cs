@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
@@ -329,34 +330,34 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	}
 
 	// One whole-texture quad stretched over `dest`, source CLAMPED to the logical image.
-	// Every caller here hands it a texture that may be a padded `.dds`, where the raw
-	// `Draw(texture, dest, color)` overload spans the mult-of-4 pad as well: `blank` is a 10x10
-	// white pixel inside a 112x112 canvas (the --padtest canary), so the un-clamped form covered
-	// ~1/8 of `dest` and left the rest untouched. That is what silently killed the death
-	// cross-fade -- SealAlpha sealed only the top-left ~100x75 of the snapshot, so the dissolve
-	// overlay's straight-alpha composite had no alpha to blend with and the objects never faded
-	// (they just vanished at the purge). See `tools/audit_unclamped_draw.py`, which is the lint
-	// for this shape.
+	// A caller here may hand it a padded `.dds`, and the raw `Draw(texture, dest, color)`
+	// overload spans the mult-of-4 pad as well: `blank` is a 10x10 white pixel inside a 112x112
+	// canvas (the --padtest canary), so the un-clamped form covered ~1/8 of `dest` and left the
+	// rest untouched. That is what silently killed the death cross-fade -- SealAlpha sealed only
+	// the top-left ~100x75 of the snapshot, so the dissolve overlay's straight-alpha composite
+	// had no alpha to blend with and the objects never faded (they just vanished at the purge).
+	// See `tools/audit_unclamped_draw.py`, which is the lint for this shape.
 	//
-	// It also REPORTS the rect it drew, once per process, so a probe can witness the clamp: the
-	// line is derived from the very `src` handed to Draw, not restated beside it
-	// (tools/headless/probes/death_fade.txt).
-	// `report` non-null => print that tag once per process. Only SealAlpha asks for it: the
-	// cross-fade is the one caller whose failure is invisible, and a shared latch would let an
-	// earlier DrawPresent (the level-select thumbnail) spend the one line the probe reads.
-	private bool sealAlphaLogged;
+	// `report` non-null => print that tag the first time that tag is drawn under this wrapper
+	// (one instance exists, as a service singleton). It exists so a probe can WITNESS the clamp:
+	// the line is derived from the very `src` handed to Draw, not restated beside it, so a
+	// regression that widened the source back to the padded bounds reports its own new value
+	// (tools/headless/probes/death_fade.txt). Keyed per tag rather than one shared latch, so a
+	// second reporting caller cannot spend the line this one's probe reads.
+	private readonly HashSet<string> reportedDraws = new HashSet<string>();
 
 	private void DrawStretched(Texture2D texture, Rectangle dest, Color color, string report = null)
 	{
-		Rectangle? src = texture.LogicalBounds();
-		if (report != null && !sealAlphaLogged)
+		// Non-nullable: LogicalBounds() falls through to the real bounds for an unpadded png/rtex
+		// or a render target, so there is no "no clamp" case to represent.
+		Rectangle src = texture.LogicalBounds();
+		if (report != null && reportedDraws.Add(report))
 		{
-			sealAlphaLogged = true;
 			Console.WriteLine(report + " tex=" + texture.Width + "x" + texture.Height
-				+ " src=" + (src.HasValue ? src.Value.Width + "x" + src.Value.Height : "full")
+				+ " src=" + src.Width + "x" + src.Height
 				+ " dst=" + dest.Width + "x" + dest.Height);
 		}
-		spriteBatch.Draw(texture, dest, src, color);
+		spriteBatch.Draw(texture, dest, (Rectangle?)src, color);
 	}
 
 	// Draw `texture` filling `dest` with an IDENTITY transform, bypassing the design->render
@@ -370,9 +371,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	{
 		Flush();
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, Matrix.Identity);
-		// Clamped like SealAlpha above. A no-op for both current callers (ScreenshotSaver hands it
-		// render targets, which are never padded), and it stays that way the moment someone hands
-		// this a `.dds` -- which is the one of the two sites the death cross-fade did not hit.
+		// Clamped like SealAlpha above. This is the second of the wrapper's two unclamped
+		// stretched draws; only SealAlpha's broke the death cross-fade, and this one is a no-op
+		// today (ScreenshotSaver, its only caller, hands it render targets, which are never
+		// padded). It is clamped so it stays correct the day someone hands it a `.dds`.
 		DrawStretched(texture, dest, color);
 		spriteBatch.End();
 	}

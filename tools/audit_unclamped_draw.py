@@ -42,8 +42,14 @@ TARGET = ROOT / "web" / "EvilAliensWeb" / "Game" / "EvilAliens" / "SpriteBatchWr
 
 DRAW_RE = re.compile(r"\bspriteBatch\.Draw\(")
 BEGIN_RE = re.compile(r"\bspriteBatch\.Begin\(")
-# a member declaration at class-nesting depth 1 (one tab), attribute lines included
-MEMBER_RE = re.compile(r"^\t(?:\[|(?:public|private|protected|internal)\s)")
+# A member declaration, anchored on INDENT DEPTH rather than on an access modifier. Inside a
+# one-class file every line at exactly one tab is class-body level, i.e. a declaration or an
+# attribute -- a statement is always at two or more, and so is a wrapped signature continuation.
+# Requiring `public|private|...` instead (the audit_add_order.py shape) misses a member declared
+# without one, e.g. SpriteBatchWrapper's explicit-interface
+# `SpriteBatchWrapper ISpriteBatchWrapperService.SpriteBatchWrapper => this;`, which would then
+# fold into the PREVIOUS member and could inherit its effect exemption.
+MEMBER_RE = re.compile(r"^\t[^\s{}/]")
 
 # Argument 3 of SpriteBatch.Draw is EITHER the source rect OR the colour -- there is no third
 # possibility across XNA's overload set. So the test is "is it a colour", and anything that is
@@ -89,22 +95,15 @@ def _line_offsets(text):
     return offs
 
 
-def method_body(text, idx):
-    """Source of the member declaration enclosing offset idx."""
+def member_start(text, idx):
+    """Offset of the start of the member declaration enclosing offset idx."""
     lines = text.splitlines(keepends=True)
     offs = _line_offsets(text)
     line_of = max(i for i, o in enumerate(offs) if o <= idx)
-    start = 0
     for i in range(line_of, -1, -1):
         if MEMBER_RE.match(lines[i]):
-            start = offs[i]
-            break
-    end = len(text)
-    for i in range(line_of + 1, len(lines)):
-        if MEMBER_RE.match(lines[i]):
-            end = offs[i]
-            break
-    return text[start:end]
+            return offs[i]
+    return 0
 
 
 def has_source_rect(args):
@@ -113,14 +112,27 @@ def has_source_rect(args):
     return COLOR_RE.match(args[2]) is None
 
 
-def uses_custom_effect(body):
-    """True if some Begin in this member passes a non-null effect (the ContentScale contract)."""
-    for b in BEGIN_RE.finditer(body):
-        bargs = split_args(call_args(body, b.end() - 1))
-        # Begin(sortMode, blend, sampler, depth, raster, effect, matrix)
-        if len(bargs) >= 6 and bargs[5] != "null":
-            return True
-    return False
+def batch_is_exempt(text, draw_at):
+    """True if the batch this Draw lands in was begun with a custom effect.
+
+    The batch is the NEAREST PRECEDING `spriteBatch.Begin` *within the same member* -- not "any
+    Begin in the member", which would exempt every draw in a member that opens two batches, and
+    not a file-wide scan, which would let one member's effect batch exempt the next member's.
+
+    The effect argument must be a BARE IDENTIFIER (`effect`, `metalEffect`). Anything with a dot
+    or a call in it does not exempt: `_beginDrawing` passes `effectHandler.CurrentEffect`, which
+    is textually non-null but is null at runtime on the ordinary sprite path, so treating it as
+    an exemption would silently bless any unclamped draw added to that member.
+    """
+    start = member_start(text, draw_at)
+    begins = [b for b in BEGIN_RE.finditer(text[start:draw_at])]
+    if not begins:
+        return False
+    bargs = split_args(call_args(text[start:], begins[-1].end() - 1))
+    # Begin(sortMode, blend, sampler, depth, raster, effect, matrix)
+    if len(bargs) < 6:
+        return False
+    return re.fullmatch(r"[A-Za-z_]\w*", bargs[5]) is not None and bargs[5] != "null"
 
 
 def audit(text):
@@ -131,7 +143,7 @@ def audit(text):
         args = split_args(call_args(text, m.end() - 1))
         if has_source_rect(args):
             continue
-        if uses_custom_effect(method_body(text, m.start())):
+        if batch_is_exempt(text, m.start()):
             exempt += 1
             continue
         suspects.append((text[:m.start()].count("\n") + 1, args))
@@ -172,27 +184,69 @@ public class Fake
 \t\tspriteBatch.Draw(texture, designRect, Color.White);
 \t\tspriteBatch.End();
 \t}
+
+\tvoid IFake.ModifierlessMember(Texture2D texture, Rectangle dest)
+\t{
+\t\tspriteBatch.Draw(texture, dest, Color.White);
+\t}
+
+\tprivate void MaybeNullEffect(Texture2D texture, Rectangle dest)
+\t{
+\t\tspriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effectHandler.CurrentEffect, mtx);
+\t\tspriteBatch.Draw(texture, dest, Color.White);
+\t\tspriteBatch.End();
+\t}
+
+\tpublic void SecondBatchNoEffect(Texture2D texture, Rectangle dest, Effect effect)
+\t{
+\t\tspriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effect, mtx);
+\t\tspriteBatch.Draw(texture, dest, (Rectangle?)texture.LogicalBounds(), Color.White);
+\t\tspriteBatch.End();
+\t\tspriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, null, mtx);
+\t\tspriteBatch.Draw(texture, dest, Color.White);
+\t\tspriteBatch.End();
+\t}
 }
 """
+
+
+# Each fixture member pins one rule, and the EXACT suspect set is asserted rather than a count --
+# a phantom or a swapped attribution would otherwise cancel out. Only `EffectExempt` may be
+# exempt; every other unclamped draw must be reported:
+#   ModifierlessMember  -- MEMBER_RE must see a declaration with no access modifier, or this draw
+#                          folds back into EffectExempt above it and inherits that exemption
+#   MaybeNullEffect     -- `effectHandler.CurrentEffect` is textually non-null but is null on the
+#                          ordinary sprite path, so it must NOT exempt
+#   SecondBatchNoEffect -- the exemption is per-BEGIN: its first batch has an effect (and that
+#                          draw is clamped anyway), its second does not
+# (anchor line, how many lines below it the offending Draw sits)
+SELFTEST_SUSPECTS = (
+    ("spriteBatch.Draw(whitePixel", 0),                     # the real defect's shape
+    ("spriteBatch.Draw(tex, dest, premultTint", 0),         # colour arg that is a plain local
+    ("\tvoid IFake.ModifierlessMember", 2),                 # header, brace, draw
+    ("\t\tspriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effectHandler", 1),
+    ("\t\tspriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, null, mtx);", 1),
+)
 
 
 def selftest():
     suspects, scanned, exempt = audit(SELFTEST_SRC)
     lines = {s[0] for s in suspects}
     fails = []
-    if scanned != 5:
-        fails.append(f"expected 5 Draw sites, saw {scanned}")
+    if scanned != 9:
+        fails.append(f"expected 9 Draw sites, saw {scanned}")
     if exempt != 1:
         fails.append(f"expected 1 custom-effect exemption, saw {exempt}")
-    # the two unclamped ones, and ONLY those: the stretched white pixel (the real defect's
-    # shape) and a colour arg that is a plain local rather than `Color.Something`
-    want = {SELFTEST_SRC[:SELFTEST_SRC.index(sig)].count("\n") + 1
-            for sig in ("spriteBatch.Draw(whitePixel", "spriteBatch.Draw(tex, dest, premultTint")}
+    want = set()
+    for sig, delta in SELFTEST_SUSPECTS:
+        at = SELFTEST_SRC.index(sig)
+        want.add(SELFTEST_SRC[:at].count("\n") + 1 + delta)
     if lines != want:
         fails.append(f"expected suspects on lines {sorted(want)}, got {sorted(lines)}")
     for f in fails:
         print("SELFTEST FAIL: " + f)
-    print("selftest: " + ("FAIL" if fails else "ok -- 2 unclamped, 1 effect-exempt, 2 clamped"))
+    print("selftest: " + ("FAIL" if fails else
+                          "ok -- 5 unclamped, 1 effect-exempt, 3 clamped"))
     return 1 if fails else 0
 
 

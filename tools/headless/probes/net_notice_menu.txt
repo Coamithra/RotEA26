@@ -1,0 +1,53 @@
+# PROBE: a session-ending net notice leaves EXACTLY ONE live menu.
+#
+# PINS: card 72143c11 -- MenuScene.NetUpdate's notice branch. A lobby co-op match that ends
+# mid-level returns to a menu whose `netMode` is STILL TRUE (nothing clears it across a level
+# launch) while MenuScene.Initialize has already re-added mainMenu. That branch used to call
+# CloseNetFlowMenus(), which does not touch mainMenu, so the notice panel went up ON TOP of a
+# live main menu. Both reported symptoms fall out of that one state: the notice text overlapped
+# the menu rows, and -- because MenuSub1 has NO modality and every menu in the collection runs
+# HandleInput every tick -- arrows moved two selections and Enter invoked two entries.
+#
+# FAILURE MEANS: read the `[menucensus]` line. `count=2 live=MenuSubWithSkull,NetStatusMenu` is
+# the bug back, verbatim: the main menu is live and selectable under the notice. Anything else
+# with count>1 is the same class -- some other menu was left up by the notice path. The fix is
+# in MenuScene.NetUpdate: mainMenu.RemoveInstantly() must run on BOTH branches, not only the
+# non-netMode one.
+#
+# WHY A PROBE AND NOT A SCREENSHOT: the dangerous half is INVISIBLE in a frame. NetStatusMenu
+# has DrawOrder 2000 and draws its own 50% darken, so a menu live underneath it can look merely
+# dim -- while still eating every keypress. The census is the only observable that separates
+# "drawn behind" from "still taking input", so this asserts on it and not on pixels. (The
+# overlap half is covered by a screenshot in the card; this is the half that needs re-running.)
+#
+# MUTATION-TESTED: restoring the pre-card `else { mainMenu.RemoveInstantly(); }` makes the final
+# expect fail with the count=2 line quoted above. Verified before committing.
+#
+# THE TWO EARLY LEGS ARE NOT DECORATION. `eval MenuNetMode` puts the scene into the ONE
+# precondition a headless run cannot otherwise produce (reaching it for real needs a paired peer
+# and a level); without it the run takes the branch that was never broken and the probe passes on
+# the bug. The `count=1 live=MenuSubWithSkull` assertion before the notice is the positive
+# control -- it proves the main menu really WAS live at the moment the notice arrived, so the
+# final count=1 means "removed" and not "was never there".
+#
+# eahl: --flags "?menu&noattract&mute"
+
+step 200 nodraw
+mark
+
+# The precondition: net-lobby mode, main menu live -- i.e. the post-match menu re-entry.
+eval MenuNetMode
+expect \[menunetmode\] netMode=true on the live MenuScene
+eval MenuCensus
+expect \[menucensus\] count=1 live=MenuSubWithSkull
+
+# The match-end notice arrives from the net layer.
+eval NetNotice "The other player disconnected|Match ended"
+expect \[netnotice\] queued: The other player disconnected / Match ended
+step 40
+
+# The notice must be the ONLY thing live -- nothing to overlap, nothing to take input.
+eval MenuCensus
+expect \[menucensus\] count=1 live=NetStatusMenu
+expect-not \[menucensus\] count=2
+quit

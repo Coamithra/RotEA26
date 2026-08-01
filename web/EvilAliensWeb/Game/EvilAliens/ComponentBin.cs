@@ -332,6 +332,31 @@ public class ComponentBin : IComponentBinService
 		return flag;
 	}
 
+	// Diagnostics only (card 72143c11): every T currently IN the collection, in collection
+	// order. ContainsType<T> answers "is there one", which cannot tell ONE menu from TWO -- and
+	// two menus taking input at once is the bug class this exists for, since MenuSub1 has no
+	// modality. Nothing in the GAME reads this; the callers are DebugInput.MenuCensus (which
+	// reports the type names) and DebugInput.MenuNetMode (which needs the live MenuScene, of
+	// which nothing else holds a reachable handle).
+	//
+	// NAMED FOR THE COLLECTION, NOT FOR "LIVE", because Remove is QUEUED: a component removed
+	// earlier this tick is still here until the next flush, and one in its exit fade is here but
+	// no longer takes input (MenuSub1.Update only calls HandleInput in entry/normal). So a caller
+	// asking "who is taking input right now" must let the death list flush first -- which is what
+	// net_notice_menu.txt's `step 40` between the notice and the census is for.
+	public List<T> InCollection<T>() where T : GameComponent
+	{
+		List<T> found = new List<T>();
+		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
+		{
+			if (item is T t)
+			{
+				found.Add(t);
+			}
+		}
+		return found;
+	}
+
 	public void Add(GameComponent component)
 	{
 		// Online co-op (card 11.2): a JOIN peer's world is host-authoritative -- game code

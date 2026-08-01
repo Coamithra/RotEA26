@@ -1161,6 +1161,17 @@ internal class MenuScene : Scene
 		EvilAliensWeb.Compat.Net.WebRtcInterop.ClosePrompt();
 	}
 
+	// Test seam (card 72143c11): put this scene into the state a lobby co-op match END leaves
+	// behind, which is netMode TRUE while mainMenu is live -- nothing clears netMode across a
+	// level launch, and Initialize re-adds mainMenu on the way back. Reaching it for real needs
+	// a paired peer and a level, so it is the one precondition of that bug a headless probe
+	// cannot produce; everything downstream of it (NetUpdate's notice branch) is then the real
+	// code. It only writes the flag -- no menu is shown or hidden here.
+	internal void NetDebugForceNetMode()
+	{
+		netMode = true;
+	}
+
 	// Per-tick lobby pump: drains the JS-side phase queue, keeps the status panel's text
 	// current, advances the host to the level pick on connect, mirrors the host's launch
 	// on the client, and surfaces session-ending notices from any point in the flow.
@@ -1173,10 +1184,19 @@ internal class MenuScene : Scene
 			{
 				CloseNetFlowMenus();
 			}
-			else
-			{
-				mainMenu.RemoveInstantly(); // fresh menu re-entry after an in-level match end
-			}
+			// Card 72143c11: the main menu is closed on BOTH paths, and the netMode branch
+			// above is exactly why it has to be. `netMode` lives on this long-lived scene and
+			// NOTHING clears it across a level launch, so a lobby co-op match that ends in-level
+			// comes back here with it still true -- while Initialize has already re-added
+			// mainMenu. CloseNetFlowMenus does not touch mainMenu, so the notice used to land on
+			// top of a live main menu: its text overlapped the rows, and since MenuSub1 has no
+			// modality at all, BOTH menus ran HandleInput every tick -- arrows moved two
+			// selections and Enter invoked two entries. Removing it unconditionally is what makes
+			// the notice the only thing on screen and the only thing taking input.
+			// Collection.Remove of a menu that is not shown is a no-op (see CloseNetFlowMenus),
+			// so the lobby paths, where mainMenu is already gone, are unaffected.
+			// netStatus_CancelSelected re-Show()s it on acknowledge.
+			mainMenu.RemoveInstantly();
 			EvilAliensWeb.Compat.Net.NetLobby.Cancel();
 			netMode = true; // the status panel is net-flow UI; cleared on acknowledge
 			netNoticeUp = true;

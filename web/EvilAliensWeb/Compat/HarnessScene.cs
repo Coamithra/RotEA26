@@ -4,7 +4,7 @@
 //
 // Boots straight onto a (real) Background showing ONE game object, drawn by its
 // OWN Draw() through the OWN game pipeline (the same SpriteBatchWrapper, RenderScale,
-// blend mapping, bloom and gamma the live game uses). The point is to make a
+// blend mapping and bloom the live game uses). The point is to make a
 // *deterministic* target for iterating on drawing code:
 //
 //   * The object is FROZEN — added to the component list so it draws itself, but

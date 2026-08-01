@@ -598,6 +598,29 @@
             catch (e) { console.warn('[debug] eaNetSceneOrder failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug (card 72143c11): the match-end notice seams. eaNetNotice(text) parks a
+        // session-ending notice at the menus with no peer and no session — every production
+        // writer of MenuNotice is inside NetSession.Stop(), so this is the only way to reach
+        // the menus' notice path on demand ('|' becomes a newline; no argument gives the real
+        // "other player disconnected" wording). eaMenuNetMode() forces the live MenuScene into
+        // net-lobby mode, which is the state a lobby co-op match END leaves behind and the one
+        // precondition of that card's bug you cannot otherwise reach without a paired peer.
+        // eaMenuCensus() lists the LIVE menus: MenuSub1 has no modality, so two live menus both
+        // take input, and the census is the only thing that separates "drawn behind the notice"
+        // from "still selectable underneath it" — a screenshot cannot tell them apart.
+        window.eaNetNotice = (text) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetNotice', text || '')); }
+            catch (e) { console.warn('[debug] eaNetNotice failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaMenuNetMode = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuNetMode')); }
+            catch (e) { console.warn('[debug] eaMenuNetMode failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaMenuCensus = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuCensus')); }
+            catch (e) { console.warn('[debug] eaMenuCensus failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the INetEntity seam (card 25ad0659 step 2c-ii) — that every explicit forward
         // on AlienDrawableGameComponent fronts the member it claims to (driven to DISTINCT
         // values, so a swap of two floats cannot pass), and that the NetKillable/NetPickup
@@ -1406,11 +1429,11 @@
         // starfield. Built ONLY when the URL query contains `fx`, so normal play
         // and the live site never see it. Each change is pushed to C# DebugToggles
         // via DotNet.invokeMethod('EvilAliensWeb','debugFx', key, value). Defaults
-        // start CLEAN: bloom OFF, bg-veil OFF, gamma ON, brightness 100%.
+        // start CLEAN: bloom OFF, bg-veil OFF, brightness 100%.
         (function ()
         {
             if (!/[?&]fx(?:[=&]|$)/.test(window.location.search || "")) return;
-            var fx = { bloom: 0, veil: 0, gamma: 1, brightness: 1 };
+            var fx = { bloom: 0, veil: 0, brightness: 1 };
 
             function send(k, v)
             {
@@ -1421,7 +1444,7 @@
             {
                 // Retry until the .NET runtime is up, then push the initial state.
                 if (!send('bloom', fx.bloom)) { setTimeout(pushAll, 200); return; }
-                send('veil', fx.veil); send('gamma', fx.gamma); send('brightness', fx.brightness);
+                send('veil', fx.veil); send('brightness', fx.brightness);
             }
 
             function build()
@@ -1451,7 +1474,6 @@
                 }
                 mkToggle('bloom', 'Bloom');
                 mkToggle('veil', 'BG dark veil');
-                mkToggle('gamma', 'Gamma');
 
                 var row = document.createElement('div');
                 row.style.cssText = 'margin-top:6px;border-top:1px solid #3a3550;padding-top:6px';

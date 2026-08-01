@@ -484,6 +484,22 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
+  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES, and `netMode` is why (card 72143c11).**
+    `MenuScene.netMode` lives on the long-lived menu scene and NOTHING clears it across a level
+    launch, so a lobby co-op match that ends mid-level returns to a menu still holding it -- while
+    `MenuScene.Initialize` has already re-added `mainMenu`. `NetUpdate`'s notice branch used to
+    call `CloseNetFlowMenus()` there, which does not touch `mainMenu`, so the panel went up over
+    a LIVE main menu: the text overlapped the rows, and since **`MenuSub1` has no modality at all**
+    -- every menu in the collection runs `HandleInput` every tick -- arrows moved two selections
+    and Enter invoked two entries. `mainMenu.RemoveInstantly()` now runs unconditionally
+    (`Collection.Remove` of a menu that is not shown is a no-op, so the lobby paths are
+    unaffected). **The stale `netMode` itself is NOT fixed** -- clearing it at launch changes the
+    lobby's exit routing and wants its own card.
+    Verify with `eaMenuCensus()` / `tools/headless/probes/net_notice_menu.txt`, never a
+    screenshot: `NetStatusMenu` has DrawOrder 2000 and draws its own 50% darken, so a menu live
+    underneath it looks merely dim while still eating every keypress. `eaNetNotice(text)` parks
+    the notice with no peer and `eaMenuNetMode()` supplies the stale flag -- the one precondition
+    a headless run cannot otherwise produce.
 
 ## Protocol, NetIds & the replicable set
 
@@ -1336,9 +1352,18 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     any empty player slot (`oracle.Players < Oracle.MaxPlayers` -- card 4d904410 relaxed this
     from `== 1`, so a COUCH game with a spare seat lists too and the browser's players column
     genuinely varies 1..3) + `Settings.AllowOnlineJoins` (new Option,
-    **default ON**) + no cheats/`DebugFlags.Active` + level not `WebcamAliens`/`TeamChallenge`
-    + no session already up. The SAME predicate gates the listing, the beacon, and the pause
-    indicator, so they can't disagree. `NetListing.Tick` runs each tick from
+    **default ON**) + no cheats/`DebugFlags.Active` + a net-eligible LEVEL
+    + no session already up. **The level test is split out as the pure
+    `NetListing.IsNetEligibleLevel(Levels)`** so it can be verified as data (`logic_probe`'s
+    `ProbeListingLevels` sweeps the whole enum, with the pre-card predicate as the negative
+    control -- the failure here is silent and REMOTE, a level appearing in a stranger's browser
+    on a screen nobody playing is looking at). Refused: `WebcamAliens` / `TeamChallenge`,
+    `Demo1..3`, and `Tutorial` since card df8f1ef7 (a solo scripted walkthrough is never what
+    a player meant to advertise). It bounds the PUBLIC LISTING only -- it does not stop a host
+    deliberately picking a level for a join-by-code game, and neither carousel offers
+    `Levels.Tutorial` anyway (it is reachable only from the main menu's own Tutorial
+    entry). The SAME predicate gates the listing, the beacon, and the pause indicator,
+    so they can't disagree. `NetListing.Tick` runs each tick from
     `Game1.UpdateInner` (right after `NetSession.Update`).
   - **Listing != session.** A listed game keeps ONE lightweight signaling WS open (via
     `eaRtc.list`, reusing the 11.4 host machinery: `{t:host}` -> code -> `{t:list}` + a ~30 s
@@ -1361,9 +1386,24 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     opens the browse socket, parses the room list, and fills each ping as its pong lands ("--"
     until then). Reached from the main-menu "Online Co-op" submenu's "Join Online Game".
   - **Beacon:** `ScoreVisualiser.drawPressStart`'s `Player X` <-> `Press Start` blink gains a
-    third string `Room code: XYZAB` while listed, and its 4-cycle stop is suppressed, so the
+    third string carrying the ROOM CODE BARE (no "Room code:" label -- card 10d9f8e3: it is a
+    narrow corner prompt sharing a column with "Player 2"/"Press Start", and the label pushed
+    the code itself off the right edge of the screen on the top-right slot; the LABELLED
+    spellings in the lobby panel and the browser carousel stay -- those are full-width panels
+    where the label is the only thing saying what the five characters are) while listed, and its
+    4-cycle stop is suppressed, so the
     code surfaces ~every 15 s (the existing intermittent rhythm, never a static banner). The
     `bool showPressStart` became an index `promptPhase` (drawn `% (listed ? 3 : 2)`).
+  - **`?netfakelisted=<code>` is the OFFLINE rig for the two places a listing SURFACES** (card
+    d1a0559b): `NetListing.Tick` short-circuits on it, reporting `Listed`/`RoomCode` with no
+    socket and no server, so the pause line and the corner beacon can be screenshot headlessly.
+    Nothing is registered and no stranger can join. Out of `DebugFlags.Active` -- no session
+    exists, so it cannot alter a shared run.
+  - **The pause "Listed online -- room XYZAB" line is positioned from the row layout, not a
+    magic y** (card d1a0559b). It sat at a hard-coded design y=400, which is INSIDE a four-entry
+    centred list (~322..442), so it drew across "Instructions"/"Exit to Main Menu" every time it
+    was shown. `PausedScene.DrawMenu` now derives it from `GetListCentre()` + the same +75
+    yoffset it just drew the rows at, so a font or entry-count change carries it along.
   - **Flags:** `?gamebrowser` boots straight to the carousel with injected FAKE entries (no
     server) for a screenshot -- four real-looking games; `?gamebrowser=fallback` appends two on
     levels with NO bundled art (card 0d166364), the only offline rig for `EnsureArt`'s fallback,

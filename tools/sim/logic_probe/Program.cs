@@ -166,6 +166,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeListingLevels(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -1913,6 +1919,112 @@ internal static class Program
         }
         Check(shortName + " assertion count did not shrink", passes >= minAssertions,
             "passes=" + passes + " floor=" + minAssertions);
+        return 0;
+    }
+
+    // Card df8f1ef7 -- which LEVELS may be advertised in the public game browser. The decision
+    // this covers is NetListing.IsNetEligibleLevel, the pure half of ComputeEligible (the rest
+    // reaches ServiceHelper and a live GameScene, which this tool cannot construct).
+    //
+    // It is verified here rather than by eye because the failure is silent and remote: a level
+    // that should not be listable simply appears in a stranger's browser, on a screen nobody
+    // running the game is looking at. The sweep is EXHAUSTIVE over the Levels enum, so a level
+    // ADDED later is judged too -- it will show up as eligible, and whoever added it has to say
+    // whether that is right.
+    private static int ProbeListingLevels(Assembly asm)
+    {
+        Type listing = asm.GetType("EvilAliensWeb.Compat.Net.NetListing", true);
+        Type levels = asm.GetType("EvilAliens.Levels", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo eligible = listing.GetMethod("IsNetEligibleLevel", anyStatic);
+        if (eligible == null)
+        {
+            Console.WriteLine("FAIL: could not reflect NetListing.IsNetEligibleLevel -- renamed or moved?");
+            return 2;
+        }
+        Func<string, bool> listable = name =>
+            (bool)eligible.Invoke(null, new object[] { Enum.Parse(levels, name) });
+
+        Console.WriteLine("[logic_probe] NetListing.IsNetEligibleLevel (card df8f1ef7)");
+
+        // The refusal set, stated independently of the implementation's shape (it tests three
+        // separate conditions; this is one list).
+        string[] refused = { "Tutorial", "WebcamAliens", "TeamChallenge", "Demo1", "Demo2", "Demo3" };
+
+        // Every name below is fed to Enum.Parse, which THROWS on a miss -- and a stack trace
+        // instead of a FAIL line is the one way this set could report nothing useful. A renamed
+        // or deleted level is exactly the change that should land here loudly.
+        foreach (string name in refused)
+        {
+            if (Array.IndexOf(Enum.GetNames(levels), name) < 0)
+            {
+                Check("refusal-set level '" + name + "' still exists", false,
+                    "renamed or removed from Levels -- update the set");
+                return 0;
+            }
+        }
+
+        // The card itself.
+        Check("Tutorial is NOT listable", !listable("Tutorial"),
+            "a solo scripted walkthrough advertised to strangers");
+
+        // The pre-existing refusals must survive the refactor -- IsNetEligibleLevel was extracted
+        // out of ComputeEligible, so the whole set is under test, not just the new member.
+        foreach (string name in refused)
+        {
+            if (name == "Tutorial")
+            {
+                continue;
+            }
+            Check(name + " is still NOT listable", !listable(name), null);
+        }
+
+        // POSITIVE CONTROL, and the point of sweeping the ENUM rather than a hand-written list:
+        // a predicate stuck at false would satisfy every assertion above. Every level not in the
+        // refusal set must still be listable, and a level appended to the enum lands here.
+        int eligibleCount = 0;
+        foreach (string name in Enum.GetNames(levels))
+        {
+            if (Array.IndexOf(refused, name) >= 0)
+            {
+                continue;
+            }
+            bool ok = listable(name);
+            if (ok)
+            {
+                eligibleCount++;
+            }
+            else
+            {
+                Check(name + " should be listable", false, "not in the refusal set");
+            }
+        }
+        // The sweep above already FAILS per level, so this only has to catch the degenerate
+        // shape it cannot: a predicate stuck at false, which produces no per-level failure the
+        // reader can distinguish from "the refusal set grew".
+        Check("the refusal set is not everything", eligibleCount > 0,
+            "eligible=" + eligibleCount + " of " + Enum.GetNames(levels).Length);
+
+        // NEGATIVE CONTROL -- the pre-card predicate over the same inputs. The assertions above
+        // are close to a restatement of three `if`s, so they would pass on a build with the
+        // Tutorial arm deleted unless something shows the OLD behaviour differing. This runs it:
+        // it must accept Tutorial (i.e. the bug is reproduced) and must agree everywhere else,
+        // which also pins that the extraction changed nothing but the one level.
+        Func<string, bool> preCard = name =>
+            name != "WebcamAliens" && name != "TeamChallenge"
+            && name != "Demo1" && name != "Demo2" && name != "Demo3";
+        Check("pre-card predicate DID list the Tutorial", preCard("Tutorial"),
+            "the control must reproduce the bug or the check above proves nothing");
+        int diffs = 0;
+        foreach (string name in Enum.GetNames(levels))
+        {
+            if (listable(name) != preCard(name))
+            {
+                diffs++;
+            }
+        }
+        Check("exactly ONE level changed verdict", diffs == 1, "changed=" + diffs);
+
         return 0;
     }
 }

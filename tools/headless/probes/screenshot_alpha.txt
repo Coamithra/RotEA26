@@ -1,5 +1,5 @@
 # PROBE: the level-select thumbnail is saved fully OPAQUE (alphaMin=255), card d67755d2
-# eahl: --flags "?level=Level2&invuln&aiplayer"
+# eahl: --flags "?level=Level2&invuln&aiplayer&loadlog"
 #
 # The level-select thumbnail is saved OPAQUE (card d67755d2).
 #

@@ -210,7 +210,7 @@ public class ScreenshotSaver
 			// always correct; only the alpha was ever wrong. Same cause and same cure as
 			// Background.Draw's SealAlpha (see the comment there). MUST be last: it runs after the
 			// webcam overlay so that composite still blends by its own alpha.
-			spriteBatchWrapper.SealAlpha(contentManager.Load<Texture2D>("GFX/Game/blank"), (int)SIZE.X, (int)SIZE.Y);
+			spriteBatchWrapper.SealAlpha(contentManager.Load<Texture2D>("GFX/Game/blank"), (int)SIZE.X, (int)SIZE.Y, "[shot] seal");
 			spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 			graphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 			if (pendingOverlay != null)
@@ -229,17 +229,24 @@ public class ScreenshotSaver
 			// whatever translucent layers drew. Reading the alpha back off the bytes we are about
 			// to persist (not restating the seal beside it) is the one thing an `expect` can catch;
 			// tools/headless/probes/screenshot_alpha.txt asserts alphaMin=255 here.
-			uint alphaMin = 255u;
-			for (int i = 0; i < array.Length; i++)
+			//
+			// Behind ?loadlog rather than always-on: this is a DIAGNOSTIC, not a watchdog like
+			// [hitch], so it follows the file-wide convention and a shipped build stays quiet.
+			// The scan is skipped with it, so a release build pays nothing at all.
+			if (DebugFlags.LoadLog)
 			{
-				uint a = array[i] >> 24;
-				if (a < alphaMin)
+				uint alphaMin = 255u;
+				for (int i = 0; i < array.Length; i++)
 				{
-					alphaMin = a;
+					uint a = array[i] >> 24;
+					if (a < alphaMin)
+					{
+						alphaMin = a;
+					}
 				}
+				System.Console.WriteLine("[shot] " + text + " " + texture.Width + "x" + texture.Height
+					+ " alphaMin=" + alphaMin);
 			}
-			System.Console.WriteLine("[shot] " + text + " " + texture.Width + "x" + texture.Height
-				+ " alphaMin=" + alphaMin);
 			if (Storage.StorageEnabled)
 			{
 				StorageContainer val2 = device.OpenContainer("EvilAliens");

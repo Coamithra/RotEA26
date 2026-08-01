@@ -657,20 +657,27 @@ namespace EvilAliensWeb.Compat
 		// puts the alpha seal in ScreenshotSaver.SaveScreenShot (card d67755d2) out of reach of
 		// any cheap probe. Two calls with a Draw between them: `arm` grabs the frame in the
 		// post-Draw hook, `save` composites + persists it and prints the `[shot]` line the probe
-		// asserts on. Reports which step it could not take rather than failing silently -- "no
-		// GameScene" and "nothing grabbed yet" are different mistakes.
+		// asserts on (under ?loadlog). Reports which step it could not take rather than failing
+		// silently -- "no GameScene", "nothing grabbed yet" and "this level does not capture at
+		// all" are three different mistakes.
+		//
+		// DESTRUCTIVE, like eaNetResetSpawn / eaNetSceneOrder: `save` goes through the production
+		// ScreenshotSaver.SaveScreenShot, so it OVERWRITES this level's real saved thumbnail --
+		// on the live site that is a write to IndexedDB. Run it in a throwaway boot, not in a
+		// game whose level-select art you care about.
 		[JSInvokable("debugShotNow")]
 		public static string ShotNow(string step)
 		{
 			string s = (step ?? "").Trim().ToLowerInvariant();
+			string why;
 			switch (s)
 			{
 			case "arm":
-				return EvilAliens.GameScene.DebugArmSnapshot()
-					? "[shotnow] armed" : "[shotnow] no live GameScene";
+				return EvilAliens.GameScene.DebugArmSnapshot(out why)
+					? "[shotnow] armed" : "[shotnow] cannot arm: " + why;
 			case "save":
-				return EvilAliens.GameScene.DebugSaveSnapshot()
-					? "[shotnow] saved" : "[shotnow] nothing to save (arm first, and step a frame)";
+				return EvilAliens.GameScene.DebugSaveSnapshot(out why)
+					? "[shotnow] saved" : "[shotnow] cannot save: " + why;
 			default:
 				return "[shotnow] expected 'arm' or 'save', got '" + s + "'";
 			}

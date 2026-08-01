@@ -2025,11 +2025,25 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	// TWO steps because the grab itself happens in the post-Draw hook: Arm on one tick, Save on
 	// a later one. Save reports whether it had anything to persist, so a rig cannot mistake "no
 	// snapshot was ever grabbed" for a pass.
-	internal static bool DebugArmSnapshot()
+	internal static bool DebugArmSnapshot(out string why)
 	{
+		why = null;
 		GameScene scene = NetActiveScene;
 		if (scene == null)
 		{
+			why = "no live GameScene";
+			return false;
+		}
+		// ForceSnapshot's FIRST guard is General.ScreenshotEnabled, which it fails SILENTLY -- and
+		// it is false for WebcamAliens unless the player opted into Settings.WebcamScreenshot
+		// (default off), i.e. the default case on the one level with a bespoke capture path.
+		// Clearing the other two guards below does not clear that one, so without this test the
+		// seam would report "armed" and then "nothing to save", which reads as a broken rig
+		// rather than a level that does not capture.
+		if (!General.ScreenshotEnabled(scene.level))
+		{
+			why = scene.level + " does not capture a level-select thumbnail "
+				+ "(General.ScreenshotEnabled is false; WebcamAliens needs Settings.WebcamScreenshot)";
 			return false;
 		}
 		// ForceSnapshot no-ops once a shot has been made this session; clear that so the seam is
@@ -2041,11 +2055,18 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		return true;
 	}
 
-	internal static bool DebugSaveSnapshot()
+	internal static bool DebugSaveSnapshot(out string why)
 	{
+		why = null;
 		GameScene scene = NetActiveScene;
-		if (scene == null || !scene.snapshotMadeThisSession || scene.MyScreenShot == null)
+		if (scene == null)
 		{
+			why = "no live GameScene";
+			return false;
+		}
+		if (!scene.snapshotMadeThisSession || scene.MyScreenShot == null)
+		{
+			why = "nothing grabbed yet -- call arm first, then step at least one frame";
 			return false;
 		}
 		ScreenshotSaver.SaveScreenShot((Texture2D)(object)scene.MyScreenShot, scene.level);

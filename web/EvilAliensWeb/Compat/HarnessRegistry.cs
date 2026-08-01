@@ -65,10 +65,6 @@ namespace EvilAliensWeb.Compat
                 ["braineroid"] = (bin, g, p) => { var b = Braineroid.NewBraineroid(bin, g); b.Setup(p, BrainSize.huge, 0f, true); return b; },
                 ["braineroidmedium"] = (bin, g, p) => { var b = Braineroid.NewBraineroid(bin, g); b.Setup(p, BrainSize.medium, 0f, true); return b; },
                 ["braineroidsmall"] = (bin, g, p) => { var b = Braineroid.NewBraineroid(bin, g); b.Setup(p, BrainSize.small, 0f, true); return b; },
-                // The Paratrooper challenge's falling brain (card c25883a2). Draws the same
-                // brainanimated sheet as the Braineroids above, at the dropping size -- the two
-                // side by side are the A/B for the scale conversion.
-                ["paratrooperbrain"] = (bin, g, p) => { var b = ParatrooperBrain.NewAlien(bin, g); b.Setup(p); return b; },
                 ["evilskull"] = (bin, g, p) => { var e = EvilSkull.NewEvilSkull(bin, g); e.Setup(p, EnemyBehaviour.normal); return e; },
                 ["battleskull"] = (bin, g, p) => { var b = BattleSkull.NewBattleSkull(bin, g); b.Setup(p); return b; },
                 ["starmine"] = (bin, g, p) => { var s = StarMine.NewStarMine(bin, g); s.Setup(); return s; },

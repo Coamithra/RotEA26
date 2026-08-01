@@ -736,13 +736,20 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			};
 			// Card 2001fbd8 beacon: while the game is listed online the rotation gains a third
 			// string carrying the room code, so a streamer can read it out on any cycle.
+			// Card 10d9f8e3: the code is shown BARE, with no "Room code: " label. This slot is
+			// a corner prompt sharing one narrow column with "Player 2"/"Press Start", and the
+			// label cost more width than it bought -- the only thing a viewer needs to copy is
+			// the five characters, and the rotation it sits in already gives them their context.
+			// The LABELLED spellings elsewhere stay (MenuScene's lobby panel, SubMenuOnlineGames'
+			// browser row): those are full-width panels where the label is the only thing saying
+			// what the five characters are.
 			string code = EvilAliensWeb.Compat.Net.NetListing.RoomCode;
 			bool listed = EvilAliensWeb.Compat.Net.NetListing.Listed && !string.IsNullOrEmpty(code);
 			int phase = promptPhase % (listed ? 3 : 2);
 			string str = phase switch
 			{
 				1 => "Press Start",
-				2 => "Room code: " + code,
+				2 => code,
 				_ => playerLabel,
 			};
 			// Inactive-slot prompt: static chrome, never a sweep (no score to roll over). Shares the

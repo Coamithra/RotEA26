@@ -168,12 +168,17 @@ public class InputHandler : IInputHandlerService
 		//  - MouseLatch.Consume folds in a click SHORTER than one tick, which this poll cannot
 		//    see at all (card 724f2abc); both samples read Released while the cursor POSITION
 		//    survives, so a menu row hover-highlights and never invokes.
-		bool mouse1Held = MouseLatch.Filter((int)MyKeys.Mouse1, (int)(state).LeftButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse1);
-		bool mouse2Held = MouseLatch.Filter((int)MyKeys.Mouse2, (int)(state).RightButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse2);
+		bool mouse1Held = MouseLatch.FilterOffCanvas((int)MyKeys.Mouse1, (int)(state).LeftButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse1);
+		bool mouse2Held = MouseLatch.FilterOffCanvas((int)MyKeys.Mouse2, (int)(state).RightButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse2);
 		// Card 2a4110d0: a click on the bottom-left "(B) back" tip drawn last frame acts as
 		// Esc, which is already "back" everywhere (menus, the pause overlay, the brag screen).
 		// Consumed here so the recorded box lives exactly one frame -- see Compat/BackTipHit.
-		bool backTipClicked = EvilAliensWeb.Compat.BackTipHit.ConsumeClick(mousepos, mouse1Held);
+		// The RISING EDGE, not the level: `pressedAndIdle` still holds the previous tick's
+		// state at this point (the loop below is what updates it), so this is the same edge
+		// `Pressed(MyKeys.Mouse1)` will report. A level would fire on a press that began
+		// elsewhere -- see ConsumeClick.
+		bool mouse1Pressed = mouse1Held && !pressedAndIdle[(int)MyKeys.Mouse1];
+		bool backTipClicked = EvilAliensWeb.Compat.BackTipHit.ConsumeClick(mousepos, mouse1Pressed);
 		bool held = false;
 		for (int i = 0; i < keysToCheck.Length; i++)
 		{

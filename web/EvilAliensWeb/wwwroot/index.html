@@ -1052,6 +1052,10 @@
             // pointer for a drag/gesture), and a suppression that never lifts is a dead mouse.
             window.addEventListener("pointerup", () => eaMouseSuppress(false), true);
             window.addEventListener("pointercancel", () => eaMouseSuppress(false), true);
+            // Mouse pointers get no implicit capture, so releasing the button OUTSIDE the window
+            // delivers neither event and the flag would stay set -- a dead mouse until the next
+            // click anywhere. Losing the window is how that happens, so lift it there too.
+            window.addEventListener("blur", () => eaMouseSuppress(false));
 
             // Pull the level-select screenshot blobs out of IndexedDB into memory BEFORE the
             // first game tick, so the synchronous save-hydrate (StorageStub, on the first

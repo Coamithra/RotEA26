@@ -1797,11 +1797,11 @@ internal static class Program
         // (the phantom press on release) needs the button held across the moment the flag lifts,
         // which is a drag, and its evidence is the absence of an event. Here it is three calls.
         MethodInfo suppress = latch.GetMethod("SetSuppressed", anyStatic);
-        MethodInfo filter = latch.GetMethod("Filter", anyStatic);
+        MethodInfo filter = latch.GetMethod("FilterOffCanvas", anyStatic);
         if (suppress == null || filter == null)
         {
             Console.WriteLine("  FAIL could not reflect the suppression targets (SetSuppressed="
-                + (suppress != null) + " Filter=" + (filter != null) + ") -- renamed or moved?");
+                + (suppress != null) + " FilterOffCanvas=" + (filter != null) + ") -- renamed or moved?");
             failures++;
             return 0;
         }
@@ -1836,6 +1836,22 @@ internal static class Program
         Check("releasing one button does not un-swallow the other",
             !filterKey(mouse2, false) && !filterKey(mouse1, true), null);
         filterKey(mouse1, false);
+
+        // An ALREADY-HELD button is not collateral. The flag is per-gesture in JS but applied
+        // per-button here, so without the carve-out, right-clicking the FPS HUD while holding
+        // fire on the canvas would stop the ship shooting mid-hold until you released and
+        // re-pressed -- a suppression fix that breaks the input it was protecting.
+        filterKey(mouse1, true);                       // a press established on the canvas
+        setSuppressed(true);                           // ... then something off-canvas is pressed
+        Check("an already-held button keeps reporting held", filterKey(mouse1, true),
+            "a fail here means an off-canvas click cancels an unrelated held button");
+        Check("but a button pressed DURING suppression is still swallowed",
+            !filterKey(mouse2, true), null);
+        setSuppressed(false);
+        filterKey(mouse1, false);
+        filterKey(mouse2, false);
+        Check("both buttons settle back to released",
+            !filterKey(mouse1, false) && !filterKey(mouse2, false), null);
 
         // Suppression must also drop anything the CANVAS latch had already banked this tick --
         // otherwise the sub-tick rescue would smuggle through exactly the press being refused.

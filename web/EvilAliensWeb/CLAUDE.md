@@ -680,13 +680,19 @@ site now lives under:
     not on. The side tiles are small, half off-screen and still flying, so the default
     select-and-activate meant aiming at a moving target with a level start as the miss penalty.
     Kept as its own flag rather than folded into `mouseHoverSelects` -- that one answers "does
-    HOVER select", a different question.
+    HOVER select", a different question. Activation also waits on `MouseActivationSettled()`
+    (the carousel overrides it to `!swaptimer.Active`): selection is instant but the scroll is
+    an ANIMATION, so `hovered == selectedEntry` alone lets a quick double-click launch the tile
+    that is still flying in -- exactly what the two-click rule exists to stop.
 - **The bottom-left "(B) back" tip is CLICKABLE, via a synthetic Esc** (card 2a4110d0,
   `Compat/BackTipHit.cs`). It is scene chrome, not a menu entry -- drawn by
   `MenuScene.drawButtonTips`, `Darkener.drawButtons` (pause overlay) and `BragScene.drawButtons`,
   three verbatim copies of one 2008 layout -- so it records no `RecordEntryHit` box and
   `HandleMouse` cannot see it. Each drawer calls `BackTipHit.Record(left, right, top, bottom)`;
-  `InputHandler.Update` consumes the box and ORs a click inside it into `MyKeys.Esc`. **Esc, not a
+  `InputHandler.Update` consumes the box and ORs the RISING EDGE of a click inside it (never the
+  button level -- a level fires on a press that began elsewhere, so a drag into the corner would
+  back out and a held fire button would un-pause the frame the pause overlay drew the tip) into
+  `MyKeys.Esc`. **Esc, not a
   per-scene back call, on purpose:** Esc is already "back" for every consumer, and the pause
   overlay's input belongs to `PausedScene` while `Darkener` only draws -- so one seam covers all
   three and none of their input owners is touched. The box lives exactly ONE frame (Draw records,
@@ -698,7 +704,8 @@ site now lives under:
     widest main-menu frame starts at x~218) but it is held by two unrelated layouts. So every
     menu asserts it itself and prints `[backtip] menu=<T> entries=<n> tip=<x,y,w,h>
     overlap=<none|index>` on each layout change -- the POSITIVE case included, since a check that
-    only printed failures would pass on a run that never opened a menu.
+    only printed failures would pass on a run that never opened a menu. Committed as
+    `tools/headless/probes/menu_backtip.txt` (framed main menu / plain list / carousel).
 - **The main menu shifts its row list UP when it would not fit** (card 45c16ef6,
   `MenuSubWithSkull.RowsStartY`). `curY0` keys off the FULL entry count, which unlocking does not
   change, so the list only ever grew DOWNWARD and at 8 visible rows EXIT was drawn clipped off the
@@ -754,6 +761,11 @@ site now lives under:
     starts on an overlay and ends over the canvas does not land either -- and `Filter` then keeps
     that button swallowed until it is PHYSICALLY released, so the tail of the refused press
     cannot read as a fresh rising edge. Per-button, since both are filtered in the same tick.
+  - **A button that was ALREADY down keeps reporting held.** The flag is per-GESTURE in JS but
+    applied per-BUTTON in C#, so without that carve-out right-clicking the FPS HUD while holding
+    fire would stop the ship shooting mid-hold until you released and re-pressed -- a
+    suppression fix breaking the input it exists to protect. Only a press that STARTS while
+    suppressed is swallowed.
   - `logic_probe`'s `ProbeMouseLatch` section 3 pins all of it. **That leg cannot be checked by
     clicking in Chrome either**: the phantom-edge case needs the button held across the moment the
     flag lifts, and its evidence is the ABSENCE of an event.

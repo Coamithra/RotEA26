@@ -1,4 +1,5 @@
 using System;
+using EvilAliens.Constants;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using EvilAliensWeb.Compat;
@@ -35,14 +36,18 @@ internal class MenuSubWithSkull : MenuSub1
 	// keys off the FULL entry count, which UNLOCKING does not change (a locked row is merely
 	// skipped), so every newly visible row adds LineSpacing at the bottom and moves nothing
 	// up. RowsStartY therefore shifts the whole block up by exactly its overflow past
-	// RowsBottomLimit: <=6 visible rows are pixel-identical to before, 8 ride ~10 design-px
-	// into the title's bottom banner (the card comment explicitly allows a little overlap),
-	// and the 9+ case reachable only with debug menus keeps shifting under the same one rule
-	// rather than needing a second. The limit is the project's own safe area bottom
-	// (General.SafeZone.Bottom): the tips band starts ~40px above it, but the tips sit at the
-	// far LEFT and RIGHT (x<=150 / x>=640) while the frames span x~218-582, so they never
-	// collide -- a stricter limit would only buy title overlap nobody asked for.
-	private const float RowsBottomLimit = 570f;
+	// RowsBottomLimit. Measured at the shipped LineSpacing of 45 and the 8-entry main menu:
+	// **<=7 visible rows do not move at all** (7 rows bottom out at 564.5, inside the limit),
+	// 8 shift up 39.5px and ride ~10 design-px into the title's bottom banner (the card comment
+	// explicitly allows a little overlap), and the 9+ case reachable only with debug menus
+	// keeps shifting under the same one rule rather than needing a second.
+	//
+	// The limit is the project's own safe-area bottom: the tips band starts ~40px above it, but
+	// the tips sit at the far LEFT and RIGHT (x<=146 / x>=640) while the frames span x~218-582,
+	// so they never collide -- a stricter limit would only buy title overlap nobody asked for.
+	// Read off General.SafeZone rather than written as its value, so moving the safe zone moves
+	// this with it instead of leaving a comment that used to be true.
+	private static float RowsBottomLimit => (float)(General.SafeZone).Bottom;
 
 	// Degenerate guard for a hypothetical 12+ entry menu: stop shifting rather than walk the
 	// list off the TOP of the screen. Nothing reachable today hits it.

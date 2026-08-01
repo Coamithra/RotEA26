@@ -105,31 +105,53 @@ namespace EvilAliensWeb.Compat
 
 		private static bool swallow2;
 
-		internal static bool Filter(int idx, bool rawDown)
+		// What this button reported LAST tick. The suppression flag is per-GESTURE in JS but
+		// applied per-BUTTON here, so without this an off-canvas press would cancel an unrelated
+		// button that was ALREADY down: hold fire on the canvas, right-click the FPS HUD tag,
+		// and the ship stops shooting mid-hold until you release and re-press. A press that was
+		// already being reported carries on; only a press that STARTS while suppressed is
+		// swallowed, which is the whole intent.
+		private static bool reported1;
+
+		private static bool reported2;
+
+		internal static bool FilterOffCanvas(int idx, bool rawDown)
 		{
 			ref bool swallow = ref swallow1;
+			ref bool reported = ref reported1;
 			if (idx == Mouse2Key)
 			{
 				swallow = ref swallow2;
+				reported = ref reported2;
 			}
 			else if (idx != Mouse1Key)
 			{
 				return rawDown;
 			}
-			if (suppressed)
+			bool result;
+			if (suppressed && !(reported && rawDown))
 			{
 				swallow = true;
-				return false;
+				result = false;
 			}
-			if (swallow)
+			else if (swallow)
 			{
 				if (rawDown)
 				{
-					return false;
+					result = false;
 				}
-				swallow = false;
+				else
+				{
+					swallow = false;
+					result = false;
+				}
 			}
-			return rawDown;
+			else
+			{
+				result = rawDown;
+			}
+			reported = result;
+			return result;
 		}
 
 		// True once per latched press, for the one tick that consumes it. Any index that is not

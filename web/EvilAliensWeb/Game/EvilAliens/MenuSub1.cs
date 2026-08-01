@@ -418,7 +418,13 @@ internal class MenuSub1 : Scene
 			{
 				// A carousel's off-centre entries only get selected (which starts the scroll);
 				// everything else selects and activates in one click, as before.
-				bool activate = !mouseClickSelectsBeforeActivating || hovered == selectedEntry;
+				// `hovered == selectedEntry` alone is not enough: selection is instant but the
+				// scroll is an ANIMATION, so a quick double-click on a side tile would satisfy
+				// it on the second click and launch the level anyway -- the very thing this is
+				// meant to prevent. MouseActivationSettled makes the carousel say when the tile
+				// has actually arrived under the cursor.
+				bool activate = !mouseClickSelectsBeforeActivating
+					|| (hovered == selectedEntry && MouseActivationSettled());
 				selectedEntry = hovered;
 				if (activate)
 				{
@@ -443,7 +449,14 @@ internal class MenuSub1 : Scene
 	// holding. So every menu reports the verdict itself, once per layout change (not per
 	// frame), positive case included -- a probe that only looked for the failure line would
 	// pass just as happily on a run that never opened a menu.
-	private string lastBackTipReport;
+	// Compared instead of the formatted line, so the common case (nothing changed) costs no
+	// allocation -- this runs in Draw, every frame, per shown menu, and formatting a string only
+	// to throw it away is the exact per-frame garbage the "Perf batch 2" work above removed.
+	private Rectangle lastReportedTip;
+
+	private int lastReportedEntries = -1;
+
+	private int lastReportedOverlap = -2;
 
 	private void ReportBackTipOverlap()
 	{
@@ -460,12 +473,22 @@ internal class MenuSub1 : Scene
 				break;
 			}
 		}
-		string report = $"[backtip] menu={GetType().Name} entries={entryHitBounds.Count} tip={tip.X},{tip.Y},{tip.Width},{tip.Height} overlap={((hit < 0) ? "none" : hit.ToString())}";
-		if (report != lastBackTipReport)
+		if (hit == lastReportedOverlap && entryHitBounds.Count == lastReportedEntries && tip == lastReportedTip)
 		{
-			lastBackTipReport = report;
-			Console.WriteLine(report);
+			return;
 		}
+		lastReportedOverlap = hit;
+		lastReportedEntries = entryHitBounds.Count;
+		lastReportedTip = tip;
+		Console.WriteLine($"[backtip] menu={GetType().Name} entries={entryHitBounds.Count} tip={tip.X},{tip.Y},{tip.Width},{tip.Height} overlap={((hit < 0) ? "none" : hit.ToString())}");
+	}
+
+	// Whether a click may activate the selected entry right now. Only consulted when
+	// `mouseClickSelectsBeforeActivating` is set; a menu whose layout is static the moment the
+	// selection changes (i.e. every non-carousel one) is always settled.
+	protected virtual bool MouseActivationSettled()
+	{
+		return true;
 	}
 
 	// Records entry `index`'s clickable box (design space, 800x600), centred at `centre`.

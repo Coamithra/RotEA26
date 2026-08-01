@@ -141,6 +141,14 @@ internal abstract class SubMenuCarousel : MenuSub1
         swaptimer.Reset();
     }
 
+    // The scroll is an animation, so the centred entry is only really under the cursor once the
+    // swap has finished -- until then a second click would launch a level still flying into
+    // place (card e3c78bb8).
+    protected override bool MouseActivationSettled()
+    {
+        return !swaptimer.Active;
+    }
+
     protected override void selectNext()
     {
         base.selectNext();

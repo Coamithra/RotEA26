@@ -323,15 +323,44 @@ def bleed_transparent_rgb(atlas):
     a = np.array(atlas, dtype=np.uint8)      # (h,w,4) copy
     ink = a[..., 3] > 0
     if not ink.any() or ink.all():
-        return atlas
-    _, idx = ndimage.distance_transform_edt(~ink, return_indices=True)
+        return Image.fromarray(a, 'RGBA')    # always a fresh image, never the caller's
+    idx = ndimage.distance_transform_edt(~ink, return_distances=False,
+                                         return_indices=True)
     rgb = a[..., 0:3]
     rgb[~ink] = rgb[idx[0], idx[1]][~ink]
     return Image.fromarray(a, 'RGBA')
 
 
+def check_no_black_halo(atlas):
+    """Guard the ship: the halo fix above is one unconditional call, and losing it
+    fails SILENTLY (a slightly dark glyph edge -- no error, no metrics diff). Fires
+    only when the atlas has non-black ink to bleed, so it can't cry wolf on art
+    that is legitimately black."""
+    a = np.asarray(atlas.convert('RGBA'))
+    clear = a[..., 3] == 0
+    ink = ~clear
+    if not clear.any() or not ink.any() or a[..., 0:3][ink].max() == 0:
+        return
+    black = int((a[..., 0:3][clear].max(axis=1) == 0).sum())
+    if black:
+        sys.exit(f'ABORT: {black} fully-transparent texels are still black -- the '
+                 f'bleed_transparent_rgb() pass did not run. Straight-alpha bilinear '
+                 f'would interpolate that black into every glyph edge (card 5d8becc2).')
+
+
 def read_orig():
     """Original menufont glyphs (from the *.orig backup if present, else live)."""
+    has_bak = os.path.exists(FNT_META + '.orig') or os.path.exists(FNT_PNG + '.orig')
+    if has_bak:
+        # The committed atlas was built with NO backup present. Reading one shifts
+        # the carried glyphs (space + debug symbols) and the build stops
+        # reproducing what is in git -- measured at 1258 texels. --commit creates
+        # these as a side effect, so this fires on any second --commit in a row.
+        print('  WARN *.orig present -- carried glyphs come from the BACKUP, not the\n'
+              '       live font, so this build will NOT reproduce the committed atlas.\n'
+              '       Delete web/.../Content/gfx/menu/menufont.fnt{,.png}.orig to get\n'
+              '       the reproducible build back (git history is the revert path).',
+              file=sys.stderr)
     meta = FNT_META + '.orig' if os.path.exists(FNT_META + '.orig') else FNT_META
     png  = FNT_PNG + '.orig' if os.path.exists(FNT_PNG + '.orig') else FNT_PNG
     d = open(meta, 'rb').read(); off = 0
@@ -565,6 +594,7 @@ def render_debug(allglyphs, caps_src, punc_src):
 
 
 def write_font(atlas, rec):
+    check_no_black_halo(atlas)
     for p in (FNT_PNG, FNT_META):           # back up the original once
         bak = p + '.orig'
         if not os.path.exists(bak):

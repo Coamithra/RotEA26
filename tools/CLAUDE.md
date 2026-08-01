@@ -616,7 +616,8 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 atlas** while `Cropping`/kerning/`LineSpacing` stay design-size (see web CLAUDE.md — never stock
 `DrawString`). Per-glyph capture-box/vertical-align/bearing tweaks live in `overrides.json`,
 authored with the live editor (`editor/serve.py` after `--emit-editor`) and baked on `--commit`;
-`_diag.py` prints per-glyph baseline offsets. Revert via the `*.orig` backups.
+`_diag.py` prints per-glyph baseline offsets. Revert via git history, NOT the `*.orig` backups
+(see below).
 
 - **`bleed_transparent_rgb()` dilates the atlas' RGB into its fully-transparent texels** (card
   `5d8becc2`), alpha untouched. Alpha is STRAIGHT project-wide, so bilinear averages RGB *ignoring*
@@ -626,14 +627,20 @@ authored with the live editor (`editor/serve.py` after `--emit-editor`) and bake
   normal case here (the atlas is `SS`x denser than the design quad). Same class as
   `build_textures.py`'s `edge_gutter()`, one level down. Measured on `?textshot`: 5921 pixels
   changed, **100% of them brighter, none darker**.
-- **Do NOT seed a `*.orig` from git history.** The committed atlas was built with no backup
-  present, so `read_orig()`'s carried glyphs (space + debug symbols) came from the LIVE font;
-  a history-seeded `.orig` changes 1258 texels (measured). With none present the script reproduces
-  the committed atlas byte-for-byte, which is what makes a rebuild verifiable — `--commit` creates
-  the backups as a side effect, so delete them afterwards rather than leaving them to drift.
+- **A `*.orig` backup must NOT be present when you build.** The committed atlas was built with
+  none, so `read_orig()`'s carried glyphs (space + debug symbols) came from the LIVE font; reading
+  a backup instead shifts 1258 texels (measured, with one seeded from git history) and the build
+  stops reproducing what is in git — which is the property that makes a rebuild verifiable at all.
+  `--commit` CREATES the pair as a side effect, so a second `--commit` in a row is already the bad
+  case: delete them after every commit run. `read_orig()` warns loudly when it finds one. Revert
+  through git history, which is the documented recovery path (`.gitignore` says so too).
+- **`check_no_black_halo()` gates `write_font`**, because losing the bleed fails silently — a
+  slightly dark glyph edge, no error and no metrics diff. It stays quiet on art that is
+  legitimately all-black.
 - **51 of the 94 shipped RGBA PNGs under `Content/` have the same all-black transparent field**
-  (36 load as `.dds`, 15 as plain PNG) — the font was fixed under its own card; the sprite fleet
-  is untouched and unfiled.
+  (36 load as `.dds`, 15 as plain PNG), i.e. the sprite fleet plausibly carries this halo too.
+  Measured while fixing the font under card `5d8becc2`; deliberately NOT addressed there and no
+  card filed yet — treat this as an open lead, not a closed question.
 
 ## Cursor — `tools/cursor/`
 

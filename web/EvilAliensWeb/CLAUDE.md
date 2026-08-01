@@ -915,10 +915,20 @@ site now lives under:
   - **Judge it over CONTRAST.** Refraction of a flat gradient changes almost nothing: the same
     ring reads max delta 8/255 over the Mars sky and 94/255 once it reaches the rocks. A shot
     that "shows no ripple" over open sky is the physics, not a broken pass.
+  - **Every knob resolves per FRAME, in `PackedRings`** -- a ring stores only its centre,
+    elapsed time, size scale and bomb power. So a slider drag retunes rings that are already
+    travelling (three of the seven sliders looked dead when the values were baked in at
+    `Fire`), and shortening the duration retires the rings in flight instead of stranding them.
   - Flags: `?ripple=` (master, 0 = off) `?rippleamp= ?rippleradius= ?rippleduration=
     ?ripplewidth= ?ripplefalloff= ?ripplerim= ?ripplemini ?ripplephase= ?ripplecenter=
-    ?rippletune`. All out of `DebugFlags.Active` (pure render/feel). Live panel `eaRipple`;
-    console `eaRipple.fire()` / `.park()` / `.state()`. Pinned by
+    ?ripplepower= ?rippletune`. All out of `DebugFlags.Active` (pure render/feel).
+    `?ripplephase=` takes a NEGATIVE value as "live" (not parked), matching the panel slider
+    and `eaRipple.park(-1)`; `?ripplepower=<0..4>` gives the parked ring a bomb powerup level,
+    which is the only way to screenshot a maxed bomb (1.88x amplitude, 1.72x radius).
+    **`?rippletune` alone mounts the panel** -- `?ripplephase=` deliberately does NOT, or the
+    270px overlay would land in the very screenshot that flag exists to take (the FPS HUD is
+    suppressed on `?ripplephase=` for exactly that reason). Live panel `eaRipple`; console
+    `eaRipple.fire()` / `.park()` / `.state()`. Pinned by
     `tools/headless/probes/bomb_ripple.txt` (a failed `.mgfxo` load is SILENT by construction --
     `Game1.LoadContent` swallows it -- so the probe is the only thing that would ever say so).
 

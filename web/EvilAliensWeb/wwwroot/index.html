@@ -791,6 +791,7 @@
         //   eaRipple.park(phase)        — park one ring at 0..1 of its life for a screenshot; pass
         //                                 nothing (or a negative) to un-park and go live again.
         //   eaRipple.state()            — print the knobs + whether a ring is live.
+        // Every knob is resolved per frame, so a call here retunes rings already in flight.
         window.eaRipple = (master, amp, radius, duration, width, falloff, rim) => {
             const or = (v, d) => (v === undefined || v === null || isNaN(Number(v))) ? d : Number(v);
             try {
@@ -2483,14 +2484,18 @@
          falloff / duration / rim can be DRAGGED over a live level, and the "park" slider freezes a
          ring at a chosen phase for a still screenshot (the same thing ?ripplephase= does at boot).
          "Fire one" throws a ring on demand, since a real bomb needs a pickup and a live ship.
-         Built outside #app so it survives Blazor's mount, and only created on a ripple-dialing page
-         (a bare ?rippletune, or any ?ripplephase= boot) — a normal boot gets no extra DOM and stays
-         byte-identical. Top-right, same chrome as the eaHolo/eaWalls panels. -->
+         Built outside #app so it survives Blazor's mount, and only created on ?rippletune — a
+         normal boot gets no extra DOM and stays byte-identical. Top-right, same chrome as the
+         eaHolo/eaWalls panels.
+         DELIBERATELY NOT mounted by ?ripplephase= alone: that flag exists to take a clean
+         screenshot, and a 270px opaque overlay in the corner is exactly what the same change
+         suppresses the (much smaller) FPS HUD for. Ask for both — ?rippletune&ripplephase= — when
+         you want to dial and park at once. -->
     <script>
         (function ()
         {
             var q = window.location.search || "";
-            if (!/[?&](rippletune|ripplephase)\b/i.test(q)) { return; }
+            if (!/[?&]rippletune\b/i.test(q)) { return; }
 
             // Seed from any ?ripple* flags already on the URL, else the baked defaults. These
             // literals MIRROR BombRipple's Default* consts (DefaultAmplitude 0.018 / DefaultRadius

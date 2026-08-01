@@ -16,11 +16,13 @@
 //   * distances are measured in ASPECT-CORRECTED units — d.x is multiplied by
 //     Aspect (= target W/H) so the wavefront is a circle on a 4:3 target, not an
 //     ellipse. Radius/width are therefore in units of "fraction of screen HEIGHT".
-//   * the wavefront is a single sine cycle under a Gaussian envelope centred on the
-//     ring radius, so the frame is pushed OUT just ahead of the crest and pulled IN
-//     just behind it — the compression/rarefaction pair that reads as water rather
-//     than as a smeared blur. Displacement is zero exactly on the crest and decays
-//     to nothing within ~1.5 ring widths either side.
+//   * the wavefront is a sine wave under a Gaussian envelope centred on the ring
+//     radius, so the frame is pushed OUT just ahead of the crest and pulled IN just
+//     behind it — the compression/rarefaction pair that reads as water rather than
+//     as a smeared blur. Displacement is zero exactly on the crest. The envelope
+//     exp(-3u*u) is still ~47% at |u| = 0.5 and dies by |u| ~ 1.5, so a couple of
+//     trailing lobes ring behind the leading one: that ringing IS the look, a single
+//     isolated cycle reads as a lens rather than a splash.
 //   * RimBoost adds a faint brightness lift proportional to |wave| (the caustic
 //     glint on a real ripple). Kept low by default; ?ripplerim= tunes it.
 //

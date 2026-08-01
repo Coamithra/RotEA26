@@ -274,7 +274,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   off) `?rippleamp= ?rippleradius= ?rippleduration= ?ripplewidth= ?ripplefalloff= ?ripplerim=`,
   plus `?ripplemini` to let the asploding-bullet minis ripple too (off by default). Live panel
   `eaRipple` on `?rippletune`; console `eaRipple.fire(x,y,power)` / `.park(phase)` / `.state()`
-  (`eval RippleFire` / `RipplePark` / `Ripple` under `eahl`). Details: web CLAUDE.md.
+  (`eval RippleFire` / `RipplePark` / `RippleState` under `eahl`). `?ripplepower=<0..4>` gives
+  the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). Details: web
+  CLAUDE.md.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

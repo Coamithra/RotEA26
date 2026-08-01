@@ -297,12 +297,14 @@ namespace EvilAliensWeb.Compat
 		// null => screen centre.
 		public static Vector2? RippleCenter { get; private set; }
 
-		// Show the eaRipple slider panel (index.html). ?rippletune
-		public static bool RippleTune { get; private set; }
+		// ?ripplepower=<0..4>: the bomb powerup level the PARKED ring pretends it came
+		// from (amplitude and radius scale with it). null => 0, a bare bomb.
+		public static float? RipplePower { get; private set; }
 
 		// JS bridge for the live ripple tuner panel (eaRipple in wwwroot/index.html, shown on
-		// ?rippletune / ?ripplephase=): overrides the knobs in real time -- BombRipple reads
-		// them every frame, so a slider drag retunes the very next frame, parked ring included.
+		// ?rippletune): overrides the knobs in real time. BombRipple resolves ALL of them in
+		// PackedRings rather than baking them in at Fire, so a slider drag retunes the very
+		// next frame -- rings already travelling, and the parked screenshot ring, included.
 		internal static void SetRippleOverride(float? master, float? amp, float? radius,
 			float? duration, float? width, float? falloff, float? rim, float? phase)
 		{
@@ -1580,18 +1582,34 @@ namespace EvilAliensWeb.Compat
 				case "ripplemini":
 					RippleMini = IsOn(val);
 					break;
-				case "rippletune":
-					RippleTune = IsOn(val);
-					break;
+				// NOTE there is deliberately no `case "rippletune"`: like ?holotune,
+				// ?walltune and ?spidertune, that flag is read by the JS panel off
+				// location.search and never reaches C#. The switch has no `default:`, so an
+				// unlisted key is silently ignored -- adding a write-only property here
+				// would just be dead code.
 				case "ripplephase":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripp))
 					{
-						RipplePhase = (ripp < 0f) ? 0f : (ripp > 1f) ? 1f : ripp;
+						// A NEGATIVE phase means "not parked", matching eaRipple.park(-1) and
+						// the panel's "-1 = live" slider -- clamping it to 0 instead would
+						// PARK on the very value a user copies out of the panel to un-park.
+						RipplePhase = (ripp < 0f) ? (float?)null : (ripp > 1f) ? 1f : ripp;
 					}
 					else
 					{
-						RejectFlagValue(key, val, "a number 0..1",
+						RejectFlagValue(key, val, "a number 0..1, or negative for live",
 							InForce(RipplePhase));
+					}
+					break;
+				case "ripplepower":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripw2) && ripw2 >= 0f)
+					{
+						RipplePower = (ripw2 > 4f) ? 4f : ripw2;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0 (a bomb powerup level 0..4)",
+							InForce(RipplePower));
 					}
 					break;
 				case "ripplecenter":

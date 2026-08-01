@@ -752,7 +752,11 @@ internal static class Program
             new { Flag = "ripplewidth", Prop = "RippleWidth", Good = "0.375", RejectsNeg = true },
             new { Flag = "ripplefalloff", Prop = "RippleFalloff", Good = "0.375", RejectsNeg = true },
             new { Flag = "ripplerim", Prop = "RippleRim", Good = "0.375", RejectsNeg = false },
-            new { Flag = "ripplephase", Prop = "RipplePhase", Good = "0.375", RejectsNeg = false },
+            // ?ripplephase= is deliberately absent from this table: a NEGATIVE value is a
+            // legal spelling there (it means "live, not parked" -- see the case's comment),
+            // so the sweep's shared "a negative is either clamped or refused" shape does not
+            // describe it. Its own leg is below, next to ?ripplecenter's.
+            new { Flag = "ripplepower", Prop = "RipplePower", Good = "0.375", RejectsNeg = true },
             new { Flag = "blastactive", Prop = "BlastActiveAlpha", Good = "0.375", RejectsNeg = false },
             new { Flag = "blasthit", Prop = "BlastHitFactor", Good = "0.375", RejectsNeg = true },
             new { Flag = "reticlesize", Prop = "ReticleSize", Good = "0.375", RejectsNeg = true },
@@ -1014,6 +1018,28 @@ internal static class Program
             && outRc.Contains("staying on 123,456"),
             "center=" + rcHeld + " said: " + FirstLine(outRc));
         flags.GetProperty("RippleCenter", anyStatic).SetValue(null, null);
+
+        // ?ripplephase= has a THIRD state the sweep table cannot express: negative means
+        // "live" (un-parked), the same spelling eaRipple.park(-1) and the panel's slider use.
+        // Clamping it to 0 instead would PARK on the exact value a user copies out of the
+        // panel to stop parking -- a silent wrong-way-round bug -- so pin all three states.
+        run("?ripplephase=0.4");
+        Check("?ripplephase= parks on a value in range",
+            Equals(flags.GetProperty("RipplePhase", anyStatic).GetValue(null), 0.4f),
+            "phase=" + flags.GetProperty("RipplePhase", anyStatic).GetValue(null));
+        run("?ripplephase=-1");
+        Check("?ripplephase= NEGATIVE un-parks rather than parking at 0",
+            flags.GetProperty("RipplePhase", anyStatic).GetValue(null) == null,
+            "phase=" + flags.GetProperty("RipplePhase", anyStatic).GetValue(null));
+        run("?ripplephase=0.4");
+        string outPhase = run("?ripplephase=hlf");
+        Check("?ripplephase= reports a bad value and keeps the parked one",
+            Equals(flags.GetProperty("RipplePhase", anyStatic).GetValue(null), 0.4f)
+            && outPhase.Contains("unknown ?ripplephase= value 'hlf'")
+            && outPhase.Contains("staying on 0.4"),
+            "phase=" + flags.GetProperty("RipplePhase", anyStatic).GetValue(null)
+            + " said: " + FirstLine(outPhase));
+        flags.GetProperty("RipplePhase", anyStatic).SetValue(null, null);
 
         // A bare ?level used to dereference a null `val`: the NRE took the headless host down and,
         // in the browser, was caught one level up as a single "flag read failed" line that

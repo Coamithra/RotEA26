@@ -754,11 +754,12 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// JS bridge for the live bomb-ripple tuner slider panel (eaRipple in wwwroot/index.html,
-		// shown on ?rippletune / ?ripplephase=): DotNet.invokeMethod('EvilAliensWeb',
-		// 'debugSetRipple', master, amp, radius, duration, width, falloff, rim, phase).
+		// shown on ?rippletune): DotNet.invokeMethod('EvilAliensWeb', 'debugSetRipple',
+		// master, amp, radius, duration, width, falloff, rim, phase).
 		// Same effect as the ?ripple/?rippleamp/?rippleradius/?rippleduration/?ripplewidth/
-		// ?ripplefalloff/?ripplerim/?ripplephase URL flags, just live (BombRipple reads them
-		// every frame, so a drag retunes the very next frame -- a parked ring included).
+		// ?ripplefalloff/?ripplerim/?ripplephase URL flags, just live -- BombRipple resolves
+		// every one of them per frame in PackedRings rather than baking them in at Fire, so a
+		// drag retunes rings that are ALREADY travelling, and the parked ring too.
 		// A NEGATIVE phase means "not parked", since the JS side has no null to send.
 		[JSInvokable("debugSetRipple")]
 		public static void SetRipple(double master, double amp, double radius, double duration,
@@ -798,19 +799,24 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[ripple] park=" + (phase < 0.0 ? "live" : phase.ToString()));
 		}
 
-		// Report the ripple state as data (`eaRipple.state()` / `eval Ripple`): whether a ring is
-		// live, the knobs in force and the parked phase if any. What the committed probe
-		// tools/headless/probes/bomb_ripple.txt asserts against.
+		// Report the ripple state as data (`eaRipple.state()` / `eval RippleState`): whether a
+		// ring is live, the knobs in force and the parked phase if any. What the committed
+		// probe tools/headless/probes/bomb_ripple.txt asserts against.
+		//
+		// Every value is read back off BombRipple's OWN resolved accessors, never re-derived
+		// here as `DebugFlags.X ?? BombRipple.DefaultX`: a second copy of the fallback chain
+		// drifts, and it would have printed a Duration below the 0.01 s floor the renderer
+		// actually applies -- a readout that lies is worse than no readout.
 		[JSInvokable("debugRippleState")]
-		public static void Ripple()
+		public static void RippleState()
 		{
 			Console.WriteLine("[ripple] visible=" + BombRipple.Visible
-				+ " master=" + (DebugFlags.Ripple ?? 1f)
-				+ " amp=" + (DebugFlags.RippleAmp ?? BombRipple.DefaultAmplitude)
-				+ " radius=" + (DebugFlags.RippleRadius ?? BombRipple.DefaultRadius)
-				+ " duration=" + (DebugFlags.RippleDuration ?? BombRipple.DefaultDuration)
+				+ " master=" + BombRipple.Master
+				+ " amp=" + BombRipple.Amplitude
+				+ " radius=" + BombRipple.Radius
+				+ " duration=" + BombRipple.Duration
 				+ " width=" + BombRipple.Width
-				+ " falloff=" + (DebugFlags.RippleFalloff ?? BombRipple.DefaultFalloff)
+				+ " falloff=" + BombRipple.Falloff
 				+ " rim=" + BombRipple.Rim
 				+ " mini=" + DebugFlags.RippleMini
 				+ " phase=" + (DebugFlags.RipplePhase.HasValue

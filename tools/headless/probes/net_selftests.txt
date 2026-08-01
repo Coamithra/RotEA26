@@ -105,9 +105,13 @@ expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
 # scenario 5 -- 67 -> 73 -- splitting `dup` by cause: three assert the churn's duplicates are ALL
 # the benign already-live shape with dupBad unmoved, and three are the negative control (an
 # EvSpawn carrying an unregistered typeIdx must move dupBad and NOT dupLive). Without that
-# control a classifier hard-wired to "already live" would pass the other three. The one
+# control a classifier hard-wired to "already live" would pass the other three. Card 125490d9
+# added leg 5b -- 73 -> 80 -- the join peer as a GUEST: an EvUnlock must grant nothing, spawn
+# no banner and leave no pair-up, while the beat is still RECEIVED (BeatsRx +1, which is what
+# stops the whole leg being vacuous on a frame that never arrived) and a malformed one is
+# still refused by the decode. The one
 # remaining `info` line is scenario 5's pupPops count, a reported measurement rather than a gap.
-expect \[netscen\] 73 passed, 0 failed
+expect \[netscen\] 80 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

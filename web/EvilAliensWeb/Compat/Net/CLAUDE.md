@@ -536,12 +536,17 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     more than degrading it. **SENTINEL** (keep the raw value, expose a checked nullable beside
     it) for the public game browser's listings, where an unknown value is a normal production
     case that must still be displayed.
-  - **Two fields can silently kill a save file, which is why they REJECT.** `XmlSerializer`
+  - **A field that can silently kill a save file REJECTS.** `XmlSerializer`
     refuses an undeclared enum value, and `Settings`/`Unlockables` open their `StreamWriter`
     BEFORE serializing -- so the file is truncated and the write then throws into
-    `Savable.SaveInner`'s catch-all. Settings or unlocks then stop persisting for the session
-    with nothing said and a corrupt file on disk. The two paths are `EvLaunch` difficulty ->
-    `Settings.SetDifficultyTo`, and `EvUnlock` item -> a `Unlockables.Collection` KEY.
+    `Savable.SaveInner`'s catch-all. Settings then stop persisting for the session
+    with nothing said and a corrupt file on disk. The live path is `EvLaunch` difficulty ->
+    `Settings.SetDifficultyTo`.
+    **`EvUnlock`'s item was the second such path and is not any more (card 125490d9)** -- the
+    join peer no longer grants, so the value reaches no `Unlockables.Collection` key. Its REJECT
+    policy STAYS regardless: the decoder still casts a raw wire byte to an enum, the protection
+    must pre-exist any future re-grant, and `ProbeWireEnums` asserts the bound. Do not relax it
+    to a clamp because nothing consumes the value.
   - **`EvLaunch` rejects the whole message, and ENDS the pairing with a notice.** A clamped
     level or difficulty replicates into a mismatched world, which is worse than a refused join;
     an out-of-enum level also reaches `Game1.AddLevelComponent`'s throwing default arm AFTER
@@ -1131,7 +1136,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
 - **Script beats replicate at the side-effect PRIMITIVES (card 11.3), never per level:**
   the level script only runs on the host, so its observable side effects are hooked where
   they happen and mirrored as reliable events -- `MessageEvent`/`UnlockEvent` at their
-  banner spawns (the unlock is also GRANTED on the join peer -- it played the level too),
+  banner spawns (**the join peer is a GUEST: `EvUnlock` neither grants nor announces there
+  -- card 125490d9, see the guest bullet below**),
   the mid-level `Background` ops (`SetSpeed`/`Queue*`/belt slowdowns/`SetAlienBase2..6`, and
   since card ca4fd94f the whole-SCENE setters when a SCRIPT runs one mid-level; the wire opcode
   enum `NetBackgroundOp` is APPEND-ONLY; a scene setter run at Initialize is still not
@@ -1141,6 +1147,35 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   later reset restores the same baseline). Any future boss code calling these primitives
   replicates for free. `CrossFade` is deliberately NOT hooked (it belongs to the reset
   flow, which each side runs itself).
+- **THE JOIN PEER IS A GUEST -- `EvUnlock` does NOTHING there (card 125490d9).** No grant, no
+  `SaveThreaded`, no banner. The host still emits the beat and the joiner still DECODES it (see
+  below); it simply has no effect.
+  - **What it used to do, and why that stopped being right.** The handler granted the item plus
+    its pair-ups (`HarderDifficulties` -> `InsaneDifficulty`, `UnlockType.cheat` -> `Cheats`,
+    `UnlockType.challenge` -> `Challenges`) and then called `Unlockables.SaveThreaded()`. The
+    reasoning -- "the join peer played the level too" -- dates from card 11.3, when a session was
+    two people who had deliberately swapped a room code. The **public game browser** changed the
+    population: anyone can join a listed game and `Settings.AllowOnlineJoins` defaults **ON**, so
+    a stranger could write `HarderDifficulties` / `Level2` / `Level3` / the challenge levels /
+    `Cheats` / `Awardments` into your `Unlockables.xml`. **A joiner is NOT a couch player** -- it
+    is a separate machine with its own save file, which is the fact that makes this different
+    from local co-op.
+  - **The user's ruling, and it is a PRODUCT call, not a security one** (nothing here is a trust
+    boundary): joining a game online makes you a guest for that game, and your personal unlock
+    state is wholly unaffected. The banner went with the grant deliberately -- announcing an
+    unlock the joiner did not receive is worse than saying nothing.
+  - **The DECODE stays and must stay.** `NetSession`'s EvUnlock case is the only live caller of
+    `NetProtocol.TryDecodeUnlockEvent`, so dropping it would leave that codec's wire-enum bound
+    (and `ProbeWireEnums`' row for it) asserting about dead code, and a malformed frame would
+    stop being refused. `BeatsRx` is still counted: it means "beats received off the wire", not
+    "effects applied", and zeroing it would make a healthy session look like the host had gone
+    quiet.
+  - **No protocol change and no version bump** -- the host still sends `EvUnlock`, and an older
+    peer still applies it, so a mixed pairing degrades to the old generous behaviour on that
+    peer rather than desyncing.
+  - **Not affected:** `EvMessage` (ordinary script banners still replicate), and the joiner can
+    still PLAY a level it has not unlocked -- `MenuScene.NetLaunchMirror` never consults
+    `Unlockables`, so being a guest costs it nothing in the session it is actually in.
 - **Death/checkpoint reset + victory are host-authoritative broadcasts (card 11.3):**
   `LoseLife` no-ops on a client; the host broadcasts the branch it took (EvReset:
   respawn / reset / game over) and `GameScene.NetApplyReset` mirrors the exact state

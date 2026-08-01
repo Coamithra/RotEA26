@@ -104,6 +104,22 @@ and `down` x4 lands on **Exit**, not Online Co-op (measured, screenshot-confirme
 Awardments and Cheats are `Unlockables`-gated and simply are not drawn. Either pass `?unlockall`
 so the table holds, or screenshot the menu and count what is actually on it.
 
+**The MOUSE is drivable too, and needs BOTH halves.** `eval Press Mouse1 1` supplies only the
+button; the cursor comes from the real mouse, which under `eahl` is wherever SDL happens to report,
+so a click alone lands on nothing. `eval MouseAt <x> <y>` parks it in **design space** (800x600) --
+the same coordinates the menus record their hit boxes in, so a box read off a `[backtip]` line can
+be clicked directly. Then `eval MouseClear` (which reports what it released). The idiom:
+
+```
+eval MouseAt 93 552
+step 2
+eval Press Mouse1 1
+step 120
+```
+
+Worked example, including a negative control and what to assert on (`eaMenuCensus`, since a menu
+you return to prints no new `[backtip]` line): `menu_backtip.txt` section 2.
+
 **`Press <key> <n>` is an n-frame HOLD, not n taps.** `eval Press down 3` moves the menu ONCE.
 Every tap is its own `eval Press` with a `step` between — this cost a rehearsal run that never
 left the main menu, and would have been an invisible vacuous pass on a probe with no `expect`.

@@ -700,10 +700,17 @@ site now lives under:
     (800x600) point, the same coordinates `RecordEntryHit` and `BackTipHit.Record` store, so a
     probe can read a box off a `[backtip]` line and click it. Persistent like `eaHold` (a click
     spans a press tick and a release tick); `eaMouseAt()` / `eaMouseClear()` hands the cursor
-    back. `eval MouseAt <x> <y>` / `eval MouseClear` under `eahl`.
-    **`InputHandler` reads it via `DebugInput.Peek`, never `Consume`** -- the key loop does the
-    one real consume for Mouse1, and a scripted hold is a countdown, so consuming twice in a
-    tick would eat two ticks of it.
+    back. `eval MouseAt <x> <y>` / `eval MouseClear` under `eahl`. A half-given or non-numeric
+    position is REPORTED and refused on both sides rather than parking the cursor at NaN, where
+    every hit test would silently miss (`eaMouseAt(0)` produces exactly that).
+    **`InputHandler` reads it via `DebugInput.PeekScripted`, never `Consume`** -- the key loop
+    does the one real consume for Mouse1, and a scripted hold is a countdown, so consuming twice
+    in a tick would eat two ticks of it.
+    **`PeekScripted` deliberately excludes `touchHeld`, unlike `Consume`.** That array is the
+    on-screen FIRE button, so including it would let a touch player's held FIRE fire a synthetic
+    Esc whenever the untouched mouse position happened to sit in the back tip's box -- shipped
+    behaviour from a debug seam. Touch keeps its own BACK button and gains nothing here, the
+    same line the `MouseLatch` pointerType filter draws.
 - **Menus are mouse-selectable + clickable.** Each `DrawMenu` records the design-space box of every
   entry it draws via `MenuSub1.RecordEntryHit(index, centre, w, h)` (locked/undrawn entries
   skipped); `MenuSub1.HandleMouse()` (gated on the `normal` state) maps the cursor to hover-select

@@ -184,13 +184,13 @@ public class InputHandler : IInputHandlerService
 		// state at this point (the loop below is what updates it), so this is the same edge
 		// `Pressed(MyKeys.Mouse1)` will report. A level would fire on a press that began
 		// elsewhere -- see ConsumeClick.
-		// `DebugInput.Peek`, not `Consume`: the key loop below does the one real consume for
-		// Mouse1 (a scripted hold is a countdown, so consuming twice in a tick eats two ticks
-		// of it). Without this a scripted click reached `HandleMouse` -- which reads Mouse1
-		// from the loop -- but never the back tip, leaving the one surface that has no other
-		// automation route unreachable.
-		bool mouse1Down = mouse1Held || EvilAliensWeb.Compat.DebugInput.Peek((int)MyKeys.Mouse1);
-		bool mouse1Pressed = mouse1Down && !pressedAndIdle[(int)MyKeys.Mouse1];
+		// `PeekScripted`, not `Consume`: the key loop below does the one real consume for Mouse1
+		// (a scripted hold is a countdown, so consuming twice in a tick eats two ticks of it).
+		// Without it a scripted click reached `HandleMouse` -- which reads Mouse1 from the loop
+		// -- but never the back tip, leaving the one surface with no other automation route
+		// unreachable. It covers `eaPress` ONLY, not the touch overlay's FIRE button; see there.
+		bool mouse1DownOrScripted = mouse1Held || EvilAliensWeb.Compat.DebugInput.PeekScripted((int)MyKeys.Mouse1);
+		bool mouse1Pressed = mouse1DownOrScripted && !pressedAndIdle[(int)MyKeys.Mouse1];
 		bool backTipClicked = EvilAliensWeb.Compat.BackTipHit.ConsumeClick(mousepos, mouse1Pressed);
 		bool held = false;
 		for (int i = 0; i < keysToCheck.Length; i++)

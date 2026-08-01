@@ -111,6 +111,16 @@ namespace EvilAliensWeb.Compat
 		[JSInvokable("debugMouseAt")]
 		public static void MouseAt(double x, double y)
 		{
+			// A NaN would park the cursor nowhere and make every hit test silently miss -- the
+			// exact swallow-a-bad-value failure the file-wide flag convention exists to stop, and
+			// `eaMouseAt(0)` produces one all by itself (y is undefined -> NaN). Report and
+			// refuse, like Press does for an unknown key.
+			if (double.IsNaN(x) || double.IsNaN(y) || double.IsInfinity(x) || double.IsInfinity(y))
+			{
+				Console.WriteLine("[debug] eaMouseAt: ignoring non-finite position (" + x + "," + y
+					+ ") -- expected two design-space numbers; the cursor is unchanged");
+				return;
+			}
 			mouseOverride = true;
 			mouseOverrideX = (float)x;
 			mouseOverrideY = (float)y;
@@ -118,15 +128,14 @@ namespace EvilAliensWeb.Compat
 				+ " (design space; eaMouseClear releases the real mouse)");
 		}
 
-		// Hand the cursor back to the real mouse.
+		// Hand the cursor back to the real mouse. Prints unconditionally (the surrounding seams
+		// all do) so a probe can assert the release happened rather than reading an empty `ok`.
 		[JSInvokable("debugMouseClear")]
 		public static void MouseClear()
 		{
-			if (mouseOverride)
-			{
-				mouseOverride = false;
-				Console.WriteLine("[debug] eaMouseClear -- cursor back on the real mouse");
-			}
+			string had = mouseOverride ? (mouseOverrideX + "," + mouseOverrideY) : "nothing parked";
+			mouseOverride = false;
+			Console.WriteLine("[debug] eaMouseClear -- cursor back on the real mouse (was " + had + ")");
 		}
 
 		internal static bool TryGetMouseOverride(out float x, out float y)
@@ -136,18 +145,24 @@ namespace EvilAliensWeb.Compat
 			return mouseOverride;
 		}
 
-		// Non-destructive read of the same injection `Consume` drains. `Consume` DECREMENTS a
-		// scripted hold, so it must be called exactly once per tick per key -- InputHandler
-		// needs the Mouse1 state one step EARLIER than the key loop reaches it (Esc is polled
-		// before Mouse1, and the back tip folds into Esc), so it peeks there and lets the loop
-		// do the single real consume.
-		internal static bool Peek(int idx)
+		// Non-destructive read of a SCRIPTED hold. `Consume` DECREMENTS one, so it must be called
+		// exactly once per tick per key -- InputHandler needs the Mouse1 state one step EARLIER
+		// than the key loop reaches it (Esc is polled before Mouse1, and the back tip folds into
+		// Esc), so it peeks there and lets the loop do the single real consume.
+		//
+		// **Deliberately NOT `|| touchHeld[idx]`, unlike `Consume`.** `touchHeld[Mouse1]` is the
+		// on-screen FIRE button, so including it would let a touch player's held FIRE fire a
+		// synthetic Esc whenever the (stale, untouched) mouse position happened to sit in the
+		// back tip's box -- shipped behaviour, not a debug seam, and the touch overlay already
+		// has its own BACK button. Touch gets no new behaviour from the mouse work; the same
+		// rule the MouseLatch pointerType filter follows.
+		internal static bool PeekScripted(int idx)
 		{
 			if (idx < 0 || idx >= holdTicks.Length)
 			{
 				return false;
 			}
-			return holdTicks[idx] > 0 || touchHeld[idx];
+			return holdTicks[idx] > 0;
 		}
 
 		// JS bridge for QA/demo of the cinematic slow-motion effect (eaSlowmo in

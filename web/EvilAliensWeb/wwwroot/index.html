@@ -114,10 +114,20 @@
         // scripted eaPress('Mouse1') actually lands on something. Same coordinates the menus
         // record their hit boxes in. eaMouseAt() with no args releases the real mouse.
         window.eaMouseAt = (x, y) => {
-            try {
-                if (x === undefined) { DotNet.invokeMethod('EvilAliensWeb', 'debugMouseClear'); }
-                else { DotNet.invokeMethod('EvilAliensWeb', 'debugMouseAt', Number(x), Number(y)); }
+            if (x === undefined && y === undefined) {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugMouseClear'); }
+                catch (e) { console.warn('[debug] eaMouseClear failed (game not booted yet?): ' + e.message); }
+                return;
             }
+            // Reject a half-given or non-numeric position here rather than parking the cursor at
+            // NaN, where every hit test silently misses -- eaMouseAt(0) alone produces one.
+            var nx = Number(x), ny = Number(y);
+            if (!Number.isFinite(nx) || !Number.isFinite(ny)) {
+                console.warn('[debug] eaMouseAt(' + x + ', ' + y + '): need two design-space numbers'
+                    + ' (800x600), or no arguments to release the cursor -- ignored');
+                return;
+            }
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugMouseAt', nx, ny); }
             catch (e) { console.warn('[debug] eaMouseAt failed (game not booted yet?): ' + e.message); }
         };
         window.eaMouseClear = () => window.eaMouseAt();

@@ -745,6 +745,14 @@ internal static class Program
             new { Flag = "hologreen", Prop = "HoloGreen", Good = "0.375", RejectsNeg = false },
             new { Flag = "hologreenpulse", Prop = "HoloGreenPulse", Good = "0.375", RejectsNeg = false },
             new { Flag = "holostaticrate", Prop = "HoloStaticRate", Good = "0.375", RejectsNeg = false },
+            new { Flag = "ripple", Prop = "Ripple", Good = "0.375", RejectsNeg = false },
+            new { Flag = "rippleamp", Prop = "RippleAmp", Good = "0.375", RejectsNeg = false },
+            new { Flag = "rippleradius", Prop = "RippleRadius", Good = "0.375", RejectsNeg = true },
+            new { Flag = "rippleduration", Prop = "RippleDuration", Good = "0.375", RejectsNeg = true },
+            new { Flag = "ripplewidth", Prop = "RippleWidth", Good = "0.375", RejectsNeg = true },
+            new { Flag = "ripplefalloff", Prop = "RippleFalloff", Good = "0.375", RejectsNeg = true },
+            new { Flag = "ripplerim", Prop = "RippleRim", Good = "0.375", RejectsNeg = false },
+            new { Flag = "ripplephase", Prop = "RipplePhase", Good = "0.375", RejectsNeg = false },
             new { Flag = "blastactive", Prop = "BlastActiveAlpha", Good = "0.375", RejectsNeg = false },
             new { Flag = "blasthit", Prop = "BlastHitFactor", Good = "0.375", RejectsNeg = true },
             new { Flag = "reticlesize", Prop = "ReticleSize", Good = "0.375", RejectsNeg = true },
@@ -992,6 +1000,20 @@ internal static class Program
             + " y=" + flags.GetProperty("HarnessY", anyStatic).GetValue(null) + " said: " + FirstLine(outPos));
         flags.GetProperty("HarnessX", anyStatic).SetValue(null, null);
         flags.GetProperty("HarnessY", anyStatic).SetValue(null, null);
+
+        // ?ripplecenter= is the OPPOSITE call on the same shape (card 5f38ed35): it is ONE
+        // Vector2, so half of a pair is not a usable setting -- taking the good axis would park
+        // the screenshot ring somewhere nobody asked for. Both axes or neither, and the earlier
+        // valid value must survive the refusal.
+        run("?ripplecenter=123,456");
+        string outRc = run("?ripplecenter=400,3O0");
+        object rcHeld = flags.GetProperty("RippleCenter", anyStatic).GetValue(null);
+        Check("?ripplecenter= refuses a HALF-valid pair and keeps the whole earlier value",
+            rcHeld != null && rcHeld.ToString().Contains("123") && rcHeld.ToString().Contains("456")
+            && outRc.Contains("unknown ?ripplecenter= value '400,3O0'")
+            && outRc.Contains("staying on 123,456"),
+            "center=" + rcHeld + " said: " + FirstLine(outRc));
+        flags.GetProperty("RippleCenter", anyStatic).SetValue(null, null);
 
         // A bare ?level used to dereference a null `val`: the NRE took the headless host down and,
         // in the browser, was caught one level up as a single "flag read failed" line that

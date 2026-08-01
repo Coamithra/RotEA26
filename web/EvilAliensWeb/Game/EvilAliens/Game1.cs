@@ -176,6 +176,31 @@ public class Game1 : Game
 
 	private EffectParameter hsTime;
 
+	// Bomb-detonation ripple (Compat/BombRipple + bombripple.fx, card 5f38ed35): a
+	// screen-space refraction ring radiating from where a bomb went off. Applied in
+	// ApplyBombRipple right after ApplyHoloSim, ping-ponging through this RT for the same
+	// reason (a SpriteBatch effect pass can't read and write sceneTarget at once). Lazily
+	// created on first use; recreated on resize (same lifecycle as holoRT).
+	private RenderTarget2D rippleRT;
+
+	private Effect bombRipple;
+
+	// Cached bombripple.fx params. The four rings are separate uniforms rather than an
+	// array -- see the shader's header for why.
+	private EffectParameter brRing0;
+
+	private EffectParameter brRing1;
+
+	private EffectParameter brRing2;
+
+	private EffectParameter brRing3;
+
+	private EffectParameter brWidth;
+
+	private EffectParameter brRim;
+
+	private EffectParameter brAspect;
+
 	// Incremental menu warm: the heavy menu PNG decodes that used to block LoadContent
 	// are queued (QueueMenuWarm) and drained one-per-Update-tick during the splash /
 	// Press-Start idle time (PumpWarmQueue), with a synchronous drain (DrainWarmQueue)
@@ -559,6 +584,26 @@ public class Game1 : Game
 		{
 			System.Console.WriteLine("[holosim] effect load failed: " + ex);
 			holoSim = null;
+		}
+		// Bomb ripple; null on failure = the ripple silently never draws, game unaffected.
+		// That silence is exactly why tools/headless/probes/bomb_ripple.txt asserts the
+		// [ripple] line below -- a missing .mgfxo would otherwise announce nothing.
+		try
+		{
+			bombRipple = base.Content.Load<Effect>("Content/GFX/Effects/bombripple");
+			brRing0 = bombRipple.Parameters["Ring0"];
+			brRing1 = bombRipple.Parameters["Ring1"];
+			brRing2 = bombRipple.Parameters["Ring2"];
+			brRing3 = bombRipple.Parameters["Ring3"];
+			brWidth = bombRipple.Parameters["RingWidth"];
+			brRim = bombRipple.Parameters["RimBoost"];
+			brAspect = bombRipple.Parameters["Aspect"];
+			System.Console.WriteLine("[ripple] effect loaded");
+		}
+		catch (Exception ex)
+		{
+			System.Console.WriteLine("[ripple] effect load failed: " + ex);
+			bombRipple = null;
 		}
 		QueueMenuWarm();
 		QueueIdleWarm();
@@ -1321,6 +1366,11 @@ public class Game1 : Game
 		// Tutorial holo-sim filter: same seam, runs after the trail so the ghosts get
 		// scanlined too. Leaves the render target on sceneTarget like the trail does.
 		ApplyHoloSim(gameTime);
+
+		// Bomb-detonation ripple: last of the three, so the wavefront refracts everything
+		// the frame ended up with (ghosts and scanlines included). Leaves the render target
+		// on sceneTarget like the other two.
+		ApplyBombRipple(gameTime);
 		FrameProfiler.End(FrameSection.DrawPost, profPost);
 
 		// FPS HUD "present" row: the letterboxed gamma blit. Scales with WINDOW size, not
@@ -1535,6 +1585,61 @@ public class Game1 : Game
 		base.GraphicsDevice.SetRenderTarget(sceneTarget);
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque);
 		spriteBatch.Draw((Texture2D)(object)holoRT, full, Color.White);
+		spriteBatch.End();
+	}
+
+	// Bomb-detonation ripple (Compat/BombRipple + bombripple.fx, card 5f38ed35): run
+	// sceneTarget through the refraction shader into rippleRT and copy it back -- the same
+	// ping-pong ApplyHoloSim needs, for the same reason. Two opaque full-frame blits, and
+	// only while a ring is actually live: every other frame (i.e. nearly all of them) skips
+	// at the first branch. Rings advance on RAW Draw time, so the wavefront keeps travelling
+	// through hit-stop like the other Draw-time cosmetics.
+	private void ApplyBombRipple(GameTime gameTime)
+	{
+		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+		if (dt <= 0f)
+		{
+			dt = 1f / 60f;
+		}
+		BombRipple.Update(dt);
+		if (!BombRipple.Visible || bombRipple == null)
+		{
+			return;
+		}
+		if (rippleRT == null || ((GraphicsResource)rippleRT).IsDisposed
+			|| ((Texture2D)rippleRT).Width != RenderScale.Width
+			|| ((Texture2D)rippleRT).Height != RenderScale.Height)
+		{
+			if (rippleRT != null && !((GraphicsResource)rippleRT).IsDisposed)
+			{
+				((GraphicsResource)rippleRT).Dispose();
+			}
+			PresentationParameters rpp = base.GraphicsDevice.PresentationParameters;
+			// DiscardContents like holoRT: fully overwritten by an opaque full-rect draw
+			// every time it's bound.
+			rippleRT = new RenderTarget2D(base.GraphicsDevice, RenderScale.Width, RenderScale.Height, false,
+				rpp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.DiscardContents);
+		}
+		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);
+		Vector4[] packed = BombRipple.PackedRings();
+		brRing0?.SetValue(packed[0]);
+		brRing1?.SetValue(packed[1]);
+		brRing2?.SetValue(packed[2]);
+		brRing3?.SetValue(packed[3]);
+		brWidth?.SetValue(BombRipple.Width);
+		brRim?.SetValue(BombRipple.Rim);
+		// The shader measures aspect-corrected distance so the wavefront is a circle rather
+		// than an ellipse; the target is the 4:3 letterbox, so this is ~1.333.
+		brAspect?.SetValue(RenderScale.Height > 0
+			? (float)RenderScale.Width / RenderScale.Height
+			: 1f);
+		base.GraphicsDevice.SetRenderTarget(rippleRT);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, bombRipple);
+		spriteBatch.Draw((Texture2D)(object)sceneTarget, full, Color.White);
+		spriteBatch.End();
+		base.GraphicsDevice.SetRenderTarget(sceneTarget);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque);
+		spriteBatch.Draw((Texture2D)(object)rippleRT, full, Color.White);
 		spriteBatch.End();
 	}
 

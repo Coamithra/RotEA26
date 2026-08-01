@@ -264,6 +264,17 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   impossible to probe. **Not the off-switch of `?nodemo`/`?noattract`** -- those disable attract
   entirely; this only pins which one the roll picks. Bad value => reported + the random roll.
   Capture ONE demo per process (the content manager is shared, so a second demo is warm).
+- **Bomb ripple** (card 5f38ed35): a screen-space refraction ring radiating from every bomb
+  detonation (`Compat/BombRipple.cs` + `tools/shaders/src/bombripple.fx`, applied in
+  `Game1.ApplyBombRipple` on the slowmo-trail/holo-sim post seam). **`?ripplephase=<0..1>` parks
+  one ring at a chosen point in its life and holds it there** -- the scrub rig, since a timed
+  screenshot of a 0.75 s travelling wave proves nothing; pair with `?ripplecenter=x,y` (design
+  coords) to place it over something with contrast, e.g.
+  `?level=Level2&invuln&ripplecenter=400,430&ripplephase=0.25`. Tuning: `?ripple=` (master, 0 =
+  off) `?rippleamp= ?rippleradius= ?rippleduration= ?ripplewidth= ?ripplefalloff= ?ripplerim=`,
+  plus `?ripplemini` to let the asploding-bullet minis ripple too (off by default). Live panel
+  `eaRipple` on `?rippletune`; console `eaRipple.fire(x,y,power)` / `.park(phase)` / `.state()`
+  (`eval RippleFire` / `RipplePark` / `Ripple` under `eahl`). Details: web CLAUDE.md.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

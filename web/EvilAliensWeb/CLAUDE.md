@@ -422,13 +422,17 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   an orange readout prints the bake-ready query string. Existing panels: `eaLazer` (`?lazershot`),
   `eaHue` (`?harness=battleskull`), `eaWalls` (`?wallsonly`/`?walltune`), `eaSpider`
   (`?harness=spiderjump`/`?level=Level2&spiders`/`?spidertune`), `eaHolo`
-  (`?level=Tutorial`/`ClassicAliens`/`?holotune`), `eaConnector`
+  (`?level=Tutorial`/`ClassicAliens`/`?holotune`), `eaRipple` (`?rippletune`/`?ripplephase=`),
+  `eaConnector`
   (`?level=TeamChallenge`/`?harness=connector`/`?connectortune`), `eaWcTune` (`?wctune`),
   `eaTexViewer` (`?texviewer`), `eaNetSim` (`?netsim` on a `?net=` boot, or `eaNetSim.show()`
   from the console). GOTCHA: range inputs need `autocomplete='off'` or Chrome's form restoration
   re-seeds them post-load and desyncs from the defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
-  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`, `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
+  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`,
+  `eaRipple.fire(x,y,power)`/`.park(phase)`/`.state()` (throw a bomb ripple on demand, park one
+  at a phase for a screenshot, read the knobs -- a real bomb needs a pickup and a live ship),
+  `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
@@ -875,6 +879,48 @@ site now lives under:
   (`WaitForPickupEvent`, timeout ceiling so a passive player still progresses — a full unattended
   run finishes ~2min). Layout rule: two `TutorialMessage` banners share one spot, so overlap is
   only ever text-with-ACTION — `LinkWith` each message to its gate.
+
+- **Bomb ripple (`Compat/BombRipple.cs` + `tools/shaders/src/bombripple.fx`, card 5f38ed35).**
+  A stone-in-water screen-space refraction ring radiating from every bomb detonation, applied in
+  `Game1.ApplyBombRipple` immediately after `ApplyHoloSim` (same ping-pong through a private
+  `rippleRT`, `BlendState.Opaque` both blits) so the wavefront refracts the finished frame,
+  ghosts and scanlines included.
+  - **Fired from `Blast.Initialize`, NOT from `PlayerShip.doBlast`** -- both the local bomb and a
+    remote peer's (`PlayerShip.NetDoBlast`) go Setup -> `Add` -> `Initialize`, so the puppet
+    ripples too with zero net plumbing. It is Draw-time only: no gameplay state, no new traffic,
+    co-op determinism and the build-hash compat key untouched.
+  - **Four slots** (a fifth ring evicts the oldest), each a separate `float4` uniform rather than
+    a `float4[4]` array -- a plain uniform is the form MojoShader -> BlazorGL GLSL is guaranteed
+    to handle. Distances are **aspect-corrected** (`Aspect` = target W/H) so the front is a circle
+    on the 4:3 target; radius and width are therefore in fractions of screen HEIGHT. The
+    wavefront is one sine cycle under a Gaussian envelope, so the frame is pushed out ahead of
+    the crest and pulled in behind it. Amplitude decays `(1-t)^Falloff` on the C# side.
+  - **Zero cost when no bomb is out** -- `BombRipple.Visible` is false and `Game1` skips the pass
+    at the first branch, exactly like `HoloSim`. Rings advance on RAW Draw time, so the wave
+    keeps travelling through hit-stop.
+  - **Known property, not a bug: as a post pass it distorts the HUD/score where the ring reaches
+    them.** The radius is bounded and the HUD sits in the corners; `?rippleradius=` limits reach.
+    A pre-HUD seam would need a new hook inside `DrawInner` and is deliberately out of scope.
+  - Baked defaults (`BombRipple.Default*`): amplitude 0.018, radius 0.55, duration 0.75 s, width
+    0.055, falloff 1.6, rim 0.10; amplitude/radius scale mildly with the bomb's powerup level.
+    Minis (asploding bullets) are OFF by default behind `?ripplemini` -- a dozen at once strobes.
+  - **Verify with `?ripplephase=<0..1>`** (+ `?ripplecenter=x,y`), which parks one ring and stops
+    it advancing; the effect is time-varying, so a timed live screenshot proves nothing.
+    **The honest A/B is IN ONE PROCESS** -- `eahl --repl`, `eval RipplePark <p>` then `shot`
+    between phases with no `step`: two separate boots of a live level do NOT land on the same
+    background scroll phase, so a cross-boot pixel diff reads as a full-frame change and tells
+    you nothing (this cost a false alarm). Measured that way, phase 0.3 changes pixels in a
+    61-138 px band about the centre and phase 0.6 in a 168-243 px band -- centres 99 and 198 px,
+    i.e. exactly `t * 0.55 * 600`.
+  - **Judge it over CONTRAST.** Refraction of a flat gradient changes almost nothing: the same
+    ring reads max delta 8/255 over the Mars sky and 94/255 once it reaches the rocks. A shot
+    that "shows no ripple" over open sky is the physics, not a broken pass.
+  - Flags: `?ripple=` (master, 0 = off) `?rippleamp= ?rippleradius= ?rippleduration=
+    ?ripplewidth= ?ripplefalloff= ?ripplerim= ?ripplemini ?ripplephase= ?ripplecenter=
+    ?rippletune`. All out of `DebugFlags.Active` (pure render/feel). Live panel `eaRipple`;
+    console `eaRipple.fire()` / `.park()` / `.state()`. Pinned by
+    `tools/headless/probes/bomb_ripple.txt` (a failed `.mgfxo` load is SILENT by construction --
+    `Game1.LoadContent` swallows it -- so the probe is the only thing that would ever say so).
 
 ## Sprite harness (details)
 

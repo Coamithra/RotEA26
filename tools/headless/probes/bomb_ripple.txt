@@ -1,0 +1,43 @@
+# PROBE: a bomb detonation still loads bombripple.fx and still fires a ripple ring.
+#
+# PINS: the bombripple.mgfxo asset + Blast.Initialize's BombRipple.Fire call + the
+# Compat/BombRipple lifetime (card 5f38ed35).
+#
+# FAILURE MEANS one of three silent breakages, in order of likelihood:
+#   * `[ripple] effect load failed` (or no `[ripple]` line at all) -- the shader blob is
+#     missing, stale or unreadable. Game1.LoadContent SWALLOWS that by design, so the ripple
+#     just silently never draws again; nothing else in the game says a word. Re-run
+#     `python tools/shaders/build_shaders.py`.
+#   * `visible=False` at the first check -- Blast.Initialize no longer calls BombRipple.Fire,
+#     so a bomb detonates with no ring. Also silent: nothing throws, the blast still draws.
+#   * `visible=True` at the SECOND check -- a ring is no longer expiring (BombRipple.Update
+#     stopped advancing, or Duration was lost), which would leave a permanent frozen
+#     distortion parked over the game.
+#
+# ?harness=blast is the cheapest real detonation available: the harness registry Setup()s and
+# Add()s a genuine non-mini Blast at boot, so this drives the SHIPPED Fire call site rather
+# than the eaRipple.fire test seam -- a probe on that seam would pass with the Blast hook
+# deleted, which is the regression most worth catching.
+#
+# NOT AN APPEARANCE CHECK: this asserts the ring EXISTS and expires, nothing about how it
+# looks. The look is a taste call and is judged from the ?ripplephase= contact sheet.
+#
+# eahl: --flags "?harness=blast"
+
+# Deliberately NOT settled 150 frames first: the ring lives 0.75 s (~45 frames), so a settled
+# boot would read visible=False for the honest reason and the probe would be asserting the
+# wrong thing. The harness draws no white-fade concern here -- nothing is screenshotted.
+step 5
+eval Ripple
+
+expect \[ripple\] effect loaded
+expect \[ripple\] visible=True .* duration=0\.75
+expect-not \[ripple\] effect load failed
+
+# Past the ring's life: it must be gone. Fresh window so the True above cannot satisfy this.
+mark
+step 90
+eval Ripple
+expect \[ripple\] visible=False
+expect-not \[ripple\] visible=True
+quit

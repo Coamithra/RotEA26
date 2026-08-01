@@ -60,6 +60,7 @@ namespace EvilAliensWeb.Compat.Net
         public bool DebugActive => inner.DebugActive;
 
         public bool NetJip => inner.NetJip;
+        public bool NetAllowDebug => inner.NetAllowDebug;
 
         public bool NetLog => inner.NetLog;
 

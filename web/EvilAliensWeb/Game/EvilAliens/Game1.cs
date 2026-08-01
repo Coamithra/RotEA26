@@ -295,6 +295,17 @@ public class Game1 : Game
 
 	protected override void Initialize()
 	{
+		// ?mute: the two audio subsystems share no bus, so silencing takes both switches.
+		// Here rather than in DebugFlags.Parse (which runs before the game exists, so the
+		// audio device is not up) and rather than SoundManager's ctor (which runs before the
+		// content service is registered). Applied once at boot; nothing re-reads the flag,
+		// so an unmuted build is byte-identical.
+		if (DebugFlags.Mute)
+		{
+			Microsoft.Xna.Framework.Audio.SoundEffect.MasterVolume = 0f;   // SFX + speech
+			MusicInterop.SetMute(true);                                    // WebAudio music bus
+			Console.WriteLine("[debug] ?mute is on -- SFX, speech and music are all silenced for this boot.");
+		}
 		((Collection<IGameComponent>)(object)base.Components).Add((IGameComponent)(object)spriteBatchWrapper);
 		startScreen = new StartScreen((Game)(object)this);
 		startScreen.OnFinished += startScreen_OnFinished;

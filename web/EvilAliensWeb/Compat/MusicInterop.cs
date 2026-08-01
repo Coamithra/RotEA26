@@ -46,6 +46,15 @@ namespace EvilAliensWeb.Compat
             _js?.InvokeVoid("eaMusic.setMuffle", on);
         }
 
+        // ?mute (DebugFlags.Mute): silence the music bus. Only half the job -- SFX and speech
+        // are on the native KNI SoundEffect path and never touch this bridge, so Game1 kills
+        // those with SoundEffect.MasterVolume. Gain-only on the JS side, so the track keeps
+        // playing underneath and Play/SetRate/SetPauseMuffle are all unaffected.
+        public static void SetMute(bool on)
+        {
+            _js?.InvokeVoid("eaMusic.setMute", on);
+        }
+
         // `rate` is the game's XACT "Pitch" variable (~50 = normal). The authored RPC
         // preset (alienssfx.xgs: one curve, var "Pitch" -> RpcParameter Pitch) maps
         // Pitch 0..100 linearly to -1200..+1200 cents, so the faithful playback rate is

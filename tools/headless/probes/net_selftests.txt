@@ -72,7 +72,7 @@ expect \[netwire\] 69 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
-expect \[nethost\] 32 passed, 0 failed
+expect \[nethost\] 33 passed, 0 failed
 # the INetEntity seam (card 25ad0659 step 2c-ii) -- also the refactor's own guard rather than
 # pre-refactor state. It covers the two things the COMPILER cannot: an explicit forward wired to
 # the wrong member of the same type (two floats swap silently), and a subtype that stops answering

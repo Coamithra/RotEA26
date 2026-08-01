@@ -145,11 +145,13 @@ namespace EvilAliensWeb.Compat.Net
             // below is the leg that is non-vacuous unconditionally.
             check("DebugActive == DebugFlags.Active", host.DebugActive == DebugFlags.Active);
             check("NetJip == DebugFlags.NetJip", host.NetJip == DebugFlags.NetJip);
+            check("NetAllowDebug == DebugFlags.NetAllowDebug", host.NetAllowDebug == DebugFlags.NetAllowDebug);
             check("NetLog == DebugFlags.NetLog", host.NetLog == DebugFlags.NetLog);
             check("NetDropGrant == DebugFlags.NetDropGrant", host.NetDropGrant == DebugFlags.NetDropGrant);
             check("NetLocal == DebugFlags.NetLocal", host.NetLocal == DebugFlags.NetLocal);
             sb.Append("  flags in force: active=").Append(host.DebugActive)
                 .Append(" jip=").Append(host.NetJip)
+                .Append(" allowdebug=").Append(host.NetAllowDebug)
                 .Append(" log=").Append(host.NetLog)
                 .Append(" dropgrant=").Append(host.NetDropGrant)
                 .Append(" local=").Append(host.NetLocal).Append('\n');

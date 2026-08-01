@@ -802,6 +802,7 @@ internal static class Program
             new { Flag = "netlocal", Prop = "NetLocal", Good = "9", RejectsNeg = false },
             new { Flag = "netlag", Prop = "NetLagMs", Good = "0.375", RejectsNeg = true },
             new { Flag = "netloss", Prop = "NetLossPct", Good = "0.375", RejectsNeg = true },
+            new { Flag = "netjitter", Prop = "NetJitterMs", Good = "0.375", RejectsNeg = true },
             new { Flag = "castbrainscale", Prop = "CastBrainScale", Good = "0.375", RejectsNeg = true },
             new { Flag = "castbrainfps", Prop = "CastBrainFps", Good = "0.375", RejectsNeg = true },
             new { Flag = "spiderloop", Prop = "SpiderLoopSeconds", Good = "0.375", RejectsNeg = true },

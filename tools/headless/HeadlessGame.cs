@@ -68,9 +68,9 @@ namespace EvilAliensWeb.Headless
                 _capturedWidth = pp.BackBufferWidth;
                 _capturedHeight = pp.BackBufferHeight;
                 _captured = new Color[_capturedWidth * _capturedHeight];
-                // Game1.Draw ends having blitted sceneTarget to the (null) back buffer
-                // to the back buffer, so this is the finished, letterboxed frame --
-                // byte-for-byte what the browser would show.
+                // Game1.Draw ends having blitted sceneTarget to the (null) back buffer,
+                // so this is the finished, letterboxed frame -- byte-for-byte what the
+                // browser would show.
                 GraphicsDevice.GetBackBufferData(_captured);
                 _captureRequested = false;
             }

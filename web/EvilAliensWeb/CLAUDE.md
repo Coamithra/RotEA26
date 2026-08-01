@@ -15,8 +15,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   pinned one). `Game1.Draw` renders the whole frame into one offscreen `sceneTarget` sized to the
   window's 4:3 letterbox (`Compat/RenderScale`, capped 1440px tall) and blits it scaled+letterboxed;
   the game's `SetRenderTarget(0, null)` calls redirect there via
-  `Xna3GraphicsDeviceCompat.BaseRenderTarget`. 800x600-design
-  draws scale up via `RenderScale.Matrix` at the `SpriteBatchWrapper` Begin choke; bloom + offscreen
+  `Xna3GraphicsDeviceCompat.BaseRenderTarget`. 800x600-design draws scale up via
+  `RenderScale.Matrix` at the `SpriteBatchWrapper` Begin choke; bloom + offscreen
   targets are `RenderScale`-sized and recreated on resize. Hi-res art (menu title, splash) draws
   straight into this one scene — no separate overlay pass. A render-sized offscreen target
   composited back uses `SpriteBatchWrapper.DrawPresent` (identity); full-screen overlays use
@@ -88,8 +88,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `interpolate.fx`'s frame delta, per-vertex UVs in `Wall.DrawTowerShafts3D`, a shader feather
   window) → **actual padded** size. Whole-texture draws MUST clamp their source to `LogicalBounds()`
   (the wrapper's `Draw` overloads do — else the transparent pad reads BLACK under Opaque blend, e.g.
-  the menu frame lines). RenderTargets are never padded. A content-extent
-  shader (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
+  the menu frame lines). RenderTargets are never padded. A content-extent shader
+  (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
   `[0,1]` frame math in `tc/ContentScale`; the `SpriteBatchWrapper` sets it centrally in
   `BeginCustom`/`DrawCustom` (the render-space custom-effect batch that `ProceduralStarfield`/
   `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`.
@@ -672,8 +672,7 @@ site now lives under:
   skipped); `MenuSub1.HandleMouse()` (gated on the `normal` state) maps the cursor to hover-select
   and `MyKeys.Mouse1` to select+invoke, either resetting the attract idle timeout. **A new
   `DrawMenu` override must call `RecordEntryHit` per entry or its menu won't be clickable.** The
-  level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: the
-  `ScreenResizeMenu` slider and `PlayerSettingsMenu`.
+  level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: `PlayerSettingsMenu`.
 - **A mouse click SHORTER than one tick is latched, not dropped** (card 724f2abc,
   `Compat/MouseLatch.cs`). `InputHandler.Update` polls `Mouse.GetState()` once per tick and
   edge-detects, so a mousedown/mouseup pair landing entirely BETWEEN two polls was never seen and

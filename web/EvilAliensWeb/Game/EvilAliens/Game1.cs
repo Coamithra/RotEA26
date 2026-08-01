@@ -1325,8 +1325,9 @@ public class Game1 : Game
 		// blitted straight to the window here. The blit is 1:1 when the render size equals
 		// the letterbox (uncapped); a bilinear upscale when RenderScale's height cap kicks in.
 		// Card a35c5f31 removed the gamma pixel shader that used to run on this blit -- it was
-		// the 2008 Xbox TV-calibration control (Settings.Gamma, default 1.0 => pow(c, 1.0), a
-		// measured byte-exact no-op), obsolete on a colour-managed browser. The port renders
+		// the 2008 Xbox TV-calibration control -- pow(abs(c.rgb), 1.0 / Settings.Gamma), whose
+		// default Gamma of 1.0 made it a measured byte-exact no-op -- obsolete on a
+		// colour-managed browser. The port renders
 		// entirely in sRGB space, as the original did; that is deliberate, not a defect.
 		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, null);
 		if (Juice.ShakeActive)

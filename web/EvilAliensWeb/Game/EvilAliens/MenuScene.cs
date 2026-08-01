@@ -353,7 +353,7 @@ internal class MenuScene : Scene
 		// resolution is browser-driven since the Stage-10 unified presenter (RenderScale), so
 		// the option no longer did anything (Settings.Scale is set once in Game1.LoadContent
 		// for narrow displays and never read by any draw path). Settings.Scale itself is left
-		// in place (XML-serialized, appended fields must not be removed) — just unreachable
+		// in place (it was already XML-serialized, and leaving it cost nothing) — just unreachable
 		// from the menu now. Trello card 993db245.
 		// "Gamma Correction" (the old XBLIG TV-calibration screen, GammaMenu + Settings.Gamma)
 		// removed -- it existed because a 2008 Xbox 360 could not know the attached TV's black

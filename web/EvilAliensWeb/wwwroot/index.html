@@ -1648,7 +1648,16 @@
                     manifestPromise = fetch("Content/music/music.json")
                         .then(function (r) { return r.json(); })
                         .then(function (m) { manifest = m; return m; })
-                        .catch(function () { manifest = {}; return {}; });
+                        .catch(function (e)
+                        {
+                            // The promise is CACHED, so this resolves {} once and every cue for
+                            // the rest of the session then takes the "no entry" branch below --
+                            // a third silent failure wearing the second one's message. Say which
+                            // it really is (card 4a3b22b7).
+                            console.warn("[music] music.json could not be loaded ("
+                                + (e && e.message ? e.message : e) + ") -- no cue can resolve");
+                            manifest = {}; return {};
+                        });
                 return manifestPromise;
             }
 
@@ -1709,7 +1718,10 @@
                     }
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
-                        if (!resp.ok) throw 0;
+                        // `throw 0` here until card 4a3b22b7: the catch below renders it as the
+                        // literal "0", so a 404 on a track reported no status at all -- which is
+                        // the very thing the catch was added to name.
+                        if (!resp.ok) throw new Error("HTTP " + resp.status);
                         return resp.arrayBuffer();
                     }).then(function (ab)
                     {
@@ -1740,8 +1752,12 @@
                     }).catch(function (e)
                     {
                         // Music is non-fatal and stays non-fatal -- but a failed fetch/decode is
-                        // reported now (see the manifest branch above). `current` is untouched on
-                        // this path, so the OLD track simply keeps playing forever.
+                        // reported now (see the manifest branch above). For the fetch/decode
+                        // failures this exists for, `current` has not been touched yet, so the OLD
+                        // track simply keeps playing forever; a throw AFTER the swap above would
+                        // land here with `current` already null, i.e. silence rather than a stale
+                        // track. The wording covers the common case and the message says which
+                        // cue, so either way it is attributable.
                         console.warn("[music] could not load cue '" + cue + "' (" + (info && info.file) + "): "
                             + (e && e.message ? e.message : e) + " -- previous track keeps playing");
                     });

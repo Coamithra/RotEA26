@@ -206,9 +206,9 @@ internal class GameEventList
 
 	// The index every checkpoint sits at, in script order -- what the oracle checks the level's
 	// own section map against.
-	internal System.Collections.Generic.List<int> DebugCheckpointIndices()
+	internal List<int> DebugCheckpointIndices()
 	{
-		System.Collections.Generic.List<int> result = new System.Collections.Generic.List<int>();
+		List<int> result = new List<int>();
 		for (int i = 0; i < eventList.Count; i++)
 		{
 			if (checkpoints.Contains(eventList[i]))

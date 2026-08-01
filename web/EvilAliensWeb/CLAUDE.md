@@ -1860,7 +1860,10 @@ work on files under `Compat/Net/`. Design doc: `plans/stage11-online-coop.md`.
   checkpoints apart. **Verify as DATA with console `eaBossTrain()`** (`Compat/BossTrainTest.cs`,
   `eval BossTrain` under `eahl`): it checks every checkpoint's declared section against a forward
   walk of the REAL script, then drives the REAL `RevertToCheckpoint` from the alien-base window and
-  reads the section + track back, with the pre-card behaviour as the negative control. **It is
+  reads the section + track back, with the pre-card behaviour as the negative control. A checkpoint
+  on a DIFFICULTY-CONDITIONAL event is the one gap: progressList tests the difficulty range before
+  it tests `checkpoints`, so such a checkpoint does not re-assert on the tiers that skip it (today
+  harmless -- see the caveat in InsaneBossI.cs). **It is
   DESTRUCTIVE** (it moves the script position and the section) -- throwaway `?level=InsaneBossI`
   boot only. A playthrough cannot cover this: eight full AI soaks, up to 25 deaths each, hit
   `revert 33 -> 24` and never once died one index later.

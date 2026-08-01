@@ -31,15 +31,31 @@ namespace EvilAliensWeb.Compat;
 // -- a green tick means nothing unless the same input is shown to break what came before.
 internal static class BossTrainTest
 {
-	// The death position the card is about: one index past the alien-base transition at 33, i.e.
-	// the first tick on which a player is IN the alien base and can die there. Derived below from
-	// the live script rather than hard-coded, so the suite follows a script edit.
+	// The death position the card is about: the first script position at which a player is IN the
+	// alien base and can die there. progressList leaves `pos` one past the last event it activated,
+	// and the transition's own OnFinished advances the list before the handler runs, so the tick
+	// after the alien-base beat sits at index+2.
+	//
+	// It is only MEANINGFUL while it lands strictly before the next checkpoint -- that gap IS the
+	// bug's window. A script edit that moves a checkpoint to index+1 or index+2 closes the window,
+	// and the leg would then revert to the AlienBase checkpoint, re-assert AlienBase and report a
+	// FAIL that is a rig artifact rather than a regression. So the caller checks the window and
+	// says which it is.
 	private static int DeathPosJustAfter(int sectionChangeIndex)
 	{
-		// progressList leaves `pos` one past the last event it activated, and the transition's own
-		// OnFinished advances the list before the handler runs -- so the tick after the alien-base
-		// beat sits at index+2.
 		return sectionChangeIndex + 2;
+	}
+
+	private static int NextCheckpointAfter(List<int> checkpointIndices, int index)
+	{
+		foreach (int c in checkpointIndices)
+		{
+			if (c > index)
+			{
+				return c;
+			}
+		}
+		return int.MaxValue;
 	}
 
 	internal static string Run()
@@ -50,8 +66,8 @@ internal static class BossTrainTest
 			return "[bosstrain] no InsaneBossI scene is live -- boot ?level=InsaneBossI first.";
 		}
 		GameEventList list = level.DebugEventList;
-		Dictionary<int, InsaneBossI.Section> checkpoints = level.DebugCheckpointSections;
-		Dictionary<int, InsaneBossI.Section> changes = level.DebugSectionChanges;
+		IReadOnlyDictionary<int, InsaneBossI.Section> checkpoints = level.DebugCheckpointSections;
+		IReadOnlyDictionary<int, InsaneBossI.Section> changes = level.DebugSectionChanges;
 		int fails = 0;
 
 		sb.Append("[bosstrain] script events=").Append(list.BenchCount)
@@ -69,16 +85,27 @@ internal static class BossTrainTest
 			{
 				walked = into;
 			}
+			bool isCheckpoint = checkpointIndices.Contains(i);
 			if (!checkpoints.TryGetValue(i, out var declared))
 			{
 				// A checkpoint with no declared section would silently keep whatever section the
 				// death left behind -- exactly the pre-card behaviour, for that one checkpoint.
-				if (checkpointIndices.Contains(i))
+				if (isCheckpoint)
 				{
 					sb.Append("  FAIL checkpoint ").Append(i)
 						.Append(" declares no section (add a CheckPointSection beside its SetLastEventAsCheckPoint)\n");
 					fails++;
 				}
+				continue;
+			}
+			// The other direction: a declaration whose index is NOT a checkpoint means a
+			// CheckPointSection call drifted away from its SetLastEventAsCheckPoint, so a real
+			// checkpoint somewhere is now undeclared and this one re-asserts nothing.
+			if (!isCheckpoint)
+			{
+				sb.Append("  FAIL index ").Append(i).Append(" declares ").Append(declared)
+					.Append(" but is not a checkpoint -- a CheckPointSection call has drifted off its own event\n");
+				fails++;
 				continue;
 			}
 			bool ok = declared == walked;
@@ -106,6 +133,19 @@ internal static class BossTrainTest
 			return Verdict(sb, fails + 1);
 		}
 		int deathPos = DeathPosJustAfter(alienBaseAt);
+		int nextCheckpoint = NextCheckpointAfter(checkpointIndices, alienBaseAt);
+		if (deathPos >= nextCheckpoint)
+		{
+			sb.Append("  FAIL the alien-base window has CLOSED: the transition is at ").Append(alienBaseAt)
+				.Append(" and the next checkpoint is ").Append(nextCheckpoint)
+				.Append(", so a death there no longer rewinds past the transition. The bug is gone by ")
+				.Append("construction and this leg cannot test it -- retune the probe rather than ")
+				.Append("reading the lines below.\n");
+			return Verdict(sb, fails + 1);
+		}
+		sb.Append("  ok   alien-base transition at ").Append(alienBaseAt)
+			.Append(", next checkpoint at ").Append(nextCheckpoint)
+			.Append(" -- death at ").Append(deathPos).Append(" is inside the window\n");
 		fails += RevertLeg(sb, level, list, deathPos, suppress: false,
 			expected: InsaneBossI.Section.Mars, label: "fixed");
 
@@ -126,7 +166,7 @@ internal static class BossTrainTest
 		return Verdict(sb, fails);
 	}
 
-	private static bool TryAlienBaseChangeIndex(Dictionary<int, InsaneBossI.Section> changes, out int index)
+	private static bool TryAlienBaseChangeIndex(IReadOnlyDictionary<int, InsaneBossI.Section> changes, out int index)
 	{
 		index = -1;
 		foreach (KeyValuePair<int, InsaneBossI.Section> kv in changes)

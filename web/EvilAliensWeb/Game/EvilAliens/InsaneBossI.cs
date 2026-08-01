@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
@@ -23,6 +24,15 @@ internal class InsaneBossI : GameScene
 	// idempotent, and every checkpoint declares which section it belongs to and re-asserts it on
 	// entry. That covers the forward pass (a no-op -- you are already in that section) and the
 	// revert (the actual fix) with one rule instead of a per-boundary patch.
+	//
+	// ONE CAVEAT, and it bounds where a future checkpoint may go: a checkpoint on a
+	// DIFFICULTY-CONDITIONAL event does not re-assert on the tiers that filter it out.
+	// GameEventList.progressList tests the difficulty range BEFORE it tests `checkpoints`, so a
+	// skipped event fires no OnCheckPointReached -- while RevertToCheckpoint's walk-back tests only
+	// `checkpoints` and can still land `pos` on it. The one such checkpoint here (the Hard+ gate in
+	// front of the BrainBoss) is harmless because both its neighbours are AlienBase too, so the
+	// section is right either way. Putting a CONDITIONAL checkpoint on a section BOUNDARY would be
+	// the unsafe case, and it would fail silently on the low tiers only.
 	internal enum Section
 	{
 		Space,
@@ -35,7 +45,7 @@ internal class InsaneBossI : GameScene
 	// Which section each checkpoint belongs to, built alongside the script so the two cannot drift
 	// -- a checkpoint added without a section is a build-time omission the oracle reports, not a
 	// silent fallthrough.
-	private readonly System.Collections.Generic.Dictionary<GameEvent, Section> checkpointSections = new System.Collections.Generic.Dictionary<GameEvent, Section>();
+	private readonly Dictionary<GameEvent, Section> checkpointSections = new Dictionary<GameEvent, Section>();
 
 	private Floor f;
 
@@ -107,9 +117,9 @@ internal class InsaneBossI : GameScene
 	// INDEX so the oracle can compare the declarations against a forward walk of the same script.
 	// They are written by the same statements that do the real work, never restated -- a map the
 	// test spelled out itself would agree with itself and prove nothing.
-	private readonly System.Collections.Generic.Dictionary<int, Section> checkpointSectionAt = new System.Collections.Generic.Dictionary<int, Section>();
+	private readonly Dictionary<int, Section> checkpointSectionAt = new Dictionary<int, Section>();
 
-	private readonly System.Collections.Generic.Dictionary<int, Section> sectionChangeAt = new System.Collections.Generic.Dictionary<int, Section>();
+	private readonly Dictionary<int, Section> sectionChangeAt = new Dictionary<int, Section>();
 
 	// Record that the event just added drives the level into `s` when it finishes. Called beside
 	// each `OnFinished += Go*`, for the same reason CheckPointSection sits beside its checkpoint.
@@ -118,9 +128,9 @@ internal class InsaneBossI : GameScene
 		sectionChangeAt[eventList.BenchCount - 1] = s;
 	}
 
-	internal System.Collections.Generic.Dictionary<int, Section> DebugCheckpointSections => checkpointSectionAt;
+	internal IReadOnlyDictionary<int, Section> DebugCheckpointSections => checkpointSectionAt;
 
-	internal System.Collections.Generic.Dictionary<int, Section> DebugSectionChanges => sectionChangeAt;
+	internal IReadOnlyDictionary<int, Section> DebugSectionChanges => sectionChangeAt;
 
 	internal string DebugSection => section.ToString();
 
@@ -133,10 +143,15 @@ internal class InsaneBossI : GameScene
 
 	internal void DebugApplySection(string name)
 	{
-		if (System.Enum.TryParse<Section>(name, out var s))
+		if (Enum.TryParse<Section>(name, out var s))
 		{
 			ApplySection(s);
+			return;
 		}
+		// Reported, never swallowed -- the file-wide value-carrying-flag convention. A silent
+		// no-op here would surface only as the oracle's generic "could not park the level".
+		Console.WriteLine("[bosstrain] unknown section '" + name + "' (expected one of "
+			+ string.Join(", ", Enum.GetNames(typeof(Section))) + ") -- ignored");
 	}
 
 	private void InsaneBossI_OnFinished(object sender, FinishedArgs args)
@@ -167,6 +182,10 @@ internal class InsaneBossI : GameScene
 		section = Section.Space;
 		spawnType = PlayerSpawnType.South;
 		Background.SetSpace();
+		// Not in the pre-card code, and a no-op on a fresh entry -- but without it "section ==
+		// Space" would not actually imply "no floor" after a replay, and the whole point of the
+		// field is that it names the state that IS in force.
+		Collection.Remove((GameComponent)(object)f);
 		base.SoundManager.PlayMusic(Songs.Level1);
 		Settings.GetInstance().LockDifficulty();
 	}

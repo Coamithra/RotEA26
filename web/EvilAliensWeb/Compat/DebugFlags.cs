@@ -129,6 +129,17 @@ namespace EvilAliensWeb.Compat
 		// gameplay, and an ONLINE JOINER -- whose lobby IS a menu -- must be able to pass it.
 		public static bool NoAttract { get; private set; }
 
+		// ?mute: silence BOTH audio subsystems for this boot. They do not share a bus, so it
+		// takes two switches (Game1.Initialize applies both): SoundEffect.MasterVolume = 0 for
+		// the KNI SFX/speech path, and eaMusic.setMute for the WebAudio music layer. Neither
+		// the Options "Music" toggle nor a tab mute covers both -- the former is music-only,
+		// the latter is not reachable from a URL, and a two-tab co-op run wants one link that
+		// comes up silent on both ends.
+		// Deliberately OUT of Active, for the ?noattract reason: it changes no gameplay,
+		// difficulty, unlock or fairness, and putting it in would refuse online play for the
+		// very runs it exists to make bearable.
+		public static bool Mute { get; private set; }
+
 		// If set, boot directly into this level (implies SkipSplash + AutoStart).
 		public static EvilAliens.Levels? Level { get; private set; }
 
@@ -1179,10 +1190,15 @@ namespace EvilAliensWeb.Compat
 
 		public static float NetLossPct { get; private set; }
 
-		// Jitter is deliberately PANEL-ONLY (no URL flag, so reaching it means ?netsim): +/- this
-		// many ms on each stream packet's release, which is the only way the stream lane ever
-		// actually REORDERS and so the only way ordViol/seqGap tolerance gets tested. The
-		// reliable lane's releases are clamped monotone, so jitter can never reorder it.
+		// ?netjitter=<ms> (0-MaxJitterMs): +/- this many ms on each stream packet's release,
+		// which is the only way the stream lane ever actually REORDERS and so the only way
+		// ordViol/seqGap tolerance gets tested. The reliable lane's releases are clamped
+		// monotone, so jitter can never reorder it.
+		// It was PANEL-ONLY until the flag was added, on the reasoning that reaching jitter
+		// should mean having the ?netsim panel up. That cost more than it bought: the three
+		// knobs are one impairment profile, and two of them being URL-settable while the third
+		// was not made a lag/loss/jitter rig unreproducible from a link -- which is the only
+		// form a two-window recipe travels in. Panel and console still drive all three.
 		public static float NetJitterMs { get; private set; }
 
 		// Runtime setter for the live impairment panel (Compat/DebugInput.SetNetSim ->
@@ -1220,6 +1236,21 @@ namespace EvilAliensWeb.Compat
 		// window joins mid-level via the menu's Join Online Game (or ?net=join&rtc&code=),
 		// and both sides' [net] metrics tell the JIP story. In Active.
 		public static bool NetJip { get; private set; }
+
+		// ?netallowdebug: let a peer carrying gameplay debug flags take part in a MENU-LOBBY
+		// session -- this tab's hello presents as clean (LocalHelloFlags) and its own local
+		// DebugActive refusal is skipped (NetSession.HandleHello). The ?netjip bypass in
+		// exactly the same shape, for the other pairing route.
+		// The case it exists for: `?aiplayer` is in Active, so the ONLY way to bot-drive a ship
+		// was the `?net=` direct rig -- which never sends EvLaunch from the ordinary menu
+		// (MenuScene only replicates a launch in netMode), so a menu-driven co-op flow with an
+		// AI pilot was unreachable. That is precisely the rig for testing the JOINING paths.
+		// **It does NOT relax NetListing.ComputeEligible**, deliberately -- a flagged game still
+		// refuses to LIST, so this can never advertise a bot-driven game to a stranger off the
+		// public browser. Widen that with ?netjip if a test needs it, as a separate decision.
+		// Out of Active: a flag whose whole job is to be tolerated in a session would otherwise
+		// refuse the session it is enabling.
+		public static bool NetAllowDebug { get; private set; }
 
 		// True if any flag that HIJACKS boot/levels is set -- deliberately NOT "any debug flag":
 		// pure render/feel/diagnostic toggles stay out (?hitboxes, ?metalscore, ?noattract, ...).
@@ -1268,6 +1299,9 @@ namespace EvilAliensWeb.Compat
 				case "noattract":
 				case "nodemo":
 					NoAttract = IsOn(val);
+					break;
+				case "mute":
+					Mute = IsOn(val);
 					break;
 				case "unlockall":
 				case "unlock":
@@ -2451,6 +2485,9 @@ namespace EvilAliensWeb.Compat
 				case "netjip":
 					NetJip = IsOn(val);
 					break;
+				case "netallowdebug":
+					NetAllowDebug = IsOn(val);
+					break;
 				case "netfakepeer":
 					if (!string.IsNullOrEmpty(val))
 					{
@@ -2480,6 +2517,17 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(NetLossPct));
+					}
+					break;
+				case "netjitter":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var njit) && njit >= 0f)
+					{
+						NetJitterMs = MathHelper.Clamp(njit, 0f, Net.NetImpairment.MaxJitterMs);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(NetJitterMs));
 					}
 					break;
 				case "spiderboss":

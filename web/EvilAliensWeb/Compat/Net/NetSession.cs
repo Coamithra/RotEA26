@@ -727,7 +727,11 @@ namespace EvilAliensWeb.Compat.Net
             // has DebugFlags.Active, which a clean menu-session joiner would reject -- so a
             // ?netjip boot presents as clean. Every real listed host has no debug flags anyway
             // (NetListing's eligibility refuses them unless ?netjip is set).
-            return (NetHost.Current.DebugActive && !NetHost.Current.NetJip) ? NetProtocol.HelloFlagDebugActive : (byte)0;
+            // ?netallowdebug is the same bypass for the MENU-LOBBY route -- the rig for driving
+            // the join paths by hand with `?aiplayer` flying. It does NOT touch NetListing, so
+            // neither flag can advertise a flagged game the other would have hidden.
+            bool presentClean = NetHost.Current.NetJip || NetHost.Current.NetAllowDebug;
+            return (NetHost.Current.DebugActive && !presentClean) ? NetProtocol.HelloFlagDebugActive : (byte)0;
         }
 
         // GameScene lifecycle edges (card 11.4): the client announces its scene coming up
@@ -1508,7 +1512,12 @@ namespace EvilAliensWeb.Compat.Net
                 SendRejectOnce(NetProtocol.RejectBuild);
                 return;
             }
-            if (menuSession && ((peerFlags & NetProtocol.HelloFlagDebugActive) != 0 || NetHost.Current.DebugActive))
+            // ?netallowdebug waives OUR OWN half of this only. The peer's bit still refuses --
+            // whoever carries the flags is the one who opts in, so an unflagged player can
+            // never be silently paired into a flagged run by the other side setting a flag.
+            // (A flagged peer that has opted in presents clean anyway, so its bit is absent.)
+            bool localDebugRefuses = NetHost.Current.DebugActive && !NetHost.Current.NetAllowDebug;
+            if (menuSession && ((peerFlags & NetProtocol.HelloFlagDebugActive) != 0 || localDebugRefuses))
             {
                 Console.WriteLine("[net] gameplay debug flags active in a menu session -- rejecting");
                 SendRejectOnce(NetProtocol.RejectFlags);

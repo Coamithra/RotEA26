@@ -61,6 +61,11 @@ namespace EvilAliensWeb.Compat.Net
             get { return DebugFlags.NetJip; }
         }
 
+        public bool NetAllowDebug
+        {
+            get { return DebugFlags.NetAllowDebug; }
+        }
+
         public bool NetLog
         {
             get { return DebugFlags.NetLog; }

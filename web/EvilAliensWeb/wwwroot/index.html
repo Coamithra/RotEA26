@@ -1468,13 +1468,30 @@
             var MUFFLE_DUCK = 0.5;        // master gain multiplier while paused
             var MUFFLE_RAMP = 0.3;        // setTargetAtTime time constant (seconds)
 
+            // ?mute (DebugFlags.Mute -> MusicInterop.SetMute). Muffle and mute BOTH want the
+            // master gain, so neither may write it directly -- they are tracked as separate
+            // state and composed by masterTarget(), or whichever ran last would clobber the
+            // other (unmuting mid-pause would come back at full volume, and a pause-enter
+            // while muted would un-silence the bus).
+            var muted = false;
+            var muffled = false;
+
+            function masterTarget()
+            {
+                if (muted) return 0;
+                return muffled ? BASE_MASTER * MUFFLE_DUCK : BASE_MASTER;
+            }
+
             function ensureCtx()
             {
                 if (ctx) return;
                 var AC = window.AudioContext || window.webkitAudioContext;
                 ctx = new AC();
                 master = ctx.createGain();
-                master.gain.value = BASE_MASTER;
+                // masterTarget(), not BASE_MASTER: ?mute is applied at boot, which can land
+                // before any audio unlocks -- a literal here would come up at full volume on
+                // the first gesture and silently ignore the flag.
+                master.gain.value = masterTarget();
                 // Lowpass on the master bus for the pause muffle. Open by default so a
                 // non-paused game is bit-identical to the pre-filter bus; setMuffle()
                 // rides its cutoff + the master duck. Q 0.7 = a gentle rolloff (no
@@ -1632,12 +1649,26 @@
                 // unaffected. No-op before audio unlocks (a pause can't precede gameplay).
                 setMuffle: function (on)
                 {
+                    muffled = !!on;
                     if (!ctx || !muffle) return;
                     var t = ctx.currentTime;
                     muffle.frequency.cancelScheduledValues(t);
                     muffle.frequency.setTargetAtTime(on ? MUFFLE_ON_HZ : MUFFLE_OPEN_HZ, t, MUFFLE_RAMP);
                     master.gain.cancelScheduledValues(t);
-                    master.gain.setTargetAtTime(on ? BASE_MASTER * MUFFLE_DUCK : BASE_MASTER, t, MUFFLE_RAMP);
+                    master.gain.setTargetAtTime(masterTarget(), t, MUFFLE_RAMP);
+                },
+                // ?mute -- silence the music bus. Gain only: the track keeps playing (and
+                // keeps its loop position and rate sweep), so unmuting is seamless and the
+                // muted run measures the same work an audible one does. Ramped like the
+                // muffle rather than a hard set, so toggling it live can't click.
+                // State is kept even with no ctx, so a boot-time mute survives to ensureCtx.
+                setMute: function (on)
+                {
+                    muted = !!on;
+                    if (!ctx || !master) return;
+                    var t = ctx.currentTime;
+                    master.gain.cancelScheduledValues(t);
+                    master.gain.setTargetAtTime(masterTarget(), t, 0.05);
                 },
                 setRate: function (rate)
                 {

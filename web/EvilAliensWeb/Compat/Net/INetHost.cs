@@ -69,6 +69,7 @@ namespace EvilAliensWeb.Compat.Net
         // would read as NetSession.Active at these call sites, which is a different thing).
         bool DebugActive { get; }   // DebugFlags.Active   -- refuses menu-session pairing
         bool NetJip { get; }        // ?netjip             -- present as clean anyway
+        bool NetAllowDebug { get; } // ?netallowdebug      -- ditto, for a MENU session
         bool NetLog { get; }        // ?netlog             -- verbose per-event logging
         bool NetDropGrant { get; }  // ?netdropgrant       -- one-shot dropped couch grant
         int NetLocal { get; }       // ?netlocal=<1-3>     -- synthetic couch joins

@@ -178,6 +178,17 @@ internal class BrainBoss : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
+		// ?brainhitflash forces the flash on for a screenshot -- landing a real shot inside the
+		// 35 ms hittimer window is not something a rig can time. It has to bracket base.Draw as
+		// well as the overlays: the base sprite's own flash comes from KillableAlien.Draw keying
+		// off isBlinking(), which the flag deliberately does NOT fake (nothing is damaged), so
+		// without this the forced capture would show the patches flashing over an unlit brain --
+		// the exact asymmetry the card is about, inverted.
+		bool forcedFlash = EvilAliensWeb.Compat.DebugFlags.BrainHitFlash;
+		if (forcedFlash)
+		{
+			spriteBatch.lightenEffect.Enable();
+		}
 		base.Draw(gameTime);
 		// Live animated patches on top of the static brain. `color` is the base sprite's
 		// live tint (reddens on low HP) so the overlays redden in lockstep; DrawScale +
@@ -188,7 +199,23 @@ internal class BrainBoss : KillableAlien
 		bool spawnActive = state == BossState.spawnstuff
 			|| netVenting
 			|| EvilAliensWeb.Compat.DebugFlags.Harness != null;
+		// Card 9f90978c: the hit flash is KillableAlien.Draw bracketing lightenEffect around
+		// base.Draw ONLY, and the overlays are drawn after it -- so the eye, the pods and the
+		// folds stayed unlit while the brain under them flashed white. Re-open the same bracket
+		// here so the patches flash with the sprite they sit on. Both of overlays.Draw's branches
+		// have a compiled variant with LIGHTEN in it (`lighten` for the plain one, whose tint
+		// still rides the vertex colour; `lighten_interpolate_fade` for the interpolated one,
+		// which already enables fade with the same tint) -- see EffectHandler.SelectEffect.
+		bool flashing = isBlinking() || forcedFlash;
+		if (flashing)
+		{
+			spriteBatch.lightenEffect.Enable();
+		}
 		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.LogicalWidth(), texture.LogicalHeight(), color, gameTime, spawnActive);
+		if (flashing)
+		{
+			spriteBatch.lightenEffect.Disable();
+		}
 	}
 
 	public override void Update(GameTime gameTime)

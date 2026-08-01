@@ -388,18 +388,40 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 	}
 
+	// Memo for retrieveBoundsFromTexture's cell size. The sheet layout only changes on
+	// LoadAnimation (or a texture swap), but the method is called several times per entity per
+	// collision pass -- see CollisionHandler -- and each call otherwise costs two
+	// TextureDims ConditionalWeakTable lookups. Keyed on everything the arithmetic reads, so a
+	// layout change re-derives rather than going stale (card 391e11d2).
+	private Texture2D cellDimsTexture;
+	private int cellDimsColumns;
+	private int cellDimsRows;
+	private int cellDimsSeparation;
+	private float cellDimsWidth;
+	private float cellDimsHeight;
+
 	protected CollisionBox retrieveBoundsFromTexture()
 	{
 		if (collisionBox == null)
 		{
 			collisionBox = new CollisionBox();
 		}
-		float cellWidth = texture.LogicalWidth();
-		cellWidth -= (float)((columns - 1) * separatingspace);
-		cellWidth /= (float)columns;
-		float cellHeight = texture.LogicalHeight();
-		cellHeight -= (float)((rows - 1) * separatingspace);
-		cellHeight /= (float)rows;
+		if ((object)cellDimsTexture != (object)texture || cellDimsColumns != columns
+			|| cellDimsRows != rows || cellDimsSeparation != separatingspace)
+		{
+			float w = texture.LogicalWidth();
+			w -= (float)((columns - 1) * separatingspace);
+			cellDimsWidth = w / (float)columns;
+			float h = texture.LogicalHeight();
+			h -= (float)((rows - 1) * separatingspace);
+			cellDimsHeight = h / (float)rows;
+			cellDimsTexture = texture;
+			cellDimsColumns = columns;
+			cellDimsRows = rows;
+			cellDimsSeparation = separatingspace;
+		}
+		float cellWidth = cellDimsWidth;
+		float cellHeight = cellDimsHeight;
 		collisionBox.TopLeft = new Vector2((0f - cellWidth * DrawScale) / 2f, (0f - cellHeight * DrawScale) / 2f) * 0.6f;
 		collisionBox.BottomRight = new Vector2(cellWidth * DrawScale / 2f, cellHeight * DrawScale / 2f) * 0.6f;
 		return collisionBox;

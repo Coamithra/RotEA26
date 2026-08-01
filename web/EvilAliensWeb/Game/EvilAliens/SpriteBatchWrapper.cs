@@ -252,6 +252,7 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 			BlendState bs = capturing ? PremultiplyOver : ToBlendState(blendmode);
 			Matrix mtx = capturing ? captureMatrix : RenderScale.Matrix;
 			spriteBatch.Begin(SpriteSortMode.Deferred, bs, null, null, null, effectHandler.CurrentEffect, mtx);
+			EvilAliensWeb.Compat.WorldCensus.NoteBatch();
 			enabled = true;
 		}
 	}

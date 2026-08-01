@@ -1339,6 +1339,7 @@ public class Game1 : Game
 			DrawInner(gameTime);
 		}
 		FrameProfiler.End(FrameSection.DrawScene, profScene);
+		WorldCensus.EndFrame();
 
 		// FPS HUD "post" row: both full-frame post-processes together. They're one line item
 		// because they share a cost shape (a full-screen pass over sceneTarget) and both are

@@ -651,6 +651,31 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSlotTest.Run();
 		}
 
+		// JS bridge for the level-select thumbnail capture (eaShotNow in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugShotNow', 'arm'|'save'). The capture+save
+		// path normally runs only at level EXIT behind an on-screen busy-ness heuristic, which
+		// puts the alpha seal in ScreenshotSaver.SaveScreenShot (card d67755d2) out of reach of
+		// any cheap probe. Two calls with a Draw between them: `arm` grabs the frame in the
+		// post-Draw hook, `save` composites + persists it and prints the `[shot]` line the probe
+		// asserts on. Reports which step it could not take rather than failing silently -- "no
+		// GameScene" and "nothing grabbed yet" are different mistakes.
+		[JSInvokable("debugShotNow")]
+		public static string ShotNow(string step)
+		{
+			string s = (step ?? "").Trim().ToLowerInvariant();
+			switch (s)
+			{
+			case "arm":
+				return EvilAliens.GameScene.DebugArmSnapshot()
+					? "[shotnow] armed" : "[shotnow] no live GameScene";
+			case "save":
+				return EvilAliens.GameScene.DebugSaveSnapshot()
+					? "[shotnow] saved" : "[shotnow] nothing to save (arm first, and step a frame)";
+			default:
+				return "[shotnow] expected 'arm' or 'save', got '" + s + "'";
+			}
+		}
+
 		// JS bridge for the texture-load probe (eaTexProbe in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugTexProbe', 'GFX/Base/756'). Reports which
 		// precompiled sibling shipped, which file the texture ACTUALLY came from, its actual vs

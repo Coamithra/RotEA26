@@ -2016,6 +2016,42 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	{
 	}
 
+	// Debug seam (card d67755d2): drive the level-select thumbnail capture WITHOUT ending the
+	// level. `SaveScreenShot` -- and so the alpha seal in it -- normally runs only from
+	// Terminate, and reaching it for real means an on-screen busy-ness heuristic (>30 entities,
+	// two timers) followed by a pause-menu quit, which is neither cheap nor deterministic for a
+	// probe. Console `eaShotNow()` / `eval ShotNow` under eahl.
+	//
+	// TWO steps because the grab itself happens in the post-Draw hook: Arm on one tick, Save on
+	// a later one. Save reports whether it had anything to persist, so a rig cannot mistake "no
+	// snapshot was ever grabbed" for a pass.
+	internal static bool DebugArmSnapshot()
+	{
+		GameScene scene = NetActiveScene;
+		if (scene == null)
+		{
+			return false;
+		}
+		// ForceSnapshot no-ops once a shot has been made this session; clear that so the seam is
+		// repeatable within one level run.
+		scene.snapshotMadeThisSession = false;
+		scene.snapshottimer.Stop();
+		scene.snapshottimer.Reset();
+		scene.ForceSnapshot();
+		return true;
+	}
+
+	internal static bool DebugSaveSnapshot()
+	{
+		GameScene scene = NetActiveScene;
+		if (scene == null || !scene.snapshotMadeThisSession || scene.MyScreenShot == null)
+		{
+			return false;
+		}
+		ScreenshotSaver.SaveScreenShot((Texture2D)(object)scene.MyScreenShot, scene.level);
+		return true;
+	}
+
 	// Arm a one-off screenshot regardless of the on-screen busy-ness heuristic. The
 	// generic checkScreenShot only fires once a scene crosses ~30 on-screen entities,
 	// which a sparse level (the webcam challenge) never does — this lets such a level

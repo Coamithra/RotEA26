@@ -167,6 +167,9 @@ public class ScreenshotSaver
 	public static void SaveScreenShot(Texture2D Screenshot, Levels level)
 	{
 		GraphicsDevice graphicsDevice = ServiceHelper.Get<IGraphicsDeviceService>().GraphicsDevice;
+		// For the alpha seal below. GFX/Game/blank is the shared white pixel Background already
+		// preloads, so this Load is a cache hit on every path that can reach a screenshot.
+		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		lock (Savable.syncObj)
 		{
 			string text = level.ToString();
@@ -195,6 +198,19 @@ public class ScreenshotSaver
 				spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 				spriteBatchWrapper.DrawPresent(pendingOverlay, new Rectangle(0, 0, (int)SIZE.X, (int)SIZE.Y), Color.White);
 			}
+			// Card d67755d2: force the thumbnail OPAQUE before it is read back. The XBLIG rendered
+			// to a Bgr565 back buffer, which has no alpha channel for a translucent draw to erode;
+			// this port's sceneTarget is RGBA8 and every NonPremultiplied layer eats alpha
+			// (destA = srcA^2 + destA*(1-srcA)), so a busy frame resolves with alpha well under 1
+			// -- measured 134..255 (mean 219) on a real saved Level2 shot, and the alpha channel
+			// held a clean picture of the marshills parallax bands. ResolveBackBuffer copies that
+			// verbatim (Opaque) and the DrawPresent above writes it straight into this RT, so the
+			// carousel -- which draws the thumbnail alpha-blended -- let the menu backdrop bleed
+			// through in the SHAPE of whatever background layers happened to be drawing. RGB was
+			// always correct; only the alpha was ever wrong. Same cause and same cure as
+			// Background.Draw's SealAlpha (see the comment there). MUST be last: it runs after the
+			// webcam overlay so that composite still blends by its own alpha.
+			spriteBatchWrapper.SealAlpha(contentManager.Load<Texture2D>("GFX/Game/blank"), (int)SIZE.X, (int)SIZE.Y);
 			spriteBatchWrapper.BlendMode = (SpriteBlendMode)1;
 			graphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 			if (pendingOverlay != null)
@@ -207,6 +223,23 @@ public class ScreenshotSaver
 			// ACTUAL Width*Height (LogicalWidth/Height would under-size it for a padded texture).
 			uint[] array = new uint[texture.Width * texture.Height];
 			texture.GetData<uint>(array);
+			// Card d67755d2: make the seal a TEXT observable. The defect it fixes is invisible in
+			// any single frame -- the thumbnail's RGB was always correct and only the alpha was
+			// wrong, so it shows up as the level-select backdrop bleeding through in the shape of
+			// whatever translucent layers drew. Reading the alpha back off the bytes we are about
+			// to persist (not restating the seal beside it) is the one thing an `expect` can catch;
+			// tools/headless/probes/screenshot_alpha.txt asserts alphaMin=255 here.
+			uint alphaMin = 255u;
+			for (int i = 0; i < array.Length; i++)
+			{
+				uint a = array[i] >> 24;
+				if (a < alphaMin)
+				{
+					alphaMin = a;
+				}
+			}
+			System.Console.WriteLine("[shot] " + text + " " + texture.Width + "x" + texture.Height
+				+ " alphaMin=" + alphaMin);
 			if (Storage.StorageEnabled)
 			{
 				StorageContainer val2 = device.OpenContainer("EvilAliens");
@@ -260,7 +293,13 @@ public class ScreenshotSaver
 			uint[] array = new uint[binaryReader.ReadInt32()];
 			for (int i = 0; i < array.Length; i++)
 			{
-				array[i] = binaryReader.ReadUInt32();
+				// Card d67755d2: force alpha opaque on the way IN as well. SaveScreenShot now seals
+				// the render target, but that only fixes shots taken from here on -- every .dat
+				// already on the player's device was written with the eroded alpha and would keep
+				// bleeding the menu backdrop through forever. Masking here heals those with no
+				// migration step. Not redundant with the seal either way: the seal is what fixes the
+				// texture SaveScreenShot hands straight to screenshots[] without a reload.
+				array[i] = binaryReader.ReadUInt32() | 0xFF000000u;
 			}
 			binaryReader.Close();
 			val2 = new Texture2D(graphicsDevice, (int)SIZE.X, (int)SIZE.Y, false, graphicsDevice.PresentationParameters.BackBufferFormat);

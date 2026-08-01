@@ -33,7 +33,6 @@ internal class Level3 : GameScene
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
 		contentManager.Load<Texture2D>("GFX/Sprites/blooddrop");
-		contentManager.Load<Texture2D>("GFX/Sprites/brainlargetransglow");
 		contentManager.Load<Texture2D>("GFX/Sprites/brainbosshd");
 		contentManager.Load<Texture2D>("GFX/Sprites/brainbossaura");
 		contentManager.Load<Texture2D>("GFX/alienboss/alienboss");

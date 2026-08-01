@@ -335,8 +335,9 @@ Paratrooper|gfx/sprites/block|WARM|2|80x80
 Paratrooper|gfx/sprites/blooddrop|WARM|0|148x156
 Paratrooper|gfx/sprites/blooddrop_green|WARM|0|148x156
 Paratrooper|gfx/sprites/bombicon|WARM|1|96x96
+Paratrooper|gfx/sprites/brainanimated|WARM|5|2660x1892
+Paratrooper|gfx/sprites/brainanimatedglow|WARM|13|620x556
 Paratrooper|gfx/sprites/braingoo|WARM|0|148x136
-Paratrooper|gfx/sprites/brainlargetransglow|WARM|0|620x516
 Paratrooper|gfx/sprites/bulletevil|WARM|1|128x128
 Paratrooper|gfx/sprites/bulletgood|WARM|1|128x128
 Paratrooper|gfx/sprites/connector|WARM|1|820x480

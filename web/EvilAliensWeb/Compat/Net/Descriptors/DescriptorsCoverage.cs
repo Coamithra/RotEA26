@@ -44,11 +44,14 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         }
     }
 
-    // ParatrooperBrain (ParatrooperBrain.cs) -- BASE-ONLY. The brainlargetransglow KillableAlien a
-    //   paratrooper drops; it chutes down, lands, and merges/grows. Draw is pure base.Draw. The whole
-    //   merge/grow choreography only ever writes Position / scale (0.1 -> 0.2 -> 0.33) / rotation
+    // ParatrooperBrain (ParatrooperBrain.cs) -- BASE-ONLY. The animated-brain KillableAlien a
+    //   paratrooper drops; it chutes down, lands, and merges/grows. Draw is base.Draw plus the
+    //   additive BrainGlow, whose scale/alpha derive from DrawScale and a per-instance phase (a
+    //   cosmetic shimmer, no state to carry). The whole merge/grow choreography only ever writes
+    //   Position / scale (0.5 -> 1.0 -> 1.65) / rotation
     //   directly in Update, all of which the host encodes into the base block every snapshot, so the
-    //   grow + fall + tumble replicate from the base fields alone. Not Colorized (no HP redden). The
+    //   grow + fall + tumble replicate from the base fields alone. curframe rides the base block too
+    //   (card c25883a2 moved it onto the 20-frame sheet). Not Colorized (no HP redden). The
     //   Parachute + PlasmaBall it spawns replicate as their own types. Nothing beyond the base fields.
     internal sealed class ParatrooperBrainDescriptor : NetTypeDescriptor<ParatrooperBrain>
     {

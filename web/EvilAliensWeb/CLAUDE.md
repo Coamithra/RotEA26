@@ -677,6 +677,46 @@ site now lives under:
   and `MyKeys.Mouse1` to select+invoke, either resetting the attract idle timeout. **A new
   `DrawMenu` override must call `RecordEntryHit` per entry or its menu won't be clickable.** The
   level-choice carousel sets `mouseHoverSelects = false` (click picks directly). Out of scope: `PlayerSettingsMenu`.
+  - **On a CAROUSEL a click on a side entry only SCROLLS to it** (card e3c78bb8,
+    `mouseClickSelectsBeforeActivating`, set by `SubMenuCarousel` alongside `mouseHoverSelects`).
+    Only the centred entry activates, so it is two clicks to launch a level you can see but are
+    not on. The side tiles are small, half off-screen and still flying, so the default
+    select-and-activate meant aiming at a moving target with a level start as the miss penalty.
+    Kept as its own flag rather than folded into `mouseHoverSelects` -- that one answers "does
+    HOVER select", a different question. Activation also waits on `MouseActivationSettled()`
+    (the carousel overrides it to `!swaptimer.Active`): selection is instant but the scroll is
+    an ANIMATION, so `hovered == selectedEntry` alone lets a quick double-click launch the tile
+    that is still flying in -- exactly what the two-click rule exists to stop.
+- **The bottom-left "(B) back" tip is CLICKABLE, via a synthetic Esc** (card 2a4110d0,
+  `Compat/BackTipHit.cs`). It is scene chrome, not a menu entry -- drawn by
+  `MenuScene.drawButtonTips`, `Darkener.drawButtons` (pause overlay) and `BragScene.drawButtons`,
+  three verbatim copies of one 2008 layout -- so it records no `RecordEntryHit` box and
+  `HandleMouse` cannot see it. Each drawer calls `BackTipHit.Record(left, right, top, bottom)`;
+  `InputHandler.Update` consumes the box and ORs the RISING EDGE of a click inside it (never the
+  button level -- a level fires on a press that began elsewhere, so a drag into the corner would
+  back out and a held fire button would un-pause the frame the pause overlay drew the tip) into
+  `MyKeys.Esc`. **Esc, not a
+  per-scene back call, on purpose:** Esc is already "back" for every consumer, and the pause
+  overlay's input belongs to `PausedScene` while `Darkener` only draws -- so one seam covers all
+  three and none of their input owners is touched. The box lives exactly ONE frame (Draw records,
+  the next Update spends it), so a frame that drew no tip -- i.e. gameplay -- offers a stray click
+  nothing. Consequence to know: a menu bound to a PAD (`controller != Keyboard`) ignores Esc, so
+  the click does nothing there; the mouse is the keyboard player's device.
+  - **Invariant: the tip box must not overlap ANY menu entry box**, or one click both goes back
+    and activates the row it landed on. It holds with room to spare (tip `40,534,106,36`; the
+    widest main-menu frame starts at x~218) but it is held by two unrelated layouts. So every
+    menu asserts it itself and prints `[backtip] menu=<T> entries=<n> tip=<x,y,w,h>
+    overlap=<none|index>` on each layout change -- the POSITIVE case included, since a check that
+    only printed failures would pass on a run that never opened a menu. Committed as
+    `tools/headless/probes/menu_backtip.txt` (framed main menu / plain list / carousel).
+- **The main menu shifts its row list UP when it would not fit** (card 45c16ef6,
+  `MenuSubWithSkull.RowsStartY`). `curY0` keys off the FULL entry count, which unlocking does not
+  change, so the list only ever grew DOWNWARD and at 8 visible rows EXIT was drawn clipped off the
+  600px bottom. It now subtracts exactly the overflow past `RowsBottomLimit` (570 =
+  `General.SafeZone.Bottom`): <=7 visible rows are pixel-identical to before, 8 shift up 39.5px and
+  ride ~10px into the title's bottom banner, 9+ (debug menus only) keep shifting under the same one
+  rule. **`DrawRows` and `GetListCentre` must both go through it** or the HUD ring parks where the
+  rows no longer are.
 - **A mouse click SHORTER than one tick is latched, not dropped** (card 724f2abc,
   `Compat/MouseLatch.cs`). `InputHandler.Update` polls `Mouse.GetState()` once per tick and
   edge-detects, so a mousedown/mouseup pair landing entirely BETWEEN two polls was never seen and
@@ -694,7 +734,10 @@ site now lives under:
     listener is on the CANVAS -- a `window` one would also fire a game press for every click on
     the outside-`#app` UI (fullscreen button, touch D-pad, FPS HUD, tuning panels), exactly the
     shots-eaten-by-an-overlay problem `pointer-events:none` exists to prevent, and it would fire
-    on the very panel you clicked to diagnose it. And it is `pointerdown` filtered to
+    on the very panel you clicked to diagnose it. **That scoping does NOT by itself keep
+    off-canvas clicks out of the game, and this bullet used to imply it did** -- see the
+    off-canvas bullet below; the latch is only the sub-tick rescue, and the primary poll leaked
+    independently of it. And it is `pointerdown` filtered to
     `pointerType === 'mouse'` -- a touch tap synthesises a back-to-back mousedown/mouseup, so it
     is a sub-tick click BY CONSTRUCTION and an ungated latch would newly fire the ship (and invoke
     menu rows) on every tap of the canvas. **Touch deliberately gets NO new behaviour here**; it
@@ -705,6 +748,30 @@ site now lives under:
     `ProbeMouseLatch` is the regression guard (it drives the real `InputHandler.Update` over the
     real latch, so it covers the wiring, not just the latch); the Chrome pass is the only
     evidence about the shipped build.
+- **A click that is not ON the canvas is not game input** (card 0fe23476, `MouseLatch.Filter` +
+  `SetSuppressed`). **KNI's own mouse listeners are on the WINDOW**
+  (`nkast.Wasm.Dom/js/Window.8.0.5.js`: `mousemove`/`mousedown`/`mouseup`), so the button state of
+  a click on ANY outside-`#app` overlay reaches `Mouse.GetState()` at that cursor position and the
+  game acts on it -- the canvas scoping above only ever covered the latch. Reported case: the
+  room-code prompt (`wwwroot/webrtc.js` `promptCode`) is a DOM overlay drawn over a live
+  `NetStatusMenu` whose single entry is CANCEL, and the JOIN button sits on that row, so clicking
+  JOIN cancelled the join. **No DOM z-order or `pointer-events` change can fix that class** -- the
+  game never sees the DOM event. Same leak for the fullscreen button, the FPS HUD tag and the
+  tuning panels. `index.html` now flags an off-canvas `pointerdown` (CAPTURE phase on window, so
+  an overlay that stops propagation is still counted) and the buttons read released for the
+  duration.
+  - **It is a LEVEL released on `pointerup`/`pointercancel`, not a one-tick edge**, so a drag that
+    starts on an overlay and ends over the canvas does not land either -- and `Filter` then keeps
+    that button swallowed until it is PHYSICALLY released, so the tail of the refused press
+    cannot read as a fresh rising edge. Per-button, since both are filtered in the same tick.
+  - **A button that was ALREADY down keeps reporting held.** The flag is per-GESTURE in JS but
+    applied per-BUTTON in C#, so without that carve-out right-clicking the FPS HUD while holding
+    fire would stop the ship shooting mid-hold until you released and re-pressed -- a
+    suppression fix breaking the input it exists to protect. Only a press that STARTS while
+    suppressed is swallowed.
+  - `logic_probe`'s `ProbeMouseLatch` section 3 pins all of it. **That leg cannot be checked by
+    clicking in Chrome either**: the phantom-edge case needs the button held across the moment the
+    flag lifts, and its evidence is the ABSENCE of an event.
 - **Aiming cursor / reticle:** KNI never applies `IsMouseVisible` to the DOM, so C# owns
   `canvas.style.cursor` via `Compat/CursorInterop` → `eaCursor.set(mode)`: `menu` (arrow),
   `hidden` (during the level-start intro sprite), `reticle` (the reticle IS the OS cursor via

@@ -1841,6 +1841,128 @@ internal static class Program
         Check("negative control: without the fold-in the same click is LOST", !isPressed(mouse1),
             "a pass here means the latch is not what carried the press above");
 
+        // ---- 3. off-canvas clicks are not game input (card 0fe23476) --------------------------
+        // KNI's own mouse listeners are on the WINDOW, so a click on any outside-#app DOM overlay
+        // still reaches the game's button state at that cursor position -- which is how clicking
+        // the room-code prompt's JOIN button hit the CANCEL row of the NetStatusMenu behind it.
+        // JS flags the press as off-canvas; Filter is what the flag actually does.
+        //
+        // This leg CANNOT be checked in the browser by clicking, either: the failure it guards
+        // (the phantom press on release) needs the button held across the moment the flag lifts,
+        // which is a drag, and its evidence is the absence of an event. Here it is three calls.
+        MethodInfo suppress = latch.GetMethod("SetSuppressed", anyStatic);
+        MethodInfo filter = latch.GetMethod("FilterOffCanvas", anyStatic);
+        if (suppress == null || filter == null)
+        {
+            Console.WriteLine("  FAIL could not reflect the suppression targets (SetSuppressed="
+                + (suppress != null) + " FilterOffCanvas=" + (filter != null) + ") -- renamed or moved?");
+            failures++;
+            return 0;
+        }
+        Action<bool> setSuppressed = on => suppress.Invoke(null, new object[] { on });
+        Func<int, bool, bool> filterKey = (idx, raw) => (bool)filter.Invoke(null, new object[] { idx, raw });
+
+        // Positive control FIRST: with nothing suppressed the filter is a pass-through, so every
+        // assertion below is about the flag rather than about a filter that always says false.
+        Check("un-suppressed, a held button reads held", filterKey(mouse1, true), null);
+        Check("un-suppressed, a released button reads released", !filterKey(mouse1, false), null);
+
+        setSuppressed(true);
+        Check("a press that began off-canvas reads released", !filterKey(mouse1, true), null);
+        // THE PHANTOM-EDGE ASSERTION. The flag lifts on pointerup, but a drag can end over the
+        // canvas with the button still down for a tick or two; a plain flag would then hand
+        // InputHandler a rising edge and land the click it just refused.
+        setSuppressed(false);
+        Check("the tail of that same press is still swallowed", !filterKey(mouse1, true),
+            "a pass here means an overlay drag ending on the canvas fires a click");
+        Check("still swallowed on a later tick", !filterKey(mouse1, true), null);
+        Check("a physical release clears it", !filterKey(mouse1, false), null);
+        Check("and the NEXT press is honoured again", filterKey(mouse1, true),
+            "a fail here is a dead mouse, which is worse than the bug being fixed");
+        filterKey(mouse1, false);
+
+        // Per-button, because the two are filtered in the same tick with independent states: a
+        // shared flag would let whichever button was polled first clear the other one's swallow.
+        setSuppressed(true);
+        filterKey(mouse1, true);
+        filterKey(mouse2, true);
+        setSuppressed(false);
+        Check("releasing one button does not un-swallow the other",
+            !filterKey(mouse2, false) && !filterKey(mouse1, true), null);
+        filterKey(mouse1, false);
+
+        // An ALREADY-HELD button is not collateral. The flag is per-gesture in JS but applied
+        // per-button here, so without the carve-out, right-clicking the FPS HUD while holding
+        // fire on the canvas would stop the ship shooting mid-hold until you released and
+        // re-pressed -- a suppression fix that breaks the input it was protecting.
+        filterKey(mouse1, true);                       // a press established on the canvas
+        setSuppressed(true);                           // ... then something off-canvas is pressed
+        Check("an already-held button keeps reporting held", filterKey(mouse1, true),
+            "a fail here means an off-canvas click cancels an unrelated held button");
+        Check("but a button pressed DURING suppression is still swallowed",
+            !filterKey(mouse2, true), null);
+        setSuppressed(false);
+        filterKey(mouse1, false);
+        filterKey(mouse2, false);
+        Check("both buttons settle back to released",
+            !filterKey(mouse1, false) && !filterKey(mouse2, false), null);
+
+        // Suppression must also drop anything the CANVAS latch had already banked this tick --
+        // otherwise the sub-tick rescue would smuggle through exactly the press being refused.
+        pressButton(LeftButton);
+        setSuppressed(true);
+        Check("suppression drops a banked sub-tick latch", !consumeKey(mouse1), null);
+        setSuppressed(false);
+        filterKey(mouse1, false);
+        filterKey(mouse2, false);
+
+        // ---- 4. the clickable back tip is an EDGE, and lives one frame (card 2a4110d0) -------
+        // Compat/BackTipHit turns a click on the bottom-left "(B) back" label into a synthetic
+        // Esc. Two properties carry it, and BOTH are invisible in a screenshot:
+        //  - it must fire on the PRESS EDGE, not the button level. A level fires on a press that
+        //    began somewhere else: mouse-down on a menu row and drag to the corner backs out,
+        //    and in-game a held fire button un-pauses the frame the pause overlay draws the tip
+        //    under the resting cursor. A browser cannot settle this either -- an automated drag
+        //    is sub-tick, so it passes on the broken code by luck.
+        //  - the box must live exactly ONE frame, or a screen that stopped drawing the tip (i.e.
+        //    gameplay) still has a live back-target sitting in its bottom-left corner.
+        Type backTip = asm.GetType("EvilAliensWeb.Compat.BackTipHit", true);
+        MethodInfo record = backTip.GetMethod("Record", anyStatic);
+        MethodInfo consumeTip = backTip.GetMethod("ConsumeClick", anyStatic);
+        if (record == null || consumeTip == null)
+        {
+            Console.WriteLine("  FAIL could not reflect BackTipHit (Record=" + (record != null)
+                + " ConsumeClick=" + (consumeTip != null) + ") -- renamed or moved?");
+            failures++;
+            return 0;
+        }
+        // Vector2 comes off the loaded assembly's own reference -- logic_probe deliberately does
+        // not compile against XNA (see the header), so it is built by reflection like the
+        // CollisionBox set above.
+        Type tipVec2 = consumeTip.GetParameters()[0].ParameterType;
+        Func<float, float, object> tipVec = (x, y) => Activator.CreateInstance(tipVec2, new object[] { x, y });
+        // The real MenuScene geometry: icon at SafeZone.Left, label to its right, on the tips
+        // baseline, down to SafeZone.Bottom.
+        Action recordTip = () => record.Invoke(null, new object[] { 40f, 146f, 534f, 570f });
+        Func<float, float, bool, bool> clickTip = (x, y, pressed) =>
+            (bool)consumeTip.Invoke(null, new object[] { tipVec(x, y), pressed });
+
+        recordTip();
+        Check("a press INSIDE the tip is a back", clickTip(93f, 552f, true), null);
+        recordTip();
+        Check("a press OUTSIDE it is not", !clickTip(400f, 300f, true), null);
+
+        // THE EDGE ASSERTION. Same cursor, same box, button merely HELD -- the drag case.
+        recordTip();
+        Check("the button merely being HELD is not a back", !clickTip(93f, 552f, false),
+            "a pass on `true` here means dragging onto the tip backs out");
+
+        // One frame only: a screen that draws no tip must offer nothing to hit.
+        recordTip();
+        clickTip(0f, 0f, false);                       // the tick that spends the recording
+        Check("an unrecorded frame has no back target", !clickTip(93f, 552f, true),
+            "a pass here means the corner stays clickable during gameplay");
+
         // Leave nothing latched for a Probe* added after this one. The Check runs FIRST -- put
         // the drains before it and it can only re-test the clear, never report a leak.
         Check("case set leaves no press latched", !consumeKey(mouse1) && !consumeKey(mouse2), null);

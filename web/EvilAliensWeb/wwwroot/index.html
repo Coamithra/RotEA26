@@ -1087,6 +1087,44 @@
                 }
             });
 
+            // A click that is not ON the canvas is not game input (card 0fe23476).
+            // The latch above is canvas-scoped for exactly that reason -- but it is only the
+            // sub-tick RESCUE. The primary read is InputHandler polling Mouse.GetState(), and
+            // KNI's own listeners are on the WINDOW (nkast.Wasm.Dom Window.js), so the button
+            // state of a press on any outside-#app UI still reaches the game at that cursor
+            // position, and the game acts on it. Reported case: the room-code prompt's JOIN
+            // button sits over the live NetStatusMenu's single CANCEL row, so clicking JOIN
+            // cancelled the join -- unfixable from the DOM, because the game never sees the DOM
+            // event. Same leak for the fullscreen button, the FPS HUD tag and the tuning panels.
+            // CAPTURE phase on window, so an overlay that stops propagation is still counted;
+            // released on pointerup rather than after a tick, so a drag that starts on an
+            // overlay and ends over the canvas does not land as a click either (C# then swallows
+            // that button until it is physically released -- see MouseLatch.Filter).
+            var eaMouseSuppressFailed = false;
+            var eaMouseSuppress = (on) => {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'eaMouseSuppress', !!on); }
+                catch (err) {
+                    if (!eaMouseSuppressFailed) {
+                        eaMouseSuppressFailed = true;
+                        console.warn('[input] eaMouseSuppress failed -- off-canvas clicks will reach the game: ' + err.message);
+                    }
+                }
+            };
+            window.addEventListener("pointerdown", (e) => {
+                if (e.pointerType !== 'mouse') return;   // touch has its own overlay (eaHold)
+                var canvas = document.getElementById('theCanvas');
+                if (canvas && (e.target === canvas || canvas.contains(e.target))) return;
+                eaMouseSuppress(true);
+            }, true);
+            // pointercancel too: a press can end without a pointerup (the browser stealing the
+            // pointer for a drag/gesture), and a suppression that never lifts is a dead mouse.
+            window.addEventListener("pointerup", () => eaMouseSuppress(false), true);
+            window.addEventListener("pointercancel", () => eaMouseSuppress(false), true);
+            // Mouse pointers get no implicit capture, so releasing the button OUTSIDE the window
+            // delivers neither event and the flag would stay set -- a dead mouse until the next
+            // click anywhere. Losing the window is how that happens, so lift it there too.
+            window.addEventListener("blur", () => eaMouseSuppress(false));
+
             // Pull the level-select screenshot blobs out of IndexedDB into memory BEFORE the
             // first game tick, so the synchronous save-hydrate (StorageStub, on the first
             // OpenContainer a few ticks in) sees them. IndexedDB is async but the game reads

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Revenge of the Evil Aliens has moved</title>
+
+<!-- This page is served at coamithra.github.io/RotEA26/ ONLY. The game itself lives
+     at haraldmaassen.com/RotEA26/ (card 54c2a8f2). Deployed by
+     .github/workflows/pages-stub.yml, which publishes this file as BOTH index.html
+     and 404.html so deep links redirect as well as the root. -->
+
+<!-- canonical, so search engines transfer the ranking to the new address instead of
+     indexing this as a duplicate. -->
+<link rel="canonical" href="https://haraldmaassen.com/RotEA26/" />
+<meta name="robots" content="noindex, follow" />
+
+<!-- The no-JS fallback. Kept in step with the visible countdown below. -->
+<meta http-equiv="refresh" content="4; url=https://haraldmaassen.com/RotEA26/" />
+
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #05030a;
+    color: #cfc7e6;
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+  }
+  .card { max-width: 34rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 .75rem; color: #f2ecff; }
+  p { margin: 0 0 1rem; }
+  a { color: #b18cff; }
+  .go {
+    display: inline-block; margin-top: .5rem; padding: .6rem 1.15rem;
+    border: 1px solid #6d4bb5; border-radius: 6px;
+    background: #1a1030; color: #f2ecff; text-decoration: none;
+  }
+  .go:hover, .go:focus { background: #271748; }
+  .muted { color: #7d739b; font-size: .875rem; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>This game has moved.</h1>
+    <p><strong>Revenge of the Evil Aliens</strong> now lives at
+       <a href="https://haraldmaassen.com/RotEA26/">haraldmaassen.com/RotEA26/</a>.</p>
+    <p class="muted">The copy that used to be here is long out of date &mdash; and because
+       online co-op only pairs players running the identical build, it can no longer play
+       with anyone. Update your bookmark.</p>
+    <p><a class="go" href="https://haraldmaassen.com/RotEA26/">Go to the game</a></p>
+    <p class="muted">Taking you there in <span id="n">4</span>&hellip;</p>
+  </div>
+
+<script>
+  // Visible countdown, then redirect. REPLACE, not assign: this page must not sit in
+  // the back-button history, or "back" from the game bounces the player straight
+  // forward again and they can never leave.
+  (function () {
+    var TARGET = "https://haraldmaassen.com/RotEA26/";
+    var n = 4, el = document.getElementById("n");
+    var t = setInterval(function () {
+      n -= 1;
+      if (el) { el.textContent = n < 0 ? 0 : n; }
+      if (n <= 0) { clearInterval(t); location.replace(TARGET); }
+    }, 1000);
+  })();
+</script>
+</body>
+</html>

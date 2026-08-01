@@ -152,8 +152,8 @@ proof.
 - **The runbook is [`docs/DEPLOY.md`](docs/DEPLOY.md).** Short version: the game ships to
   https://haraldmaassen.com/RotEA26/ via `python tools/deploy_web.py` (SFTP to the shared Hetzner
   host), verified with `python tools/check_deploy.py`. Hosting is mid-migration — the *current*
-  public site is still GitHub Pages via `.github/workflows/deploy.yml` (`workflow_dispatch`), and
-  stays so until the first Hetzner deploy is verified.
+  public site IS that Hetzner address (live since 2026-08-01); `coamithra.github.io/RotEA26/`
+  serves only a redirect stub and no longer builds the game.
 - For anything content/path-sensitive, **spot-check the LIVE URL** — content paths are
   case-sensitive on both hosts, localhost isn't.
 - **Docs are split** — when a change adds a convention/flag/gotcha, update the right file:

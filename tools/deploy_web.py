@@ -175,8 +175,9 @@ def build_hash(site: Path) -> str:
     it and refuses a peer whose hash differs, and the game browser filters the
     room list on it -- so two players only ever meet when their builds hash the
     same. Do not "improve" the recipe: it is ported VERBATIM from
-    .github/workflows/deploy.yml (still present, pending the cutover) so a site
-    published by this script is indistinguishable from one CI published.
+    .github/workflows/deploy.yml, which is now DELETED (card 54c2a8f2) -- so this
+    function plus --selftest are the only surviving statement of it, and a site
+    published by this script stays indistinguishable from one CI published.
 
     The shell it replaces was:
 
@@ -229,10 +230,12 @@ def build_hash(site: Path) -> str:
 
 
 # A fixed tree and the hash the SHELL recipe produces for it, captured while
-# .github/workflows/deploy.yml still existed to be compared against. Once that
-# workflow is deleted this is the only surviving evidence of the original recipe,
-# so `--selftest` is what stops a well-meaning edit from silently redefining the
-# co-op compatibility key. Each name earns its place:
+# .github/workflows/deploy.yml still existed to be compared against. THAT WORKFLOW IS
+# NOW DELETED, so this vector is the only surviving evidence of the original recipe and
+# `--selftest` is what stops a well-meaning edit from silently redefining the co-op
+# compatibility key. Treat a FAIL as "I am about to split the player base", never as a
+# stale test -- there is nothing left to re-derive the recipe from. Each name earns its
+# place:
 #   Z / a          uppercase sorts BEFORE lowercase (byte order, not locale collation)
 #   a10 / a2       plain lexicographic, NOT natural/numeric ordering
 #   'd e.txt'      a space in the name
@@ -274,7 +277,7 @@ def selftest() -> int:
 def stamp(site: Path) -> str:
     """Rewrite index.html for the live host. Returns the stamped build hash.
 
-    Two edits, both of which the Pages workflow did:
+    Two edits, both of which the (now deleted) Pages workflow did:
       * ``<base href="/" />`` -> ``/RotEA26/`` (the dev build keeps "/" so
         ``dotnet run`` works at a domain root).
       * ``window.eaBuildHash = 'dev'`` -> the real fingerprint. Leaving it at

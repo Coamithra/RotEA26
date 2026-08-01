@@ -88,8 +88,28 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `interpolate.fx`'s frame delta, per-vertex UVs in `Wall.DrawTowerShafts3D`, a shader feather
   window) → **actual padded** size. Whole-texture draws MUST clamp their source to `LogicalBounds()`
   (the wrapper's `Draw` overloads do — else the transparent pad reads BLACK under Opaque blend, e.g.
-  the menu frame lines). RenderTargets are never padded. A content-extent shader
-  (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
+  the menu frame lines). RenderTargets are never padded.
+  **That parenthesis was FALSE for two of them until card b7e9b106, and the way it failed is the
+  reason `tools/audit_unclamped_draw.py` now lints the shape** (run it after adding any raw
+  `spriteBatch.Draw` to the wrapper; `--selftest` pins the rule). `SealAlpha` and the
+  `DrawPresent(texture, dest, color)` overload used the un-clamped
+  `Draw(texture, dest, color)` form, so they stretched the whole PADDED canvas over `dest`. With
+  `blank` (a 10x10 white pixel in a 112x112 `--padtest` canvas) that covers ~1/8 of the
+  destination — which silently killed the DEATH CROSS-FADE: `SealAlpha` sealed only the top-left
+  ~100x75 px of the 800x600 snapshot, the straight-alpha dissolve had no alpha to blend with
+  anywhere else, and dying objects stayed fully solid for the whole 1.5 s and then vanished at
+  the purge. **Note the failure shape** — the XFade timer, the `NonPremultiplied` blend state and
+  the ramping tint alpha were all provably correct, so every intermediate reads healthy and only
+  the composited result is wrong. Pinned by `tools/headless/probes/death_fade.txt`, which reads
+  the `[xfade] seal ... src=` line `SealAlpha` prints on its first draw (derived from the rect it
+  actually hands `Draw`, not restated beside it).
+  **`DrawEffect` is the ONE deliberate un-clamped draw** and must stay that way: it is the
+  `ContentScale` contract below, where the shader maps into the content itself, so clamping
+  would double-correct. The audit exempts a batch begun with a custom effect — the NEAREST
+  preceding `Begin`, and only when its effect argument is a bare identifier, since
+  `_beginDrawing` passes `effectHandler.CurrentEffect`, which is textually non-null but null on
+  the ordinary sprite path. A content-extent
+  shader (`starwindow`, `channelflip`) takes a `ContentScale` (= logical/padded) uniform and does its
   `[0,1]` frame math in `tc/ContentScale`; the `SpriteBatchWrapper` sets it centrally in
   `BeginCustom`/`DrawCustom` (the render-space custom-effect batch that `ProceduralStarfield`/
   `DriftingStars` use instead of a private `SpriteBatch`) and in `DrawEffect`.

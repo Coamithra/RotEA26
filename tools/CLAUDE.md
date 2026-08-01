@@ -766,3 +766,13 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   — flags any `ComponentBin.Add` call site that still configures the object (Setup/Make*/property
   write) AFTER the Add; KNI runs `Initialize()` synchronously inside the Add, so config must come
   first. Run after adding spawn sites; exit 0 = clean. See web CLAUDE.md "Component lifecycle".
+- **`tools/audit_unclamped_draw.py`**: lint for the padded-DXT source clamp (card b7e9b106) —
+  flags any raw `spriteBatch.Draw` in `SpriteBatchWrapper.cs` that passes NO source rectangle, so
+  a padded `.dds` would stretch its mult-of-4 pad over the destination. Exempts a batch begun with
+  a custom `Effect` (the `ContentScale` contract — `DrawEffect`). `--selftest` pins the rule with
+  no repo needed; mutation-tested (reverting the two clamps card b7e9b106 added turns it red,
+  naming both sites). Scope is that ONE file on purpose: it is the wrapper whose overloads web
+  CLAUDE.md vouches for, and `Game1`'s own raw batch only ever draws render targets, which are
+  never padded. **The bug it exists for was invisible**: `SealAlpha` sealed 1/8 of the death
+  cross-fade's snapshot and the fade silently stopped happening, with the timer, blend state and
+  tint alpha all correct. Run after adding a raw draw to the wrapper; exit 0 = clean.

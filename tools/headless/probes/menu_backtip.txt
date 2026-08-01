@@ -57,7 +57,55 @@ eval Press enter 1
 step 200
 expect      \[backtip\] menu=SubMenuLevelChoice entries=\d+ .* overlap=none
 
-# THE ASSERTION: nothing reported an overlap anywhere in that walk.
+# THE GEOMETRY ASSERTION: nothing reported an overlap anywhere in that walk.
 expect-not  \[backtip\] .* overlap=[0-9]
+
+# Back to the main menu for section 2.
+eval Press escape 1
+step 150
+
+# =====================================================================================
+# SECTION 2 -- the tip actually GOES BACK when clicked (PR #255 follow-up)
+#
+# Reachable here only because `eaMouseAt` parks the cursor in DESIGN space: `eaPress` supplies
+# the button, but every mouse consumer is position-dependent and the position used to come only
+# from Mouse.GetState(), which no script can move. Before that seam this leg needed real Chrome.
+#
+# `eaMenuCensus` is the observable -- which menu is LIVE. The [backtip] line cannot serve here:
+# it prints only when a layout CHANGES, so returning to a menu already seen prints nothing.
+# =====================================================================================
+mark
+
+eval Press down 1
+step 5
+eval Press enter 1
+step 150
+# Precondition, asserted rather than assumed: we really are in the submenu. Without this the
+# "back on the main menu" check below passes on a run that never left it.
+eval MenuCensus
+expect      \[menucensus\] count=1 live=MenuSub1
+
+# NEGATIVE CONTROL: same click, cursor somewhere with no entry and no tip. If this moved us,
+# the assertion below would be about clicking anywhere rather than about the tip.
+mark
+eval MouseAt 700 100
+step 2
+eval Press Mouse1 1
+step 120
+eval MenuCensus
+expect      \[menucensus\] count=1 live=MenuSub1
+expect-not  \[menucensus\] count=1 live=MenuSubWithSkull
+
+# THE CLICK. Cursor inside the tip box asserted in section 1 (40,534 .. 146,570).
+mark
+eval MouseAt 93 552
+step 2
+eval Press Mouse1 1
+step 120
+eval MenuCensus
+expect      \[menucensus\] count=1 live=MenuSubWithSkull
+
+# Leave the cursor to the real mouse, so nothing after this inherits a parked pointer.
+eval MouseClear
 
 quit

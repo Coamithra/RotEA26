@@ -159,6 +159,13 @@ public class InputHandler : IInputHandlerService
 		// letterbox scale+offset so the cursor maps to the design point under it; otherwise
 		// the ship fires toward a scaled/shifted phantom point, not where you clicked.
 		mousepos = RenderScale.WindowToDesign(new Vector2((float)(state).X, (float)(state).Y));
+		// A scripted cursor (eaMouseAt / eval MouseAt) wins over the real mouse, so automation
+		// can put the pointer ON a menu entry or the back tip -- `eaPress('Mouse1')` alone only
+		// ever supplied the button. Never set on an ordinary boot.
+		if (EvilAliensWeb.Compat.DebugInput.TryGetMouseOverride(out float overrideX, out float overrideY))
+		{
+			mousepos = new Vector2(overrideX, overrideY);
+		}
 		// The two mouse buttons are resolved ONCE, before the key loop, because Esc (5) is
 		// polled before Mouse1 (6) and the clickable back tip below needs the settled left
 		// button. Each source is still evaluated exactly once per tick:
@@ -177,7 +184,13 @@ public class InputHandler : IInputHandlerService
 		// state at this point (the loop below is what updates it), so this is the same edge
 		// `Pressed(MyKeys.Mouse1)` will report. A level would fire on a press that began
 		// elsewhere -- see ConsumeClick.
-		bool mouse1Pressed = mouse1Held && !pressedAndIdle[(int)MyKeys.Mouse1];
+		// `DebugInput.Peek`, not `Consume`: the key loop below does the one real consume for
+		// Mouse1 (a scripted hold is a countdown, so consuming twice in a tick eats two ticks
+		// of it). Without this a scripted click reached `HandleMouse` -- which reads Mouse1
+		// from the loop -- but never the back tip, leaving the one surface that has no other
+		// automation route unreachable.
+		bool mouse1Down = mouse1Held || EvilAliensWeb.Compat.DebugInput.Peek((int)MyKeys.Mouse1);
+		bool mouse1Pressed = mouse1Down && !pressedAndIdle[(int)MyKeys.Mouse1];
 		bool backTipClicked = EvilAliensWeb.Compat.BackTipHit.ConsumeClick(mousepos, mouse1Pressed);
 		bool held = false;
 		for (int i = 0; i < keysToCheck.Length; i++)

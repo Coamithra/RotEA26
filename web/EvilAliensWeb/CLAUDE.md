@@ -691,6 +691,19 @@ site now lives under:
   **Touch/mobile** uses the same seam: `eaHold(key, down)` → `DebugInput.Hold` holds until
   released; both drained by `DebugInput.Consume`. Driving fullscreen via automation fails
   (synthetic clicks carry no `navigator.userActivation`) — harness limit, not a bug.
+  - **`eaMouseAt(x, y)` is the CURSOR half, and a scripted click needs both.** `eaPress('Mouse1')`
+    supplies only the button, but every mouse consumer is position-dependent -- `HandleMouse`
+    hit-tests the cursor against the entry boxes, `BackTipHit` against the tip box -- and the
+    position came only from `Mouse.GetState()`, which no script can move (under `eahl` it is
+    wherever SDL reports). So the whole mouse surface was unreachable from this seam and every
+    menu click needed a real Chrome pass. `eaMouseAt` parks the pointer at a **design-space**
+    (800x600) point, the same coordinates `RecordEntryHit` and `BackTipHit.Record` store, so a
+    probe can read a box off a `[backtip]` line and click it. Persistent like `eaHold` (a click
+    spans a press tick and a release tick); `eaMouseAt()` / `eaMouseClear()` hands the cursor
+    back. `eval MouseAt <x> <y>` / `eval MouseClear` under `eahl`.
+    **`InputHandler` reads it via `DebugInput.Peek`, never `Consume`** -- the key loop does the
+    one real consume for Mouse1, and a scripted hold is a countdown, so consuming twice in a
+    tick would eat two ticks of it.
 - **Menus are mouse-selectable + clickable.** Each `DrawMenu` records the design-space box of every
   entry it draws via `MenuSub1.RecordEntryHit(index, centre, w, h)` (locked/undrawn entries
   skipped); `MenuSub1.HandleMouse()` (gated on the `normal` state) maps the cursor to hover-select
@@ -729,6 +742,10 @@ site now lives under:
     overlap=<none|index>` on each layout change -- the POSITIVE case included, since a check that
     only printed failures would pass on a run that never opened a menu. Committed as
     `tools/headless/probes/menu_backtip.txt` (framed main menu / plain list / carousel).
+  - **The click itself is HEADLESS now** -- that probe's section 2 parks the cursor on the tip
+    with `eaMouseAt` and clicks it, asserting via `eaMenuCensus` that the live menu goes back
+    (with the same click at a bare spot as the negative control). So the back tip needs no Chrome
+    pass; before the `eaMouseAt` seam it did, because `eaPress` could not move the pointer.
 - **The main menu shifts its row list UP when it would not fit** (card 45c16ef6,
   `MenuSubWithSkull.RowsStartY`). `curY0` keys off the FULL entry count, which unlocking does not
   change, so the list only ever grew DOWNWARD and at 8 visible rows EXIT was drawn clipped off the

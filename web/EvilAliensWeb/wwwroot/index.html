@@ -110,6 +110,18 @@
             catch (e) { console.warn('[debug] eaPress failed (game not booted yet?): ' + e.message); }
         };
 
+        // The cursor half of eaPress: park the pointer at a DESIGN-SPACE (800x600) point so a
+        // scripted eaPress('Mouse1') actually lands on something. Same coordinates the menus
+        // record their hit boxes in. eaMouseAt() with no args releases the real mouse.
+        window.eaMouseAt = (x, y) => {
+            try {
+                if (x === undefined) { DotNet.invokeMethod('EvilAliensWeb', 'debugMouseClear'); }
+                else { DotNet.invokeMethod('EvilAliensWeb', 'debugMouseAt', Number(x), Number(y)); }
+            }
+            catch (e) { console.warn('[debug] eaMouseAt failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaMouseClear = () => window.eaMouseAt();
+
         // Online co-op dev transport (?net=host / ?net=join): a BroadcastChannel between two
         // local tabs -- zero network, dev-only. JS owns the platform object (this channel),
         // C# sees only Compat/Net/NetInterop (the webcam.js pattern); card 11.4 adds a

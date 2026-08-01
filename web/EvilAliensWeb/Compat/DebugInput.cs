@@ -86,6 +86,70 @@ namespace EvilAliensWeb.Compat
 			}
 		}
 
+		// --- scripted CURSOR POSITION (the other half of eaPress, PR #255 follow-up) ---
+		//
+		// `eaPress('Mouse1')` injects the BUTTON, but every mouse consumer in the game is
+		// position-dependent: `MenuSub1.HandleMouse` hit-tests the cursor against the entry
+		// boxes, and `BackTipHit` against the back tip's box. The position came only from
+		// `Mouse.GetState()`, which a script cannot move -- under `eahl` it is wherever SDL
+		// happens to report -- so a scripted click could never land ON anything and the whole
+		// mouse surface was unreachable from the project's own automation seam. Every menu
+		// click therefore needed a real Chrome pass, including the ones whose only browser-
+		// specific ingredient was that they involve a mouse at all.
+		//
+		// Design space (800x600), i.e. the same coordinates `RecordEntryHit` and
+		// `BackTipHit.Record` store, so a probe can read a box off a `[backtip]` line and click
+		// it. Persistent until cleared, like `Hold` and unlike `Press`: a click is at least a
+		// press tick and a release tick, and a one-shot position would strand the second one.
+		private static bool mouseOverride;
+
+		private static float mouseOverrideX;
+
+		private static float mouseOverrideY;
+
+		// JS bridge: DotNet.invokeMethod('EvilAliensWeb', 'debugMouseAt', x, y) / eaMouseAt(x,y).
+		[JSInvokable("debugMouseAt")]
+		public static void MouseAt(double x, double y)
+		{
+			mouseOverride = true;
+			mouseOverrideX = (float)x;
+			mouseOverrideY = (float)y;
+			Console.WriteLine("[debug] eaMouseAt " + mouseOverrideX + "," + mouseOverrideY
+				+ " (design space; eaMouseClear releases the real mouse)");
+		}
+
+		// Hand the cursor back to the real mouse.
+		[JSInvokable("debugMouseClear")]
+		public static void MouseClear()
+		{
+			if (mouseOverride)
+			{
+				mouseOverride = false;
+				Console.WriteLine("[debug] eaMouseClear -- cursor back on the real mouse");
+			}
+		}
+
+		internal static bool TryGetMouseOverride(out float x, out float y)
+		{
+			x = mouseOverrideX;
+			y = mouseOverrideY;
+			return mouseOverride;
+		}
+
+		// Non-destructive read of the same injection `Consume` drains. `Consume` DECREMENTS a
+		// scripted hold, so it must be called exactly once per tick per key -- InputHandler
+		// needs the Mouse1 state one step EARLIER than the key loop reaches it (Esc is polled
+		// before Mouse1, and the back tip folds into Esc), so it peeks there and lets the loop
+		// do the single real consume.
+		internal static bool Peek(int idx)
+		{
+			if (idx < 0 || idx >= holdTicks.Length)
+			{
+				return false;
+			}
+			return holdTicks[idx] > 0 || touchHeld[idx];
+		}
+
 		// JS bridge for QA/demo of the cinematic slow-motion effect (eaSlowmo in
 		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugSlowmo', seconds).
 		// Triggers the same slow-motion burst the fully-powered 1up does (Oracle.SetSlowmotion)

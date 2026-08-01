@@ -1,0 +1,45 @@
+# PROBE: the crawl taper's fit clamp SATURATES an over-large request instead of clipping.
+#
+# PINS: the other half of card bee8f0e0's taper -- see credits_crawl.txt for the mechanism.
+# ?crawlskew= is a taste knob the player is expected to dial during a playthrough, so it must
+# be impossible to set it to a value that pushes the crawl off screen: the amount asked for is
+# clamped to the largest that keeps the widest line inside the 800 px design width. This probe
+# asks for 5.0 -- absurd on purpose, 25x the shipped default -- and asserts that what is drawn
+# is a small positive number and still fits.
+#
+# It also pins that the clamp is DYNAMIC rather than a baked constant, by driving the level-3
+# crawl: eahl wipes saves per run, so the difficulty gate in SetupLevel3 takes the non-Hard
+# branch, whose text is a different (and credits-appended) line set from the level-1 crawl the
+# sibling probe uses -- and it saturates at a DIFFERENT value off that text (0.095 here against
+# 0.081 there, from widest lines of 664.5 and 669.0 px), which is the observable difference
+# between a derived clamp and a second baked constant. If the credits text is ever edited both
+# numbers move and `fit=ok` is what keeps holding, so that is what the assertions lean on.
+#
+# FAILURE MEANS: read the quoted `[crawl]` line.
+#   effective=5.000 / fit=OVERFLOW -- the clamp is gone: ?crawlskew= is now a foot-gun that
+#                                     runs the crawl off screen, and the shipped default is
+#                                     almost certainly clipping too.
+#   effective=0.000                -- the clamp over-corrected to nothing (a sign error in the
+#                                     scale-to-skew conversion would do this); no taper at all.
+#
+# NOT NODRAW / ANTI-VACUITY: as credits_crawl.txt -- the line comes from CreditsScene.Draw and
+# only exists once the crawl is on screen, so a run that never got there fails the `expect`.
+#
+# MUTATION-TESTED, both measured: dropping the clamp (`crawlEffectiveSkew = requestedSkew`)
+# prints `effective=5.000 ... fit=OVERFLOW span=[-1561.3,2425.8]`. Omitting the
+# scale-to-skew conversion (`- 1f` instead of `- 2f` -- the off-by-one this was actually
+# written with, and the reason to test rather than reason about it) prints
+# `effective=1.095 fits=1.095 fit=OVERFLOW span=[-263.8,1128.3]`: a clamp that is visibly
+# DOING something and is still 13x too generous. `effective < requested` alone would have
+# called that a pass, which is why fit= is a verdict the game computes and asserts here.
+# Rebuild tools/headless after either mutation -- eahl links the game sources in.
+#
+# eahl: --flags "?creditsshot=3&crawlskew=5&crawlpos=100&mute"
+
+mark
+step 150
+expect      \[crawl\] skew=5\.000 effective=0\.[0-9]
+expect-not  \[crawl\] .* effective=0\.000
+expect      \[crawl\] .* fit=ok
+expect-not  \[crawl\] .* fit=OVERFLOW
+quit

@@ -29,11 +29,16 @@
 #      "%, &, ?, ( )".
 #  (3) KERNING: per-glyph side bearings + a tuned global spacing (SpriteFont has no
 #      pair-kern table; tracking + bearings is the lever we have).
+#  (4) EDGE HALO (card 5d8becc2): the atlas' fully-transparent texels carry the
+#      RGB of their nearest ink instead of black -- see bleed_transparent_rgb().
 #
 # Custom glyphs replace A-Z a-z 0-9 and the 12 punctuation marks; every other
 # original glyph (space + debug symbols) is carried over unchanged from the
-# *.orig backup; U+00B4 (the game's acute-accent "apostrophe") is aliased to the
-# drawn apostrophe.
+# *.orig backup, or from the LIVE font when no backup exists; U+00B4 (the game's
+# acute-accent "apostrophe") is aliased to the drawn apostrophe.
+# NOTE: the committed atlas was built with NO *.orig present, i.e. those carried
+# glyphs came from the live font -- seeding a *.orig from git history does NOT
+# reproduce it (measured: 1258 texels differ). Don't seed one.
 # Re-run after editing any sheet. Writes a preview PNG (+ a --debug montage);
 # only overwrites the live font when run with --commit.
 # ---------------------------------------------------------------------------
@@ -301,8 +306,61 @@ def to_white_alpha(crop_l):
     return Image.fromarray(rgba, 'RGBA')
 
 
+def bleed_transparent_rgb(atlas):
+    """Dilate the atlas' RGB into its fully-transparent texels (card 5d8becc2).
+
+    Alpha is STRAIGHT project-wide, so bilinear averages RGB *ignoring* alpha: a
+    sample straddling a glyph edge mixes the ink's colour with whatever colour the
+    transparent side happens to carry. Both the packing canvas and PIL's
+    alpha_composite leave that at (0,0,0), so every edge sample came back dragged
+    toward black -- a dark halo on every glyph, worst where the text is minified
+    (the atlas is SSx denser than the design quad it's drawn into). Same class of
+    bug as build_textures.py's edge_gutter(), one level down.
+
+    Each alpha==0 texel takes the RGB of its nearest alpha>0 texel; ALPHA IS NEVER
+    WRITTEN, so glyph shapes, coverage and AA are bit-for-bit unchanged.
+    """
+    a = np.array(atlas, dtype=np.uint8)      # (h,w,4) copy
+    ink = a[..., 3] > 0
+    if not ink.any() or ink.all():
+        return Image.fromarray(a, 'RGBA')    # always a fresh image, never the caller's
+    idx = ndimage.distance_transform_edt(~ink, return_distances=False,
+                                         return_indices=True)
+    rgb = a[..., 0:3]
+    rgb[~ink] = rgb[idx[0], idx[1]][~ink]
+    return Image.fromarray(a, 'RGBA')
+
+
+def check_no_black_halo(atlas):
+    """Guard the ship: the halo fix above is one unconditional call, and losing it
+    fails SILENTLY (a slightly dark glyph edge -- no error, no metrics diff). Fires
+    only when the atlas has non-black ink to bleed, so it can't cry wolf on art
+    that is legitimately black."""
+    a = np.asarray(atlas.convert('RGBA'))
+    clear = a[..., 3] == 0
+    ink = ~clear
+    if not clear.any() or not ink.any() or a[..., 0:3][ink].max() == 0:
+        return
+    black = int((a[..., 0:3][clear].max(axis=1) == 0).sum())
+    if black:
+        sys.exit(f'ABORT: {black} fully-transparent texels are still black -- the '
+                 f'bleed_transparent_rgb() pass did not run. Straight-alpha bilinear '
+                 f'would interpolate that black into every glyph edge (card 5d8becc2).')
+
+
 def read_orig():
     """Original menufont glyphs (from the *.orig backup if present, else live)."""
+    has_bak = os.path.exists(FNT_META + '.orig') or os.path.exists(FNT_PNG + '.orig')
+    if has_bak:
+        # The committed atlas was built with NO backup present. Reading one shifts
+        # the carried glyphs (space + debug symbols) and the build stops
+        # reproducing what is in git -- measured at 1258 texels. --commit creates
+        # these as a side effect, so this fires on any second --commit in a row.
+        print('  WARN *.orig present -- carried glyphs come from the BACKUP, not the\n'
+              '       live font, so this build will NOT reproduce the committed atlas.\n'
+              '       Delete web/.../Content/gfx/menu/menufont.fnt{,.png}.orig to get\n'
+              '       the reproducible build back (git history is the revert path).',
+              file=sys.stderr)
     meta = FNT_META + '.orig' if os.path.exists(FNT_META + '.orig') else FNT_META
     png  = FNT_PNG + '.orig' if os.path.exists(FNT_PNG + '.orig') else FNT_PNG
     d = open(meta, 'rb').read(); off = 0
@@ -441,6 +499,7 @@ def build(debug=False):
     atlas = Image.new('RGBA', (ATLAS_W, atlas_h), (0, 0, 0, 0))
     for ch, g in glyphs.items():
         atlas.alpha_composite(g['img'], placed[ch])
+    atlas = bleed_transparent_rgb(atlas)
 
     # ---- character table (sorted by codepoint) -----------------------------
     rec = []
@@ -535,6 +594,7 @@ def render_debug(allglyphs, caps_src, punc_src):
 
 
 def write_font(atlas, rec):
+    check_no_black_halo(atlas)
     for p in (FNT_PNG, FNT_META):           # back up the original once
         bak = p + '.orig'
         if not os.path.exists(bak):

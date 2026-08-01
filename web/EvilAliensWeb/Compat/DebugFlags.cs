@@ -1034,6 +1034,19 @@ namespace EvilAliensWeb.Compat
 		// Null/empty = the genuine WebRtcInterop.PeerId(); dev-only, byte-identical when unset.
 		public static string NetFakePeerId { get; private set; } = "";
 
+		// ?netfakelisted=<code>: report this game as publicly LISTED under that room code without
+		// ever opening a socket (card d1a0559b). NetListing.Tick short-circuits on it, so nothing
+		// is registered with the signaling server and no stranger can actually join -- it exists
+		// purely so the two places that SURFACE a listing can be screenshot offline: the pause
+		// menu's "Listed online -- room XYZAB" line and ScoreVisualiser's corner beacon. Reaching
+		// either for real needs a live server plus a game the eligibility predicate accepts, which
+		// is not something a headless screenshot run can stand up.
+		// Free-form identity string (the ?netfakepeer=/?netfakehash= class), so a bad value is not
+		// a typo class and nothing is reported. Deliberately NOT part of DebugFlags.Active: no
+		// session exists, so it cannot alter a shared run.
+		// Null/empty = off; byte-identical when unset.
+		public static string NetFakeListed { get; private set; } = "";
+
 		// ?netkickshot: park the host's remote-pause KICK menu over a booted level with no peer
 		// at all (pair with ?level=<Name>), so its appearance can be screenshot in isolation --
 		// the ?gamebrowser fake-entry precedent, named for the ?textshot/?lazershot idiom.
@@ -2492,6 +2505,12 @@ namespace EvilAliensWeb.Compat
 					if (!string.IsNullOrEmpty(val))
 					{
 						NetFakePeerId = val.Trim();
+					}
+					break;
+				case "netfakelisted":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetFakeListed = val.Trim().ToUpperInvariant();
 					}
 					break;
 				case "netkickshot":

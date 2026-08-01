@@ -52,6 +52,17 @@ namespace EvilAliensWeb.Compat.Net
         public static void Tick(Game g)
         {
             game = g;
+            // ?netfakelisted=<code>: pretend to be listed, with no socket and no server (card
+            // d1a0559b). Placed first so nothing below can open a listing behind it; the two
+            // consumers of Listed/RoomCode (the pause line, the corner beacon) then render
+            // exactly as they do for a real listing, which is the whole point of the rig.
+            if (!string.IsNullOrEmpty(DebugFlags.NetFakeListed))
+            {
+                Listed = true;
+                Eligible = true;
+                RoomCode = DebugFlags.NetFakeListed;
+                return;
+            }
             if (!subscribed)
             {
                 subscribed = true;
@@ -112,6 +123,33 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // The LEVEL half of the eligibility predicate, split out of ComputeEligible so it can be
+        // verified as data: it is pure (no ServiceHelper, no GameScene, no clock), which is what
+        // lets tools/sim/logic_probe sweep the whole Levels enum through the REAL method
+        // (ProbeListingLevels). The rest of ComputeEligible reaches the live world and cannot go
+        // there. Keep it pure.
+        //
+        // Tutorial is refused since card df8f1ef7: it is a scripted teaching level whose whole
+        // point is walking ONE player through the controls, so advertising it to strangers in the
+        // public browser is never what a player meant. This is about the PUBLIC LISTING only --
+        // it does not stop a host deliberately picking the tutorial for a join-by-code game.
+        internal static bool IsNetEligibleLevel(Levels lvl)
+        {
+            if (lvl == Levels.WebcamAliens || lvl == Levels.TeamChallenge)
+            {
+                return false;                              // camera-is-the-controller / needs two seats
+            }
+            if (lvl == Levels.Demo1 || lvl == Levels.Demo2 || lvl == Levels.Demo3)
+            {
+                return false;                              // the idle attract demo is an AI playthrough
+            }
+            if (lvl == Levels.Tutorial)
+            {
+                return false;                              // a solo scripted walkthrough (card df8f1ef7)
+            }
+            return true;
+        }
+
         // Single eligibility predicate. Excludes scene==null and an active session up front,
         // so the caller can use it verbatim.
         private static bool ComputeEligible(GameScene scene)
@@ -128,14 +166,9 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return false;
             }
-            Levels lvl = scene.Level;
-            if (lvl == Levels.WebcamAliens || lvl == Levels.TeamChallenge)
+            if (!IsNetEligibleLevel(scene.Level))
             {
-                return false;                              // camera-is-the-controller / needs two seats
-            }
-            if (lvl == Levels.Demo1 || lvl == Levels.Demo2 || lvl == Levels.Demo3)
-            {
-                return false;                              // the idle attract demo is an AI playthrough
+                return false;
             }
             // A cheating or debug-flagged host would change the joiner's game (Turbo is forced
             // to 100 in a session; cheats alter the shared run), and Friends>0 means mechanical

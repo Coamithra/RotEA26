@@ -59,7 +59,16 @@ internal class PausedScene : MenuSub1
 		{
 			string line = "Listed online  -  room " + EvilAliensWeb.Compat.Net.NetListing.RoomCode;
 			Vector2 o = font.MeasureString(line) / 2f;
-			base.SpriteBatch.DrawString(font, line, new Vector2(400f, 400f), Color.Gold, 0f, o, 0.6f, (SpriteEffects)0, 0f);
+			// Card d1a0559b: this used to sit at a hard-coded y=400, which is INSIDE the row
+			// list -- the four pause entries run from ~322 to ~442, so it landed across
+			// "Instructions"/"Exit to Main Menu" every single time it was shown. Park it below
+			// the last row instead, DERIVED from the same layout DrawMenu just used, so it
+			// tracks a font or entry-count change instead of needing a second magic number.
+			// GetListCentre() reports the base layout at yoffset 0; this menu draws at +75
+			// (above), and every entry here is unlocked, so visible == menuEntries.Count.
+			float lastRowY = GetListCentre().Y + 75f + (float)(menuEntries.Count - 1) / 2f * (float)font.LineSpacing;
+			float lineY = lastRowY + (float)font.LineSpacing * 0.9f;
+			base.SpriteBatch.DrawString(font, line, new Vector2(400f, lineY), Color.Gold, 0f, o, 0.6f, (SpriteEffects)0, 0f);
 		}
 	}
 

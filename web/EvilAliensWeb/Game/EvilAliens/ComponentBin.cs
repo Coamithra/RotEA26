@@ -332,6 +332,25 @@ public class ComponentBin : IComponentBinService
 		return flag;
 	}
 
+	// Diagnostics only (card 72143c11): every live T in the world, in collection order.
+	// ContainsType<T> answers "is there one", which cannot tell ONE live menu from TWO -- and
+	// two live menus is precisely the bug class this exists for, since MenuSub1 has no modality
+	// and every live menu runs HandleInput. Nothing in the GAME reads this; the callers are
+	// DebugInput.MenuCensus (which reports the type names) and DebugInput.MenuNetMode (which
+	// needs the live MenuScene, of which nothing else holds a reachable handle).
+	public List<T> Live<T>() where T : GameComponent
+	{
+		List<T> found = new List<T>();
+		foreach (GameComponent item in (Collection<IGameComponent>)(object)collection)
+		{
+			if (item is T t)
+			{
+				found.Add(t);
+			}
+		}
+		return found;
+	}
+
 	public void Add(GameComponent component)
 	{
 		// Online co-op (card 11.2): a JOIN peer's world is host-authoritative -- game code

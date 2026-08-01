@@ -1868,6 +1868,53 @@ internal static class Program
         filterKey(mouse1, false);
         filterKey(mouse2, false);
 
+        // ---- 4. the clickable back tip is an EDGE, and lives one frame (card 2a4110d0) -------
+        // Compat/BackTipHit turns a click on the bottom-left "(B) back" label into a synthetic
+        // Esc. Two properties carry it, and BOTH are invisible in a screenshot:
+        //  - it must fire on the PRESS EDGE, not the button level. A level fires on a press that
+        //    began somewhere else: mouse-down on a menu row and drag to the corner backs out,
+        //    and in-game a held fire button un-pauses the frame the pause overlay draws the tip
+        //    under the resting cursor. A browser cannot settle this either -- an automated drag
+        //    is sub-tick, so it passes on the broken code by luck.
+        //  - the box must live exactly ONE frame, or a screen that stopped drawing the tip (i.e.
+        //    gameplay) still has a live back-target sitting in its bottom-left corner.
+        Type backTip = asm.GetType("EvilAliensWeb.Compat.BackTipHit", true);
+        MethodInfo record = backTip.GetMethod("Record", anyStatic);
+        MethodInfo consumeTip = backTip.GetMethod("ConsumeClick", anyStatic);
+        if (record == null || consumeTip == null)
+        {
+            Console.WriteLine("  FAIL could not reflect BackTipHit (Record=" + (record != null)
+                + " ConsumeClick=" + (consumeTip != null) + ") -- renamed or moved?");
+            failures++;
+            return 0;
+        }
+        // Vector2 comes off the loaded assembly's own reference -- logic_probe deliberately does
+        // not compile against XNA (see the header), so it is built by reflection like the
+        // CollisionBox set above.
+        Type tipVec2 = consumeTip.GetParameters()[0].ParameterType;
+        Func<float, float, object> tipVec = (x, y) => Activator.CreateInstance(tipVec2, new object[] { x, y });
+        // The real MenuScene geometry: icon at SafeZone.Left, label to its right, on the tips
+        // baseline, down to SafeZone.Bottom.
+        Action recordTip = () => record.Invoke(null, new object[] { 40f, 146f, 534f, 570f });
+        Func<float, float, bool, bool> clickTip = (x, y, pressed) =>
+            (bool)consumeTip.Invoke(null, new object[] { tipVec(x, y), pressed });
+
+        recordTip();
+        Check("a press INSIDE the tip is a back", clickTip(93f, 552f, true), null);
+        recordTip();
+        Check("a press OUTSIDE it is not", !clickTip(400f, 300f, true), null);
+
+        // THE EDGE ASSERTION. Same cursor, same box, button merely HELD -- the drag case.
+        recordTip();
+        Check("the button merely being HELD is not a back", !clickTip(93f, 552f, false),
+            "a pass on `true` here means dragging onto the tip backs out");
+
+        // One frame only: a screen that draws no tip must offer nothing to hit.
+        recordTip();
+        clickTip(0f, 0f, false);                       // the tick that spends the recording
+        Check("an unrecorded frame has no back target", !clickTip(93f, 552f, true),
+            "a pass here means the corner stays clickable during gameplay");
+
         // Leave nothing latched for a Probe* added after this one. The Check runs FIRST -- put
         // the drains before it and it can only re-test the clear, never report a leak.
         Check("case set leaves no press latched", !consumeKey(mouse1) && !consumeKey(mouse2), null);

@@ -1,0 +1,49 @@
+# PROBE: a bomb detonation still loads bombripple.fx and still fires a ripple ring.
+#
+# PINS: the bombripple.mgfxo asset + Blast.Initialize's BombRipple.Fire call + the
+# Compat/BombRipple lifetime (card 5f38ed35).
+#
+# FAILURE MEANS one of three silent breakages, in order of likelihood:
+#   * `[ripple] effect load failed` (or no `[ripple]` line at all) -- the shader blob is
+#     missing, stale or unreadable. Game1.LoadContent SWALLOWS that by design, so the ripple
+#     just silently never draws again; nothing else in the game says a word. Re-run
+#     `python tools/shaders/build_shaders.py`.
+#   * `visible=False` at the first check -- Blast.Initialize no longer calls BombRipple.Fire,
+#     so a bomb detonates with no ring. Also silent: nothing throws, the blast still draws.
+#   * `visible=True` at the SECOND check -- a ring is no longer expiring (BombRipple.Update
+#     stopped advancing, or Duration was lost), which would leave a permanent frozen
+#     distortion parked over the game.
+#
+# ?harness=blast is the cheapest real detonation available: the harness registry Setup()s and
+# Add()s a genuine non-mini Blast at boot, so this drives the SHIPPED Fire call site rather
+# than the eaRipple.fire test seam -- a probe on that seam would pass with the Blast hook
+# deleted, which is the regression most worth catching.
+#
+# NOT AN APPEARANCE CHECK: this asserts the ring EXISTS and expires, nothing about how it
+# looks. The look is a taste call and is judged from the ?ripplephase= contact sheet.
+#
+# NOTHING HERE PINS A TUNED VALUE. `duration=` is matched as a number, not as 0.75, because
+# the duration is an advertised taste knob -- re-baking it must not turn this probe red with
+# a message that reads like a breakage. `?rippleduration=` below pins the EXPIRY WINDOW
+# instead of trusting the baked default, so the step counts stay valid however it is re-baked.
+#
+# eahl: --flags "?harness=blast&rippleduration=0.5"
+
+# Deliberately NOT settled 150 frames first: the ring lives ?rippleduration= seconds and a
+# settled boot would read visible=False for the honest reason, i.e. the probe would pass
+# while asserting nothing. Nothing is screenshotted, so the white-fade window is irrelevant.
+step 5
+eval RippleState
+
+expect \[ripple\] effect loaded
+expect \[ripple\] visible=True .* duration=0\.5
+expect-not \[ripple\] effect load failed
+
+# Past the ring's life (0.5 s = 30 frames at the fixed 60 Hz dt; 90 is 3x the margin): it
+# must be gone. Fresh window so the True above cannot satisfy this.
+mark
+step 90
+eval RippleState
+expect \[ripple\] visible=False
+expect-not \[ripple\] visible=True
+quit

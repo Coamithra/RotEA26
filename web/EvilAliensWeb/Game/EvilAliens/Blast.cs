@@ -95,6 +95,14 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		{
 			EvilAliensWeb.Compat.Juice.AddTrauma(0.08f);
 		}
+		// Screen-space refraction ring radiating from the detonation (Compat/BombRipple +
+		// bombripple.fx, card 5f38ed35). Fired from Initialize rather than from doBlast so
+		// the REMOTE peer's bomb (PlayerShip.NetDoBlast) ripples too with no extra plumbing --
+		// both paths Setup() then Add(), and KNI runs Initialize inside the Add. Draw-time
+		// only: nothing here touches gameplay, so co-op stays deterministic. `power` is the
+		// bomb's powerup level + 1 (Setup), so hand the level back; minis have no level and
+		// are gated on ?ripplemini inside Fire.
+		EvilAliensWeb.Compat.BombRipple.Fire(base.Position, mini ? 0 : (int)power - 1, mini);
 		scale = 0f;
 		// Update() overwrites scale + color from the lifetime curve before the first Draw,
 		// so in-game this 0 baseline is never seen. The sprite harness freezes Update, though,

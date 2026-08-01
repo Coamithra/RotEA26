@@ -800,6 +800,51 @@
             catch (e) { console.warn('[debug] eaHolo failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: live-set the bomb-ripple knobs (the stone-in-water refraction ring a bomb
+        // detonation throws out — card 5f38ed35). Drives Compat/DebugInput.SetRipple so the slider
+        // panel below (and the console) can retune it without a page reload. Console:
+        // eaRipple(1, 0.018, 0.55, 0.75, 0.055, 1.6, 0.1) — master scale, amplitude, travel radius
+        // (fractions of screen HEIGHT), duration s, wavefront width, decay exponent, rim glint.
+        // The defaults below MIRROR BombRipple's Default* consts (same duplication caveat as the
+        // eaLazer/eaWalls panels — re-bake a const, update both). Same effect as the ?ripple* URL
+        // flags, live. eaRipple(0) turns the whole effect off.
+        //   eaRipple.fire(x, y, power)  — throw a ring NOW at a design-space point (a real bomb
+        //                                 needs a pickup and a live ship, so this is how a rig
+        //                                 reaches the effect). Defaults to centre, full power.
+        //   eaRipple.park(phase)        — park one ring at 0..1 of its life for a screenshot; pass
+        //                                 nothing (or a negative) to un-park and go live again.
+        //   eaRipple.state()            — print the knobs + whether a ring is live.
+        // Every knob is resolved per frame, so a call here retunes rings already in flight.
+        window.eaRipple = (master, amp, radius, duration, width, falloff, rim) => {
+            const or = (v, d) => (v === undefined || v === null || isNaN(Number(v))) ? d : Number(v);
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugSetRipple',
+                    or(master, 1), or(amp, 0.018), or(radius, 0.55), or(duration, 0.75),
+                    or(width, 0.055), or(falloff, 1.6), or(rim, 0.1), -1);
+            }
+            catch (e) { console.warn('[debug] eaRipple failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaRipple.fire = (x, y, power) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugRippleFire',
+                    x === undefined ? 400 : Number(x) || 0,
+                    y === undefined ? 300 : Number(y) || 0,
+                    power === undefined ? 4 : Number(power) || 0);
+            }
+            catch (e) { console.warn('[debug] eaRipple.fire failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaRipple.park = (phase) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugRipplePark',
+                    phase === undefined || phase === null || isNaN(Number(phase)) ? -1 : Number(phase));
+            }
+            catch (e) { console.warn('[debug] eaRipple.park failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaRipple.state = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugRippleState'); }
+            catch (e) { console.warn('[debug] eaRipple.state failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives
         // Compat/DebugInput.SetConnector so the slider panel below (and the console) can retune the
         // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1) — main bolt
@@ -2455,6 +2500,170 @@
         })();
     </script>
 
+    <!-- Live bomb-ripple tuner (card 5f38ed35). The stone-in-water refraction ring a bomb throws
+         out is a FEEL feature, so its look is the user's call: this overlay drives
+         Compat/DebugInput.SetRipple (via debugSetRipple) so amplitude / speed-of-travel / width /
+         falloff / duration / rim can be DRAGGED over a live level, and the "park" slider freezes a
+         ring at a chosen phase for a still screenshot (the same thing ?ripplephase= does at boot).
+         "Fire one" throws a ring on demand, since a real bomb needs a pickup and a live ship.
+         Built outside #app so it survives Blazor's mount, and only created on ?rippletune — a
+         normal boot gets no extra DOM and stays byte-identical. Top-right, same chrome as the
+         eaHolo/eaWalls panels.
+         DELIBERATELY NOT mounted by ?ripplephase= alone: that flag exists to take a clean
+         screenshot, and a 270px opaque overlay in the corner is exactly what the same change
+         suppresses the (much smaller) FPS HUD for. Ask for both — ?rippletune&ripplephase= — when
+         you want to dial and park at once. -->
+    <script>
+        (function ()
+        {
+            var q = window.location.search || "";
+            if (!/[?&]rippletune\b/i.test(q)) { return; }
+
+            // Seed from any ?ripple* flags already on the URL, else the baked defaults. These
+            // literals MIRROR BombRipple's Default* consts (DefaultAmplitude 0.018 / DefaultRadius
+            // 0.55 / DefaultDuration 0.75 / DefaultWidth 0.055 / DefaultFalloff 1.6 /
+            // DefaultRim 0.10) — same duplication caveat as the eaHolo/eaWalls panels: re-bake a
+            // const there => update here.
+            function num(name, def)
+            {
+                var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
+                return m ? parseFloat(m[1]) : def;
+            }
+            var st = {
+                master: num("ripple", 1),
+                amp: num("rippleamp", 0.018),
+                radius: num("rippleradius", 0.55),
+                duration: num("rippleduration", 0.75),
+                width: num("ripplewidth", 0.055),
+                falloff: num("ripplefalloff", 1.6),
+                rim: num("ripplerim", 0.1),
+                // -1 = not parked (live). ?ripplephase= on the URL starts us parked there.
+                phase: num("ripplephase", -1)
+            };
+
+            function push()
+            {
+                try
+                {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugSetRipple',
+                        st.master, st.amp, st.radius, st.duration, st.width, st.falloff, st.rim,
+                        st.phase);
+                    return true;
+                }
+                catch (e) { return false; }
+            }
+
+            var css = document.createElement("style");
+            css.textContent =
+                "#ea-ripple{position:fixed;top:10px;right:10px;z-index:99999;width:270px;" +
+                "font:12px/1.35 system-ui,Segoe UI,sans-serif;color:#e8e8f0;" +
+                "background:rgba(8,12,24,.82);border:1px solid rgba(130,180,240,.35);" +
+                "border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.5);" +
+                "-webkit-user-select:none;user-select:none;backdrop-filter:blur(2px)}" +
+                "#ea-ripple h4{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.02em;" +
+                "color:#bcdcff}" +
+                "#ea-ripple .row{margin:7px 0}" +
+                "#ea-ripple label{display:flex;justify-content:space-between;align-items:baseline}" +
+                "#ea-ripple .v{font-variant-numeric:tabular-nums;color:#9fd4fc;font-weight:600}" +
+                "#ea-ripple input[type=range]{width:100%;margin:3px 0 0;accent-color:#6fb0dc}" +
+                "#ea-ripple button{margin:6px 6px 0 0;font:11px system-ui,sans-serif;color:#e8e8f0;" +
+                "background:rgba(60,90,140,.5);border:1px solid rgba(130,180,240,.4);" +
+                "border-radius:5px;padding:4px 9px;cursor:pointer}" +
+                "#ea-ripple .out{margin-top:9px;padding-top:8px;border-top:1px solid rgba(130,180,240,.25);" +
+                "font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#ffd98f;" +
+                "word-break:break-all;cursor:pointer}" +
+                "#ea-ripple .hint{margin-top:6px;font-size:10px;color:#8a86a0;line-height:1.3}";
+            document.head.appendChild(css);
+
+            var el = document.createElement("div");
+            el.id = "ea-ripple";
+            el.innerHTML =
+                "<h4>Bomb ripple &mdash; stone in water</h4>" +
+                "<div class='row'><label>Master (0 = off)<span class='v' id='er-vm'></span></label>" +
+                "<input type='range' id='er-master' min='0' max='3' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Amplitude<span class='v' id='er-va'></span></label>" +
+                "<input type='range' id='er-amp' min='0' max='0.08' step='0.001' autocomplete='off'></div>" +
+                "<div class='row'><label>Travel radius (screen H)<span class='v' id='er-vr'></span></label>" +
+                "<input type='range' id='er-radius' min='0.05' max='1.5' step='0.01' autocomplete='off'></div>" +
+                "<div class='row'><label>Duration (s)<span class='v' id='er-vd'></span></label>" +
+                "<input type='range' id='er-duration' min='0.1' max='3' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Wavefront width<span class='v' id='er-vw'></span></label>" +
+                "<input type='range' id='er-width' min='0.005' max='0.3' step='0.005' autocomplete='off'></div>" +
+                "<div class='row'><label>Decay falloff<span class='v' id='er-vf'></span></label>" +
+                "<input type='range' id='er-falloff' min='0' max='5' step='0.1' autocomplete='off'></div>" +
+                "<div class='row'><label>Rim glint<span class='v' id='er-vg'></span></label>" +
+                "<input type='range' id='er-rim' min='0' max='1' step='0.02' autocomplete='off'></div>" +
+                "<div class='row'><label>Park phase (-1 = live)<span class='v' id='er-vp'></span></label>" +
+                "<input type='range' id='er-phase' min='-1' max='1' step='0.01' autocomplete='off'></div>" +
+                "<button id='er-fire'>Fire one</button><button id='er-live'>Un-park</button>" +
+                "<div class='out' id='er-out' title='Click to copy'></div>" +
+                "<div class='hint'>Park the phase to judge a still frame; un-park and hit " +
+                "&ldquo;Fire one&rdquo; to watch it travel. Click the orange line to copy, then " +
+                "paste to Claude to bake in.</div>";
+            document.body.appendChild(el);
+
+            var erMaster = el.querySelector("#er-master"), erAmp = el.querySelector("#er-amp"),
+                erRadius = el.querySelector("#er-radius"), erDuration = el.querySelector("#er-duration"),
+                erWidth = el.querySelector("#er-width"), erFalloff = el.querySelector("#er-falloff"),
+                erRim = el.querySelector("#er-rim"), erPhase = el.querySelector("#er-phase"),
+                erOut = el.querySelector("#er-out"),
+                vm = el.querySelector("#er-vm"), va = el.querySelector("#er-va"),
+                vr = el.querySelector("#er-vr"), vd = el.querySelector("#er-vd"),
+                vw = el.querySelector("#er-vw"), vf = el.querySelector("#er-vf"),
+                vg = el.querySelector("#er-vg"), vp = el.querySelector("#er-vp");
+
+            function render()
+            {
+                erMaster.value = st.master; erAmp.value = st.amp; erRadius.value = st.radius;
+                erDuration.value = st.duration; erWidth.value = st.width;
+                erFalloff.value = st.falloff; erRim.value = st.rim; erPhase.value = st.phase;
+                vm.textContent = st.master; va.textContent = st.amp; vr.textContent = st.radius;
+                vd.textContent = st.duration; vw.textContent = st.width; vf.textContent = st.falloff;
+                vg.textContent = st.rim;
+                vp.textContent = st.phase < 0 ? "live" : st.phase;
+                // The bake-ready query string. The park phase is a RIG setting, not a look, so it
+                // only appears while actually parked.
+                erOut.textContent = "ripple=" + st.master + " rippleamp=" + st.amp +
+                    " rippleradius=" + st.radius + " rippleduration=" + st.duration +
+                    " ripplewidth=" + st.width + " ripplefalloff=" + st.falloff +
+                    " ripplerim=" + st.rim +
+                    (st.phase < 0 ? "" : " ripplephase=" + st.phase);
+            }
+
+            function changed() { render(); push(); }
+
+            erMaster.addEventListener("input", function () { st.master = +erMaster.value; changed(); });
+            erAmp.addEventListener("input", function () { st.amp = +erAmp.value; changed(); });
+            erRadius.addEventListener("input", function () { st.radius = +erRadius.value; changed(); });
+            erDuration.addEventListener("input", function () { st.duration = +erDuration.value; changed(); });
+            erWidth.addEventListener("input", function () { st.width = +erWidth.value; changed(); });
+            erFalloff.addEventListener("input", function () { st.falloff = +erFalloff.value; changed(); });
+            erRim.addEventListener("input", function () { st.rim = +erRim.value; changed(); });
+            erPhase.addEventListener("input", function () { st.phase = +erPhase.value; changed(); });
+            el.querySelector("#er-fire").addEventListener("click", function ()
+            {
+                if (window.eaRipple && window.eaRipple.fire) { window.eaRipple.fire(); }
+            });
+            el.querySelector("#er-live").addEventListener("click", function ()
+            {
+                st.phase = -1; changed();
+            });
+            erOut.addEventListener("click", function ()
+            {
+                var t = erOut.textContent;
+                if (navigator.clipboard) { navigator.clipboard.writeText(t).catch(function () { }); }
+                var old = erOut.style.color; erOut.style.color = "#9fd4fc";
+                setTimeout(function () { erOut.style.color = old; }, 250);
+            });
+
+            render();
+            if (!push())
+            {
+                var iv = setInterval(function () { if (push()) { clearInterval(iv); } }, 400);
+            }
+        })();
+    </script>
+
     <!-- Live tuner slider panel for the Level-3 wall towers (card d59266cc, plans/walls-3d-towers.md).
          The tower-extrusion knobs were URL-flag only, so every nudge meant a full page reload AND a
          re-run of the walls section. This overlay drives Compat/DebugInput.SetWalls (via eaWalls) so
@@ -3413,7 +3622,7 @@
             // (sprite harness, showcase scenes, the texture viewer), and those scenes draw their
             // own readouts in the top-left design corner -- exactly where this panel sits. So a
             // dev build suppresses the HUD on those pages by default; ?fpshud forces it back on.
-            var showcase = /[?&](harness|textshot|bulletshot|lazershot|castbrain|castshow|texviewer|gamebrowser|spiderphase|wcmothershipfreeze)\b/i.test(q);
+            var showcase = /[?&](harness|textshot|bulletshot|lazershot|castbrain|castshow|texviewer|gamebrowser|spiderphase|wcmothershipfreeze|ripplephase)\b/i.test(q);
             var visible = forced || (isDevBuild && !suppressed && !showcase);
 
             var el = null, armed = false, wasUnfocused = true, poll = null;

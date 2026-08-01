@@ -821,6 +821,77 @@ namespace EvilAliensWeb.Compat
 				(float)filter);
 		}
 
+		// JS bridge for the live bomb-ripple tuner slider panel (eaRipple in wwwroot/index.html,
+		// shown on ?rippletune): DotNet.invokeMethod('EvilAliensWeb', 'debugSetRipple',
+		// master, amp, radius, duration, width, falloff, rim, phase).
+		// Same effect as the ?ripple/?rippleamp/?rippleradius/?rippleduration/?ripplewidth/
+		// ?ripplefalloff/?ripplerim/?ripplephase URL flags, just live -- BombRipple resolves
+		// every one of them per frame in PackedRings rather than baking them in at Fire, so a
+		// drag retunes rings that are ALREADY travelling, and the parked ring too.
+		// A NEGATIVE phase means "not parked", since the JS side has no null to send.
+		[JSInvokable("debugSetRipple")]
+		public static void SetRipple(double master, double amp, double radius, double duration,
+			double width, double falloff, double rim, double phase)
+		{
+			DebugFlags.SetRippleOverride(
+				(float)master,
+				(float)amp,
+				(float)radius,
+				(float)duration,
+				(float)width,
+				(float)falloff,
+				(float)rim,
+				phase < 0.0 ? (float?)null : (float)phase);
+		}
+
+		// Fire a ripple ring on demand at a design-space point (eaRipple.fire(x, y, power) /
+		// `eval RippleFire 400 300 2`). A real bomb needs a bomb pickup and a live ship, so
+		// this is how a rig -- browser or eahl -- reaches the effect without playing for one.
+		// Defaults to screen centre at full power.
+		[JSInvokable("debugRippleFire")]
+		public static void RippleFire(double x = 400.0, double y = 300.0, double power = 4.0)
+		{
+			BombRipple.Fire(new Microsoft.Xna.Framework.Vector2((float)x, (float)y),
+				(int)System.Math.Round(power));
+			Console.WriteLine("[ripple] fired at " + x + "," + y + " power=" + (int)System.Math.Round(power));
+		}
+
+		// Park ONE ripple ring at `phase` (0..1) of its life and hold it there for a still
+		// screenshot, or un-park with a NEGATIVE value (the JS side has no null to send) --
+		// the live equivalent of the ?ripplephase= boot flag. `eaRipple.park(0.35)` /
+		// `eval RipplePark 0.35`.
+		[JSInvokable("debugRipplePark")]
+		public static void RipplePark(double phase = -1.0)
+		{
+			DebugFlags.SetRipplePhaseOverride(phase < 0.0 ? (float?)null : (float)phase);
+			Console.WriteLine("[ripple] park=" + (phase < 0.0 ? "live" : phase.ToString()));
+		}
+
+		// Report the ripple state as data (`eaRipple.state()` / `eval RippleState`): whether a
+		// ring is live, the knobs in force and the parked phase if any. What the committed
+		// probe tools/headless/probes/bomb_ripple.txt asserts against.
+		//
+		// Every value is read back off BombRipple's OWN resolved accessors, never re-derived
+		// here as `DebugFlags.X ?? BombRipple.DefaultX`: a second copy of the fallback chain
+		// drifts, and it would have printed a Duration below the 0.01 s floor the renderer
+		// actually applies -- a readout that lies is worse than no readout.
+		[JSInvokable("debugRippleState")]
+		public static void RippleState()
+		{
+			Console.WriteLine("[ripple] visible=" + BombRipple.Visible
+				+ " master=" + BombRipple.Master
+				+ " amp=" + BombRipple.Amplitude
+				+ " radius=" + BombRipple.Radius
+				+ " duration=" + BombRipple.Duration
+				+ " width=" + BombRipple.Width
+				+ " falloff=" + BombRipple.Falloff
+				+ " rim=" + BombRipple.Rim
+				+ " mini=" + DebugFlags.RippleMini
+				+ " phase=" + (DebugFlags.RipplePhase.HasValue
+					? DebugFlags.RipplePhase.Value.ToString()
+					: "live"));
+		}
+
 		// JS bridge for the live connector-tuner slider panel (eaConnector in wwwroot/index.html, shown
 		// on ?level=TeamChallenge / a bare ?connectortune): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetConnector', boltCount, arcRate, jitter, pulse, glow). Overrides the ShipConnector

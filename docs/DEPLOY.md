@@ -5,9 +5,12 @@
 > build hash `c591c9dfe4f4948e` and verified (`check_deploy.py` 13/13, real-Chrome
 > smoke incl. a saves round-trip, zero console errors). `MERIDIAN_BASE` is now the
 > relative sibling `../meridian/` and Meridian's `GAME_ORIGIN` is empty.
-> Still outstanding: **GitHub Pages is not yet decommissioned** (card `54c2a8f2`) --
-> `.github/workflows/deploy.yml` still exists and the stale Pages build is still up,
-> so a stranger can still find it. Take that down (or leave a redirect stub) next.
+> **GitHub Pages is decommissioned** (card `54c2a8f2`): `deploy.yml` is deleted and
+> `coamithra.github.io/RotEA26/` now serves only a REDIRECT stub
+> (`.github/workflows/pages-stub.yml` + `docs/pages-stub/`), published as both
+> `index.html` and `404.html` so deep links forward too. Deliberately a stub rather
+> than `gh api -X DELETE .../pages`: **Pages cannot redirect once deleted**, and a
+> 404 would strand every existing link and bookmark.
 >
 > **GOTCHA THAT COST THE FIRST ATTEMPT -- `SFTP_PATH` MUST BE THE ACCOUNT WEB ROOT
 > `/public_html/`.** It was `/public_html/portfolio/`, a portfolio subfolder, so the
@@ -83,8 +86,8 @@ the live site, and `--ref` picks what does.
 
 ## What the deploy does to the build
 
-Both edits are inherited from `.github/workflows/deploy.yml`, which still
-exists and is still the live publishing route until the cutover:
+Both edits are inherited verbatim from the deleted `.github/workflows/deploy.yml`,
+which was the publishing route before the cutover:
 
 - **`<base href="/" />` -> `/RotEA26/`.** The dev build keeps `/` so `dotnet run`
   works at a domain root; never hard-code the deployed value in `index.html`.
@@ -97,8 +100,8 @@ exists and is still the live publishing route until the cutover:
 compares it and rejects a mismatched peer with an "update required" notice, and
 the game browser filters the room list on it. Change the recipe and you split the
 player base across the boundary; `--selftest` exists to make that impossible to do
-by accident, and it becomes the only record of the recipe once the CI workflow
-is deleted. A `dev` hash on a live site is a deploy that did not stamp — it
+by accident. **That workflow is now deleted, so `--selftest` IS the only record of the
+recipe** — there is nothing left to re-derive it from. A `dev` hash on a live site is a deploy that did not stamp — it
 also leaves the frame-profiler HUD visible, which keys off the same value.
 
 ### The hash identifies a PUBLISH, not a commit
@@ -131,7 +134,8 @@ consequences worth knowing before you rely on it:
   across builds, so the incremental manifest still saves most of the transfer —
   a no-op redeploy moves ~18 MB, not ~322 MB.
 
-Two things the old Pages workflow did that this one does not, both Pages-specific:
+Two things the old Pages workflow did that this one does not, both Pages-specific
+(and both now moot -- Pages serves only the redirect stub):
 `.nojekyll` (Apache has no Jekyll to stop eating `_framework/`) and copying
 `index.html` to `404.html` (a Pages SPA fallback; the game is a single page and
 `harness.html` is a real file).

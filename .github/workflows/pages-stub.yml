@@ -1,0 +1,58 @@
+name: Publish the Pages redirect stub
+
+# The game is NOT built or published here any more. It lives at
+# https://haraldmaassen.com/RotEA26/ (SFTP, `python tools/deploy_web.py` -- see
+# docs/DEPLOY.md). All this workflow does is keep coamithra.github.io/RotEA26/
+# alive as a REDIRECT to that address, so every old link, bookmark and search
+# result still lands on the real game.
+#
+# WHY A STUB AND NOT `gh api -X DELETE .../pages` (card 54c2a8f2): Pages cannot
+# redirect once it is deleted. Deleting would 404 every existing link; a stub
+# forwards them. It also fixes the actual hazard -- a stranger finding the stale
+# 2026-07-23 build, whose co-op build hash cannot pair with the live host, and
+# concluding the multiplayer is broken rather than that they are on an old copy.
+#
+# MANUAL only, and it should essentially never need re-running: Pages keeps
+# serving the last deployed artifact, so this exists to (re)establish the stub,
+# not as part of any release. `gh workflow run "Publish the Pages redirect stub"`.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # index.html is the stub itself; 404.html is the SAME file, which is what
+      # makes DEEP links redirect too -- Pages serves 404.html for any path it
+      # cannot resolve, so /RotEA26/anything forwards instead of dying.
+      - name: Assemble the stub
+        run: |
+          mkdir -p stub
+          cp docs/pages-stub/index.html stub/index.html
+          cp docs/pages-stub/index.html stub/404.html
+          touch stub/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: stub
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

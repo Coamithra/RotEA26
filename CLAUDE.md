@@ -314,11 +314,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   build keeps `<base href="/" />`; don't hard-code `/RotEA26/` in `index.html`.
   **The build hash is the co-op compatibility key** (peers-run-identical-binary check; dev builds
   keep `'dev'`, which also shows the FPS HUD). Its recipe is inherited verbatim from the
-  Pages workflow and pinned by `python tools/deploy_web.py --selftest` — which becomes the only
+  (now deleted) Pages workflow and pinned by `python tools/deploy_web.py --selftest` — THE ONLY
   record of it once that workflow goes, so treat a FAIL as "I am about to split the player base",
   not as a stale test.
-  The old `.github/workflows/deploy.yml` (Pages, `workflow_dispatch`) still exists and still works;
-  it is slated for deletion once the Hetzner cutover is verified live.
+  `.github/workflows/deploy.yml` is **GONE** (card `54c2a8f2`). Pages no longer builds or hosts
+  the game: `.github/workflows/pages-stub.yml` publishes only a redirect page (source in
+  `docs/pages-stub/`, deployed as both `index.html` and `404.html` so deep links forward too), so
+  `coamithra.github.io/RotEA26/` sends every old link to the live site. **`--selftest` is now the
+  SOLE specification of the eaBuildHash recipe** — there is no workflow left to diff it against,
+  so a FAIL there means "I am about to split the player base", never "the test is stale".
 - **Publish trimming:** `PublishTrimmed=true` + `TrimMode=partial` (NOT full — full strips the
   XmlSerializer save types + KNI's reflection factories → white screen);
   `InvariantGlobalization=true` (so even Debug is culture-invariant — no culture-dependent

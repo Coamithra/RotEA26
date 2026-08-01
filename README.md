@@ -63,6 +63,7 @@ dev server disables caching so assets never go stale while iterating; see
 **Nothing deploys on merge.** Publishing is a separate manual act, and there are
 two of them (the static site and the signaling server) — the runbook is
 [`docs/DEPLOY.md`](docs/DEPLOY.md). `python tools/deploy_web.py` ships the site to
-the Hetzner host; the still-live GitHub Pages route is a `workflow_dispatch` run of
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), and stays that way
-until the first Hetzner deploy is verified.
+the Hetzner host, which since 2026-08-01 is **the** public site. GitHub Pages no
+longer builds or hosts the game: `coamithra.github.io/RotEA26/` serves only a
+redirect stub ([`.github/workflows/pages-stub.yml`](.github/workflows/pages-stub.yml)),
+so old links still reach the game.

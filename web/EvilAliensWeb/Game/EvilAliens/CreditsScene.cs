@@ -93,7 +93,11 @@ internal class CreditsScene : Scene
 	// Dynamic, off the measured text: any ?crawlskew= value is safe, it just saturates.
 	private float crawlEffectiveSkew;
 
-	private int crawlPivotLineCount = -1;
+	// Cache key for BOTH values above (and for the one-shot `[crawl]` line): the line count
+	// EnsureCrawlGeometry last measured. The requested skew is deliberately not part of it --
+	// ?crawlskew= is parsed once at boot and never changes within a run. A live setter (an
+	// eaXxx panel) would have to reset this, or it would look dead.
+	private int crawlGeometryLineCount = -1;
 
 	public event FinishedHandler OnFinished;
 
@@ -162,7 +166,7 @@ internal class CreditsScene : Scene
 		// ran before this Add/Initialize, so `lines` is already the new set -- and two
 		// different setups can share a line COUNT, which is all the in-scene cache key can
 		// see, so the reset has to happen here rather than relying on that key alone.
-		crawlPivotLineCount = -1;
+		crawlGeometryLineCount = -1;
 		// KNI runs LoadContent() once per component instance EVER (guarded), but this
 		// scene is a boot-time singleton that Unload()s its per-scene content when removed
 		// (OnComponentRemoved) and is re-added after every level completion. Re-load the
@@ -556,31 +560,39 @@ internal class CreditsScene : Scene
 	// fits. Recomputed only when the line set changes (SetupCredits appends mid-scene).
 	private void EnsureCrawlGeometry(float requestedSkew)
 	{
-		if (crawlPivotLineCount == lines.Count)
+		if (crawlGeometryLineCount == lines.Count)
 		{
 			return;
 		}
-		crawlPivotLineCount = lines.Count;
+		crawlGeometryLineCount = lines.Count;
 		float widest = 0f;
 		for (int i = 0; i < lines.Count; i++)
 		{
 			widest = Math.Max(widest, font.MeasureString(lines[i]).X);
 		}
 		crawlPivotX = 100f + widest / 2f;
-		// Scaling about the block centre moves the right end out by half the added width, so
-		// the widest line stays on screen while 100 + (w/2)*(1 + s) <= 800 - margin. Solve for
-		// the largest s and clamp the request to it: over-asking saturates instead of pushing
-		// text off the edge (the shipped text tops out around +-0.08).
-		// (the -2 turns the solved max SCALE into a skew: skew = maxScale - 1)
-		float fits = ((widest > 0f) ? (2f * (700f - CrawlEdgeMargin) / widest - 2f) : requestedSkew);
+		// Scaling about the block centre moves EACH end out by half the added width, so the
+		// widest line stays on screen while 100 + (w/2)*(1 + s) <= 800 - margin (right) and
+		// 100 - (w/2)*(s - 1) >= margin (left). Solve both for the largest s and clamp the
+		// request to the tighter: over-asking saturates instead of pushing text off an edge.
+		// The right edge binds for the shipped text (which tops out around +-0.08 to +-0.10,
+		// its widest lines being ~665 design px); the left edge would bind for any line set
+		// narrower than ~596 px, which is the case that makes this re-derive honestly when
+		// the credits text is edited.
+		// (the -2 / -1 turn the solved max SCALE into a skew: skew = maxScale - 1)
+		float fits = ((widest > 0f)
+			? Math.Min(2f * (700f - CrawlEdgeMargin) / widest - 2f, 2f * (100f - CrawlEdgeMargin) / widest)
+			: requestedSkew);
 		crawlEffectiveSkew = Math.Max(0f, Math.Min(requestedSkew, fits));
 		// The widest line at the largest scale is the whole crawl's horizontal extent -- the
 		// one thing a screenshot cannot judge and the one way this can fail silently (text
 		// pushed off the 800px design width). Report requested AND effective so the clamp is
 		// visible rather than a mystery; a probe asserts both.
 		float maxScale = 1f + crawlEffectiveSkew;
-		float left = crawlPivotX - (crawlPivotX - 100f) * maxScale;
-		float right = left + widest * maxScale;
+		// From the SHADOW's x (98) -- it is the leftmost thing drawn, and fit= is asserted as
+		// the screen-fit verdict, so it must judge what is actually on screen.
+		float left = crawlPivotX - (crawlPivotX - 98f) * maxScale;
+		float right = left + (widest + 2f) * maxScale;
 		// fit= is the invariant a probe can assert without pinning font metrics: whatever the
 		// text and the requested amount, the widest line stays inside the 800px design width.
 		string fit = ((left >= 0f && right <= 800f) ? "ok" : "OVERFLOW");

@@ -292,8 +292,8 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   **`?creditsshot=<1|2|3>`** boots straight into it for that level (otherwise reachable only by
   finishing a level or `?level=N&win`), **`?crawlpos=<designY>`** parks the scroll for a
   screenshot, **`?crawlskew=<f>`** dials the taper (`0` = the flat pre-card crawl). **The amount
-  is CLAMPED to what keeps the widest line on screen and the shipped text saturates it at ~0.08,
-  not the card's 0.2** -- +20% of a 669px line does not fit 800px at any pivot. Read
+  is CLAMPED to what keeps the widest line on screen and the shipped crawls saturate it at
+  0.081-0.095, not the card's 0.2** -- +20% of a 669px line does not fit 800px at any pivot. Read
   `[crawl] skew= effective= fit=` for what is actually drawn; details in web CLAUDE.md.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live

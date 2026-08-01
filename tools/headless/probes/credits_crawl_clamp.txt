@@ -10,9 +10,10 @@
 # It also pins that the clamp is DYNAMIC rather than a baked constant, by driving the level-3
 # crawl: eahl wipes saves per run, so the difficulty gate in SetupLevel3 takes the non-Hard
 # branch, whose text is a different (and credits-appended) line set from the level-1 crawl the
-# sibling probe uses. Both saturate near 0.08 because both happen to be ~669 px wide at their
-# widest, but they get there from independently measured text -- and if the credits text is
-# ever edited, `fit=ok` is what keeps holding.
+# sibling probe uses -- and it saturates at a DIFFERENT value off that text (0.095 here against
+# 0.081 there, from widest lines of 664.5 and 669.0 px), which is the observable difference
+# between a derived clamp and a second baked constant. If the credits text is ever edited both
+# numbers move and `fit=ok` is what keeps holding, so that is what the assertions lean on.
 #
 # FAILURE MEANS: read the quoted `[crawl]` line.
 #   effective=5.000 / fit=OVERFLOW -- the clamp is gone: ?crawlskew= is now a foot-gun that
@@ -33,11 +34,12 @@
 # called that a pass, which is why fit= is a verdict the game computes and asserts here.
 # Rebuild tools/headless after either mutation -- eahl links the game sources in.
 #
-# eahl: --flags "?creditsshot=3&crawlskew=5&crawlpos=100"
+# eahl: --flags "?creditsshot=3&crawlskew=5&crawlpos=100&mute"
 
 mark
 step 150
-expect      \[crawl\] skew=5\.000 effective=0\.0[1-9]
+expect      \[crawl\] skew=5\.000 effective=0\.[0-9]
+expect-not  \[crawl\] .* effective=0\.000
 expect      \[crawl\] .* fit=ok
 expect-not  \[crawl\] .* fit=OVERFLOW
 quit

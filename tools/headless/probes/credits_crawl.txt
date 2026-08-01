@@ -3,10 +3,11 @@
 # PINS: CreditsScene's Star Wars-style crawl taper (card bee8f0e0). Each line is drawn at a
 # uniform scale that eases from 1+skew at the screen bottom through 1.0 at mid screen to
 # 1-skew at the top, scaled about the crawl block's own centre. The card asked for +-20%, but
-# the widest line of every crawl is ~669 of the 800 design px, so +20% would push its right
+# the widest line of every crawl is ~661-669 of the 800 design px, so +20% would push its right
 # end ~36 px off screen and eat the last character -- measured, and visible in the first
 # screenshot of the card. The requested amount is therefore CLAMPED to the largest that still
-# fits, which the shipped text saturates at ~0.08.
+# fits: 0.081 for this crawl, 0.095 for the level-3 one, i.e. the clamp is derived from the
+# measured text rather than being a second baked constant.
 #
 # So there are two things to defend and they pull in opposite directions:
 #   1. the taper is still THERE (effective > 0) and still asked for at the card's 0.2, and
@@ -46,13 +47,14 @@
 # Rebuild tools/headless after either mutation -- eahl links the game sources in, so a
 # web/EvilAliensWeb-only build leaves the probe testing the old binary and passing.
 #
-# eahl: --flags "?creditsshot=1&crawlpos=100"
+# eahl: --flags "?creditsshot=1&crawlpos=100&mute"
 
 # mark FIRST: the geometry is measured once per line set, so the line is printed by the
 # crawl's very first Draw -- a mark after the settle would scope the window past it.
 mark
 step 150
-expect    \[crawl\] skew=0\.200 effective=0\.0[1-9]
+expect      \[crawl\] skew=0\.200 effective=0\.[0-9]
+expect-not  \[crawl\] .* effective=0\.000
 expect      \[crawl\] .* fit=ok
 expect-not  \[crawl\] .* fit=OVERFLOW
 quit

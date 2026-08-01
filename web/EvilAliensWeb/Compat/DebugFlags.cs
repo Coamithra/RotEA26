@@ -99,6 +99,9 @@ namespace EvilAliensWeb.Compat
 	//                  brainanimated sheet + glow, not the old brainlargetransglow). The real cast
 	//                  is only reachable after beating Level 3 on Hard, so this is how to see/tune
 	//                  it. Reuses the sprite-harness scene (Esc -> menu). Tuning knobs:
+	//     ?castbrainscale=<f>  on-screen size of the cast brain (default baked in CastDisplayer)
+	//     ?castbrainfps=<f>    animation speed (the cast draws frames by hand, no interpolation,
+	//                          so it plays faster than the in-game 0.4 fps; default baked in)
 	//   ?creditsshot[=1|2|3]  POST-LEVEL TEXT CRAWL: boot straight into CreditsScene set up as
 	//                  though that level had just been beaten (3 = the Hard "you have done it"
 	//                  crawl + Cast + full credits). Reaching it otherwise means finishing a
@@ -108,12 +111,9 @@ namespace EvilAliensWeb.Compat
 	//                  and falls; ~560 puts the first line at the screen bottom).
 	//     ?crawlskew=<f>  amount of the Star Wars-style perspective taper on the crawl (larger
 	//                  at the screen bottom, smaller at the top; 0 = the flat pre-card crawl).
-	//                  CLAMPED to what keeps the widest line on screen -- the shipped text
-	//                  saturates at ~0.08, so the 0.2 default draws as 0.08 and a bigger value
-	//                  changes nothing. Applies in normal play too -- it is the shipped look.
-	//     ?castbrainscale=<f>  on-screen size of the cast brain (default baked in CastDisplayer)
-	//     ?castbrainfps=<f>    animation speed (the cast draws frames by hand, no interpolation,
-	//                          so it plays faster than the in-game 0.4 fps; default baked in)
+	//                  CLAMPED to what keeps the widest line on screen -- the shipped crawls
+	//                  saturate at ~0.08-0.10, so the 0.2 default draws as that and a bigger
+	//                  value changes nothing. Applies in normal play too -- the shipped look.
 	//   With ?harness=spiderjump the harness LOOPS the Mars jumping-spider's whole crawl -> launch
 	//   -> arc -> land cycle (shadow + jump-X/ground markers + a readout) so its alignment values
 	//   can be tuned by eye. The spider crosses the screen over one loop, jumping at jumpX with the
@@ -850,8 +850,8 @@ namespace EvilAliensWeb.Compat
 
 		// ?crawlskew=<f> overrides the crawl's perspective taper; null => the baked
 		// CreditsScene.DefaultCrawlSkew, and ?crawlskew=0 restores the flat pre-card crawl.
-		// The value is CLAMPED to what keeps the widest line on screen (the shipped text
-		// saturates around 0.08), so any value here is safe -- it just stops growing. The
+		// The value is CLAMPED to what keeps the widest line on screen (the shipped crawls
+		// saturate around 0.08-0.10), so any value here is safe -- it just stops growing. The
 		// `[crawl]` console line reports requested vs effective. Pure render/feel => OUT of
 		// `Active`.
 		public static float? CrawlSkew { get; private set; }

@@ -962,7 +962,9 @@ site now lives under:
     ~661-669 of the 800 design px, so +20% is ~803 px -- wider than the screen, at any pivot --
     and it ate the last characters of "...upon the solar system." The requested amount is
     therefore clamped to the largest that keeps the widest line inside the design width, which
-    the shipped text saturates at **~0.08**. So `DefaultCrawlSkew = 0.2f` is the ASK; read the
+    the shipped crawls saturate at **0.081 (levels 1-2) / 0.095 (level 3)** -- different values
+    off different text, which is what a derived clamp looks like. So `DefaultCrawlSkew = 0.2f`
+    (kept on the file-wide `Default*` naming convention) is the ASK; read the
     `[crawl] skew=... effective=... fit=ok` line for what is drawn. The clamp is derived from the
     measured text, so any `?crawlskew=` value is safe and simply saturates -- and if the credits
     text is ever edited, it re-derives.

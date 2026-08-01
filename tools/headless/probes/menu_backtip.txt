@@ -36,7 +36,10 @@ mark
 step 200
 
 # --- the framed main menu, all 8 rows unlocked (the 45c16ef6 shifted layout) ---
-expect      \[backtip\] menu=MenuSubWithSkull entries=8 .* overlap=none
+# The tip GEOMETRY is pinned exactly, not wildcarded, because section 2 clicks a hard-coded
+# point inside it: wildcard this and moving the tip leaves section 1 green while section 2 fails
+# as "the back tip is broken", which is the wrong diagnosis at the wrong line.
+expect      \[backtip\] menu=MenuSubWithSkull entries=8 tip=40,534,106,36 overlap=none
 
 # --- a plain centred list (Options) ---
 eval Press down 1
@@ -57,7 +60,59 @@ eval Press enter 1
 step 200
 expect      \[backtip\] menu=SubMenuLevelChoice entries=\d+ .* overlap=none
 
-# THE ASSERTION: nothing reported an overlap anywhere in that walk.
+# THE GEOMETRY ASSERTION: nothing reported an overlap anywhere in that walk.
 expect-not  \[backtip\] .* overlap=[0-9]
+
+# Back to the main menu for section 2.
+eval Press escape 1
+step 150
+
+# =====================================================================================
+# SECTION 2 -- the tip actually GOES BACK when clicked (PR #255 follow-up)
+#
+# Reachable here only because `eaMouseAt` parks the cursor in DESIGN space: `eaPress` supplies
+# the button, but every mouse consumer is position-dependent and the position used to come only
+# from Mouse.GetState(), which no script can move. Before that seam this leg needed real Chrome.
+#
+# `eaMenuCensus` is the observable -- which menu is LIVE. The [backtip] line cannot serve here:
+# it prints only when a layout CHANGES, so returning to a menu already seen prints nothing.
+# =====================================================================================
+mark
+
+eval Press down 1
+step 5
+eval Press enter 1
+step 150
+# Precondition, asserted rather than assumed: we really are in the submenu. Without this the
+# "back on the main menu" check below passes on a run that never left it.
+eval MenuCensus
+expect      \[menucensus\] count=1 live=MenuSub1
+
+# NEGATIVE CONTROL: same click, cursor somewhere with no entry and no tip. If this moved us,
+# the assertion below would be about clicking anywhere rather than about the tip.
+mark
+eval MouseAt 700 100
+step 2
+eval Press Mouse1 1
+step 120
+eval MenuCensus
+expect      \[menucensus\] count=1 live=MenuSub1
+expect-not  \[menucensus\] count=1 live=MenuSubWithSkull
+
+# THE CLICK. Cursor inside the tip box pinned in section 1 (40,534 .. 146,570).
+mark
+eval MouseAt 93 552
+step 2
+eval Press Mouse1 1
+step 120
+eval MenuCensus
+expect      \[menucensus\] count=1 live=MenuSubWithSkull
+
+# The release path, which nothing else here covers: MouseClear must report what it let go of.
+# (The override is a process-lifetime static and this is the last line, so the release itself
+# protects nothing -- asserting its line is what gives the method any coverage at all.)
+mark
+eval MouseClear
+expect      \[debug\] eaMouseClear .* \(was 93,552\)
 
 quit

@@ -86,6 +86,85 @@ namespace EvilAliensWeb.Compat
 			}
 		}
 
+		// --- scripted CURSOR POSITION (the other half of eaPress, PR #255 follow-up) ---
+		//
+		// `eaPress('Mouse1')` injects the BUTTON, but every mouse consumer in the game is
+		// position-dependent: `MenuSub1.HandleMouse` hit-tests the cursor against the entry
+		// boxes, and `BackTipHit` against the back tip's box. The position came only from
+		// `Mouse.GetState()`, which a script cannot move -- under `eahl` it is wherever SDL
+		// happens to report -- so a scripted click could never land ON anything and the whole
+		// mouse surface was unreachable from the project's own automation seam. Every menu
+		// click therefore needed a real Chrome pass, including the ones whose only browser-
+		// specific ingredient was that they involve a mouse at all.
+		//
+		// Design space (800x600), i.e. the same coordinates `RecordEntryHit` and
+		// `BackTipHit.Record` store, so a probe can read a box off a `[backtip]` line and click
+		// it. Persistent until cleared, like `Hold` and unlike `Press`: a click is at least a
+		// press tick and a release tick, and a one-shot position would strand the second one.
+		private static bool mouseOverride;
+
+		private static float mouseOverrideX;
+
+		private static float mouseOverrideY;
+
+		// JS bridge: DotNet.invokeMethod('EvilAliensWeb', 'debugMouseAt', x, y) / eaMouseAt(x,y).
+		[JSInvokable("debugMouseAt")]
+		public static void MouseAt(double x, double y)
+		{
+			// A NaN would park the cursor nowhere and make every hit test silently miss -- the
+			// exact swallow-a-bad-value failure the file-wide flag convention exists to stop, and
+			// `eaMouseAt(0)` produces one all by itself (y is undefined -> NaN). Report and
+			// refuse, like Press does for an unknown key.
+			if (double.IsNaN(x) || double.IsNaN(y) || double.IsInfinity(x) || double.IsInfinity(y))
+			{
+				Console.WriteLine("[debug] eaMouseAt: ignoring non-finite position (" + x + "," + y
+					+ ") -- expected two design-space numbers; the cursor is unchanged");
+				return;
+			}
+			mouseOverride = true;
+			mouseOverrideX = (float)x;
+			mouseOverrideY = (float)y;
+			Console.WriteLine("[debug] eaMouseAt " + mouseOverrideX + "," + mouseOverrideY
+				+ " (design space; eaMouseClear releases the real mouse)");
+		}
+
+		// Hand the cursor back to the real mouse. Prints unconditionally (the surrounding seams
+		// all do) so a probe can assert the release happened rather than reading an empty `ok`.
+		[JSInvokable("debugMouseClear")]
+		public static void MouseClear()
+		{
+			string had = mouseOverride ? (mouseOverrideX + "," + mouseOverrideY) : "nothing parked";
+			mouseOverride = false;
+			Console.WriteLine("[debug] eaMouseClear -- cursor back on the real mouse (was " + had + ")");
+		}
+
+		internal static bool TryGetMouseOverride(out float x, out float y)
+		{
+			x = mouseOverrideX;
+			y = mouseOverrideY;
+			return mouseOverride;
+		}
+
+		// Non-destructive read of a SCRIPTED hold. `Consume` DECREMENTS one, so it must be called
+		// exactly once per tick per key -- InputHandler needs the Mouse1 state one step EARLIER
+		// than the key loop reaches it (Esc is polled before Mouse1, and the back tip folds into
+		// Esc), so it peeks there and lets the loop do the single real consume.
+		//
+		// **Deliberately NOT `|| touchHeld[idx]`, unlike `Consume`.** `touchHeld[Mouse1]` is the
+		// on-screen FIRE button, so including it would let a touch player's held FIRE fire a
+		// synthetic Esc whenever the (stale, untouched) mouse position happened to sit in the
+		// back tip's box -- shipped behaviour, not a debug seam, and the touch overlay already
+		// has its own BACK button. Touch gets no new behaviour from the mouse work; the same
+		// rule the MouseLatch pointerType filter follows.
+		internal static bool PeekScripted(int idx)
+		{
+			if (idx < 0 || idx >= holdTicks.Length)
+			{
+				return false;
+			}
+			return holdTicks[idx] > 0;
+		}
+
 		// JS bridge for QA/demo of the cinematic slow-motion effect (eaSlowmo in
 		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugSlowmo', seconds).
 		// Triggers the same slow-motion burst the fully-powered 1up does (Oracle.SetSlowmotion)

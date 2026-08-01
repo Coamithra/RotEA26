@@ -1,13 +1,21 @@
 # Deploying the game
 
-> **STATUS — the cutover has not happened yet.** The public site is still GitHub
-> Pages (https://coamithra.github.io/RotEA26/), last published 2026-07-23 and by
-> now hundreds of commits stale. `https://haraldmaassen.com/RotEA26/` currently
-> **404s**; it starts existing the first time someone runs the flow below, and
-> that first run is the user's to make. Until then `.github/workflows/deploy.yml`
-> is still the live publishing route and still works. Deleting it, flipping
-> `MERIDIAN_BASE` / Meridian's `GAME_ORIGIN` to relative, and taking Pages down
-> are all follow-up work gated on that first deploy being verified.
+> **STATUS — DEPLOYED AND CUT OVER (2026-08-01).**
+> **https://haraldmaassen.com/RotEA26/ is live**, first published from `8778cb4` as
+> build hash `c591c9dfe4f4948e` and verified (`check_deploy.py` 13/13, real-Chrome
+> smoke incl. a saves round-trip, zero console errors). `MERIDIAN_BASE` is now the
+> relative sibling `../meridian/` and Meridian's `GAME_ORIGIN` is empty.
+> Still outstanding: **GitHub Pages is not yet decommissioned** (card `54c2a8f2`) --
+> `.github/workflows/deploy.yml` still exists and the stale Pages build is still up,
+> so a stranger can still find it. Take that down (or leave a redirect stub) next.
+>
+> **GOTCHA THAT COST THE FIRST ATTEMPT -- `SFTP_PATH` MUST BE THE ACCOUNT WEB ROOT
+> `/public_html/`.** It was `/public_html/portfolio/`, a portfolio subfolder, so the
+> first upload put 322 MB at `/portfolio/RotEA26/` where the stamped
+> `<base href="/RotEA26/">` made every asset 404. Proof of the right value: Meridian
+> serves at `/meridian/` and `/portfolio/meridian/` is a 404, so the directory holding
+> Meridian *is* the root. Meridian now has its **own** `.env`
+> (`SFTP_PATH=/public_html/meridian/`) so one variable no longer has to mean two roots.
 
 Two independent public deployments, neither of which happens by merging a PR:
 
@@ -128,13 +136,12 @@ Two things the old Pages workflow did that this one does not, both Pages-specifi
 `index.html` to `404.html` (a Pages SPA fallback; the game is a single page and
 `harness.html` is a real file).
 
-And one thing **neither** does, deliberately deferred to the cutover: the
-absolute `og:image` / `og:url` tags in `index.html` still point at
-`coamithra.github.io/RotEA26/`. Link previews for the Hetzner site therefore
-advertise the Pages URL, and break outright when Pages is taken down. They are
-part of the same change as flipping `MERIDIAN_BASE` to `../meridian/`, which
-must not ship before the first verified deploy — so `stamp()` leaves them alone
-rather than half-migrating the origin.
+And one thing **neither** does, and that is permanent rather than deferred: the
+`og:image` / `og:url` tags in `index.html` are **absolute by design** -- a link
+preview is fetched by a scraper with no page context, so a relative URL there is
+meaningless. The cutover (card `ee61a482`) therefore did NOT make them relative; it
+re-pointed them from `coamithra.github.io/RotEA26/` to `haraldmaassen.com/RotEA26/`.
+`stamp()` still leaves them alone, which is why they are edited in the source.
 
 ## Incremental uploads and the manifest
 
@@ -211,7 +218,17 @@ commit sha, is what identifies the build in the wild.
 ## Credentials
 
 `SFTP_HOST` / `SFTP_USER` / `SFTP_PASS` / `SFTP_PATH` in the repo-root `.env`
-(gitignored, never printed — the tool reports only the password's length). The
-same file is the credential source for the **meridian** repo's `tools/deploy.py`,
-which defaults to this exact path. A `.claude/worktrees/wt<k>` worktree has no
-`.env` of its own; the tool falls back to the root checkout's copy.
+(gitignored, never printed — the tool reports only the password's length).
+
+**`SFTP_PATH` is the account's WEB ROOT, `/public_html/`** -- the directory that holds
+`RotEA26/`, `meridian/` and `portfolio/` as siblings. `deploy_web.py` appends the
+`--subdir` (default `RotEA26`) to it. Setting it to anything deeper silently deploys a
+working-looking site at a URL where the stamped `<base href>` cannot resolve; see the
+STATUS banner for how that actually played out.
+
+**Meridian has its OWN `.env` since 2026-08-01** (`SFTP_PATH=/public_html/meridian/`).
+It used to default to *this* repo's file, which is how one variable ended up having to
+mean two different roots. Do not re-point it back here.
+
+A `.claude/worktrees/wt<k>` worktree has no `.env` of its own; the tool falls back to
+the root checkout's copy.

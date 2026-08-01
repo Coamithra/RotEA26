@@ -7,16 +7,18 @@
     <title>Revenge of the Evil Aliens</title>
     <base href="/" />
 
-    <!-- SEO / social (Stage 9). og:image is an absolute URL to the live host so link
-         previews work when the public page is shared; the <base href> above is what CI
-         the deploy rewrites, NOT these. -->
+    <!-- SEO / social (Stage 9). og:image and og:url are ABSOLUTE BY DESIGN -- a link
+         preview is fetched by a scraper with no page context, so a relative URL would
+         be meaningless. They are the one pair the cutover to relative (card ee61a482)
+         does NOT convert -- it only re-points them at the new origin. stamp() rewrites
+         <base href> above and deliberately NOT these. -->
     <meta name="description" content="Revenge of the Evil Aliens — a 2008 Xbox Live Indie shoot-'em-up, recovered and ported to play in your browser. Up to 4-player couch co-op, three worlds, retro arcade mayhem." />
     <meta name="theme-color" content="#05030a" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Revenge of the Evil Aliens" />
     <meta property="og:description" content="A lost 2008 XBLIG shoot-'em-up, revived to play in your browser." />
-    <meta property="og:image" content="https://coamithra.github.io/RotEA26/Content/gfx/preview/poster.png" />
-    <meta property="og:url" content="https://coamithra.github.io/RotEA26/" />
+    <meta property="og:image" content="https://haraldmaassen.com/RotEA26/Content/gfx/preview/poster.png" />
+    <meta property="og:url" content="https://haraldmaassen.com/RotEA26/" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64" />
@@ -1036,13 +1038,17 @@
         // here. C# reaches this via Compat/ExitInterop.Quit().
         window.eaQuit = function ()
         {
-            // Single knob: where Meridian lives. The game is on GitHub Pages while
-            // Meridian is hosted at haraldmaassen.com/meridian (Hetzner), so this is absolute
-            // cross-origin base. Flip back to the relative sibling "../meridian/" once
-            // the game and Meridian live on the same origin (e.g. both on the server).
+            // Single knob: where Meridian lives.
+            // SAME-ORIGIN SIBLINGS since the cutover (card ee61a482): the game serves from
+            // haraldmaassen.com/RotEA26/ and Meridian from haraldmaassen.com/meridian/, both
+            // directories directly under the account web root /public_html/. So this is a
+            // RELATIVE path, not the cross-origin absolute URL it used to be -- which is the
+            // whole point of deploying the game as Meridian's sibling.
+            // It resolves through document.baseURI below, so it follows the deploy's stamped
+            // <base href="/RotEA26/"> and a dev build's "/" alike.
             // Target the explicit index.html (not the bare directory) so a static host
             // serves the file directly rather than through any SPA fallback.
-            var MERIDIAN_BASE = "https://haraldmaassen.com/meridian/";
+            var MERIDIAN_BASE = "../meridian/";
             var url;
             try { url = new URL("index.html?from=evilaliens", new URL(MERIDIAN_BASE, document.baseURI)).href; }
             catch (e) { url = MERIDIAN_BASE + "index.html?from=evilaliens"; }

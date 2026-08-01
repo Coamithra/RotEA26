@@ -3,11 +3,12 @@
 Porting a recovered 2008 **XBLIG** (XNA 3.x, C#) to run in the browser via **KNI**
 (a MonoGame fork with a Blazor WebAssembly / WebGL backend). Output = a static site.
 
-**Hosting is mid-migration.** The public site is still GitHub Pages
-(https://coamithra.github.io/RotEA26/, and badly stale). Its replacement is
-**https://haraldmaassen.com/RotEA26/** — a sibling of Meridian on the shared Hetzner host, and
-the target `tools/deploy_web.py` ships to. The first Hetzner deploy has NOT run yet; until it
-does, Pages is what players get. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
+**Hosting: LIVE at https://haraldmaassen.com/RotEA26/** (first deployed 2026-08-01, build hash
+`c591c9dfe4f4948e`) — a sibling of Meridian under the shared Hetzner host's web root
+`/public_html/`, which is what lets the game link to Meridian as the relative `../meridian/`.
+`tools/deploy_web.py` ships there. **The stale GitHub Pages build is still up and NOT yet
+decommissioned** (card `54c2a8f2`) — it is the copy a stranger still finds, and its build hash
+makes it unable to co-op with the new host. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 This file is how to *work* in the repo. Detail lives next to the code:
 
@@ -363,7 +364,8 @@ The online co-op signaling server (Stage 11.4+) lives on a shared Hetzner VPS:
   `eaQuit` in `index.html` → `<MERIDIAN_BASE>index.html?from=evilaliens`; `?from=` is what its
   "Shut Down" uses to return). Architecture is hub-and-spoke: each game is a standalone repo/site;
   the only coupling is that URL contract (`MERIDIAN_BASE` game-side, `CONFIG.GAME_ORIGIN`
-  meridian-side — currently absolute, cross-origin). To add a game: cover art + one `games.json`
+  meridian-side — **same-origin and RELATIVE since the 2026-08-01 cutover**: `../meridian/`
+  and an empty `GAME_ORIGIN`, because both now sit under the same web root). To add a game: cover art + one `games.json`
   entry in meridian, one `eaQuit`-style handoff in the game. **To edit the decoy/launcher, work in
   the meridian repo** (deploy with its `tools/deploy.py`; prefix `MSYS_NO_PATHCONV=1` in Git Bash).
 

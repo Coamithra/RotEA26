@@ -67,7 +67,7 @@ namespace EvilAliensWeb.Compat
 	//   ?harness=<Obj> SPRITE HARNESS: boot straight onto a space background showing ONE
 	//                  game object (an enemy/boss/projectile), FROZEN on a frame, drawn by
 	//                  the real in-game Draw path (same SpriteBatchWrapper / RenderScale /
-	//                  bloom / gamma). Built for iterating on drawing code: the image is
+	//                  bloom). Built for iterating on drawing code: the image is
 	//                  identical every frame, so a screenshot at any moment is reliable -- no
 	//                  fighting game timing. <Obj> is a HarnessRegistry name (see that file or
 	//                  harness.html), case-insensitive, e.g. Spider / UFO / Asteroid / DeathStar.

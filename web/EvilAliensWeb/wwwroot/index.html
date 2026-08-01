@@ -1361,11 +1361,11 @@
         // starfield. Built ONLY when the URL query contains `fx`, so normal play
         // and the live site never see it. Each change is pushed to C# DebugToggles
         // via DotNet.invokeMethod('EvilAliensWeb','debugFx', key, value). Defaults
-        // start CLEAN: bloom OFF, bg-veil OFF, gamma ON, brightness 100%.
+        // start CLEAN: bloom OFF, bg-veil OFF, brightness 100%.
         (function ()
         {
             if (!/[?&]fx(?:[=&]|$)/.test(window.location.search || "")) return;
-            var fx = { bloom: 0, veil: 0, gamma: 1, brightness: 1 };
+            var fx = { bloom: 0, veil: 0, brightness: 1 };
 
             function send(k, v)
             {
@@ -1376,7 +1376,7 @@
             {
                 // Retry until the .NET runtime is up, then push the initial state.
                 if (!send('bloom', fx.bloom)) { setTimeout(pushAll, 200); return; }
-                send('veil', fx.veil); send('gamma', fx.gamma); send('brightness', fx.brightness);
+                send('veil', fx.veil); send('brightness', fx.brightness);
             }
 
             function build()
@@ -1406,7 +1406,6 @@
                 }
                 mkToggle('bloom', 'Bloom');
                 mkToggle('veil', 'BG dark veil');
-                mkToggle('gamma', 'Gamma');
 
                 var row = document.createElement('div');
                 row.style.cssText = 'margin-top:6px;border-top:1px solid #3a3550;padding-top:6px';

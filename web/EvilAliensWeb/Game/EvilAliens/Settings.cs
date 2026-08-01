@@ -91,8 +91,6 @@ public class Settings : Savable
 
 	public float Scale = 1f;
 
-	public float Gamma = 1f;
-
 	private DifficultyLevel _difficultyLevel;
 
 	private float _difficultyMin = 1f;

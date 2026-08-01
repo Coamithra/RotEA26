@@ -1,8 +1,8 @@
 // holosim.fx — fullscreen "trial simulation" filter for the tutorial holodeck.
 //
 // Applied by Game1.ApplyHoloSim as a sceneTarget -> holoRT pass right before the
-// gamma present blit (the ApplySlowmoTrail seam). Pixel shader only: KNI's
-// SpriteBatch supplies the vertex transform (same as gamma.fx).
+// present blit (the ApplySlowmoTrail seam). Pixel shader only: KNI's
+// SpriteBatch supplies the vertex transform.
 //
 // Three intensity drivers, all already eased/scaled on the C# side (Compat/HoloSim):
 //   Intensity  the always-on baseline while the simulation runs — scanlines, a cool

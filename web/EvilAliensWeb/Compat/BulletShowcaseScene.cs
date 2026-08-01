@@ -8,7 +8,7 @@
 // UFOs up top, a rising stream of player bullets (GFX/Sprites/bulletgood) and a
 // falling stream of evil bullets (GFX/Sprites/bulletevil), all on the real
 // starfield and drawn through the real pipeline (SpriteBatchWrapper / RenderScale
-// / blend mapping / bloom / gamma). Like the harness everything is FROZEN
+// / blend mapping / bloom). Like the harness everything is FROZEN
 // (Enabled=false) so a screenshot at any moment is pixel-identical.
 //
 // Opt in with ?bulletshot. Reusable: once the bullets are redrawn, the same scene

@@ -157,8 +157,8 @@ unavailable · `4` `--fake-no-audio-device` could not install its `alsoft.ini`.
   frame** — 41 ms/frame with it, 5.5 ms without. Nothing consumes the swap chain, and the capture
   reads the back buffer *before* the swap anyway, so it is off by default. `--present` restores it.
 - **The capture is the finished frame.** `Game1.Draw` ends by blitting `sceneTarget` to the back
-  buffer through the gamma shader, letterboxed. `HeadlessGame` reads the back buffer between
-  `Draw()` and `EndDraw()` — after bloom, post FX, gamma and the present blit, before the swap.
+  buffer, letterboxed. `HeadlessGame` reads the back buffer between
+  `Draw()` and `EndDraw()` — after bloom, post FX and the present blit, before the swap.
 - **Silent by default, at the mixer** (`HeadlessAudio.cs`): `SoundEffect.MasterVolume = 0` plus a
   direct `alListenerf(AL_GAIN, 0)`, both in force before the first sound can play, so a background
   soak does not play SFX through the speakers. The device, the mixer, the `.wav` decodes and every

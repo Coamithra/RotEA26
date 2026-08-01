@@ -136,12 +136,10 @@ public class Game1 : Game
 
 	private AwardmentBlade awardmentBlade;
 
-	private Effect gamma;
-
 	// Stage 10 unified presenter: the WHOLE frame — legacy 800x600 art (upscaled via
 	// RenderScale.Matrix) AND the hi-res art (menu title, channel-flip splash reveal,
 	// drawn at native density) — is rendered into this one offscreen target, sized to
-	// the window's 4:3 letterbox (RenderScale.Width x Height). Bloom + gamma operate on
+	// the window's 4:3 letterbox (RenderScale.Width x Height). Bloom operates on
 	// it, then Draw blits it letterboxed to KNI's window-sized back buffer. (Replaces
 	// the Stage-9 split where hi-res art rode a separate native-res overlay pass.)
 	// Recreated when the render size changes (Draw).
@@ -534,17 +532,6 @@ public class Game1 : Game
 		if (!isWideScreen)
 		{
 			Settings.GetInstance().Scale = 0.9f;
-		}
-		// Gamma (Stage 5) is loaded here and applied on the present blit in Draw(). If the
-		// load fails it stays null and the present blit simply skips the gamma shader.
-		try
-		{
-			gamma = base.Content.Load<Effect>("Content/GFX/Effects/gamma");
-		}
-		catch (Exception ex)
-		{
-			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
-			gamma = null;
 		}
 		// Tutorial holo-sim filter; null on failure = filter silently off, game unaffected.
 		try
@@ -1255,7 +1242,7 @@ public class Game1 : Game
 		// to back buffer" calls are redirected to this target via
 		// Xna3GraphicsDeviceCompat.BaseRenderTarget so the whole frame composites here;
 		// legacy 800x600 draws are scaled up by RenderScale.Matrix and hi-res art is
-		// drawn at native density, sharing one bloom + gamma + present blit.
+		// drawn at native density, sharing one bloom + present blit.
 		PresentationParameters pp = base.GraphicsDevice.PresentationParameters;
 		RenderScale.Update(pp.BackBufferWidth, pp.BackBufferHeight);
 		if (sceneTarget == null || ((GraphicsResource)sceneTarget).IsDisposed
@@ -1323,7 +1310,7 @@ public class Game1 : Game
 		ApplyHoloSim(gameTime);
 		FrameProfiler.End(FrameSection.DrawPost, profPost);
 
-		// FPS HUD "present" row: the letterboxed gamma blit. Scales with WINDOW size, not
+		// FPS HUD "present" row: the letterbox blit. Scales with WINDOW size, not
 		// scene complexity, so it's the row that moves when you resize rather than when you
 		// spawn enemies.
 		long profPresent = FrameProfiler.Begin();
@@ -1334,17 +1321,14 @@ public class Game1 : Game
 		// Letterbox geometry from the single source of truth (RenderScale), so the present
 		// blit and the inverse mouse mapping (WindowToDesign) round identically.
 		Rectangle dest = RenderScale.WindowDestRect(pp.BackBufferWidth, pp.BackBufferHeight);
-		// Gamma correction is applied here, on the final present blit. sceneTarget holds
-		// the fully composited frame (legacy + hi-res, bloomed). Blitting it through the
-		// gamma pixel shader as it's scaled+letterboxed to the window is equivalent to a
-		// full-screen gamma post-process. The blit is 1:1 when the render size equals the
-		// letterbox (uncapped); a bilinear upscale when RenderScale's height cap kicks in.
-		Effect gx = (DebugToggles.Active && !DebugToggles.Gamma) ? null : gamma;
-		if (gx != null)
-		{
-			gx.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
-		}
-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gx);
+		// sceneTarget holds the fully composited frame (legacy + hi-res, bloomed); it is
+		// blitted straight to the window here. The blit is 1:1 when the render size equals
+		// the letterbox (uncapped); a bilinear upscale when RenderScale's height cap kicks in.
+		// Card a35c5f31 removed the gamma pixel shader that used to run on this blit -- it was
+		// the 2008 Xbox TV-calibration control (Settings.Gamma, default 1.0 => pow(c, 1.0), a
+		// measured byte-exact no-op), obsolete on a colour-managed browser. The port renders
+		// entirely in sRGB space, as the original did; that is deliberate, not a defect.
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, null);
 		if (Juice.ShakeActive)
 		{
 			// Screen shake (Compat/Juice.cs): jolt the present blit itself — offset + a small
@@ -1565,11 +1549,6 @@ public class Game1 : Game
 			HitboxOverlay.Draw(base.GraphicsDevice, spriteBatchWrapper, collisionHandler.Collidables);
 			spriteBatchWrapper.Flush();
 		}
-		// Stage 5 (shaders): the gamma post-process used to composite the resolved
-		// back buffer here via ResolveBackBuffer + a full-screen gamma draw. The
-		// Stage-4 presenter already renders the whole frame into sceneTarget, so
-		// gamma is now applied on the final present blit in Draw() instead (no
-		// ResolveBackBuffer round-trip needed). See Draw().
 		if (Settings.GetInstance().HideSafeArea)
 		{
 			Rectangle safeZone = General.SafeZone;

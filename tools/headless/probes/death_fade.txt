@@ -1,0 +1,61 @@
+# PROBE: the death cross-fade's alpha seal still clamps to the white pixel's LOGICAL bounds.
+#
+# PINS: SpriteBatchWrapper.SealAlpha's source-rect clamp (card b7e9b106). When the player dies,
+# GameScene.UpdateResetting starts Background's XFade: the clean background is snapshotted into an
+# RGBA8 target and DrawForeground composites it back over the live objects at a ramping straight
+# alpha, so enemies/bullets/wreckage DISSOLVE out over 1.5 s before the purge. That composite is
+# straight-alpha, so the snapshot's own alpha must be 1 -- which is SealAlpha's whole job.
+#
+# `blank` is a 10x10 white pixel inside a 112x112 padded `.dds` (the --padtest 100 canary), so the
+# un-clamped `Draw(texture, dest, color)` overload SealAlpha was written with stretched the whole
+# padded canvas and sealed ~1/8 of the target: the top-left ~100x75 px of 800x600. Everywhere else
+# the snapshot kept its eroded alpha, the dissolve contributed nothing, and the objects simply
+# VANISHED at the purge with no fade at all.
+#
+# FAILURE MEANS: that regression is back, or something else made the seal stop clamping. Read the
+# quoted `[xfade] seal` line -- `src=` is the rect actually handed to SpriteBatch.Draw (the log is
+# derived from that same local inside DrawStretched, not restated beside it), so `src=full` or a
+# padded size is the finding. Objects will pop out of existence on death instead of fading.
+#
+# WHY THIS AND NOT PIXELS: the failure is SILENT and every intermediate is CORRECT -- the XFade
+# timer ramps 1->0 over exactly 91 ticks, the blend state is NonPremultiplied and the tint alpha
+# reaches the draw at the right value. Only the composited result is wrong, and a screenshot
+# cannot assert it: RandomHelper is unseeded, so an OwnLevel A/B has a run-to-run noise floor
+# (mean 0.2, max 210) larger than the effect, and `?level=Level3&wallsonly` is bistable 1-in-6.
+# A GetData readback of the sealed target WAS considered and declined -- a real output oracle,
+# but desktop-GL-only and more scope than this defect earns. `tools/audit_unclamped_draw.py` is
+# the other half of the guard: it lints the SHAPE across the whole wrapper.
+#
+# ANTI-VACUITY: the `[xfade] seal` line only ever prints during a cross-fade, so a run that never
+# reached a death fails the `expect` rather than passing on an assertion it never got to. The
+# `asploded 1 local ship` line above it names WHICH half went wrong when it does.
+#
+# NOT NODRAW: SealAlpha is reached from Background.Draw, so the post-death steps must render.
+#
+# WHY A CHALLENGE LEVEL AND NOT A STORY ONE: on EASY, GameScene.ApplyDifficultyPolicy sets
+# Settings.DirectRespawn, and UpdateResetting's DirectRespawn branch respawns in place with NO
+# cross-fade at all. eahl wipes saves per run, so a story level boots at Easy and this probe
+# would never reach a fade (measured: `?level=Level3&wallsonly` prints nothing in 600 frames).
+# The nine challenge levels never call ApplyDifficultyPolicy, so OwnLevel always takes the fade.
+#
+# TIMING: the settle is what a ship needs to exist (OwnLevel spawns one by frame ~600 -- at 400
+# `eaKillShips` reports 0 and the probe would fail on its own anti-vacuity line). UpdateResetting
+# then waits 3 s before Background.CrossFade, so the seal lands ~191 frames after the kill.
+#
+# MUTATION-TESTED: reverting SealAlpha's DrawStretched call to the bare
+# `spriteBatch.Draw(whitePixel, new Rectangle(0, 0, width, height), Color.White)` drops the line
+# entirely and the `src=10x10` expect goes red; passing a null source rect instead prints
+# `src=full` and fails the same line. Rebuild tools/headless after either -- eahl links the game
+# sources in, so a `web/EvilAliensWeb`-only build leaves the probe testing the old binary.
+#
+# eahl: --flags "?level=OwnLevel&noattract"
+
+step 600 nodraw
+eval OracleRoster
+mark
+eval KillShips
+step 260
+expect      asploded 1 local ship
+expect      \[xfade\] seal .* src=10x10
+expect-not  \[xfade\] seal .* src=full
+quit

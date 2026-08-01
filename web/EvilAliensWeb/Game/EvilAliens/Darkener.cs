@@ -87,6 +87,10 @@ public class Darkener : DrawableGameComponent
 		{
 			spriteBatchWrapper.Draw(BButton, new Vector2(tipBIconX, tipsY), 0f, iconScale, center: false, Color.White);
 			spriteBatchWrapper.DrawString(buttonTipB, new Vector2(tipBTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
+			// Card 2a4110d0: make the tip clickable here too. Darkener only DRAWS it -- the
+			// pause overlay's input is PausedScene's -- so the click is folded in as an Esc
+			// (Compat/BackTipHit), which is exactly what the B button already means there.
+			EvilAliensWeb.Compat.BackTipHit.Record(tipBIconX, tipBTextX + font.MeasureString(buttonTipB).X * textScale, tipsY, (float)(General.SafeZone).Bottom);
 		}
 		if (buttonTipA != "")
 		{

@@ -1751,6 +1751,9 @@ internal class MenuScene : Scene
 		float selectIconX = selectTextX - (float)AButton.LogicalWidth() * iconScale - font.MeasureString(" ").X * textScale;
 		base.SpriteBatch.Draw(BButton, new Vector2(backIconX, tipsY), 0f, iconScale, center: false, Color.White);
 		base.SpriteBatch.DrawString("back", new Vector2(backTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
+		// Card 2a4110d0: make that tip clickable. Both parts draw from their top-left at
+		// tipsY, so the box runs icon-left to label-right and down by the taller of the two.
+		EvilAliensWeb.Compat.BackTipHit.Record(backIconX, backTextX + font.MeasureString("back").X * textScale, tipsY, (float)(General.SafeZone).Bottom);
 		base.SpriteBatch.Draw(AButton, new Vector2(selectIconX, tipsY), 0f, iconScale, center: false, Color.White);
 		base.SpriteBatch.DrawString("select", new Vector2(selectTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
 	}

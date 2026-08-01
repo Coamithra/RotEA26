@@ -159,6 +159,21 @@ public class InputHandler : IInputHandlerService
 		// letterbox scale+offset so the cursor maps to the design point under it; otherwise
 		// the ship fires toward a scaled/shifted phantom point, not where you clicked.
 		mousepos = RenderScale.WindowToDesign(new Vector2((float)(state).X, (float)(state).Y));
+		// The two mouse buttons are resolved ONCE, before the key loop, because Esc (5) is
+		// polled before Mouse1 (6) and the clickable back tip below needs the settled left
+		// button. Each source is still evaluated exactly once per tick:
+		//  - MouseLatch.Filter drops a press that began OUTSIDE the canvas (card 0fe23476) --
+		//    KNI's own mouse listeners are on the window, so a click on the room-code prompt,
+		//    the fullscreen button or a tuning panel otherwise reaches the menu underneath.
+		//  - MouseLatch.Consume folds in a click SHORTER than one tick, which this poll cannot
+		//    see at all (card 724f2abc); both samples read Released while the cursor POSITION
+		//    survives, so a menu row hover-highlights and never invokes.
+		bool mouse1Held = MouseLatch.Filter((int)MyKeys.Mouse1, (int)(state).LeftButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse1);
+		bool mouse2Held = MouseLatch.Filter((int)MyKeys.Mouse2, (int)(state).RightButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse2);
+		// Card 2a4110d0: a click on the bottom-left "(B) back" tip drawn last frame acts as
+		// Esc, which is already "back" everywhere (menus, the pause overlay, the brag screen).
+		// Consumed here so the recorded box lives exactly one frame -- see Compat/BackTipHit.
+		bool backTipClicked = EvilAliensWeb.Compat.BackTipHit.ConsumeClick(mousepos, mouse1Held);
 		bool held = false;
 		for (int i = 0; i < keysToCheck.Length; i++)
 		{
@@ -177,17 +192,10 @@ public class InputHandler : IInputHandlerService
 			switch (i)
 			{
 			case 6:
-				held |= (int)(state).LeftButton == 1;
-				// A click SHORTER than one tick is invisible to the poll above -- both samples
-				// read Released -- so the DOM mousedown edge is latched in JS and folded in here
-				// for exactly one tick (card 724f2abc, Compat/MouseLatch.cs). The cursor POSITION
-				// survives such a click, so without this a menu row hover-highlights and never
-				// invokes. Same shape as the DebugInput.Consume(i) line below, for the same reason.
-				held |= MouseLatch.Consume(i);
+				held |= mouse1Held;
 				break;
 			case 7:
-				held |= (int)(state).RightButton == 1;
-				held |= MouseLatch.Consume(i);
+				held |= mouse2Held;
 				break;
 			}
 			// Swallow the Esc that the browser delivers when it EXITS fullscreen on Esc, so
@@ -198,6 +206,13 @@ public class InputHandler : IInputHandlerService
 			if (i == (int)MyKeys.Esc && DebugInput.EscSuppressActive(held))
 			{
 				held = false;
+			}
+			// The clickable back tip, added AFTER that mask so the fullscreen-exit Esc guard
+			// (which counts down against the raw keyboard Esc) can neither swallow the click
+			// nor be spent by it.
+			if (i == (int)MyKeys.Esc)
+			{
+				held |= backTipClicked;
 			}
 			// Debug input injection (immune to the rAF frame-timing miss): force this key
 			// down for any remaining injected ticks. Done inside the tick so a scripted

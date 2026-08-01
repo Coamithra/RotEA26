@@ -31,6 +31,9 @@ internal abstract class SubMenuCarousel : MenuSub1
         // Carousel: hovering a flying/scaling entry shouldn't snap the selection —
         // only a click picks (DrawEntryAt records each on-screen entry's box).
         mouseHoverSelects = false;
+        // ... and a click on a side entry scrolls the carousel to it rather than launching
+        // it; only the centred entry activates on click (card e3c78bb8).
+        mouseClickSelectsBeforeActivating = true;
     }
 
     private bool Visible(int i)

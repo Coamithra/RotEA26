@@ -81,6 +81,16 @@ internal class MenuSub1 : Scene
 	// flying screenshot shouldn't snap the selection — only a click selects there.
 	protected bool mouseHoverSelects = true;
 
+	// Card e3c78bb8: on a carousel, a click on an entry that is NOT the centred one only
+	// scrolls the carousel to it -- it takes a second click, on the now-centred entry, to
+	// activate. The default (any click selects AND activates) is right for a static list,
+	// where what you click is what you get; on a carousel the side entries are small,
+	// partly off-screen and still flying, so treating a click on one as "launch that level"
+	// meant aiming at a moving target with a level start as the penalty for missing.
+	// Deliberately NOT folded into mouseHoverSelects: that one says hover does not select,
+	// which is a different question with a different answer for a hypothetical static menu.
+	protected bool mouseClickSelectsBeforeActivating;
+
 	protected SpriteFont font;
 
 	private RenderTarget2D myRenderTarget;
@@ -406,16 +416,56 @@ internal class MenuSub1 : Scene
 			}
 			if (base.InputHandler.Pressed(MyKeys.Mouse1))
 			{
+				// A carousel's off-centre entries only get selected (which starts the scroll);
+				// everything else selects and activates in one click, as before.
+				bool activate = !mouseClickSelectsBeforeActivating || hovered == selectedEntry;
 				selectedEntry = hovered;
-				if (ItemSelectedEvents[selectedEntry] != null)
+				if (activate)
 				{
-					ItemSelectedEvents[selectedEntry](this);
+					if (ItemSelectedEvents[selectedEntry] != null)
+					{
+						ItemSelectedEvents[selectedEntry](this);
+					}
+					mouseActivated = true;
 				}
-				mouseActivated = true;
 				changed = true;
 			}
 		}
 		return changed;
+	}
+
+	// The clickable "(B) back" tip (card 2a4110d0) is a hit box the menus know nothing about,
+	// so its one hard invariant -- it must not overlap ANY menu entry's box, or a single click
+	// would both go back AND activate whatever row it landed on -- has no natural owner and no
+	// visible failure until a player hits it. It holds today with room to spare (the tip lives
+	// at x<=~150, the widest main-menu frame starts at x~218), but it is held by two unrelated
+	// layouts: widen a frame, lengthen a label, or move the safe zone and it silently stops
+	// holding. So every menu reports the verdict itself, once per layout change (not per
+	// frame), positive case included -- a probe that only looked for the failure line would
+	// pass just as happily on a run that never opened a menu.
+	private string lastBackTipReport;
+
+	private void ReportBackTipOverlap()
+	{
+		if (!EvilAliensWeb.Compat.BackTipHit.TryGetRect(out Rectangle tip))
+		{
+			return;
+		}
+		int hit = -1;
+		for (int i = 0; i < entryHitBounds.Count; i++)
+		{
+			if (entryHitBounds[i].rect.Intersects(tip))
+			{
+				hit = entryHitBounds[i].index;
+				break;
+			}
+		}
+		string report = $"[backtip] menu={GetType().Name} entries={entryHitBounds.Count} tip={tip.X},{tip.Y},{tip.Width},{tip.Height} overlap={((hit < 0) ? "none" : hit.ToString())}";
+		if (report != lastBackTipReport)
+		{
+			lastBackTipReport = report;
+			Console.WriteLine(report);
+		}
 	}
 
 	// Records entry `index`'s clickable box (design space, 800x600), centred at `centre`.
@@ -592,6 +642,7 @@ internal class MenuSub1 : Scene
 		// reads them next Update). Clear here so a removed/relaid-out entry can't linger.
 		entryHitBounds.Clear();
 		DrawMenu(gameTime, 0f);
+		ReportBackTipOverlap();
 		base.SpriteBatch.Flush();
 		base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 		float scale = 1f;

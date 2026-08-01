@@ -30,6 +30,24 @@ internal class MenuSubWithSkull : MenuSub1
 	// both key off this so they stay in lockstep.
 	private const float RowsYOffset = 96f;
 
+	// Card 45c16ef6: with everything unlocked the eight rows no longer fitted and EXIT was
+	// drawn clipped off the bottom edge. The 2008 layout only ever grows DOWNWARD -- curY0
+	// keys off the FULL entry count, which UNLOCKING does not change (a locked row is merely
+	// skipped), so every newly visible row adds LineSpacing at the bottom and moves nothing
+	// up. RowsStartY therefore shifts the whole block up by exactly its overflow past
+	// RowsBottomLimit: <=6 visible rows are pixel-identical to before, 8 ride ~10 design-px
+	// into the title's bottom banner (the card comment explicitly allows a little overlap),
+	// and the 9+ case reachable only with debug menus keeps shifting under the same one rule
+	// rather than needing a second. The limit is the project's own safe area bottom
+	// (General.SafeZone.Bottom): the tips band starts ~40px above it, but the tips sit at the
+	// far LEFT and RIGHT (x<=150 / x>=640) while the frames span x~218-582, so they never
+	// collide -- a stricter limit would only buy title overlap nobody asked for.
+	private const float RowsBottomLimit = 570f;
+
+	// Degenerate guard for a hypothetical 12+ entry menu: stop shifting rather than walk the
+	// list off the TOP of the screen. Nothing reachable today hits it.
+	private const float RowsTopLimit = 10f;
+
 	// Perf batch 2: the selected row's glow ring (constant offsets, r=4.5) and the octagon
 	// outline's 8-point array were allocated fresh every frame — the outline one per visible
 	// row. Hoist the constant ring; reuse a scratch array for the per-row outline points.
@@ -114,7 +132,7 @@ internal class MenuSubWithSkull : MenuSub1
 				maxW = Math.Max(maxW, font.MeasureString(menuEntries[i]).X);
 		}
 		float frameW = Math.Min(520f, Math.Max(360f, maxW + 96f));
-		float frameH = Math.Min(52f, font.LineSpacing * 0.82f);
+		float frameH = RowFrameHeight();
 
 		// Vertical centring reference: the CAP band centre (cap-top..baseline), not the
 		// full line box. Centring the line box (LineSpacing/2) leaves the visible caps
@@ -132,7 +150,7 @@ internal class MenuSubWithSkull : MenuSub1
 			}
 		}
 
-		float curY = yoffset + 300f - (float)(font.LineSpacing * menuEntries.Count) / 3f;
+		float curY = RowsStartY(yoffset);
 		for (int i = 0; i < menuEntries.Count; i++)
 		{
 			if (!IsVisible(i))
@@ -190,6 +208,42 @@ internal class MenuSubWithSkull : MenuSub1
 			|| Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item);
 	}
 
+	private int VisibleCount()
+	{
+		int visible = 0;
+		for (int i = 0; i < menuEntries.Count; i++)
+		{
+			if (IsVisible(i))
+				visible++;
+		}
+		return visible;
+	}
+
+	private float RowFrameHeight()
+	{
+		return Math.Min(52f, font.LineSpacing * 0.82f);
+	}
+
+	// The FIRST visible row's centre y, in 800x600 design space. Owns the whole vertical
+	// placement of the row list: the 2008 centring reference (the FULL entry count, not the
+	// visible one) plus the card-45c16ef6 fit-shift described at RowsBottomLimit. DrawRows and
+	// GetListCentre BOTH go through it -- they must stay in lockstep or the HUD ring parks
+	// somewhere the rows no longer are. Callers must have loaded `font` first.
+	private float RowsStartY(float yoffset)
+	{
+		float y0 = yoffset + 300f - (float)(font.LineSpacing * menuEntries.Count) / 3f;
+		int visible = VisibleCount();
+		if (visible <= 0)
+			return y0;
+		float half = RowFrameHeight() / 2f;
+		float overflow = (y0 + (float)(visible - 1) * font.LineSpacing + half) - RowsBottomLimit;
+		if (overflow <= 0f)
+			return y0;
+		// Never shift so far that the top frame edge leaves the screen (degenerate case only).
+		float headroom = Math.Max(0f, y0 - half - RowsTopLimit);
+		return y0 - Math.Min(overflow, headroom);
+	}
+
 	// The vertical centre of the visible row list, in 800x600 design space, computed the
 	// same way DrawRows lays them out (yoffset RowsYOffset=96, centred from the FULL entry count with
 	// locked entries skipped). MenuScene centres the HUD ring on this so the reticle tracks
@@ -199,13 +253,8 @@ internal class MenuSubWithSkull : MenuSub1
 	{
 		if (font == null)
 			return new Vector2(400f, 384f);
-		int visible = 0;
-		for (int i = 0; i < menuEntries.Count; i++)
-		{
-			if (IsVisible(i))
-				visible++;
-		}
-		float curY0 = RowsYOffset + 300f - (float)(font.LineSpacing * menuEntries.Count) / 3f;
+		int visible = VisibleCount();
+		float curY0 = RowsStartY(RowsYOffset);
 		float centreY = curY0 + ((visible > 0) ? (visible - 1) / 2f * font.LineSpacing : 0f);
 		return new Vector2(400f, centreY);
 	}

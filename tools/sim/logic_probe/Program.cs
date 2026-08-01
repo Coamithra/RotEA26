@@ -1787,6 +1787,65 @@ internal static class Program
         Check("negative control: without the fold-in the same click is LOST", !isPressed(mouse1),
             "a pass here means the latch is not what carried the press above");
 
+        // ---- 3. off-canvas clicks are not game input (card 0fe23476) --------------------------
+        // KNI's own mouse listeners are on the WINDOW, so a click on any outside-#app DOM overlay
+        // still reaches the game's button state at that cursor position -- which is how clicking
+        // the room-code prompt's JOIN button hit the CANCEL row of the NetStatusMenu behind it.
+        // JS flags the press as off-canvas; Filter is what the flag actually does.
+        //
+        // This leg CANNOT be checked in the browser by clicking, either: the failure it guards
+        // (the phantom press on release) needs the button held across the moment the flag lifts,
+        // which is a drag, and its evidence is the absence of an event. Here it is three calls.
+        MethodInfo suppress = latch.GetMethod("SetSuppressed", anyStatic);
+        MethodInfo filter = latch.GetMethod("Filter", anyStatic);
+        if (suppress == null || filter == null)
+        {
+            Console.WriteLine("  FAIL could not reflect the suppression targets (SetSuppressed="
+                + (suppress != null) + " Filter=" + (filter != null) + ") -- renamed or moved?");
+            failures++;
+            return 0;
+        }
+        Action<bool> setSuppressed = on => suppress.Invoke(null, new object[] { on });
+        Func<int, bool, bool> filterKey = (idx, raw) => (bool)filter.Invoke(null, new object[] { idx, raw });
+
+        // Positive control FIRST: with nothing suppressed the filter is a pass-through, so every
+        // assertion below is about the flag rather than about a filter that always says false.
+        Check("un-suppressed, a held button reads held", filterKey(mouse1, true), null);
+        Check("un-suppressed, a released button reads released", !filterKey(mouse1, false), null);
+
+        setSuppressed(true);
+        Check("a press that began off-canvas reads released", !filterKey(mouse1, true), null);
+        // THE PHANTOM-EDGE ASSERTION. The flag lifts on pointerup, but a drag can end over the
+        // canvas with the button still down for a tick or two; a plain flag would then hand
+        // InputHandler a rising edge and land the click it just refused.
+        setSuppressed(false);
+        Check("the tail of that same press is still swallowed", !filterKey(mouse1, true),
+            "a pass here means an overlay drag ending on the canvas fires a click");
+        Check("still swallowed on a later tick", !filterKey(mouse1, true), null);
+        Check("a physical release clears it", !filterKey(mouse1, false), null);
+        Check("and the NEXT press is honoured again", filterKey(mouse1, true),
+            "a fail here is a dead mouse, which is worse than the bug being fixed");
+        filterKey(mouse1, false);
+
+        // Per-button, because the two are filtered in the same tick with independent states: a
+        // shared flag would let whichever button was polled first clear the other one's swallow.
+        setSuppressed(true);
+        filterKey(mouse1, true);
+        filterKey(mouse2, true);
+        setSuppressed(false);
+        Check("releasing one button does not un-swallow the other",
+            !filterKey(mouse2, false) && !filterKey(mouse1, true), null);
+        filterKey(mouse1, false);
+
+        // Suppression must also drop anything the CANVAS latch had already banked this tick --
+        // otherwise the sub-tick rescue would smuggle through exactly the press being refused.
+        pressButton(LeftButton);
+        setSuppressed(true);
+        Check("suppression drops a banked sub-tick latch", !consumeKey(mouse1), null);
+        setSuppressed(false);
+        filterKey(mouse1, false);
+        filterKey(mouse2, false);
+
         // Leave nothing latched for a Probe* added after this one. The Check runs FIRST -- put
         // the drains before it and it can only re-test the clear, never report a leak.
         Check("case set leaves no press latched", !consumeKey(mouse1) && !consumeKey(mouse2), null);

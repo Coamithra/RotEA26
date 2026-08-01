@@ -56,6 +56,82 @@ namespace EvilAliensWeb.Compat
 			}
 		}
 
+		// --- Clicks that are not on the canvas are not game input (card 0fe23476) ---
+		//
+		// The latch above is canvas-scoped for exactly that reason, but the latch is only the
+		// sub-tick RESCUE -- the primary read is InputHandler polling Mouse.GetState(), and
+		// KNI's own listeners are on the WINDOW (nkast.Wasm.Dom Window.js: 'mousedown' /
+		// 'mouseup' / 'mousemove'). So a click on any outside-#app UI is still delivered to the
+		// game at that cursor position, and the game happily acts on it. The reported symptom
+		// was the join-by-code flow: the room-code prompt (wwwroot/webrtc.js promptCode) is a
+		// DOM overlay drawn over a live NetStatusMenu whose single entry is CANCEL, and the
+		// JOIN button sits right over that row -- so clicking JOIN cancelled the join. Nothing
+		// about the DOM z-order could fix it; the game never sees the DOM event, only the
+		// button state. The same leak fires the fullscreen button, the FPS HUD tag and the
+		// tuning panels into the menu (and the ship) underneath them.
+		//
+		// So JS flags a press that began off-canvas and the mouse buttons read as released for
+		// as long as it lasts. It is a LEVEL, not an edge: releasing on the physical mouseup
+		// (rather than after one tick) is what stops a drag that starts on an overlay and ends
+		// over the canvas from landing as a click, and the swallow-until-release below is what
+		// stops the release itself from reading as a fresh press.
+		private static bool suppressed;
+
+		// True from an off-canvas pointerdown until its pointerup. Set/cleared from JS
+		// (wwwroot/index.html, alongside eaMouseDown).
+		[JSInvokable("eaMouseSuppress")]
+		public static void SetSuppressed(bool value)
+		{
+			if (value)
+			{
+				suppressed = true;
+				// A press that started off-canvas must not become a press the moment it is
+				// released, so drop anything the canvas latch had already banked this tick.
+				mouse1 = false;
+				mouse2 = false;
+			}
+			else
+			{
+				suppressed = false;
+			}
+		}
+
+		// Called once per tick per button with the raw physical state. While an off-canvas press
+		// is live the button reads released; once JS clears the flag it stays swallowed until
+		// that button is PHYSICALLY released, so the tail of the same press cannot produce a
+		// rising edge in InputHandler (the phantom click a plain flag would inject). Per-button,
+		// because the two are polled in the same tick with independent states.
+		private static bool swallow1;
+
+		private static bool swallow2;
+
+		internal static bool Filter(int idx, bool rawDown)
+		{
+			ref bool swallow = ref swallow1;
+			if (idx == Mouse2Key)
+			{
+				swallow = ref swallow2;
+			}
+			else if (idx != Mouse1Key)
+			{
+				return rawDown;
+			}
+			if (suppressed)
+			{
+				swallow = true;
+				return false;
+			}
+			if (swallow)
+			{
+				if (rawDown)
+				{
+					return false;
+				}
+				swallow = false;
+			}
+			return rawDown;
+		}
+
 		// True once per latched press, for the one tick that consumes it. Any index that is not
 		// a mouse button never latches.
 		internal static bool Consume(int idx)

@@ -1,0 +1,63 @@
+# PROBE: the clickable "(B) back" tip never overlaps a menu entry's hit box
+#
+# PINS:   card 2a4110d0. The bottom-left back tip is clickable, but it is NOT a menu entry --
+#         it is scene chrome (MenuScene.drawButtonTips) with its own box in Compat/BackTipHit,
+#         while the entries record theirs via MenuSub1.RecordEntryHit. If the two boxes ever
+#         overlap, ONE click both goes back AND activates the row it landed on.
+#         Nothing enforces that; it holds only because two unrelated layouts happen to leave a
+#         gap (tip x<=146, the widest main-menu frame starts at x~218). Widen a frame, lengthen
+#         a label, or move General.SafeZone and it stops holding -- with no build error, no
+#         crash and no visible symptom until a player clicks "back" and launches a mission.
+#
+#         So MenuSub1 prints its own verdict on each layout change and this asserts it, across
+#         the three menu layouts that differ: the framed main menu (widest frames, and the one
+#         that shifts up at 8 unlocked rows -- card 45c16ef6), the plain centred list, and a
+#         carousel (whose boxes are 800x600*scale screenshots, by far the biggest here).
+#
+# FAILURE MEANS: read the quoted line's `overlap=<n>` -- n is the entry index the tip now
+#         collides with. Either the tip grew (a longer label, a bigger icon, a moved safe zone)
+#         or that menu's boxes did. Do not "fix" it by shrinking the assertion; the click really
+#         does double-fire in that state.
+#
+# The POSITIVE assertions are load-bearing, not decoration: `expect-not` alone would pass on a
+# run that never opened a menu at all, which is the failure mode this file is most likely to
+# rot into. Mutation-tested by widening the recorded tip box by 200px -- the main menu then
+# reports `overlap=7` (Exit) and this goes red on both the expect-not and the main-menu expect.
+#
+# eahl: --flags "?menu&unlockall&noattract"
+
+# mark FIRST, then settle: the report prints only when a menu's layout CHANGES, so the main
+# menu's line lands during boot -- a mark placed after the settle would scope the window past
+# the very line it is here to assert. The boot noise this normally guards against is other
+# cards' `(boot)` decode lines, which none of these patterns can match.
+mark
+
+# Settle past the boot white fade.
+step 200
+
+# --- the framed main menu, all 8 rows unlocked (the 45c16ef6 shifted layout) ---
+expect      \[backtip\] menu=MenuSubWithSkull entries=8 .* overlap=none
+
+# --- a plain centred list (Options) ---
+eval Press down 1
+step 5
+eval Press enter 1
+step 150
+expect      \[backtip\] menu=MenuSub1 entries=\d+ .* overlap=none
+
+# Back out to the main menu. The selection is left on Options, so step back UP to Start --
+# without this, `enter` re-opens Options and the carousel assertion below never gets there.
+eval Press escape 1
+step 120
+eval Press up 1
+step 5
+
+# --- a carousel, whose entry boxes are the largest in the game ---
+eval Press enter 1
+step 200
+expect      \[backtip\] menu=SubMenuLevelChoice entries=\d+ .* overlap=none
+
+# THE ASSERTION: nothing reported an overlap anywhere in that walk.
+expect-not  \[backtip\] .* overlap=[0-9]
+
+quit

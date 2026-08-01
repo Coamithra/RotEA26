@@ -67,7 +67,7 @@ namespace EvilAliensWeb.Compat
 	//   ?harness=<Obj> SPRITE HARNESS: boot straight onto a space background showing ONE
 	//                  game object (an enemy/boss/projectile), FROZEN on a frame, drawn by
 	//                  the real in-game Draw path (same SpriteBatchWrapper / RenderScale /
-	//                  bloom / gamma). Built for iterating on drawing code: the image is
+	//                  bloom). Built for iterating on drawing code: the image is
 	//                  identical every frame, so a screenshot at any moment is reliable -- no
 	//                  fighting game timing. <Obj> is a HarnessRegistry name (see that file or
 	//                  harness.html), case-insensitive, e.g. Spider / UFO / Asteroid / DeathStar.
@@ -253,6 +253,76 @@ namespace EvilAliensWeb.Compat
 			HoloBurst = burst;
 			HoloStaticRate = staticRate;
 			HoloFilter = filter;
+		}
+
+		// ---- Bomb detonation ripple (Compat/BombRipple + bombripple.fx, card 5f38ed35) -----
+		// All null => the baked BombRipple.Default* consts, so a shipped build with no flags
+		// is byte-identical to the tuned look. Pure render/feel, so the whole family stays
+		// OUT of `Active` (like every ?holo* and ?slowmotrail) and can never refuse a co-op
+		// session.
+
+		// Master scale on the whole effect; 0 = off (the kill switch). ?ripple=
+		public static float? Ripple { get; private set; }
+
+		// Peak UV displacement of the wavefront. ?rippleamp=
+		public static float? RippleAmp { get; private set; }
+
+		// How far the wavefront travels over its life, in fractions of screen HEIGHT.
+		// ?rippleradius=
+		public static float? RippleRadius { get; private set; }
+
+		// Seconds one ring lives. ?rippleduration=
+		public static float? RippleDuration { get; private set; }
+
+		// Gaussian half-width of the wavefront (same units as the radius). ?ripplewidth=
+		public static float? RippleWidth { get; private set; }
+
+		// Exponent on the (1 - t) amplitude decay. ?ripplefalloff=
+		public static float? RippleFalloff { get; private set; }
+
+		// Additive caustic glint on the crest. ?ripplerim=
+		public static float? RippleRim { get; private set; }
+
+		// Let the MINI blasts (asploding bullets) ripple too. OFF by default -- a dozen at
+		// once strobes the frame. ?ripplemini
+		public static bool RippleMini { get; private set; }
+
+		// ?ripplephase=<0..1>: park ONE ring at that point in its life and hold it there, so
+		// a still screenshot shows the deformation at a known phase (the card's scrub rig --
+		// the effect is time-varying, so a timed live screenshot proves nothing). Works on
+		// any boot: ?level=Level2&invuln&ripplephase=0.35.
+		public static float? RipplePhase { get; private set; }
+
+		// ?ripplecenter=x,y: where the parked ring sits, in 800x600 design coords.
+		// null => screen centre.
+		public static Vector2? RippleCenter { get; private set; }
+
+		// ?ripplepower=<0..4>: the bomb powerup level the PARKED ring pretends it came
+		// from (amplitude and radius scale with it). null => 0, a bare bomb.
+		public static float? RipplePower { get; private set; }
+
+		// JS bridge for the live ripple tuner panel (eaRipple in wwwroot/index.html, shown on
+		// ?rippletune): overrides the knobs in real time. BombRipple resolves ALL of them in
+		// PackedRings rather than baking them in at Fire, so a slider drag retunes the very
+		// next frame -- rings already travelling, and the parked screenshot ring, included.
+		internal static void SetRippleOverride(float? master, float? amp, float? radius,
+			float? duration, float? width, float? falloff, float? rim, float? phase)
+		{
+			Ripple = master;
+			RippleAmp = amp;
+			RippleRadius = radius;
+			RippleDuration = duration;
+			RippleWidth = width;
+			RippleFalloff = falloff;
+			RippleRim = rim;
+			RipplePhase = phase;
+		}
+
+		// Park/un-park the screenshot ring on its own, without disturbing the tuning knobs
+		// (eaRipple.park(phase) / DebugInput.RipplePark). null => live again.
+		internal static void SetRipplePhaseOverride(float? phase)
+		{
+			RipplePhase = phase;
 		}
 
 		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
@@ -1034,6 +1104,21 @@ namespace EvilAliensWeb.Compat
 		// Null/empty = the genuine WebRtcInterop.PeerId(); dev-only, byte-identical when unset.
 		public static string NetFakePeerId { get; private set; } = "";
 
+		// ?netfakelisted=<code>: report this game as publicly LISTED under that room code without
+		// ever opening a socket (card d1a0559b). NetListing.Tick short-circuits on it, so nothing
+		// is registered with the signaling server and no stranger can actually join -- it exists
+		// purely so the two places that SURFACE a listing can be screenshot offline: the pause
+		// menu's "Listed online -- room XYZAB" line and ScoreVisualiser's corner beacon. Reaching
+		// either for real needs a live server plus a game the eligibility predicate accepts, which
+		// is not something a headless screenshot run can stand up.
+		// Any value is legal, so nothing is reported -- the ?netfakepeer=/?netfakehash= class of
+		// silent flag. Unlike those two it is UPPER-CASED as well as trimmed, because a real room
+		// code is upper case (the server mints them that way) and this has to render like one.
+		// Deliberately NOT part of DebugFlags.Active: no session exists, so it cannot alter a
+		// shared run.
+		// Null/empty = off; byte-identical when unset.
+		public static string NetFakeListed { get; private set; } = "";
+
 		// ?netkickshot: park the host's remote-pause KICK menu over a booted level with no peer
 		// at all (pair with ?level=<Name>), so its appearance can be screenshot in isolation --
 		// the ?gamebrowser fake-entry precedent, named for the ?textshot/?lazershot idiom.
@@ -1431,6 +1516,119 @@ namespace EvilAliensWeb.Compat
 						RejectFlagValue(key, val, "a number",
 							InForce(HoloStaticRate));
 					}
+					break;
+				case "ripple":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var rip))
+					{
+						Ripple = (rip < 0f) ? 0f : (rip > 4f) ? 4f : rip;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(Ripple));
+					}
+					break;
+				case "rippleamp":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripa))
+					{
+						RippleAmp = (ripa < 0f) ? 0f : (ripa > 0.5f) ? 0.5f : ripa;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(RippleAmp));
+					}
+					break;
+				case "rippleradius":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripr) && ripr > 0f)
+					{
+						RippleRadius = (ripr > 4f) ? 4f : ripr;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(RippleRadius));
+					}
+					break;
+				case "rippleduration":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripd) && ripd > 0f)
+					{
+						RippleDuration = (ripd > 10f) ? 10f : ripd;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(RippleDuration));
+					}
+					break;
+				case "ripplewidth":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripw) && ripw > 0f)
+					{
+						RippleWidth = (ripw > 2f) ? 2f : ripw;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(RippleWidth));
+					}
+					break;
+				case "ripplefalloff":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripf) && ripf >= 0f)
+					{
+						RippleFalloff = (ripf > 8f) ? 8f : ripf;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(RippleFalloff));
+					}
+					break;
+				case "ripplerim":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripm))
+					{
+						RippleRim = (ripm < 0f) ? 0f : (ripm > 4f) ? 4f : ripm;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number",
+							InForce(RippleRim));
+					}
+					break;
+				case "ripplemini":
+					RippleMini = IsOn(val);
+					break;
+				// NOTE there is deliberately no `case "rippletune"`: like ?holotune,
+				// ?walltune and ?spidertune, that flag is read by the JS panel off
+				// location.search and never reaches C#. The switch has no `default:`, so an
+				// unlisted key is silently ignored -- adding a write-only property here
+				// would just be dead code.
+				case "ripplephase":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripp))
+					{
+						// A NEGATIVE phase means "not parked", matching eaRipple.park(-1) and
+						// the panel's "-1 = live" slider -- clamping it to 0 instead would
+						// PARK on the very value a user copies out of the panel to un-park.
+						RipplePhase = (ripp < 0f) ? (float?)null : (ripp > 1f) ? 1f : ripp;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number 0..1, or negative for live",
+							InForce(RipplePhase));
+					}
+					break;
+				case "ripplepower":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ripw2) && ripw2 >= 0f)
+					{
+						RipplePower = (ripw2 > 4f) ? 4f : ripw2;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0 (a bomb powerup level 0..4)",
+							InForce(RipplePower));
+					}
+					break;
+				case "ripplecenter":
+					ParseRippleCenter(key, val);
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))
@@ -2494,6 +2692,12 @@ namespace EvilAliensWeb.Compat
 						NetFakePeerId = val.Trim();
 					}
 					break;
+				case "netfakelisted":
+					if (!string.IsNullOrEmpty(val))
+					{
+						NetFakeListed = val.Trim().ToUpperInvariant();
+					}
+					break;
 				case "netkickshot":
 					NetKickShot = IsOn(val);
 					break;
@@ -3037,6 +3241,26 @@ namespace EvilAliensWeb.Compat
 			{
 				RejectFlagValue("pos", parts[1], "a number for y in ?pos=x,y", InForce(HarnessY));
 			}
+		}
+
+		// Parse "?ripplecenter=x,y" (design coords) for the parked screenshot ring. Unlike
+		// ?pos= this is a single Vector2, so a half-valid value would place the ring somewhere
+		// nobody asked for -- BOTH axes must parse or the flag is rejected as a whole and the
+		// centre stays where it was (screen centre unless a previous ?ripplecenter set it).
+		private static void ParseRippleCenter(string key, string val)
+		{
+			string[] parts = (val ?? "").Split(',');
+			if (parts.Length >= 2
+				&& float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var rcx)
+				&& float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rcy))
+			{
+				RippleCenter = new Vector2(rcx, rcy);
+				return;
+			}
+			RejectFlagValue(key, val, "two numbers as ?ripplecenter=x,y in design coords",
+				RippleCenter.HasValue
+					? InForce(RippleCenter.Value.X) + "," + InForce(RippleCenter.Value.Y)
+					: "the screen centre");
 		}
 
 		// Parse a "?wallfogcolor=rrggbb" value (a leading '#' or '0x' is tolerated) into an

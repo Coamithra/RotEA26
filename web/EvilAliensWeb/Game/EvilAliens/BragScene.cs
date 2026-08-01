@@ -300,6 +300,9 @@ public class BragScene : Scene
 		SpriteBatchWrapper spriteBatchWrapper = ServiceHelper.Get<ISpriteBatchWrapperService>().SpriteBatchWrapper;
 		spriteBatchWrapper.Draw(BButton, new Vector2(tipBIconX, tipsY), 0f, iconScale, center: false, Color.White);
 		spriteBatchWrapper.DrawString(B, new Vector2(tipBTextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
+		// Card 2a4110d0: the third copy, clickable on the same seam (Compat/BackTipHit) --
+		// the click reads as Esc, which is already this screen's back.
+		EvilAliensWeb.Compat.BackTipHit.Record(tipBIconX, tipBTextX + font.MeasureString(B).X * textScale, tipsY, (float)(General.SafeZone).Bottom);
 		spriteBatchWrapper.Draw(AButton, new Vector2(tipAIconX, tipsY), 0f, iconScale, center: false, Color.White);
 		spriteBatchWrapper.DrawString(A, new Vector2(tipATextX, tipsY), Color.AliceBlue, 0f, centered: false, textScale, (SpriteEffects)0, 1f);
 	}

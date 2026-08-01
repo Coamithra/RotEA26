@@ -15,7 +15,6 @@ namespace EvilAliensWeb.Compat
         public static bool Active;                  // panel engaged (a push has arrived)
         public static bool Bloom;                   // scene bloom post-process
         public static bool BgVeil;                  // Background's oscillating black dim
-        public static bool Gamma = true;            // present-blit gamma shader
         public static float StarfieldBrightness = 1f;
 
         [JSInvokable("debugFx")]
@@ -26,7 +25,6 @@ namespace EvilAliensWeb.Compat
             {
                 case "bloom": Bloom = value != 0.0; break;
                 case "veil": BgVeil = value != 0.0; break;
-                case "gamma": Gamma = value != 0.0; break;
                 case "brightness": StarfieldBrightness = (float)value; break;
             }
         }

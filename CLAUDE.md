@@ -195,6 +195,17 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
   two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
   the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
+- **Net UI screenshot/probe seams** (card group `fix/net-ui-smalls`): **`?netfakelisted=<code>`**
+  reports the game as publicly LISTED under that code with **no socket and no server**, so the
+  pause menu's "Listed online -- room XYZAB" line and `ScoreVisualiser`'s corner beacon can be
+  screenshot offline (reaching either for real needs a live server AND a level the eligibility
+  predicate accepts). Free-form identity string, out of `DebugFlags.Active` -- no session exists,
+  so it cannot alter a shared run. Console-side: **`eaNetNotice(text)`** parks a session-ending
+  notice at the menus with no peer (`|` = newline; every production writer of `MenuNotice` is
+  inside `NetSession.Stop()`), **`eaMenuNetMode()`** forces the live `MenuScene` into net-lobby
+  mode -- the one precondition of card 72143c11 a headless run cannot otherwise produce -- and
+  **`eaMenuCensus()`** lists the LIVE menus, which is the only observable that separates "drawn
+  behind" from "still taking input". Pinned by `tools/headless/probes/net_notice_menu.txt`.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new
@@ -264,6 +275,19 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   impossible to probe. **Not the off-switch of `?nodemo`/`?noattract`** -- those disable attract
   entirely; this only pins which one the roll picks. Bad value => reported + the random roll.
   Capture ONE demo per process (the content manager is shared, so a second demo is warm).
+- **Bomb ripple** (card 5f38ed35): a screen-space refraction ring radiating from every bomb
+  detonation (`Compat/BombRipple.cs` + `tools/shaders/src/bombripple.fx`, applied in
+  `Game1.ApplyBombRipple` on the slowmo-trail/holo-sim post seam). **`?ripplephase=<0..1>` parks
+  one ring at a chosen point in its life and holds it there** -- the scrub rig, since a timed
+  screenshot of a 0.75 s travelling wave proves nothing; pair with `?ripplecenter=x,y` (design
+  coords) to place it over something with contrast, e.g.
+  `?level=Level2&invuln&ripplecenter=400,430&ripplephase=0.25`. Tuning: `?ripple=` (master, 0 =
+  off) `?rippleamp= ?rippleradius= ?rippleduration= ?ripplewidth= ?ripplefalloff= ?ripplerim=`,
+  plus `?ripplemini` to let the asploding-bullet minis ripple too (off by default). Live panel
+  `eaRipple` on `?rippletune`; console `eaRipple.fire(x,y,power)` / `.park(phase)` / `.state()`
+  (`eval RippleFire` / `RipplePark` / `RippleState` under `eahl`). `?ripplepower=<0..4>` gives
+  the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). Details: web
+  CLAUDE.md.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

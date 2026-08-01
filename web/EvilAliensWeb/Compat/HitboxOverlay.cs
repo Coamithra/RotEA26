@@ -19,7 +19,7 @@ namespace EvilAliensWeb.Compat
     // Drawn from Game1.DrawInner AFTER the game components + bloom have painted sceneTarget, in
     // 800x600 DESIGN space through the SpriteBatchWrapper (RenderScale.Matrix scales it to fill
     // the window-sized scene target, exactly like the HideSafeArea letterbox draw right below the
-    // hook). So it composites on top of everything and shares the unified present/gamma path.
+    // hook). So it composites on top of everything and shares the unified present path.
     //
     // A pure debug overlay, deliberately kept OUT of DebugFlags.Active — a shipped build is
     // unaffected unless ?hitboxes is appended to the URL or eaHitboxes(true) is called from the

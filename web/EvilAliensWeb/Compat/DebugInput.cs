@@ -416,6 +416,74 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetEntityTest.Run();
 		}
 
+		// Park a session-ending notice at the menus (card 72143c11), with no peer and no
+		// session -- the only offline way to reach MenuScene.NetUpdate's notice path, since
+		// every production writer of MenuNotice is inside NetSession.Stop(). MenuScene polls
+		// it on its next tick, so step a frame after calling this.
+		[JSInvokable("debugNetNotice")]
+		public static string NetNotice(string text)
+		{
+			string notice = string.IsNullOrEmpty(text)
+				? "The other player disconnected\nMatch ended"
+				: text.Replace("|", "\n");
+			EvilAliensWeb.Compat.Net.NetSession.SetMenuNoticeForTest(notice);
+			return "[netnotice] queued: " + notice.Replace("\n", " / ");
+		}
+
+		// Which menus are in the world right now (card 72143c11). MenuSub1 has no modality: a
+		// menu in the collection runs HandleInput every tick, so TWO of them means two selections
+		// moving and two entries invoked per press -- a bug that is invisible in a screenshot
+		// (the top menu draws over the other) and has no other observable. This is what a probe
+		// asserts on; nothing in the game reads it.
+		//
+		// Removal is QUEUED, so step a frame after whatever you expect to have closed a menu --
+		// see ComponentBin.InCollection for why the count is a tick behind a Remove.
+		[JSInvokable("debugMenuCensus")]
+		public static string MenuCensus()
+		{
+			System.Collections.Generic.List<EvilAliens.MenuSub1> live = LiveMenus();
+			if (live == null)
+			{
+				return "[menucensus] no ComponentBin service";
+			}
+			string names = "(none)";
+			if (live.Count > 0)
+			{
+				string[] typeNames = new string[live.Count];
+				for (int i = 0; i < live.Count; i++)
+				{
+					typeNames[i] = live[i].GetType().Name;
+				}
+				names = string.Join(",", typeNames);
+			}
+			return "[menucensus] count=" + live.Count + " live=" + names;
+		}
+
+		// Put the live MenuScene into net-lobby mode (card 72143c11). It is the ONE precondition
+		// of the overlapping-notice bug a headless run cannot otherwise produce: netMode is set
+		// by entering the Online Co-op flow and nothing clears it across a level launch, so a
+		// lobby match that ends mid-level returns to a menu holding it -- which needs a real
+		// paired peer to reach. Everything the probe then exercises (NetUpdate's notice branch)
+		// is the real code.
+		[JSInvokable("debugMenuNetMode")]
+		public static string MenuNetMode()
+		{
+			EvilAliens.IComponentBinService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>();
+			System.Collections.Generic.List<EvilAliens.MenuScene> scenes = svc?.ComponentBin?.InCollection<EvilAliens.MenuScene>();
+			if (scenes == null || scenes.Count == 0)
+			{
+				return "[menunetmode] no live MenuScene -- boot ?menu first";
+			}
+			scenes[0].NetDebugForceNetMode();
+			return "[menunetmode] netMode=true on the live MenuScene";
+		}
+
+		private static System.Collections.Generic.List<EvilAliens.MenuSub1> LiveMenus()
+		{
+			EvilAliens.IComponentBinService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>();
+			return svc?.ComponentBin?.InCollection<EvilAliens.MenuSub1>();
+		}
+
 		// JS bridge for the pinned many-puppet drive bench (eaNetPuppetBench in
 		// wwwroot/index.html, card 25ad0659 step 2c-ii). Puts n real puppets in the world
 		// through the real self-heal path and times NetPuppets.Drive in a plain loop, in
@@ -751,6 +819,77 @@ namespace EvilAliensWeb.Compat
 				(float)burst,
 				(float)staticRate,
 				(float)filter);
+		}
+
+		// JS bridge for the live bomb-ripple tuner slider panel (eaRipple in wwwroot/index.html,
+		// shown on ?rippletune): DotNet.invokeMethod('EvilAliensWeb', 'debugSetRipple',
+		// master, amp, radius, duration, width, falloff, rim, phase).
+		// Same effect as the ?ripple/?rippleamp/?rippleradius/?rippleduration/?ripplewidth/
+		// ?ripplefalloff/?ripplerim/?ripplephase URL flags, just live -- BombRipple resolves
+		// every one of them per frame in PackedRings rather than baking them in at Fire, so a
+		// drag retunes rings that are ALREADY travelling, and the parked ring too.
+		// A NEGATIVE phase means "not parked", since the JS side has no null to send.
+		[JSInvokable("debugSetRipple")]
+		public static void SetRipple(double master, double amp, double radius, double duration,
+			double width, double falloff, double rim, double phase)
+		{
+			DebugFlags.SetRippleOverride(
+				(float)master,
+				(float)amp,
+				(float)radius,
+				(float)duration,
+				(float)width,
+				(float)falloff,
+				(float)rim,
+				phase < 0.0 ? (float?)null : (float)phase);
+		}
+
+		// Fire a ripple ring on demand at a design-space point (eaRipple.fire(x, y, power) /
+		// `eval RippleFire 400 300 2`). A real bomb needs a bomb pickup and a live ship, so
+		// this is how a rig -- browser or eahl -- reaches the effect without playing for one.
+		// Defaults to screen centre at full power.
+		[JSInvokable("debugRippleFire")]
+		public static void RippleFire(double x = 400.0, double y = 300.0, double power = 4.0)
+		{
+			BombRipple.Fire(new Microsoft.Xna.Framework.Vector2((float)x, (float)y),
+				(int)System.Math.Round(power));
+			Console.WriteLine("[ripple] fired at " + x + "," + y + " power=" + (int)System.Math.Round(power));
+		}
+
+		// Park ONE ripple ring at `phase` (0..1) of its life and hold it there for a still
+		// screenshot, or un-park with a NEGATIVE value (the JS side has no null to send) --
+		// the live equivalent of the ?ripplephase= boot flag. `eaRipple.park(0.35)` /
+		// `eval RipplePark 0.35`.
+		[JSInvokable("debugRipplePark")]
+		public static void RipplePark(double phase = -1.0)
+		{
+			DebugFlags.SetRipplePhaseOverride(phase < 0.0 ? (float?)null : (float)phase);
+			Console.WriteLine("[ripple] park=" + (phase < 0.0 ? "live" : phase.ToString()));
+		}
+
+		// Report the ripple state as data (`eaRipple.state()` / `eval RippleState`): whether a
+		// ring is live, the knobs in force and the parked phase if any. What the committed
+		// probe tools/headless/probes/bomb_ripple.txt asserts against.
+		//
+		// Every value is read back off BombRipple's OWN resolved accessors, never re-derived
+		// here as `DebugFlags.X ?? BombRipple.DefaultX`: a second copy of the fallback chain
+		// drifts, and it would have printed a Duration below the 0.01 s floor the renderer
+		// actually applies -- a readout that lies is worse than no readout.
+		[JSInvokable("debugRippleState")]
+		public static void RippleState()
+		{
+			Console.WriteLine("[ripple] visible=" + BombRipple.Visible
+				+ " master=" + BombRipple.Master
+				+ " amp=" + BombRipple.Amplitude
+				+ " radius=" + BombRipple.Radius
+				+ " duration=" + BombRipple.Duration
+				+ " width=" + BombRipple.Width
+				+ " falloff=" + BombRipple.Falloff
+				+ " rim=" + BombRipple.Rim
+				+ " mini=" + DebugFlags.RippleMini
+				+ " phase=" + (DebugFlags.RipplePhase.HasValue
+					? DebugFlags.RipplePhase.Value.ToString()
+					: "live"));
 		}
 
 		// JS bridge for the live connector-tuner slider panel (eaConnector in wwwroot/index.html, shown

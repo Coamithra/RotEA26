@@ -166,6 +166,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeListingLevels(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -745,6 +751,18 @@ internal static class Program
             new { Flag = "hologreen", Prop = "HoloGreen", Good = "0.375", RejectsNeg = false },
             new { Flag = "hologreenpulse", Prop = "HoloGreenPulse", Good = "0.375", RejectsNeg = false },
             new { Flag = "holostaticrate", Prop = "HoloStaticRate", Good = "0.375", RejectsNeg = false },
+            new { Flag = "ripple", Prop = "Ripple", Good = "0.375", RejectsNeg = false },
+            new { Flag = "rippleamp", Prop = "RippleAmp", Good = "0.375", RejectsNeg = false },
+            new { Flag = "rippleradius", Prop = "RippleRadius", Good = "0.375", RejectsNeg = true },
+            new { Flag = "rippleduration", Prop = "RippleDuration", Good = "0.375", RejectsNeg = true },
+            new { Flag = "ripplewidth", Prop = "RippleWidth", Good = "0.375", RejectsNeg = true },
+            new { Flag = "ripplefalloff", Prop = "RippleFalloff", Good = "0.375", RejectsNeg = true },
+            new { Flag = "ripplerim", Prop = "RippleRim", Good = "0.375", RejectsNeg = false },
+            // ?ripplephase= is deliberately absent from this table: a NEGATIVE value is a
+            // legal spelling there (it means "live, not parked" -- see the case's comment),
+            // so the sweep's shared "a negative is either clamped or refused" shape does not
+            // describe it. Its own leg is below, next to ?ripplecenter's.
+            new { Flag = "ripplepower", Prop = "RipplePower", Good = "0.375", RejectsNeg = true },
             new { Flag = "blastactive", Prop = "BlastActiveAlpha", Good = "0.375", RejectsNeg = false },
             new { Flag = "blasthit", Prop = "BlastHitFactor", Good = "0.375", RejectsNeg = true },
             new { Flag = "reticlesize", Prop = "ReticleSize", Good = "0.375", RejectsNeg = true },
@@ -992,6 +1010,42 @@ internal static class Program
             + " y=" + flags.GetProperty("HarnessY", anyStatic).GetValue(null) + " said: " + FirstLine(outPos));
         flags.GetProperty("HarnessX", anyStatic).SetValue(null, null);
         flags.GetProperty("HarnessY", anyStatic).SetValue(null, null);
+
+        // ?ripplecenter= is the OPPOSITE call on the same shape (card 5f38ed35): it is ONE
+        // Vector2, so half of a pair is not a usable setting -- taking the good axis would park
+        // the screenshot ring somewhere nobody asked for. Both axes or neither, and the earlier
+        // valid value must survive the refusal.
+        run("?ripplecenter=123,456");
+        string outRc = run("?ripplecenter=400,3O0");
+        object rcHeld = flags.GetProperty("RippleCenter", anyStatic).GetValue(null);
+        Check("?ripplecenter= refuses a HALF-valid pair and keeps the whole earlier value",
+            rcHeld != null && rcHeld.ToString().Contains("123") && rcHeld.ToString().Contains("456")
+            && outRc.Contains("unknown ?ripplecenter= value '400,3O0'")
+            && outRc.Contains("staying on 123,456"),
+            "center=" + rcHeld + " said: " + FirstLine(outRc));
+        flags.GetProperty("RippleCenter", anyStatic).SetValue(null, null);
+
+        // ?ripplephase= has a THIRD state the sweep table cannot express: negative means
+        // "live" (un-parked), the same spelling eaRipple.park(-1) and the panel's slider use.
+        // Clamping it to 0 instead would PARK on the exact value a user copies out of the
+        // panel to stop parking -- a silent wrong-way-round bug -- so pin all three states.
+        run("?ripplephase=0.4");
+        Check("?ripplephase= parks on a value in range",
+            Equals(flags.GetProperty("RipplePhase", anyStatic).GetValue(null), 0.4f),
+            "phase=" + flags.GetProperty("RipplePhase", anyStatic).GetValue(null));
+        run("?ripplephase=-1");
+        Check("?ripplephase= NEGATIVE un-parks rather than parking at 0",
+            flags.GetProperty("RipplePhase", anyStatic).GetValue(null) == null,
+            "phase=" + flags.GetProperty("RipplePhase", anyStatic).GetValue(null));
+        run("?ripplephase=0.4");
+        string outPhase = run("?ripplephase=hlf");
+        Check("?ripplephase= reports a bad value and keeps the parked one",
+            Equals(flags.GetProperty("RipplePhase", anyStatic).GetValue(null), 0.4f)
+            && outPhase.Contains("unknown ?ripplephase= value 'hlf'")
+            && outPhase.Contains("staying on 0.4"),
+            "phase=" + flags.GetProperty("RipplePhase", anyStatic).GetValue(null)
+            + " said: " + FirstLine(outPhase));
+        flags.GetProperty("RipplePhase", anyStatic).SetValue(null, null);
 
         // A bare ?level used to dereference a null `val`: the NRE took the headless host down and,
         // in the browser, was caught one level up as a single "flag read failed" line that
@@ -1787,6 +1841,128 @@ internal static class Program
         Check("negative control: without the fold-in the same click is LOST", !isPressed(mouse1),
             "a pass here means the latch is not what carried the press above");
 
+        // ---- 3. off-canvas clicks are not game input (card 0fe23476) --------------------------
+        // KNI's own mouse listeners are on the WINDOW, so a click on any outside-#app DOM overlay
+        // still reaches the game's button state at that cursor position -- which is how clicking
+        // the room-code prompt's JOIN button hit the CANCEL row of the NetStatusMenu behind it.
+        // JS flags the press as off-canvas; Filter is what the flag actually does.
+        //
+        // This leg CANNOT be checked in the browser by clicking, either: the failure it guards
+        // (the phantom press on release) needs the button held across the moment the flag lifts,
+        // which is a drag, and its evidence is the absence of an event. Here it is three calls.
+        MethodInfo suppress = latch.GetMethod("SetSuppressed", anyStatic);
+        MethodInfo filter = latch.GetMethod("FilterOffCanvas", anyStatic);
+        if (suppress == null || filter == null)
+        {
+            Console.WriteLine("  FAIL could not reflect the suppression targets (SetSuppressed="
+                + (suppress != null) + " FilterOffCanvas=" + (filter != null) + ") -- renamed or moved?");
+            failures++;
+            return 0;
+        }
+        Action<bool> setSuppressed = on => suppress.Invoke(null, new object[] { on });
+        Func<int, bool, bool> filterKey = (idx, raw) => (bool)filter.Invoke(null, new object[] { idx, raw });
+
+        // Positive control FIRST: with nothing suppressed the filter is a pass-through, so every
+        // assertion below is about the flag rather than about a filter that always says false.
+        Check("un-suppressed, a held button reads held", filterKey(mouse1, true), null);
+        Check("un-suppressed, a released button reads released", !filterKey(mouse1, false), null);
+
+        setSuppressed(true);
+        Check("a press that began off-canvas reads released", !filterKey(mouse1, true), null);
+        // THE PHANTOM-EDGE ASSERTION. The flag lifts on pointerup, but a drag can end over the
+        // canvas with the button still down for a tick or two; a plain flag would then hand
+        // InputHandler a rising edge and land the click it just refused.
+        setSuppressed(false);
+        Check("the tail of that same press is still swallowed", !filterKey(mouse1, true),
+            "a pass here means an overlay drag ending on the canvas fires a click");
+        Check("still swallowed on a later tick", !filterKey(mouse1, true), null);
+        Check("a physical release clears it", !filterKey(mouse1, false), null);
+        Check("and the NEXT press is honoured again", filterKey(mouse1, true),
+            "a fail here is a dead mouse, which is worse than the bug being fixed");
+        filterKey(mouse1, false);
+
+        // Per-button, because the two are filtered in the same tick with independent states: a
+        // shared flag would let whichever button was polled first clear the other one's swallow.
+        setSuppressed(true);
+        filterKey(mouse1, true);
+        filterKey(mouse2, true);
+        setSuppressed(false);
+        Check("releasing one button does not un-swallow the other",
+            !filterKey(mouse2, false) && !filterKey(mouse1, true), null);
+        filterKey(mouse1, false);
+
+        // An ALREADY-HELD button is not collateral. The flag is per-gesture in JS but applied
+        // per-button here, so without the carve-out, right-clicking the FPS HUD while holding
+        // fire on the canvas would stop the ship shooting mid-hold until you released and
+        // re-pressed -- a suppression fix that breaks the input it was protecting.
+        filterKey(mouse1, true);                       // a press established on the canvas
+        setSuppressed(true);                           // ... then something off-canvas is pressed
+        Check("an already-held button keeps reporting held", filterKey(mouse1, true),
+            "a fail here means an off-canvas click cancels an unrelated held button");
+        Check("but a button pressed DURING suppression is still swallowed",
+            !filterKey(mouse2, true), null);
+        setSuppressed(false);
+        filterKey(mouse1, false);
+        filterKey(mouse2, false);
+        Check("both buttons settle back to released",
+            !filterKey(mouse1, false) && !filterKey(mouse2, false), null);
+
+        // Suppression must also drop anything the CANVAS latch had already banked this tick --
+        // otherwise the sub-tick rescue would smuggle through exactly the press being refused.
+        pressButton(LeftButton);
+        setSuppressed(true);
+        Check("suppression drops a banked sub-tick latch", !consumeKey(mouse1), null);
+        setSuppressed(false);
+        filterKey(mouse1, false);
+        filterKey(mouse2, false);
+
+        // ---- 4. the clickable back tip is an EDGE, and lives one frame (card 2a4110d0) -------
+        // Compat/BackTipHit turns a click on the bottom-left "(B) back" label into a synthetic
+        // Esc. Two properties carry it, and BOTH are invisible in a screenshot:
+        //  - it must fire on the PRESS EDGE, not the button level. A level fires on a press that
+        //    began somewhere else: mouse-down on a menu row and drag to the corner backs out,
+        //    and in-game a held fire button un-pauses the frame the pause overlay draws the tip
+        //    under the resting cursor. A browser cannot settle this either -- an automated drag
+        //    is sub-tick, so it passes on the broken code by luck.
+        //  - the box must live exactly ONE frame, or a screen that stopped drawing the tip (i.e.
+        //    gameplay) still has a live back-target sitting in its bottom-left corner.
+        Type backTip = asm.GetType("EvilAliensWeb.Compat.BackTipHit", true);
+        MethodInfo record = backTip.GetMethod("Record", anyStatic);
+        MethodInfo consumeTip = backTip.GetMethod("ConsumeClick", anyStatic);
+        if (record == null || consumeTip == null)
+        {
+            Console.WriteLine("  FAIL could not reflect BackTipHit (Record=" + (record != null)
+                + " ConsumeClick=" + (consumeTip != null) + ") -- renamed or moved?");
+            failures++;
+            return 0;
+        }
+        // Vector2 comes off the loaded assembly's own reference -- logic_probe deliberately does
+        // not compile against XNA (see the header), so it is built by reflection like the
+        // CollisionBox set above.
+        Type tipVec2 = consumeTip.GetParameters()[0].ParameterType;
+        Func<float, float, object> tipVec = (x, y) => Activator.CreateInstance(tipVec2, new object[] { x, y });
+        // The real MenuScene geometry: icon at SafeZone.Left, label to its right, on the tips
+        // baseline, down to SafeZone.Bottom.
+        Action recordTip = () => record.Invoke(null, new object[] { 40f, 146f, 534f, 570f });
+        Func<float, float, bool, bool> clickTip = (x, y, pressed) =>
+            (bool)consumeTip.Invoke(null, new object[] { tipVec(x, y), pressed });
+
+        recordTip();
+        Check("a press INSIDE the tip is a back", clickTip(93f, 552f, true), null);
+        recordTip();
+        Check("a press OUTSIDE it is not", !clickTip(400f, 300f, true), null);
+
+        // THE EDGE ASSERTION. Same cursor, same box, button merely HELD -- the drag case.
+        recordTip();
+        Check("the button merely being HELD is not a back", !clickTip(93f, 552f, false),
+            "a pass on `true` here means dragging onto the tip backs out");
+
+        // One frame only: a screen that draws no tip must offer nothing to hit.
+        recordTip();
+        clickTip(0f, 0f, false);                       // the tick that spends the recording
+        Check("an unrecorded frame has no back target", !clickTip(93f, 552f, true),
+            "a pass here means the corner stays clickable during gameplay");
+
         // Leave nothing latched for a Probe* added after this one. The Check runs FIRST -- put
         // the drains before it and it can only re-test the clear, never report a leak.
         Check("case set leaves no press latched", !consumeKey(mouse1) && !consumeKey(mouse2), null);
@@ -1865,6 +2041,112 @@ internal static class Program
         }
         Check(shortName + " assertion count did not shrink", passes >= minAssertions,
             "passes=" + passes + " floor=" + minAssertions);
+        return 0;
+    }
+
+    // Card df8f1ef7 -- which LEVELS may be advertised in the public game browser. The decision
+    // this covers is NetListing.IsNetEligibleLevel, the pure half of ComputeEligible (the rest
+    // reaches ServiceHelper and a live GameScene, which this tool cannot construct).
+    //
+    // It is verified here rather than by eye because the failure is silent and remote: a level
+    // that should not be listable simply appears in a stranger's browser, on a screen nobody
+    // running the game is looking at. The sweep is EXHAUSTIVE over the Levels enum, so a level
+    // ADDED later is judged too -- it will show up as eligible, and whoever added it has to say
+    // whether that is right.
+    private static int ProbeListingLevels(Assembly asm)
+    {
+        Type listing = asm.GetType("EvilAliensWeb.Compat.Net.NetListing", true);
+        Type levels = asm.GetType("EvilAliens.Levels", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo eligible = listing.GetMethod("IsNetEligibleLevel", anyStatic);
+        if (eligible == null)
+        {
+            Console.WriteLine("FAIL: could not reflect NetListing.IsNetEligibleLevel -- renamed or moved?");
+            return 2;
+        }
+        Func<string, bool> listable = name =>
+            (bool)eligible.Invoke(null, new object[] { Enum.Parse(levels, name) });
+
+        Console.WriteLine("[logic_probe] NetListing.IsNetEligibleLevel (card df8f1ef7)");
+
+        // The refusal set, stated independently of the implementation's shape (it tests three
+        // separate conditions; this is one list).
+        string[] refused = { "Tutorial", "WebcamAliens", "TeamChallenge", "Demo1", "Demo2", "Demo3" };
+
+        // Every name below is fed to Enum.Parse, which THROWS on a miss -- and a stack trace
+        // instead of a FAIL line is the one way this set could report nothing useful. A renamed
+        // or deleted level is exactly the change that should land here loudly.
+        foreach (string name in refused)
+        {
+            if (Array.IndexOf(Enum.GetNames(levels), name) < 0)
+            {
+                Check("refusal-set level '" + name + "' still exists", false,
+                    "renamed or removed from Levels -- update the set");
+                return 0;
+            }
+        }
+
+        // The card itself.
+        Check("Tutorial is NOT listable", !listable("Tutorial"),
+            "a solo scripted walkthrough advertised to strangers");
+
+        // The pre-existing refusals must survive the refactor -- IsNetEligibleLevel was extracted
+        // out of ComputeEligible, so the whole set is under test, not just the new member.
+        foreach (string name in refused)
+        {
+            if (name == "Tutorial")
+            {
+                continue;
+            }
+            Check(name + " is still NOT listable", !listable(name), null);
+        }
+
+        // POSITIVE CONTROL, and the point of sweeping the ENUM rather than a hand-written list:
+        // a predicate stuck at false would satisfy every assertion above. Every level not in the
+        // refusal set must still be listable, and a level appended to the enum lands here.
+        int eligibleCount = 0;
+        foreach (string name in Enum.GetNames(levels))
+        {
+            if (Array.IndexOf(refused, name) >= 0)
+            {
+                continue;
+            }
+            bool ok = listable(name);
+            if (ok)
+            {
+                eligibleCount++;
+            }
+            else
+            {
+                Check(name + " should be listable", false, "not in the refusal set");
+            }
+        }
+        // The sweep above already FAILS per level, so this only has to catch the degenerate
+        // shape it cannot: a predicate stuck at false, which produces no per-level failure the
+        // reader can distinguish from "the refusal set grew".
+        Check("the refusal set is not everything", eligibleCount > 0,
+            "eligible=" + eligibleCount + " of " + Enum.GetNames(levels).Length);
+
+        // NEGATIVE CONTROL -- the pre-card predicate over the same inputs. The assertions above
+        // are close to a restatement of three `if`s, so they would pass on a build with the
+        // Tutorial arm deleted unless something shows the OLD behaviour differing. This runs it:
+        // it must accept Tutorial (i.e. the bug is reproduced) and must agree everywhere else,
+        // which also pins that the extraction changed nothing but the one level.
+        Func<string, bool> preCard = name =>
+            name != "WebcamAliens" && name != "TeamChallenge"
+            && name != "Demo1" && name != "Demo2" && name != "Demo3";
+        Check("pre-card predicate DID list the Tutorial", preCard("Tutorial"),
+            "the control must reproduce the bug or the check above proves nothing");
+        int diffs = 0;
+        foreach (string name in Enum.GetNames(levels))
+        {
+            if (listable(name) != preCard(name))
+            {
+                diffs++;
+            }
+        }
+        Check("exactly ONE level changed verdict", diffs == 1, "changed=" + diffs);
+
         return 0;
     }
 }

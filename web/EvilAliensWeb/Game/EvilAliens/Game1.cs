@@ -136,12 +136,10 @@ public class Game1 : Game
 
 	private AwardmentBlade awardmentBlade;
 
-	private Effect gamma;
-
 	// Stage 10 unified presenter: the WHOLE frame — legacy 800x600 art (upscaled via
 	// RenderScale.Matrix) AND the hi-res art (menu title, channel-flip splash reveal,
 	// drawn at native density) — is rendered into this one offscreen target, sized to
-	// the window's 4:3 letterbox (RenderScale.Width x Height). Bloom + gamma operate on
+	// the window's 4:3 letterbox (RenderScale.Width x Height). Bloom operates on
 	// it, then Draw blits it letterboxed to KNI's window-sized back buffer. (Replaces
 	// the Stage-9 split where hi-res art rode a separate native-res overlay pass.)
 	// Recreated when the render size changes (Draw).
@@ -175,6 +173,31 @@ public class Game1 : Game
 	private EffectParameter hsBurst;
 
 	private EffectParameter hsTime;
+
+	// Bomb-detonation ripple (Compat/BombRipple + bombripple.fx, card 5f38ed35): a
+	// screen-space refraction ring radiating from where a bomb went off. Applied in
+	// ApplyBombRipple right after ApplyHoloSim, ping-ponging through this RT for the same
+	// reason (a SpriteBatch effect pass can't read and write sceneTarget at once). Lazily
+	// created on first use; recreated on resize (same lifecycle as holoRT).
+	private RenderTarget2D rippleRT;
+
+	private Effect bombRipple;
+
+	// Cached bombripple.fx params. The four rings are separate uniforms rather than an
+	// array -- see the shader's header for why.
+	private EffectParameter brRing0;
+
+	private EffectParameter brRing1;
+
+	private EffectParameter brRing2;
+
+	private EffectParameter brRing3;
+
+	private EffectParameter brWidth;
+
+	private EffectParameter brRim;
+
+	private EffectParameter brAspect;
 
 	// Incremental menu warm: the heavy menu PNG decodes that used to block LoadContent
 	// are queued (QueueMenuWarm) and drained one-per-Update-tick during the splash /
@@ -535,17 +558,6 @@ public class Game1 : Game
 		{
 			Settings.GetInstance().Scale = 0.9f;
 		}
-		// Gamma (Stage 5) is loaded here and applied on the present blit in Draw(). If the
-		// load fails it stays null and the present blit simply skips the gamma shader.
-		try
-		{
-			gamma = base.Content.Load<Effect>("Content/GFX/Effects/gamma");
-		}
-		catch (Exception ex)
-		{
-			System.Console.WriteLine("[Stage5] gamma effect load failed: " + ex);
-			gamma = null;
-		}
 		// Tutorial holo-sim filter; null on failure = filter silently off, game unaffected.
 		try
 		{
@@ -559,6 +571,26 @@ public class Game1 : Game
 		{
 			System.Console.WriteLine("[holosim] effect load failed: " + ex);
 			holoSim = null;
+		}
+		// Bomb ripple; null on failure = the ripple silently never draws, game unaffected.
+		// That silence is exactly why tools/headless/probes/bomb_ripple.txt asserts the
+		// [ripple] line below -- a missing .mgfxo would otherwise announce nothing.
+		try
+		{
+			bombRipple = base.Content.Load<Effect>("Content/GFX/Effects/bombripple");
+			brRing0 = bombRipple.Parameters["Ring0"];
+			brRing1 = bombRipple.Parameters["Ring1"];
+			brRing2 = bombRipple.Parameters["Ring2"];
+			brRing3 = bombRipple.Parameters["Ring3"];
+			brWidth = bombRipple.Parameters["RingWidth"];
+			brRim = bombRipple.Parameters["RimBoost"];
+			brAspect = bombRipple.Parameters["Aspect"];
+			System.Console.WriteLine("[ripple] effect loaded");
+		}
+		catch (Exception ex)
+		{
+			System.Console.WriteLine("[ripple] effect load failed: " + ex);
+			bombRipple = null;
 		}
 		QueueMenuWarm();
 		QueueIdleWarm();
@@ -1255,7 +1287,7 @@ public class Game1 : Game
 		// to back buffer" calls are redirected to this target via
 		// Xna3GraphicsDeviceCompat.BaseRenderTarget so the whole frame composites here;
 		// legacy 800x600 draws are scaled up by RenderScale.Matrix and hi-res art is
-		// drawn at native density, sharing one bloom + gamma + present blit.
+		// drawn at native density, sharing one bloom + present blit.
 		PresentationParameters pp = base.GraphicsDevice.PresentationParameters;
 		RenderScale.Update(pp.BackBufferWidth, pp.BackBufferHeight);
 		if (sceneTarget == null || ((GraphicsResource)sceneTarget).IsDisposed
@@ -1321,9 +1353,14 @@ public class Game1 : Game
 		// Tutorial holo-sim filter: same seam, runs after the trail so the ghosts get
 		// scanlined too. Leaves the render target on sceneTarget like the trail does.
 		ApplyHoloSim(gameTime);
+
+		// Bomb-detonation ripple: last of the three, so the wavefront refracts everything
+		// the frame ended up with (ghosts and scanlines included). Leaves the render target
+		// on sceneTarget like the other two.
+		ApplyBombRipple(gameTime);
 		FrameProfiler.End(FrameSection.DrawPost, profPost);
 
-		// FPS HUD "present" row: the letterboxed gamma blit. Scales with WINDOW size, not
+		// FPS HUD "present" row: the letterbox blit. Scales with WINDOW size, not
 		// scene complexity, so it's the row that moves when you resize rather than when you
 		// spawn enemies.
 		long profPresent = FrameProfiler.Begin();
@@ -1334,17 +1371,15 @@ public class Game1 : Game
 		// Letterbox geometry from the single source of truth (RenderScale), so the present
 		// blit and the inverse mouse mapping (WindowToDesign) round identically.
 		Rectangle dest = RenderScale.WindowDestRect(pp.BackBufferWidth, pp.BackBufferHeight);
-		// Gamma correction is applied here, on the final present blit. sceneTarget holds
-		// the fully composited frame (legacy + hi-res, bloomed). Blitting it through the
-		// gamma pixel shader as it's scaled+letterboxed to the window is equivalent to a
-		// full-screen gamma post-process. The blit is 1:1 when the render size equals the
-		// letterbox (uncapped); a bilinear upscale when RenderScale's height cap kicks in.
-		Effect gx = (DebugToggles.Active && !DebugToggles.Gamma) ? null : gamma;
-		if (gx != null)
-		{
-			gx.Parameters["Gamma"].SetValue(Settings.GetInstance().Gamma);
-		}
-		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, gx);
+		// sceneTarget holds the fully composited frame (legacy + hi-res, bloomed); it is
+		// blitted straight to the window here. The blit is 1:1 when the render size equals
+		// the letterbox (uncapped); a bilinear upscale when RenderScale's height cap kicks in.
+		// Card a35c5f31 removed the gamma pixel shader that used to run on this blit -- it was
+		// the 2008 Xbox TV-calibration control -- pow(abs(c.rgb), 1.0 / Settings.Gamma), whose
+		// default Gamma of 1.0 made it a measured byte-exact no-op -- obsolete on a
+		// colour-managed browser. The port renders
+		// entirely in sRGB space, as the original did; that is deliberate, not a defect.
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, null);
 		if (Juice.ShakeActive)
 		{
 			// Screen shake (Compat/Juice.cs): jolt the present blit itself — offset + a small
@@ -1538,6 +1573,61 @@ public class Game1 : Game
 		spriteBatch.End();
 	}
 
+	// Bomb-detonation ripple (Compat/BombRipple + bombripple.fx, card 5f38ed35): run
+	// sceneTarget through the refraction shader into rippleRT and copy it back -- the same
+	// ping-pong ApplyHoloSim needs, for the same reason. Two opaque full-frame blits, and
+	// only while a ring is actually live: every other frame (i.e. nearly all of them) skips
+	// at the first branch. Rings advance on RAW Draw time, so the wavefront keeps travelling
+	// through hit-stop like the other Draw-time cosmetics.
+	private void ApplyBombRipple(GameTime gameTime)
+	{
+		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+		if (dt <= 0f)
+		{
+			dt = 1f / 60f;
+		}
+		BombRipple.Update(dt);
+		if (!BombRipple.Visible || bombRipple == null)
+		{
+			return;
+		}
+		if (rippleRT == null || ((GraphicsResource)rippleRT).IsDisposed
+			|| ((Texture2D)rippleRT).Width != RenderScale.Width
+			|| ((Texture2D)rippleRT).Height != RenderScale.Height)
+		{
+			if (rippleRT != null && !((GraphicsResource)rippleRT).IsDisposed)
+			{
+				((GraphicsResource)rippleRT).Dispose();
+			}
+			PresentationParameters rpp = base.GraphicsDevice.PresentationParameters;
+			// DiscardContents like holoRT: fully overwritten by an opaque full-rect draw
+			// every time it's bound.
+			rippleRT = new RenderTarget2D(base.GraphicsDevice, RenderScale.Width, RenderScale.Height, false,
+				rpp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.DiscardContents);
+		}
+		Rectangle full = new Rectangle(0, 0, RenderScale.Width, RenderScale.Height);
+		Vector4[] packed = BombRipple.PackedRings();
+		brRing0?.SetValue(packed[0]);
+		brRing1?.SetValue(packed[1]);
+		brRing2?.SetValue(packed[2]);
+		brRing3?.SetValue(packed[3]);
+		brWidth?.SetValue(BombRipple.Width);
+		brRim?.SetValue(BombRipple.Rim);
+		// The shader measures aspect-corrected distance so the wavefront is a circle rather
+		// than an ellipse; the target is the 4:3 letterbox, so this is ~1.333.
+		brAspect?.SetValue(RenderScale.Height > 0
+			? (float)RenderScale.Width / RenderScale.Height
+			: 1f);
+		base.GraphicsDevice.SetRenderTarget(rippleRT);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp, null, null, bombRipple);
+		spriteBatch.Draw((Texture2D)(object)sceneTarget, full, Color.White);
+		spriteBatch.End();
+		base.GraphicsDevice.SetRenderTarget(sceneTarget);
+		spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque);
+		spriteBatch.Draw((Texture2D)(object)rippleRT, full, Color.White);
+		spriteBatch.End();
+	}
+
 	private static void Output(string fileName, string data)
 	{
 		using StreamWriter streamWriter = new StreamWriter(fileName);
@@ -1565,11 +1655,6 @@ public class Game1 : Game
 			HitboxOverlay.Draw(base.GraphicsDevice, spriteBatchWrapper, collisionHandler.Collidables);
 			spriteBatchWrapper.Flush();
 		}
-		// Stage 5 (shaders): the gamma post-process used to composite the resolved
-		// back buffer here via ResolveBackBuffer + a full-screen gamma draw. The
-		// Stage-4 presenter already renders the whole frame into sceneTarget, so
-		// gamma is now applied on the final present blit in Draw() instead (no
-		// ResolveBackBuffer round-trip needed). See Draw().
 		if (Settings.GetInstance().HideSafeArea)
 		{
 			Rectangle safeZone = General.SafeZone;

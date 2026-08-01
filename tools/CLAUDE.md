@@ -245,7 +245,7 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
   near-white frame inside that window; don't lean on it. This cost a full investigation once.
 - Presenting the hidden window costs ~32 ms/frame for nothing, so `EndDraw` is skipped by default
   (`--present` restores it); the capture reads the back buffer BEFORE the swap either way, after
-  bloom/post/gamma, so it is the finished frame.
+  bloom/post, so it is the finished frame.
 - **Audio is silent by default, and since card `1e476668` that is actually TRUE** (`--audio` opts
   in). It had been a no-op for the whole of eahl's first life while this file and the README both
   vouched for it, so every headless soak played the game's SFX at full volume -- which is how the

@@ -1,6 +1,6 @@
 """Rebuild the HUD powerbar sprites -> wwwroot/Content/gfx/hud/{barlit,barlitedge}.png.
 
-Why (the powerup/gamma bar's "ugly line"): PowerupData.drawPowerbar (and GammaMenu's
+Why (the powerup/gamma bar's "ugly line"): PowerupData.drawPowerbar (and the since-removed GammaMenu's
 copy) fill the bar by source-rect-clipping BarLit at the progress column and stamping
 the 20px BarLitEdge cap at the cut. BarLitEdge is literally BarLit's right 20 columns,
 BUT the pill's baked-in glow halo is NOT constant along the body - it starts fading
@@ -10,7 +10,7 @@ a ~19% instant drop in the glow above/below the pill = a hard vertical line that
 the fill point. The cap's darker inner shading (185 -> 168 on the body rows) adds a
 smaller dip on the pill itself.
 
-Fix, texture-space only (draw code untouched, covers PowerupData AND GammaMenu):
+Fix, texture-space only (draw code untouched, covers PowerupData; GammaMenu has since been removed):
 - barlit: columns from just after the left cap's rim to the end are replaced by the
   interior cross-section V(y) (mean of cols 40..70), with a short crossfade after the
   rim so the left cap art keeps its look. Any cut in the fill range (col 21..96) now

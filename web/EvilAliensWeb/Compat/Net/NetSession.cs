@@ -2718,38 +2718,39 @@ namespace EvilAliensWeb.Compat.Net
             }
             case NetProtocol.EvUnlock:
             {
-                if (isHost || !NetProtocol.TryDecodeUnlockEvent(data, out Unlockables.Items unlockItem, out AnimatedMessage.UnlockType ut, out SoundManager.Texts speech, out string text))
+                // THE JOIN PEER IS A GUEST -- no grant, no save, no banner (card 125490d9).
+                //
+                // This used to be "generous: the join peer played the level too", and it granted
+                // the item (plus the HarderDifficulties -> InsaneDifficulty, cheat -> Cheats and
+                // challenge -> Challenges pair-ups) and then called SaveThreaded(). That framing
+                // dated from card 11.3, when a session could only be two people who had
+                // deliberately swapped a room code. The public game browser changed the
+                // population: anyone can join a listed game and "Allow Online Joins" defaults ON,
+                // so the same path let a STRANGER write HarderDifficulties / Level2 / Level3 /
+                // the challenge levels / Cheats / Awardments into your Unlockables.xml. A joiner
+                // is on their own machine with their own save -- it is not a couch player sharing
+                // the host's.
+                //
+                // The USER'S RULING (2026-08-01), and it is a product decision, not a security
+                // one: joining a game online makes you a guest for that game, and your personal
+                // unlock state is wholly unaffected. The banner went with the grant -- announcing
+                // an unlock the joiner did not receive is worse than saying nothing.
+                //
+                // THE DECODE STAYS, and that is deliberate. It is the only live caller of
+                // TryDecodeUnlockEvent, so dropping it would leave the wire-enum validator (and
+                // ProbeWireEnums' row for it) asserting about a function nothing calls. Keeping
+                // it also means a malformed frame is still REFUSED rather than counted as a beat,
+                // and the protection is already in place if the grant is ever restored.
+                //
+                // NOT REMOVED FROM THE WIRE: the host still emits EvUnlock and an older peer
+                // still applies it, so there is no protocol change and no version bump.
+                if (isHost || !NetProtocol.TryDecodeUnlockEvent(data, out _, out _, out _, out _))
                 {
                     return;
                 }
-                // Generous: the join peer played the level too -- grant the same unlocks the
-                // host-side UnlockEvent granted (idempotent), then show the same banner.
-                Unlockables.GetInstance().Unlock(unlockItem);
-                if (unlockItem == Unlockables.Items.HarderDifficulties)
-                {
-                    Unlockables.GetInstance().Unlock(Unlockables.Items.InsaneDifficulty);
-                }
-                if (ut == AnimatedMessage.UnlockType.cheat)
-                {
-                    Unlockables.GetInstance().Unlock(Unlockables.Items.Cheats);
-                }
-                if (ut == AnimatedMessage.UnlockType.challenge)
-                {
-                    Unlockables.GetInstance().Unlock(Unlockables.Items.Challenges);
-                }
-                Unlockables.GetInstance().SaveThreaded();
-                // The GRANT above always applies; the banner is world dressing -- skip it
-                // if our scene isn't up (menu-lobby warm race).
-                if (NetScene.Current != null)
-                {
-                    AnimatedMessage banner = AnimatedMessage.NewAnimatedMessage(bin, game);
-                    banner.Setup(text, speech, AnimatedMessage.MessageType.unlocked);
-                    banner.SetUnlockType(ut);
-                    // Same standing-purge analysis as EvMessage above: eating this matches the
-                    // host, and the GRANT (which is what actually matters) already happened
-                    // unconditionally. Card 74403f83.
-                    bin.Add((GameComponent)(object)banner);
-                }
+                // Counted: BeatsRx is "script beats received off the wire", not "effects
+                // applied". Skipping it here would make a healthy session look like the host had
+                // stopped sending beats.
                 metrics.BeatsRx++;
                 break;
             }

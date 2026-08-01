@@ -80,6 +80,12 @@ namespace EvilAliensWeb.Compat.Net
         // rather than assuming it, so appending descriptors can never quietly make it valid.
         private const byte UnknownTypeIdx = 254;
 
+        // The guest-unlock leg's probe item and its out-of-range control. Level3 is a real
+        // progression gate (exactly the kind a stranger must not be able to hand you) and the
+        // leg forces it locked and restores it, so the choice does not depend on the save.
+        private const Unlockables.Items GuestProbeItem = Unlockables.Items.Level3;
+        private const byte GuestBadItem = 200;
+
         public static string Run()
         {
             StringBuilder sb = new StringBuilder();
@@ -737,6 +743,8 @@ namespace EvilAliensWeb.Compat.Net
                 + " above mean something (+" + (m.PuppetPops - popsBeforeJump) + ")",
                 m.PuppetPops == popsBeforeJump + 1);
 
+            RunGuestUnlockLeg(sb, Check, game, ref eventSeq, peer, wire, m);
+
             // Tear the generation-2 puppets back out. Disable() clears the id maps but leaves
             // live puppets to a scene's Terminate purge -- and this suite has no scene.
             TrackPuppets(game, planted);
@@ -751,6 +759,91 @@ namespace EvilAliensWeb.Compat.Net
             NetScene.Current = null;
             Check("the churn scenario left no puppets behind (live=" + NetPuppets.LiveCount + ")",
                 NetPuppets.LiveCount == 0);
+        }
+
+
+        // ---- the guest-unlock leg (card 125490d9) -------------------------------------------
+        // Rides scenario 5's LIVE CLIENT session because that is what it needs: EvUnlock is a
+        // client-only receive path (the host arm returns immediately), and the banner half is
+        // gated on a scene being up -- which scenario 5 has supplied. A stand-in would make
+        // every assertion here about the stand-in.
+        //
+        // The subject: a join peer is a GUEST. It must not grant, must not save, must not
+        // announce -- while still RECEIVING the beat. That last clause is the whole difficulty:
+        // "the unlock did not happen" is trivially true of a frame that never arrived, so the
+        // BeatsRx assertions below are what stop this going quietly vacuous.
+        private static void RunGuestUnlockLeg(StringBuilder sb, Action<string, bool> Check,
+            Game game, ref ushort eventSeq, InMemoryTransport peer, NetWire wire, NetMetrics m)
+        {
+            sb.Append(" 5b. the join peer is a GUEST -- EvUnlock grants nothing and says nothing\n");
+
+            Check("precondition: a scene is up, so the banner branch is REACHABLE",
+                NetScene.Current != null);
+
+            // Force the probe items LOCKED whatever this machine's save holds -- otherwise a
+            // fully-unlocked save (the common case on a dev box) would make "still locked"
+            // true before the frame was ever sent. Restored below.
+            Unlockables unlocks = Unlockables.GetInstance();
+            bool hadItem = unlocks.IsUnlocked(GuestProbeItem);
+            bool hadPairUp = unlocks.IsUnlocked(Unlockables.Items.Challenges);
+            unlocks.Collection[GuestProbeItem] = false;
+            unlocks.Collection[Unlockables.Items.Challenges] = false;
+            int bannersBefore = CountBanners(game);
+            long beatsBefore = m.BeatsRx;
+
+            try
+            {
+                peer.SendReliable(NetProtocol.EncodeUnlockEvent(eventSeq++, (byte)GuestProbeItem,
+                    (byte)AnimatedMessage.UnlockType.challenge, (byte)SoundManager.Texts.Nothing,
+                    "GUEST PROBE"));
+                wire.Pump();
+                NetSession.Update();
+
+                Check("the beat ARRIVED (BeatsRx +" + (m.BeatsRx - beatsBefore)
+                    + ") -- without this every assertion below is vacuous",
+                    m.BeatsRx == beatsBefore + 1);
+                Check("... and it granted NOTHING: " + GuestProbeItem + " is still locked",
+                    !unlocks.IsUnlocked(GuestProbeItem));
+                Check("... nor the UnlockType.challenge pair-up (Challenges still locked)",
+                    !unlocks.IsUnlocked(Unlockables.Items.Challenges));
+                Check("... and spawned NO banner (" + CountBanners(game) + " == " + bannersBefore
+                    + ")", CountBanners(game) == bannersBefore);
+
+                // The decode is kept alive deliberately (it is the only live caller of
+                // TryDecodeUnlockEvent, so the wire-enum bound would otherwise cover dead code).
+                // A malformed frame must therefore still be REFUSED -- and refusal is visible
+                // only as BeatsRx NOT moving, which is also the control proving the decode still
+                // runs at all rather than the handler having become an unconditional no-op.
+                long beatsBeforeBad = m.BeatsRx;
+                peer.SendReliable(NetProtocol.EncodeUnlockEvent(eventSeq++, GuestBadItem,
+                    (byte)AnimatedMessage.UnlockType.challenge, (byte)SoundManager.Texts.Nothing,
+                    "BAD ITEM"));
+                wire.Pump();
+                NetSession.Update();
+                Check("an out-of-range item is still REFUSED by the decode (BeatsRx unmoved at "
+                    + m.BeatsRx + ") -- the decode is alive, not bypassed",
+                    m.BeatsRx == beatsBeforeBad);
+            }
+            finally
+            {
+                unlocks.Collection[GuestProbeItem] = hadItem;
+                unlocks.Collection[Unlockables.Items.Challenges] = hadPairUp;
+            }
+            Check("the leg restored the real unlock state", unlocks.IsUnlocked(GuestProbeItem) == hadItem
+                && unlocks.IsUnlocked(Unlockables.Items.Challenges) == hadPairUp);
+        }
+
+        private static int CountBanners(Game game)
+        {
+            int n = 0;
+            foreach (GameComponent item in (System.Collections.ObjectModel.Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is AnimatedMessage)
+                {
+                    n++;
+                }
+            }
+            return n;
         }
 
         // ---- rig helpers -------------------------------------------------------------------

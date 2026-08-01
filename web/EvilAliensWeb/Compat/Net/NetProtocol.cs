@@ -96,14 +96,21 @@ namespace EvilAliensWeb.Compat.Net
         //               where an unknown value is a NORMAL production case that must still
         //               be displayed (the public game browser's listings).
         //
-        // TWO FIELDS CAN KILL A SAVE FILE, which is why they REJECT rather than clamp.
+        // A FIELD THAT CAN KILL A SAVE FILE REJECTS rather than clamps.
         // XmlSerializer refuses to serialize an enum value that is not a declared member,
         // and both Settings and Unlockables open their StreamWriter BEFORE serializing --
         // so the file is truncated and the write then throws. Savable.SaveInner swallows
         // that into Storage.ShowSaveError, so the player's settings or unlocks silently
         // stop persisting for the rest of the session and the file on disk is corrupt:
         //   - EvLaunch difficulty -> Settings.SetDifficultyTo -> Settings.xml
-        //   - EvUnlock item       -> Unlockables.Collection key -> Unlockables.xml
+        //
+        // EvUnlock's item WAS the second such path and is not any more (card 125490d9): the
+        // join peer is a guest now and never grants, so the decoded value reaches no
+        // Unlockables.Collection key and no save. ITS REJECT POLICY STAYS ANYWAY, for three
+        // reasons -- the decoder still casts a raw wire byte to an enum, which this region is
+        // the single place allowed to do; the protection must already be in place if the grant
+        // is ever restored; and ProbeWireEnums asserts the bound. Do not relax it to a clamp on
+        // the grounds that nothing consumes the value.
         //
         // VALIDATION IS CLIENT-SIDE BY DESIGN. The signaling server does not bound any of
         // these values and a server check would not be a security boundary -- gameplay is
@@ -799,11 +806,13 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        // `item` and `unlockType` REJECT the whole message: an unknown item would be added
-        // to Unlockables.Collection as a dictionary KEY and kill every later save (see the
-        // wire-enum contract above), and granting a DIFFERENT item instead of the one we do
-        // not recognise is worse than granting none. The banner is dropped with the grant
-        // deliberately -- announcing an unlock that did not happen would be a lie.
+        // `item` and `unlockType` REJECT the whole message. Since card 125490d9 the join peer
+        // neither grants nor announces an unlock -- it is a guest, and its own save is
+        // untouched -- so this decode has no consumer beyond validating the frame. That is
+        // exactly why it is still called: it is the only live caller, so removing it would
+        // leave the wire-enum bound above (and ProbeWireEnums' row for it) covering dead code,
+        // and a malformed frame would stop being refused. See the EvUnlock case in
+        // NetSession.HandleEvent.
         internal static bool TryDecodeUnlockEvent(byte[] b, out Unlockables.Items item, out AnimatedMessage.UnlockType unlockType, out SoundManager.Texts speech, out string text)
         {
             item = default;

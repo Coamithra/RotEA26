@@ -591,12 +591,15 @@ site now lives under:
   release is a safety net, not the intended path -- but do not re-inflate the severity, and do
   not write a test that expects the broken code to stay broken past one tick.
 - **Wire-driven banners are NOT exempt, deliberately** (card 74403f83). `NetSession`'s
-  `EvMessage`/`EvUnlock` adds can be eaten by a standing `Purge<AnimatedMessage>`, and that
+  `EvMessage` add can be eaten by a standing `Purge<AnimatedMessage>`, and that
   MATCHES the host: the level script is host-only and only runs in `GameState.Normal`, so the
   host cannot emit a beat while it is itself in Win or Resetting, and both peers enter those
   states from the host's own broadcast. Reaching it needs the two state machines to have already
   diverged -- a different bug, which letting the banner through would only mask. Nothing dangles
   either way (one-shot, no reference held past the `Add`). Don't "fix" it.
+  (**`EvUnlock` used to be the second banner here and no longer spawns one at all** -- card
+  125490d9 made the join peer a guest, so it neither grants nor announces. This bullet is about
+  `EvMessage` only now.)
 - **Adds while the world is `Push`ed (paused) join the freeze**: an `AlienDrawableGameComponent`
   added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
   `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE

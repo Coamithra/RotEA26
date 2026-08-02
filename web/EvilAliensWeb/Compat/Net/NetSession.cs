@@ -67,7 +67,13 @@ namespace EvilAliensWeb.Compat.Net
         // replicated individually. A v9 peer would ignore the beat (unknown event type) AND
         // still expect the per-entity spawns, so it would see empty scenery: a real
         // incompatibility, hence the version move even though no existing layout changed.
-        public const byte ProtocolVersion = 10;
+        // v11 (card f62116b5): EvDying -- the host announces that a deferred death has BEGUN, at
+        // the moment KilledBy returns without removing the component, instead of the joiner
+        // inferring it from hp==0 on that entity's next snapshot turn. A v10 peer would ignore
+        // the event and fall back to the hp==0 trigger, i.e. the pre-card latency rather than a
+        // desync -- so this bump is the cheap-protocol ruling's "put it on the wire and move the
+        // number" rather than a forced incompatibility.
+        public const byte ProtocolVersion = 11;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because FiringHoldMsFor's contract is expressed in whole
@@ -1119,6 +1125,60 @@ namespace EvilAliensWeb.Compat.Net
             transport.SendReliable(NetProtocol.EncodeFxEvent(txEventSeq++, (byte)kind, netId, param));
             metrics.EventsTx++;
             metrics.BeatsTx++;
+        }
+
+        // "This entity's death has BEGUN and is going to take a while" (card f62116b5). Called
+        // from KillableAlien the moment a KilledBy returns WITHOUT having removed the component
+        // -- the discriminant is `!IsDead`, which is exactly the test the client already makes
+        // to spot the same thing, so the two ends agree by construction. An ordinary type ends
+        // its KilledBy in Die(), so it is dead by then and no beat goes out at all.
+        //
+        // WHY IT IS NOT INFERRED FROM THE SNAPSHOT ANY MORE. hp==0 in a snapshot entry says the
+        // same thing, and it is still the fallback (NetPuppets.ApplyHostKilledFromSnapshot) --
+        // but it only says it on that entity's round-robin turn, which is 60 ms at best and
+        // ~1.2 s in a big world, against a 2.5-5 s animation. This is immediate at any world
+        // size, and it cannot fire a tick early on an ordinary kill the way a sampled hp can.
+        //
+        // An entity with no netId has no puppet on the other screen to release, so there is
+        // nothing to say. Traffic is one 6-byte reliable frame per DEFERRED death, which is a
+        // handful per level.
+        //
+        // NO `NetScene.Current` GATE, unlike OnGameFx and the script beats -- this is an ENTITY
+        // LIFECYCLE event off the NetIdRegistry, like OnHostSpawn/OnHostDeath (further down this
+        // file, in the registry-seam block), and the registry's own enablement is what decides
+        // whether a world exists. Adding one would also make the host leg of eaNetDeathFx
+        // unreachable, since that suite plants real entities from the MENU. The client's rx
+        // handler is scene-gated, exactly as EvDeath's is.
+        //
+        // Named for the HOST side, like OnHostSpawn/OnHostDeath: NetPuppets.OnDeathBegan is the
+        // rx half, and a bare OnDeathBegan in a stack trace would not say which end it is.
+        public static void OnHostDeathBegan(AlienDrawableGameComponent comp)
+        {
+            if (!IsHost || !PeerUp || comp == null)
+            {
+                return;
+            }
+            if (!NetIdRegistry.TryGetByComp((GameComponent)(object)comp, out NetIdRegistry.Entry entry))
+            {
+                return;
+            }
+            OnHostDeathBegan(entry.Id);
+        }
+
+        // The by-id half, for NetIdRegistry.ReplayLive's catch-up: a peer joining mid-animation
+        // needs the beat for a death that began before it arrived.
+        internal static void OnHostDeathBegan(ushort netId)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeDyingEvent(txEventSeq++, netId));
+            metrics.EventsTx++;
+            if (NetHost.Current.NetLog)
+            {
+                Console.WriteLine("[net] tx dying id=" + netId);
+            }
         }
 
         public static void OnScriptUnlock(int item, int unlockType, int speech, string text)
@@ -2915,6 +2975,22 @@ namespace EvilAliensWeb.Compat.Net
                 if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx death id=" + id + " killer=" + killer);
+                }
+                break;
+            }
+            case NetProtocol.EvDying:
+            {
+                // A deferred death has begun on the host (card f62116b5). Scene-gated like every
+                // world message; the settlement still arrives as the EvDeath that follows.
+                if (isHost || NetScene.Current == null
+                    || !NetProtocol.TryDecodeDyingEvent(data, out ushort dyingId))
+                {
+                    return;
+                }
+                NetPuppets.OnDeathBegan(dyingId);
+                if (NetHost.Current.NetLog)
+                {
+                    Console.WriteLine("[net] rx dying id=" + dyingId);
                 }
                 break;
             }

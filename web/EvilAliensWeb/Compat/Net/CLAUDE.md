@@ -519,15 +519,15 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   compatibility. Four shipped designs were bent around avoiding the wire by a one-batch
   coordination rule; their straighter wire-first replacements are CHARTERED at the top of the
   Backlog (analysis on the original cards' comments): `a45b78f6` a cumulative shot counter in
-  `MsgShipState` (replaces `FiringHoldMsFor` + both its residuals, card a5c2a39b), `f62116b5` an
-  explicit death-began event (replaces the hp==0 snapshot trigger's latency + one-tick residual,
-  card 303bfb5b), `e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
+  `MsgShipState` (replaces `FiringHoldMsFor` + both its residuals, card a5c2a39b), **`f62116b5`
+  an explicit death-began event -- SHIPPED, `EvDying` + protocol v11, see the deferred-death
+  bullet under "Claims"**, `e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
   card 8dabe812), `c1a38ef9` motion parameters on the wire (sent Lazer rates, card 0108d1fc +
   deterministic-path spawn anchors, card 0dfc4495 -- the second half gated on the playtest).
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v11):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -547,7 +547,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   No existing layout changed, but a v9 peer would ignore the beat AND still expect the
   per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move.
   The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
-  says why that is a decision and not an oversight).
+  says why that is a decision and not an oversight.
+  **v11** adds `EvDying` (event 23) -- the host announces that a DEFERRED death has begun, at
+  the moment `KilledBy` returns without removing the component, card f62116b5, see the
+  deferred-death bullet under "Claims". A v10 peer would ignore it and fall back to the hp==0
+  snapshot trigger, i.e. the pre-card latency rather than a desync -- so this bump is the
+  cheap-protocol ruling being taken at its word, not a forced incompatibility.)
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -948,17 +953,52 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       `KillableAlien.NetReplayUnattributedDeath` -- default `NetKill`, overridden by `StarMine`
       to run `Asplode()`, because being shot (one small white burst, `expl1`) looks nothing like
       detonating (two big blue bursts, `expl2`). Award-suppressed first, per the b0ab09ec rule.
-  - **A DEFERRED death RELEASES its puppet from the freeze, and the trigger is the hp already in
-    the snapshot (cards 303bfb5b / 13aa596c).** `BattleSkull` and the surviving `MarsBoss` put
-    their WHOLE death in an Update-driven state machine (2.5 s of shrink-and-flicker; a 5 s crash
-    to the ground) -- and a puppet is `Enabled=false` for life, so none of it ran. Worse, their
-    `EvDeath` does not arrive until that animation ENDS on the host, so the peer saw an intact
-    enemy and then, seconds later, one frame of removal.
-    - **`NetBaseState.Hp == 0` on a puppet we know is KILLABLE means the host has killed it** --
-      `Initialize` floors hit points at 1, `NetApplyHp` floors at 1, and `HitBy` reaches 0 only
-      on the killing blow. So no wire change was needed at all; the **discriminant is
-      `NetKillable`, not the value** (`Hp` is also 0 for every non-killable, which is what its
-      own "0 = not killable / unknown" comment means).
+  - **A DEFERRED death RELEASES its puppet from the freeze, and the host says so EXPLICITLY
+    (cards 303bfb5b / 13aa596c for the release, `f62116b5` for the trigger).** `BattleSkull` and
+    the surviving `MarsBoss` put their WHOLE death in an Update-driven state machine (2.5 s of
+    shrink-and-flicker; a 5 s crash to the ground) -- and a puppet is `Enabled=false` for life, so
+    none of it ran. Worse, their `EvDeath` does not arrive until that animation ENDS on the host,
+    so the peer saw an intact enemy and then, seconds later, one frame of removal.
+    - **`EvDying(netId)` (event 23, reliable, 6 B, protocol v11) is the trigger: the host emits it
+      the moment a `KilledBy` returns with the component STILL IN THE WORLD.** The discriminant is
+      `!IsDead` after `KilledBy`, which is exactly the test the client already made to spot the
+      same thing, so the two ends agree by construction and an ordinary type -- whose `KilledBy`
+      ends in `Die()` -- sends nothing. Two call sites, both in `KillableAlien`
+      (`HitBy` and `NetKill`, the latter because the host also kills through it when the CLIENT
+      landed the blow), so a new deferred-death type costs nothing. `NetSession.OnHostDeathBegan` ->
+      `NetPuppets.OnDeathBegan` -> the shared `BeginDeferredDeath`.
+      **It carries no killer and no award: this is the death BEGINNING**, and the `EvDeath` that
+      lands when the animation ends still settles who was paid, exactly as before.
+    - **`OnHostDeathBegan` has NO `NetScene.Current` gate, unlike `OnGameFx` and the script beats.**
+      It is an entity-lifecycle event off the `NetIdRegistry`, like `OnHostSpawn`/`OnHostDeath`,
+      and the registry's own enablement is what decides whether a world exists. Adding
+      one would also make `eaNetDeathFx`'s host section unreachable, since that suite plants real
+      entities from the MENU. The client's rx handler IS scene-gated, as `EvDeath`'s is.
+    - **`NetBaseState.Hp == 0` on a puppet we know is KILLABLE also means the host has killed it,
+      and that stays as the FALLBACK** -- `Initialize` floors hit points at 1, `NetApplyHp` floors
+      at 1, and `HitBy` reaches 0 only on the killing blow. The **discriminant is `NetKillable`,
+      not the value** (`Hp` is also 0 for every non-killable, which is what its own "0 = not
+      killable / unknown" comment means). It covers the two cases a live beat cannot: a peer that
+      JOINED IN PROGRESS after the death began, and any future deferred-death path that does not
+      go through `KillableAlien`.
+    - **The fallback now needs TWO CONSECUTIVE hp==0 turns, and that is what removed the
+      one-tick-early residual.** The host's `ComponentBin` defers removal, so an ORDINARY kill is
+      still in the registry for the one tick between the killing blow and the flush -- and a
+      snapshot turn landing in that tick used to run the death here, award-free and with the
+      `KillerNone` scratch agent, a tick before the attributed `EvDeath`. That was accepted while
+      this was the only fast trigger, because narrowing it cost the deferred case a whole
+      `snapTurn`; it does not any more, since `EvDying` owns the live case and the extra turn is
+      only ever paid on a path nothing reaches today. A `PuppetInfo.SawZeroHp` latch, cleared by
+      any hp>0 turn.
+    - **A peer JOINING IN PROGRESS mid-animation gets the beat with its catch-up spawn** --
+      `NetIdRegistry.ReplayLive` sends one for every live entry already at zero hit points and
+      not yet dead. Without it the joiner would be the one case paying the two-turn rule above,
+      and paying it twice over (up to ~2.4 s of a 2.5 s animation) -- i.e. the very symptom the
+      release exists to fix, on the very peer it exists for.
+    - **A deferred-death type the CLIENT killed itself is released too, and at RTT rather than at
+      the end of the animation.** Its own `KilledBy` ran locally, so its hp is already 0 and it
+      has been standing frozen mid-animation; `BeginDeferredDeath` skips the FX (a second
+      `NetKill` is a no-op anyway) and releases. Pre-card only the late `EvDeath` reached it.
     - `NetPuppets.ReleaseDyingPuppet` drops the entity from `byId`/`live`/`idByComp`, clears
       `Collides`, sets `Enabled = true`, and its own `Update` finishes dying locally -- which is
       what card 13aa596c's note asked for ("animation doesnt need to be syncd and can be done
@@ -969,21 +1009,24 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       the self-heal then rebuilds a fresh, intact, collidable enemy standing on top of the one
       that is visibly dying. Short window (the host stops streaming the id within a turn or two),
       so it would have been a rare unreproducible ghost.
-    - **`OnRemoteDeath` makes the same decision** when a puppet's round-robin turn never came
-      before the `EvDeath` landed (`snapTurn` runs to ~1.2 s in a big world; these deaths are
-      2.5-5 s). `DeferredDeathInFlight` is `NetHitPoints <= 0` -- which is also the state of a
-      puppet WE killed locally, and wants the same answer for the same reason.
-  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 49 assertions;
+    - **`OnRemoteDeath` makes the same decision** when neither the beat nor the snapshot got
+      there first -- the last-resort fallback, and the only one before card 303bfb5b.
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 73 assertions;
     `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
-    shape -- section 2 runs a real HOST session over a `NetWire` and reads the frame the peer
-    RECEIVED; sections 3-5 need no session, only `NetPuppets.Enable`. Everything it plants sits
+    shape -- section 2 runs a real HOST session over a `NetWire` and reads the frames the peer
+    RECEIVED (including the `EvDying` trigger-latency legs: the beat is on the wire while no
+    `EvDeath` is, because the host will not remove the entity for another 2.5 s); sections 3-6
+    need no session, only `NetPuppets.Enable`, and **section 6 delivers NO snapshot at all**,
+    which is what makes it a latency assertion rather than a duplicate of section 4. Everything it plants sits
     far off-screen, so nothing it does is drawn, its explosions included. **The observable is the
     WORLD** (live `Explosion` count, membership of `Game.Components`, `Enabled`, the score
     panels): the symptom is the ABSENCE of a one-to-five-second effect, so a timed screenshot
     proves nothing and a backgrounded joiner tab ticks at ~1 Hz. Every positive has its negative
     beside it -- **the `Enabled` assertions are the load-bearing ones**, since a puppet left
     frozen is still in the world and would satisfy a survival-only check, which IS the bug.
-    Mutation-tested six ways, failing DISJOINT legs across the two defects.
+    Mutation-tested nine ways, failing DISJOINT legs across the two defects and the trigger --
+    notably, making `NetPuppets.OnDeathBegan` a no-op fails section 6 and ONLY section 6, which
+    is what proves the two fallbacks are still real rather than dead code behind the fast path.
     **Deliberately absent from `net_selftests.txt` despite being menu-runnable** -- unlike the
     suites there it has its own probe, which carries this card's write-up and mutation matrix, so
     listing it in both would run it twice for nothing. (It is NOT absent for `eaNetBgTest`'s

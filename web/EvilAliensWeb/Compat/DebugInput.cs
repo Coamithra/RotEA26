@@ -583,6 +583,16 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetLocalFxTest.Run();
 		}
 
+		// JS bridge for the co-op respawn indicator (eaNetRespawn in wwwroot/index.html, card
+		// 37f3a663). The peer's respawn clock is drawn on BOTH screens now: tx through the real
+		// death path, rx as a COSMETIC summon that pops with the reward blast and spawns no ship.
+		// Menu-only and leave-no-trace.
+		[JSInvokable("debugNetRespawn")]
+		public static string NetRespawn()
+		{
+			return EvilAliensWeb.Compat.Net.NetRespawnTest.Run();
+		}
+
 		// JS bridge for the teleport marker (eaNetTeleport in wwwroot/index.html, card e79bb994).
 		// A real HOST session's snapshot frames read off the wire (flag set, declared velocity
 		// rather than the jump's finite difference) and a real CLIENT session's puppet snapping
@@ -969,6 +979,40 @@ namespace EvilAliensWeb.Compat
 			return "[debug] eaKillShips asploded " + targets.Count + " local ship(s)";
 		}
 
+		// The ONE-SLOT form (`eaKillShip(1)` / `eval KillShip 1`), card 37f3a663. KillShips above
+		// takes every locally-owned ship in the same tick, which is precisely the case where the
+		// respawn summon is correctly SUPPRESSED -- so it cannot reach the co-op case where one
+		// player dies while the other flies on, i.e. the only case the indicator exists for.
+		//
+		// A SEPARATE method rather than an optional parameter on KillShips: eahl's `eval` binds
+		// by exact parameter COUNT, so adding one would break every committed probe's bare
+		// `eval KillShips`.
+		[JSInvokable("debugKillShip")]
+		public static string KillShip(int slot)
+		{
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			EvilAliens.PlayerShip target = null;
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.PlayerShip ship
+					&& ship.Owner == slot
+					&& ship.Controller != EvilAliens.ControlDevice.Remote
+					&& ship.Controller != EvilAliens.ControlDevice.RemoteFriend)
+				{
+					target = ship;
+					break;
+				}
+			}
+			if (target == null)
+			{
+				return "[debug] eaKillShip slot=" + slot + " -- no locally-owned ship in that seat";
+			}
+			target.Asplode();
+			return "[debug] eaKillShip asploded slot=" + slot;
+		}
+
 		// JS bridge for the awardment banner (eaAward in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugAward', 'Pacifist'). Queues an awardment
 		// through the REAL AwardmentBlade.AwardAchievement path, so the banner enters, shows
@@ -1227,6 +1271,41 @@ namespace EvilAliensWeb.Compat
 				+ " mini=" + DebugFlags.RippleMini
 				+ " phase=" + (DebugFlags.RipplePhase.HasValue
 					? DebugFlags.RipplePhase.Value.ToString()
+					: "live"));
+		}
+
+		// Park/un-park the respawn clock ring (`eaRespawn.park(0.9)` / `eval RespawnPark 0.9`),
+		// card 37f3a663. Negative = live, the RipplePark convention above.
+		[JSInvokable("debugRespawnPark")]
+		public static void RespawnPark(double phase = -1.0)
+		{
+			DebugFlags.SetRespawnPhaseOverride(phase < 0.0 ? (float?)null : (float)phase);
+			Console.WriteLine("[respawn] park=" + (phase < 0.0 ? "live" : phase.ToString()));
+		}
+
+		// Report every live respawn ring as data (`eaRespawn.state()` / `eval RespawnState`).
+		// The fill, the pulse and the pop are all time-varying, and the pulse in particular
+		// cannot be verified from a screenshot pair -- an identical frame also passes on a build
+		// that stopped drawing the ring. The lines come off the summons themselves, so an empty
+		// report means "no respawn is running", which is a real answer rather than a failure.
+		[JSInvokable("debugRespawnState")]
+		public static void RespawnState()
+		{
+			int n = 0;
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.PlayerShipSummon summon)
+				{
+					Console.WriteLine(summon.DebugStateLine());
+					n++;
+				}
+			}
+			Console.WriteLine("[respawn] summons=" + n
+				+ " park=" + (DebugFlags.RespawnPhase.HasValue
+					? DebugFlags.RespawnPhase.Value.ToString()
 					: "live"));
 		}
 

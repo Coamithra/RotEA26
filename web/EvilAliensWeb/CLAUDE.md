@@ -554,6 +554,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   menu roster, `?netdropgrant`'s one-shot latch and couch-seat reuse -- leave-no-trace,
   so it is safe at any point in play),
   `eaKillShips()` (asplode the locally-owned ships to force a death/reset on demand),
+  `eaKillShip(slot)` (asplode ONE -- the co-op case the all-at-once form cannot reach, card
+  37f3a663),
+  `eaRespawn.park(phase)`/`.state()` (park the respawn clock ring for a screenshot; read its
+  fill/pulse/pop as data -- the pulse moves, so a frame pair cannot verify it),
+  `eaNetRespawn()` (the co-op respawn-indicator suite -- card 37f3a663: the real death path's
+  announcement, a puppet death announcing nothing, the peer's cosmetic copy, and that it pops
+  into a blast and NOT a second ship. Menu-only and leave-no-trace),
   `eaAward('Pacifist')` (pop an awardment banner now -- every real trigger is minutes deep
   behind a condition a rig cannot produce; see the awardment bullet under "Feature notes"),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
@@ -1342,7 +1349,8 @@ size mismatches (the supersample bug class: a rescaled sheet whose hand-rolled r
 Update-reached state show their spawned/idle pose — bosses are best-effort. Special modes:
 `?harness=eyeattract` forces the JunkBoss attract sheet (`HarnessForceAttract`; try `&play&fps=2` to
 prove the `interpolate.fx` frame-interpolation shader tweens); `?harness=blast` loops the blast
-lifecycle (`?blastloop=` sweep speed);
+lifecycle (`?blastloop=` sweep speed); `?harness=respawn` shows the respawn clock ring, scrubbed
+with `?respawnphase=<0..1>`;
 `?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
 ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
 plays the boss overlays (they advance on `WorldTime`, which the harness does not freeze -- it
@@ -1357,6 +1365,48 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
   ActiveAlpha` 0.5); hitbox radius uses `DrawScale` (supersample divided out) at
   `DefaultHitRadiusFactor` 0.8-of-visible. `?blastactive=`/`?blasthit=` override live;
   `?harness=blast` overlays the ring (green = damaging) + readout.
+- **Respawn clock ring (`PlayerShipSummon.cs`, card 37f3a663).** The 2008 respawn indicator was a
+  `LazerGenerator` charge orb plus a DarkGoldenrod integer countdown; it is now a clock ring that
+  fills clockwise from 12 o'clock, pulses as it nears full, and flares outward over its last 220 ms
+  as the ship arrives -- dropping a **free level-4 `Blast`** at the respawn point as the reward.
+  - **The ring is ~48 thin rotated quads of `GFX/Game/blank`** (a 10x10 OPAQUE WHITE texture the
+    class already loaded, and never drew, as its own animation) -- no new asset, no shader, no
+    pipeline change. The draws go through the `SpriteBatchWrapper` overloads, which clamp the
+    source to `LogicalBounds()`; a raw `SpriteBatch.Draw` would stretch the `--padtest` pad, the
+    `SealAlpha` trap (card b7e9b106). Unfilled arc at alpha-blend, filled arc ADDITIVE, straight
+    alpha throughout.
+  - **The COUNTDOWN itself is untouched.** The 1 Hz `countdowntimer`, the rumble ladder and the
+    tick the ship arrives on are unchanged; `RemainingMs` is derived from them, so only the
+    drawing moved. The pulse phase reads **`WorldTime.Seconds`**, so it freezes under a pause or a
+    hit-stop like every other Draw-time cosmetic.
+  - **The reward blast is NOT `doBlast()`**: no bomb is spent, the level is a fixed 4 rather than
+    the player's progression, and no `EvBlast` is sent -- in a session the far peer's own cosmetic
+    summon drops its copy off its own `EvRespawn`. Reusing `EvBlast` would have raced the puppet's
+    arrival (its rx handler needs a live ship in that slot, and at a respawn there may not be one).
+  - **SIDE-FIX: a death that WIPES the world raises no summon at all.** `PlayerShip_OnDeath` asks
+    `PlayerShipSummon.ShouldSummon(otherLiveShips)` first -- and counts ships that are not
+    `IsDead`, not list membership, because `Die()` only QUEUES the removal and a same-tick double
+    death leaves both in the oracle's list. Before this, single player raised a summon on every
+    death and `GameScene.LoseLife` purged it a tick later: one frame of countdown, which is the
+    card's "looks a bit broken". A puppet dying raises none either -- that respawn is the other
+    peer's.
+    **A SECOND wipe shape needs a DRAW-time guard, not a spawn-time one**: in co-op the first ship
+    can die while its partner is still flying (summon correctly raised) and the partner die
+    immediately after -- TeamChallenge's tether does this in the same tick -- so `Draw` returns
+    early while the world holds no live ship, reporting itself once. **That guard is unreachable
+    from eahl's `eval KillShip*` path**, which is a property of the rig: a scripted death lands
+    BETWEEN frames, so the death tick and the purge tick coalesce and the summon never reaches a
+    Draw. `DebugStateLine`'s `wiped=` is the observable either way.
+  - **Rigs:** `?harness=respawn` (frozen, real pipeline) + **`?respawnphase=<0..1>`** to scrub the
+    fill (negative = live, the `?ripplephase=` convention; it parks the pop too, since the pop is
+    derived from the fill). Console `eaRespawn.park(p)` / `.state()` (`eval RespawnPark` /
+    `RespawnState`). **Read the pulse as DATA, never from a screenshot pair** -- an identical frame
+    also passes on a build that stopped drawing the ring. `eaKillShip(<slot>)` reaches the co-op
+    case (`eaKillShips()` kills every locally-owned ship in one tick, which is the SUPPRESSED
+    case). Pinned by `tools/headless/probes/respawn_summon.txt` (co-op positive + the wipe),
+    `respawn_singleplayer.txt` and `logic_probe`'s `ProbeRespawnSummon`.
+  - The netplay half -- both peers draw it, `EvRespawn`, protocol v17 -- is in
+    [`Compat/Net/CLAUDE.md`](Compat/Net/CLAUDE.md).
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
   (baked `DefaultSizeFactor` 0.75) scales sprite AND box hitbox together; `?flyspiderscale=`.
   Fast-boot a dense endless swarm with **`?level=Level2&flyspiders`** (background variant, the only

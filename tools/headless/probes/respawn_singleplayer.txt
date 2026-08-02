@@ -1,0 +1,44 @@
+# PROBE: a single-player death raises no respawn summon at all (card 37f3a663)
+#
+# PINS:   the card's side-fix as it was actually REPORTED -- "in single-player games the animation
+#         appears for 1 frame when the player dies, which looks a bit broken". In single player
+#         every death is a wipe: GameScene.UpdateNormal sees oracle.AllShipsDead and LoseLife
+#         purges the summon a tick after PlayerShip_OnDeath raised it, because both the ship's
+#         removal and the purge are queued. The countdown therefore reached exactly one Draw.
+#
+#         Its co-op twin is respawn_summon.txt, which carries the POSITIVE. This file is the
+#         other branch, and it is worth its own boot because single player is the case the card
+#         is about and the only one where the FIRST death is already a wipe.
+#
+# FAILURE MEANS: a lone player's death is raising a respawn indicator again -- it will be purged
+#         a frame later and flash. Look at PlayerShip.PlayerShip_OnDeath's ShouldSummon gate.
+#
+# Mutation-tested: `PlayerShipSummon.ShouldSummon` -> `return true` makes this go red, printing
+# `[respawn] summon slot=0 ms=10000 others=0` where the suppression line should be. Run.
+#
+# eahl: --flags "?level=Level2&noattract&invuln&seed=1234"
+
+step 300
+
+# PRECONDITION (card af4c3694): exactly ONE ship, and it is flying. `?invuln` is what pins that
+# -- without it the level's own spawners can take the ship before the probe does, and the run
+# then fails downstream instead of here.
+mark
+eval OracleRoster
+expect eaOracleRoster: players=1 seated=0:Keyboard aliveSlots=\[0\]
+
+mark
+eval KillShips
+expect \[debug\] eaKillShips asploded 1 local ship\(s\)
+expect \[respawn\] summon suppressed slot=0 \(no other live ship\)
+
+# The world really did wipe, so the line above is about a wipe. Nothing here asserts the ABSENCE
+# of a summon -- eval RespawnState does that positively, by reporting the count.
+step 4
+mark
+eval OracleRoster
+expect eaOracleRoster: players=1 seated=0:Keyboard aliveSlots=\[\]
+eval RespawnState
+expect \[respawn\] summons=0 park=live
+
+quit

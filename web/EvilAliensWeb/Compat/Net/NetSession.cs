@@ -95,7 +95,13 @@ namespace EvilAliensWeb.Compat.Net
         // so both worlds scale together instead of one crawling while the other runs. A v14 peer
         // ignores the unknown event and falls back to the pre-card unilateral slowdown, so like
         // v14 this is the batch convention rather than a forced incompatibility.
-        public const byte ProtocolVersion = 15;
+        // v17 (card 37f3a663): EvRespawn (event 26) -- either peer announces that one of its ships
+        // has started its respawn clock, so the OTHER peer draws the indicator too and knows its
+        // buddy is coming back and where. A v16 peer ignores the unknown event and simply does not
+        // draw it, i.e. the pre-card behaviour, so like v14-v16 this bump is the parallel batch's
+        // convention rather than a forced incompatibility. (v16 is card c5228350's MsgHudState
+        // widening, which IS forced.)
+        public const byte ProtocolVersion = 17;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -1109,6 +1115,24 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             transport.SendReliable(NetProtocol.EncodeBlastEvent(txEventSeq++, (byte)ship.Owner, pos, level));
+            metrics.EventsTx++;
+        }
+
+        // Called from PlayerShip.PlayerShip_OnDeath, at the moment a respawn summon is spawned for
+        // a ship we own (card 37f3a663). Same shape and same reasoning as OnLocalBlast above: a
+        // respawn is discrete, so it rides the reliable lane, and it is slot-tagged so a couch
+        // player's respawn indicator does not appear over the peer's primary.
+        //
+        // Only the ANNOUNCEMENT crosses -- the far peer's copy is cosmetic and its ship still
+        // arrives through the ordinary remoteAlive edge. So a lost or ignored frame costs the
+        // indicator, never the ship.
+        public static void OnLocalRespawnSummon(PlayerShip ship, Vector2 pos, int durationMs)
+        {
+            if (!Active || !PeerUp || ship == null || !IsLocallyOwned(ship))
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeRespawnEvent(txEventSeq++, (byte)ship.Owner, pos, durationMs));
             metrics.EventsTx++;
         }
 
@@ -3272,6 +3296,42 @@ namespace EvilAliensWeb.Compat.Net
                 if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx blast slot=" + blastSlot + " level=" + level);
+                }
+                break;
+            }
+            case NetProtocol.EvRespawn:
+            {
+                // Card 37f3a663: the peer's ship died and its respawn clock is running -- draw the
+                // same indicator here so this player can see their buddy coming back, and where.
+                if (!NetProtocol.TryDecodeRespawnEvent(data, out byte respawnSlot, out Vector2 respawnPos, out int respawnMs))
+                {
+                    return;
+                }
+                if (NetScene.Current == null)
+                {
+                    return;
+                }
+                // Never over one of OUR seats. A slot disagreement (a reconnect race, a refused
+                // move) would otherwise park a phantom indicator on a player who is alive and
+                // flying -- and, when it popped, drop a free bomb into our world. The EvBlast
+                // case above refuses the same way and for the same reason.
+                if (respawnSlot >= Oracle.MaxPlayers || OwnsSlot(respawnSlot))
+                {
+                    return;
+                }
+                PlayerShipSummon summon = PlayerShipSummon.NewPlayerShipSummon(bin, game);
+                summon.SetupRemote(respawnSlot, respawnPos, respawnMs);
+                if (!bin.TryAdd((GameComponent)(object)summon))
+                {
+                    // A standing Purge<PlayerShipSummon> is live this tick (NetApplyReset purges
+                    // from inside this very rx drain -- see SpawnPuppet's guard for the full
+                    // reasoning). Dropping it is correct: a reset wipes the indicator anyway.
+                    return;
+                }
+                if (NetHost.Current.NetLog)
+                {
+                    Console.WriteLine("[net] rx respawn slot=" + respawnSlot + " ms=" + respawnMs
+                        + " at=" + (int)respawnPos.X + "," + (int)respawnPos.Y);
                 }
                 break;
             }

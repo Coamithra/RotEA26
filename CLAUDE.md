@@ -332,6 +332,17 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   (`eval RippleFire` / `RipplePark` / `RippleState` under `eahl`). `?ripplepower=<0..4>` gives
   the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). Details: web
   CLAUDE.md.
+- **Respawn clock ring** (card 37f3a663): the respawn countdown is a clock ring that fills, pulses
+  near full and POPS into a free level-4 bomb as the ship returns (`Game/EvilAliens/
+  PlayerShipSummon.cs`). **`?respawnphase=<0..1>` parks the fill at a chosen point** -- negative =
+  live, the `?ripplephase=` convention -- and **`?harness=respawn`** is the frozen rig for it; a
+  ~10 s fill with a 220 ms pop cannot be caught by a timed screenshot. Console `eaRespawn.park(p)`
+  / `.state()` (`eval RespawnPark` / `RespawnState`), the latter reporting fill/pulse/pop as DATA,
+  which is the only way to verify the pulse. **In netplay BOTH peers draw it** (`EvRespawn`,
+  protocol v17). Side-fix in the same card: a death that WIPES the world no longer raises a summon
+  at all -- it used to appear for one frame before `LoseLife` purged it. `eaKillShip(<slot>)` kills
+  ONE ship (`eaKillShips()` takes them all in a tick, which is the suppressed case). Details: web
+  CLAUDE.md; net half: net CLAUDE.md.
 - **BrainBoss overlay rigs** (cards 391e11d2 / 9f90978c): **`?brainoverlayphase=<0..1>`** parks
   every animated overlay patch (the shipped pair: the eye and the exhaust pods) at a chosen point in
   its cycle and holds it there -- the eye rests CLOSED on frame 0 and opens only on a ~15 s random

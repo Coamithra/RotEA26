@@ -69,6 +69,7 @@ eval TeamSeat
 eval NetSimTest 150 20 60 200
 eval NetScenarios
 eval NetFx
+eval NetRespawn
 eval NetTeleport
 eval HostMenuTest
 eval HostMenuLive
@@ -101,7 +102,7 @@ eval HostMenuLive
 # Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
 # game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
 # slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
-expect \[netwire\] 91 passed, 0 failed
+expect \[netwire\] 93 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -171,6 +172,16 @@ expect \[netscen\] 80 passed, 0 failed
 # the ordering that split depends on: ApplyStateExtra only RECORDS, and the puppet DRIVER is what
 # builds and frees the child.
 expect \[netfx\] 24 passed, 0 failed
+# The co-op respawn indicator (card 37f3a663). The peer used to see NOTHING for the ten seconds
+# its buddy was waiting to come back -- ExplodePuppet takes the puppet out WITHOUT Die(), so no
+# summon was ever raised for it. Three sections, and the third is the one that would be
+# catastrophic and silent: a COSMETIC summon that spawned a PlayerShip would give the peer's
+# player a second body on this screen for the rest of the match, and every other assertion here
+# would still be green. Section 1 drives the REAL death path (two planted ships, one Asplode'd)
+# rather than calling the sender, so the chain OnDeath -> ShouldSummon -> OnLocalRespawnSummon is
+# what is asserted; its negative is a PUPPET dying, which must raise nothing and announce nothing
+# back. Menu-runnable and leave-no-trace, the eaNetScenarios shape.
+expect \[netrespawn\] 23 passed, 0 failed
 # The teleport marker (card e79bb994), which REPLACED card 8dabe812's observed-velocity cap.
 # Two halves, each with the identical jump left UNMARKED beside it: section 1 runs a real HOST
 # session and reads the snapshot frames the peer RECEIVED (the wire is the only place the host's

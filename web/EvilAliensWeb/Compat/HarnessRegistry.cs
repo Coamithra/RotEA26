@@ -84,6 +84,10 @@ namespace EvilAliensWeb.Compat
                 // power 1 (a small-ish bomb) so the default viz fits on screen — the fade/active
                 // curve being tuned is power-independent. Use ?objscale to shrink a bigger one.
                 ["blast"] = (bin, g, p) => { var b = Blast.NewBlast(bin, g); b.Setup(p, 1, 0); return b; },
+                // The respawn clock ring (card 37f3a663). Frozen by the harness, so it draws at
+                // fill 0 by default -- scrub it with ?respawnphase=<0..1>, which is the only way
+                // to see a chosen point of a ~10 s fill (and the 220 ms pop) as a still.
+                ["respawn"] = (bin, g, p) => { var s = PlayerShipSummon.NewPlayerShipSummon(bin, g); s.Setup(0, 0f, p, 0); return s; },
 
                 // --- bosses (best-effort: shown in their spawned/idle pose, not mid-attack) ---
                 ["deathstar"] = (bin, g, p) => { var d = DeathStar.NewDeathStar(bin, g); d.Setup(p, EnemyBehaviour.normal); return d; },

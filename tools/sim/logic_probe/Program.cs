@@ -185,6 +185,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeRespawnSummon(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         // LAST ON PURPOSE -- it is the only set that seeds RandomHelper, and it cannot unseed
         // afterwards (there is no un-seed API and adding one for a probe would be a production
         // change made for a test). Nothing above draws from RandomHelper, so the order costs
@@ -2303,6 +2309,63 @@ internal static class Program
     //   * the rejection legs assert the message AND that the stream was untouched, because
     //     "reported" and "ignored" are separate promises and a run can keep one while breaking
     //     the other.
+    // Card 37f3a663 -- "should a dying ship raise a respawn summon at all?".
+    //
+    // The bug it defends against is invisible and one frame long: before this card every death
+    // raised one, and in single-player (or when the last two co-op ships die in the same tick)
+    // GameScene.LoseLife purged it again on the NEXT tick -- so the clock flashed for exactly one
+    // Draw. Nothing throws, no counter moves, and no screenshot can be timed to it; the only
+    // thing that can be asserted is the DECISION, which is why it lives here rather than in a
+    // frame rig.
+    //
+    // The pre-card rule ("always summon") is run beside it as the negative control -- without it
+    // a predicate hard-wired to true passes the positive leg perfectly.
+    private static int ProbeRespawnSummon(Assembly asm)
+    {
+        Type summon = asm.GetType("EvilAliens.PlayerShipSummon", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo should = summon.GetMethod("ShouldSummon", anyStatic);
+        if (should == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShipSummon.ShouldSummon -- renamed or moved?");
+            return 2;
+        }
+
+        Func<int, bool> rule = n => (bool)should.Invoke(null, new object[] { n });
+        // The pre-card behaviour, verbatim: PlayerShip_OnDeath spawned one unconditionally.
+        Func<int, bool> preCard = n => true;
+
+        Console.WriteLine("[logic_probe] respawn summon suppression (card 37f3a663)");
+
+        // 1. THE FIX. Single player is `others == 0` -- one ship in the world, and it just died.
+        Check("single player (others=0): NO summon -- the death is a wipe",
+            !rule(0), "the 1-frame flash the card reports");
+        // A same-tick double death in co-op reaches this with others=0 too: Die() only QUEUES the
+        // removal, so the second ship is still in the oracle's list, but IsDead is already true
+        // on it -- which is why PlayerShip.CountOtherLiveShips counts IsDead rather than
+        // membership, and why this case is not a separate arm here.
+        Check("co-op, both ships down in the same tick (others=0): NO summon", !rule(0), null);
+
+        // 2. THE CASE THE INDICATOR EXISTS FOR. One player dies, the other flies on.
+        Check("co-op, a partner still flying (others=1): summon", rule(1), null);
+        Check("four seats, three still flying (others=3): summon", rule(3), null);
+
+        // 3. THE NEGATIVE CONTROL. Every leg above passes on a predicate stuck at true, so the
+        // discriminating statement is that the two rules DISAGREE exactly where the card says.
+        bool disagreesAtWipe = preCard(0) != rule(0);
+        bool agreesWithPartner = preCard(1) == rule(1);
+        Check("the pre-card rule disagrees at others=0 (that IS the bug)", disagreesAtWipe, null);
+        Check("...and agrees everywhere else, so nothing else changed behaviour",
+            agreesWithPartner && preCard(2) == rule(2) && preCard(3) == rule(3), null);
+
+        // 4. A negative count cannot arise from CountOtherLiveShips, but a predicate that read
+        // `!= 0` rather than `> 0` would summon on one -- and that is the shape a later refactor
+        // would plausibly introduce.
+        Check("a negative count does not summon", !rule(-1), "'!= 0' rather than '> 0'");
+
+        return 0;
+    }
+
     private static int ProbeSeedFlag(Assembly asm)
     {
         Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);

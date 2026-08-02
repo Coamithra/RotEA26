@@ -163,6 +163,7 @@ eval NetResetSpawn
 # over it, so without this the lie can come back for free.
 expect \[net\] session start role=join .* transport=InMemory
 expect \[netreset\] EvReset -> SpawnPuppet/SpawnFriend TryAdd
+expect 0a\. hit-stop baseline
 expect 0b\. the session was built through the INetHost seam
 expect 0c\. handshake
 expect 1\. NEGATIVE
@@ -170,13 +171,12 @@ expect 2\. POSITIVE -- EvReset purges inside the drain
 expect 3\. POSITIVE -- next tick, filter expired
 expect 3b\. the session's cadence runs on the INJECTED clock
 expect 3c\. the world reaches the scene through the INetScene seam
-expect 4\. teardown
-expect 0a\. hit-stop baseline
 expect 5\. the peer's death FX fires ONCE
 expect 5b\. SpawnAllPlayers leaves the net-owned seat alone
 expect 5c\. a puppet adopted while the peer is DEAD
 expect 5d\. positive control
 expect 6\. a player death arms NO hit-stop inside a session
+expect 4\. teardown
 expect \[netreset\] 63 passed, 0 failed
 expect-not FAIL
 expect-not SKIP

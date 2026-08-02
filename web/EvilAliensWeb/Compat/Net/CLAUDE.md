@@ -1174,6 +1174,15 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       regardless), so this is the one flag whose entire purpose is reintroducing a net-desync bug
       and it must never reach a public lobby or a listed game. Every legitimate use is a dev
       `?net=` boot, which is anything-goes.
+      **It has its OWN probe, `tools/headless/probes/net_hitstop_flag.txt`, and the reason
+      generalises to any bug-reproduction seam**: `net_reset_spawn.txt` runs with the flag OFF, so
+      it only ever exercises the SUPPRESSING side -- `DebugFlags.NetHitstop` has exactly one
+      reader, and dropping it would leave the flag silently inert with every existing assertion
+      still green (mutation-tested: that revert fails the new probe and NOT the old one). The new
+      probe re-runs the SAME suite with the flag on and requires the two hit-stop assertions to
+      FLIP, bounded by the `61 passed, 2 failed` tally so a flag that broke something else is
+      caught too. A reproduction seam that has quietly stopped reproducing is worse than none --
+      the next person concludes the bug is gone.
   - **THE PEER'S DEATH FX FIRES ON THE ALIVE EDGE, NOT THE LEVEL (card b4d0ba1d).** Reported as:
     P1 and P2 both die, the level restarts, and on P1's screen both ships fly in -- then P2
     explodes instantly again and flies in again. `ManagePuppet` tested `!remoteAlive && puppet !=

@@ -44,7 +44,10 @@
 // Tuning/QA:
 //   * URL: ?shake=0 (off) / ?shake=1.5 (amplify, 0..3) · ?hitstop=1 (re-enable
 //     the per-kill/boss-kill micro-stop, off by default — see above).
-//     Both are pure feel/render toggles, deliberately OUT of DebugFlags.Active.
+//     Those two are pure feel/render toggles, deliberately OUT of
+//     DebugFlags.Active. ?nethitstop=1 is the third and is the opposite case:
+//     it lets a hit-stop freeze game time inside a co-op session again, i.e. it
+//     reintroduces the desync above, so it is IN DebugFlags.Active.
 //   * Console: eaShake() / eaShake(0.8) fires a shake burst on demand;
 //     eaHitstop() / eaHitstop(250) a freeze — see DebugInput + index.html.
 // Update cadence: Game1.Update calls Update(realDt) ONCE per tick with the

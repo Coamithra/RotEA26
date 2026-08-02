@@ -2170,10 +2170,12 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	}
 
 	// Scenario seam for NetResetSpawnTest leg 5 (card b4d0ba1d), the StartForTest/HasRemotePuppet
-	// idiom. The Remote-seat skip below is the fix, and the ONLY caller of SpawnAllPlayers is
-	// UpdateStartup/UpdateResetting behind ~1.3 s of game-time choreography the suite deliberately
-	// does not tick -- so without this there is no way to drive the real method and the skip could
-	// only be spot-read. Reaches nothing a reset does not already reach.
+	// idiom. The Remote-seat skip below is the fix, and every caller of SpawnAllPlayers --
+	// UpdateStartup, UpdateResetting's DirectRespawn branch, Level1's level-entry spawn and
+	// Demo1's -- sits behind seconds of game-time choreography the suite deliberately does not
+	// tick, so without this there is no way to drive the real method and the skip could only be
+	// spot-read. It passes UpdateStartup's `invulnerable: false` shape; the skip is
+	// argument-independent, so do not add a leg that turns on the difference.
 	internal void NetSpawnAllPlayersForTest()
 	{
 		SpawnAllPlayers(invulnerable: false);

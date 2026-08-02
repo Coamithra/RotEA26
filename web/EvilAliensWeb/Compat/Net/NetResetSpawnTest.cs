@@ -125,9 +125,10 @@ namespace EvilAliensWeb.Compat.Net
 
         private const float FacingUp = 4.712389f; // 3*pi/2, the spawn heading every ship uses
 
-        // What PlayerShip.Asplode/AsplodeWall request. Legs 0a and 6 both use it so the control
-        // and the assertion are about the same duration.
-        private const float PlayerDeathHitStopSeconds = 0.18f;
+        // Leg 0a's control freeze. THE SAME const PlayerShip.Asplode requests, not a copy of its
+        // value: leg 6 drives the real Asplode, so a control sized independently would stop
+        // being a control the moment that duration changed, silently.
+        private const float PlayerDeathHitStopSeconds = PlayerShip.DeathHitStopSeconds;
 
         // Run any standing hit-stop out. Juice.Update clamps its dt to 0.1 s per call (a stall
         // must not burn a whole freeze), so this is a loop rather than one big dt -- and it

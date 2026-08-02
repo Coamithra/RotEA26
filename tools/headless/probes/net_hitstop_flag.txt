@@ -1,0 +1,66 @@
+# PROBE: `?nethitstop=1` must really put the death hit-stop back inside a co-op session.
+#
+# PINS the ONE branch of card 68f62e92 that net_reset_spawn.txt cannot assert. That suite runs
+# with the flag OFF and its leg 6 requires `Juice.TimeScale == 1f` after a real
+# `PlayerShip.Asplode()` inside a live session -- i.e. it only ever exercises the SUPPRESSING
+# side. `DebugFlags.NetHitstop` has exactly one reader (`Juice.HitStopSuppressed`), so if that
+# read were dropped the flag would quietly stop doing anything and every existing assertion would
+# still pass. This probe is the other half: the SAME suite, the SAME legs, booted WITH the flag,
+# and the two hit-stop assertions must FLIP.
+#
+# WHY THAT MATTERS RATHER THAN BEING PEDANTRY: the flag is the deliberate bug reproduction -- the
+# only way anyone can put the desync back to look at it. A reproduction seam that has silently
+# stopped reproducing is worse than none, because the next person concludes the bug is gone.
+#
+# WHAT FLIPS, and why it is exactly two assertions:
+#   * "PRECONDITION the session is what suppresses it" -- reads `Juice.HitStopSuppressed`, which
+#     is `NetSession.Active && !DebugFlags.NetHitstop`. With the flag on, an ACTIVE session no
+#     longer suppresses. This one proves the FLAG reached the predicate.
+#   * "... and game time was NOT frozen (TimeScale=0)" -- the real `PlayerShip.Asplode()` now
+#     lands its 180ms freeze. This one proves the predicate reached `Juice.AddHitStop`, i.e. the
+#     whole path, not just the boolean.
+# Both are asserted BY TEXT below, not merely as a count, so a run that failed two OTHER
+# assertions for unrelated reasons cannot pass this probe.
+#
+# THE TALLY IS THE POSITIVE HALF. `61 passed, 2 failed` says the other 61 assertions -- the whole
+# reset/TryAdd suite, the INetHost and INetScene seams, leg 5's death-FX legs -- are UNAFFECTED by
+# the flag. A flag that broke something else would move that number, and a probe asserting only
+# the two failures would not notice.
+#
+# LEG 0a STILL PASSES HERE and that is the interesting part: it takes its control BEFORE the
+# session starts, where the flag is irrelevant either way, so it reads identically in both boots.
+# That is what makes it a control of `AddHitStop` itself rather than of the session gate.
+#
+# MUTATION-TESTED: dropping `&& !DebugFlags.NetHitstop` from `Juice.HitStopSuppressed` makes this
+# probe fail (the suite goes back to 63/0 and neither expected FAIL line appears) while
+# net_reset_spawn.txt stays green -- which is precisely the blind spot this file closes.
+#
+# DESTRUCTIVE for the same reason net_reset_spawn.txt is (it IS that suite): a real session is
+# paired onto the live level, the local seat is moved and a real EvReset applied. Own process.
+# Note it therefore ALSO leaves the game with a 180ms freeze standing at the end, which nothing
+# after it cares about because the run quits.
+#
+# NO `expect-not FAIL` HERE, deliberately -- two FAILs are the expected result. The tally is what
+# bounds them.
+#
+# eahl: --flags "?level=Level2&invuln&nethitstop"
+
+step 200 nodraw
+mark
+eval NetResetSpawn
+
+expect \[net\] session start role=join .* transport=InMemory
+expect \[netreset\] EvReset -> SpawnPuppet/SpawnFriend TryAdd
+
+# Unchanged by the flag: the offline control still sees a hit-stop land, because no session
+# exists yet at that point.
+expect PASS offline, AddHitStop freezes game time \(TimeScale=0\)
+
+# THE TWO THAT MUST FLIP.
+expect FAIL PRECONDITION the session is what suppresses it
+expect FAIL \.\.\. and game time was NOT frozen \(TimeScale=0\)
+
+# ... and nothing else did.
+expect \[netreset\] 61 passed, 2 failed
+expect-not SKIP
+quit

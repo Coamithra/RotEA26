@@ -3196,7 +3196,9 @@ namespace EvilAliensWeb.Compat.Net
             bin.Remove((GameComponent)(object)p);
             if (NetHost.Current.NetLog)
             {
-                Console.WriteLine("[net] remote ship released (peer not alive yet, no death FX)");
+                // "on this puppet", not "yet": a peer that was alive minutes ago on a PREVIOUS
+                // puppet, died, and had a fresh ship adopted into its seat lands here too.
+                Console.WriteLine("[net] remote ship released (never seen alive on this puppet, no death FX)");
             }
         }
 

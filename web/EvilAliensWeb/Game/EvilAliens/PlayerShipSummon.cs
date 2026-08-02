@@ -46,6 +46,11 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 	// The reward for sticking with it. A fixed level 4 -- it is a gift, not the player's own bomb
 	// progression, and no bomb is spent for it.
+	//
+	// IT ONLY EVER FIRES IN CO-OP, and that is deliberate rather than an oversight of the
+	// suppression above. Every single-player death is a WIPE, so no summon is built and the
+	// respawn goes through LoseLife -> the checkpoint reset instead -- where the world has just
+	// been purged and a bomb would hit nothing. Ruled that way when the card was planned.
 	private const int RewardBlastLevel = 4;
 
 	private int player;
@@ -80,6 +85,16 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 	// A cosmetic copy of the PEER's respawn: draws, pops and rewards, but spawns no ship.
 	internal bool IsCosmetic => cosmetic;
+
+	// The clock's remaining ms, for the monotonicity leg in NetRespawnTest. The value is otherwise
+	// only reachable through DebugStateLine's text, and the defect it pins (the ring un-filling
+	// once a second) is invisible to every screenshot rig -- ?respawnphase= parks the fill, and a
+	// live capture cannot be timed to the one frame per second that was wrong.
+	internal float DebugRemainingMs => RemainingMs;
+
+	// The roster slot this indicator belongs to -- the dying player's. Read by NetSession to
+	// re-point an announcement for a slot it is already showing rather than stacking a second one.
+	internal int Owner => player;
 
 	public PlayerShipSummon(Game game)
 		: base(game)
@@ -150,9 +165,25 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	// Milliseconds left on the clock. The real mode derives it from the existing 1 Hz countdown
 	// rather than running a second clock of its own, so the tick the ship actually arrives on is
 	// unchanged and only the DRAWING moved.
-	private float RemainingMs => cosmetic
-		? cosmetictimer.TimeLeft
-		: (float)(countdown - 1) * 1000f + countdowntimer.TimeLeft;
+	//
+	// THE PENDING SECOND IS NOT A ROUNDING FUDGE -- without it the ring visibly un-fills once per
+	// second. `base.Update` ticks the timers AFTER this class tests `Finished`, so between the
+	// tick that rings the repeating timer and the tick that acts on it, `TimeLeft` has already
+	// wrapped back to ~1000 while `countdown` is still the old value -- and Draw runs in that
+	// window, reading a full second too much. It also ate the climax: the last drawn frame before
+	// the ship arrived read fill 0.9 with no flare.
+	private float RemainingMs
+	{
+		get
+		{
+			if (cosmetic)
+			{
+				return cosmetictimer.TimeLeft;
+			}
+			float pending = countdowntimer.Finished ? 1000f : 0f;
+			return MathHelper.Max((float)(countdown - 1) * 1000f + countdowntimer.TimeLeft - pending, 0f);
+		}
+	}
 
 	// 0 = just died, 1 = about to pop. ?respawnphase=<0..1> parks it for a screenshot (the
 	// ?ripplephase= convention) -- a 10 s ring that has to be caught mid-fill is exactly what a
@@ -315,7 +346,8 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		{
 			DrawSegment(j, step, radius, segScale, lit);
 		}
-		// The leading edge, brighter and longer, so the clock has a visible hand.
+		// The leading edge, brighter and THICKER (the 1.9 scales segScale.Y, the thickness axis),
+		// so the clock has a visible hand.
 		if (litCount > 0 && litCount < RingSegments)
 		{
 			DrawSegment(litCount - 1, step, radius, segScale * new Vector2(1f, 1.9f),

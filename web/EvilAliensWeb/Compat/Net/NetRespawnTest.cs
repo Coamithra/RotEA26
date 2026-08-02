@@ -199,6 +199,34 @@ namespace EvilAliensWeb.Compat.Net
                 + Fmt(Nowhere) + ")",
                 txOk && txPos.X == Nowhere.X && txPos.Y == Nowhere.Y);
 
+            // 1a. THE CLOCK ONLY EVER RUNS DOWN. `base.Update` ticks the timers AFTER this class
+            // tests `Finished`, so between the tick that rings the 1 Hz timer and the tick that
+            // acts on it, TimeLeft has wrapped back to ~1000 while `countdown` is still the old
+            // value -- and Draw runs in that window. Unfixed, the ring un-filled by a tenth once
+            // a second and the last frame before the ship arrived showed no flare at all.
+            // NOTHING ELSE CAN SEE THIS: ?respawnphase= parks the fill, `eval RespawnState`
+            // samples between ticks, and a live capture cannot be timed to the one frame per
+            // second that was wrong. 200 ticks is ~3.3 s of a 10 s clock, so it never completes.
+            if (raised != null)
+            {
+                GameTime tick = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(16.67));
+                float prev = raised.DebugRemainingMs;
+                float worstRise = 0f;
+                float startedAt = prev;
+                for (int i = 0; i < 200; i++)
+                {
+                    ((GameComponent)(object)raised).Update(tick);
+                    float now = raised.DebugRemainingMs;
+                    worstRise = Math.Max(worstRise, now - prev);
+                    prev = now;
+                }
+                // The positive control: a clock that never moved would satisfy "never rises".
+                Check("PRECONDITION the clock actually ran (" + Fmt(startedAt) + " -> "
+                    + Fmt(prev) + "ms over 200 ticks)", startedAt - prev > 2000f);
+                Check("...and never ran BACKWARD (worst rise " + Fmt(worstRise) + "ms)",
+                    worstRise <= 0.01f);
+            }
+
             // Retire it before the negative leg, so "no new summon" cannot be confused with
             // "the first one is still there".
             RetireSummons(bin, game, planted);
@@ -409,6 +437,11 @@ namespace EvilAliensWeb.Compat.Net
             {
                 Check("teardown ran (" + Describe(ex) + ")", false);
             }
+        }
+
+        private static string Fmt(float f)
+        {
+            return f.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
         private static string Fmt(Vector2 v)

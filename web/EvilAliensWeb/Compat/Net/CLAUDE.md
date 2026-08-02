@@ -603,7 +603,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   **v17** adds `EvRespawn` (event 26) -- either peer announces that one of its ships has started
   its respawn clock, so the other peer draws the indicator too, card 37f3a663. A v16 peer ignores
   the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14-v16 the
-  bump is the batch convention. (v16 is card c5228350's `MsgHudState` widening, which is forced.)
+  bump is the batch convention. (v16 is RESERVED for card c5228350's `MsgHudState` widening, in
+  flight in the same batch; if that card lands differently, v16 is an unused number rather than a
+  gap in this history.)
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1432,15 +1434,20 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     precedent and for the same reason: a slot disagreement would otherwise park a phantom clock
     over a player who is alive and flying, and drop a free bomb into our world when it popped. Sent
     for any LOCALLY OWNED ship, so a couch player's or an AI friend's respawn replicates too.
-  - **Verify with `eaNetRespawn()`** (`Compat/Net/NetRespawnTest.cs`, 23 assertions; a leg of
+  - **Verify with `eaNetRespawn()`** (`Compat/Net/NetRespawnTest.cs`, 25 assertions; a leg of
     `net_selftests.txt`). Menu-runnable and leave-no-trace. Section 1 drives the REAL death path --
     two planted ships, one `Asplode()`d -- so what is asserted is the chain `OnDeath` ->
     `ShouldSummon` -> `OnLocalRespawnSummon` rather than a hand-called sender, with a PUPPET death
     beside it as the negative. **The load-bearing leg is section 3's "and spawning NO
     PlayerShip"**: a cosmetic summon that spawned one would give the peer's player a second body on
     this screen for the rest of the match, and every other assertion would still be green.
-    Mutation-tested two ways (dropping the `OwnsSlot` refusal, and not marking the cosmetic mode),
-    each failing disjoint legs. The wire layout is `eaNetWire.test` section 5's, round-tripped by
+    Mutation-tested three ways (dropping the `OwnsSlot` refusal, not marking the cosmetic mode,
+    and dropping the pending-second term from `RemainingMs`), each failing disjoint legs.
+    **Section 1a is the odd one out and is not about the wire at all**: it ticks the REAL summon
+    200 times and requires the clock to run only DOWN. `base.Update` ticks the timers after this
+    class tests `Finished`, so for one frame a second the ring un-filled by a tenth -- and no
+    screenshot rig can see it (`?respawnphase=` parks the fill, `eval RespawnState` samples between
+    ticks). It lives here because this is the only suite that already drives a real summon. The wire layout is `eaNetWire.test` section 5's, round-tripped by
     VALUE since it has a real `Try*` decoder.
   - The SINGLE-PLAYER half of the same card (a wipe raises no summon at all) is offline and lives
     in `web/EvilAliensWeb/CLAUDE.md`.

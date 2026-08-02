@@ -99,8 +99,9 @@ namespace EvilAliensWeb.Compat.Net
         // has started its respawn clock, so the OTHER peer draws the indicator too and knows its
         // buddy is coming back and where. A v16 peer ignores the unknown event and simply does not
         // draw it, i.e. the pre-card behaviour, so like v14-v16 this bump is the parallel batch's
-        // convention rather than a forced incompatibility. (v16 is card c5228350's MsgHudState
-        // widening, which IS forced.)
+        // convention rather than a forced incompatibility. (v16 is RESERVED for card c5228350's
+        // MsgHudState widening, in flight in the same batch -- if that card lands differently,
+        // v16 is simply an unused number rather than a gap in the history.)
         public const byte ProtocolVersion = 17;
         public const float InterpDelayMs = 100f;
 
@@ -3319,7 +3320,17 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                PlayerShipSummon summon = PlayerShipSummon.NewPlayerShipSummon(bin, game);
+                // Re-point an indicator we are already showing for that slot rather than stacking
+                // a second one. A duplicate is unlikely on the ordered reliable lane, but nothing
+                // stops one, and the cost is not cosmetic: two rings pop into TWO reward blasts
+                // in our world.
+                PlayerShipSummon summon = FindCosmeticSummon(respawnSlot);
+                if (summon != null)
+                {
+                    summon.SetupRemote(respawnSlot, respawnPos, respawnMs);
+                    break;
+                }
+                summon = PlayerShipSummon.NewPlayerShipSummon(bin, game);
                 summon.SetupRemote(respawnSlot, respawnPos, respawnMs);
                 if (!bin.TryAdd((GameComponent)(object)summon))
                 {
@@ -3787,6 +3798,23 @@ namespace EvilAliensWeb.Compat.Net
                 // whose settle path sets `taken` and never flips IsDead.
                 Console.WriteLine("[net] claim honored (already settled, paid) id=" + netId + " slot=" + killerSlot);
             }
+        }
+
+        // The cosmetic respawn indicator we are already drawing for that slot, if any (card
+        // 37f3a663). COSMETIC only: a summon of our own in that slot would be a real countdown
+        // with a ship at the end of it, and re-pointing one off the wire would move a respawn we
+        // own -- the rx path refuses those slots anyway, so this is belt and braces.
+        private static PlayerShipSummon FindCosmeticSummon(int slot)
+        {
+            foreach (IGameComponent item
+                in (System.Collections.ObjectModel.Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is PlayerShipSummon summon && summon.IsCosmetic && summon.Owner == slot)
+                {
+                    return summon;
+                }
+            }
+            return null;
         }
 
         // ---- remote-ship puppet lifecycle ---------------------------------------------------

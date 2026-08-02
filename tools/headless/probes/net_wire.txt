@@ -56,6 +56,6 @@ expect 4\. stream-lane reorder \+ dedup
 # THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
 # not-short -- which is the whole reason those cards needed no protocol version bump, so if
 # it ever goes red the bump is back on the table.
-expect \[netwire\] 77 passed, 0 failed
+expect \[netwire\] 80 passed, 0 failed
 expect-not FAIL
 quit

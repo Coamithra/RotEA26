@@ -41,6 +41,16 @@ namespace EvilAliensWeb.Compat.Net
         // answer, latched at the last CheckPlayerJoins.
         bool JoinWouldSpawnNow { get; }
 
+        // Card 8a7772d6: the level script is holding the local player spawn (Level 1's intro
+        // cinematic is the only shipped case). The HOST streams this in every MsgShipState so
+        // the joiner can watch the same cutscene instead of flying around during it.
+        //
+        // There is no matching APPLY member on this seam, deliberately: the client reads
+        // NetSession.PeerHoldsShipSpawn on its own tick rather than being pushed at. A push
+        // would have to land on a scene, and the packet that carries the bit routinely arrives
+        // while a join-in-progress peer is still warming its level and has none.
+        bool NetScriptHoldsShipSpawn { get; }
+
         // --- host-broadcast state transitions --------------------------------------------------
 
         // mode is the EvReset branch the HOST took (respawn / reset / game over). The client
@@ -57,6 +67,12 @@ namespace EvilAliensWeb.Compat.Net
         void NetApplyCosmeticSwarm(NetCosmeticKind kind, bool on, float rate);
 
         void NetApplyTetherBreak();
+
+        // Card 8a7772d6 (part B): run the Level 1 intro bullet volley locally, COSMETIC ONLY.
+        // `Bullet` is not in NetTypeRegistry (player bullets are never replicated -- a remote
+        // ship's are re-fired locally off the fire stream), so without this the joiner watches
+        // the intro UFOs die of nothing. `seed` makes both peers draw the same angles.
+        void NetApplyIntroVolley(int seed);
 
         // The single match-end path shared by EvLeave / drop timeout / pagehide bye / EvKick.
         void NetApplyPeerLeft();

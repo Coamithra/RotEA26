@@ -183,14 +183,24 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	{
 		get
 		{
-			// Online co-op (card 11.2): a scripted no-ship phase (Level1's intro sets this
-			// false and hands the ship spawn to demo_OnFinished) lives in the level script,
-			// which never runs on a join peer -- without this override a client would never
-			// spawn its local ship (or LoseLife on wipe). The client's ship always uses the
-			// generic startup/respawn path; the intro choreography stays host-only.
+			// Online co-op: a scripted no-ship phase (Level1's intro sets this false and
+			// hands the ship spawn to demo_OnFinished) lives in the level script, which never
+			// runs on a join peer -- so a client reading only `_spawnplayernormally` would
+			// never spawn its local ship (or LoseLife on wipe).
+			//
+			// Card 11.2 answered that with a bare `|| IsClient`, and the cost was the joiner
+			// spawning 1.3s into Level 1 and flying around for the whole ~10.5s intro
+			// cinematic the host was watching. Card 8a7772d6 narrows it: the client still
+			// ignores its OWN dead script flag, but honours the HOST's replicated one, so the
+			// hold is mirrored and the two ships fly in together.
+			// PeerHoldsShipSpawn is false offline, false on the host and false with no peer,
+			// so single-player is untouched and losing the peer OPENS the gate rather than
+			// stranding a shipless client.
 			// (WebcamLevel's permanent no-ship design is unaffected: its enemy types aren't
 			// replicable, so webcam co-op isn't a supported session in the first place.)
-			return _spawnplayernormally || EvilAliensWeb.Compat.Net.NetSession.IsClient;
+			return _spawnplayernormally
+				|| (EvilAliensWeb.Compat.Net.NetSession.IsClient
+					&& !EvilAliensWeb.Compat.Net.NetSession.PeerHoldsShipSpawn);
 		}
 		set
 		{
@@ -854,6 +864,86 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic(base.SoundManager.NetCurrentSong);
 	}
 
+	// ---- Level 1 intro cinematic (card 8a7772d6) ----------------------------------------
+
+	// Host read, streamed in every MsgShipState: our level script is holding the player spawn.
+	// Derived from spawnPlayerNormally rather than latched, so it can never drift from the
+	// flag that actually gates the spawn -- including through a checkpoint revert, which
+	// re-enters Startup without re-running Initialize.
+	public bool NetScriptHoldsShipSpawn => netTestSpawnGateOverride ?? !spawnPlayerNormally;
+
+	// Debug/test override for the read above (the Background.NetTestWipe idiom). It exists for
+	// ONE assertion NetIntroGateTest cannot otherwise make: that the SAME live host clears the
+	// bit when its script stops holding. The only other way to reach that state is to wait out
+	// Level 1's ten-second cutscene, which would make the negative control a function of how
+	// long the probe happened to take. Null hands the read back to the script.
+	private bool? netTestSpawnGateOverride;
+
+	internal void NetTestForceSpawnGate(bool? held)
+	{
+		netTestSpawnGateOverride = held;
+	}
+
+	// Was the host holding OUR spawn last tick? Drives the release below. Polled rather than
+	// pushed -- see the INetScene header for why the packet cannot land on a scene.
+	private bool netScriptGateHeld;
+
+	// The client's cosmetic copy of the intro bullet volley, or null. Ticked from UpdateNormal
+	// beside the decorative swarms, in the very branch that skips eventList.Update -- which is
+	// what gets pause, victory and resetting for free.
+	private Lvl1StartDemoEvent.Volley netIntroVolley;
+
+	public void NetApplyIntroVolley(int seed)
+	{
+		netIntroVolley = new Lvl1StartDemoEvent.Volley(seed, cosmetic: true);
+	}
+
+	// Narrow readbacks for NetIntroGateTest, the NetFxTest idiom: both are private state that
+	// moves no metric and that no frame can be timed to, which is the same fact that made this
+	// card's bug easy to ship in the first place.
+	internal bool NetWouldSpawnPlayerNormally => spawnPlayerNormally;
+
+	internal bool NetIntroVolleyActive => netIntroVolley != null;
+
+	// The client half of the spawn gate. The RELEASE is the interesting edge: it mirrors
+	// Level1.demo_OnFinished, which is the beat that puts the host's own ship on screen.
+	private void NetUpdateScriptShipGate()
+	{
+		bool held = EvilAliensWeb.Compat.Net.NetSession.PeerHoldsShipSpawn;
+		if (held == netScriptGateHeld)
+		{
+			return;
+		}
+		netScriptGateHeld = held;
+		if (held)
+		{
+			// The getter already refuses to spawn; nothing to do, and in particular nothing
+			// is REMOVED. A gate arriving after we have already spawned (a slow link, or a
+			// join-in-progress peer whose scene came up mid-intro) must never yank a ship the
+			// player is flying -- it just means this peer missed the cutscene.
+			return;
+		}
+		// Latch it locally too, so the rest of the level no longer depends on the wire: our
+		// own _spawnplayernormally is false for this whole level run (the script that would
+		// set it true is host-only) and the peer can drop at any time.
+		spawnPlayerNormally = true;
+		int slot = EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot;
+		if (slot >= 0 && slot < Oracle.MaxPlayers && oracle.IsSeated(slot) && oracle.IsAlive(slot))
+		{
+			// Already flying -- we were gated late and never actually held a spawn back, so
+			// spawning now would only put a spurious "Get ready!" banner up.
+			return;
+		}
+		if (_state == GameState.Normal)
+		{
+			// UpdateNormal has no spawn path of its own (offline, Level1's demo_OnFinished is
+			// what calls this), so the release has to do it here. In Startup the 1300ms branch
+			// picks it up on the next tick now the getter has opened, and Resetting/Victory
+			// run their own flows -- the edge is simply seen when Normal resumes.
+			SpawnAllPlayers(invulnerable: true);
+		}
+	}
+
 	// The catch-up state as one parseable line, for the eaNetBg() console dump.
 	internal string NetCatchUpStateLine()
 	{
@@ -1220,6 +1310,10 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		// Level scenes are re-added singletons, so start every play from an empty decorative-swarm
 		// set. Terminate clears it too; this covers any exit path that never reached Terminate.
 		NetClearCosmeticSwarms();
+		// Same reason (card 8a7772d6): a stale gate edge would suppress the release on the next
+		// play of this level, and a stale volley would keep firing into it.
+		netScriptGateHeld = false;
+		netIntroVolley = null;
 		pausestopper.Reset();
 		pausestopper.Stop();
 		Background.Reset();
@@ -1616,6 +1710,9 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			return;
 		}
 		Settings.GetInstance().Update(gameTime);
+		// Card 8a7772d6: outside the state switch on purpose -- the host can release the hold
+		// while we are still in Startup, and the edge has to be seen wherever it lands.
+		NetUpdateScriptShipGate();
 		switch (_state)
 		{
 		case GameState.Normal:
@@ -1914,6 +2011,10 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 				// and the failure would be a hard crash, so it is not worth asserting instead.
 				netCosmeticSwarms[i].Spawner?.Update(gameTime);
 			}
+			// ...and, on Level 1, the intro volley the host announced (card 8a7772d6). Same
+			// reasoning as the swarms: the bullets cannot replicate, so this peer fires its
+			// own cosmetic copy, and ticking it here gets pause/victory/resetting for free.
+			netIntroVolley?.Update(gameTime, Collection, base.Game);
 		}
 		if (oracle.AllShipsDead & spawnPlayerNormally)
 		{
@@ -1943,6 +2044,10 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		// left in the list would be replayed to a joiner -- or ticked by a client -- on the NEXT
 		// play of this level, where the script never announced it.
 		NetClearCosmeticSwarms();
+		// Card 8a7772d6, the same singleton reasoning: a volley left running would keep firing
+		// bullets into the next play of this level, where the host never announced one.
+		netIntroVolley = null;
+		netScriptGateHeld = false;
 		// KEEP THIS ABOVE THE PURGES (card 74403f83). ComponentBin.Add exempts the puppet layer
 		// from the standing purge filter, and the only thing stopping that exemption dropping a
 		// puppet into a scene that is tearing down is that EvSpawn / the snapshot path are gated

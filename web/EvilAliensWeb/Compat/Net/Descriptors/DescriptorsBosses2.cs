@@ -117,7 +117,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   `owner != this`. So on the joiner a big laser UFO was hit by ITS OWN beam, 11 hit points
     //   at a 35 ms hittimer, and the unattributed claim that followed deleted the host's copy
     //   silently: "large laser-firing UFOs randomly disappear". Same shape for every other
-    //   `Setup` emitter (MarsBoss, the sweeping Boss).
+    //   `Setup` emitter -- MarsBoss, the sweeping Boss, and SpiderHelperMothership, which READS
+    //   `lazer.owner == this` in three places.
     //   Resolved through the live puppet map, so ordering matters and holds: the emitter's own
     //   EvSpawn always precedes its beam's on the ORDERED reliable lane (it existed first), and
     //   `NetIdRegistry.ReplayLive` walks `liveList` in spawn order for a join-in-progress peer.

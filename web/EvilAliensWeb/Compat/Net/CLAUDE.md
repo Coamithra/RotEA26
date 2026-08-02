@@ -1245,7 +1245,12 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     id that does not resolve leaves `owner` null, i.e. the pre-card behaviour.
     **`SetupSingleShot` now CLEARS `owner`** -- `Lazer` is pooled, so a recycled beam otherwise
     inherited the previous emitter and would spare the WRONG enemy, on BOTH peers. Same recycle
-    trap `netSweepRadPerMs` documents two lines above it.
+    trap `netSweepRadPerMs` documents two lines above it -- and `Lazer.OnComponentRemoved` closes
+    its MIRROR IMAGE, the EMITTER being recycled out from under a live beam, which is a latent
+    OFFLINE bug the puppet owner merely made easier to reach.
+    **A null owner is a real answer, and only `JunkBoss` (plus `GameScene`'s off-screen warm-up
+    prime) produces one** -- both motherships fire through `Setup`, and `SpiderHelperMothership`
+    READS `lazer.owner == this`.
   - **FIX 2 -- an unattributed claim never settles a live entity, and it is the half that
     generalises.** `payable` is false for `KillerNone`, `KillerSelf` and any out-of-range slot;
     `HandleClaim` now returns before the live branch, keeps the entity, counts
@@ -1254,11 +1259,17 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     dropped its puppet and `MarkRemoved` the id, so without it the enemy blanks for
     `RecentRemovalWindowMs` and then self-heals into a GENERICALLY DRESSED puppet (card
     de4d5d65's provisional shape) with no later `EvSpawn` to correct it.
-    The client stops sending them (`NetPuppets.Components_ComponentRemoved`), so the near half is
-    the fix and the host guard is what covers an older peer or a stranger's wire.
-    **The three `payable` tests further down that arm are gone**, because they are now
-    unreachable -- do not restore them without also restoring the guard, or a `KillerNone` claim
-    indexes `ScoreVisualiser`'s 4-slot list with 0xFF.
+    **THE CLIENT STILL SENDS IT, and that is the repair path rather than an oversight.** It has
+    already `MarkRemoved` the id, so a client that stayed quiet would leave the enemy missing for
+    `RecentRemovalWindowMs` and then self-heal it into a generically-dressed provisional puppet
+    no later `EvSpawn` corrects -- i.e. suppressing the send makes the two halves of this fix
+    cancel out. It was written that way first and reverted.
+    **`KillerSelf` is deliberately NOT routed here**, though it is equally unpayable: it is an
+    OPT-IN report that a real death happened (a `StarMine`'s own `Asplode`, card 4e406eba), so it
+    settles on its pre-card path and simply credits nobody. A guard written as a bare `!payable`
+    swallows it, and the claimant then watches the mine it just detonated pop back onto its
+    screen off the re-announce -- which is why the guard reads
+    `killerSlot != KillerSelf && !payable` and the arm below KEEPS its `payable` tests.
   - **The self-hit was the loudest route to step 4, not the only one** -- which is why fix 2
     ships even though fix 1 removes the reported symptom. `UFO.CollidesWith` calls `KilledBy`
     DIRECTLY for `Floorbottom`, `Spider`, `FlyingSpider` and `SpiderBoss`, none of which

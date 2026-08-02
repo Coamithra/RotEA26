@@ -36,9 +36,14 @@
 #     lane, and `NetIdRegistry.ReplayLive` walks `liveList` in spawn order for a JIP peer.
 #   * AN UNATTRIBUTED CLAIM NEVER SETTLES A LIVE ENTITY. It means the joiner LOST the entity,
 #     not that it killed it, so the host keeps it and RE-ANNOUNCES it (the same `OnHostSpawn`
-#     the JIP catch-up uses -- no new protocol). The client stops sending them at all. Both
-#     halves ship: the near half is the fix, the far half means a peer on an older build, or a
-#     stranger's wire, cannot reach it either.
+#     the JIP catch-up uses -- no new protocol). The client still SENDS it: that claim is the
+#     repair REQUEST, since the client has already MarkRemoved the id and would otherwise be
+#     blank for RecentRemovalWindowMs and then permanently generic. Suppressing the send was
+#     tried first and reverted -- it made the two halves cancel out.
+#     KillerSelf is deliberately NOT routed here: it is an OPT-IN report that a real death
+#     happened (a StarMine's own Asplode, card 4e406eba), so it settles as it always did and
+#     simply credits nobody. A guard written as a bare `!payable` swallows it, and the claimant
+#     then watches the mine it just detonated pop back onto its screen.
 #
 # THE SECOND FIX STANDS ON ITS OWN and is why the guard is not merely belt-and-braces: the
 # self-hit was the loudest route to step 4, not the only one. A puppet dead-reckoned into the
@@ -60,7 +65,8 @@
 #   * dropping `owner = null` from `SetupSingleShot`      -> 1 leg (the pooling leg, section 1)
 #   * `CreatePuppet` ignoring the wired owner             -> 1 leg (the adopt leg, section 5)
 #   * `EncodeSpawnExtra` always writing 0                 -> 1 leg (the emitter leg, section 3)
-#   * the client still sending unattributed claims        -> 2 legs (section 5a only)
+#   * the client SUPPRESSING unattributed claims          -> 3 legs (section 5a only)
+#   * the guard written as a bare `!payable`               -> 3 legs (section 4c only)
 #   * `HandleClaim` restored to its exact pre-card shape  -> 5 legs (section 4a only), and it
 #     reproduces the report verbatim: the entity leaves the world, an `EvDeath` goes out, and
 #     "no explosion was spawned" still PASSES -- it vanishes silently, which is the bug.
@@ -89,6 +95,6 @@ eval NetIdReuse
 # The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
 # happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
 # attract demo is up. Raise the count when legs are added.
-expect \[netidreuse\] 35 passed, 0 failed
+expect \[netidreuse\] 39 passed, 0 failed
 expect-not SKIP
 quit

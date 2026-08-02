@@ -63,6 +63,18 @@ internal class Lazer : AlienDrawableGameComponent
 		{
 			sound.Stop(soundeffect);
 		}
+		// THE EMITTER LEAVING THE WORLD DROPS THE REFERENCE, and that is a real recycle trap
+		// rather than tidiness (card 9ccfe295). Every emitter type is POOLED, so an instance that
+		// dies while its beam is still alive can be handed straight back out as a DIFFERENT
+		// enemy -- and `owner` is only ever read as "did MY beam hit me" (`UFO.CollidesWith`,
+		// `SpiderHelperMothership`), so a dangling reference makes the beam spare a ship that
+		// never fired it. The mirror image of the trap `SetupSingleShot`'s `owner = null` closes
+		// on the beam's own side. Offline too -- this predates the net layer; replicated beams
+		// only made it easier to reach.
+		if (e.GameComponent == owner)
+		{
+			owner = null;
+		}
 	}
 
 	public static Lazer NewLazer(ComponentBin collection, Game game)
@@ -234,8 +246,10 @@ internal class Lazer : AlienDrawableGameComponent
 	// `other is Lazer && ((Lazer)other).owner != this` was TRUE for the very ship that fired it:
 	// on the joiner a big laser UFO shot itself dead with its own beam. The host knows the
 	// emitter, so it says so (LazerDescriptor spawn extras) rather than the client guessing from
-	// geometry. Null is a real answer -- every SetupSingleShot emitter (JunkBoss, the two
-	// motherships) genuinely has no owner on either peer, and that is shipped behaviour.
+	// geometry. Null is a real answer -- the SetupSingleShot emitters (JunkBoss, plus
+	// GameScene's off-screen warm-up prime) genuinely have no owner on either peer, and that is
+	// shipped behaviour. NOTE the two MOTHERSHIPS are NOT among them: both fire through `Setup`
+	// with an owner, and SpiderHelperMothership READS `lazer.owner == this`.
 	internal AlienDrawableGameComponent NetOwner => owner;
 
 	// Adopt the emitter a spawn extra named. Only the puppet layer calls this; the host's own

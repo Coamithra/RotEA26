@@ -3744,18 +3744,25 @@ namespace EvilAliensWeb.Compat.Net
                 // disappear, and P2's kill plays no explosion on P1's screen".
                 //
                 // A claim we cannot credit means the JOINER LOST THE ENTITY, not that it killed
-                // it: its own copy died a gameplay death nobody landed (a mis-simulated
-                // puppet-vs-puppet hit, a puppet dead-reckoned into the Floorbottom, a mine's
-                // own Asplode). The host owns unattributed deaths, so the entity stays, and we
-                // re-announce it so the joiner -- which has already dropped its puppet and
-                // MarkRemoved the id -- gets a correctly-dressed rebuild instead of a
-                // RecentRemovalWindowMs blackout. `OnHostSpawn` is the SAME call
+                // it: its own copy died a gameplay death nobody landed -- a mis-simulated
+                // puppet-vs-puppet hit, or a puppet dead-reckoned into the Floorbottom. The host
+                // owns unattributed deaths, so the entity stays, and we re-announce it so the
+                // joiner -- which has already dropped its puppet and MarkRemoved the id -- gets a
+                // correctly-dressed rebuild instead of a RecentRemovalWindowMs blackout followed
+                // by a permanently generic self-heal. `OnHostSpawn` is the SAME call
                 // NetIdRegistry.ReplayLive makes for a join-in-progress catch-up, so this needs
                 // no new protocol and the client path is already exercised.
                 //
+                // KILLERSELF IS DELIBERATELY NOT IN HERE, even though it is equally unpayable.
+                // It is an OPT-IN report that a real death happened (`NoteSelfDestruct`, a
+                // StarMine's own Asplode -- card 4e406eba), so it settles the entity on its
+                // pre-card path and simply credits nobody. Routing it here instead would
+                // re-announce a mine the claimant has just watched explode, and it would pop
+                // back onto their screen.
+                //
                 // The DEAD branches are untouched: an unpayable claim for an entity already
                 // settled or already out of the world pays nothing and always did.
-                if (!payable)
+                if (killerSlot != NetProtocol.KillerSelf && !payable)
                 {
                     metrics.ClaimsUnattributed++;
                     OnHostSpawn(e);
@@ -3766,8 +3773,11 @@ namespace EvilAliensWeb.Compat.Net
                     }
                     return;
                 }
-                NoteKillSlot(e.Comp, killerSlot); // attribution for the death broadcast
-                if (e.Comp.NetKillable is INetKillable killable)
+                if (payable)
+                {
+                    NoteKillSlot(e.Comp, killerSlot); // attribution for the death broadcast
+                }
+                if (e.Comp.NetKillable is INetKillable killable && payable)
                 {
                     killable.NetKill(NetPuppets.KillerAgent(killerSlot, e.Comp.Position), isComboGenerator: true);
                     if (!e.Comp.IsDead)
@@ -3786,12 +3796,12 @@ namespace EvilAliensWeb.Compat.Net
                         // Lives are host-authoritative (EvScoreSync sends them verbatim), so a
                         // client-collected extra life must be applied HERE or the next sync
                         // silently reverts it. Other powerup effects are per-ship on the collector.
-                        if (p.NetPickupType == Powerup.PowerupType.OneUp)
+                        if (p.NetPickupType == Powerup.PowerupType.OneUp && payable)
                         {
                             score.AddLife();
                         }
                     }
-                    else
+                    else if (payable)
                     {
                         if (e.Comp.NetPointValue > 0f)
                         {
@@ -3811,10 +3821,13 @@ namespace EvilAliensWeb.Compat.Net
                 // this. Neither of the two branches above flips IsDead for a pickup or a plain
                 // non-killable -- both just queue the removal -- so this flag is what tells a
                 // later claim in the same tick that the settling has already happened.
-                // `payable` is guaranteed here since card 9ccfe295's guard above -- an
-                // unattributed claim returns before any of this and settles nothing.
+                // KillerSelf reaches here and is NOT payable -- an opted-in self-destruct is a
+                // real death report, so it settles the entity while crediting nobody.
                 e.ClaimSettled = true;
-                e.ClaimPaidMask |= (byte)(1 << killerSlot);
+                if (payable)
+                {
+                    e.ClaimPaidMask |= (byte)(1 << killerSlot);
+                }
                 metrics.ClaimsHonored++;
                 if (NetHost.Current.NetLog)
                 {

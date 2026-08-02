@@ -30,6 +30,11 @@ namespace EvilAliensWeb.Compat.Net
     // removes the destructive amplifier, and stands on its own -- Floorbottom, an asteroid and
     // any future puppet-vs-puppet mishap reach step 4 by other routes.
     //
+    // THE CLIENT STILL SENDS THE UNATTRIBUTED CLAIM -- it is the REPAIR request, not a kill
+    // claim, and the host answers it with a re-announce. Section 5 asserts that rather than its
+    // absence: suppressing the send was tried and made the two halves cancel out, leaving the
+    // joiner's puppet blank for RecentRemovalWindowMs and then permanently generic.
+    //
     // EVERY POSITIVE HAS ITS NEGATIVE BESIDE IT, and here that matters more than usual: "the UFO
     // survived" passes on a build where the two never collided at all, so section 2 asserts the
     // pre-card configuration (owner null) DOES kill it over the identical geometry. Without that
@@ -91,7 +96,7 @@ namespace EvilAliensWeb.Compat.Net
                 Section2SelfHit(sb, Check, bin, game, planted);
                 Section3HostEncodesOwner(sb, Check, bin, game, planted);
                 Section4HostKeepsUnattributed(sb, Check, bin, game, planted);
-                Section5ClientSendsNoUnattributedClaim(sb, Check, bin, game, planted);
+                Section5ClientReportsLostEntity(sb, Check, bin, game, planted);
                 Section6SameFrameReuse(sb, Check, bin, game, planted);
             }
             catch (Exception ex)
@@ -117,9 +122,9 @@ namespace EvilAliensWeb.Compat.Net
         //
         // `Lazer` is pooled (`NewLazer` -> `bin.Recycle<Lazer>`), and only `Setup` ever wrote
         // `owner`. So a recycled single-shot beam kept the PREVIOUS emitter and would spare the
-        // WRONG enemy -- on BOTH peers, since `SetupSingleShot` is also how the JunkBoss and the
-        // two motherships fire. Needs no session at all: it is a property of the two entry
-        // points. The same recycle trap `netSweepRadPerMs` documents two lines above it.
+        // WRONG enemy -- on BOTH peers, since `SetupSingleShot` is also how the JunkBoss fires.
+        // Needs no session at all: it is a property of the two entry points. The same recycle
+        // trap `netSweepRadPerMs` documents two lines above it.
         private static void Section1PoolReset(StringBuilder sb, Action<string, bool> Check,
             ComponentBin bin, Game game, List<GameComponent> planted)
         {
@@ -287,9 +292,9 @@ namespace EvilAliensWeb.Compat.Net
                 Check("...naming its emitter (" + OwnerIdIn(spawns) + " == the UFO's "
                     + ufoEntry.Id + ")", spawns.Count == 1 && OwnerIdIn(spawns) == ufoEntry.Id);
 
-                // THE NEGATIVE, and it is not decoration: every SetupSingleShot emitter in the
-                // game (JunkBoss, both motherships) genuinely has no owner, so 0 has to reach
-                // the wire as 0 rather than as some stale entry.
+                // THE NEGATIVE, and it is not decoration: the SetupSingleShot emitters
+                // (JunkBoss, and GameScene's off-screen warm-up prime) genuinely have no owner,
+                // so 0 has to reach the wire as 0 rather than as some stale entry.
                 spawns.Clear();
                 Lazer solo = Lazer.NewLazer(bin, game);
                 solo.SetupSingleShot(Nowhere, MathHelper.PiOver2, 75f, playSound: false);
@@ -409,6 +414,36 @@ namespace EvilAliensWeb.Compat.Net
                     || !InWorld(game, (GameComponent)(object)shot));
                 Check("...and is honoured", NetSession.Metrics.ClaimsHonored == honoredBefore + 1);
                 Check("...and broadcasts its EvDeath (" + deaths.Count + ")", deaths.Count == 1);
+
+                // 4c. KILLERSELF IS THE OTHER CONTROL, and it is the one the guard could most
+                // easily have swallowed: it is equally UNPAYABLE, so a guard written as a bare
+                // `!payable` routes it here too -- and the claimant (a StarMine puppet that has
+                // just run its own Asplode) would watch the mine pop back onto its screen off the
+                // re-announce. An opted-in self-destruct is a REAL death report, so it settles as
+                // it always did and simply credits nobody.
+                UFO selfDestruct = PlantUfo(bin, game, planted, big: false);
+                if (!NetIdRegistry.TryGetByComp((GameComponent)(object)selfDestruct,
+                    out NetIdRegistry.Entry selfEntry))
+                {
+                    Check("PRECONDITION the third UFO got a netId", false);
+                    return;
+                }
+                bin.TopOfTickFlush();
+                wire.Pump();
+                spawns.Clear();
+                unattributedBefore = NetSession.Metrics.ClaimsUnattributed;
+                peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, selfEntry.Id,
+                    NetProtocol.KillerSelf));
+                wire.Pump();
+                NetSession.Update();
+                bin.TopOfTickFlush();
+                wire.Pump();
+                Check("a KillerSelf claim SETTLES the entity (it is a real death report)",
+                    selfDestruct.IsDead || !InWorld(game, (GameComponent)(object)selfDestruct));
+                Check("...is NOT counted as unattributed",
+                    NetSession.Metrics.ClaimsUnattributed == unattributedBefore);
+                Check("...and is NOT re-announced (" + spawns.Count + " EvSpawn)",
+                    spawns.Count == 0);
             }
             finally
             {
@@ -417,11 +452,18 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // ---- 5. CLIENT -- an unattributed puppet death sends no claim -----------------------
-        private static void Section5ClientSendsNoUnattributedClaim(StringBuilder sb,
+        // ---- 5. CLIENT -- an unattributed puppet death REPORTS the loss ---------------------
+        //
+        // The claim is still SENT, and that is the repair path rather than an oversight. The
+        // removal seam has already `MarkRemoved` the id, so a client that stayed quiet would
+        // leave the enemy missing for `RecentRemovalWindowMs` and then self-heal it into a
+        // generically-dressed provisional puppet that no later `EvSpawn` corrects. Telling the
+        // host is what earns the re-announce section 4 asserts. Suppressing the send was tried
+        // first and reverted: it made the two halves of the fix cancel out.
+        private static void Section5ClientReportsLostEntity(StringBuilder sb,
             Action<string, bool> Check, ComponentBin bin, Game game, List<GameComponent> planted)
         {
-            sb.Append(" 5. CLIENT -- an unattributed puppet death files no claim\n");
+            sb.Append(" 5. CLIENT -- an unattributed puppet death REPORTS the loss\n");
 
             NetWire wire = new NetWire(2);
             InMemoryTransport ours = wire[0];
@@ -453,8 +495,8 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
 
-                byte ufoIdx = TypeIdxOf(UFO.NewUFO(bin, game));
-                byte lazerIdx = TypeIdxOf(Lazer.NewLazer(bin, game));
+                byte ufoIdx = TypeIdxOf(new UFO(game));
+                byte lazerIdx = TypeIdxOf(new Lazer(game));
                 NetBaseState state = default(NetBaseState);
                 state.Pos = Nowhere;
                 state.Scale = 1f;
@@ -498,10 +540,12 @@ namespace EvilAliensWeb.Compat.Net
                 bin.Remove((GameComponent)(object)ufo);
                 bin.TopOfTickFlush();
                 wire.Pump();
-                Check("an unattributed puppet death sends NO claim (" + claims.Count + ")",
-                    claims.Count == 0);
-                Check("...and moves no claim counter",
-                    NetSession.Metrics.ClaimsTx == claimsTxBefore);
+                Check("an unattributed puppet death still files its claim (" + claims.Count
+                    + ") -- the host's cue to re-announce", claims.Count == 1);
+                Check("...naming KillerNone, so the host can neither credit nor settle it",
+                    claims.Count == 1 && claims[0][6] == NetProtocol.KillerNone);
+                Check("...and it moved the claim counter",
+                    NetSession.Metrics.ClaimsTx == claimsTxBefore + 1);
 
                 // 5b. THE POSITIVE CONTROL -- an ATTRIBUTED death still claims, so 5a cannot be
                 // "the seam stopped working". The note is written the way KillableAlien.HitBy
@@ -523,8 +567,8 @@ namespace EvilAliensWeb.Compat.Net
                 bin.Remove((GameComponent)(object)second);
                 bin.TopOfTickFlush();
                 wire.Pump();
-                Check("an ATTRIBUTED puppet death still sends its claim (" + claims.Count + ")",
-                    claims.Count == 1);
+                Check("an ATTRIBUTED puppet death names its killer (" + claims.Count + ")",
+                    claims.Count == 1 && claims[0][6] == PeerSlot);
             }
             finally
             {
@@ -669,6 +713,11 @@ namespace EvilAliensWeb.Compat.Net
 
         // The registry is an exact-runtime-type map, so a throwaway instance answers for the
         // type. It is never added to the world.
+        //
+        // CONSTRUCTED DIRECTLY, NOT THROUGH THE `New*` FACTORY, and that is what keeps the suite
+        // leave-no-trace: the factories go through `bin.Recycle<T>()`, which REMOVES an instance
+        // from `idleList` -- so a throwaway built that way silently shrinks the pool, and
+        // section 1's pool-identity assertion is about exactly that list.
         private static byte TypeIdxOf(GameComponent probe)
         {
             return NetTypeRegistry.TryGet(probe, out byte idx, out _) ? idx : (byte)0;

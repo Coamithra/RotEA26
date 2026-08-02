@@ -515,7 +515,7 @@ internal class JunkBoss : KillableAlien
 
 	internal override void NetDriveExtras(GameTime gameTime)
 	{
-		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref suckeffect, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref suckeffect, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 0.5f, collection, base.Game, base.Position);
 	}
 
 	internal void NetSetEyeAttract(bool attract)

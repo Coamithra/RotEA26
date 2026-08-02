@@ -257,7 +257,7 @@ internal class Ball : AlienDrawableGameComponent
 				// no wire field at all -- so a chip the HOST landed was completely invisible on
 				// the join peer. Both beats are no-ops with no session or no peer.
 				EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
-					EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this, base.Position);
+					EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this);
 				if (hitpoints == 0)
 				{
 					base.Direction = MyMath.VectorToAngle(base.Position - owner.GetPosition) + (float)Math.PI / 4f * RandomHelper.RandomNextFloat(-1f, 1f);
@@ -272,7 +272,7 @@ internal class Ball : AlienDrawableGameComponent
 					// spawned here and nowhere the wire can see: the ball simply drifted away
 					// silently on the other screen.
 					EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
-						EvilAliensWeb.Compat.Net.NetFxKind.BallDetach, this, base.Position);
+						EvilAliensWeb.Compat.Net.NetFxKind.BallDetach, this);
 					if (other is Bullet)
 					{
 						AwardScore(combo: true, other);

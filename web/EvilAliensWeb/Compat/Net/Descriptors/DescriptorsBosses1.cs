@@ -34,7 +34,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     internal sealed class JunkBossDescriptor : NetTypeDescriptor<JunkBoss>
     {
         private const byte FlagAttract = 1;
-        private const byte FlagCharging = 2;
+        // Shared with the other charge-glow descriptors -- see NetChargeWire.
+        private const byte FlagCharging = NetChargeWire.FlagChargingBit1;
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {

@@ -732,7 +732,7 @@ public class UFO : KillableAlien
 
 	internal override void NetDriveExtras(Microsoft.Xna.Framework.GameTime gameTime)
 	{
-		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game, base.Position);
 	}
 
 	internal void NetClearBonus()

@@ -545,25 +545,24 @@ namespace EvilAliensWeb.Compat.Net
                 && NetProtocol.TryDecodeMessageEvent(msgLegacy, out _, out _, out _,
                     out string legacyText, out bool legacyShort)
                 && !legacyShort && legacyText == "danger");
-            
-            // EvFx: the transient-feedback beat. Fixed layout, so this is stride-sensitive in the
-            // ordinary way -- but its netId sits between two floats, which is exactly the shape a
-            // one-byte offset slip reads back as a plausible wrong entity.
+
+            // EvFx: the transient-feedback beat. A netId flanked by two single bytes, which is
+            // exactly the shape a one-byte offset slip reads back as a plausible WRONG entity --
+            // and a beat applied to the wrong puppet is invisible in every log.
             byte[] fx = Round(NetProtocol.EncodeFxEvent(
-                21, (byte)NetFxKind.BallDetach, 4242, new Vector2(-12.5f, 340.25f), 7), reliable: true);
-            check("EvFx round-trips kind/netId/pos/param", fx != null
+                21, (byte)NetFxKind.BallDetach, 4242, 7), reliable: true);
+            check("EvFx round-trips kind/netId/param", fx != null
                 && NetProtocol.TryDecodeFxEvent(fx, out NetFxKind fxKind, out ushort fxId,
-                    out Vector2 fxPos, out byte fxParam)
-                && fxKind == NetFxKind.BallDetach && fxId == 4242
-                && Near(fxPos.X, -12.5f) && Near(fxPos.Y, 340.25f) && fxParam == 7);
+                    out byte fxParam)
+                && fxKind == NetFxKind.BallDetach && fxId == 4242 && fxParam == 7);
             // netId 0 is the reserved "positional, no entity" form (EnemyLazerFire), so it has to
             // survive the round trip rather than reading as a decode failure.
             byte[] fxPositional = Round(NetProtocol.EncodeFxEvent(
-                22, (byte)NetFxKind.EnemyLazerFire, 0, new Vector2(400f, 300f), 0), reliable: true);
+                22, (byte)NetFxKind.EnemyLazerFire, 0, 0), reliable: true);
             check("EvFx carries the entity-free form (netId 0)", fxPositional != null
                 && NetProtocol.TryDecodeFxEvent(fxPositional, out NetFxKind lazerKind, out ushort zeroId,
-                    out Vector2 lazerPos, out _)
-                && lazerKind == NetFxKind.EnemyLazerFire && zeroId == 0 && Near(lazerPos.X, 400f));
+                    out _)
+                && lazerKind == NetFxKind.EnemyLazerFire && zeroId == 0);
 
             // The inline-decoded families (EvDeath / EvClaim / EvScoreSync / EvBlast and the
             // bare byte/empty events) are read straight out of the buffer in
@@ -619,19 +618,19 @@ namespace EvilAliensWeb.Compat.Net
             check("an EvMessage truncated INTO its text is refused",
                 !NetProtocol.TryDecodeMessageEvent(Truncate(Truncate(msg)), out _, out _, out _, out _, out _));
             check("a truncated EvFx is refused",
-                !NetProtocol.TryDecodeFxEvent(Truncate(fx), out _, out _, out _, out _));
+                !NetProtocol.TryDecodeFxEvent(Truncate(fx), out _, out _, out _));
             // The kind is REJECT-policy, so an out-of-enum byte must drop the whole frame rather
             // than decode to something plausible -- a beat is EXECUTED on arrival.
-            byte[] fxBadKind = fx != null ? (byte[])fx.Clone() : new byte[16];
+            byte[] fxBadKind = fx != null ? (byte[])fx.Clone() : new byte[8];
             fxBadKind[4] = 200;
             check("an EvFx naming an unknown kind is refused",
-                !NetProtocol.TryDecodeFxEvent(fxBadKind, out _, out _, out _, out _));
+                !NetProtocol.TryDecodeFxEvent(fxBadKind, out _, out _, out _));
             // ...with the positive control beside it, or a decoder that refused EVERYTHING would
             // pass the line above.
-            byte[] fxGoodKind = fx != null ? (byte[])fx.Clone() : new byte[16];
+            byte[] fxGoodKind = fx != null ? (byte[])fx.Clone() : new byte[8];
             fxGoodKind[4] = (byte)NetFxKind.EnemyHitFlash;
             check("...and the same frame with a known kind is accepted (positive control)",
-                NetProtocol.TryDecodeFxEvent(fxGoodKind, out NetFxKind okKind, out _, out _, out _)
+                NetProtocol.TryDecodeFxEvent(fxGoodKind, out NetFxKind okKind, out _, out _)
                 && okKind == NetFxKind.EnemyHitFlash);
             // A frame of the right length whose TYPE byte is wrong must also be refused -- the
             // lanes are shared, so every decoder is handed frames of other types routinely.

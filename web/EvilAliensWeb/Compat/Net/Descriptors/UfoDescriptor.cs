@@ -19,9 +19,9 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //
     // Card 57ea30cd: a BIG ufo winds up a child LazerGenerator for 2500ms before firing
     // (UFOState.lazor) and draws it by hand, so the join peer saw the beam appear with no
-    // telegraph. Bit 2 of the EXISTING flags byte carries it -- no new field and no wire-width
-    // change, so no protocol bump: an older peer reads bit 0 and 2 as before and ignores bit 1,
-    // and the trailing block is inside this entry's own length prefix.
+    // telegraph. Bit 1 (value 2) of the EXISTING flags byte carries it -- no new field and no
+    // wire-width change, so no protocol bump: an older peer reads the stationary and bonus bits
+    // as before and ignores this one, and the trailing block is inside the entry's length prefix.
     internal sealed class UfoDescriptor : NetTypeDescriptor<UFO>
     {
         private const byte FlagBig = 1;
@@ -29,7 +29,9 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         private const byte FlagBonus = 4;
         private const byte FlagUfoSheet = 8; // MakeSmall's random sheet pick, forced to match
         private const byte FlagStationary = 1;
-        private const byte FlagCharging = 2;
+        // The SHARED charging bit -- the other five charge-glow descriptors use the same one, so
+        // it lives with NetChargeWire rather than being re-declared per descriptor.
+        private const byte FlagCharging = NetChargeWire.FlagChargingBit1;
 
         public override int EncodeSpawnExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {

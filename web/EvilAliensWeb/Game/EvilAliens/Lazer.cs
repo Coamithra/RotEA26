@@ -110,7 +110,7 @@ internal class Lazer : AlienDrawableGameComponent
 			// the whole live set when a peer joins in progress, and the puppet layer cannot tell
 			// that from a fresh spawn -- the joiner would be met by every live beam at once.
 			EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
-				EvilAliensWeb.Compat.Net.NetFxKind.EnemyLazerFire, null, position);
+				EvilAliensWeb.Compat.Net.NetFxKind.EnemyLazerFire, null);
 		}
 		smallshottimer.Reset();
 		smallshottimer.Start();

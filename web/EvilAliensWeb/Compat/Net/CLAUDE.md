@@ -129,7 +129,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `WebRtcTransport`, whose bye rides the ORDERED reliable channel as a `0x00` frame. So a
     scenario asserting "the peer's last `EvLeave` arrives before its bye" passes here and fails in
     play; do not write one against this transport.
-  - **Verify with `eaNetWire.test()`** (`Compat/Net/NetWireTest.cs`, 67 assertions): the transport
+  - **Verify with `eaNetWire.test()`** (`Compat/Net/NetWireTest.cs`, 77 assertions): the transport
     contract at N=2 and N=4, `NetImpairment` composed over a real endpoint (the chain production
     always builds, previously never executed outside a browser), and every codec's real frames put
     ON the wire and decoded from what the far endpoint received -- which an encode/decode pair
@@ -553,9 +553,11 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     fails INTERMITTENTLY rather than cleanly, which is the tell -- a client hit-tests puppets with
     its own bullets, so a hit IT observed ran the real code and a hit only the host observed
     produced nothing. That is card 43e85936's "missing sfx/anims **sometimes**" exactly.
-  - **`EvFx` (event 22, reliable): `[kind:1][netId:2][x:f32][y:f32][param:1]`.** `netId` 0 means
-    "positional, no entity" (the registry never allocates 0); `param` is per-kind and 0 for every
-    kind shipped so far. `NetFxKind` is APPEND-ONLY and takes the **REJECT** policy -- the kind
+  - **`EvFx` (event 22, reliable): `[kind:1][netId:2][param:1]`, 8 bytes.** `netId` 0 means
+    "no entity" (the registry never allocates 0); `param` is per-kind and 0 for every kind shipped
+    so far. **It carries NO POSITION**: the entity kinds draw on a puppet whose position is already
+    replicated and NEWER than a beat could be, and the entity-free kind plays a 2D cue. The first
+    cut carried one and every consumer ignored it. `NetFxKind` is APPEND-ONLY and takes the **REJECT** policy -- the kind
     selects an effect to EXECUTE, so a substituted one is worse than silence.
   - **WHY IT CANNOT BE A STATE EXTRA -- answer this before adding a kind.** The snapshot round
     robin corrects an entity every `live/16*60ms` (`SnapshotTurnMs`): 60 ms at best, ~1.2 s in a
@@ -614,7 +616,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     from a fresh spawn -- so a cue on the spawn path would salvo every live beam at a
     join-in-progress peer the instant it arrived. A beat fired at the real moment is simply missed
     by a peer who was not there yet, which is correct.
-  - **Verify with `eaNetFx()`** (`Compat/Net/NetFxTest.cs`, 20 assertions; a leg of
+  - **Verify with `eaNetFx()`** (`Compat/Net/NetFxTest.cs`, 24 assertions; a leg of
     `net_selftests.txt`). Real `EvFx` frames from a scripted host over a `NetWire` into a REAL
     client session, asserting the EFFECT on the live puppet -- `eaNetWire.test` covers the layout,
     and the layout was never what was broken. MENU-runnable and leave-no-trace.
@@ -749,6 +751,11 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `Initialize`, `Terminate`), and the test reads the live INSTANCE rather than the entry --
     dropping the entry while the sound plays on forever IS the leak. No version bump: an older
     peer rejects the unknown kind and gets no sound, i.e. the pre-card behaviour.
+    **KNOWN ASYMMETRY at a checkpoint revert:** the clear stops the CLIENT's loop, but the host
+    keeps its own `Level2.bees` instance playing -- the script's `beesSoundOff` never runs on a
+    revert, which is the very reason the entries are cleared there. That host-side behaviour
+    (including `beesSoundOn` overwriting `bees` without stopping the old instance) predates these
+    cards; what changed is that it is now audibly ASYMMETRIC rather than silently one-sided.
   - **Verify with `eaNetCosmetic()`** (`Compat/Net/NetCosmeticTest.cs`) -- codec, the instance
     predicate (every check beside its positive control, since a predicate answering "not
     replicated" for everything would pass a fog-spiders-only test and silently stop replicating

@@ -743,7 +743,7 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			// screen is a coin toss. The host owns "the boss was hit"; the peer plays the cue and
 			// the light-up off this beat.
 			EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
-				EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this, base.Position);
+				EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this);
 			for (int n = 0; n < 5; n++)
 			{
 				Bleed(2.5f);
@@ -971,10 +971,16 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// what the host's own hit branch does MINUS the hp spend and the kill check -- the hit itself
 	// is the host's to count, and the death arrives as an ordinary EvDeath.
 	//
-	// Idempotent on `hittimer.Active`, which is also the boss's own re-hit gate: a Lazer the
-	// client saw connect already ran the real branch, so the host's beat for that same hit lands
-	// inside the 800ms blink and does nothing. (BloodExplosion is not a replicable type, so the
-	// bleed spray is a legal local spawn on a client -- the same one its own hits produce.)
+	// Idempotent on `hittimer.Active`: a Lazer the client saw connect already ran the real branch,
+	// so the host's beat for that same hit lands inside the 800ms blink and does nothing.
+	// (BloodExplosion is not a replicable type, so the bleed spray is a legal local spawn on a
+	// client -- the same one its own hits produce.)
+	//
+	// NOTE the gate is NOT the same one CollidesWith opens with, unlike KillableAlien's. This boss
+	// dedupes PER LAZER (`alreadyHitBy`), not on the blink, so the host can take two hits from two
+	// beams inside one 800ms blink and the client will show one. Accepted: the alternative is
+	// mirroring a beam-identity set the wire does not carry, for a second flash inside a blink
+	// that is already lit. The hp and the death are host-authoritative either way.
 	internal override void NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
 	{
 		if (kind != EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash || base.IsDead || hittimer.Active)

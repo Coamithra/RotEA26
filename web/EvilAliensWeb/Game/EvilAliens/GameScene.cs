@@ -694,9 +694,15 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 
 	// Both peers, at the checkpoint revert: the host's eventList drops its active events without
 	// terminating them (so no "off" beat is ever sent), and the purge in the same block wipes the
-	// scenery itself. Clearing here keeps the two ends symmetric -- the host's re-activated
-	// spawner re-announces on its next tick, and one that the revert left BEHIND correctly stays
-	// off on both screens.
+	// scenery itself. Clearing here keeps the two ends symmetric FOR SPAWNERS -- the host's
+	// re-activated spawner re-announces on its next tick, and one the revert left BEHIND correctly
+	// stays off on both screens.
+	//
+	// It is NOT symmetric for a LOOPING-CUE kind, and that is a known gap rather than an oversight:
+	// this stops the client's loop while the host's own instance (Level2.bees) plays on, because
+	// the script event that would stop it is exactly what the revert skipped. The host-side
+	// behaviour predates the cue riding this lane; what these cards changed is that the mismatch
+	// is now audible on one screen instead of on neither.
 	private void NetClearCosmeticSwarms()
 	{
 		netCosmeticSwarms.Clear();

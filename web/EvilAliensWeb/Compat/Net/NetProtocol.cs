@@ -74,7 +74,7 @@ namespace EvilAliensWeb.Compat.Net
         // state they CANNOT ride the snapshot's state extras: the round robin corrects an entity
         // only every `live/16*60ms` (SnapshotTurnMs, 60ms at best and ~1.2s in a big world) while
         // a KillableAlien hit blink lasts 35ms, so a sampled bit would miss the event outright and
-        // a sampled cue would double-fire or drop. [kind:1][netId:2][x:f32][y:f32][param:1].
+        // a sampled cue would double-fire or drop. [kind:1][netId:2][param:1].
         // See NetFxKind.
         public const byte EvFx = 22;
 
@@ -826,34 +826,36 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
-        // EvFx (the transient-feedback beats): [kind:1][netId:2][x:f32][y:f32][param:1].
-        // `netId` 0 means "no entity, use the position" (NetIdRegistry never allocates 0).
-        // `param` is per-kind and is 0 for every kind shipped so far -- it exists so a later kind
-        // can carry a level/size/on-off without a second event type.
-        public static byte[] EncodeFxEvent(ushort eventSeq, byte kind, ushort netId, Vector2 pos, byte param)
+        // EvFx (the transient-feedback beats): [kind:1][netId:2][param:1].
+        // `netId` 0 means "no entity" -- a purely positional kind (NetIdRegistry never allocates 0).
+        // `param` is per-kind and is 0 for every kind shipped so far; it exists so a later kind can
+        // carry a level/size/on-off without a second event type.
+        //
+        // NO POSITION FIELD, deliberately. The two entity kinds resolve their target by netId and
+        // draw on the puppet, whose position is already replicated and NEWER than anything a beat
+        // could carry; the one entity-free kind plays a 2D cue. A position was carried in the first
+        // cut of this event and every consumer ignored it -- if a future kind genuinely needs one,
+        // add it then rather than shipping eight bytes per beat that nothing reads.
+        public static byte[] EncodeFxEvent(ushort eventSeq, byte kind, ushort netId, byte param)
         {
-            byte[] b = EventHeader(EvFx, eventSeq, 12);
+            byte[] b = EventHeader(EvFx, eventSeq, 4);
             b[4] = kind;
             WriteU16(b, 5, netId);
-            WriteF32(b, 7, pos.X);
-            WriteF32(b, 11, pos.Y);
-            b[15] = param;
+            b[7] = param;
             return b;
         }
 
-        internal static bool TryDecodeFxEvent(byte[] b, out NetFxKind kind, out ushort netId, out Vector2 pos, out byte param)
+        internal static bool TryDecodeFxEvent(byte[] b, out NetFxKind kind, out ushort netId, out byte param)
         {
             kind = default;
             netId = 0;
-            pos = Vector2.Zero;
             param = 0;
-            if (b.Length < 16 || !TryFxKind(b[4], out kind))
+            if (b.Length < 8 || !TryFxKind(b[4], out kind))
             {
                 return false;
             }
             netId = ReadU16(b, 5);
-            pos = new Vector2(ReadF32(b, 7), ReadF32(b, 11));
-            param = b[15];
+            param = b[7];
             return true;
         }
 
@@ -1138,7 +1140,8 @@ namespace EvilAliensWeb.Compat.Net
         EnemyHitFlash = 0,
         // A JunkBoss orbit Ball took its last chip and broke away: the detach explosion + "expl1".
         BallDetach = 1,
-        // An enemy fired a single-shot Lazer at `pos`: the "lazershotnoloop" cue. Emitted at the
+        // An enemy fired a single-shot Lazer: the "lazershotnoloop" cue (2D, so it needs no
+        // position). Emitted at the
         // host's real firing moment rather than off the beam's EvSpawn, because ReplayLive
         // re-sends EvSpawn for the WHOLE live set at a join-in-progress catch-up and the puppet
         // layer cannot tell that from a fresh spawn -- which would salvo every live beam's cue at

@@ -162,7 +162,7 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		// one). The blink is 35ms against a 60ms-to-1.2s snapshot turn, so it cannot ride the
 		// snapshot at all; it needs its own beat. A no-op with no session or no peer.
 		EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
-			EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this, base.Position);
+			EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this);
 		if ((hitpoints <= 0) & !dead)
 		{
 			// Game juice: every confirmed kill lands a punch — a micro freeze-frame + a tap

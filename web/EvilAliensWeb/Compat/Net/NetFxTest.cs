@@ -132,8 +132,8 @@ namespace EvilAliensWeb.Compat.Net
             // The two typeIdxs are LOOKED UP through the real registry rather than written down:
             // the wire typeIdx IS the registry order, so a literal here would silently spawn some
             // other enemy the day a descriptor is appended ahead of these.
-            byte ufoIdx = TypeIdxOf(game, UFO.NewUFO(bin, game), Check, "UFO");
-            byte ballIdx = TypeIdxOf(game, Ball.NewBall(bin, game), Check, "Ball");
+            byte ufoIdx = TypeIdxOf(UFO.NewUFO(bin, game), Check, "UFO");
+            byte ballIdx = TypeIdxOf(Ball.NewBall(bin, game), Check, "Ball");
 
             NetBaseState state = default(NetBaseState);
             state.Pos = Nowhere;
@@ -162,7 +162,7 @@ namespace EvilAliensWeb.Compat.Net
             Check("a fresh puppet is NOT blinking (the pre-state)", !ufo.NetHitBlinking);
 
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.EnemyHitFlash, UfoId, Nowhere, 0));
+                (byte)NetFxKind.EnemyHitFlash, UfoId, 0));
             wire.Pump();
             NetSession.Update();
             Check("an EnemyHitFlash beat lights the puppet up", ufo.NetHitBlinking);
@@ -172,7 +172,7 @@ namespace EvilAliensWeb.Compat.Net
             // case (the entity died while the beat was in flight).
             long beatsBefore = NetSession.Metrics.BeatsRx;
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.EnemyHitFlash, UnknownId, Nowhere, 0));
+                (byte)NetFxKind.EnemyHitFlash, UnknownId, 0));
             wire.Pump();
             NetSession.Update();
             Check("a beat for an unknown netId is consumed harmlessly (BeatsRx +"
@@ -184,7 +184,7 @@ namespace EvilAliensWeb.Compat.Net
             Check("the ball is not blinking and has not detached (the pre-state)",
                 !ball.NetHitBlinking && !ball.NetDetachedFx);
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.EnemyHitFlash, BallId, Nowhere, 0));
+                (byte)NetFxKind.EnemyHitFlash, BallId, 0));
             wire.Pump();
             NetSession.Update();
             Check("a chip beat lights the ball up", ball.NetHitBlinking);
@@ -194,7 +194,7 @@ namespace EvilAliensWeb.Compat.Net
             bin.TopOfTickFlush();
             int explosionsBefore = CountExplosions(game);
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.BallDetach, BallId, Nowhere, 0));
+                (byte)NetFxKind.BallDetach, BallId, 0));
             wire.Pump();
             NetSession.Update();
             int explosionsAfter = CountExplosions(game);
@@ -207,7 +207,7 @@ namespace EvilAliensWeb.Compat.Net
             // the client has already run the real one. A second burst would be a visible double
             // explosion, and the latch is what stops it.
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.BallDetach, BallId, Nowhere, 0));
+                (byte)NetFxKind.BallDetach, BallId, 0));
             wire.Pump();
             NetSession.Update();
             Check("a SECOND detach beat for the same ball fires nothing (explosions still +"
@@ -229,9 +229,9 @@ namespace EvilAliensWeb.Compat.Net
             Check("a second, un-chipped ball is up and not blinking",
                 ball2 != null && !ball2.NetHitBlinking);
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.BallDetach, BallId2, Nowhere, 0));
+                (byte)NetFxKind.BallDetach, BallId2, 0));
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.EnemyHitFlash, BallId2, Nowhere, 0));
+                (byte)NetFxKind.EnemyHitFlash, BallId2, 0));
             wire.Pump();
             NetSession.Update();
             Check("a chip beat AFTER the detach is refused (the ball never lights up)",
@@ -244,7 +244,7 @@ namespace EvilAliensWeb.Compat.Net
             // a NetPlayFx that "helpfully" also decremented would desync the two worlds silently.
             int hpBefore = ((INetEntity)ufo).NetKillable.NetHitPoints;
             peer.SendReliable(NetProtocol.EncodeFxEvent(eventSeq++,
-                (byte)NetFxKind.EnemyHitFlash, UfoId, Nowhere, 0));
+                (byte)NetFxKind.EnemyHitFlash, UfoId, 0));
             wire.Pump();
             NetSession.Update();
             Check("a hit beat spends NO hitpoints (hp " + hpBefore + " -> "
@@ -306,9 +306,9 @@ namespace EvilAliensWeb.Compat.Net
             return packet;
         }
 
-        // The registry index for a live instance of `t`'s type, asserted rather than assumed.
+        // The registry index for a live instance of this type, asserted rather than assumed.
         // The instance is a throwaway -- it is never added to the bin, so it takes no NetId.
-        private static byte TypeIdxOf(Game game, AlienDrawableGameComponent probe,
+        private static byte TypeIdxOf(AlienDrawableGameComponent probe,
             Action<string, bool> Check, string name)
         {
             bool ok = NetTypeRegistry.TryGet((GameComponent)(object)probe, out byte idx, out _);

@@ -594,79 +594,6 @@ internal static class Program
     //   3. a NEGATIVE value -- parseable but refused by the range guard, i.e. the second way into
     //      the else, which a TryParse-only test would miss.
     // Then the two per-tier knobs' wording, which cannot be a number (see below).
-    // The AI's seek weights against its park threshold (cards 31ceb6ff / ada9e839).
-    //
-    // WHAT THIS IS AND IS NOT. It is an ORDERING property over four constants, not a restatement
-    // of any one of them: DoAIMove expresses "go to my idle station", "go and fetch that powerup"
-    // and "close on that level-halting boss" through the SAME steerTarget, and the park
-    // (`direction.Length() <= SteerParkDemand -> Vector2.Zero`) has to zero the first two and NOT
-    // the third. Before card 31ceb6ff all of them rode SeekWeight 0.8 under a 0.95 park, so the
-    // boss-approach term added by card f4d1721f was correct code the park silently deleted.
-    //
-    // WHY IT MATTERS THAT IT IS PINNED HERE. The three constants live apart and are individually
-    // plausible; nudging the park to 1.7 "to settle the idle fidget" would revert this card
-    // completely, change nothing else, and produce no error, no visual difference and no console
-    // line. The only symptom is a bot that stops going places, which is what the original report
-    // was.
-    //
-    // LIMIT, stated rather than papered over: DoAIMove needs a Game, an Oracle and a live scene,
-    // so it cannot be invoked here -- this proves the CONFIGURATION is coherent, never that the
-    // split is wired up. `tools/headless/probes/ai_boss_approach.txt` covers the wiring, by
-    // soaking the real bot against a boss it has to close on.
-    private static int ProbeAiSeekWeights(Assembly asm)
-    {
-        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
-        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-        string[] names = { "SeekWeight", "DefaultSteerParkDemand", "DefaultSeekPowerupWeight", "DefaultSeekApproachWeight", "DefaultPowerupReachPx" };
-        var vals = new Dictionary<string, float>();
-        foreach (string n in names)
-        {
-            FieldInfo f = ship.GetField(n, anyStatic);
-            if (f == null || !f.IsLiteral)
-            {
-                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " as a const -- renamed, moved, or no longer const?");
-                return 2;
-            }
-            vals[n] = (float)f.GetRawConstantValue();
-        }
-
-        Console.WriteLine("[logic_probe] AI seek weights vs the park threshold (card ada9e839)");
-        float station = vals["SeekWeight"], park = vals["DefaultSteerParkDemand"];
-        float powerup = vals["DefaultSeekPowerupWeight"], approach = vals["DefaultSeekApproachWeight"];
-
-        Check("the idle STATION pull parks (station <= park)", station <= park,
-            "SeekWeight " + station + " vs SteerParkDemand " + park
-            + " -- above it and an idle ship fidgets around an arbitrary spot forever");
-        Check("the boss STANDOFF clears the park (approach > park)", approach > park,
-            "DefaultSeekApproachWeight " + approach + " vs SteerParkDemand " + park
-            + " -- at or below it the park zeroes the only vote asking the ship to close on a"
-            + " level-halting boss, and card 31ceb6ff is inert code again");
-        // Not a tuned bound, a structural one: Move() throws the magnitude away and thrusts at
-        // full acceleration along the ANGLE, so a seek that can out-vote the threat field is a
-        // bot that flies into things to reach them.
-        Check("closing never outranks not dying (approach < the threat field's 4)", approach < 4f,
-            "DefaultSeekApproachWeight " + approach);
-        // The DECLINED half, asserted as declined. Raising it is a real change with a measured
-        // cost (card ada9e839's SpaceDodge table), so it must not drift up unnoticed -- and the
-        // ?aiseekpowerup= override still moves it, which is how that card gets re-measured.
-        Check("the powerup detour is still parked, i.e. shipped behaviour is unchanged there",
-            powerup <= park,
-            "DefaultSeekPowerupWeight " + powerup + " -- measured at 1.1 and 1.6 and DECLINED"
-            + " (SpaceDodge victories 6/8 -> 2/8 and 4/8); see the const before raising it");
-        Check("the powerup reach is its own quantity, not the screen-edge margin",
-            vals["DefaultPowerupReachPx"] > 0f,
-            "DefaultPowerupReachPx " + vals["DefaultPowerupReachPx"]
-            + " (baked at the 2008 steerRange value -- 300 was measured inert, see the const)");
-
-        // NEGATIVE CONTROL: the pre-card configuration, i.e. the standoff seeking at the STATION's
-        // weight, run through the same predicate. It must FAIL -- otherwise the check above is
-        // satisfied by any pair of numbers and proves nothing.
-        Check("the PRE-CARD configuration is rejected by that same predicate (control)",
-            !(station > park),
-            "a standoff at SeekWeight " + station + " does not clear the " + park + " park -- which is the bug");
-        return 0;
-    }
-
     private static int ProbeAiFlagRejection(Assembly asm)
     {
         Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
@@ -703,7 +630,7 @@ internal static class Program
             new { Flag = "aifieldsize",    Prop = "AiThreatFieldSize",     Good = "6",   Want = (object)6f,    Baked = "1.8"  },
             new { Flag = "aifieldfall",    Prop = "AiThreatFieldFalloff",  Good = "8",   Want = (object)8f,    Baked = "3"    },
             new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
-            new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = ""  },
+            new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
         };
@@ -824,6 +751,86 @@ internal static class Program
     //   leg 3  a negative value      -> the same, for the flags whose guard refuses one
     // Reading back also sidesteps every inline clamp (?holofilter caps at 2, ?aifriends at 3, ...)
     // without this file having to know a single one of them.
+    // The AI's seek weights against its park threshold (cards 31ceb6ff / ada9e839).
+    //
+    // WHAT THIS IS AND IS NOT. It is an ORDERING property over four constants, not a restatement
+    // of any one of them: DoAIMove expresses "go to my idle station", "go and fetch that powerup"
+    // and "close on that level-halting boss" through the SAME steerTarget, and the park
+    // (`direction.Length() <= SteerParkDemand -> Vector2.Zero`) has to zero the first two and NOT
+    // the third. Before card 31ceb6ff all of them rode SeekWeight 0.8 under a 0.95 park, so the
+    // boss-approach term added by card f4d1721f was correct code the park silently deleted.
+    //
+    // WHY IT MATTERS THAT IT IS PINNED HERE. The three constants live apart and are individually
+    // plausible; nudging the park to 1.7 "to settle the idle fidget" would revert this card
+    // completely, change nothing else, and produce no error, no visual difference and no console
+    // line. The only symptom is a bot that stops going places, which is what the original report
+    // was.
+    //
+    // LIMIT, stated rather than papered over: DoAIMove needs a Game, an Oracle and a live scene,
+    // so it cannot be invoked here -- this proves the CONFIGURATION is coherent, never that the
+    // split is wired up. `tools/headless/probes/ai_boss_approach.txt` covers the wiring, by
+    // soaking the real bot against a boss it has to close on.
+    private static int ProbeAiSeekWeights(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        string[] names = { "SeekWeight", "DefaultSteerParkDemand", "DefaultSeekPowerupWeight", "DefaultSeekApproachWeight", "DefaultPowerupReachPx" };
+        var vals = new Dictionary<string, float>();
+        foreach (string n in names)
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " as a const -- renamed, moved, or no longer const?");
+                return 2;
+            }
+            vals[n] = (float)f.GetRawConstantValue();
+        }
+
+        Console.WriteLine("[logic_probe] AI seek weights vs the park threshold (card ada9e839)");
+        float station = vals["SeekWeight"], park = vals["DefaultSteerParkDemand"];
+        float powerup = vals["DefaultSeekPowerupWeight"], approach = vals["DefaultSeekApproachWeight"];
+
+        // The predicate DoAIMove's park actually applies, named once so the checks below and the
+        // control cannot drift into being two different tests.
+        Func<float, bool> movesTheShip = w => w > park;
+
+        Check("the idle STATION pull parks (station <= park)", !movesTheShip(station),
+            "SeekWeight " + station + " vs SteerParkDemand " + park
+            + " -- above it and an idle ship fidgets around an arbitrary spot forever");
+        Check("the boss STANDOFF clears the park (approach > park)", movesTheShip(approach),
+            "DefaultSeekApproachWeight " + approach + " vs SteerParkDemand " + park
+            + " -- at or below it the park zeroes the only vote asking the ship to close on a"
+            + " level-halting boss, and card 31ceb6ff is inert code again");
+        // Not a tuned bound, a structural one: Move() throws the magnitude away and thrusts at
+        // full acceleration along the ANGLE, so a seek that can out-vote the threat field is a
+        // bot that flies into things to reach them.
+        Check("closing never outranks not dying (approach < the threat field's 4)", approach < 4f,
+            "DefaultSeekApproachWeight " + approach);
+        // The DECLINED half, asserted as declined. Raising it is a real change with a measured
+        // cost (card ada9e839's SpaceDodge table), so it must not drift up unnoticed -- and the
+        // ?aiseekpowerup= override still moves it, which is how that card gets re-measured.
+        Check("the powerup detour is still parked, i.e. shipped behaviour is unchanged there",
+            !movesTheShip(powerup),
+            "DefaultSeekPowerupWeight " + powerup + " -- measured at 1.1 and 1.6 and DECLINED"
+            + " (SpaceDodge victories 6/8 -> 2/8 and 4/8); see the const before raising it");
+        Check("the powerup reach is its own quantity, not the screen-edge margin",
+            vals["DefaultPowerupReachPx"] > 0f,
+            "DefaultPowerupReachPx " + vals["DefaultPowerupReachPx"]
+            + " (baked at the 2008 steerRange value -- 300 was measured inert, see the const)");
+
+        // NEGATIVE CONTROL: run the SHIPPED weight and the PRE-CARD one (the standoff at the
+        // station's weight) through the same predicate and require them to disagree. Asserting
+        // only that the pre-card value fails would restate the station check above -- it is the
+        // same two constants -- so the discriminating claim is that the card MOVED the standoff
+        // across the threshold, which one build can satisfy and the other cannot.
+        Check("the card moved the standoff ACROSS the park (control: pre-card did not clear it)",
+            movesTheShip(approach) && !movesTheShip(station),
+            "shipped " + approach + " clears the " + park + " park, pre-card " + station
+            + " did not -- that gap is the whole fix");
+        return 0;
+    }
+
     private static int ProbeFlagRejectionSweep(Assembly asm)
     {
         Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);

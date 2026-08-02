@@ -1817,7 +1817,10 @@ the rest are tier-independent.
   into a PARKED boss and losing a dodge against a screen-wide sweep are opposite failures that
   `deaths` alone cannot tell apart. `pickups=<n>/<spawned>(<pct>%)` is the powerup rate, with the
   denominator so "the bot ignores powerups" and "this run dropped two" are distinguishable, and
-  `boss=<px> bossfar=<pct>` is the approach term measured where it acts.
+  `boss=<px> bossfar=<pct>` is the approach term measured where it acts. **`Row()` spells the
+  first two differently** -- `pickups=<n> poffered=<spawned>` and no percentage -- because its
+  parser is `split(. .)` then the first `=`, so a value carrying a bracket or a space is what
+  breaks `eaAiBench.matrix`; the percentage exists in `Line()` only, for probes to regex.
   **Standing result worth knowing: on `?level=Level2&spiderboss` (Very_Hard, no `?invuln`, 180
   sim-s, N=16) `SpiderBoss(standing)` is 39 of 101 deaths -- the largest single killer, and more
   than double the moving boss's 25.** So "the AI happily runs into the spider boss when it is

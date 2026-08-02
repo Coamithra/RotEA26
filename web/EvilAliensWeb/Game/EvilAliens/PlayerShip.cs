@@ -693,6 +693,12 @@ public class PlayerShip : AlienDrawableGameComponent
 	{
 		optionLevel = 0;
 		asplodeOnNextFrame = false;
+		// Cleared with its flag, or it survives the respawn: Killer_OnDeath only fires while the
+		// killer itself dies, so a ship killed by something that is still alive carried that
+		// reference for the rest of the session and AiBench would attribute a LATER, unrelated
+		// death to it (card b56633fb -- the killer histogram is only worth reading if it cannot
+		// name a stale one).
+		asplosionCauser = null;
 		isTutorial = false;
 		respawntimebonus = 0;
 		readyToConnect = false;
@@ -1289,8 +1295,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// How hard to pull toward whatever steerTarget ends up being. It carries the WEIGHT rather
 		// than a flag because the answer is not two-valued: the idle station and every DETOUR park
 		// (SeekWeight, as before this card), while a level-halting boss's standoff point has to
-		// clear the park or it is dead code. Assigned beside the steerTarget assignments that
-		// differ; everything else, the two station fallbacks included, keeps this default.
+		// clear the park or it is dead code.
+		// INVARIANT: a steerTarget write that can run AFTER another one must set this too, even
+		// to SeekWeight -- otherwise it inherits the previous writer's weight rather than the
+		// default, and a detour silently flies at the standoff's. Only the two writes inside the
+		// baddy loop (a blastable cluster, a JunkBoss) are exempt, and only because nothing has
+		// written a weight yet by then; the two station fallbacks are exempt because they run
+		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
 		float dodgeAngle = 0f;
 		if (player == 0)
@@ -1579,6 +1590,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			if (ship.readyToConnect && ship != this && readyToConnect && !isConnectedWith(ship))
 			{
 				steerTarget = ship.Position;
+				// EVERY steerTarget write sets its own weight, including the ones that keep the
+				// station's. This one overwrites the boss standoff above, so inheriting silently
+				// would fly the DETOUR at the standoff's weight -- the one case where "leave it
+				// at the default" and "leave it at whatever the last writer set" differ.
+				steerTargetWeight = SeekWeight;
 			}
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
@@ -2358,7 +2374,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// it from the local player's world with no way to reconcile.
 		if (other is Powerup && !((Powerup)other).taken && !IsNetPuppet)
 		{
-			EvilAliensWeb.Compat.AiBench.NotePickup(this);
+			// AI ships only, like the wall-contact hook above: a human sharing the couch under
+			// ?aibench would otherwise open a ShipRec for their slot and add a phantom column --
+			// and on slot 0 it is a HUMAN's counters that reach eaAiBench.matrix's table.
+			if (EffectiveController() == ControlDevice.AI)
+			{
+				EvilAliensWeb.Compat.AiBench.NotePickup(this);
+			}
 			currentPower = ((Powerup)other).type;
 			Score.SetPowerup(currentPower, player);
 			haspower = true;
@@ -2449,9 +2471,10 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void AsplodeWall()
 	{
-		// The causer is not carried through this path (CollidesWith calls it directly for a
-		// Wall, without queueing), so name the killer from the path itself.
-		EvilAliensWeb.Compat.AiBench.NoteDeath(this, asplosionCauser ?? (object)"Wall");
+		// VERBATIM, never `asplosionCauser ?? "Wall"`. CollidesWith calls this directly for a Wall
+		// without queueing, so the causer field belongs to some EARLIER death here and reading it
+		// would file a wall clip under whatever killed the ship last.
+		EvilAliensWeb.Compat.AiBench.NoteDeath(this, "Wall");
 		// Game juice: the player's own death is the biggest impact in the game — a real
 		// freeze-frame + extra trauma on top of what the two explosions below add.
 		EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);
@@ -2472,7 +2495,12 @@ public class PlayerShip : AlienDrawableGameComponent
 	{
 		if (!base.IsDead)
 		{
-			EvilAliensWeb.Compat.AiBench.NoteDeath(this, asplosionCauser);
+			// Only trust the causer when this death was actually QUEUED by a collision. Asplode is
+			// also called directly (eaKillShips, a scripted kill), where the field holds whatever
+			// last queued one -- reporting that would invent a collision. Deliberately NOT cleared
+			// here: the field gates the early-out in Update, so spending it would let a dead ship
+			// run the rest of its Update a tick sooner. Initialize clears it per life.
+			EvilAliensWeb.Compat.AiBench.NoteDeath(this, asplodeOnNextFrame ? asplosionCauser : null);
 			// Game juice: same death punch as AsplodeWall — freeze-frame + extra trauma on
 			// top of the two explosions' own shake.
 			EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);

@@ -83,8 +83,15 @@ expect \[netentity\] PASS \(38 passed, 0 failed\)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
 expect \[kicktest\] PASS \(29/29 checks\)
-# snapshot unknown-id attribution + the snapTurn arithmetic (card 48ab9b2f)
-expect \[netsnap\] PASS \(18 passed, 0 failed\)
+# snapshot unknown-id attribution + the snapTurn arithmetic (card 48ab9b2f). Card de4d5d65 added
+# section 6 -- 18 -> 36 -- the self-heal builds with NO spawn extras, so the reliable EvSpawn that
+# follows must REBUILD the puppet rather than be dropped as a duplicate: a Powerup otherwise keeps
+# Randomize()'s local random type and a bonus UFO never gets its SetAsBonus, i.e. the joiner sees a
+# carrier whose colour does not match its powerup, permanently. Two of those legs are not about the
+# extras at all but about the ORDER the rebuild detaches in (bin.Remove is deferred, so the stale
+# component's ComponentRemoved lands after the replacement took the same netId); mutation-tested
+# separately, and that mutation fails ONLY those two.
+expect \[netsnap\] PASS \(36 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a)
 expect -> ALL PASS \(36 passed, 0 failed\)
 # the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)

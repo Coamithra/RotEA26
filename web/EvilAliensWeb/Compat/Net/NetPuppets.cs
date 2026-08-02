@@ -29,7 +29,10 @@ namespace EvilAliensWeb.Compat.Net
     public enum SpawnRejectKind
     {
         None = 0,     // the puppet was BUILT and landed. Not a rejection.
-        AlreadyLive,  // we already hold this id. BENIGN and expected in bursts: the snapshot
+        AlreadyLive,  // we already hold this id -- and it was NOT self-healed, so it already
+                      // carries the host's spawn extras and this really is a duplicate. (A
+                      // self-healed puppet takes the rebuild path in OnSpawn instead and
+                      // reports None, card de4d5d65.) BENIGN and expected in bursts: the snapshot
                       // self-heal rebuilds ids off the unreliable stream lane, so the ordered
                       // EvSpawn for one of those arrives second, and a checkpoint revert
                       // re-spawns ids across a purge the client is still settling. Measured on
@@ -90,6 +93,10 @@ namespace EvilAliensWeb.Compat.Net
             public float CorrectionMsLeft;
             public float TargetScale;
             public bool HasSnapshot;
+            // Built by the snapshot self-heal, i.e. with NO spawn extras -- so its variant
+            // cosmetics are the descriptor's defaults, not the host's. The reliable EvSpawn
+            // that follows rebuilds it properly (card de4d5d65); cleared once it has.
+            public bool SelfHealed;
         }
 
         private static readonly Dictionary<ushort, PuppetInfo> byId = new Dictionary<ushort, PuppetInfo>();
@@ -193,15 +200,40 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- wire -> puppets ----------------------------------------------------------------
 
-        public static SpawnRejectKind OnSpawn(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int off, int len)
+        // `selfHealed` is true ONLY for the snapshot self-heal below, which constructs with no
+        // spawn extras at all (card de4d5d65). It is not the same question as `len == 0`: several
+        // types legitimately have no spawn extras, and their puppets are complete.
+        public static SpawnRejectKind OnSpawn(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int off, int len, bool selfHealed = false)
         {
             if (!enabled)
             {
                 return SpawnRejectKind.Disabled;
             }
-            if (byId.ContainsKey(netId))
+            if (byId.TryGetValue(netId, out PuppetInfo livePuppet))
             {
-                return SpawnRejectKind.AlreadyLive;
+                // A self-healed puppet was built from a SNAPSHOT, i.e. with no spawn extras --
+                // so it is wearing whatever its descriptor's default construction produced: an
+                // untinted bonus UFO (no SetAsBonus), a Powerup carrying Randomize()'s local
+                // random type instead of the host's, a small saucer where the host has a big
+                // one. The extras that would fix it are on the reliable EvSpawn that is arriving
+                // RIGHT NOW, and discarding it as a duplicate is what made those defects
+                // permanent. Rebuild the puppet from the real extras instead. Anything NOT
+                // self-healed is an ordinary duplicate and still rejects (card de4d5d65).
+                if (!livePuppet.SelfHealed || selfHealed)
+                {
+                    return SpawnRejectKind.AlreadyLive;
+                }
+                // Detach BEFORE asking the bin to remove: bin.Remove is DEFERRED to the next
+                // flush, by which point the replacement is already registered under this same
+                // netId. Components_ComponentRemoved early-returns on an unmapped component, so
+                // dropping the old maps here makes that late event a complete no-op -- leave the
+                // maps in place and it would evict the REPLACEMENT from byId and MarkRemoved the
+                // id, and every following snapshot entry would read as LeftDead.
+                var stale = (GameComponent)(object)livePuppet.Comp;
+                idByComp.Remove(stale);
+                byId.Remove(netId);
+                live.Remove(livePuppet);
+                bin.Remove(stale);
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(typeIdx);
             if (desc == null)
@@ -253,6 +285,7 @@ namespace EvilAliensWeb.Compat.Net
                 TypeIdx = typeIdx,
                 Vel = state.Vel,
                 TargetScale = state.Scale > 0f ? state.Scale : entity.NetScale,
+                SelfHealed = selfHealed,
             };
             ApplySnapshotState(info, state, null, null, 0, 0, isSpawn: true);
             byId[netId] = info;
@@ -273,10 +306,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 // Self-heal: an id we never built (spawn raced the stream / a local purge
                 // dropped the world while the host's lives on) is reconstructed from the
-                // snapshot itself -- default construction extras, so a variant may look
-                // generic until nothing (spawn extras only pick cosmetics). An id removed HERE
-                // moments ago is a death still settling (our claim, or the host's EvDeath):
-                // leave it dead.
+                // snapshot itself -- with NO spawn extras, so a variant looks generic (an
+                // untinted bonus UFO, a Powerup carrying a locally-random type). The puppet is
+                // flagged SelfHealed and the reliable EvSpawn, when it arrives, REBUILDS it from
+                // the real extras rather than being dropped as a duplicate (card de4d5d65); when
+                // it never arrives -- the purge case -- the generic look is all there is. An id
+                // removed HERE moments ago is a death still settling (our claim, or the host's
+                // EvDeath): leave it dead.
                 //
                 // WHICH of those three it was is reported to the caller (card 48ab9b2f). They
                 // all return false and used to share one snapUnk counter, but they mean
@@ -294,7 +330,7 @@ namespace EvilAliensWeb.Compat.Net
                     // kind means the same thing to it -- the entry did not apply. The finer
                     // causes are the EvSpawn lane's business (SpawnRejectKind), and folding
                     // them in would make snapBad and dupBad count the same event twice.
-                    kind = OnSpawn(netId, typeIdx, state, buf, extraOff, 0) == SpawnRejectKind.None
+                    kind = OnSpawn(netId, typeIdx, state, buf, extraOff, 0, selfHealed: true) == SpawnRejectKind.None
                         ? SnapUnknownKind.Rebuilt
                         : SnapUnknownKind.Refused;
                 }

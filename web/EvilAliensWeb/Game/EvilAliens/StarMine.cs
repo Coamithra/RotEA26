@@ -243,6 +243,11 @@ public class StarMine : KillableAlien
 	{
 		if (!base.IsDead)
 		{
+			// Online co-op (card 4e406eba): a mine detonating on its own timer, or set off by a
+			// neighbour's blast, is a real death with NO killing blow -- so KillableAlien.HitBy
+			// never runs and the removal seam had nothing to attribute. Without this note the
+			// host broadcast KillerNone and the mine simply vanished on the other screen.
+			EvilAliensWeb.Compat.Net.NetSession.NoteSelfDestruct(this);
 			Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 			explosion.Setup(base.Position, 3.5f, 2.5f, 0.03f, base.Direction);
 			explosion.MakeBlue();
@@ -360,6 +365,15 @@ public class StarMine : KillableAlien
 		collection.Add((GameComponent)(object)explosion);
 		sound.PlayCue("expl1");
 		Die();
+	}
+
+	// Card 4e406eba: the mine's self-destruct looks nothing like being shot -- Asplode() is two
+	// big BLUE bursts and "expl2", KilledBy is one small white burst and "expl1" -- so the peer
+	// replays the real thing. Asplode() guards on IsDead and ends in Die(), so it is safe to
+	// call on a puppet and removes it itself.
+	internal override void NetReplayUnattributedDeath(ICollidable agent)
+	{
+		Asplode();
 	}
 
 	internal void AttractByBoss(JunkBoss junkBoss)

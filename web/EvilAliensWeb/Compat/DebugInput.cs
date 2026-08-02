@@ -507,6 +507,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSnapshotTest.Run();
 		}
 
+		// JS bridge for the join-peer death-FX suite (eaNetDeathFx in wwwroot/index.html; cards
+		// 4e406eba / 303bfb5b / 13aa596c). Both halves of "the enemy just vanishes on P2": an
+		// unattributed real death arriving as KillerSelf, and a deferred death (BattleSkull,
+		// the surviving MarsBoss) releasing its puppet from the freeze so the animation plays.
+		// Menu-only and leave-no-trace; the FX are an absence, so this is data, not a screenshot.
+		[JSInvokable("debugNetDeathFx")]
+		public static string NetDeathFx()
+		{
+			return EvilAliensWeb.Compat.Net.NetDeathFxTest.Run();
+		}
+
 		// JS bridge for the step-4 scenario harness (eaNetScenarios in wwwroot/index.html, card
 		// 25ad0659). Five scenarios over ONE real session with a scripted wire peer: the three
 		// generous-claim shapes, the OneUp overlap, and the id-churn self-heal that carries the

@@ -189,6 +189,11 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		NetKill(killer, isComboGenerator);
 	}
 
+	void EvilAliensWeb.Compat.Net.INetKillable.NetReplayUnattributedDeath(ICollidable agent)
+	{
+		NetReplayUnattributedDeath(agent);
+	}
+
 	internal int NetHitPoints => hitpoints;
 
 	// Apply a replicated hp value to a frozen client puppet. Only ever lowers (local hits
@@ -229,5 +234,22 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		EvilAliensWeb.Compat.Juice.KillPunch(isboss);
 		KilledBy(killer, isComboGenerator);
 		dead = true;
+	}
+
+	// Replay a death NOBODY landed the killing blow on (cards 4e406eba / 303bfb5b / 13aa596c):
+	// the host's copy self-destructed or was killed off-script, told the net layer so
+	// (NetSession.NoteSelfDestruct), and the peer must show the same bang.
+	//
+	// The default IS the type's ordinary death look, which is right for almost everything.
+	// Override only where the self-destruct genuinely looks DIFFERENT from being shot — the
+	// shipped case is StarMine, whose Asplode() is two big blue bursts and "expl2" while its
+	// KilledBy is one small burst and "expl1".
+	//
+	// `agent` is NetPuppets' scratch Bullet carrying KillerSelf as its slot, so a KilledBy that
+	// casts `other` to Bullet still works; nothing is credited, because the caller has already
+	// claimed the award slot with NetSuppressAward().
+	internal virtual void NetReplayUnattributedDeath(ICollidable agent)
+	{
+		NetKill(agent, isComboGenerator: false);
 	}
 }

@@ -1134,6 +1134,29 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // "I am about to die a real death that nobody landed" -- a self-detonating space mine, a
+        // scripted crash (cards 4e406eba / 303bfb5b / 13aa596c). Called by the game immediately
+        // before its own Die(), so the note is on the entity when the removal seam reads it and
+        // OnHostDeath can put KillerSelf on the wire instead of KillerNone.
+        //
+        // IT IS OPT-IN AT THE CALL SITE, and that is the whole safety argument. The alternative
+        // -- inferring it from `IsDead` at the removal seam -- cannot tell a self-destruct from
+        // the dozens of FX-free Die() sites that mean "I have left the world" (every OffScreen
+        // despawn, Parachute's fade-out, ParatrooperBrain's merge, Lazer being eaten by the
+        // spider boss), so it would put a bang and a sound on the peer's screen where the host
+        // showed nothing. A hook says exactly what the game meant.
+        //
+        // Costs one bool test offline. Runs on BOTH peers: a client that self-destructs a
+        // RELEASED puppet (see NetPuppets.ReleaseDyingPuppet) notes it too, where the note is
+        // simply consumed by the removal seam and never sent -- the host is the authority.
+        public static void NoteSelfDestruct(AlienDrawableGameComponent comp)
+        {
+            if (Active && NetTypeRegistry.IsReplicableInstance((GameComponent)(object)comp))
+            {
+                NoteKillSlot(comp, NetProtocol.KillerSelf);
+            }
+        }
+
         // Powerup pickups are claims too: the collecting side records WHO took it before
         // Powerup.Die() cascades into removal.
         public static void NotePowerupTaken(Powerup powerup, int playerSlot)
@@ -1239,6 +1262,22 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // How far outside the 800x600 design screen a self-destruct still counts as visible.
+        // Matches the buffer AlienDrawableGameComponent.OffScreen is called with by the types
+        // that despawn themselves (StarMine/ParatrooperAlien use 100), so "off screen enough to
+        // despawn" and "off screen enough not to bother exploding" are the same edge.
+        private const float DeathFxMarginPx = 100f;
+
+        // The same test AlienDrawableGameComponent.OffScreen(100) makes, inverted -- restated
+        // here rather than reached through the seam because INetEntity carries Position and not
+        // OffScreen, and putting a screen-bounds test on the entity seam for one caller would be
+        // a worse trade than four literals that already appear verbatim in the game code.
+        private static bool OnScreenForDeathFx(Vector2 pos)
+        {
+            return pos.X >= 0f - DeathFxMarginPx && pos.X <= 800f + DeathFxMarginPx
+                && pos.Y >= 0f - DeathFxMarginPx && pos.Y <= 600f + DeathFxMarginPx;
+        }
+
         internal static void OnHostDeath(NetIdRegistry.Entry e)
         {
             if (!Active)
@@ -1247,6 +1286,12 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte killer = TakeKillNote(e.Comp);
             Vector2 pos = e.Comp.Position;
+            if (killer == NetProtocol.KillerSelf && !OnScreenForDeathFx(pos))
+            {
+                // A self-destruct the host itself showed nothing of: play nothing at the peer
+                // either. Downgrading to KillerNone means the ordinary silent despawn.
+                killer = NetProtocol.KillerNone;
+            }
             // recentDeaths keeps the BASE value: a later claim from the other peer is a fresh
             // generous payout the host still credits with its own live combo (card 11.2), not
             // a replay of the award below.
@@ -2644,7 +2689,10 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
-                byte killer = data[6]; // wire slot == oracle slot on both peers
+                // Wire slot == oracle slot on both peers. Clamped at the decode boundary like
+                // every other raw wire value -- see NetProtocol.ClampKillerSlot for why this
+                // one degrades to KillerNone instead of dropping the message.
+                byte killer = NetProtocol.ClampKillerSlot(data[6]);
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
                 NetProtocol.ReadDeathAwards(data, deathAwardScratch);
                 NetPuppets.OnRemoteDeath(id, killer, pos, deathAwardScratch);

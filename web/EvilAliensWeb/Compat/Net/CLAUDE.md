@@ -782,12 +782,80 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   and replicate); already dead -> pay the claimant once from a bounded recent-death
   record. Host broadcasts `EvDeath(netId, killerSlot, pos, points)` for every replicable
   removal (killerSlot from the `NetSession.NoteKill` hook in KillableAlien.HitBy);
-  client: live puppet + killer -> local NetKill (FX + credit), no killer -> silent
+  client: live puppet + killer -> local NetKill (FX + credit), `KillerSelf` -> the type's
+  own death FX and nobody paid (next bullet), no killer -> silent
   despawn, already dead -> pay the killer once. Per-(netId, slot) paid ledgers both sides
   = every distinct claimant credited, nobody credited twice. Powerups are the same claim
   shape: the real PlayerShip pickup runs instantly on the collector (a
   `NetSession.NotePowerupTaken` hook attributes it), first claim despawns the entity,
   overlapping collectors inside the RTT window BOTH keep it.
+  - **A DEATH NOBODY LANDED IS `KillerSelf` (0xFE), NOT `KillerNone` (cards 4e406eba /
+    303bfb5b / 13aa596c).** `StarMine.Asplode()` is a real death -- two blue bursts and a cue --
+    that never runs `KillableAlien.HitBy`, so `NoteKill` never fires and the host used to
+    broadcast `KillerNone`, whose client branch is a bare `bin.Remove`: **the mine simply blinked
+    out on P2.** The two cases cannot share a value, because `KillerNone` is also every
+    off-screen fly-off and every teardown purge, and exploding those puts a bang AND A SOUND
+    where the host showed nothing.
+    - **NO PROTOCOL CHANGE AND NO VERSION BUMP.** It reuses `EvDeath`'s existing killerSlot
+      byte, whose 0x08..0xFE were all dead values (`Oracle.MaxPlayers` is 4). A peer that would
+      misread it cannot exist: the build-hash handshake refuses to pair two different binaries.
+      Validated at the decode boundary like every other raw wire value --
+      `NetProtocol.ClampKillerSlot`, which **CLAMPS rather than REJECTS** (the message also
+      carries the REMOVAL, and dropping it strands a puppet the host has deleted, permanently,
+      since no later snapshot will mention that id). Its payable bound is **8, the PaidMask
+      width, not `MaxSlots`** -- `NoteKill` already admits 0..7.
+    - **It is OPT-IN at the death site (`NetSession.NoteSelfDestruct`), never inferred.** The
+      obvious alternative -- "`IsDead` at the removal seam" -- cannot tell a self-destruct from
+      the dozens of FX-free `Die()` sites that mean "I have left the world" (`OffScreen`
+      despawns, `Parachute`'s fade-out, `ParatrooperBrain`'s merge, a `Lazer` eaten by the spider
+      boss), so it would explode all of them. A hook says exactly what the game meant.
+      **`OnHostDeath` still gates it on the entity being ON SCREEN** (±100 px, the same buffer
+      the self-despawning types pass to `OffScreen`), so a self-destruct the host itself showed
+      nothing of stays silent.
+    - **The client replays the type's OWN self-destruct look**, via
+      `KillableAlien.NetReplayUnattributedDeath` -- default `NetKill`, overridden by `StarMine`
+      to run `Asplode()`, because being shot (one small white burst, `expl1`) looks nothing like
+      detonating (two big blue bursts, `expl2`). Award-suppressed first, per the b0ab09ec rule.
+  - **A DEFERRED death RELEASES its puppet from the freeze, and the trigger is the hp already in
+    the snapshot (cards 303bfb5b / 13aa596c).** `BattleSkull` and the surviving `MarsBoss` put
+    their WHOLE death in an Update-driven state machine (2.5 s of shrink-and-flicker; a 5 s crash
+    to the ground) -- and a puppet is `Enabled=false` for life, so none of it ran. Worse, their
+    `EvDeath` does not arrive until that animation ENDS on the host, so the peer saw an intact
+    enemy and then, seconds later, one frame of removal.
+    - **`NetBaseState.Hp == 0` on a puppet we know is KILLABLE means the host has killed it** --
+      `Initialize` floors hit points at 1, `NetApplyHp` floors at 1, and `HitBy` reaches 0 only
+      on the killing blow. So no wire change was needed at all; the **discriminant is
+      `NetKillable`, not the value** (`Hp` is also 0 for every non-killable, which is what its
+      own "0 = not killable / unknown" comment means).
+    - `NetPuppets.ReleaseDyingPuppet` drops the entity from `byId`/`live`/`idByComp`, clears
+      `Collides`, sets `Enabled = true`, and its own `Update` finishes dying locally -- which is
+      what card 13aa596c's note asked for ("animation doesnt need to be syncd and can be done
+      locally"). Dropping `idByComp` is what makes the eventual local removal a no-op at the
+      claim seam (the host already knows).
+    - **...which is exactly why `MarkRemoved` has to run BY HAND in the release.** That seam is
+      what normally marks the id, and skipping it leaves the next snapshot entry an UNKNOWN id:
+      the self-heal then rebuilds a fresh, intact, collidable enemy standing on top of the one
+      that is visibly dying. Short window (the host stops streaming the id within a turn or two),
+      so it would have been a rare unreproducible ghost.
+    - **`OnRemoteDeath` makes the same decision** when a puppet's round-robin turn never came
+      before the `EvDeath` landed (`snapTurn` runs to ~1.2 s in a big world; these deaths are
+      2.5-5 s). `DeferredDeathInFlight` is `NetHitPoints <= 0` -- which is also the state of a
+      puppet WE killed locally, and wants the same answer for the same reason.
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 49 assertions;
+    `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
+    shape -- section 2 runs a real HOST session over a `NetWire` and reads the frame the peer
+    RECEIVED; sections 3-5 need no session, only `NetPuppets.Enable`. Everything it plants sits
+    far off-screen, so nothing it does is drawn, its explosions included. **The observable is the
+    WORLD** (live `Explosion` count, membership of `Game.Components`, `Enabled`, the score
+    panels): the symptom is the ABSENCE of a one-to-five-second effect, so a timed screenshot
+    proves nothing and a backgrounded joiner tab ticks at ~1 Hz. Every positive has its negative
+    beside it -- **the `Enabled` assertions are the load-bearing ones**, since a puppet left
+    frozen is still in the world and would satisfy a survival-only check, which IS the bug.
+    Mutation-tested six ways, failing DISJOINT legs across the two defects.
+    **Deliberately absent from `net_selftests.txt` despite being menu-runnable** -- unlike the
+    suites there it has its own probe, which carries this card's write-up and mutation matrix, so
+    listing it in both would run it twice for nothing. (It is NOT absent for `eaNetBgTest`'s
+    reason: it needs no level.)
   - **THE HOST'S LEDGER OPENS AT THE CLAIM, NOT AT THE REMOVAL FLUSH (card 1bfcd705), and it
     takes TWO stores to say that.** `recentDeaths` cannot be the whole ledger, because
     `OnHostDeath` only writes a record at the `ComponentRemoved` seam -- one `ComponentBin`
@@ -1546,8 +1614,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
     connection math) are in `plans/4p-online-coop.md`. Boss puppets are
   best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
-  state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
-  play on the client -- an attributed remote death removes the puppet). The time-scaling half of
+  state extras grow. **The multi-phase DEATHS are no longer part of that** (cards 303bfb5b /
+  13aa596c): a remote death whose `KilledBy` defers its own removal now RELEASES the puppet to
+  finish dying locally instead of deleting it mid-animation -- see the deferred-death bullet
+  under "Claims". That is type-agnostic, so the SpiderBoss debris death and the
+  BrainBoss/FakeBoss asplode come with it; neither has been WATCHED on a client, so treat them as
+  covered-by-construction rather than verified. The time-scaling half of
   the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
   above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
   checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the

@@ -243,6 +243,29 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
+        // EvDeath's killerSlot is not an enum, but it IS a raw wire byte with a three-way
+        // meaning (a payable slot / KillerSelf / KillerNone), so it is validated here with
+        // everything else rather than by an `is it 0xFF` test at each of its four readers.
+        //
+        // CLAMP, not REJECT: the message also carries the REMOVAL and the award array, so
+        // dropping it would strand a puppet the host has already deleted -- permanently, since
+        // the id is gone from the host's registry and no later snapshot will mention it. An
+        // unrecognised value degrades to KillerNone, the FX-free silent despawn, which is the
+        // least the receiver can do rather than crediting a slot 0x42 that does not exist.
+        //
+        // The payable bound is 8, the width of the claim ledgers' PaidMask (NetPuppets.MarkPaid
+        // / IsPaid), NOT MaxSlots -- NetSession.NoteKill already admits 0..7, so bounding at 4
+        // here would silently reclassify a value the host is able to emit. Slots 4..7 are
+        // unreachable today (Oracle.MaxPlayers is 4); this keeps the two ends agreeing anyway.
+        internal static byte ClampKillerSlot(int raw)
+        {
+            if (raw == KillerSelf)
+            {
+                return KillerSelf;
+            }
+            return (raw >= 0 && raw < 8) ? (byte)raw : KillerNone;
+        }
+
         // ---- ship stream --------------------------------------------------------------
 
         // [type][flags][shotsPerSec][bulletLife/10][seq:2][senderMs:4][posX:4][posY:4]
@@ -598,7 +621,8 @@ namespace EvilAliensWeb.Compat.Net
             return b.Length >= extraOff + extraLen;
         }
 
-        // EvDeath v7: [netId:2][killerSlot:1 (KillerNone = despawn/off-screen)][posX:4][posY:4]
+        // EvDeath v7: [netId:2][killerSlot:1 (KillerSelf = unattributed real death,
+        // KillerNone = despawn/off-screen)][posX:4][posY:4]
         // [award:f32 x MaxSlots] -- killer/pos let the receiver pay death FX even when its local
         // copy is already gone; the award array is what it credits.
         //
@@ -610,6 +634,25 @@ namespace EvilAliensWeb.Compat.Net
         // reason -- most kills leave three of the four at zero, and 12 bytes per death is not
         // worth a variable-length mask.
         public const byte KillerNone = 0xFF;
+
+        // "It really DIED, and nobody earned it" (cards 4e406eba / 303bfb5b / 13aa596c).
+        // A self-detonating space mine, a scripted mothership crash, an enemy flying into a
+        // wall: the host ran the type's real death path -- explosions, a cue, an animation --
+        // with no killing blow to attribute. The receiver must run that same path for the FX
+        // and pay NOBODY.
+        //
+        // It needs a value of its own because KillerNone means the OPPOSITE thing on the FX
+        // axis while meaning the same thing on the score axis: an off-screen fly-off and a
+        // teardown purge are also unattributed, and exploding those would put a bang (and a
+        // sound) where the host had silence. The host decides which of the two it is -- see
+        // NetSession.OnHostDeath.
+        //
+        // NO PROTOCOL CHANGE RIDES ON THIS. It reuses the existing killerSlot byte's reserved
+        // space (Oracle.MaxPlayers is 4, so 0x08..0xFE were all dead values): no new field, no
+        // width change, no new message or event type, and ProtocolVersion does not move. A peer
+        // that would misread it cannot exist -- MsgHello's build-hash handshake refuses to pair
+        // two different binaries, so both ends of any session are the same build.
+        public const byte KillerSelf = 0xFE;
 
         public const int DeathEventBytes = 4 + 11 + 4 * MaxSlots;
 

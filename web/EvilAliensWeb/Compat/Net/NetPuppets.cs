@@ -381,7 +381,59 @@ namespace EvilAliensWeb.Compat.Net
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(info.TypeIdx);
             popped = ApplySnapshotState(info, state, desc, buf, extraOff, extraLen, isSpawn: false);
+            ApplyHostKilledFromSnapshot(netId, info, state);
             return true;
+        }
+
+        // The host's copy of this killable is at ZERO HIT POINTS and still in its world, so its
+        // death has begun and is taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s
+        // crash (cards 13aa596c / 303bfb5b). The EvDeath for it does not arrive until that
+        // animation ENDS, so waiting for it means the peer sees an intact enemy and then, seconds
+        // later, one frame of removal.
+        //
+        // NO PROTOCOL CHANGE CARRIES THIS: hp is already in every snapshot entry's base block.
+        // Zero is unambiguous here because the entry belongs to a puppet we know is killable --
+        // NetBaseState.Hp is also 0 for a non-killable, which is why the NetKillable
+        // discriminant, not the value, is what makes this readable. On a live KillableAlien hit
+        // points can never be 0: Initialize floors them at 1, NetApplyHp floors at 1, and HitBy
+        // reaches 0 only on the killing blow.
+        //
+        // Award-free (NetSuppressAward first): this is the FX only. Who gets paid is settled by
+        // the host's EvDeath when it eventually lands, exactly as before.
+        //
+        // IT ALSO FIRES, RARELY, ON AN ORDINARY INSTANT DEATH, and that is ACCEPTED rather than
+        // engineered around. The host's ComponentBin defers removal, so an entity killed in the
+        // collision phase is still in the NetIdRegistry when that same tick's snapshot is encoded
+        // -- if its round-robin turn happens to land in that ONE tick, hp reads 0 here a tick
+        // before its EvDeath arrives. The consequences are bounded and small: NetKill's own
+        // dead-guard means the FX play exactly ONCE either way, the award still comes off the
+        // wire, and the only difference is that the death runs with the KillerNone scratch agent
+        // and isComboGenerator false rather than the attributed pair. Narrowing it would mean
+        // requiring two consecutive hp==0 turns, which costs the deferred case a whole snapTurn
+        // (up to ~1.2 s of a 2.5 s animation) to remove a one-tick cosmetic difference.
+        private static void ApplyHostKilledFromSnapshot(ushort netId, PuppetInfo info, in NetBaseState state)
+        {
+            if (state.Hp > 0 || !(info.Comp.NetKillable is INetKillable killable) || info.Comp.IsDead)
+            {
+                return;
+            }
+            if (killable.NetHitPoints <= 0)
+            {
+                return; // a death path has already run here -- ours, or an earlier turn's
+            }
+            info.Comp.NetSuppressAward();
+            // Never echo this back as a claim -- the host is the one that told us. Same guard
+            // OnRemoteDeath sets, and it is consumed by the same removal seam; ReleaseDyingPuppet
+            // clears it by hand for the branch where that seam early-returns.
+            remoteDeaths.Add((GameComponent)info.Comp);
+            killable.NetKill(KillerAgent(NetProtocol.KillerNone, info.Comp.Position), isComboGenerator: false);
+            if (info.Comp.IsDead)
+            {
+                // KilledBy ended in Die(), which has already queued the removal -- the ordinary
+                // instant-death types. Nothing to release; the removal seam tidies the maps.
+                return;
+            }
+            ReleaseDyingPuppet(netId, info);
         }
 
         private static bool IsRecentlyRemoved(ushort netId)
@@ -452,6 +504,57 @@ namespace EvilAliensWeb.Compat.Net
             return popped;
         }
 
+        // A DEFERRED death: the type's death path ran, but it did not remove the component --
+        // it entered a multi-second dying STATE that its own Update drives (BattleSkull's 2.5s
+        // shrink-and-flicker, MarsBoss's 5s crash to the ground). A puppet is frozen for life,
+        // so as a puppet it would stand there intact and then blink out; that is cards 303bfb5b
+        // and 13aa596c ("explosions and death animation don't properly play on P2's view").
+        //
+        // So we let it GO: drop it from the puppet registry and un-freeze it, and its own Update
+        // finishes dying locally and its own Die() removes it. The card's own note said the
+        // animation "doesn't need to be synced and can be done locally" -- this is that.
+        //
+        // Nothing about it is replicated after this point, deliberately. It is already dead on
+        // the host, so there is nothing left to correct it toward, and the host's EvDeath (which
+        // for these types arrives seconds later, at the END of ITS animation) then finds no
+        // puppet and settles as an ordinary award-only reconciliation.
+        private static void ReleaseDyingPuppet(ushort netId, PuppetInfo info)
+        {
+            INetEntity comp = info.Comp;
+            GameComponent gc = (GameComponent)comp; // identity is off the seam -- INetEntity's header
+            byId.Remove(netId);
+            live.Remove(info);
+            // Dropping idByComp is what makes the eventual local removal a no-op in
+            // Components_ComponentRemoved -- which is wanted twice over: no EvClaim is sent (the
+            // host already knows; it is the one that told us) and no second MarkRemoved.
+            idByComp.Remove(gc);
+            // The same early return means the seam will never consume an echo guard either, so
+            // drop it here rather than leaving an entry in remoteDeaths for the session.
+            remoteDeaths.Remove(gc);
+            // ...which is exactly why MarkRemoved has to run HERE instead. Without it the next
+            // snapshot entry for this id is an unknown id, and the self-heal REBUILDS the enemy
+            // we just released -- a fresh, intact, collidable puppet standing where one is
+            // visibly dying. The host stops streaming the id within a turn or two, so the window
+            // is short and would have made this a rare, unreproducible ghost.
+            MarkRemoved(netId);
+            // It is dying, so it must not still be able to kill the local player -- both shipped
+            // types clear this in their own KilledBy, but a released puppet is live code now and
+            // may not rely on that. The cast back is the documented one (INetEntity's header):
+            // every entry in the type registry is an AlienDrawableGameComponent.
+            var adc = (AlienDrawableGameComponent)comp;
+            adc.Collides = false;
+            // The freeze is the thing that was stopping the death animation. KNOWN, ACCEPTED
+            // DIVERGENCE: a release that lands while a ComponentBin.Push pause is up enables the
+            // entity OUTSIDE any pause layer (nothing can retro-register an existing component
+            // into one), so its dying animation runs on through the freeze. It is cosmetic, it is
+            // an enemy that is already dead, and it removes itself when it finishes.
+            comp.Enabled = true;
+            if (NetHost.Current.NetLog)
+            {
+                Console.WriteLine("[net] released dying puppet id=" + netId + " type=" + comp.GetType().Name);
+            }
+        }
+
         // Host said this entity is gone. Live puppet + killer -> the real per-type death
         // (FX + credit); live + no killer -> silent despawn; already gone -> generous pay.
         //
@@ -473,10 +576,27 @@ namespace EvilAliensWeb.Compat.Net
                 if (killerSlot != NetProtocol.KillerNone && comp.NetKillable is INetKillable killable)
                 {
                     comp.NetSuppressAward();
-                    killable.NetKill(KillerAgent(killerSlot, comp.Position), isComboGenerator: true);
+                    if (killerSlot == NetProtocol.KillerSelf)
+                    {
+                        // Nobody landed it -- the host's copy blew itself up or crashed. Same
+                        // real death path, the type's own self-destruct look, and the award
+                        // array below is all-zero because the host credited nobody either.
+                        killable.NetReplayUnattributedDeath(KillerAgent(killerSlot, comp.Position));
+                    }
+                    else
+                    {
+                        killable.NetKill(KillerAgent(killerSlot, comp.Position), isComboGenerator: true);
+                    }
                     if (!comp.IsDead)
                     {
-                        bin.Remove(gc); // dead-guarded NetKill no-op
+                        // A death path has run and the entity is STILL IN THE WORLD, which for a
+                        // killable means exactly one thing: its KilledBy deferred its own removal
+                        // into a dying animation (BattleSkull's 2.5 s, the surviving MarsBoss's
+                        // 5 s crash). The pre-card `bin.Remove` here is what deleted those
+                        // mid-animation. Note this also covers the NetKill that no-opped because
+                        // WE had already killed the puppet locally -- same state, and its dying
+                        // animation had not played either, so it wants the same answer.
+                        ReleaseDyingPuppet(netId, info);
                     }
                     ApplyAwards(netId, comp.Position, awards);
                 }
@@ -567,6 +687,13 @@ namespace EvilAliensWeb.Compat.Net
             // and never deaths we ourselves applied from a host EvDeath (echo guard).
             if (remoteDeaths.Remove(gc) || !comp.IsDead)
             {
+                // Consume any kill note on the way out even though no claim is sent. A client
+                // CAN write one -- a mine puppet's own Asplode() calls NetSession.NoteSelfDestruct
+                // (cards 4e406eba) -- and killNotes is keyed on the ENTITY, which ComponentBin
+                // recycles: an unconsumed note would sit in the bounded FIFO until eviction and,
+                // if that instance came back out of the recycle pool first, be taken as the
+                // attribution for a different death.
+                NetSession.TakeKillNote(comp);
                 return;
             }
             byte killerSlot = NetSession.TakeKillNote(comp);

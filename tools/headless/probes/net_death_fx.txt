@@ -1,0 +1,88 @@
+# Death FX on the JOIN peer -- cards 4e406eba, 303bfb5b, 13aa596c.
+#
+# WHAT WENT WRONG. Three reports, one file, two unrelated causes:
+#   * "space mines dont explode on P2's screen" -- StarMine.Asplode() is a real death with no
+#     killing blow, so KillableAlien.HitBy (and with it NetSession.NoteKill) never runs and the
+#     host broadcast EvDeath with KillerNone. NetPuppets.OnRemoteDeath's "live puppet, no killer"
+#     branch is a bare bin.Remove, so the mine simply blinked out.
+#   * "the twin motherships final ship doesnt play explosions or sounds when it crashes" and
+#     "the congaline of big rulers -- explosions and death animation dont properly play" --
+#     BattleSkull and the surviving MarsBoss put their WHOLE death in an Update-driven state
+#     machine (2.5s of shrink-and-flicker; a 5s crash to the ground), and a puppet is
+#     Enabled=false for life. Worse, the EvDeath does not arrive until that animation ENDS on the
+#     host, so the peer saw an intact enemy and then, seconds later, one frame of removal.
+#
+# WHAT THE FIX IS, and therefore what this probe defends:
+#   * NetProtocol.KillerSelf (0xFE) -- a SECOND meaning in EvDeath's existing killerSlot byte, put
+#     there by an opt-in hook at the death site (NetSession.NoteSelfDestruct). No new field, no
+#     new event type, no protocol version bump: 0x08..0xFE were all reserved values already, and
+#     the build-hash handshake means both ends of any session run the same binary.
+#     The host gates it on the entity being ON SCREEN, so an off-screen fly-off cannot become a
+#     bang (and a sound) at the edge of the peer's screen.
+#   * A DEFERRED death is detected from the hp ALREADY in every snapshot entry -- 0 on a killable
+#     means the host has landed the killing blow -- and the puppet is RELEASED from the freeze so
+#     its own Update finishes dying locally. That is what card 13aa596c's own note asked for
+#     ("animation doesnt need to be syncd and can be done locally").
+#
+# WHY A PROBE AND NOT A SCREENSHOT. Both symptoms are the ABSENCE of a one-to-five-second effect
+# at a moment no capture can be timed to (root CLAUDE.md: never verify motion with timed live
+# screenshots). Two windows cannot do it either -- the deaths happen on the HOST while the FX
+# belong to the joiner, and a backgrounded joiner tab ticks at ~1 Hz. So the suite reads the
+# WORLD instead: live Explosion count, whether the entity is still in Game.Components, whether it
+# is Enabled, and what the score panels read.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL lines, they name what they check.
+#   * a section-2 failure is the WIRE: either the host stopped marking self-destructs (every mine
+#     goes back to vanishing) or it stopped gating them on screen position (bangs off the edge).
+#   * a section-4 failure is the RELEASE. Note which one: "is UN-FROZEN" failing IS the original
+#     bug (a puppet left frozen is still in the world, so a survival-only assertion would pass);
+#     "reports LeftDead, not Rebuilt" failing means the by-hand MarkRemoved went, and the snapshot
+#     self-heal will rebuild a fresh intact collidable enemy on top of the one that is dying.
+#   * a section-5 failure means a deferred death is being deleted mid-animation again whenever the
+#     puppet's round-robin snapshot turn does not come round before the host's EvDeath.
+#
+# THE POSITIVE IS THE `49 passed` TALLY, and section 5's paid-award leg is the positive control
+# for every "no slot was credited" assertion above it -- an award path that had stopped working
+# entirely would satisfy all of those zeroes. Raise the count when checks are added.
+# `expect-not FAIL` is here too but is the weaker half: it passes on a run where the eval never
+# happened (a renamed DebugInput method), which the tally catches. `expect-not SKIP` matters more
+# than usual here -- the suite skips itself over a live session, level or attract demo, which is
+# exactly what ?noattract is for below.
+#
+# MENU-ONLY AND LEAVE-NO-TRACE, unlike net_reset_spawn: sections 3-5 need no session at all, and
+# section 2's real host session is stopped in its own finally. It does plant real entities into
+# the live Game.Components and really kill them, so it refuses to run near a live world, and every
+# entity it builds sits far off-screen -- nothing it does is ever drawn.
+#
+# MUTATION-TESTED SIX WAYS, each isolated, each a REVERT of one thing the fix does (counts are
+# failing LEGS, and they are DISJOINT across the two defects):
+#   * NoteSelfDestruct made a no-op (the pre-card host)                 -> 1  (section 2)
+#   * the host's on-screen gate removed                                 -> 1  (section 2)
+#   * the hp==0 snapshot trigger disabled                               -> 6  (section 4)
+#   * the EvDeath release fallback back to an unconditional bin.Remove  -> 1  (section 5)
+#   * the client's KillerSelf branch removed (falls to the generic burst)-> 1  (section 3)
+#
+# eahl: --flags "?menu&noattract"
+#
+# ?noattract, not ?menu alone: the idle main menu drops into an attract demo after 20s and the
+# suite would then SKIP itself. 200 frames is well inside that, but the flag makes the probe
+# independent of how long a slow machine takes to boot.
+
+step 200 nodraw
+mark
+eval NetDeathFx
+
+# The host section really paired over the in-process wire -- without this, section 2 could be
+# reporting a precondition failure that the tally would catch but nothing would explain.
+expect \[net\] session start role=host .* transport=InMemory
+expect \[netdeathfx\] unattributed \+ deferred death FX on the join peer
+expect 1\. the killerSlot byte's three-way meaning at the decode boundary
+expect 2\. HOST -- a self-destruct goes out as KillerSelf, a fly-off does not
+expect 3\. CLIENT -- EvDeath\(KillerSelf\) runs the mine's real self-destruct
+expect 4\. CLIENT -- hp==0 in a snapshot releases the puppet to finish dying
+expect 5\. CLIENT -- an ATTRIBUTED EvDeath on a deferred-death type releases too
+expect 6\. teardown
+expect \[netdeathfx\] 49 passed, 0 failed
+expect-not FAIL
+expect-not SKIP
+quit

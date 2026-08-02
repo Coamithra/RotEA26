@@ -44,6 +44,13 @@
 # `&invuln&aiplayer` so the run is unattended and cannot end early on a death, which would cut the
 # soak short and under-report the ceiling.
 #
+# IF `expect MarsBoss` IS THE LEG THAT FAILS, THAT IS PROBABLY NOT A REGRESSION. It is a bet on
+# an unseeded AI run reaching the boss inside 30000 frames, which is the one soft-real-time
+# assertion in this file. Re-run it once before investigating: a genuine cap regression fails the
+# `-- PASS` leg with a [velscan] table present, whereas this one fails with the boss simply absent
+# from the table. If it starts failing REPEATEDLY, the AI has stopped clearing Level 2 rather than
+# the guard having broken -- check the AI completion matrix, not this card.
+#
 # THE SOAK IS LONG ON PURPOSE (~8 sim-minutes). MarsBoss arrives deep into Level 2: a
 # 5000-frame run never reaches it at all and reports UFO 0.758 as the fastest thing in the game,
 # which is a PASS FOR THE WRONG REASON. That is why `expect MarsBoss` is here as the positive

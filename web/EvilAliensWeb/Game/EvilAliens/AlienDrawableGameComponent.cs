@@ -798,7 +798,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// opts the puppet out of REPLICATED frames: NetPuppets pins curframe once at spawn and the
 	// driver's NetAdvanceFrame owns it from there, so the snapshot's CurFrame field is ignored.
 	// The NetSpinPerMs idiom one field over, and for the same reason (cards c92f3817 / 0dfc4495 /
-	// 435db27f).
+	// d3add86f).
 	//
 	// WHY IT IS NOT FREE TO KEEP CORRECTING IT. Both peers advance the same loop at the same fps,
 	// so in STEADY state the correction is a no-op and costs nothing -- it is the disturbances it

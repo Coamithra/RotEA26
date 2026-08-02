@@ -341,16 +341,21 @@ namespace EvilAliensWeb.Compat
 		// per replicable type against NetSession.MaxObservedSpeedPxPerMs. Needs NO net session --
 		// it measures the GAME's motion, which is the quantity the guard bounds.
 		[JSInvokable("debugNetVelScan")]
-		public static string NetVelScan(bool on)
+		public static string NetVelScan(bool arm)
 		{
 			Microsoft.Xna.Framework.Game game =
 				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin?.Game;
-			if (on)
+			if (arm)
 			{
-				EvilAliensWeb.Compat.Net.NetVelocityScan.SetEnabled(true, game);
+				EvilAliensWeb.Compat.Net.NetVelocityScan.Arm(game);
 				return "[velscan] armed";
 			}
-			return EvilAliensWeb.Compat.Net.NetVelocityScan.Report();
+			// Reading DISARMS: the scan owns a GameComponent and a ComponentRemoved subscription,
+			// and there is no other call that would ever take them down. Report first -- disarming
+			// clears the tallies the report is made of.
+			string report = EvilAliensWeb.Compat.Net.NetVelocityScan.Report();
+			EvilAliensWeb.Compat.Net.NetVelocityScan.Disarm();
+			return report;
 		}
 
 		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).

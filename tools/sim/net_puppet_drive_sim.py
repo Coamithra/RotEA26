@@ -628,7 +628,8 @@ def _flyspider_truth(t_ms, teleport_at=None, teleport_dx=0.0):
 
 
 def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
-                   teleport_at=None, teleport_dx=0.0, vel_guard=None):
+                   teleport_at=None, teleport_dx=0.0, vel_guard=None,
+                   declared_vel=(-0.12, 0.0)):
     turn = snap_turn_ms(n_live)
     window = {"fixed150": CORRECTION_WINDOW_MS,
               "2xturn": max(CORRECTION_WINDOW_MS, 2.0 * turn)}[window_mode]
@@ -646,9 +647,14 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
             if has_last and t > last_ms:
                 vx = (truth[0] - last_pos[0]) / (t - last_ms)
                 vy = (truth[1] - last_pos[1]) / (t - last_ms)
-                # NetSession.MaxObservedSpeedPxPerMs -- the teleport guard.
+                # NetSession.MaxObservedSpeedPxPerMs -- the teleport guard. Production does NOT
+                # zero the velocity on a refusal, it falls back to the entity's DECLARED
+                # NetSpeedVector, which is the honest answer (it describes what the entity will do
+                # next). Modelling that rather than zero matters: zero would be strictly better
+                # than what ships, and the assertion below would then be measured against a
+                # fallback the game does not have.
                 if vel_guard is not None and math.hypot(vx, vy) > vel_guard:
-                    vx = vy = 0.0
+                    vx, vy = declared_vel
                 vel = (vx, vy)
             last_pos, last_ms, has_last = truth, t, True
             pup.apply_snapshot(truth, vel)

@@ -68,7 +68,17 @@ namespace EvilAliensWeb.Compat.Net
 
         internal static bool Enabled { get; private set; }
 
-        internal static void SetEnabled(bool on, Game game)
+        internal static void Arm(Game game)
+        {
+            SetEnabled(true, game);
+        }
+
+        internal static void Disarm()
+        {
+            SetEnabled(false, null);
+        }
+
+        private static void SetEnabled(bool on, Game game)
         {
             Enabled = on;
             perComp.Clear();
@@ -122,18 +132,24 @@ namespace EvilAliensWeb.Compat.Net
             float interval = sampleAccMs;
             sampleAccMs = 0f;
             tickIndex++;
-            Oracle oracle = ServiceHelper.Get<IOracleService>()?.Oracle;
-            if (oracle == null)
+            if (ticker == null)
             {
                 return;
             }
-            List<AlienDrawableGameComponent> baddies = oracle.GetBaddies();
-            for (int i = 0; i < baddies.Count; i++)
+            // Walks Game.Components rather than Oracle.GetBaddies, and the difference is
+            // load-bearing: GetBaddies is a hard-coded `is` chain that omits BOTH `Powerup` and
+            // `SpiderHelperMothership`, so scanning it would silently exclude two of the replicable
+            // types -- including the mothership, one of the types this card is about. The set that
+            // matters is the one NetIdRegistry replicates, so ask its own predicate.
+            // IsReplicableInstance also drops the cosmetic-only instances, which take no NetId and
+            // whose motion therefore never reaches CaptureBaseState at all.
+            foreach (IGameComponent item in ticker.Game.Components)
             {
-                AlienDrawableGameComponent c = baddies[i];
+                if (!(item is AlienDrawableGameComponent c))
+                {
+                    continue;
+                }
                 var gc = (GameComponent)(object)c;
-                // Only what actually crosses the wire -- a cosmetic-only instance takes no NetId, so
-                // its motion never reaches CaptureBaseState and would inflate the ceiling for free.
                 if (!NetTypeRegistry.IsReplicableInstance(gc))
                 {
                     continue;
@@ -190,11 +206,10 @@ namespace EvilAliensWeb.Compat.Net
                 row.LastSeenTick = tickIndex;
                 row.Has = true;
             }
-            // Entities die constantly; without this the map grows for the whole scan.
-            if (perComp.Count > 4096)
-            {
-                perComp.Clear();
-            }
+            // No trimming here on purpose: OnComponentRemoved drops each entity's row as it leaves
+            // the world, so the map tracks the LIVE population rather than growing with the scan.
+            // A size-triggered Clear() would also wipe every live entity's history at once and
+            // silently cost a sample from each, which is the opposite of what a bound should do.
         }
 
         internal static string Report()
@@ -209,7 +224,8 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append("[velscan] observed |vel| per replicable type, px/ms at the ")
               .Append(NetSession.SnapshotIntervalMs).Append("ms snapshot cadence")
               .Append(" (guard cap ").Append(NetSession.MaxObservedSpeedPxPerMs.ToString("0.00"))
-              .Append("; sustained = held across two consecutive turns, peak = any single sample)\n");
+              .Append("; sustained = a plateau, i.e. a neighbouring sample on EITHER side is at"
+                    + " least half as fast. peak = any single sample)\n");
             if (names.Count == 0)
             {
                 sb.Append("[velscan] VACUOUS -- no replicable entity was sampled; a scan with no live"
@@ -259,17 +275,22 @@ namespace EvilAliensWeb.Compat.Net
         //   EvilSkull   -- respawns at `new Vector2(Random(0,800), Random(0,600))`, i.e. the
         //                  grinning face reappears somewhere else outright.
         //   SpiderBoss  -- parked at the far screen edge to start each fly-by. THE CARD.
-        //   Asteroid / FlyingSpider / UFO / Ball / StarMine / BattleSkull / Wall -- pooled types
-        //                  whose entry paths place them off-screen; they only ever show a
-        //                  reposition as a one-sample PEAK, never as a plateau, so they are here
-        //                  for the peak column's sake and never affect the verdict.
+        //
+        // DELIBERATELY ONLY THESE THREE. Every replicable type is pooled, so most of them show a
+        // one-sample PEAK from an entry path placing them off-screen -- but the plateau test
+        // already discounts those, which is its whole job, and listing them here as well would
+        // remove them from the verdict permanently. That matters because this scan is the SOLE
+        // negative test the cap rests on: if a pooled type ever did move fast enough to be clipped,
+        // an over-broad exclusion list is exactly what would keep this green while the guard
+        // stuttered it. Earn a place here by REPOSITIONING, not by being pooled.
+        //
         // The verdict is computed over everything NOT in this list. Keeping it explicit is the
         // point: a new type showing a big SUSTAINED reading must be judged by a human -- either it
-        // is genuinely that fast, and the cap goes up, or it repositions, and it is named here.
+        // is genuinely that fast, and the cap goes up, or it repositions, and it is named here
+        // WITH the line of code that proves it.
         private static readonly HashSet<string> RepositioningTypes = new HashSet<string>
         {
-            "Braineroid", "EvilSkull", "SpiderBoss", "Asteroid", "FlyingSpider",
-            "UFO", "Ball", "StarMine", "BattleSkull", "Wall",
+            "Braineroid", "EvilSkull", "SpiderBoss",
         };
 
         // Its own component so arming this needs no edit to Game1 or GameScene -- the same reason

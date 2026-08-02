@@ -124,6 +124,7 @@ internal class Lazer : AlienDrawableGameComponent
 		stopped = false;
 		growthspeed = 0.4f;
 		freed = false;
+		NetResetExtrapolation();
 		base.Initialize();
 	}
 
@@ -238,15 +239,36 @@ internal class Lazer : AlienDrawableGameComponent
 	private const float NetExtrapolateCapMs = 250f;
 
 	private bool netHasRates;
-	private float netAngleRate;   // rad/ms
-	private float netLenRate;     // px/ms
-	private float netLeadRate;    // px/ms
-	private float netLastApplyMs;
-	private float netSinceApplyMs;
+	private float netAngleRate;      // rad/ms
+	private float netLenRate;        // px/ms
+	private float netLeadRate;       // px/ms
+	private float netExtrapolatedMs; // budget SPENT against NetExtrapolateCapMs, not a timestamp
+	private float netSinceApplyMs;   // real time since the last NetApplyBeam
 	private float netPrevAngle;
 	private float netPrevLen;
 	private float netPrevLead;
 	private bool netHasPrev;
+
+	// Lazer is POOLED (NewLazer -> collection.Recycle<Lazer>), so a recycled instance would
+	// otherwise start its new life with the PREVIOUS beam's rates already armed: NetDriveExtras
+	// would extrapolate the old beam's aim and growth for up to NetExtrapolateCapMs before the
+	// first snapshot of the new life landed, and the first NetNoteRates after the recycle would
+	// difference across the gap and derive a nonsense angular rate. That moves a COLLIDABLE
+	// hitbox (CollisionType reads len/lead/Direction), so it is not a cosmetic slip. Same
+	// recycle trap NetVelocityScan documents on the measurement side.
+	private void NetResetExtrapolation()
+	{
+		netHasRates = false;
+		netHasPrev = false;
+		netAngleRate = 0f;
+		netLenRate = 0f;
+		netLeadRate = 0f;
+		netExtrapolatedMs = 0f;
+		netSinceApplyMs = 0f;
+		netPrevAngle = 0f;
+		netPrevLen = 0f;
+		netPrevLead = 0f;
+	}
 
 	private void NetNoteRates(float angle, float length, float leadValue)
 	{
@@ -263,7 +285,7 @@ internal class Lazer : AlienDrawableGameComponent
 		netPrevLead = leadValue;
 		netHasPrev = true;
 		netSinceApplyMs = 0f;
-		netLastApplyMs = 0f;
+		netExtrapolatedMs = 0f;
 	}
 
 	internal override void NetDriveExtras(GameTime gameTime)
@@ -271,7 +293,7 @@ internal class Lazer : AlienDrawableGameComponent
 		base.NetDriveExtras(gameTime);
 		float dtMs = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 		netSinceApplyMs += dtMs;
-		if (!netHasRates || netLastApplyMs >= NetExtrapolateCapMs)
+		if (!netHasRates || netExtrapolatedMs >= NetExtrapolateCapMs)
 		{
 			// Still track the muzzle: base.Position is dead-reckoned by the driver every tick, and
 			// the Quad holds its own copy, so without this the beam's origin lags its emitter even
@@ -279,8 +301,8 @@ internal class Lazer : AlienDrawableGameComponent
 			lazor.MoveTo(base.Position);
 			return;
 		}
-		float step = MathHelper.Min(dtMs, NetExtrapolateCapMs - netLastApplyMs);
-		netLastApplyMs += step;
+		float step = MathHelper.Min(dtMs, NetExtrapolateCapMs - netExtrapolatedMs);
+		netExtrapolatedMs += step;
 		base.Direction += netAngleRate * step;
 		// The ramps are monotone on the host (growthspeed is positive and `stopped`/`freed` only
 		// ever zero a rate or start the lead one), so a negative observed rate is a sample pair

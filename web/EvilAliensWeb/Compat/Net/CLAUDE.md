@@ -1410,9 +1410,37 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     spins its puppets locally instead (Asteroid). A puppet's Update is frozen, so a
     continuously spinning type could only advance at its ~16.7 Hz round-robin snapshot turn --
     visibly choppy. Only override where rotation is cosmetic and no hitbox reads it.
-  - **Peer stall != peer lost.**
+  - **Peer stall != peer lost.** `PeerStallMs` raises `NetWaitOverlay` (banner only -- it does
+    NOT push the collection, because the world staying live is the point and dimming a
+    playfield the player is still dodging in would be worse than the hiccup) and parks puppet
+    dead-reckoning (`NetSession.PeerStalled`; without that, the wider grace would let stale
+    velocities fling the enemy world seconds off and then snap). The verdict only lands at
+    `PeerTimeoutMs + PeerGraceMs`, through the single `EndMatchPeerGone` path shared by
+    EvLeave / drop timeout / pagehide bye. GOTCHA: `GameScene.Terminate` must drop the banner
+    BEFORE nulling `NetActiveScene` -- it is a plain `DrawableGameComponent` in the global bin
+    that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
+    both draw over the menus and poison the next play of that level.
+- **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
+  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS
+  (see the sub-bullet below); DevCommentEvent commentary is not replicated (profile-local
+  setting).
+  - **Two PEERS is not two PLAYERS -- 4-player online co-op already works today** (card
+    2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
+    `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
+    The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
+    `ScoreVisualiser.SlotCount`, slot-keyed `MsgFriendState`, `EvScoreSync`, the claim
+    ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
+    per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
+    connection math) are in `plans/4p-online-coop.md`. Boss puppets are
+  best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
+  state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
+  play on the client -- an attributed remote death removes the puppet). The time-scaling half of
+  the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
+  above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
+  checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the
+  puppet clock.
 
-## Puppet SMOOTHNESS -- the four fixes (cards c92f3817 / 0dfc4495 / d3add86f / 8dabe812 / 0108d1fc)
+## Puppet SMOOTHNESS (cards c92f3817 / 0dfc4495 / d3add86f / 8dabe812 / 0108d1fc)
 
 A family, not four bugs: everything a puppet does between snapshot turns was either not simulated
 at all or corrected as if the blind window were fixed. **`pupPops` cannot see any of it** -- every
@@ -1485,7 +1513,7 @@ reads a contented 0 throughout. The instrument is
     cap of 2.0 passed the probe on one run and failed on the next).
   - **`eaNetVelScan(on?)` / `eval NetVelScan true` is the negative test**, and it needs NO net
     session -- it measures the GAME's motion, which is the quantity the guard bounds. Arm, soak,
-    read. It reports SUSTAINED speed (a plateau, i.e. a neighbouring sample at least half as fast)
+    read. It reports SUSTAINED speed (a plateau: a neighbouring sample -- either side -- at least half as fast)
     beside the raw peak, because a reposition is a one-interval spike by definition. Types that
     reposition in ordinary play are named in `NetVelocityScan.RepositioningTypes` **with the code
     line that proves it** and excluded from the verdict. Committed as
@@ -1529,35 +1557,7 @@ reads a contented 0 throughout. The instrument is
   (the frame branch lives in `ApplySnapshotState`, which runs per snapshot ENTRY, not per tick, and
   now does strictly less work for most types). `eaNetPuppetBench(128, 2000)` reads 8.6-9.7 us/call
   (~67 ns/puppet) across runs in one process, so any delta here is below the instrument's own
-  resolution -- which is the honest claim, not a measured 0. `PeerStallMs` raises `NetWaitOverlay` (banner only -- it does
-    NOT push the collection, because the world staying live is the point and dimming a
-    playfield the player is still dodging in would be worse than the hiccup) and parks puppet
-    dead-reckoning (`NetSession.PeerStalled`; without that, the wider grace would let stale
-    velocities fling the enemy world seconds off and then snap). The verdict only lands at
-    `PeerTimeoutMs + PeerGraceMs`, through the single `EndMatchPeerGone` path shared by
-    EvLeave / drop timeout / pagehide bye. GOTCHA: `GameScene.Terminate` must drop the banner
-    BEFORE nulling `NetActiveScene` -- it is a plain `DrawableGameComponent` in the global bin
-    that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
-    both draw over the menus and poison the next play of that level.
-- **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
-  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS
-  (see the sub-bullet below); DevCommentEvent commentary is not replicated (profile-local
-  setting).
-  - **Two PEERS is not two PLAYERS -- 4-player online co-op already works today** (card
-    2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
-    `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
-    The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
-    `ScoreVisualiser.SlotCount`, slot-keyed `MsgFriendState`, `EvScoreSync`, the claim
-    ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
-    per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
-    connection math) are in `plans/4p-online-coop.md`. Boss puppets are
-  best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
-  state extras grow (the SpiderBoss debris death + BrainBoss/FakeBoss multi-phase asplode do not
-  play on the client -- an attributed remote death removes the puppet). The time-scaling half of
-  the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
-  above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
-  checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the
-  puppet clock.
+  resolution -- which is the honest claim, not a measured 0.
 
 ## Public game browser & join-in-progress
 

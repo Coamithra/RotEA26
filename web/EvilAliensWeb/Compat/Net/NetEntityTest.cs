@@ -185,7 +185,7 @@ namespace EvilAliensWeb.Compat.Net
             Check("a NetCosmeticOnly override reaches the seam (true)", variant.NetCosmeticOnly);
 
             // NetFrameLocal is the third virtual of this shape (the puppet animation opt-out,
-            // cards c92f3817 / 0dfc4495 / 435db27f) and it DEFAULTS TRUE, unlike the two above.
+            // cards c92f3817 / 0dfc4495 / d3add86f) and it DEFAULTS TRUE, unlike the two above.
             // That inversion is exactly why it needs its own pair of checks: a forward
             // accidentally bound to the base would answer `true` everywhere, which is the
             // shipped answer for almost every type -- so only a type that opts OUT can tell the

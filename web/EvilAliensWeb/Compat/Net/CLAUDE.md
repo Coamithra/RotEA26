@@ -527,14 +527,21 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     launch after `mainMenu` and the selector were already gone (a reload-only dead end, the
     sharpest of the four), the two selector `OnExit`s backed out to `netPickMenu`, the carousel
     refused `WebcamAliens` offline, and `NetUpdate` ran the lobby pump. `MenuScene.Initialize` now
-    calls `ResetNetFlowState()` -- `netMode`, `netNoticeUp`, `browsingGames` and the status panel,
-    one lifecycle rather than four near-misses -- placed before the `?gamebrowser` block so that
-    flag's own `netMode = true` still wins.
+    calls `ResetNetFlowState()` -- `netMode`, `netNoticeUp`, `browsingGames` and the status panel
+    as ONE lifecycle -- placed before the `?gamebrowser` block so that flag's own
+    `netMode = true` still wins. **`netNoticeUp` is a second real fix, not a ride-along**:
+    `netStatus_CancelSelected` is its only clearer, so a notice still up at a level launch left it
+    set forever and `if (!netMode || netNoticeUp) return;` then killed the lobby pump for the rest
+    of the process -- every later Host/Join stuck on "Contacting server...". (`browsingGames` and
+    `netStatusShown` really are near-unreachable today; they ride along because one lifecycle
+    beats three near-misses.)
     - **It is SESSION-FREE on purpose** (no `NetLobby.Cancel`, no `NetGameBrowser.Stop`): a caller
       that returns to the menus with a session STILL UP must be able to re-enter deliberately.
     - **That entry point is `MenuScene.EnterNetLobby()`, and it is THE way to reach the net-lobby
-      menu state programmatically** -- card 3b6c12e7's level-end -> lobby flow is its first
-      caller. It sets `netMode`, clears `netNoticeUp`, **removes `mainMenu` itself** (`Initialize`
+      menu state programmatically.** **It ships UNCALLED** -- card 3b6c12e7's level-end -> lobby
+      flow lands its first caller, and the seam is here so that card comes through a defined door
+      instead of inventing one against private state. It sets `netMode`, clears `netNoticeUp`,
+      **removes `mainMenu` itself** (`Initialize`
       re-adds it unconditionally and neither `netPickMenu` nor `NetStatusMenu` is modal, so a live
       main menu underneath would eat every keypress -- the 72143c11 lesson; a caller must NOT be
       relied on to do this), then mirrors the lobby's own `Connected` branch: host to the level

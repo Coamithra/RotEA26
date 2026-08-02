@@ -596,13 +596,17 @@ internal class MenuScene : Scene
 				sender.Remove();
 				// The session died between the level pick and the difficulty pick, so the launch
 				// is aborted and NetUpdate's notice branch redraws the flow on a later tick --
-				// but ONLY if a notice is actually pending. With no session AND no notice coming,
-				// removing this menu leaves NOTHING on screen (mainMenu went away at Start,
-				// the selector at levelSelected): a reload-only dead end, the worst failure class
-				// in a browser game. Card c337222a; MenuNotice is peeked, never taken, so the
-				// notice branch still gets it.
-				if (!EvilAliensWeb.Compat.Net.NetSession.Active
-					&& EvilAliensWeb.Compat.Net.NetSession.MenuNotice == null)
+				// but ONLY if a notice is actually pending. Without one, removing this menu leaves
+				// NOTHING on screen (mainMenu went away at Start, the selector at levelSelected):
+				// a reload-only dead end, the worst failure class in a browser game. Card c337222a.
+				// The pending NOTICE is the whole test, deliberately -- a session that is still
+				// Active but has lost its peer is exactly the kick/reject wind-down
+				// (SendRejectOnce defers Stop by a grace), where nothing is on screen either and
+				// the notice may still be several ticks away. MenuNotice is PEEKED, never taken
+				// (TakeMenuNotice consumes), so the notice branch still gets it; and when one IS
+				// pending that branch removes mainMenu unconditionally, so showing it here would
+				// be undone rather than duplicated.
+				if (EvilAliensWeb.Compat.Net.NetSession.MenuNotice == null)
 				{
 					netMode = false;
 					mainMenu.Show();
@@ -1173,11 +1177,14 @@ internal class MenuScene : Scene
 	// SESSION-FREE on purpose: no NetLobby.Cancel, no NetGameBrowser.Stop -- a caller that comes
 	// back to the menus with a live session (card 3b6c12e7's level-end -> lobby flow) must be
 	// able to re-enter deliberately via EnterNetLobby, and this must not tear its session down.
-	// The three siblings ride along because they are the same bug class on the same object with
-	// the same lifetime: a stale browsingGames parks NetUpdate in the browse branch forever, a
-	// stale netNoticeUp kills the lobby pump, and a stale netStatusShown desyncs the panel from
-	// what is on screen. Each is individually near-unreachable today -- which is the argument for
-	// one lifecycle rather than four near-misses.
+	// The three siblings go with it because they are the same bug class on the same object with
+	// the same lifetime: a stale browsingGames parks NetUpdate in the browse branch forever and a
+	// stale netStatusShown desyncs the panel from what is on screen -- both near-unreachable
+	// today, which is the argument for one lifecycle rather than three near-misses.
+	// netNoticeUp is NOT in that class and is a second real fix: netStatus_CancelSelected is its
+	// only clearer, so a notice that is still up when a level launches leaves it set forever, and
+	// `if (!netMode || netNoticeUp) return;` then kills the lobby pump for the rest of the
+	// process -- every later Host/Join would sit on "Contacting server..." and never advance.
 	private void ResetNetFlowState()
 	{
 		HideNetStatus();
@@ -1187,10 +1194,13 @@ internal class MenuScene : Scene
 	}
 
 	// Programmatic entry into the net-lobby menu state (card c337222a), for a caller that returns
-	// to the menus with a session STILL UP -- the level-end -> lobby flow of card 3b6c12e7, where
-	// the host picks the next level and both peers carry on. It is the counterpart of
-	// ResetNetFlowState: menu entry now clears netMode, so "come back as if freshly connected"
-	// has to be ASKED for rather than inherited from a flag that happened to survive a launch.
+	// to the menus with a session STILL UP. It is the counterpart of ResetNetFlowState: menu entry
+	// now clears netMode, so "come back as if freshly connected" has to be ASKED for rather than
+	// inherited from a flag that happened to survive a launch.
+	// **NOTHING CALLS THIS YET, and that is deliberate** -- it ships with the lifecycle it belongs
+	// to so card 3b6c12e7's level-end -> lobby flow (host picks the next level, both peers carry
+	// on) has a defined door to come through, rather than that card inventing one against private
+	// state. Its first caller lands with that card; until then, grepping for one finds nothing.
 	// Mirrors the lobby's own Connected branch in NetUpdate -- host to the level pick, client to
 	// the waiting panel -- so there is one definition of what that state looks like.
 	// mainMenu.RemoveInstantly() is unconditional and a no-op when it is not shown, per the rule
@@ -1247,20 +1257,18 @@ internal class MenuScene : Scene
 			{
 				CloseNetFlowMenus();
 			}
-			// Card 72143c11: the main menu is closed on BOTH paths, and it still has to be --
-			// card c337222a changed WHICH path a post-level notice arrives on, not whether the
-			// branch is needed. A lobby co-op match that ends in-level now comes back with
-			// netMode FALSE (Initialize clears it) and mainMenu live, i.e. straight down the
-			// else-less path below, so this is the case that closes it. Before that card the
-			// stale flag sent the same situation through CloseNetFlowMenus, which does not touch
-			// mainMenu, so the notice landed on top of a live main menu: its text overlapped the
-			// rows, and since MenuSub1 has no
-			// modality at all, BOTH menus ran HandleInput every tick -- arrows moved two
-			// selections and Enter invoked two entries. Removing it unconditionally is what makes
-			// the notice the only thing on screen and the only thing taking input.
-			// Collection.Remove of a menu that is not shown is a no-op (see CloseNetFlowMenus),
-			// so the lobby paths, where mainMenu is already gone, are unaffected.
-			// netStatus_CancelSelected re-Show()s it on acknowledge.
+			// Card 72143c11: the main menu is closed on BOTH paths, unconditionally, so the notice
+			// is the only thing on screen AND the only thing taking input. Collection.Remove of a
+			// menu that is not shown is a no-op (see CloseNetFlowMenus), so the lobby paths, where
+			// mainMenu is already gone, are unaffected; netStatus_CancelSelected re-Show()s it on
+			// acknowledge.
+			// A post-level notice is precisely the case it covers: since card c337222a that
+			// notice arrives with netMode FALSE (Initialize clears it) and mainMenu live, i.e. it
+			// skips CloseNetFlowMenus above entirely. Before that card the stale flag sent the
+			// same situation through CloseNetFlowMenus, which does not touch mainMenu, so the
+			// panel went up over a LIVE main menu: its text overlapped the rows, and since
+			// MenuSub1 has no modality at all, BOTH menus ran HandleInput every tick -- arrows
+			// moved two selections and Enter invoked two entries.
 			mainMenu.RemoveInstantly();
 			EvilAliensWeb.Compat.Net.NetLobby.Cancel();
 			netMode = true; // the status panel is net-flow UI; cleared on acknowledge

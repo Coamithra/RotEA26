@@ -56,7 +56,8 @@ namespace EvilAliensWeb.Compat.Net
     // are restored and asserted restored, and it refuses to run with a session, a level or an
     // attract demo up -- it puts real entities into the live Game.Components and really kills
     // them. Every entity it builds sits at Nowhere (far off-screen), so nothing it does is ever
-    // drawn, INCLUDING its explosions.
+    // drawn, INCLUDING its explosions -- but it is NOT silent: the real death paths play their
+    // real cues, so running it from the menu fires a handful of explosion SFX.
     //
     // GOTCHA IT WORKS AROUND: the off-screen position that keeps this invisible is exactly what
     // NetSession's own on-screen gate refuses, so section 2's POSITIVE leg has to put its mine
@@ -242,8 +243,10 @@ namespace EvilAliensWeb.Compat.Net
                 wire.Pump();
                 Check("an on-screen self-destruct broadcast exactly one EvDeath (" + deaths.Count + ")",
                     deaths.Count == 1);
+                // The RAW byte, not ClampKillerSlot(...): section 1 is what proves the clamp, so reading
+                // the host through it would let a collapsed clamp mask a real wire regression.
                 Check("...carrying KillerSelf, not KillerNone",
-                    deaths.Count == 1 && NetProtocol.ClampKillerSlot(deaths[0][6]) == NetProtocol.KillerSelf);
+                    deaths.Count == 1 && deaths[0][6] == NetProtocol.KillerSelf);
                 // Nobody earned it. The award array is what the client pays from, so a
                 // KillerSelf death that carried a figure would credit a slot for a suicide.
                 float[] awards = new float[NetProtocol.MaxSlots];
@@ -253,7 +256,6 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 Check("...and an ALL-ZERO award array -- nobody is credited for a self-destruct",
                     AllZero(awards));
-                planted.Remove((GameComponent)(object)mine);
 
                 // 2b. NEGATIVE -- the same self-destruct, off screen. This is the ruling's gate:
                 // the host itself showed nothing there, so the peer must not hear a bang at the
@@ -266,8 +268,7 @@ namespace EvilAliensWeb.Compat.Net
                 Check("an OFF-SCREEN self-destruct still broadcasts its EvDeath (" + deaths.Count + ")",
                     deaths.Count == 1);
                 Check("...but downgraded to KillerNone -- no bang off the edge of the screen",
-                    deaths.Count == 1 && NetProtocol.ClampKillerSlot(deaths[0][6]) == NetProtocol.KillerNone);
-                planted.Remove((GameComponent)(object)offMine);
+                    deaths.Count == 1 && deaths[0][6] == NetProtocol.KillerNone);
 
                 // 2c. NEGATIVE -- an ordinary despawn ON SCREEN. Nothing noted the death, so it
                 // is KillerNone whatever its position: this is what tells the gate in 2b from
@@ -278,10 +279,9 @@ namespace EvilAliensWeb.Compat.Net
                 bin.Remove((GameComponent)(object)quiet);
                 bin.Update();
                 wire.Pump();
-                Check("a plain removal with no self-destruct note is KillerNone even on screen",
-                    deaths.Count == 1
-                    && NetProtocol.ClampKillerSlot(deaths[0][6]) == NetProtocol.KillerNone);
-                planted.Remove((GameComponent)(object)quiet);
+                Check("a plain removal with no self-destruct note is KillerNone even on screen ("
+                    + deaths.Count + " EvDeath)",
+                    deaths.Count == 1 && deaths[0][6] == NetProtocol.KillerNone);
             }
             finally
             {
@@ -319,7 +319,6 @@ namespace EvilAliensWeb.Compat.Net
                 made >= 2);
             Check("the puppet left the world", !InWorld(game, (GameComponent)(object)puppet));
             Check("no slot was credited for a suicide", SameScores(score, before));
-            planted.Remove((GameComponent)(object)puppet);
 
             // NEGATIVE: KillerNone is still the silent despawn. Without this leg, a fix that
             // exploded every unattributed removal would pass everything above.
@@ -337,7 +336,6 @@ namespace EvilAliensWeb.Compat.Net
                 + (CountType<Explosion>(game) - boom) + " explosions)",
                 CountType<Explosion>(game) == boom);
             Check("...and still removes the puppet", !InWorld(game, (GameComponent)(object)quiet));
-            planted.Remove((GameComponent)(object)quiet);
         }
 
         // ---- 4. a deferred death, detected from the snapshot's hp --------------------------

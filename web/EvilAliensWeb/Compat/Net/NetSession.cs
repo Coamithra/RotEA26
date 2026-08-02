@@ -1146,9 +1146,12 @@ namespace EvilAliensWeb.Compat.Net
         // spider boss), so it would put a bang and a sound on the peer's screen where the host
         // showed nothing. A hook says exactly what the game meant.
         //
-        // Costs one bool test offline. Runs on BOTH peers: a client that self-destructs a
-        // RELEASED puppet (see NetPuppets.ReleaseDyingPuppet) notes it too, where the note is
-        // simply consumed by the removal seam and never sent -- the host is the authority.
+        // Costs one bool test offline. Runs on BOTH peers -- a client's own mine puppet is still
+        // hit-testable, so its Asplode() reaches here too. The note is harmless there but NOT
+        // ignorable: the client's removal seam takes the echo-guard early return, so it consumes
+        // the note explicitly (killNotes is keyed on the entity, which ComponentBin recycles).
+        // When a claim IS sent for one, KillerSelf is non-payable at HandleClaim exactly as
+        // KillerNone was, so nothing is credited either way.
         public static void NoteSelfDestruct(AlienDrawableGameComponent comp)
         {
             if (Active && NetTypeRegistry.IsReplicableInstance((GameComponent)(object)comp))
@@ -2708,7 +2711,11 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                HandleClaim(NetProtocol.ReadU16(data, 4), data[6]);
+                // Clamped like EvDeath's copy of the same byte -- one decode-boundary reader for
+                // both, per NetProtocol's validation contract. KillerSelf is a legal inbound
+                // value here (a client's own mine puppet can self-destruct on its screen) and is
+                // simply not payable, exactly as KillerNone is not.
+                HandleClaim(NetProtocol.ReadU16(data, 4), NetProtocol.ClampKillerSlot(data[6]));
                 break;
             }
             case NetProtocol.EvScoreSync:

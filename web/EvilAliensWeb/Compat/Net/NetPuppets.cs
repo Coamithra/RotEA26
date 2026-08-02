@@ -400,6 +400,17 @@ namespace EvilAliensWeb.Compat.Net
         //
         // Award-free (NetSuppressAward first): this is the FX only. Who gets paid is settled by
         // the host's EvDeath when it eventually lands, exactly as before.
+        //
+        // IT ALSO FIRES, RARELY, ON AN ORDINARY INSTANT DEATH, and that is ACCEPTED rather than
+        // engineered around. The host's ComponentBin defers removal, so an entity killed in the
+        // collision phase is still in the NetIdRegistry when that same tick's snapshot is encoded
+        // -- if its round-robin turn happens to land in that ONE tick, hp reads 0 here a tick
+        // before its EvDeath arrives. The consequences are bounded and small: NetKill's own
+        // dead-guard means the FX play exactly ONCE either way, the award still comes off the
+        // wire, and the only difference is that the death runs with the KillerNone scratch agent
+        // and isComboGenerator false rather than the attributed pair. Narrowing it would mean
+        // requiring two consecutive hp==0 turns, which costs the deferred case a whole snapTurn
+        // (up to ~1.2 s of a 2.5 s animation) to remove a one-tick cosmetic difference.
         private static void ApplyHostKilledFromSnapshot(ushort netId, PuppetInfo info, in NetBaseState state)
         {
             if (state.Hp > 0 || !(info.Comp.NetKillable is INetKillable killable) || info.Comp.IsDead)
@@ -493,18 +504,6 @@ namespace EvilAliensWeb.Compat.Net
             return popped;
         }
 
-        // Has a death path run on this entity without removing it? Hit points reaching zero is
-        // the marker: both ways in (KillableAlien.HitBy's killing blow and NetKill) zero them
-        // before calling KilledBy, and nothing ever raises them again. So `0 hp and still in the
-        // world` is exactly "its KilledBy ran and chose to stay for a while" -- which is the
-        // deferred-death shape, and is what tells it from a NetKill that no-opped because we had
-        // already killed the puppet locally... which is the SAME state, and wants the same
-        // answer: that local kill's own dying animation never played either.
-        private static bool DeferredDeathInFlight(INetKillable killable)
-        {
-            return killable.NetHitPoints <= 0;
-        }
-
         // A DEFERRED death: the type's death path ran, but it did not remove the component --
         // it entered a multi-second dying STATE that its own Update drives (BattleSkull's 2.5s
         // shrink-and-flicker, MarsBoss's 5s crash to the ground). A puppet is frozen for life,
@@ -544,7 +543,12 @@ namespace EvilAliensWeb.Compat.Net
             // every entry in the type registry is an AlienDrawableGameComponent.
             var adc = (AlienDrawableGameComponent)comp;
             adc.Collides = false;
-            comp.Enabled = true; // the freeze is the thing that was stopping the death animation
+            // The freeze is the thing that was stopping the death animation. KNOWN, ACCEPTED
+            // DIVERGENCE: a release that lands while a ComponentBin.Push pause is up enables the
+            // entity OUTSIDE any pause layer (nothing can retro-register an existing component
+            // into one), so its dying animation runs on through the freeze. It is cosmetic, it is
+            // an enemy that is already dead, and it removes itself when it finishes.
+            comp.Enabled = true;
             if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] released dying puppet id=" + netId + " type=" + comp.GetType().Name);
@@ -585,18 +589,14 @@ namespace EvilAliensWeb.Compat.Net
                     }
                     if (!comp.IsDead)
                     {
-                        // Either the dead-guarded NetKill was a no-op (we already killed it
-                        // locally), or the type DEFERRED its own removal into a dying animation.
-                        // Those need opposite treatment, and `live.Contains` cannot tell them
-                        // apart -- the discriminant is whether a death path has run at all.
-                        if (DeferredDeathInFlight(killable))
-                        {
-                            ReleaseDyingPuppet(netId, info);
-                        }
-                        else
-                        {
-                            bin.Remove(gc);
-                        }
+                        // A death path has run and the entity is STILL IN THE WORLD, which for a
+                        // killable means exactly one thing: its KilledBy deferred its own removal
+                        // into a dying animation (BattleSkull's 2.5 s, the surviving MarsBoss's
+                        // 5 s crash). The pre-card `bin.Remove` here is what deleted those
+                        // mid-animation. Note this also covers the NetKill that no-opped because
+                        // WE had already killed the puppet locally -- same state, and its dying
+                        // animation had not played either, so it wants the same answer.
+                        ReleaseDyingPuppet(netId, info);
                     }
                     ApplyAwards(netId, comp.Position, awards);
                 }
@@ -687,6 +687,13 @@ namespace EvilAliensWeb.Compat.Net
             // and never deaths we ourselves applied from a host EvDeath (echo guard).
             if (remoteDeaths.Remove(gc) || !comp.IsDead)
             {
+                // Consume any kill note on the way out even though no claim is sent. A client
+                // CAN write one -- a mine puppet's own Asplode() calls NetSession.NoteSelfDestruct
+                // (cards 4e406eba) -- and killNotes is keyed on the ENTITY, which ComponentBin
+                // recycles: an unconsumed note would sit in the bounded FIFO until eviction and,
+                // if that instance came back out of the recycle pool first, be taken as the
+                // attribution for a different death.
+                NetSession.TakeKillNote(comp);
                 return;
             }
             byte killerSlot = NetSession.TakeKillNote(comp);

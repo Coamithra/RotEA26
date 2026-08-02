@@ -493,7 +493,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   space mine goes out as `KillerSelf` instead of a silent despawn, and a deferred death
   (BattleSkull, the surviving MarsBoss) releases its frozen puppet so its own 2.5–5 s animation
   plays locally. MENU-only and leave-no-trace, but it plants real entities off-screen and really
-  kills them, so it skips itself over a live session or level),
+  kills them, so it skips itself over a live session or level. Nothing it does is drawn, but it
+  is not silent — the real death paths play their real cues),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),

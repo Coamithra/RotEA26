@@ -1210,6 +1210,14 @@ internal class MenuScene : Scene
 		netMode = true;
 		netNoticeUp = false;
 		mainMenu.RemoveInstantly();
+		// ...and the browse carousel, for the same reason and by the same no-op-when-not-shown
+		// rule: you cannot be shopping for a game while sitting in a lobby with a live session.
+		// Reachable because DebugFlags.GameBrowser is process-lifetime -- on a ?gamebrowser boot
+		// Initialize re-shows the carousel on EVERY menu entry, so a card-3b6c12e7 lobby return
+		// would otherwise land netPickMenu on top of it: two live MenuSub1s, which have no
+		// modality, moving two selections per arrow (card 72143c11).
+		onlineGamesMenu.RemoveInstantly();
+		browsingGames = false;
 		if (EvilAliensWeb.Compat.Net.NetSession.IsHost)
 		{
 			HideNetStatus();

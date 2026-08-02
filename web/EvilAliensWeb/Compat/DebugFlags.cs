@@ -177,9 +177,10 @@ namespace EvilAliensWeb.Compat
 		// victory -> credits -> menu handoff without playing the level out. It does NOT work "in
 		// any GameScene", which this comment used to claim and which the root CLAUDE.md's
 		// `?level=N&win` phrasing inherited -- both corrected by card 3b6c12e7, whose two-peer
-		// level-end probes are its main user now. Deliberately OUT of `Active`, so an online MENU
-		// session can still pair with a tab carrying it -- which is what makes a co-op HOST
-		// victory reachable by a rig at all (a host wins from its script, never from a wire beat).
+		// level-end probes are its main user now (a host wins from its SCRIPT, never from a wire
+		// beat, so this is the only route a rig has to a co-op HOST victory). Out of `Active` and
+		// nothing rests on that: it is useless without `?level=`, which is in `Active` -- so a
+		// menu-lobby pairing carrying it still needs `?netallowdebug` either way.
 		public static bool Win { get; private set; }
 
 		// Sprite harness (see the header comment + HarnessScene/HarnessRegistry). Harness is
@@ -3435,6 +3436,10 @@ namespace EvilAliensWeb.Compat
 							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
+							// Same class (card 3b6c12e7): ?win replaces Level 2's script with the ending
+							// unlock chain AND forces Hard, so a run that reached the credits in a
+							// minute has to be able to say why.
+							+ (Win ? " win" : "")
 							// Prints only when set: it decides which attract demo a capture or probe
 							// actually measured. Note the whole line is gated on `Active`, which
 							// DemoPick is deliberately out of -- so a bare ?demo=2 confirms nothing

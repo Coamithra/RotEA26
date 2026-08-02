@@ -960,6 +960,13 @@ namespace EvilAliensWeb.Compat.Net
         // transport, PeerUp/menuSession, the peer identity and block list, the roster grants
         // (the same two peers keep their seats), the monotone tx/rx event sequences, and
         // pendingLaunch* (the host may already have picked the next level).
+        //
+        // A URL `?net=` SESSION IS THE ONE OTHER SHAPE THAT OUTLIVES A LEVEL, and it deliberately
+        // does NOT come through here -- the scene-down branch below only reaches menu/listed
+        // sessions, so a dev rig keeps its buffers and id maps across a level exactly as it always
+        // has. That is pre-existing and rig-only, and changing it would alter what those two-tab
+        // recipes measure; it is called out so the omission reads as a decision rather than a
+        // missed call site.
         private static void ResetPerMatchState()
         {
             localPaused = false;

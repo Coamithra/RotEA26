@@ -47,6 +47,11 @@ namespace EvilAliensWeb.Compat.Net
         private static InMemoryTransport peer;
         private static INetHost hostBefore;
         private static bool armed;
+        // WHICH arm ran. The two phase-2 entry points read DIFFERENT captured state (Check reads
+        // the direction samples, MenuCheck reads none of them), so without this a Check() after
+        // an ArmHost() sails past the `armed` guard and reports FAILs about a puppet that was
+        // never spawned -- garbage where a SKIP belongs.
+        private static bool armedHost;
         private static bool armedPaired;
         private static bool armedSceneUp;
         private static float armedLocalDir;
@@ -83,6 +88,7 @@ namespace EvilAliensWeb.Compat.Net
             hostBefore = NetHost.Current;
             NetHost.Current = new PinnedNetHost();
             armed = true;
+            armedHost = false;
             try
             {
                 wire = new NetWire(2);
@@ -174,6 +180,7 @@ namespace EvilAliensWeb.Compat.Net
             hostBefore = NetHost.Current;
             NetHost.Current = new PinnedNetHost();
             armed = true;
+            armedHost = true;
             try
             {
                 wire = new NetWire(2);
@@ -187,7 +194,6 @@ namespace EvilAliensWeb.Compat.Net
                 wire.Pump();
                 NetSession.Update();
                 armedPaired = NetSession.IsHost && NetSession.PeerUp;
-                armedSceneUp = true;
                 sb.Append("  paired=").Append(armedPaired ? "yes" : "NO")
                   .Append(" -- now let the level's own ?win script reach Victory, then step past"
                       + " the credits crawl and run the menu check\n");
@@ -216,9 +222,11 @@ namespace EvilAliensWeb.Compat.Net
             }
 
             sb.Append("[netlevelendmenu] phase 2' -- the host is in its lobby (card 3b6c12e7)\n");
-            if (!armed)
+            if (!armed || !armedHost)
             {
-                sb.Append("  SKIP (not armed -- run the host arm phase first)\n");
+                sb.Append(armed
+                    ? "  SKIP (the CLIENT arm phase is up -- its phase 2 is the session check)\n"
+                    : "  SKIP (not armed -- run the host arm phase first)\n");
                 sb.Append(Tally2(pass, fail));
                 return sb.ToString();
             }
@@ -304,9 +312,11 @@ namespace EvilAliensWeb.Compat.Net
             }
 
             sb.Append("[netlevelend] phase 2 -- check (card 3b6c12e7 / b4a9fe60)\n");
-            if (!armed)
+            if (!armed || armedHost)
             {
-                sb.Append("  SKIP (not armed -- run the arm phase first)\n");
+                sb.Append(armed
+                    ? "  SKIP (the HOST arm phase is up -- its phase 2 is the menu check)\n"
+                    : "  SKIP (not armed -- run the arm phase first)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }

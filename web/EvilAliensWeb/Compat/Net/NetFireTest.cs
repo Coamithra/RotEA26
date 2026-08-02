@@ -191,6 +191,30 @@ namespace EvilAliensWeb.Compat.Net
             Check("exactly the first " + (MaxCatchUp + 1) + " steps are spendable, from every"
                 + " starting count (spendable=" + spendable + ")",
                 spendable == 256 * (MaxCatchUp + 1));
+            // The TX side of the same arithmetic: the count on the wire belongs to the SLOT, so a
+            // ship swap must contribute nothing and the sequence must stay monotone across a
+            // respawn. The case that matters is a ship dying near the top of the byte range --
+            // 252 -> 0 is a wrapped delta of 4, INSIDE the catch-up bound, so a ship-local count
+            // put straight on the wire would spawn four bullets nobody fired.
+            byte lastShipShots = 0;
+            byte wire = 0;
+            NetSession.AdvanceTxShotCount(sameShip: false, shipShots: 0, ref lastShipShots, ref wire);
+            NetSession.AdvanceTxShotCount(sameShip: true, shipShots: 252, ref lastShipShots, ref wire);
+            byte afterLife1 = wire;
+            // The ship dies at 252 and its replacement starts at 0, then fires three shots.
+            NetSession.AdvanceTxShotCount(sameShip: false, shipShots: 0, ref lastShipShots, ref wire);
+            Check("a ship SWAP contributes no shots to the slot's wire count (" + afterLife1
+                + " -> " + wire + ")", wire == afterLife1);
+            NetSession.AdvanceTxShotCount(sameShip: true, shipShots: 3, ref lastShipShots, ref wire);
+            Check("the new ship's shots continue the slot's sequence (" + afterLife1 + " -> "
+                + wire + ", i.e. +" + (byte)(wire - afterLife1) + ", want +3)",
+                (byte)(wire - afterLife1) == 3);
+            // NEGATIVE: the ship-local count put straight on the wire is what would have looked
+            // like a real, spendable burst to the receiver.
+            Check("NEGATIVE the raw ship count would have read as "
+                + PlayerShip.NetShotDelta(0, 252, out _) + " spendable shots across that respawn",
+                PlayerShip.NetShotDelta(0, 252, out bool rawResync) > 0 && !rawResync);
+
             // The reference implementation, on the reported case. It is the control legs 3 and 5
             // lean on, so it is asserted here too: a control that had stopped modelling the bug
             // would make their disagreement meaningless.

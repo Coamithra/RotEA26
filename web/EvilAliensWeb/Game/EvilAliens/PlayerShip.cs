@@ -942,7 +942,15 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		else if (shotCount != netAppliedShotCount)
 		{
-			netShotsPending += NetShotDelta(shotCount, netAppliedShotCount, out bool _);
+			int owed = NetShotDelta(shotCount, netAppliedShotCount, out bool resync);
+			if (resync)
+			{
+				// The counter is no longer continuous with what we were tracking, so neither is
+				// anything still queued from before it: firing that backlog now would put the
+				// previous sequence's bullets in front of this one.
+				netShotsPending = 0;
+			}
+			netShotsPending += owed;
 			netAppliedShotCount = shotCount;
 		}
 		// One per tick: a burst that arrives together still leaves the barrel one bullet at a

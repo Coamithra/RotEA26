@@ -68,8 +68,12 @@ namespace EvilAliensWeb.Compat.Net
         // still expect the per-entity spawns, so it would see empty scenery: a real
         // incompatibility, hence the version move even though no existing layout changed.
         // v11 (card a45b78f6): MsgShipState / MsgFriendState carry a cumulative u8 shotCount in
-        // place of the `firing` LEVEL flag (31 -> 32 B each). Both layouts CHANGED, so a v10 peer
-        // would misparse every ship packet outright -- the least ambiguous bump in the list.
+        // place of the `firing` LEVEL flag. MsgFriendState MISPARSES on a v10 peer -- its b[2] was
+        // the flags byte and is now a raw count, so bit 1 of the count reads as "firing" and every
+        // couch/AI-friend puppet fires at random. MsgShipState degrades more quietly (the count
+        // took the byte after `aim`, which v10 never read, so it would simply see firing=false
+        // forever and the remote ship would never shoot). Either way a mixed pairing is wrong
+        // rather than merely older, which is the bump test.
         public const byte ProtocolVersion = 11;
         public const float InterpDelayMs = 100f;
 
@@ -221,10 +225,18 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
-        // Held across a shipless heartbeat exactly as lastTxPos/lastTxAim are: the stream keeps
-        // flowing with alive=false while the local player is dead, and a count that fell back to
-        // 0 there would read as a wrap on the peer.
+        // THE COUNT ON THE WIRE BELONGS TO THE SLOT, NOT TO THE SHIP, and that distinction is the
+        // whole reason these are two fields (card a45b78f6). `PlayerShip.NetShotCount` restarts at
+        // 0 with every ship -- it is pooled, so it has to -- while the receiver holds ONE baseline
+        // for as long as it holds a puppet. A ship that died at 252 and respawned at 0 is a
+        // wrapped delta of 4: inside the catch-up bound, so the peer would spawn four bullets
+        // nobody fired. Advancing our own counter by the SHIP's delta, and taking no delta at all
+        // across a ship swap, makes what we send monotone per slot however often the ship behind
+        // it is replaced -- and leaves NetMaxCatchUpShots to mean only what it says, packet loss.
+        // Held across a shipless heartbeat exactly as lastTxPos/lastTxAim are.
         private static byte lastTxShotCount;
+        private static PlayerShip lastTxShip;
+        private static byte lastTxShipShots;
         private static long lastHudTx;
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
@@ -581,6 +593,9 @@ namespace EvilAliensWeb.Compat.Net
             localJoinSimAt = 0;
             txSeq = 0;
             txEventSeq = 0;
+            lastTxShotCount = 0;
+            lastTxShip = null;   // also drops a stale ship reference from the previous session
+            lastTxShipShots = 0;
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
@@ -857,6 +872,32 @@ namespace EvilAliensWeb.Compat.Net
         // NetProtocol (ShipFlagFiring), ShipSample carries ShotCount instead, and there is no
         // sender-side timing left on this path -- which is also what let eaNetFire grow a real
         // SENDER leg, the old design's stamp being unreachable without a clock seam on FireAt.
+        // Fold a ship's own shot count into the SLOT's wire counter. A change of ship (a respawn,
+        // or a pooled instance re-seated) contributes nothing: its counter is a fresh sequence,
+        // and any bullets it fired before we first saw it were fired into a life the peer's puppet
+        // was never watching. See the lastTxShotCount comment for why per-slot is the requirement.
+        private static byte AdvanceTxShots(PlayerShip ship, ref PlayerShip lastShip,
+            ref byte lastShipShots, ref byte wireCount)
+        {
+            bool sameShip = ReferenceEquals(ship, lastShip);
+            lastShip = ship;
+            return AdvanceTxShotCount(sameShip, ship.NetShotCount, ref lastShipShots, ref wireCount);
+        }
+
+        // The arithmetic of the above, with the ship identity already resolved to a bool -- so
+        // eaNetFire can drive a ship swap and a counter restart without needing two live ships.
+        internal static byte AdvanceTxShotCount(bool sameShip, byte shipShots, ref byte lastShipShots,
+            ref byte wireCount)
+        {
+            if (!sameShip)
+            {
+                lastShipShots = shipShots;
+            }
+            wireCount = (byte)(wireCount + (byte)(shipShots - lastShipShots));
+            lastShipShots = shipShots;
+            return wireCount;
+        }
+
         private static void SendShipState(long now)
         {
             lastStreamTx = now;
@@ -875,7 +916,7 @@ namespace EvilAliensWeb.Compat.Net
                 // A ship that has never fired reports NetLastFireAim's own seed (facing up), so
                 // there is no "has it fired yet" test left to get wrong.
                 aim = local.NetLastFireAim;
-                shotCount = local.NetShotCount;
+                shotCount = AdvanceTxShots(local, ref lastTxShip, ref lastTxShipShots, ref lastTxShotCount);
                 shots = local.NetShotsPerSec;
                 bulletLife = local.NetBulletLife;
                 lastTxPos = pos;

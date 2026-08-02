@@ -1454,35 +1454,46 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       intent was stamped BEFORE the owner's own gate, so two taps inside one cadence period were
       one bullet for the owner and TWO for the peer; the increment now happens where the bullet
       does, so it is one of each on both screens.
+    - **THE COUNT ON THE WIRE BELONGS TO THE SLOT, NOT TO THE SHIP -- `NetSession.AdvanceTxShots`
+      is what keeps that true, and it is not decoration.** `PlayerShip.NetShotCount` restarts at 0
+      with every ship (it is POOLED, so it must), while the receiver holds one baseline for as long
+      as it holds a puppet. A ship that died at 252 and respawned at 0 is a wrapped delta of FOUR
+      -- inside the catch-up bound, so the peer would spawn four bullets nobody fired. The sender
+      therefore advances its own per-slot counter by the SHIP's delta and takes no delta at all
+      across a ship swap (reference identity), which makes what goes on the wire monotone per slot
+      however often the ship behind it is replaced. The primary keeps `lastTxShip`/`lastTxShotCount`
+      in `NetSession`; the friend stream keeps one `FriendTxShots` per slot it sends. **The
+      RECEIVE-side `FriendChannel` is not the same thing** -- a peer both sends and receives friend
+      states, and the two halves are about different slots.
     - **THE RECEIVER SPENDS AT MOST ONE OWED SHOT PER TICK.** A delta that arrives bunched (after
       loss, or a late packet) drains over the next few ticks instead of stacking bullets on one
       point. It is not a rate limit -- nothing is ever dropped.
     - **A delta past `NetMaxCatchUpShots` (6) is a RESYNC, not catch-up: the count is adopted and
       nothing is fired.** Six shots is ~330 ms of continuous loss even at 18/s, past the point
-      where exactness means anything -- and the case it really guards is a peer whose ship
-      RESPAWNED, since `PlayerShip.Initialize` resets the counter to 0 and a raw delta from 200
-      would be a magazine nobody fired. (The ordinary respawn is already covered by construction:
-      the puppet is torn down on the alive edge and its replacement baselines from the first packet
-      it sees, `Initialize` resetting the receive-side latch for the same pooling reason.)
+      where exactness means anything. **It is NOT the respawn guard** -- that is the per-slot tx
+      counter above, precisely because a respawn can land INSIDE this bound. A resync also drops
+      whatever the puppet still owed, since a discontinuous counter makes the backlog in front of
+      it meaningless.
     - **`ShipFlagFiring` and `ShipSample.Firing` are DELETED**, and `NetSession` holds no
       sender-side timing on this path at all. That is what let the suite grow a real SENDER leg:
       the old stamp read `Environment.TickCount64`, so driving it end to end would have needed a
       clock seam on `FireAt` whose only reader was the test -- the call card d53431b4 declined for
       the same reason.
-    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 26 assertions;
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 29 assertions;
       `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs a
       real host session onto the live level, fires real bullets into it AND drives the local
       player's ship through scripted input, so use a throwaway `?level=Level2&invuln` boot. Six
-      legs: the wrapped-delta decision over the whole 0..255 domain (the rigorous, phase-
-      independent half), the SENDER's counter against the bullets it really spawned (including the
-      two-taps-in-one-period case), then one shot = one bullet end to end, a +2 step, a burst with
-      four of ten packets dropped, and an exact sustained cadence. **The negative control is a
+      legs: the wrapped-delta decision over the whole 0..255 domain plus the per-slot tx counter's
+      ship swap (the rigorous, phase-independent half), the SENDER's counter against the bullets it
+      really spawned (including the two-taps-in-one-period case), then one shot = one bullet end to
+      end, a +2 step, a burst with four of ten packets dropped, and an exact sustained cadence. **The negative control is a
       REFERENCE IMPLEMENTATION rather than the old code**, which is deleted: `PreCardTapBullets` /
       `PreCardLossBullets` mirror the firing-LEVEL rule on the same inputs and must give the wrong
       answers (2 for one tap, 6 of 10 under the loss pattern). Mutation-tested three ways, each
       failing disjoint legs -- the intent-side stamp fails ONLY the sender leg, one-bullet-per-
       counter-change fails only the +2 and loss legs, and a signed (unwrapped) delta fails only
-      leg 1's arithmetic.
+      leg 1's arithmetic. A fourth puts the raw ship count on the wire (dropping the swap branch
+      of `AdvanceTxShotCount`) and fails only the two tx legs.
 
 ## Metrics & verification
 

@@ -45,6 +45,21 @@ namespace EvilAliensWeb.Compat.Net
         // it; stretched to the paused backstop while either side holds a pause (the stream stalls then).
         private const long FriendTimeoutMs = 500;
 
+        // TX side, one per slot we STREAM: the slot's wire shot count, plus which ship it was last
+        // read from. Separate from FriendChannel, which is the RX half -- a peer both sends and
+        // receives friend states, and the two halves are about different slots.
+        // See NetSession's lastTxShotCount comment for why the count has to belong to the slot
+        // rather than to the ship: a couch player's ship dies and respawns inside the 500 ms
+        // FriendTimeoutMs, so the puppet (and its baseline) survives the counter restarting at 0.
+        private sealed class FriendTxShots
+        {
+            public PlayerShip Ship;
+            public byte ShipShots;
+            public byte WireCount;
+        }
+
+        private static readonly Dictionary<byte, FriendTxShots> friendTxShots = new Dictionary<byte, FriendTxShots>();
+
         private static readonly Dictionary<byte, FriendChannel> friendChannels = new Dictionary<byte, FriendChannel>();
         private static ushort friendTxSeq; // separate from txSeq so the primary stream's seq stays contiguous
         private static readonly List<byte> friendScratchSlots = new List<byte>(4);
@@ -69,8 +84,14 @@ namespace EvilAliensWeb.Compat.Net
                 // The cumulative shot count, exactly as the primary ship streams it (card
                 // a45b78f6) -- DriveFriendShip feeds the identical NetApplyRemoteState, so a
                 // couch player's tap and an AI friend's burst are replicated shot for shot.
+                if (!friendTxShots.TryGetValue((byte)slot, out FriendTxShots tx))
+                {
+                    tx = new FriendTxShots();
+                    friendTxShots[(byte)slot] = tx;
+                }
+                byte shotCount = AdvanceTxShots(s, ref tx.Ship, ref tx.ShipShots, ref tx.WireCount);
                 transport.SendStream(NetProtocol.EncodeFriendState((byte)slot, friendTxSeq++, (uint)(now - sessionStartAt),
-                    s.GetPosition(), s.NetVelocity, s.NetLastFireAim, s.NetShotCount, s.NetShotsPerSec, s.NetBulletLife));
+                    s.GetPosition(), s.NetVelocity, s.NetLastFireAim, shotCount, s.NetShotsPerSec, s.NetBulletLife));
             }
         }
 
@@ -329,6 +350,7 @@ namespace EvilAliensWeb.Compat.Net
                 ch.Puppet = null;
             }
             friendChannels.Clear();
+            friendTxShots.Clear();
             friendTxSeq = 0;
         }
     }

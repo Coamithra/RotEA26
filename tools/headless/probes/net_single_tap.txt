@@ -22,6 +22,9 @@
 #   1. The delta arithmetic as a PURE DECISION over the whole 0..255 wrap domain -- every counter
 #      step spent exactly once or refused as a resync, the wrap itself (255 -> 2 is 3 shots, which
 #      a signed subtraction gets catastrophically wrong), and both sides of the catch-up bound.
+#      Plus the TX half: the count on the wire belongs to the SLOT, so a ship swap contributes
+#      nothing and a respawn cannot fabricate shots (a ship dying at 252 and restarting at 0 is a
+#      wrapped delta of 4 -- inside the catch-up bound, and asserted here as the negative).
 #      Phase-independent, so it is the rigorous half; the live legs script one packet cadence.
 #   2. THE SENDER, which the pre-card design could not test at all (its stamp read
 #      Environment.TickCount64, so driving it would have needed a clock seam on FireAt whose only
@@ -51,6 +54,10 @@
 #     for a +2 step and leg 5 reports 6 of 10, i.e. exactly the pre-card reference number.
 #   * a signed delta (no byte wrap) -> the three arithmetic assertions in leg 1 fail and nothing
 #     else does; the live legs never reach a wrap.
+#   * the RAW ship count put on the wire (dropping the ship-swap branch of AdvanceTxShotCount) ->
+#     only leg 1's two tx assertions fail, reporting `252 -> 0` where the slot's count must not
+#     move. That is the respawn hazard the per-slot counter exists for, and nothing else can see
+#     it: a respawn's wrapped delta can land inside the catch-up bound and look like real fire.
 #
 # DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs a
 # real host session onto the live level, seats a Remote puppet, fires real bullets into the world
@@ -90,10 +97,12 @@ expect spawns exactly two bullets \(got 2\)
 expect 10 owner shots over a lossy link are 10 bullets on the peer \(got 10\)
 expect the pre-card firing-LEVEL rule spawns 2 bullets for ONE tap
 expect the pre-card firing LEVEL would have spawned only 6 over the same loss
+expect a ship SWAP contributes no shots to the slot's wire count
+expect the raw ship count would have read as 4 spendable shots across that respawn
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite skips its live legs on a bad precondition. Raise the count when
 # checks are added.
-expect \[netfire\] 26 passed, 0 failed
+expect \[netfire\] 29 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

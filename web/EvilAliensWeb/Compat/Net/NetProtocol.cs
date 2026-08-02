@@ -6,8 +6,8 @@ namespace EvilAliensWeb.Compat.Net
 {
     // The 3-layer wire protocol (plans/stage11-online-coop.md), little-endian binary:
     //   1. Ship stream (unreliable lane, ~30 Hz): MsgShipState -- each peer's own ship
-    //      STATE (pos, velocity, last aim, fire/alive flags, fire-rate loadout). The wire
-    //      carries state, never inputs.
+    //      STATE (pos, velocity, last aim, alive flag, cumulative shot count, fire-rate
+    //      loadout). The wire carries state, never inputs.
     //   2. World snapshot (host -> clients, unreliable lane, ~16.7 Hz): MsgWorldSnapshot --
     //      round-robin length-prefixed entries of the generic base block + per-type state
     //      extras (card 11.2, host world authority).
@@ -298,7 +298,7 @@ namespace EvilAliensWeb.Compat.Net
         // ---- ship stream --------------------------------------------------------------
 
         // [type][flags][shotsPerSec][bulletLife/10][seq:2][senderMs:4][posX:4][posY:4]
-        // [velX:4][velY:4][aim:4][shotCount:1] = 32 bytes. Velocity is design px per MILLISECOND
+        // [velX:4][velY:4][aim:4][shotCount:1] = 31 bytes. Velocity is design px per MILLISECOND
         // (the component system's native unit, see AlienDrawableGameComponent.Update).
         // senderMs is SESSION-RELATIVE (uint ms since the sender's NetSession.Start) --
         // an absolute machine-uptime tick in float32 loses ms precision within hours.
@@ -312,7 +312,7 @@ namespace EvilAliensWeb.Compat.Net
         // exactly as they are one bullet for the owner.
         public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife)
         {
-            byte[] b = new byte[32];
+            byte[] b = new byte[31];
             b[0] = MsgShipState;
             b[1] = (byte)(alive ? ShipFlagAlive : 0);
             b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
@@ -334,7 +334,7 @@ namespace EvilAliensWeb.Compat.Net
             sample = default;
             shotsPerSec = 8;
             bulletLife = 450f;
-            if (b.Length < 32 || b[0] != MsgShipState)
+            if (b.Length < 31 || b[0] != MsgShipState)
             {
                 return false;
             }
@@ -357,7 +357,7 @@ namespace EvilAliensWeb.Compat.Net
         // it ever carried.
         public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, byte shotCount, int shotsPerSec, float bulletLife)
         {
-            byte[] b = new byte[32];
+            byte[] b = new byte[31];
             b[0] = MsgFriendState;
             b[1] = slot;
             b[2] = shotCount;
@@ -380,7 +380,7 @@ namespace EvilAliensWeb.Compat.Net
             sample = default;
             shotsPerSec = 8;
             bulletLife = 450f;
-            if (b.Length < 32 || b[0] != MsgFriendState)
+            if (b.Length < 31 || b[0] != MsgFriendState)
             {
                 return false;
             }

@@ -146,6 +146,24 @@ namespace EvilAliensWeb.Compat.Net
                 ReferenceEquals(recycled, beam));
             recycled.SetupSingleShot(Nowhere, 0f, 0f, playSound: false);
             Check("...and SetupSingleShot cleared its owner", recycled.NetOwner == null);
+
+            // THE MIRROR IMAGE: the EMITTER recycled out from under a LIVE beam. Every emitter
+            // type is pooled too, so an instance that dies while its beam is still travelling
+            // can be handed straight back out as a different enemy -- and `owner` is only ever
+            // read as "did MY beam hit me", so a dangling reference makes the beam spare a ship
+            // that never fired it. Latent OFFLINE as well; the replicated owner only made it
+            // easier to reach. `Lazer.OnComponentRemoved` is what closes it.
+            UFO dying = PlantUfo(bin, game, planted, big: true);
+            Lazer live = Lazer.NewLazer(bin, game);
+            live.Setup(Nowhere, 0f, dying, 75f);
+            bin.Add((GameComponent)(object)live);
+            planted.Add((GameComponent)(object)live);
+            Check("PRECONDITION a live beam holds its emitter",
+                ReferenceEquals(live.NetOwner, dying));
+            bin.Remove((GameComponent)(object)dying);
+            bin.TopOfTickFlush();
+            Check("...and the emitter LEAVING the world drops that reference",
+                live.NetOwner == null);
         }
 
         // ---- 2. the defect itself: an ownerless beam kills the ship that fired it ------------

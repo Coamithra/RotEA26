@@ -67,6 +67,7 @@
 #   * `EncodeSpawnExtra` always writing 0                 -> 1 leg (the emitter leg, section 3)
 #   * the client SUPPRESSING unattributed claims          -> 3 legs (section 5a only)
 #   * the guard written as a bare `!payable`               -> 3 legs (section 4c only)
+#   * the emitter reference left dangling on its removal   -> 1 leg (section 1 only)
 #   * `HandleClaim` restored to its exact pre-card shape  -> 5 legs (section 4a only), and it
 #     reproduces the report verbatim: the entity leaves the world, an `EvDeath` goes out, and
 #     "no explosion was spawned" still PASSES -- it vanishes silently, which is the bug.

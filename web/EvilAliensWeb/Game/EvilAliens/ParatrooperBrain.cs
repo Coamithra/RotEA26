@@ -1,5 +1,6 @@
 using System;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace EvilAliens;
 
@@ -32,6 +33,28 @@ public class ParatrooperBrain : KillableAlien
 
 	private Timer mergetimer = new Timer(600f, repeating: false);
 
+	// Additive blue glow behind the brain (BrainGlow), replacing the halo the old
+	// brainlargetransglow sprite had baked in. See the constructor.
+	private Texture2D glowTexture;
+
+	private float glowPhase;
+
+	// Card c25883a2: the pre-card 0.1 / 0.2 / 0.33 carried through the SAME x5 the Braineroid
+	// migration used (0.4/0.2/0.07 -> 2/1/0.35), so the two brain families stay in proportion.
+	// Why x5 and not something derived: on-screen frame width is designWidth * scale, and the
+	// swap goes from brainlargetransglow -- unregistered in
+	// AlienDrawableGameComponent.DesignFrameWidth, so its designWidth is its own 519px logical
+	// texture -- to brainanimated, registered at 100. Preserving the FRAME width would be x5.19;
+	// preserving the VISIBLE BRAIN would be x5.52, because the old sprite filled 0.900 of its
+	// texture (alpha > 128) and a sheet cell fills 0.846. x5 is neither, and is deliberately the
+	// Braineroid number: it lands the visible brain at 0.906 of its old size, exactly the ratio
+	// that migration already shipped (huge went 186.8 -> 169.2 design px on the same measure).
+	private const float ScaleDropping = 0.5f;   // 0.1 * 5
+
+	private const float ScaleMerged = 1f;       // 0.2 * 5
+
+	private const float ScaleMerged2 = 1.65f;   // 0.33 * 5
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -46,8 +69,17 @@ public class ParatrooperBrain : KillableAlien
 	public ParatrooperBrain(Game game)
 		: base(game)
 	{
-		LoadAnimation(new AnimationData("GFX/Sprites/brainlargetransglow"));
-		scale = 0.1f;
+		// Card c25883a2: the animated cyborg brain, same art the in-world Braineroid uses. This
+		// was the LAST consumer of the old static brainlargetransglow -- the Braineroids moved to
+		// the sheet with it, the cast screen followed in card 208da2fe, and the paratroopers were
+		// simply missed, so the challenge level shipped with the previous generation's sprite.
+		// Sheet + interpolation args mirror Braineroid exactly (5 cols x 4 rows, 20 frames at
+		// 0.4fps; interpolationOptions = always so interpolate.fx cross-fades N->N+1 regardless
+		// of the global Interpolate setting, which is what makes that low frame rate read smooth).
+		LoadAnimation(new AnimationData("GFX/Sprites/brainanimated", 4, 5, 0, 0.4f, 0, 20));
+		interpolationOptions = InterpolationOptions.always;
+		glowTexture = content.Load<Texture2D>("GFX/Sprites/brainanimatedglow");
+		scale = ScaleDropping;
 		SetHitPoints(1, scaleWithDifficulty: false);
 		PointValue = 10f;
 	}
@@ -85,7 +117,7 @@ public class ParatrooperBrain : KillableAlien
 		base.Initialize();
 		base.DrawOrder = 21;
 		big = false;
-		scale = 0.1f;
+		scale = ScaleDropping;
 		state = State.just_dropped;
 		stateTimer.Duration = RandomHelper.RandomNextFloat(200f, 1000f);
 		stateTimer.Start();
@@ -93,10 +125,16 @@ public class ParatrooperBrain : KillableAlien
 		base.Direction = (float)Math.PI / 2f;
 		rotation = 0f;
 		base.Collides = true;
+		glowPhase = BrainGlow.RandomPhase();
+		// Desync the animation too: a drop wave is a dozen brains at once, and on one shared
+		// 50s loop they would breathe in perfect lock-step. After base.Initialize, which resets
+		// curframe to FirstFrame (and which the sprite harness overrides again for a frozen frame).
+		curframe = RandomHelper.RandomNextFloat(0f, Math.Max(1, rows * columns));
 	}
 
 	public override void Draw(GameTime gameTime)
 	{
+		BrainGlow.Draw(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, gameTime, blendMode);
 		base.Draw(gameTime);
 	}
 
@@ -138,7 +176,7 @@ public class ParatrooperBrain : KillableAlien
 					Die();
 					break;
 				}
-				scale = 0.2f;
+				scale = ScaleMerged;
 				base.Position -= new Vector2(0f, 10f);
 				big = true;
 				base.DrawOrder = 20;
@@ -153,7 +191,7 @@ public class ParatrooperBrain : KillableAlien
 					Die();
 					break;
 				}
-				scale = 0.33f;
+				scale = ScaleMerged2;
 				base.Position -= new Vector2(0f, 20f);
 				state = State.fire;
 				PlasmaBall plasmaBall = PlasmaBall.NewAlien(collection, base.Game);

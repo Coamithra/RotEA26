@@ -321,11 +321,17 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	// cloud draws inside that snapshot leave its alpha < 1, which would make the overlay
 	// under-cover (a residual ghost of the faded objects). Sealing alpha to 1 makes the target
 	// behave like the alpha-less Bgr565 original — the overlay covers by its tint alpha alone.
-	public void SealAlpha(Texture2D whitePixel, int width, int height)
+	//
+	// `report` is the DrawStretched tag, and every caller must pass its OWN (card d67755d2 added
+	// the second one). That latch is keyed per tag on this singleton wrapper precisely so one
+	// reporting caller cannot spend the line another caller's probe reads -- two callers sharing
+	// a tag re-opens exactly the hole the per-tag keying closed, and silently: death_fade.txt
+	// would start passing on a line describing whatever else sealed first.
+	public void SealAlpha(Texture2D whitePixel, int width, int height, string report)
 	{
 		Flush();
 		spriteBatch.Begin(SpriteSortMode.Deferred, WriteAlphaOne, null, null, null, null, Matrix.Identity);
-		DrawStretched(whitePixel, new Rectangle(0, 0, width, height), Color.White, "[xfade] seal");
+		DrawStretched(whitePixel, new Rectangle(0, 0, width, height), Color.White, report);
 		spriteBatch.End();
 	}
 

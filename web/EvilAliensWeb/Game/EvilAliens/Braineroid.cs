@@ -26,17 +26,8 @@ internal class Braineroid : KillableAlien
 	private float pulsatespeed;
 
 	// Blue glow drawn additively behind the brain (BrainBoss-aura recipe, blue tinted).
+	// The recipe itself lives in BrainGlow, shared with ParatrooperBrain (card c25883a2).
 	private Texture2D glowTexture;
-
-	private const float GlowOmega = 2.6f;          // ~2.4s shimmer period
-
-	private const float GlowScaleBase = 1.05f;     // glow drawn at brain DrawScale * this
-
-	private const float GlowScaleShimmer = 0.04f;  // +/-4% breathe
-
-	private const float GlowAlphaBase = 0.5f;
-
-	private const float GlowAlphaShimmer = 0.12f;  // alpha rides 0.38..0.62
 
 	private float glowPhase;   // per-instance offset so glows don't pulse in unison
 
@@ -119,7 +110,7 @@ internal class Braineroid : KillableAlien
 		// Desync per-instance so a cluster of brains isn't lock-step: random scale-pulse
 		// phase (_time) and glow-pulse phase. The animation frame is randomised below.
 		_time = RandomHelper.RandomNextFloat(0f, 10f);
-		glowPhase = RandomHelper.RandomNextFloat(0f, MathHelper.TwoPi);
+		glowPhase = BrainGlow.RandomPhase();
 		switch (size)
 		{
 		case BrainSize.huge:
@@ -189,23 +180,12 @@ internal class Braineroid : KillableAlien
 	}
 
 	// Soft blue glow behind the brain — additive, tracks the brain's (pulsated) size,
-	// with its own subtle shimmer. The glow texture is pre-tinted blue, so it's drawn
-	// white-with-alpha (like BrainAura over brainbossaura). Caller has already set
-	// scale = num * pulsate (so DrawScale tracks the brain) and, for a bonus-carrying
-	// Braineroid, enabled colorize — so the glow gets hue-shifted with the brain.
+	// with its own subtle shimmer (BrainGlow). Caller has already set scale = num * pulsate
+	// (so DrawScale tracks the brain) and, for a bonus-carrying Braineroid, enabled colorize —
+	// so the glow gets hue-shifted with the brain.
 	private void DrawGlow(GameTime gameTime)
 	{
-		if (glowTexture == null)
-		{
-			return;
-		}
-		float t = (float)gameTime.TotalGameTime.TotalSeconds;
-		float s = (float)Math.Sin(t * GlowOmega + glowPhase);
-		float glowScale = DrawScale * GlowScaleBase * (1f + GlowScaleShimmer * s);
-		float alpha = GlowAlphaBase + GlowAlphaShimmer * s;
-		spriteBatch.BlendMode = (SpriteBlendMode)2;
-		spriteBatch.Draw(glowTexture, Position, rotation, glowScale, center: true, new Color(new Vector4(1f, 1f, 1f, alpha)));
-		spriteBatch.BlendMode = blendMode;
+		BrainGlow.Draw(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, gameTime, blendMode);
 	}
 
 	public override void Update(GameTime gameTime)

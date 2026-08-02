@@ -93,7 +93,6 @@ namespace EvilAliensWeb.Compat
             { "Content/gfx/screenshots/level2empty", ".dds" },
             { "Content/gfx/base/756-v3", ".dds" },
             { "Content/gfx/base/756-v4", ".dds" },
-            { "Content/gfx/sprites/brainlargetransglow", ".dds" },
             { "Content/gfx/marsbg/clouds-background", ".dds" },
             { "Content/gfx/sprites/connector", ".dds" },
             { "Content/gfx/base/2331-v5", ".dds" },

@@ -723,6 +723,20 @@
             catch (e) { console.warn('[debug] eaBossTrain failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: capture + persist this level's level-select thumbnail NOW (card d67755d2).
+        //   eaShotNow('arm')   -> grab the frame in the next post-Draw hook
+        //   eaShotNow('save')  -> composite it into the 300x225 thumbnail and write <Level>.dat
+        // Two calls with at least one frame between them. The real path runs only at level EXIT,
+        // behind an on-screen busy-ness heuristic and two timers, which puts the alpha seal in
+        // ScreenshotSaver.SaveScreenShot out of reach of a cheap check. `save` prints the
+        // `[shot] <Level> 300x225 alphaMin=<n>` line UNDER ?loadlog; alphaMin must read 255.
+        // DESTRUCTIVE: `save` overwrites this level's real saved thumbnail (IndexedDB on the
+        // live site). Use a throwaway boot.
+        window.eaShotNow = (step) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugShotNow', step || 'arm')); }
+            catch (e) { console.warn('[debug] eaShotNow failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: probe the REAL texture load path for one asset (card 35834236).
         //   eaTexProbe('GFX/Base/756')  ->  .dds, 612x612 actual / 512x512 logical, 1 level
         // Reports which precompiled sibling the offline build shipped, which file the texture

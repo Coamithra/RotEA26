@@ -463,6 +463,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   sequence, and the level-up sparkle. **Destructive** — it pairs a real host session onto the
   live level and spends real pickups into the live panels, so run it in a throwaway
   `?level=Level2&invuln` boot),
+  `eaNetFire()` (the single-tap bullet count — card a5c2a39b: one tap used to reach the other
+  peer as TWO bullets, because the sender streamed firing=true for a flat 150 ms while the peer
+  re-fires through a 125 ms cadence gate. Asserts the packet-derived hold contract for every
+  fire rate, then counts the bullets a scripted tap really spawns on a live remote puppet, with
+  the pre-card pattern beside it as the control. **Destructive** — it pairs a real host session
+  onto the live level and fires real bullets into it, so run it in a throwaway
+  `?level=Level2&invuln` boot),
   `eaNetWire.test()` (the in-process net wire + every wire-level codec round trip — card
   25ad0659; needs no session, level or second tab, and also runs under `logic_probe`),
   `eaNetHost()` (the `INetHost` seam — card 25ad0659 step 2a: the production host's 1:1 mapping

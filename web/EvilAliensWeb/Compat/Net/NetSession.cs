@@ -70,7 +70,9 @@ namespace EvilAliensWeb.Compat.Net
         public const byte ProtocolVersion = 10;
         public const float InterpDelayMs = 100f;
 
-        private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
+        // ~30 Hz ship stream. INTERNAL because FiringHoldMsFor's contract is expressed in whole
+        // packets of it, and NetFireTest has to do the same arithmetic to assert that contract.
+        internal const long StreamIntervalMs = 33;
         // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
         // and it is a readout rather than something the sim reads back, so a third of the ship
         // rate is plenty and keeps the added stream traffic under ~400 B/s.
@@ -111,7 +113,11 @@ namespace EvilAliensWeb.Compat.Net
         // a closed tab still departs instantly via the pagehide 'bye'.
         private const long PausedPeerTimeoutMs = 120000;
         private const long MetricsIntervalMs = 5000;
-        private const float FiringHoldMs = 150f;     // "still firing" window after the last FireAt intent
+        // "Still firing" window after the last FireAt intent -- the CEILING of the hold, not the
+        // hold itself. See FiringHoldMsFor: the far side re-fires through a cadence gate of the
+        // same period we are streaming, so the hold has to stay inside one period. This was the
+        // whole hold until card a5c2a39b, which is what doubled a single tap.
+        private const float FiringHoldMs = 150f;
         private const float RenderClockSnapMs = 250f;
         // Pop detection: a rendered step larger than any plausible ship motion over the same
         // real time (PlayerShip.MaxSpeed is 0.33 px/ms; x2 margin + slack for frame jitter).
@@ -782,6 +788,54 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- local ship -> wire ---------------------------------------------------------
 
+        // How long after the last FireAt intent we keep streaming firing=true (card a5c2a39b).
+        //
+        // THE BUG THIS FIXES. `firing` is a LEVEL on the wire, and the peer re-fires from it
+        // through the REAL FireAt path -- whose cadence gate the peer has already set to OUR
+        // period (NetApplyRemoteState does `shoottimer.Duration = 1000/shotsPerSec` off the
+        // same packet). So the peer spawns `1 + floor(hold / period)` bullets for one tap. The
+        // hold was a flat 150 ms against a 125 ms default period (shotspersec 8), i.e. EXACTLY
+        // TWO bullets for every single tap -- and three at the maxed rate of 18/s (55.6 ms).
+        // Those phantom bullets are real in the peer's world and damage what they hit, which is
+        // what made a tap look like it killed an enemy on one screen and not the other.
+        //
+        // THE UNIT IS PACKETS, NOT MILLISECONDS, and that is the whole subtlety. The peer holds
+        // the NEWEST sample until a newer one arrives (DriveRemoteShip reads buffer.Newest every
+        // tick), so N packets marked firing=true put firing=true in front of the re-fire gate for
+        // N SEND INTERVALS there -- not for `hold` ms. A hold expressed in ms therefore has to be
+        // read back as "how many sends land inside it", and the answer jumps in whole packets.
+        // A plain fraction-of-the-period hold is NOT enough: 0.6 * the 62.5 ms period at 16
+        // shots/s is 37.5 ms, which still catches TWO sends 33 ms apart -- 66 ms of firing=true
+        // against a 62.5 ms gate, i.e. the same doubled tap this card is about, just at a rate
+        // nobody tested. So derive the packet count first and convert back.
+        //
+        // Sends are >= StreamIntervalMs apart BY CONSTRUCTION (the `now - lastStreamTx >=
+        // StreamIntervalMs` gate above), and a hold of exactly `n * StreamIntervalMs` therefore
+        // marks exactly n of them wherever the tap falls between two sends -- n >= 1 always, so a
+        // tap can never slip through unsent. Using the NOMINAL interval is conservative in the
+        // right direction: a hitched frame makes the real interval LONGER, which marks fewer
+        // packets (a possible missed bullet), never more (a doubled one).
+        //
+        // RESIDUAL, at the top of the fire-rate range only: from 16/s up the period only fits one
+        // packet, so a tap rides a single packet with no redundancy -- if the stream lane DROPS
+        // it, that bullet goes missing on the peer (the kill still counts on the owner's screen,
+        // where the bullet was real). Exactness under loss needs a shot COUNT or a fire EDGE on
+        // the wire, i.e. a protocol version, which is not worth it for one cosmetic bullet at one
+        // end of the range. Revisit if real-network playtests show missing tap bullets.
+        internal static float FiringHoldMsFor(int shotsPerSec)
+        {
+            // shotsPerSec arrives from a live ship (Setup seeds 8, FirePower caps at 18), but
+            // guard the divide rather than trust it -- a 0 here would be an infinite hold.
+            float period = 1000f / Math.Max(shotsPerSec, 1);
+            // The most packets whose combined window still fits INSIDE one cadence period, floored
+            // at one so the intent is always sent at least once.
+            int packets = Math.Max(1, (int)Math.Ceiling(period / StreamIntervalMs) - 1);
+            // The ceiling keeps a very low fire rate from streaming firing=true for most of a
+            // second off one tap; it only ever LOWERS the packet count, so it cannot reintroduce
+            // the overlap above.
+            return Math.Min(packets * (float)StreamIntervalMs, FiringHoldMs);
+        }
+
         private static void SendShipState(long now)
         {
             lastStreamTx = now;
@@ -797,7 +851,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 pos = local.GetPosition();
                 vel = local.NetVelocity;
-                firing = now - local.NetLastFireMs < FiringHoldMs;
+                firing = now - local.NetLastFireMs < FiringHoldMsFor(local.NetShotsPerSec);
                 if (firing || local.NetLastFireMs > 0)
                 {
                     aim = local.NetLastFireAim;

@@ -1159,6 +1159,41 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   restore it, so "host white / joiner purple" holds for DEFAULT colours; nothing normalises the
   two peers' hue tables.) The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
+  - **THE FIRING HOLD IS MEASURED IN PACKETS, NOT MILLISECONDS (card a5c2a39b), and getting that
+    wrong is what made one tap fire TWICE on the peer.** `firing` is a LEVEL on the wire and
+    `DriveRemoteShip` reads `buffer.Newest.Firing` EVERY tick, so the peer holds the newest
+    sample until a newer one arrives: **N packets marked firing=true = N SEND INTERVALS of
+    firing=true in front of the re-fire gate over there.** That gate is
+    `1000/shotsPerSec` -- the peer sets it from the SAME packet -- so the peer spawns
+    `1 + floor(window / period)` bullets for one tap. `SendShipState` streamed a flat
+    `FiringHoldMs` 150 ms against a 125 ms default period: **exactly two bullets per tap**, three
+    at the maxed 18/s. They are real bullets in the peer's world and damage what they hit, which
+    is why the card also reported "P1 can kill an enemy on P2's screen that is alive on P1's" --
+    one symptom, not two bugs, and the generous-claim design is working as intended underneath.
+    `NetSession.FiringHoldMsFor(shotsPerSec)` now derives the packet count that fits INSIDE one
+    period and converts back; `NetSession.Friends.cs` uses it too (a couch player's tap doubled
+    identically, and an AI friend gained one bullet at the tail of every burst).
+    - **A fraction-of-the-period hold in plain ms is NOT equivalent and was tried first**: 0.6 x
+      the 62.5 ms period at 16 shots/sec is 37.5 ms, which still catches TWO sends 33 ms apart --
+      the same doubled tap at a rate nobody thinks to test. Sends are `>= StreamIntervalMs` apart
+      BY CONSTRUCTION (the `now - lastStreamTx >=` gate), which is what makes the packet count
+      derivable at all; using the NOMINAL interval is conservative in the right direction, since
+      a hitched frame marks FEWER packets, never more.
+    - **RESIDUAL, accepted (do not re-derive it):** from 16/s up the period fits only one packet,
+      so a tap rides a single packet with no redundancy and a stream-lane DROP loses that bullet
+      on the peer -- the kill still counts on the owner's screen, where the bullet was real.
+      Exactness under loss needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol
+      version, judged not worth it for one cosmetic bullet at one end of the range. Revisit if
+      real-network playtests show missing tap bullets.
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 16 assertions;
+      `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs
+      a real host session onto the live level and fires real bullets into it, so use a throwaway
+      `?level=Level2&invuln` boot. It COUNTS the bullets a scripted tap spawns on a real puppet,
+      with the PRE-CARD packet pattern beside it as the control (which must still report 2), and
+      asserts the packet contract as a pure decision over the whole 1..18 domain. **Read leg 1 as
+      the rigorous half**: the rig aligns packets to tick boundaries, so the end-to-end legs
+      sample ONE phase and the 0.6-fraction mutation above passes every one of them while failing
+      leg 1.
 
 ## Metrics & verification
 

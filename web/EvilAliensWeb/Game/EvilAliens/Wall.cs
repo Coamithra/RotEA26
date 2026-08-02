@@ -227,6 +227,13 @@ internal class Wall : AlienDrawableGameComponent
 			// CollisionLevelMap.tileSize for what it cost when the two were allowed to disagree.
 			// Re-pushed beside the offset every time, so nothing can rescale the wall behind the
 			// grid's back.
+			//
+			// ONE number for BOTH axes, because CollisionLevelMap has always divided X and Y by
+			// the same tile size -- so this inherits an assumption rather than adding one: the
+			// sheet must be SQUARE, or the collision rows stop lining up with the drawn ones
+			// (Draw sizes rows as LogicalHeight * scale). 756-v1 is 1248x1248 and it is the only
+			// wall sheet; NetWallTest asserts the squareness so a non-square replacement fails
+			// loudly instead of silently mis-aligning every row.
 			float blockSize = (float)texture.LogicalWidth() * scale;
 			if (collisionMap == null)
 			{

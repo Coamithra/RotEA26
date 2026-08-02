@@ -200,6 +200,14 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   otherwise. Grid files (variation 2) load via TitleContainer -- fine on the client.
     // Spawn extras: [variation:1]
     // State extras: none (base Position drives the scroll; the grid is fixed at spawn).
+    //   THE `v < 0 -> 0` FALLBACK IS LOAD-BEARING SINCE cards 4392bd30 / 80749dc4, where it was
+    //   merely lossy before. SetupFromFile (the ?wallpoptest path) leaves NetVariation at -1, so
+    //   such a wall replicates as variation 0 -- and now that Wall.NetScaleLocal keeps the client
+    //   on its OWN derived scale, the puppet takes variation 0's block size rather than adopting
+    //   the host's, which for a 3-wide poptest grid is a 4x size error on top of the wrong grid.
+    //   Only reachable on a dev ?net= boot (?wallpoptest always pairs with ?level=, which sets
+    //   DebugFlags.Active and so refuses a menu session); a file-driven wall would need its own
+    //   spawn-extra encoding to replicate honestly.
     internal sealed class WallDescriptor : NetTypeDescriptor<Wall>
     {
         public override int EncodeSpawnExtra(AlienDrawableGameComponent c, byte[] buf, int off)

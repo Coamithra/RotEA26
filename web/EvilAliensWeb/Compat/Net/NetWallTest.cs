@@ -101,6 +101,20 @@ namespace EvilAliensWeb.Compat.Net
             }
             finally
             {
+                // THE PUPPETS HAVE TO GO BY HAND. NetPuppets.Disable() clears the id maps and the
+                // recently-removed ledger; it does NOT remove the components the layer built, so
+                // without this every run leaves its walls and its bullet in Game.Components --
+                // drawn, in the Oracle scans, and one more set per run. Collected BEFORE Disable,
+                // since FindPuppet reads the maps it clears. Same shape as NetSnapshotTest's and
+                // NetMotionTest's own cleanups.
+                foreach (ushort id in new ushort[] { IdWall, IdWallB, IdBullet })
+                {
+                    INetEntity puppet = NetPuppets.FindPuppet(id);
+                    if (puppet != null)
+                    {
+                        bin.Remove((GameComponent)(object)puppet);
+                    }
+                }
                 NetPuppets.Disable();
                 foreach (Wall w in scratch)
                 {
@@ -158,6 +172,12 @@ namespace EvilAliensWeb.Compat.Net
 
             check("offline, the drawn block size IS the old 800/width, bit for bit",
                 tileIdentityHolds);
+            // CollisionLevelMap divides X and Y by ONE tile size (it always has), while Draw sizes
+            // rows as LogicalHeight * scale -- so the grid lines up with the towers only while the
+            // sheet is square. 756-v1 is 1248x1248 and is the only wall sheet; this is what makes
+            // a non-square replacement fail loudly rather than mis-align every row.
+            check("the wall sheet is SQUARE, which the single tile size assumes",
+                scratch[0].texture.LogicalWidth() == scratch[0].texture.LogicalHeight());
             check("the wire ROUNDS every wall scale (u16 at 1/256 truncates)", worstPct > 0f);
             check("...and by more than 1% on at least one shipped grid", anyBig);
 
@@ -337,10 +357,9 @@ namespace EvilAliensWeb.Compat.Net
             check("...where the pre-card path differenced the samples instead (control)",
                 observed != declared);
 
-            // 4b. the CLIENT's half, end to end: a scroll-speed change must arrive as a nudge, not
-            //     a step. The snapshot's position is left exactly where the puppet already is, so
-            //     the position-correction blend contributes nothing and this leg is about the
-            //     velocity alone.
+            // 4b. the CLIENT's half, end to end: the puppet dead-reckons at the sent scroll speed,
+            //     an ordinary drift is blended rather than snapped, and a scroll-speed change
+            //     arrives as a nudge instead of a step.
             NetBaseState state = default(NetBaseState);
             state.Pos = new Vector2(0f, -9000f);
             state.Scale = 0.05f;
@@ -360,15 +379,37 @@ namespace EvilAliensWeb.Compat.Net
             check("a wall puppet dead-reckons at the sent scroll speed",
                 Near(puppet.Position.Y - before, 31f, 0.5f));
 
-            // The speedup: Level 3 multiplies the scroll by 4.3, so this is the real shape of the
-            // event, not a synthetic one.
+            // An ordinary correction BLENDS. Stated with a real error in it -- a snapshot placed
+            // exactly where the puppet already is cannot pop whatever the layer does, so asserting
+            // !popped there would pass on a build that snapped on every entry. 40px is a plausible
+            // turn's drift and is under SnapThresholdPx (100); the 400px entry beside it is the
+            // control that makes the first line mean something.
             bool popped;
             SnapUnknownKind kind;
+            state.Pos = puppet.Position + new Vector2(0f, 40f);
+            NetPuppets.OnSnapshotEntry(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
+                state, extras, 0, 0, out popped, out kind);
+            check("a wall's ordinary drift is BLENDED, not snapped", !popped);
+
+            state.Pos = puppet.Position + new Vector2(0f, 400f);
+            NetPuppets.OnSnapshotEntry(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
+                state, extras, 0, 0, out popped, out kind);
+            check("...while a 400px error DOES snap (the control)", popped);
+
+            // Drain that correction before measuring the velocity ease, or the two would be
+            // superimposed and the step below would read whatever the blend happened to add.
+            for (int i = 0; i < 60; i++)
+            {
+                NetPuppets.Drive(16.7f);
+            }
+
+            // The speedup: Level 3 multiplies the scroll by 4.3, so this is the real shape of the
+            // event, not a synthetic one. The position is left exactly where the puppet already
+            // is, so the correction contributes nothing and this leg is about velocity alone.
             state.Pos = puppet.Position;
             state.Vel = declared * 2f;
             NetPuppets.OnSnapshotEntry(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
                 state, extras, 0, 0, out popped, out kind);
-            check("...and a speed change is not a snap (no pupPops)", !popped);
 
             float atChange = puppet.Position.Y;
             NetPuppets.Drive(16.7f);

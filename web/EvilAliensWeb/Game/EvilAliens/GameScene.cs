@@ -927,11 +927,24 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		// own _spawnplayernormally is false for this whole level run (the script that would
 		// set it true is host-only) and the peer can drop at any time.
 		spawnPlayerNormally = true;
-		int slot = EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot;
-		if (slot >= 0 && slot < Oracle.MaxPlayers && oracle.IsSeated(slot) && oracle.IsAlive(slot))
+		// Is there anything of OURS still waiting for a ship? Asked over every seated slot we
+		// own, not just the primary: a couch player on this peer (?netlocal, or a real pad
+		// Start press during the hold) is seated with no ship too, and keying on the primary
+		// alone would leave them behind whenever the primary happened to be flying already.
+		bool anyoneWaiting = false;
+		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
-			// Already flying -- we were gated late and never actually held a spawn back, so
-			// spawning now would only put a spurious "Get ready!" banner up.
+			if (oracle.IsSeated(i) && !oracle.IsAlive(i)
+				&& EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i))
+			{
+				anyoneWaiting = true;
+				break;
+			}
+		}
+		if (!anyoneWaiting)
+		{
+			// Everyone of ours is already flying -- we were gated late and never actually held
+			// a spawn back, so spawning now would only put a spurious "Get ready!" banner up.
 			return;
 		}
 		if (_state == GameState.Normal)
@@ -1922,6 +1935,12 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			score.Load();
 			eventList.RevertToCheckpoint();
 			NetClearCosmeticSwarms();
+			// Card 8a7772d6, the same reasoning: the host's own volley is dropped by the
+			// revert (eventList discards active events, and Lvl1StartDemoEvent.Reset clears
+			// it), so a client copy still emitting across it would be firing bullets the host
+			// is not. Unreachable on Level 1 today -- its first checkpoint sits after the
+			// intro -- so this is the sibling behaviour, not a fix for an observed bug.
+			netIntroVolley = null;
 			Settings.GetInstance().ResetDifficulty();
 			snapshotdelaytimer.Stop();
 			snapshotdelaytimer.Reset();
@@ -2014,7 +2033,16 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			// ...and, on Level 1, the intro volley the host announced (card 8a7772d6). Same
 			// reasoning as the swarms: the bullets cannot replicate, so this peer fires its
 			// own cosmetic copy, and ticking it here gets pause/victory/resetting for free.
-			netIntroVolley?.Update(gameTime, Collection, base.Game);
+			if (netIntroVolley != null)
+			{
+				netIntroVolley.Update(gameTime, Collection, base.Game);
+				if (netIntroVolley.Finished)
+				{
+					// Drop the spent emitter, so NetIntroVolleyActive answers "is a volley
+					// RUNNING" rather than "has one ever started".
+					netIntroVolley = null;
+				}
+			}
 		}
 		if (oracle.AllShipsDead & spawnPlayerNormally)
 		{

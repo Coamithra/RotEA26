@@ -268,18 +268,29 @@ namespace EvilAliensWeb.Compat.Net
                 Pump(wire, peer, NetProtocol.EncodeIntroVolleyEvent(eventSeq++, 12345));
                 Check("the beat started a local volley", live.NetIntroVolleyActive);
 
-                int before = CountType<Bullet>(game);
+                // Census only what OUR volley added, the DriveVolley shape. A whole-world census
+                // would fail for a reason that has nothing to do with the code: the HOST's own
+                // volley is `cosmetic: false` and its 70 COLLIDING bullets are live in this same
+                // world from ~8.8 s to ~14 s of level time, while leg 1's precondition stays
+                // true until demo_OnFinished at ~13.2 s. The committed probe asserts at frame
+                // 200 and would never have noticed; a human running it a few seconds later
+                // would have.
+                HashSet<GameComponent> preVolley = new HashSet<GameComponent>(CollectType<Bullet>(game));
                 TickScene(20);
-                List<GameComponent> bullets = CollectType<Bullet>(game);
-                int added = bullets.Count - before;
-                Check("ticking the scene fires bullets (added=" + added + ")", added > 0);
+                int added = 0;
                 bool allInert = true;
-                foreach (GameComponent b in bullets)
+                foreach (GameComponent b in CollectType<Bullet>(game))
                 {
+                    if (preVolley.Contains(b))
+                    {
+                        continue;
+                    }
+                    added++;
                     allInert &= !((AlienDrawableGameComponent)b).Collides;
                 }
-                Check("every bullet in the world is NON-COLLIDING -- the cosmetic contract"
-                    + " (bullets=" + bullets.Count + ")", allInert);
+                Check("ticking the scene fires bullets (added=" + added + ")", added > 0);
+                Check("every bullet the volley added is NON-COLLIDING -- the cosmetic contract",
+                    allInert && added > 0);
 
                 // ---- 7. fail-open: losing the peer opens the gate --------------------------
                 // The catastrophic failure this feature could have is a joiner with no ship, so

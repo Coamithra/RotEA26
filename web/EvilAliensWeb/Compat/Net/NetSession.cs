@@ -932,9 +932,11 @@ namespace EvilAliensWeb.Compat.Net
                 lastTxAim = aim;
             }
             // Card 8a7772d6: "my level script is holding the player spawn". Only meaningful
-            // from the HOST (the client's script never runs), and the receiver ignores it from
-            // a client -- but it is encoded from whatever OUR scene says rather than gated on
-            // the role here, so the bit always describes the sender honestly.
+            // from the HOST -- a client's own script never runs, and NetScriptHoldsShipSpawn
+            // reads through the client-side override, so what a CLIENT puts here is an echo of
+            // the host's own bit rather than a report about itself. Harmless because
+            // HandleShipState latches it only from a non-host peer; encoded unconditionally
+            // rather than gated on the role so there is one expression, not two.
             bool scriptGate = NetScene.Current?.NetScriptHoldsShipSpawn ?? false;
             transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, firing, shots, bulletLife, scriptGate));
             metrics.StreamTx++;

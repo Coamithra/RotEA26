@@ -40,7 +40,10 @@
 #   5. CONTROL -- a gate arriving AFTER we spawned never yanks the ship, and a second release
 #      never adds a second one. Without this, leg 4 passes on a build where some other path
 #      happened to spawn a ship during the ticking.
-#   6. EvIntroVolley starts a local volley and every bullet it puts in the world is NON-COLLIDING.
+#   6. EvIntroVolley starts a local volley and every bullet IT added is NON-COLLIDING. The
+#      census is scoped to the volley's own bullets, not the world: the HOST's volley is the
+#      real one and its 70 COLLIDING bullets share this world from ~8.8 s to ~14 s of level
+#      time, inside the window leg 1 still calls valid.
 #   7. OPENS ON PEER LOSS -- losing the peer opens the gate. The catastrophic failure this feature could
 #      have is a joiner with no ship at all, so the escape is asserted rather than argued.
 #   8. the emitter itself: exactly 70 bullets, the same seed gives the same angles, a different
@@ -60,7 +63,7 @@
 #   * Volley.NextAngle back to RandomHelper.RandomNextFloat -> **1** ("the same seed gives the
 #     same angles").
 #   * drop `bullet.Collides = false` from the cosmetic branch -> **1** ("every bullet in the
-#     world is NON-COLLIDING").
+#     volley added is NON-COLLIDING").
 #
 # THE PRE-CARD MUTATION FAILS THE GATE ASSERTION AND NOT THE 120-TICK ONE, AND THAT IS HONEST
 # RATHER THAN A GAP TO PAPER OVER. The suite attaches to a level already in GameState.Normal, so

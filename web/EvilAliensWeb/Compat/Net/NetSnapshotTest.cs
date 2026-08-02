@@ -7,7 +7,11 @@ using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
 {
-    // Console self-test for the world-snapshot UNKNOWN-ID attribution (card 48ab9b2f).
+    // Console self-test for the world-snapshot UNKNOWN-ID attribution (card 48ab9b2f) and,
+    // since card de4d5d65, for what happens to the puppet that attribution BUILT: the
+    // self-heal constructs with no spawn extras, so the reliable EvSpawn behind it has to
+    // rebuild the puppet rather than be dropped as a duplicate (section 6, which drives
+    // OnSpawn directly).
     // Invoke with eaNetSnap() from the browser console -- best from the main menu.
     //
     // WHY THIS EXISTS. A snapshot entry whose netId has no puppet takes one of three branches
@@ -31,6 +35,20 @@ namespace EvilAliensWeb.Compat.Net
         // scenario can never collide with a real entry.
         private const ushort IdRebuild = 60101;
         private const ushort IdRefused = 60102;
+        private const ushort IdPowerup = 60103;
+        private const ushort IdUfo = 60104;
+        private const ushort IdUnbuildable = 60105;
+
+        // The two registry indices section 6 drives. The wire typeIdx IS the registry order
+        // (NetTypeRegistry.BuildTable), so these are asserted against the live table rather than
+        // trusted -- a reorder would otherwise make the whole section test the wrong descriptor.
+        private const byte TypePowerup = 20;
+        private const byte TypeUfo = 1;
+
+        // UfoDescriptor's spawn-extra flag bits (private there, restated here rather than
+        // widened -- this suite is the only outside reader and a mismatch fails loudly).
+        private const byte UfoFlagBonus = 4;
+        private const byte UfoFlagUfoSheet = 8;
 
         public static string Run()
         {
@@ -57,9 +75,26 @@ namespace EvilAliensWeb.Compat.Net
             }
 
             EvilBullet puppet = null;
+            // Section 6 identifies its puppets as "the Powerup/UFO that was NOT there before",
+            // exactly as scenario 1 does for its bullet -- a bare type scan would latch onto one
+            // the game already owns and the cleanup would then evict it. TWO sets, because they
+            // answer different questions: `worldBefore` is seeded once and never touched again,
+            // so the cleanup in `finally` sees EVERY component the section built; `ignore` also
+            // absorbs a puppet the section has finished with (one that has been bin.Remove'd but
+            // whose removal has not flushed yet), so the scans can still say which is the new
+            // one. Folding them into one set would hide a retired-but-not-yet-removed puppet
+            // from the cleanup on exactly the failure path the section exists to catch.
+            HashSet<GameComponent> worldBefore = new HashSet<GameComponent>();
+            HashSet<GameComponent> ignore = new HashSet<GameComponent>();
             try
             {
                 NetPuppets.Enable(game);
+                // Seeded HERE, not inside section 6, so the cleanup in `finally` is correct even
+                // if an earlier scenario throws -- an empty set would make it evict every live
+                // Powerup and UFO in the world instead of only the ones this suite built.
+                worldBefore.UnionWith(CollectType<Powerup>(game));
+                worldBefore.UnionWith(CollectType<UFO>(game));
+                ignore.UnionWith(worldBefore);
                 NetBaseState state = default(NetBaseState);
                 state.Pos = new Vector2(-400f, -400f); // off-screen: never drawn, never collides
                 state.Scale = 1f;
@@ -72,10 +107,10 @@ namespace EvilAliensWeb.Compat.Net
                 //    Identify the puppet as the EvilBullet that was NOT there beforehand: a
                 //    bare "is there one?" scan would pass vacuously on a pre-existing bullet
                 //    (and the cleanup below would then evict a bullet the game still owns).
-                HashSet<GameComponent> before = CollectBullets(game);
+                HashSet<GameComponent> before = new HashSet<GameComponent>(CollectType<EvilBullet>(game));
                 bool applied = NetPuppets.OnSnapshotEntry(IdRebuild, 0, state, noExtras, 0, 0,
                     out bool popped, out SnapUnknownKind kind);
-                foreach (GameComponent item in CollectBullets(game))
+                foreach (GameComponent item in CollectType<EvilBullet>(game))
                 {
                     if (!before.Contains(item))
                     {
@@ -112,7 +147,7 @@ namespace EvilAliensWeb.Compat.Net
                     NetPuppets.LiveCount == liveAfterRemoval && liveAfterRemoval == 0);
                 // It was really gone from the world, not merely unregistered -- otherwise the
                 // "not resurrected" check above could pass with a live orphan still drawing.
-                Check("the removed puppet left the world", !CollectBullets(game).Contains((GameComponent)(object)puppet));
+                Check("the removed puppet left the world", !CollectType<EvilBullet>(game).Contains((GameComponent)(object)puppet));
                 puppet = null;
 
                 // 4. REFUSED -- a typeIdx with no descriptor. Unlike the two above this is a
@@ -132,6 +167,130 @@ namespace EvilAliensWeb.Compat.Net
                 NetPuppets.OnSnapshotEntry(IdRefused, badType, state, noExtras, 0, 0, out popped, out kind);
                 Check("an unbuildable typeIdx re-counts on the very next turn (was " + kind + ")",
                     kind == SnapUnknownKind.Refused);
+
+                // ---- 6. A SELF-HEALED PUPPET IS REBUILT BY THE LATER EvSpawn (card de4d5d65) --
+                // The self-heal above constructs with NO spawn extras, so every variant the
+                // extras pin is the descriptor's DEFAULT: a Powerup keeps Randomize()'s local
+                // random type instead of the host's, a bonus UFO gets no SetAsBonus and so draws
+                // untinted. Those extras are on the reliable EvSpawn that lands moments later,
+                // and dropping it as a duplicate is what froze the wrong look in permanently --
+                // the reported symptom being a powerup-carrying UFO whose colour did not match
+                // its powerup on the joiner's screen.
+                sb.Append("[netsnap] self-healed puppets are corrected by the EvSpawn\n");
+                // A GATE, not a report: after a registry reorder these indices name some
+                // other type, and the section would build one of THOSE into the world, fail
+                // to recognise it as a Powerup/UFO and leave it there. Skip instead.
+                bool powerupIdxOk = NetTypeRegistry.Get(TypePowerup) is Descriptors.PowerupDescriptor;
+                bool ufoIdxOk = NetTypeRegistry.Get(TypeUfo) is Descriptors.UfoDescriptor;
+                Check("registry index " + TypePowerup + " is the Powerup descriptor", powerupIdxOk);
+                Check("registry index " + TypeUfo + " is the UFO descriptor", ufoIdxOk);
+
+                // 6a. POWERUP -- the type IS the entity's identity (colour AND letter).
+                Powerup healed = powerupIdxOk
+                    ? (Powerup)BuildBySelfHeal<Powerup>(game, IdPowerup, TypePowerup, state, noExtras, Check, ignore)
+                    : null;
+                if (healed != null)
+                {
+                    // Pick a target the self-heal did NOT land on, or the leg passes vacuously
+                    // on a lucky roll.
+                    Powerup.PowerupType want = healed.type == Powerup.PowerupType.Blast
+                        ? Powerup.PowerupType.Linker
+                        : Powerup.PowerupType.Blast;
+                    byte[] extras = new byte[] { (byte)want };
+                    // The stale one is only bin.Remove'd, and that is DEFERRED -- it is still in
+                    // Game.Components until the flush below, so park it here or "the new Powerup"
+                    // is ambiguous for the next two assertions.
+                    ignore.Add(healed);
+                    SpawnRejectKind reject = NetPuppets.OnSpawn(IdPowerup, TypePowerup, state, extras, 0, 1);
+                    Powerup rebuilt = (Powerup)SoleOfType<Powerup>(game, ignore);
+                    Check("the EvSpawn for a self-healed id is NOT rejected (was " + reject + ")",
+                        reject == SpawnRejectKind.None);
+                    Check("the rebuild produced a NEW Powerup", rebuilt != null);
+                    Check("the rebuilt Powerup carries the host's type (want " + want
+                        + ", was " + (rebuilt != null ? rebuilt.type.ToString() : "none") + ")",
+                        rebuilt != null && rebuilt.type == want);
+                    Check("the rebuild leaves exactly one puppet registered", NetPuppets.LiveCount == 1);
+
+                    // 6b. THE DETACH-BEFORE-REMOVE ORDERING. bin.Remove is DEFERRED, so the stale
+                    //     component's ComponentRemoved fires on this flush -- AFTER the
+                    //     replacement took the same netId. Leave the maps in place and that late
+                    //     event evicts the REPLACEMENT and marks the id removed, and every
+                    //     following snapshot entry reads LeftDead (the puppet stops being
+                    //     corrected at all, which no frame would show).
+                    bin.Update();
+                    Check("the stale self-healed Powerup left the world",
+                        !CollectType<Powerup>(game).Contains((GameComponent)(object)healed));
+                    NetPuppets.OnSnapshotEntry(IdPowerup, TypePowerup, state, noExtras, 0, 0, out popped, out kind);
+                    Check("the rebuilt puppet survives the stale component's deferred removal (was "
+                        + kind + ")", kind == SnapUnknownKind.None);
+
+                    // 6c. NEGATIVE CONTROL -- this puppet is no longer self-healed, so a second
+                    //     EvSpawn is an ordinary duplicate and must still be refused. Without
+                    //     this a rebuild-on-every-duplicate would pass 6a just as well.
+                    Powerup live = (Powerup)SoleOfType<Powerup>(game, ignore);
+                    reject = NetPuppets.OnSpawn(IdPowerup, TypePowerup, state, extras, 0, 1);
+                    Check("a duplicate EvSpawn for a corrected puppet still reports AlreadyLive (was "
+                        + reject + ")", reject == SpawnRejectKind.AlreadyLive);
+                    Check("...and rebuilds nothing",
+                        live != null && ReferenceEquals(SoleOfType<Powerup>(game, ignore), live));
+                    Prune<Powerup>(bin, game, ignore);
+                }
+
+                // 6c-2. A REBUILD THAT CANNOT BE CONSTRUCTED KEEPS THE PUPPET IT HAS. The
+                //       spawn extras come off the wire from a stranger via the public game
+                //       browser, and PowerupDescriptor DECLINES an unrecognised type byte --
+                //       so tearing the live puppet down before construction succeeded would
+                //       let one bad byte delete a working enemy AND MarkRemoved its id, after
+                //       which every snapshot for RecentRemovalWindowMs reads LeftDead. A
+                //       generically-dressed puppet beats no puppet.
+                Powerup doomed = powerupIdxOk
+                    ? (Powerup)BuildBySelfHeal<Powerup>(game, IdUnbuildable, TypePowerup, state, noExtras, Check, ignore)
+                    : null;
+                if (doomed != null)
+                {
+                    byte[] bogus = new byte[] { 200 }; // not a PowerupType
+                    SpawnRejectKind reject = NetPuppets.OnSpawn(IdUnbuildable, TypePowerup, state, bogus, 0, 1);
+                    Check("an unbuildable rebuild reports AlreadyLive (was " + reject + ")",
+                        reject == SpawnRejectKind.AlreadyLive);
+                    Check("...and leaves the self-healed puppet in the world",
+                        CollectType<Powerup>(game).Contains((GameComponent)(object)doomed));
+                    bin.Update();
+                    NetPuppets.OnSnapshotEntry(IdUnbuildable, TypePowerup, state, noExtras, 0, 0, out popped, out kind);
+                    Check("...and the id is still corrected, not left for dead (was " + kind + ")",
+                        kind == SnapUnknownKind.None);
+                    ignore.Add(doomed);
+                    Prune<Powerup>(bin, game, ignore);
+                    bin.Remove((GameComponent)(object)doomed);
+                    bin.Update();
+                }
+
+                // 6d. UFO -- the carrier itself. The bonus can only ever be turned OFF by the
+                //     state extras, so a self-healed carrier can never regain its tint any other
+                //     way. The sheet pick rides along as a second distinguishing property.
+                UFO ufo = ufoIdxOk
+                    ? (UFO)BuildBySelfHeal<UFO>(game, IdUfo, TypeUfo, state, noExtras, Check, ignore)
+                    : null;
+                if (ufo != null)
+                {
+                    Check("a self-healed UFO starts with no bonus", !ufo.NetHasBonus);
+                    Check("a self-healed UFO starts on the default (smallship) sheet", !ufo.NetSmallUfoSheet);
+                    byte[] extras = new byte[]
+                    {
+                        UfoFlagBonus | UfoFlagUfoSheet,
+                        (byte)Powerup.PowerupType.OneUp,
+                    };
+                    ignore.Add(ufo); // deferred removal -- see 6a
+                    SpawnRejectKind reject = NetPuppets.OnSpawn(IdUfo, TypeUfo, state, extras, 0, 2);
+                    UFO rebuilt = (UFO)SoleOfType<UFO>(game, ignore);
+                    Check("the EvSpawn for a self-healed UFO is NOT rejected (was " + reject + ")",
+                        reject == SpawnRejectKind.None);
+                    Check("the rebuilt UFO carries a bonus", rebuilt != null && rebuilt.NetHasBonus);
+                    Check("the rebuilt UFO's bonus is the host's type (want OneUp, was "
+                        + (rebuilt != null ? ((Powerup.PowerupType)rebuilt.NetBonusType).ToString() : "none") + ")",
+                        rebuilt != null && rebuilt.NetBonusType == (byte)Powerup.PowerupType.OneUp);
+                    Check("the rebuilt UFO is on the host's sheet", rebuilt != null && rebuilt.NetSmallUfoSheet);
+                    Prune<UFO>(bin, game, ignore);
+                }
             }
             catch (Exception ex)
             {
@@ -145,8 +304,19 @@ namespace EvilAliensWeb.Compat.Net
                 if (puppet != null)
                 {
                     bin.Remove((GameComponent)(object)puppet);
-                    bin.Update();
                 }
+                // Section 6's puppets, if a Check short-circuited before its own Prune -- and
+                // against `worldBefore`, so a stale one the rebuild did NOT remove (the very
+                // regression 6a asserts against) is still evicted rather than left orphaned.
+                foreach (GameComponent stray in CollectNew<Powerup>(game, worldBefore))
+                {
+                    bin.Remove(stray);
+                }
+                foreach (GameComponent stray in CollectNew<UFO>(game, worldBefore))
+                {
+                    bin.Remove(stray);
+                }
+                bin.Update();
             }
 
             // ---- the derived snapTurn number the [net] line prints ---------------------------
@@ -173,19 +343,78 @@ namespace EvilAliensWeb.Compat.Net
             return sb.ToString();
         }
 
-        // The live EvilBullets in the world, so a puppet this suite built can be told apart
-        // from any the game already owned.
-        private static HashSet<GameComponent> CollectBullets(Game game)
+        // ---- section 6 helpers ----------------------------------------------------------------
+
+        // Drive the REAL self-heal for one id and hand back the T it built, recording everything
+        // that was already in the world so later scans can tell the puppet apart from it.
+        private static GameComponent BuildBySelfHeal<T>(Game game, ushort netId, byte typeIdx,
+            in NetBaseState state, byte[] noExtras, Action<string, bool> check,
+            HashSet<GameComponent> ignore) where T : GameComponent
         {
-            HashSet<GameComponent> set = new HashSet<GameComponent>();
-            foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
+            NetPuppets.OnSnapshotEntry(netId, typeIdx, state, noExtras, 0, 0,
+                out bool _, out SnapUnknownKind kind);
+            GameComponent built = SoleOfType<T>(game, ignore);
+            // The positive control, as in scenario 1: every assertion below is about what the
+            // self-heal produced, so a self-heal that produced nothing must fail here loudly
+            // rather than skip quietly.
+            check("the self-heal built a " + typeof(T).Name + " (kind " + kind + ")",
+                kind == SnapUnknownKind.Rebuilt && built != null);
+            return built;
+        }
+
+        // The one live T that is not in `ignore`; null if there are none or more than one
+        // (either is a rig fault, and returning it would make the caller's assertion vacuous).
+        private static GameComponent SoleOfType<T>(Game game, HashSet<GameComponent> ignore)
+            where T : GameComponent
+        {
+            GameComponent found = null;
+            foreach (GameComponent item in CollectNew<T>(game, ignore))
             {
-                if (item is EvilBullet)
+                if (found != null)
                 {
-                    set.Add(item);
+                    return null;
+                }
+                found = item;
+            }
+            return found;
+        }
+
+        private static List<GameComponent> CollectNew<T>(Game game, HashSet<GameComponent> ignore)
+            where T : GameComponent
+        {
+            List<GameComponent> list = new List<GameComponent>();
+            foreach (GameComponent item in CollectType<T>(game))
+            {
+                if (!ignore.Contains(item))
+                {
+                    list.Add(item);
                 }
             }
-            return set;
+            return list;
         }
+
+        private static void Prune<T>(ComponentBin bin, Game game, HashSet<GameComponent> ignore)
+            where T : GameComponent
+        {
+            foreach (GameComponent item in CollectNew<T>(game, ignore))
+            {
+                bin.Remove(item);
+            }
+            bin.Update();
+        }
+
+        private static List<GameComponent> CollectType<T>(Game game) where T : GameComponent
+        {
+            List<GameComponent> list = new List<GameComponent>();
+            foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is T)
+                {
+                    list.Add(item);
+                }
+            }
+            return list;
+        }
+
     }
 }

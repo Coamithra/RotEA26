@@ -540,6 +540,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   is not silent — the real death paths play their real cues),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
+  `eaNetLocalFx()` (which peer sees a presentation effect -- cards 7a8ec0d3 / a66e190a: a
+  floating score is suppressed for a slot this peer does not own, and the 1up slow motion
+  crosses the wire in both directions with no echo. Menu-only and leave-no-trace),
   `eaNetFx()` (the transient-feedback beats — cards 43e85936 / 57ea30cd / ee939dd1 / 8d063d33 /
   c146422f: real EvFx frames from a scripted host over a NetWire into a real client session,
   asserting the EFFECT on the live puppet. The hit blink and the detach burst are private state
@@ -1200,6 +1203,10 @@ site now lives under:
     other peer's puppets are then corrected backward -- the mechanism, the measurement and
     `?nethitstop=1` are in `Compat/Net/CLAUDE.md`. **Shake is untouched** (present-blit only, no
     gameplay time), so a co-op death still reads as an impact.
+    **The rule is "no ASYMMETRIC time scaling", not "no time scaling"** -- the 1up slow motion
+    (`Oracle.SetSlowmotion`, a different mechanism entirely) DOES run in a session and since card
+    a66e190a replicates as `EvSlowmo`, so both peers scale together. A hit-stop is scale ZERO on
+    ONE peer; that is what makes it the banned shape.
 - **Slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up slowmo adds an accumulation-
   buffer motion blur on the composited+bloomed `sceneTarget` before the present blit:
   `trail = trail*decay + scene*(1-decay)`, mixed back with an eased `slowmoTrailMix` (~0.25s); the

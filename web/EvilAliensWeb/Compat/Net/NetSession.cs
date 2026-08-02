@@ -91,7 +91,11 @@ namespace EvilAliensWeb.Compat.Net
         // Both blocks are length-guarded, so an older peer degrades to exactly the pre-card
         // behaviour rather than desyncing -- the ca4fd94f bump test, which this passes. The bump
         // is the batch convention rather than a strict requirement; see NetProtocol's header.
-        public const byte ProtocolVersion = 14;
+        // v15 (card a66e190a): EvSlowmo (event 25) -- either peer announces its 1up slow motion
+        // so both worlds scale together instead of one crawling while the other runs. A v14 peer
+        // ignores the unknown event and falls back to the pre-card unilateral slowdown, so like
+        // v14 this is the batch convention rather than a forced incompatibility.
+        public const byte ProtocolVersion = 15;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -1176,6 +1180,36 @@ namespace EvilAliensWeb.Compat.Net
                 netId = entry.Id;
             }
             transport.SendReliable(NetProtocol.EncodeFxEvent(txEventSeq++, (byte)kind, netId, param));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        // The local 1up slow motion has started -- run it over there too (card a66e190a).
+        // Called from Oracle.SetSlowmotion, the ONE place a local slow motion begins (the 1up
+        // bar's PlayerShip.PowerUp case and the eaSlowmo() QA seam both go through it), so
+        // there is no per-caller plumbing. The rx side calls Oracle.NetSetSlowmotion instead,
+        // which does the identical work WITHOUT this send -- so the two peers cannot echo each
+        // other into a permanent slowdown, by construction rather than by a latch.
+        //
+        // EITHER PEER, unlike OnGameFx: the bar belongs to whichever player filled it, and that
+        // is as often the joiner as the host.
+        //
+        // WHY REPLICATING A TIME SCALE IS SAFE HERE, when Juice.AddHitStop is refused outright:
+        // a hit-stop is scale ZERO on ONE peer, so that peer stops producing motion while the
+        // wire keeps streaming and the other peer's puppets are corrected backward. This is 0.4
+        // on BOTH, and every net clock (the cadence, NetPuppets.Drive, the observed velocities)
+        // reads real time and is untouched by the game time scale -- so the wire carries the
+        // slowed truth and nothing is corrected backward. What it REMOVES is a 12 s divergence:
+        // pre-card one peer crawled while the other ran, which is exactly what the card reported.
+        // The residual is the ~one-way-trip skew at each end of the window.
+        public static void OnLocalSlowmotion(float seconds)
+        {
+            if (!Active || !PeerUp || NetScene.Current == null)
+            {
+                return;
+            }
+            float ms = MathHelper.Clamp(seconds * 1000f, 0f, 65535f);
+            transport.SendReliable(NetProtocol.EncodeSlowmoEvent(txEventSeq++, (ushort)ms));
             metrics.EventsTx++;
             metrics.BeatsTx++;
         }
@@ -3374,6 +3408,23 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 ApplyFx(fxKind, fxId, fxParam);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvSlowmo:
+            {
+                // The peer's 1up filled (card a66e190a). NOT host-gated -- either peer's bar can
+                // fill -- but scene-gated like every world message: Oracle.Update clears slow
+                // motion whenever no player ship is alive, so applying one at the menus would be
+                // a no-op with a tick of scaled time in it.
+                //
+                // NetSetSlowmotion, never SetSlowmotion: the latter would send this straight back.
+                if (NetScene.Current == null || oracle == null
+                    || !NetProtocol.TryDecodeSlowmoEvent(data, out ushort slowmoMs))
+                {
+                    return;
+                }
+                oracle.NetSetSlowmotion(slowmoMs / 1000f);
                 metrics.BeatsRx++;
                 break;
             }

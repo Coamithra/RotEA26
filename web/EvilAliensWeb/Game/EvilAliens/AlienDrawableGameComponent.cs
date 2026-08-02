@@ -633,7 +633,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
 		// (card 4d904410), so indexing by loop counter would pay unseated slots and skip real
-		// ones. The FIRST seated player still gets the positional floating text.
+		// ones. The first seated player WE OWN still gets the positional floating text.
+		//
+		// Card 7a8ec0d3: "first seated" alone would offer the one floater to a slot the other
+		// peer holds, and ScoreVisualiser.AddScore now suppresses a floater for a slot we do not
+		// own -- so a boss kill would show this screen no figure at all whenever slot 0 belongs
+		// to the peer, which on a joiner is always. Asking OwnsSlot here hands it to a slot whose
+		// popup will actually be drawn, at that slot's own multiplier. Offline and in local
+		// co-op OwnsSlot is true for every seated slot, so this IS "the first seated player".
 		bool first = true;
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
@@ -644,7 +651,7 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			// Each slot is credited with ITS OWN combo multiplier, so a boss pays four
 			// different figures -- which is why the wire carries a per-slot award array
 			// rather than one number (card b0ab09ec).
-			if (first)
+			if (first && EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i))
 			{
 				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, Position, i));
 				first = false;

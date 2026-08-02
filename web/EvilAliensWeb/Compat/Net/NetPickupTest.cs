@@ -412,7 +412,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             senderMs += 33;
             return NetProtocol.EncodeShipState(seq++, senderMs, new Vector2(400f, 300f),
-                Vector2.Zero, 4.712389f, alive: true, firing: false, 8, 450f);
+                Vector2.Zero, 4.712389f, alive: true, shotCount: 0, 8, 450f);
         }
 
         private static void Teardown(StringBuilder sb, Action<string, bool> Check, Oracle oracle,

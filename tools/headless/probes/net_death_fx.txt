@@ -19,10 +19,17 @@
 #     the build-hash handshake means both ends of any session run the same binary.
 #     The host gates it on the entity being ON SCREEN, so an off-screen fly-off cannot become a
 #     bang (and a sound) at the edge of the peer's screen.
-#   * A DEFERRED death is detected from the hp ALREADY in every snapshot entry -- 0 on a killable
-#     means the host has landed the killing blow -- and the puppet is RELEASED from the freeze so
-#     its own Update finishes dying locally. That is what card 13aa596c's own note asked for
-#     ("animation doesnt need to be syncd and can be done locally").
+#   * A DEFERRED death RELEASES the puppet from the freeze so its own Update finishes dying
+#     locally. That is what card 13aa596c's own note asked for ("animation doesnt need to be
+#     syncd and can be done locally").
+#   * The TRIGGER for that release is card f62116b5's, and it is the newer half of this probe.
+#     The host emits an explicit EvDying (event 23, reliable, [netId:2], protocol v11) the moment
+#     its KilledBy returns WITHOUT having removed the component, so the peer releases on that
+#     tick at any world size. The two inferences stay as fallbacks: hp==0 across TWO consecutive
+#     snapshot turns (one turn is no longer enough, which is what removes the pre-card
+#     one-tick-early residual on ordinary kills), and the late EvDeath. A peer JOINING IN
+#     PROGRESS mid-animation is on the fast path too -- NetIdRegistry.ReplayLive re-announces
+#     any live entity that is already dying, beside its catch-up spawn (section 2f).
 #
 # WHY A PROBE AND NOT A SCREENSHOT. Both symptoms are the ABSENCE of a one-to-five-second effect
 # at a moment no capture can be timed to (root CLAUDE.md: never verify motion with timed live
@@ -34,6 +41,13 @@
 # FAILURE MEANS: read the quoted PASS/FAIL lines, they name what they check.
 #   * a section-2 failure is the WIRE: either the host stopped marking self-destructs (every mine
 #     goes back to vanishing) or it stopped gating them on screen position (bangs off the edge).
+#   * a section-2d/2e failure is the TRIGGER at the wire: 2d failing means a deferred death no
+#     longer announces itself at KilledBy time (back to waiting a snapshot turn or a whole
+#     animation), 2e failing means EVERY kill now announces itself, which would run the
+#     award-free death path on the peer a tick before the attributed EvDeath.
+#   * a section-6 failure is the client half of that trigger -- the beat lands and the puppet is
+#     not released. Section 6 delivers NO snapshot at all, which is what makes it a latency
+#     assertion rather than a duplicate of section 4.
 #   * a section-4 failure is the RELEASE. Note which one: "is UN-FROZEN" failing IS the original
 #     bug (a puppet left frozen is still in the world, so a survival-only assertion would pass);
 #     "reports LeftDead, not Rebuilt" failing means the by-hand MarkRemoved went, and the snapshot
@@ -41,7 +55,7 @@
 #   * a section-5 failure means a deferred death is being deleted mid-animation again whenever the
 #     puppet's round-robin snapshot turn does not come round before the host's EvDeath.
 #
-# THE POSITIVE IS THE `49 passed` TALLY, and section 5's paid-award leg is the positive control
+# THE POSITIVE IS THE `73 passed` TALLY, and section 5's paid-award leg is the positive control
 # for every "no slot was credited" assertion above it -- an award path that had stopped working
 # entirely would satisfy all of those zeroes. Raise the count when checks are added.
 # `expect-not FAIL` is here too but is the weaker half: it passes on a run where the eval never
@@ -54,13 +68,17 @@
 # the live Game.Components and really kill them, so it refuses to run near a live world, and every
 # entity it builds sits far off-screen -- nothing it does is ever drawn.
 #
-# MUTATION-TESTED SIX WAYS, each isolated, each a REVERT of one thing the fix does (counts are
+# MUTATION-TESTED NINE WAYS, each isolated, each a REVERT of one thing the fix does (counts are
 # failing LEGS, and they are DISJOINT across the two defects):
 #   * NoteSelfDestruct made a no-op (the pre-card host)                 -> 1  (section 2)
 #   * the host's on-screen gate removed                                 -> 1  (section 2)
 #   * the hp==0 snapshot trigger disabled                               -> 6  (section 4)
 #   * the EvDeath release fallback back to an unconditional bin.Remove  -> 1  (section 5)
 #   * the client's KillerSelf branch removed (falls to the generic burst)-> 1  (section 3)
+#   * the !IsDead guard on the EvDying emission dropped                  -> 1  (section 2e)
+#   * NetPuppets.OnDeathBegan made a no-op                               -> 5  (section 6 only,
+#     i.e. sections 4 and 5 stay green -- which is what proves the fallbacks are still real)
+#   * the two-consecutive-turns latch dropped (fire on the first zero)   -> 2  (section 4)
 #
 # eahl: --flags "?menu&noattract"
 #
@@ -77,12 +95,13 @@ eval NetDeathFx
 expect \[net\] session start role=host .* transport=InMemory
 expect \[netdeathfx\] unattributed \+ deferred death FX on the join peer
 expect 1\. the killerSlot byte's three-way meaning at the decode boundary
-expect 2\. HOST -- a self-destruct goes out as KillerSelf, a fly-off does not
+expect 2\. HOST -- a self-destruct goes out as KillerSelf, a fly-off does not, a deferred death announces itself
 expect 3\. CLIENT -- EvDeath\(KillerSelf\) runs the mine's real self-destruct
-expect 4\. CLIENT -- hp==0 in a snapshot releases the puppet to finish dying
+expect 4\. CLIENT -- hp==0 in TWO snapshot turns releases the puppet \(the fallback\)
 expect 5\. CLIENT -- an ATTRIBUTED EvDeath on a deferred-death type releases too
-expect 6\. teardown
-expect \[netdeathfx\] 49 passed, 0 failed
+expect 6\. CLIENT -- an EvDying beat releases the puppet on the EVENT tick
+expect 7\. teardown
+expect \[netdeathfx\] 73 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

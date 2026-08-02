@@ -158,7 +158,11 @@ def probe_files(pattern):
 def read_meta(path):
     """(extra argv, one-line summary) from the probe's header comments."""
     argv, summary = [], ""
-    with open(path, "r", encoding="utf-8") as fh:
+    # utf-8-sig: a BOM would otherwise glue to the first '#', startswith("#") answers False,
+    # and the scan concludes the header is over -- the probe then runs with NO flags while
+    # still printing a plausible summary, reading as a genuine probe failure (seen when a
+    # conflict-resolution script added BOMs; cost a phantom-regression chase).
+    with open(path, "r", encoding="utf-8-sig") as fh:
         for line in fh:
             # lstrip first, matching eahl's own comment handling (it Trim()s before
             # testing for '#'), or an indented comment ends the header scan here while
@@ -401,6 +405,13 @@ def main():
     for path in paths:
         name = os.path.basename(path)
         extra, summary = read_meta(path)
+        if not extra:
+            # All committed probes declare an `# eahl:` directive; an empty parse means the
+            # header scan never saw it (BOM, indentation, encoding), and the probe would run
+            # flagless against whatever eahl boots by default -- a wrong-world "failure".
+            print("%-24s ERROR  no `# eahl:` directive parsed -- header unreadable?" % name)
+            failed.append(name)
+            continue
         sys.stdout.write("%-24s " % name)
         sys.stdout.flush()
         rc, out, cmd = run(path, extra, args.verbose)

@@ -495,6 +495,8 @@ namespace EvilAliensWeb.Compat.Net
             public bool NetEndingNormally => false;
 
             public bool JoinWouldSpawnNow => false;
+
+            public float PlayerSpawnDirection => 4.712389f;
             public bool NetScriptHoldsShipSpawn => false;
             public void NetApplyIntroVolley(int seed) { }
 

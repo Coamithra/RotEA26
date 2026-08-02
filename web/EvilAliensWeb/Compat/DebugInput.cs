@@ -605,6 +605,39 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetSceneOrderTest.Run();
 		}
 
+		// JS bridge for the level-end scenario (eaNetLevelEnd in wwwroot/index.html, cards
+		// 3b6c12e7 / b4a9fe60). TWO ENTRY POINTS, not one: the subject is the level's own
+		// seven-second victory choreography, so the caller has to step the game between them
+		// (`eval NetLevelEndArm`, `step 450`, `eval NetLevelEndCheck`). DESTRUCTIVE -- it
+		// terminates the live level. Boot ?level=Level2&invuln&netallowdebug&noattract.
+		[JSInvokable("debugNetLevelEndArm")]
+		public static string NetLevelEndArm()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.Arm();
+		}
+
+		[JSInvokable("debugNetLevelEndCheck")]
+		public static string NetLevelEndCheck()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.Check();
+		}
+
+		// The HOST half of the same card: the lobby the pair comes back TO. Its victory is the
+		// level's own ?win script rather than an injected beat -- a host wins from its script,
+		// and that is the only route a rig has to one. `eval NetLevelEndArmHost`, step past the
+		// victory AND the credits crawl, `eval NetLevelEndMenu`.
+		[JSInvokable("debugNetLevelEndArmHost")]
+		public static string NetLevelEndArmHost()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.ArmHost();
+		}
+
+		[JSInvokable("debugNetLevelEndMenu")]
+		public static string NetLevelEndMenu()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.MenuCheck();
+		}
+
 		// JS bridge for the INetEntity seam (eaNetEntity in wwwroot/index.html, card 25ad0659
 		// step 2c-ii). The compiler already covers the migration -- the core fields changed
 		// TYPE, so no call site can still read the concrete one. What it cannot cover is a

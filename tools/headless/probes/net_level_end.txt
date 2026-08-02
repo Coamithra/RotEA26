@@ -1,0 +1,60 @@
+# PROBE: finishing a level keeps an online co-op pairing ALIVE (card 3b6c12e7), and the remote
+# ship flies off in the SAME DIRECTION as every local one (card b4a9fe60).
+#
+# PINS two things a frame cannot show and a counter does not move for:
+#   - GameScene.Terminate's finishedlevel latch -> NetSession.UpdateSceneEdges' scene-down
+#     branch. Pre-card that branch sent EvLeave and called Stop("match ended") -- one match per
+#     lobby -- so the host could not pick a second level with the same buddy.
+#   - PlayerShip.startdir on a net puppet. Both puppet spawn sites hard-coded South (4.712389f)
+#     while the SCENE decides the angle, so on Level 2 (spawnType West) the remote ship left
+#     UPWARD while every local ship left to the RIGHT, on both peers' screens.
+#
+# WHY LEVEL 2: it is the one shipped level whose spawnType is not South, so it is the only boot
+# on which the direction legs discriminate at all. On any South level the pre-card constant and
+# the correct answer agree and every direction leg passes on the broken build.
+#
+# WHY ?netallowdebug: the subject is MENU-session match-end semantics, so the suite starts a real
+# menu session -- and HandleHello refuses one while DebugFlags.Active, which ?level= sets. This is
+# the production flag for exactly that case. The suite asserts its own pairing, so a missing flag
+# reads as a FAIL rather than a vacuous pass.
+#
+# WHY TWO EVALS WITH A STEP BETWEEN: the subject is the level's OWN victory choreography --
+# GameScene.UpdateWin purges at 4 s and calls Terminate at 7 s. The arm phase applies a real
+# EvVictory over the wire; the 470 frames (~7.8 s at the fixed 60 Hz dt) are that choreography
+# actually running; the check phase reads what survived it. Calling Terminate by hand instead
+# would assert about the rig, not about the path.
+#
+# WHY IT IS NOT IN net_selftests.txt: it needs a live level, and it is DESTRUCTIVE -- more so
+# than net_scene_order.txt, which only leaves the scene in its reset branch. This one drives the
+# level to its END, so the run finishes at the menus. Same separate-probe answer as
+# net_reset_spawn.txt.
+#
+# FAILURE MEANS one of: a finished level tore the pairing down again (the players are dropped to
+# the main menu instead of the lobby, and cannot start a second level together); an EvLeave went
+# out, so even a surviving local session is ended from the peer's side; the per-match state
+# carried over, so the next level's puppet starts from the last level's final position; or a
+# puppet is back on the hard-coded spawn direction.
+#
+# MUTATION-TESTED both ways, failing DISJOINT legs: reverting PuppetSpawnDirection() to the bare
+# constant fails 2 (the puppet's direction and its pre-card control) and nothing else; disabling
+# the scene-down survival branch fails 4 (Active, PeerUp, the lobby return, and the EvLeave
+# discriminator) and no direction leg.
+#
+# THE COUNT IS ASSERTED, not `expect-not FAIL`: both phases SKIP themselves with no level up,
+# and an absence assertion passes on a run that never got there.
+#
+# eahl: --flags "?level=Level2&invuln&netallowdebug&noattract&seed=1234"
+
+step 200 nodraw
+mark
+
+eval NetLevelEndArm
+
+# The real 7-second victory choreography (UpdateWin purges at 4000 ms, Terminates at 7000 ms).
+step 470 nodraw
+
+eval NetLevelEndCheck
+
+expect \[netlevelend\] 17 passed, 0 failed
+expect-not FAIL
+quit

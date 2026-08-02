@@ -721,6 +721,31 @@
             catch (e) { console.warn('[debug] eaNetSceneOrder failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug (cards 3b6c12e7 / b4a9fe60): finishing a level keeps an online co-op pairing
+        // alive and returns both peers to the lobby, and the remote ship flies off in the same
+        // direction as every local one. TWO CALLS with the game running in between — the subject
+        // is the level's own ~7 s victory choreography, so .arm() applies a real EvVictory and
+        // .check() reads the result about 7.5 s later. DESTRUCTIVE: it terminates the live level.
+        // Boot ?level=Level2&invuln&netallowdebug&noattract.
+        window.eaNetLevelEnd = {
+            arm: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndArm')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.arm failed (game not booted yet?): ' + e.message); }
+            },
+            check: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndCheck')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.check failed (game not booted yet?): ' + e.message); }
+            },
+            armHost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndArmHost')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.armHost failed (game not booted yet?): ' + e.message); }
+            },
+            menu: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndMenu')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.menu failed (game not booted yet?): ' + e.message); }
+            },
+        };
+
         // Debug (card 72143c11): the match-end notice seams. eaNetNotice(text) parks a
         // session-ending notice at the menus with no peer and no session — every production
         // writer of MenuNotice is inside NetSession.Stop(), so this is the only way to reach

@@ -1153,6 +1153,33 @@ internal class MenuScene : Scene
 		netMode = true;
 	}
 
+	// Enter the net-lobby menu state on a menu scene that is coming up with a session ALREADY
+	// LIVE (card 3b6c12e7 -- a finished online co-op level). "Enter the lobby" includes closing
+	// the main menu: MenuSub1 has no modality whatsoever, so a mainMenu left live under the
+	// lobby panel would take every arrow and every Enter alongside it (card 72143c11).
+	//
+	// It shows the state the two roles are in AFTER a connect, which is where the pair already
+	// are -- the host on netPickMenu choosing the next mission, the client on the status panel
+	// waiting for it. NetUpdate keeps both current from there: NetLobby.Phase is untouched
+	// (Stop(), the only thing that resets it, deliberately did not run), so the client's panel
+	// gets its text from the same Connected branch a fresh pairing does, and the client's Cancel
+	// still leaves the match through NetLobby.Cancel.
+	internal void EnterNetLobby()
+	{
+		netMode = true;
+		netNoticeUp = false;
+		mainMenu.RemoveInstantly();
+		if (EvilAliensWeb.Compat.Net.NetSession.IsHost)
+		{
+			HideNetStatus();
+			netPickMenu.Show();
+		}
+		else
+		{
+			ShowNetStatus("Connected!\nThe host is choosing a mission...");
+		}
+	}
+
 	// Per-tick lobby pump: drains the JS-side phase queue, keeps the status panel's text
 	// current, advances the host to the level pick on connect, mirrors the host's launch
 	// on the client, and surfaces session-ending notices from any point in the flow.
@@ -1438,6 +1465,17 @@ internal class MenuScene : Scene
 			Collection.Add((GameComponent)(object)mainMenu);
 		}
 		hidemainmenu = false;
+		// Card 3b6c12e7: an online co-op level that FINISHED left the pairing standing, so this
+		// re-entry is a return to the lobby rather than to the main menu -- the host picks the
+		// next mission and the pair keeps playing. Take-once, and LAST: EnterNetLobby removes the
+		// mainMenu this method has just added, so anything re-adding it afterwards would put a
+		// live main menu underneath the lobby panel (card 72143c11's two-menus-eat-every-keypress
+		// shape). Story levels come back through CreditsScene, so this can be seconds after the
+		// scene went down and the two peers need not arrive together.
+		if (EvilAliensWeb.Compat.Net.NetSession.TakeLobbyReturn())
+		{
+			EnterNetLobby();
+		}
 		base.Initialize();
 	}
 

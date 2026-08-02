@@ -969,6 +969,12 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	internal float NetBulletLife => bulletlifetime;
 
+	// Read seam for eaNetLevelEnd (card b4a9fe60): the angle this ship flew IN on and will fly
+	// OUT on at victory (the hasWon arm of Update thrusts at it forever). Private, set once in
+	// Setup, and it drives nothing else observable -- so the only way to tell a puppet spawned
+	// on the scene's direction from one spawned on the hard-coded South is to read it.
+	internal float NetStartDirection => startdir;
+
 	// How many shots a puppet owes, given the count that just arrived and the last one it acted
 	// on. Pure and static so the whole wrap domain can be swept as a decision (eaNetFire leg 1)
 	// rather than sampled at whatever counts a scripted burst happens to produce.

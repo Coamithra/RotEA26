@@ -691,6 +691,14 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetFx')); }
             catch (e) { console.warn('[debug] eaNetFx failed (game not booted yet?): ' + e.message); }
         };
+        // Debug: the vanishing laser UFO (cards 9ccfe295 / 54e9a590) — the beam's emitter on the
+        // wire, the self-collision it prevents (with the ownerless pre-card configuration beside
+        // it as the control), and the unattributed claim that used to delete the host's live
+        // entity silently. Prints PASS/FAIL. Run from the MAIN MENU.
+        window.eaNetIdReuse = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetIdReuse')); }
+            catch (e) { console.warn('[debug] eaNetIdReuse failed (game not booted yet?): ' + e.message); }
+        };
         // Debug: which peer sees a presentation effect (cards 7a8ec0d3 / a66e190a) — the
         // floating score suppressed for a slot this peer does not own, and the 1up slow motion
         // replicated in both directions with no echo. Prints PASS/FAIL. Run from the MAIN MENU.

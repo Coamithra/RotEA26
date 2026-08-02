@@ -110,7 +110,19 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   DDA hang was fixed with a step cap; a tilt would only desync from the host). The puppet
     //   is built sound-free (SetupSingleShot playSound:false) and ApplyStateExtra plays nothing /
     //   spawns nothing.
-    // Spawn extras: none (constructed at aim 0 / len ~0; the first snapshot supplies the beam).
+    // Spawn extras: [ownerNetId:2]  (card 9ccfe295, protocol v18; 0 = no emitter)
+    //   THE EMITTER HAS TO BE ON THE WIRE, and leaving it off was a real defect rather than a
+    //   fidelity gap. `Lazer.owner` is written only by `Setup`, which no puppet ever runs, so a
+    //   client's beam had none -- and `UFO.CollidesWith` damages itself off any Lazer whose
+    //   `owner != this`. So on the joiner a big laser UFO was hit by ITS OWN beam, 11 hit points
+    //   at a 35 ms hittimer, and the unattributed claim that followed deleted the host's copy
+    //   silently: "large laser-firing UFOs randomly disappear". Same shape for every other
+    //   `Setup` emitter -- MarsBoss, the sweeping Boss, and SpiderHelperMothership, which READS
+    //   `lazer.owner == this` in three places.
+    //   Resolved through the live puppet map, so ordering matters and holds: the emitter's own
+    //   EvSpawn always precedes its beam's on the ORDERED reliable lane (it existed first), and
+    //   `NetIdRegistry.ReplayLive` walks `liveList` in spawn order for a join-in-progress peer.
+    //   An id that does not resolve leaves `owner` null, i.e. exactly the pre-card behaviour.
     // State extras: [angle:2][len:2][lead:2][lenRate:2][leadRate:2][angleRate:2]
     //   angle u16 normalised [0,2pi); len/lead u16 px; the three RATES scaled i16 (card
     //   c1a38ef9) -- px/ms x1000 for the two growth rates, rad/ms x10000 for the sweep.
@@ -127,13 +139,42 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         // the beam just holds its aim and length between turns, i.e. the pre-card behaviour.
         private const int ValuesBytes = 6;
         private const int RatesBytes = 12;
+        // The spawn-extra block (card 9ccfe295): [ownerNetId:2].
+        private const int OwnerBytes = 2;
+
+        public override int EncodeSpawnExtra(AlienDrawableGameComponent c, byte[] buf, int off)
+        {
+            // 0 when the beam has no emitter (every SetupSingleShot shooter) OR when the emitter
+            // is not itself replicated -- both mean "nothing for the client to point at".
+            ushort ownerId = 0;
+            if (C(c).NetOwner is AlienDrawableGameComponent emitter
+                && NetIdRegistry.TryGetByComp(emitter, out NetIdRegistry.Entry e))
+            {
+                ownerId = e.Id;
+            }
+            buf[off++] = (byte)ownerId;
+            buf[off++] = (byte)(ownerId >> 8);
+            return off;
+        }
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
             Lazer z = Lazer.NewLazer(bin, game);
             // playSound:false -- a puppet must never fire the beam SFX (it is not the local
             // shooter). Aim 0 / lead 0 for a frame until the first snapshot streams the beam.
+            // SetupSingleShot also CLEARS `owner`, so the adopt below is the only thing that can
+            // set one and a recycled beam cannot inherit the last emitter.
             z.SetupSingleShot(state.Pos, 0f, 0f, playSound: false);
+            // Length-guarded: the snapshot self-heal constructs with len 0 (card de4d5d65), and
+            // that puppet is PROVISIONAL -- the reliable EvSpawn rebuilds it with these extras.
+            if (len >= OwnerBytes)
+            {
+                ushort ownerId = NetProtocol.ReadU16(buf, off);
+                if (ownerId != 0 && NetPuppets.FindPuppet(ownerId) is AlienDrawableGameComponent emitter)
+                {
+                    z.NetSetOwner(emitter);
+                }
+            }
             return z;
         }
 

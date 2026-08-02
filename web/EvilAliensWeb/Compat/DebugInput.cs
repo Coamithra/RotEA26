@@ -721,6 +721,18 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetResetSpawnTest.Run();
 		}
 
+		// JS bridge for the Level 1 intro-cinematic suite (eaNetIntroGate in wwwroot/index.html,
+		// card 8a7772d6): the replicated player-spawn hold and the cosmetic intro bullet volley,
+		// driven over an in-process NetWire against the REAL Level 1 script. **DESTRUCTIVE and
+		// LEVEL-1-ONLY**: it pairs a session onto the live level, ticks the real scene and spawns
+		// the local ship, so run it in a throwaway ?level=Level1 boot -- and run it EARLY, within
+		// the ~10s cutscene, or its first precondition reports that the intro is already over.
+		[JSInvokable("debugNetIntroGate")]
+		public static string NetIntroGate()
+		{
+			return EvilAliensWeb.Compat.Net.NetIntroGateTest.Run();
+		}
+
 		// JS bridge for the remote-powerup-pickup suite (eaNetPickup in wwwroot/index.html; cards
 		// 83271f3d / 10f9dba4 / d53431b4). Pairs a REAL host session to a scripted client, adopts
 		// its ship puppet, and drives real EvClaim pickups plus the real MsgHudState level mirror

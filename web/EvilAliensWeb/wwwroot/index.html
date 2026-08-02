@@ -568,6 +568,15 @@
             catch (e) { console.warn('[debug] eaNetResetSpawn failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the Level 1 intro cinematic in co-op (card 8a7772d6) -- the replicated
+        // player-spawn hold and the cosmetic intro bullet volley, driven over the in-process wire
+        // against the REAL Level 1 script. DESTRUCTIVE and LEVEL-1-ONLY: run it in a throwaway
+        // ?level=Level1 boot, EARLY (within the ~10s cutscene). Prints PASS/FAIL.
+        window.eaNetIntroGate = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetIntroGate')); }
+            catch (e) { console.warn('[debug] eaNetIntroGate failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the remote-powerup-pickup suite (cards 83271f3d / 10f9dba4 / d53431b4). Pairs a
         // real host session to a scripted client over the in-process wire, adopts its ship puppet,
         // and drives real EvClaim pickups plus the real MsgHudState level mirror at it — proving

@@ -368,10 +368,33 @@ namespace EvilAliensWeb.Compat.Net
                 shipOk = shipSeq == 4242 && s.T == 1234567.0
                     && Near(s.Pos.X, 123.5f) && Near(s.Pos.Y, -45.25f)
                     && Near(s.Vel.X, 0.125f) && Near(s.Vel.Y, -0.5f)
-                    && Near(s.Aim, 1.75f) && s.Alive && s.ShotCount == 200
+                    && Near(s.Aim, 1.75f) && s.Alive && s.ShotCount == 200 && !s.ScriptGate
                     && sps == 17 && Near(blife, 640f);
             }
             check("MsgShipState round-trips every field", shipOk);
+
+            // Card 8a7772d6's script-gate bit. It shares the flags byte with `alive`, so the
+            // leg above pins it CLEAR while alive is SET, and this one pins it SET while alive
+            // is CLEAR -- either half alone passes a bit wired to the wrong mask.
+            byte[] gated = Round(NetProtocol.EncodeShipState(
+                1, 5u, Vector2.Zero, Vector2.Zero, 0f, alive: false, shotCount: 0,
+                shotsPerSec: 8, bulletLife: 450f, scriptGate: true), reliable: false);
+            bool gateOk = false;
+            if (gated != null && NetProtocol.TryDecodeShipState(gated, out _,
+                out ShipSample gs, out _, out _))
+            {
+                gateOk = gs.ScriptGate && !gs.Alive;
+            }
+            check("MsgShipState carries the script-gate flag independently of alive", gateOk);
+
+            // EvIntroVolley (card 8a7772d6): a bare seed, and every 32-bit value is legal --
+            // so the risk is the SIGN, which a positive-only seed would never show.
+            byte[] volley = Round(NetProtocol.EncodeIntroVolleyEvent(9, int.MinValue), reliable: true);
+            check("EvIntroVolley round-trips a negative seed",
+                volley != null && NetProtocol.TryDecodeIntroVolleyEvent(volley, out int vseed)
+                    && vseed == int.MinValue);
+            check("EvIntroVolley refuses a truncated frame",
+                !NetProtocol.TryDecodeIntroVolleyEvent(new byte[7], out _));
 
             // The two ship messages share a body with the friend one shifted right by a byte for
             // the slot -- exactly the shape where an off-by-one reads the neighbouring field and

@@ -89,13 +89,30 @@ namespace EvilAliensWeb.Compat.Net
         // the per-slot awards, exactly as before. This says only "it has begun".
         public const byte EvDying = 23;
 
+        // Card 8a7772d6, host -> client, reliable: Level 1's intro "hail of bullets" is
+        // starting, run your own COSMETIC copy of it with this seed. The bullets themselves
+        // cannot replicate -- `Bullet` is not in the NetTypeRegistry table at all -- so without
+        // this the joiner watches the intro UFOs die of nothing for 2.3 seconds. See
+        // Lvl1StartDemoEvent.Volley for what "cosmetic" is contractually allowed to do.
+        public const byte EvIntroVolley = 24;
+
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;
 
         public const byte ShipFlagAlive = 1 << 0;
         // Bit 1 used to be ShipFlagFiring -- the fire INTENT as a level, deleted by card a45b78f6
-        // in favour of MsgShipState's cumulative shotCount byte. Free for the next flag.
+        // in favour of MsgShipState's cumulative shotCount byte, and reused here.
+        //
+        // Card 8a7772d6: "my level script is holding the player spawn" -- Level 1's intro
+        // cinematic (Lvl1StartDemoEvent) runs for ~10.5s with no ship on screen, and the script
+        // is host-only, so without this the joiner spawns 1.3s in and plays through the host's
+        // cutscene. A SAMPLED bit rather than an event because the state PERSISTS for the whole
+        // phase (the EvFx bullet's own rule), because a 30Hz resend is self-healing against
+        // loss/reorder, and because it needs no level-entry ordering and no JIP catch-up leg:
+        // the stream is already flowing before a joiner's level even loads.
+        // ONLY THE HOST'S BIT IS HONOURED -- see NetSession.HandleShipState.
+        public const byte ShipFlagScriptGate = 1 << 1;
 
         // ---- wire enum validation (card 88f87ba2) -------------------------------------
         //
@@ -321,11 +338,11 @@ namespace EvilAliensWeb.Compat.Net
         // last count it applied, so a lost or reordered stream packet costs nothing (the next
         // one carries the total) and two taps inside one cadence period are one increment,
         // exactly as they are one bullet for the owner.
-        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife)
+        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false)
         {
             byte[] b = new byte[31];
             b[0] = MsgShipState;
-            b[1] = (byte)(alive ? ShipFlagAlive : 0);
+            b[1] = (byte)((alive ? ShipFlagAlive : 0) | (scriptGate ? ShipFlagScriptGate : 0));
             b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[3] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 4, seq);
@@ -357,6 +374,7 @@ namespace EvilAliensWeb.Compat.Net
             sample.Vel = new Vector2(ReadF32(b, 18), ReadF32(b, 22));
             sample.Aim = ReadF32(b, 26);
             sample.Alive = (b[1] & ShipFlagAlive) != 0;
+            sample.ScriptGate = (b[1] & ShipFlagScriptGate) != 0;
             sample.ShotCount = b[30];
             return true;
         }
@@ -1072,6 +1090,27 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
+        // EvIntroVolley (host -> client, card 8a7772d6): [seed:4]. Every 32-bit value is a legal
+        // seed -- it only feeds a private `Random` that picks 70 launch angles inside a fixed
+        // arc -- so there is no enum to validate here and nothing to reject but a short frame.
+        public static byte[] EncodeIntroVolleyEvent(ushort eventSeq, int seed)
+        {
+            byte[] b = EventHeader(EvIntroVolley, eventSeq, 4);
+            WriteU32(b, 4, (uint)seed);
+            return b;
+        }
+
+        internal static bool TryDecodeIntroVolleyEvent(byte[] b, out int seed)
+        {
+            seed = 0;
+            if (b.Length < 8)
+            {
+                return false;
+            }
+            seed = (int)ReadU32(b, 4);
+            return true;
+        }
+
         // EvMusic: [song:1] (MusicStop = StopMusic). EvCheckpoint/EvVictory/EvTetherBreak carry
         // no payload; EvReset carries [mode:1]; EvPause carries [on:1] -- all use EncodeByteEvent.
         public const byte MusicStop = 0xFF;
@@ -1277,6 +1316,11 @@ namespace EvilAliensWeb.Compat.Net
         public Vector2 Vel; // design px per ms
         public float Aim;
         public bool Alive;
+        // Card 8a7772d6. Like Alive this is a LEVEL the receiver reads off the newest sample,
+        // not a quantity anything interpolates -- it rides here rather than in a fifth `out`
+        // because the decoder already carries the alive bit this way. Always false out of
+        // TryDecodeFriendState: an AI friend has no level script.
+        public bool ScriptGate;
         // Cumulative wrapping count of the shots the OWNER's ship has actually spawned (card
         // a45b78f6). The receiver fires the wrapped delta; it is not a rate and never resets
         // except with the ship itself.

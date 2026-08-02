@@ -496,6 +496,12 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetSceneOrder()` (scenario 6 of the same harness -- reset/pause/checkpoint ordering
   against a REAL GameScene, so **destructive**: run it in a throwaway `?level=Level2&invuln`
   boot),
+  `eaNetIntroGate()` (Level 1's intro cinematic in co-op — card 8a7772d6: the replicated
+  player-spawn hold and the cosmetic intro bullet volley, driven over the in-process wire against
+  the REAL Level 1 script. **DESTRUCTIVE and LEVEL-1-ONLY** — it pairs real sessions onto the live
+  level, ticks the real scene and spawns the local ship, so run it in a throwaway
+  `?level=Level1&invuln` boot, and run it EARLY: on any other level, or after the ~10 s cutscene,
+  its first precondition reports rather than asserting about nothing),
   `eaNetResetSpawn()` (the reset/`TryAdd` ship-puppet spawn scenario — card 25ad0659; the ONE
   **destructive** suite here: it pairs a real session onto the live level, so run it in a
   throwaway `?level=Level2&invuln` boot),

@@ -396,6 +396,8 @@ namespace EvilAliensWeb.Compat.Net
             public bool NetEndingNormally => false;
 
             public bool JoinWouldSpawnNow => false;
+            public bool NetScriptHoldsShipSpawn => false;
+            public void NetApplyIntroVolley(int seed) { }
 
             public void NetApplyReset(byte mode) { }
 

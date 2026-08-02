@@ -1,0 +1,106 @@
+# PROBE: Level 1's intro cinematic must run on the JOINING peer too -- neither ship on screen
+# until the cutscene ends, then both fly in together.
+#
+# PINS card 8a7772d6. Level 1 opens with ~10.5 s of scripted cutscene (Lvl1StartDemoEvent: twenty
+# UFOs fly in, then a hail of bullets, THEN the player), and the level script is HOST-ONLY. Card
+# 11.2 dealt with that by making GameScene.spawnPlayerNormally read `_spawnplayernormally ||
+# NetSession.IsClient`, so the joiner spawned 1.3 s in and flew around for the whole cutscene --
+# and the host could not even see it, because ManagePuppet gates the remote ship puppet on having
+# a local ship of its own, which during the intro it has not got. Two mechanisms replace it:
+#   PART A, the spawn gate. The host streams "my script is holding the player spawn" as
+#   NetProtocol.ShipFlagScriptGate in every MsgShipState. The joiner holds its own spawn while
+#   that bit is set and mirrors Level1.demo_OnFinished when it CLEARS.
+#   PART B, the volley. `Bullet` is not in NetTypeRegistry at all -- player bullets are never
+#   replicated -- so a correctly gated joiner would watch the twenty intro UFOs pop with nothing
+#   visibly killing them. EvIntroVolley hands over a seed and the joiner runs its own COSMETIC
+#   copy (non-colliding, no asploding mini-Blast, so it can neither kill a puppet nor file a
+#   claim for kills the host's own volley is already credited with).
+#
+# WHY A PROBE AT ALL: every observable here is invisible in a frame. The gate is a bit in a
+# 30 Hz stream packet; "no ship yet" is the ABSENCE of a sprite, which a screenshot of a level
+# that has not spawned one yet cannot distinguish from a level that never will; and the
+# cosmetic contract is a `Collides` flag on bullets that fly off the top of the screen. A
+# two-window Chrome run can show the FEEL but cannot assert any of it.
+#
+# ?level=Level1 IS LOAD-BEARING, not a convenient boot. The host-side read is
+# `!spawnPlayerNormally` on a REAL GameScene, and Level 1's intro is the only shipped script
+# that ever sets it -- on any other level that read is a constant false and every leg would be
+# vacuous. Leg 1 asserts that precondition (and asserts the intro is still RUNNING, so a probe
+# that somehow got here late reports rather than passing for the wrong reason). ?invuln so the
+# 200-frame settle cannot lose the local player.
+#
+# WHAT IT ASSERTS, leg by leg (Compat/Net/NetIntroGateTest.cs carries the full reasoning):
+#   1. the host read comes off the real Level 1 script, and the level really has no ship yet.
+#   2. a real HOST session puts the bit on the wire -- asserted on the frame the far endpoint
+#      RECEIVED, not on the sender's intent, with the same live sender CLEARING it as the
+#      negative control (a bit hard-wired true cannot pass).
+#   3. a real CLIENT session holds its own spawn while the host's bit is set -- and is UNGATED
+#      before any stream arrives, which is the fail-open default.
+#   4. clearing the bit spawns our ship one tick later and latches the release locally.
+#   5. CONTROL -- a gate arriving AFTER we spawned never yanks the ship, and a second release
+#      never adds a second one. Without this, leg 4 passes on a build where some other path
+#      happened to spawn a ship during the ticking.
+#   6. EvIntroVolley starts a local volley and every bullet IT added is NON-COLLIDING. The
+#      census is scoped to the volley's own bullets, not the world: the HOST's volley is the
+#      real one and its 70 COLLIDING bullets share this world from ~8.8 s to ~14 s of level
+#      time, inside the window leg 1 still calls valid.
+#   7. OPENS ON PEER LOSS -- losing the peer opens the gate. The catastrophic failure this feature could
+#      have is a joiner with no ship at all, so the escape is asserted rather than argued.
+#   8. the emitter itself: exactly 70 bullets, the same seed gives the same angles, a different
+#      seed does not, and every angle is inside the intro's upward arc.
+#
+# THE POSITIVE IS THE `32 passed` TALLY. `expect-not FAIL` is the weaker half -- it passes on a
+# run where the eval never happened (a renamed DebugInput method), which the tally catches.
+#
+# MUTATION-TESTED FIVE WAYS, each isolated, each failing exactly ONE assertion and a DIFFERENT
+# one:
+#   * GameScene.spawnPlayerNormally back to the pre-card `|| IsClient` -> **1** ("closes the
+#     scene's spawn gate"). READ THAT COUNT CAREFULLY, and see the next paragraph.
+#   * SendShipState never sets the flag (scriptGate = false) -> **1** ("its ShipFlagScriptGate
+#     is SET").
+#   * drop the NetUpdateScriptShipGate() call from GameScene.Update -> **1** ("one tick later
+#     our ship is in the world").
+#   * Volley.NextAngle back to RandomHelper.RandomNextFloat -> **1** ("the same seed gives the
+#     same angles").
+#   * drop `bullet.Collides = false` from the cosmetic branch -> **1** ("every bullet in the
+#     volley added is NON-COLLIDING").
+#
+# THE PRE-CARD MUTATION FAILS THE GATE ASSERTION AND NOT THE 120-TICK ONE, AND THAT IS HONEST
+# RATHER THAN A GAP TO PAPER OVER. The suite attaches to a level already in GameState.Normal, so
+# UpdateStartup's 1300 ms spawn branch -- the thing `|| IsClient` actually fed in play -- cannot
+# fire there either way. The gate READING closed is what that branch consumes, so it is the leg
+# that carries the bug; the 120-tick leg says only that nothing else spawned a ship during the
+# hold. Reaching a real Startup would mean driving a whole level entry inside the suite, which
+# buys one already-covered assertion.
+#
+# DESTRUCTIVE, which is why this is a whole process to itself (the runner gives every probe one
+# anyway). It pairs real sessions onto the live level, ticks the real scene, spawns the local
+# ship and fires real bullets into the world -- so the cinematic is cut short and the level is
+# left mid-intro with a ship in it. It restores the roster and asserts it did.
+#
+# NOT COVERED HERE, and it cannot be: whether the two ships LOOK right flying in together. That
+# is the two-window Chrome leg, and it is the only evidence about the shipped WASM build.
+#
+# eahl: --flags "?level=Level1&invuln"
+
+step 200 nodraw
+mark
+eval NetIntroGate
+
+# Both roles really ran on the in-process wire (the transport= field is the only thing that says
+# which wire a run was on).
+expect \[net\] session start role=host room=introgate protocol=v13 transport=InMemory
+expect \[net\] session start role=join room=introgate protocol=v13 transport=InMemory
+expect \[introgate\] Level 1 intro cinematic in co-op
+expect 1\. the host read comes off the REAL Level 1 script
+expect 2\. a real HOST session streams the gate bit
+expect 3\. a real CLIENT session holds its own spawn
+expect 4\. clearing the bit spawns our ship
+expect 5\. CONTROL -- a late gate never yanks a ship
+expect 6\. the intro volley
+expect 7\. OPENS ON PEER LOSS
+expect 8\. the emitter
+expect \[introgate\] 32 passed, 0 failed
+expect-not FAIL
+expect-not SKIP
+quit

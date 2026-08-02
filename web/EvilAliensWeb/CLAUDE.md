@@ -626,7 +626,8 @@ ufoz wave, 204 collidables). Three changes, all behaviour-neutral, all pinned:
   `FillCollisionMatrix*`), and every ADC evaluation runs `retrieveBoundsFromTexture` -- which now
   memoises its cell dimensions, so it is two `Vector2` writes instead of two `ConditionalWeakTable`
   lookups plus arithmetic. **The NARROW phase still recomputes**, through
-  `ICollidable.DetectCollision`; widening that signature is a proposed follow-up, not done here.
+  `ICollidable.DetectCollision` -- deliberate: post-card numbers show collision no longer
+  dominates, so widening that signature was declined (card 391e11d2).
 
 **Verify with `eaCollisionBench(n, iters)`** (`Compat/CollisionBench.cs`), MENU-only. Its
 correctness half diffs the real pass's callback list against `ReferencePass`, a verbatim

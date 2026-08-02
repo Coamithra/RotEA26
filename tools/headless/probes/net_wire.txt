@@ -84,6 +84,12 @@ expect 5\. scaled-i16 motion rates
 # Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
 # game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
 # slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
-expect \[netwire\] 91 passed, 0 failed
+# Card 37f3a663 raised it 91 -> 93: EvRespawn. Unlike the neighbouring event families it has a
+# real Try* decoder, so it is round-tripped by VALUE -- slot, position and duration driven to
+# three distinct values, so a pair of swapped offsets cannot pass -- with a truncated frame
+# beside it. The DURATION is the field that carries the risk: it is what the far peer's copy of
+# the respawn clock actually runs for, and it is not a constant (it falls out of the dying
+# player's respawntimebonus as well as the difficulty).
+expect \[netwire\] 93 passed, 0 failed
 expect-not FAIL
 quit

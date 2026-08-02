@@ -46,6 +46,9 @@ inputs; the other peer's ship is an interpolated puppet.
 - **Per-peer presentation effects** (`7a8ec0d3` / `a66e190a`, v15): a floating score is the
   KILLER's alone, and the 1up slow motion is the WORLD's -- see the presentation-effects
   bullet at the end of "Claims, score & per-slot HUD".
+- **The respawn indicator crosses the wire** (`37f3a663`, v17): a dead player's clock ring is
+  drawn on BOTH screens, so you can see your buddy coming back and where -- see the
+  respawn-indicator bullet at the end of "Claims, score & per-slot HUD".
 - **Level 1's intro cinematic plays on BOTH peers** (`8a7772d6`): the host's scripted no-ship
   phase is replicated as a `MsgShipState` flag bit, so neither ship is on screen until the
   cutscene ends and then both fly in together -- and the hail of bullets, which cannot replicate
@@ -424,7 +427,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
   code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaNetEntity`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
   `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`, `eaNetScenarios`,
-  `eaNetFx`, `eaNetTeleport`. They were
+  `eaNetFx`, `eaNetRespawn`, `eaNetTeleport`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never
   happened, and several of these suites SKIP legs they cannot reach, which is not a pass. Raise a
@@ -647,6 +650,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   pickup. Like v13 this MOVED A FIXED-WIDTH LAYOUT rather than appending something an old peer
   could ignore, so a v15 peer mis-parses every entry after the first: a forced bump, not a
   convention one.
+  **v17** adds `EvRespawn` (event 26) -- either peer announces that one of its ships has started
+  its respawn clock, so the other peer draws the indicator too, card 37f3a663. A v16 peer ignores
+  the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14 and v15
+  the bump is the batch convention rather than a forced incompatibility.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1475,6 +1482,55 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     the write-up and the mutation matrix, the `eaNetDeathFx` precedent.
   - **NOT VERIFIED ON TWO REAL SCREENS.** Whether 12 s of shared bullet-time from one player's
     1up FEELS right is a playtest question this rig cannot answer.
+- **THE RESPAWN INDICATOR IS THE WORLD'S TOO: `EvRespawn` (event 26, reliable,
+  `[slot:1][posX:f32][posY:f32][durationMs:u16]`, 15 B, protocol v17, EITHER PEER) -- card
+  37f3a663.** A dead player's respawn clock existed only on their own screen: the other peer
+  watched the ship explode and then had ten seconds of nothing, with no idea their buddy was coming
+  back or where. That is structural rather than an oversight -- `NetSession.ExplodePuppet` takes a
+  puppet out WITHOUT `Die()`, precisely so it does not raise a local summon for a ship it does not
+  own, so nothing on the far side ever knew a respawn had begun.
+  - **The receiving copy is COSMETIC and the same TYPE** (`PlayerShipSummon.SetupRemote`): same
+    ring, same pop, same reward blast, but it never spawns a `PlayerShip`. The peer's real ship
+    still arrives through the ordinary `remoteAlive` edge (`SpawnPuppet`), which stays the only way
+    a puppet is born -- so a lost or ignored frame costs the indicator, never the ship. Being the
+    same type is what makes every existing `Purge<PlayerShipSummon>` (`LoseLife` / `NetApplyReset`
+    / `Terminate`) clean it up for free.
+  - **The REWARD BLAST does not ride `EvBlast`, and that is the design decision worth keeping.**
+    Reusing it looks free -- a bomb already replicates -- but its rx handler resolves
+    `oracle.GetPlayerShip(slot)` and returns if null, and at a respawn the far peer's puppet may
+    not have been born yet (a reliable event against a ~30 Hz alive edge), so the bomb would drop
+    silently; it also attaches the blast to the puppet's LAGGING interpolated position. Each side's
+    own summon fires its own `Blast` at its own pop instead, from the announced position -- the
+    `EvIntroVolley` idiom. Damage stays fair because that is already how an ordinary co-op bomb
+    works: both peers spawn a real `Blast`, the host's is authoritative and the client's kills go
+    through the generous claims.
+  - **NOT an `EvFx`.** That lane is HOST-ONLY and keyed on a `netId`; this is neither -- either
+    peer's ship can die, and a summon is not a replicated entity at all, so it needs its own
+    position. `EvSlowmo` is the shape it follows.
+  - **The DURATION is sent rather than re-derived**, because it is not a function of anything the
+    receiver knows: it falls out of the dying player's own `respawntimebonus` (a powerup
+    progression) as well as the difficulty.
+  - **Slot-tagged, and a frame naming a slot WE own is REFUSED** (`OwnsSlot`) -- the `EvBlast`
+    precedent and for the same reason: a slot disagreement would otherwise park a phantom clock
+    over a player who is alive and flying, and drop a free bomb into our world when it popped. Sent
+    for any LOCALLY OWNED ship, so a couch player's or an AI friend's respawn replicates too.
+  - **Verify with `eaNetRespawn()`** (`Compat/Net/NetRespawnTest.cs`, 25 assertions; a leg of
+    `net_selftests.txt`). Menu-runnable and leave-no-trace. Section 1 drives the REAL death path --
+    two planted ships, one `Asplode()`d -- so what is asserted is the chain `OnDeath` ->
+    `ShouldSummon` -> `OnLocalRespawnSummon` rather than a hand-called sender, with a PUPPET death
+    beside it as the negative. **The load-bearing leg is section 3's "and spawning NO
+    PlayerShip"**: a cosmetic summon that spawned one would give the peer's player a second body on
+    this screen for the rest of the match, and every other assertion would still be green.
+    Mutation-tested three ways (dropping the `OwnsSlot` refusal, not marking the cosmetic mode,
+    and dropping the pending-second term from `RemainingMs`), each failing disjoint legs.
+    **Section 1a is the odd one out and is not about the wire at all**: it ticks the REAL summon
+    200 times and requires the clock to run only DOWN. `base.Update` ticks the timers after this
+    class tests `Finished`, so for one frame a second the ring un-filled by a tenth -- and no
+    screenshot rig can see it (`?respawnphase=` parks the fill, `eval RespawnState` samples between
+    ticks). It lives here because this is the only suite that already drives a real summon. The wire layout is `eaNetWire.test` section 5's, round-tripped by
+    VALUE since it has a real `Try*` decoder.
+  - The SINGLE-PLAYER half of the same card (a wipe raises no summon at all) is offline and lives
+    in `web/EvilAliensWeb/CLAUDE.md`.
 
 ## Roster slots, seating & the remote ship
 

@@ -595,9 +595,50 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void PlayerShip_OnDeath(object sender)
 	{
+		// A PUPPET's respawn is its owner's business, and we already draw a cosmetic summon off
+		// its EvRespawn announcement -- raising a local one here would double it up, and would
+		// run a countdown for a ship this peer does not decide the respawn of. Normally
+		// unreachable (NetSession.ExplodePuppet takes a puppet out WITHOUT Die() for exactly
+		// this reason), so this is the guard for every other way one could be killed.
+		if (IsNetPuppet)
+		{
+			Console.WriteLine("[respawn] summon suppressed slot=" + player + " (net puppet)");
+			return;
+		}
+		// Card 37f3a663: raise the respawn indicator only when somebody else is still flying.
+		// Otherwise this death is a WIPE and GameScene.LoseLife purges the summon on the next
+		// tick -- one frame of countdown, which is the "looks a bit broken" the card reports.
+		// See PlayerShipSummon.ShouldSummon for why this counts IsDead rather than membership.
+		int otherLiveShips = CountOtherLiveShips();
+		if (!PlayerShipSummon.ShouldSummon(otherLiveShips))
+		{
+			Console.WriteLine("[respawn] summon suppressed slot=" + player + " (no other live ship)");
+			return;
+		}
 		PlayerShipSummon playerShipSummon = PlayerShipSummon.NewPlayerShipSummon(collection, base.Game);
 		playerShipSummon.Setup(player, startdir, base.Position, respawntimebonus);
 		collection.Add((GameComponent)(object)playerShipSummon);
+		Console.WriteLine("[respawn] summon slot=" + player + " ms=" + playerShipSummon.DurationMs
+			+ " others=" + otherLiveShips);
+		// Online co-op: tell the peer, so it draws the same indicator and knows its buddy is
+		// coming back and where. No-op unless a session is up and this ship is ours.
+		EvilAliensWeb.Compat.Net.NetSession.OnLocalRespawnSummon(this, base.Position, playerShipSummon.DurationMs);
+	}
+
+	// Player ships other than THIS one that have not themselves died. `Die()` only queues the
+	// removal, so at OnDeath time the oracle's list still holds this ship -- and, when two ships
+	// go in the same tick, the other one too. `IsDead` is what tells them apart.
+	private int CountOtherLiveShips()
+	{
+		int live = 0;
+		foreach (PlayerShip s in oracle.GetShips())
+		{
+			if (s != this && !s.IsDead)
+			{
+				live++;
+			}
+		}
+		return live;
 	}
 
 	public Vector2 GetPosition()

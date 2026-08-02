@@ -298,7 +298,8 @@ namespace EvilAliensWeb.Compat.Net
             byte[] scratch = new byte[NetProtocol.SnapshotHeaderBytes
                 + NetProtocol.SnapshotEntryBaseBytes + extrasLen + 1];
             int off = NetProtocol.SnapshotHeaderBytes;
-            NetProtocol.WriteSnapshotEntry(scratch, ref off, id, typeIdx, state, extras, extrasLen);
+            NetProtocol.WriteSnapshotEntry(scratch, ref off, id, typeIdx,
+                NetProtocol.NetSnapshotFlags.None, state, extras, extrasLen);
             scratch[0] = NetProtocol.MsgWorldSnapshot;
             scratch[1] = 1;
             byte[] packet = new byte[off];

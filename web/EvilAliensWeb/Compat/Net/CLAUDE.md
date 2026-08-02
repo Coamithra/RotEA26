@@ -42,6 +42,9 @@ inputs; the other peer's ship is an interpolated puppet.
 - **Diagnostics + rigs:** fake lag/loss/jitter (`40334a8f`), the snapshot unknown-id split and
   `snapTurn` (`48ab9b2f`), decorative swarms as one on/off beat (`9a3175d0`, v10), the
   standing-purge-filter races (`74403f83`), the signaling server deployed (`8c3c18da`).
+- **Puppet smoothness** (`c92f3817` / `0dfc4495` / `d3add86f` / `8dabe812` / `0108d1fc`), and its
+  wire-first successor: the host now MARKS a reposition instead of the observed-velocity estimator
+  guessing at one (`e79bb994`, v11) -- see the teleport-marker bullet under "Puppet SMOOTHNESS".
 
 **Remaining.** The TURN go/no-go and interpolation/jitter feel are the only Stage 11.5 pieces
 still open, and both are gated on real-network playtests this rig cannot run -- card `4717d3cf`
@@ -403,7 +406,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
   code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaNetEntity`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
   `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`, `eaNetScenarios`,
-  `eaNetFx`. They were
+  `eaNetFx`, `eaNetTeleport`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never
   happened, and several of these suites SKIP legs they cannot reach, which is not a pass. Raise a
@@ -521,13 +524,15 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   Backlog (analysis on the original cards' comments): `a45b78f6` a cumulative shot counter in
   `MsgShipState` (replaces `FiringHoldMsFor` + both its residuals, card a5c2a39b), `f62116b5` an
   explicit death-began event (replaces the hp==0 snapshot trigger's latency + one-tick residual,
-  card 303bfb5b), `e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
-  card 8dabe812), `c1a38ef9` motion parameters on the wire (sent Lazer rates, card 0108d1fc +
+  card 303bfb5b), **`e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
+  card 8dabe812) -- SHIPPED, v11, and the ruling's first worked example: the straight design was
+  cheaper than the heuristic it replaced AND found a fourth defective type (`Ball`) the estimator
+  had been covering by luck**, `c1a38ef9` motion parameters on the wire (sent Lazer rates, card 0108d1fc +
   deterministic-path spawn anchors, card 0dfc4495 -- the second half gated on the playtest).
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v11):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -547,7 +552,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   No existing layout changed, but a v9 peer would ignore the beat AND still expect the
   per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move.
   The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
-  says why that is a decision and not an oversight).
+  says why that is a decision and not an oversight;
+  **v11** adds a per-SAMPLE flags byte to every world-snapshot ENTRY
+  (`[len][netId][typeIdx][flags][base][extra]`, `NetProtocol.NetSnapshotFlags`) carrying the host's
+  teleport marker -- card e79bb994, see the teleport-marker bullet. Unlike `EvFx`'s appended event
+  type this MOVED AN EXISTING LAYOUT, so a v10 peer would mis-parse every snapshot entry: the bump
+  is not a courtesy, it is the only thing stopping a garbage world).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1815,45 +1825,107 @@ reads a contented 0 throughout. The instrument is
   offset alive to be re-hit by the next correction. The sim asserts that, so it stays refuted.
   The window is held PER PUPPET (`PuppetInfo.CorrectionMs`) rather than read live in `Drive`: a
   spawn burst mid-blend would otherwise rescale the fraction already applied and jump.
-- **THE TELEPORT GUARD (card 8dabe812) -- host-side, in `CaptureBaseState`.** A finite difference
-  cannot tell motion from a REPOSITION, and the SpiderBoss is parked at the far screen edge to
-  start each fly-by. Differentiating that ~800px jump stamped 42-57 px/ms onto the wire, and the
-  client snapped (correctly) and then **dead-reckoned onward at teleport speed** -- puppets are
-  collidable, so the boss crossed the screen and killed the local player, in the card's "2-3
-  frames". A sample implying more than `MaxObservedSpeedPxPerMs` now falls back to
-  `NetSpeedVector`, the same fallback the first-observation branch already used. Sim-measured:
-  client peak **158 -> 3.1 px/tick**, and the run **still pops once** -- the position is still
-  snapped, it is only the VELOCITY that is refused. That negative leg is asserted; a guard that
-  hid the reposition would be worse than the lurch.
-  - **The cap is 5.0 px/ms and it is MEASURED, by `eaNetVelScan` in the real game.** Genuine
-    motion tops out at ~2.5 (MarsBoss's entry PowerCurve 2.404 measured, EvilSkull's launched
-    `MaxSpeed` 2.5 declared); the repositions sit an order of magnitude up (SpiderBoss 42-57,
-    a `wrapping` Braineroid 13.5, EvilSkull's random respawn 11.6). 5.0 is the log midpoint.
+- **THE TELEPORT MARKER (card e79bb994, replacing card 8dabe812's plausibility cap).** A finite
+  difference cannot tell motion from a REPOSITION, and the SpiderBoss is parked at the far screen
+  edge to start each fly-by. Differentiating that ~800px jump stamped 42-57 px/ms onto the wire,
+  and the client snapped (correctly) and then **dead-reckoned onward at teleport speed** -- puppets
+  are collidable, so the boss crossed the screen and killed the local player, in card 8dabe812's
+  "2-3 frames". **The host KNOWS when it teleports something, so it says so**: the reposition sites
+  call `AlienDrawableGameComponent.NetNoteTeleport()`, `CaptureBaseState` read-and-clears the latch
+  and stamps the entity's declared `NetSpeedVector` instead of differentiating, and the marker
+  rides the wire so the client snaps rather than blends.
+  - **The reposition sites are the whole feature, and there are exactly four types.** Found by
+    auditing every direct `Position =` on the 29 replicable types: `Braineroid`'s four wrap
+    branches, `EvilSkull`'s random respawn in `CollidesWith`, `SpiderBoss`'s three fly-by parks,
+    and **`Ball`'s three screen wraps -- a NEW find**, which the old cap covered only by luck (its
+    wrap happens to imply ~13 px/ms). Everything else that writes `Position` outright is either a
+    spawn-time write (fresh netId, `HasLastPos` false, harmless) or a small end-of-lerp clamp
+    (`FakeBoss` 169, `SweepUFO` 127, `JunkBoss` 286, `PunchingBag` 66, `BrainBoss` 331, `StarMine`
+    285, `SpiderBoss`'s landing snap at 539 -- all under one tick of motion).
+  - **THE LATCH IS READ-AND-CLEAR, and both halves matter.** It must survive from the reposition
+    until that entity's next snapshot TURN (up to ~1.2 s in a big world) and then be spent exactly
+    once -- a latch left set refuses the FOLLOWING turn's velocity too, freezing the puppet's dead
+    reckoning, which is a worse bug than the one being fixed and invisible without the suite's
+    "the marker is SPENT" leg. `OnHostSpawn` consumes it too and discards the flag: `EvSpawn`
+    carries the shared base-state block, which has no flags byte, but it has just advanced the
+    velocity baseline so an unspent latch would poison the next turn.
+  - **The wire byte is per-SAMPLE and sits on the snapshot ENTRY, not in `NetBaseState`**
+    (`NetProtocol.NetSnapshotFlags`, protocol **v11**): `EvSpawn` shares `WriteBaseState`, and a
+    spawn is by definition a first observation, so the flag would be permanently zero there. It is
+    a BITMASK, so it takes no decode-boundary validator and no `ProbeWireEnums` row -- an unknown
+    BIT is masked and ignored, which is the correct degradation, where a wire ENUM must reject.
+  - **The client SNAPS a marked entry whatever the error, and does NOT count `pupPops`.** Two wins
+    the host-side cap could not reach: a reposition SHORTER than `SnapThresholdPx` (100) was
+    BLENDED, so the entity slid across the screen instead of reappearing -- reachable, since
+    EvilSkull respawns at a random point -- and every SpiderBoss fly-by used to inflate a counter
+    that is supposed to mean "an error the layer could not account for".
+  - **The 5.0 px/ms figure SURVIVES, DEMOTED to a reporting-only diagnostic**
+    (`NetSession.NoteIfUnmarkedTeleport` -> the shared `ReportUnmarkedTeleport`). Nothing above it
+    reads the number, so it can no longer alter a byte on the wire -- which inverts its risk: as a
+    cap, a value set too LOW silently clipped a genuinely fast enemy and recreated this whole
+    family's stutter one type at a time; as a diagnostic the worst case is a spurious line. All it
+    does now is print, once per type, `[net] UNMARKED teleport suspected: <Type> at <n> px/ms --
+    add NetNoteTeleport() at its reposition site`. **That line's shape is an interface** --
+    `net_velguard.txt` greps it.
+  - **The threshold is still MEASURED, because a diagnostic that cries wolf is worse than none.**
+    Genuine motion tops out at ~2.5 px/ms (MarsBoss's entry PowerCurve 2.404 measured, EvilSkull's
+    launched `MaxSpeed` 2.5 declared); the repositions sit an order of magnitude up (SpiderBoss
+    42-57, a `wrapping` Braineroid 13.5, EvilSkull's random respawn 11.6). 5.0 is the log midpoint.
     **Do not tighten it toward the measurements** -- gameplay RNG is unseeded and three runs of one
-    rig read MarsBoss at 1.777 / 2.013 / 2.404, so a cap inside that band is a coin flip (a trial
-    cap of 2.0 passed the probe on one run and failed on the next).
-  - **`eaNetVelScan(on?)` / `eval NetVelScan true` is the negative test**, and it needs NO net
-    session -- it measures the GAME's motion, which is the quantity the guard bounds. Arm, soak,
-    read. It reports SUSTAINED speed (a plateau: a neighbouring sample -- either side -- at least half as fast)
-    beside the raw peak, because a reposition is a one-interval spike by definition. Types that
-    reposition in ordinary play are named in `NetVelocityScan.RepositioningTypes` **with the code
-    line that proves it** and excluded from the verdict. Committed as
-    `tools/headless/probes/net_velguard.txt`.
-  - **TWO RIG TRAPS, both of which produced confident wrong numbers before being fixed.** (a) The
-    scan keys its position history on `ComponentRemoved`, mirroring `NetIdRegistry` -- every
-    replicable type is POOLED, so without that it differences across a recycle and reports an
+    rig read MarsBoss at 1.777 / 2.013 / 2.404, so a threshold inside that band is a coin flip.
+  - **`eaNetVelScan(on?)` / `eval NetVelScan true` audits BOTH halves, and needs NO net session.**
+    Arm, soak, read. Per type it reports SUSTAINED speed (a plateau: a neighbouring sample --
+    either side -- at least half as fast) beside the raw peak, because a reposition is a
+    one-interval spike by definition; plus **`marked=<n>`**, how many repositions that type
+    ANNOUNCED. Types that reposition in ordinary play are named in
+    `NetVelocityScan.RepositioningTypes` **with the code line that proves it** and excluded from
+    the speed verdict. **It REFUSES to arm inside a live session** -- it read-and-clears the same
+    latch, so a scan running alongside a real host would eat the markers before
+    `CaptureBaseState` saw them, i.e. the diagnostic would reintroduce the exact bug it audits.
+  - **THE SCAN CARRIES THE AUDIT BECAUSE `CaptureBaseState`'S COPY IS UNREACHABLE HEADLESSLY, and
+    the first cut of the probe was VACUOUS for exactly that reason.** `NoteIfUnmarkedTeleport`
+    only runs inside a live HOST SESSION, so a 30000-frame Level-2 soak produces not one line
+    whether the markers are intact or deleted (measured). Two detectors, one wording, and the
+    scan's is the one `tools/headless/probes/net_velguard.txt` asserts.
+  - **`net_velguard.txt` now asserts COVERAGE, which is the leg the marker made possible**:
+    `expect-not UNMARKED teleport` over the soak says every reposition site reachable in real play
+    is marked -- something no cap and no scan could ever check, since the cap swallowed a missed
+    site indistinguishably from a marked one. **Its positive control is not optional**: a build
+    with every marker deleted prints no UNMARKED lines either (it just stops announcing), so
+    `expect SpiderBoss .* marked=[1-9]` is what makes the absence mean something. Mutation-tested
+    by deleting SpiderBoss's three calls -- `marked=0` and
+    `UNMARKED teleport suspected: SpiderBoss at 28.5 px/ms` both fire.
+  - **TWO RIG TRAPS in the scan, both of which produced confident wrong numbers before being
+    fixed.** (a) It keys its position history on `ComponentRemoved`, mirroring `NetIdRegistry` --
+    every replicable type is POOLED, so without that it differences across a recycle and reports an
     `EvilBullet` whose declared speed is 0.24 px/ms at a SUSTAINED 14.9. (b) It samples on GAME
     time, not `NowMs`: `eahl --nodraw` runs ~17x real time, so a wall-clock cadence took ~10
     samples out of 5000 frames and read a UFO at 17 px/ms.
   - **The soak has to be LONG (~8 sim-minutes).** The bosses that set the ceiling arrive deep into
     a level; a 5000-frame Level-2 run never reaches MarsBoss and reports UFO 0.758 as the fastest
     thing in the game -- a PASS for the wrong reason, which is why the probe asserts `MarsBoss` is
-    in the table as its positive control.
-  - `[net]` gains **`velGuard=`**, the count of refused samples. It counts REPOSITIONS, so 0 on a
-    level with none is correct and it is not a health metric; what makes it worth printing is that
-    it is the only externally visible sign the guard fired (a guarded sample looks exactly like an
-    entity standing still). **A count climbing on a type that does not reposition means the cap is
-    clipping real motion -- raise it.**
+    in the table as its other positive control.
+  - `[net]` gains **`teleports=`** (samples that went out marked) and **`tpUnmarked=`**.
+    `teleports` counts REPOSITIONS, so 0 on a level with none is correct and it is not a health
+    metric; what makes it worth printing is that it is the only externally visible sign the path
+    ran (a marked sample looks, on the wire and on the client, exactly like an entity standing
+    still). **`tpUnmarked` IS a 0 bar** -- every nonzero is a type whose puppets dead-reckon at
+    teleport speed on the other player's screen.
+  - **Sim-measured** (`python tools/sim/net_puppet_drive_sim.py --smoothness`): client peak
+    **158 -> 3.1 px/tick** on an 800px reposition with `pupPops` 2 -> 0, and on a 60px one
+    (under the snap threshold) maxstep **15.6 -> 3.1** -- i.e. the slide is gone and the motion is
+    host-like. **Both legs assert the puppet still ARRIVES**; a marker that HID the reposition
+    would be worse than the lurch, and since the pop counter deliberately no longer moves, the
+    ARRIVAL rather than the pop is what the negative leg reads.
+  - **`eaNetTeleport()` / `eval NetTeleport`** (`Compat/Net/NetTeleportTest.cs`, 25 assertions, a
+    leg of `net_selftests.txt`) is the end-to-end suite: a real HOST session's snapshot frames read
+    off a `NetWire` (flag set, DECLARED velocity rather than the jump's 13 px/ms difference, and
+    the latch spent), then a real CLIENT session's puppet snapping instead of blending. **Every
+    positive has the identical jump left UNMARKED beside it**, because the pre-card code also ended
+    up in the right PLACE -- "the puppet is at the target" passes on the broken build, so what
+    discriminates is the wire's velocity, the blend-vs-snap, and `pupPops`. Menu-only and
+    leave-no-trace. It deliberately PRINTS one `UNMARKED teleport suspected: UFO` line (its
+    section-1c control), which is why `net_velguard.txt` does not run it.
 - **Per-type LOCAL SIMULATION, via the existing `NetDriveExtras` hook -- no wire bytes, no
   protocol change.**
   - **`Lazer` (card 0108d1fc):** aim, length and lead are state extras, so a frozen beam only moved

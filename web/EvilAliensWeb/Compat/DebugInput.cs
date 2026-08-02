@@ -343,10 +343,12 @@ namespace EvilAliensWeb.Compat
 			return WorldCensus.Report(game);
 		}
 
-		// eaNetVelScan(on?): the measured ceiling the co-op teleport guard is set against (card
-		// 8dabe812). Arm it, play/soak a level, call again to read the fastest observed velocity
-		// per replicable type against NetSession.MaxObservedSpeedPxPerMs. Needs NO net session --
-		// it measures the GAME's motion, which is the quantity the guard bounds.
+		// eaNetVelScan(on?): the offline audit behind the teleport marker (cards 8dabe812 ->
+		// e79bb994). Arm it, play/soak a level, call again to read, per replicable type, the
+		// fastest observed velocity against NetSession.MaxObservedSpeedPxPerMs AND how many
+		// repositions that type ANNOUNCED. Needs NO net session -- it measures the GAME's motion
+		// and the GAME's marking, which is exactly why it can audit both where a live-session
+		// diagnostic cannot. It REFUSES to arm inside a session (it consumes the markers).
 		[JSInvokable("debugNetVelScan")]
 		public static string NetVelScan(bool arm)
 		{
@@ -354,8 +356,7 @@ namespace EvilAliensWeb.Compat
 				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin?.Game;
 			if (arm)
 			{
-				EvilAliensWeb.Compat.Net.NetVelocityScan.Arm(game);
-				return "[velscan] armed";
+				return EvilAliensWeb.Compat.Net.NetVelocityScan.Arm(game);
 			}
 			// Reading DISARMS: the scan owns a GameComponent and a ComponentRemoved subscription,
 			// and there is no other call that would ever take them down. Report first -- disarming
@@ -567,6 +568,18 @@ namespace EvilAliensWeb.Compat
 		public static string NetFx()
 		{
 			return EvilAliensWeb.Compat.Net.NetFxTest.Run();
+		}
+
+		// JS bridge for the teleport marker (eaNetTeleport in wwwroot/index.html, card e79bb994).
+		// A real HOST session's snapshot frames read off the wire (flag set, declared velocity
+		// rather than the jump's finite difference) and a real CLIENT session's puppet snapping
+		// instead of blending -- each with the identical jump left UNMARKED beside it, since the
+		// pre-card code also ended up in the right PLACE and it was the velocity that poisoned
+		// the dead reckoning. Menu-only and leave-no-trace.
+		[JSInvokable("debugNetTeleport")]
+		public static string NetTeleport()
+		{
+			return EvilAliensWeb.Compat.Net.NetTeleportTest.Run();
 		}
 
 		// JS bridge for scenario 6 (eaNetSceneOrder in wwwroot/index.html, card 25ad0659 step 4).

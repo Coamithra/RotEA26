@@ -67,6 +67,7 @@ eval TeamSeat
 eval NetSimTest 150 20 60 200
 eval NetScenarios
 eval NetFx
+eval NetTeleport
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
 # Cards 43e85936 / c146422f raised this 69 -> 77: the EvFx codec (kind/netId/pos/param, its
@@ -75,7 +76,14 @@ eval NetFx
 # THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
 # not-short -- which is the whole reason those cards needed no protocol version bump, so if
 # it ever goes red the bump is back on the table.
-expect \[netwire\] 77 passed, 0 failed
+# Card e79bb994 raised it 77 -> 80: the snapshot entry's new per-sample flags byte, asserted PER
+# ENTRY (the two entries in the stride leg now carry different flags, so a codec that read the byte
+# from a fixed offset would report the same value for both), an UNKNOWN flag BIT surviving decode
+# rather than refusing the entry -- NetSnapshotFlags is a bitmask, so masking is the degradation,
+# and a decoder that validated the whole byte would stop correcting that entity the day a later
+# build appends a flag -- and a runt entry one byte short of the base block being refused, which is
+# the boundary the flags byte moved.
+expect \[netwire\] 80 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -145,6 +153,19 @@ expect \[netscen\] 80 passed, 0 failed
 # the ordering that split depends on: ApplyStateExtra only RECORDS, and the puppet DRIVER is what
 # builds and frees the child.
 expect \[netfx\] 24 passed, 0 failed
+# The teleport marker (card e79bb994), which REPLACED card 8dabe812's observed-velocity cap.
+# Two halves, each with the identical jump left UNMARKED beside it: section 1 runs a real HOST
+# session and reads the snapshot frames the peer RECEIVED (the wire is the only place the host's
+# decision is observable -- a refused sample looks exactly like an entity standing still), and
+# section 2 runs a real CLIENT session and asserts a marked entry SNAPS instead of being blended.
+# The controls carry the weight here: the pre-card code also ended up in the right PLACE, so
+# "the puppet is at the target" passes on the broken build too. What discriminates is the wire's
+# VELOCITY (declared vs the jump's 13 px/ms finite difference), the sub-threshold jump being
+# blended without the marker and snapped with it, and pupPops moving only on the unmarked one.
+# NOTE it deliberately PRINTS `[net] UNMARKED teleport suspected: UFO` -- that is its section-1c
+# control exercising the diagnostic on purpose, not a missed reposition site. The probe that
+# asserts the ABSENCE of that line over real play is net_velguard.txt, which does not run this.
+expect \[nettp\] 25 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

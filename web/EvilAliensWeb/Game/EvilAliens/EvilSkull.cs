@@ -397,6 +397,12 @@ internal class EvilSkull : KillableAlien
 				{
 					base.Position = new Vector2(base.Position.X, -45f);
 				}
+				// Online co-op (card e79bb994): the grinning face reappears somewhere else
+				// outright -- a reposition, not motion, so the host must not differentiate across
+				// it. NOTE it is a RANDOM point, so plenty of these jumps are shorter than the
+				// puppet layer's 100px snap threshold: unmarked, those were BLENDED, and the skull
+				// slid across the screen on the joiner instead of reappearing.
+				NetNoteTeleport();
 				fadeintimer.Reset();
 				justspawned = true;
 				hitwall = true;

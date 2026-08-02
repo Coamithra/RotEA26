@@ -353,7 +353,7 @@ namespace EvilAliensWeb.Compat.Net
             return SpawnRejectKind.None;
         }
 
-        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
+        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
         {
             popped = false;
             kind = SnapUnknownKind.None;
@@ -396,7 +396,10 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(info.TypeIdx);
-            popped = ApplySnapshotState(info, state, desc, buf, extraOff, extraLen, isSpawn: false);
+            // Unknown bits are ignored, not refused -- see NetProtocol.NetSnapshotFlags for why a
+            // bitmask degrades by masking where a wire ENUM would have to reject.
+            bool teleported = (entryFlags & NetProtocol.NetSnapshotFlags.Teleported) != 0;
+            popped = ApplySnapshotState(info, state, desc, buf, extraOff, extraLen, isSpawn: false, teleported: teleported);
             ApplyHostKilledFromSnapshot(netId, info, state);
             return true;
         }
@@ -499,13 +502,21 @@ namespace EvilAliensWeb.Compat.Net
             return MathHelper.Max(CorrectionWindowMs, 2f * NetSession.SnapshotTurnMs(liveCount));
         }
 
-        private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn)
+        private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn, bool teleported = false)
         {
             bool popped = false;
             INetEntity comp = info.Comp;
-            if (isSpawn || !info.HasSnapshot)
+            // A TELEPORT SNAPS, WHATEVER THE ERROR (card e79bb994). The host marked this sample as
+            // a discontinuity, so blending it would slide the entity across the gap -- which is
+            // what a jump SHORTER than SnapThresholdPx used to do (EvilSkull respawns at a random
+            // point, so plenty of its jumps are under 100 px). Snapping an explained jump is not a
+            // pop, either: `pupPops` means "an error the layer could not account for", and every
+            // SpiderBoss fly-by used to inflate it.
+            if (isSpawn || !info.HasSnapshot || teleported)
             {
                 comp.Position = state.Pos;
+                info.Correction = Vector2.Zero;
+                info.CorrectionMsLeft = 0f;
             }
             else
             {

@@ -738,6 +738,37 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		awarded = true;
 	}
 
+	// Online co-op (card e79bb994): "I was REPOSITIONED, not moved."
+	//
+	// The host stamps each replicated entity's wire velocity as a finite difference between its
+	// snapshot turns (NetSession.CaptureBaseState), because half the replicable set writes
+	// Position directly and Speed/Direction reads zero for those. That estimator cannot tell
+	// motion from a JUMP, and several types jump in ordinary play -- the SpiderBoss parks at the
+	// far screen edge to start each fly-by, a `wrapping` Braineroid crosses the screen, EvilSkull
+	// respawns somewhere else, a Ball wraps. Differentiating an ~800px jump put 42-57 px/ms on the
+	// wire and the client DEAD-RECKONED on it, crossing the screen collidably and killing the
+	// local player.
+	//
+	// So the reposition SAYS SO. Call this at any site that writes Position as a discontinuity,
+	// alongside the write; the game itself never reads the flag, and offline it costs one bool
+	// store. Do NOT call it from ordinary motion -- see NetSession.CaptureBaseState for the
+	// diagnostic that reports an UNMARKED jump, which is the safety net for a missed site.
+	private bool netTeleported;
+
+	internal void NetNoteTeleport()
+	{
+		netTeleported = true;
+	}
+
+	// Read-and-clear. Consumed once per snapshot turn by the host; see INetEntity.NetTakeTeleport
+	// for why it must be spent rather than merely read.
+	internal bool NetTakeTeleport()
+	{
+		bool was = netTeleported;
+		netTeleported = false;
+		return was;
+	}
+
 	// Advance the sheet animation exactly like Update does (same wrap math), on real dt.
 	internal void NetAdvanceFrame(float dtSeconds)
 	{
@@ -949,6 +980,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	void EvilAliensWeb.Compat.Net.INetEntity.NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
 	{
 		NetPlayFx(kind);
+	}
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetTakeTeleport()
+	{
+		return NetTakeTeleport();
 	}
 
 	// The two discriminants. The base answers "no" to both; KillableAlien and Powerup override

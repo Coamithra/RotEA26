@@ -574,11 +574,19 @@ def population():
 #    outright, because its tail keeps a velocity offset alive to be re-hit by the next correction.
 #    Do not re-propose it without re-running this.
 #
-# The teleport section is card 8dabe812 and is the sharpest result here: a reposition
-# differentiated as velocity (NetSession.CaptureBaseState) is dead-reckoned by the client at
-# teleport speed until its next turn, and puppets are collidable, so the boss crosses the screen
-# and kills the local player. The guard lives in CaptureBaseState; its CAP is measured separately
-# and in the REAL GAME by eaNetVelScan, not here -- this only shows what an unguarded sample does.
+# The teleport sections are cards 8dabe812 -> e79bb994 and are the sharpest result here: a
+# reposition differentiated as velocity (NetSession.CaptureBaseState) is dead-reckoned by the
+# client at teleport speed until its next turn, and puppets are collidable, so the boss crosses
+# the screen and kills the local player.
+#
+# WHAT THE FIX IS NOW, because this file modelled the previous one. Card 8dabe812 refused any
+# sample implying more than 5.0 px/ms. Card e79bb994 replaced that estimator with knowledge: the
+# host MARKS the sample (AlienDrawableGameComponent.NetNoteTeleport -> a per-sample flags byte),
+# so `marked` here is a wire fact rather than a threshold, and it buys two things a host-side cap
+# could not. The client SNAPS a marked entry whatever the error size -- the sub-threshold section
+# below, the case that used to slide -- and an announced jump stops inflating `pupPops`.
+# WHETHER THE SITES ARE ACTUALLY MARKED is not a question this sim can ask; that is
+# tools/headless/probes/net_velguard.txt, in the real game.
 
 
 class SmoothPuppet:
@@ -594,10 +602,18 @@ class SmoothPuppet:
         self.has = False
         self.pops = 0
 
-    def apply_snapshot(self, pos, vel):
+    def apply_snapshot(self, pos, vel, teleported=False):
+        # `teleported` is the host per-sample marker (card e79bb994): the position in this
+        # sample is a DISCONTINUITY, so it is snapped whatever the error size and is NOT counted
+        # as a pop -- pops mean "an error the layer could not account for", and a reposition the
+        # host announced is accounted for.
         if not self.has:
             self.pos = pos
             self.has = True
+        elif teleported:
+            self.pos = pos
+            self.corr = (0.0, 0.0)
+            self.corr_left = 0.0
         else:
             err = (pos[0] - self.pos[0], pos[1] - self.pos[1])
             if math.hypot(*err) > SNAP_THRESHOLD_PX:
@@ -643,7 +659,7 @@ def _flyspider_truth(t_ms, teleport_at=None, teleport_dx=0.0):
 
 
 def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
-                   teleport_at=None, teleport_dx=0.0, vel_guard=None,
+                   teleport_at=None, teleport_dx=0.0, marked=False,
                    declared_vel=(-0.12, 0.0)):
     turn = snap_turn_ms(n_live)
     window = {"fixed150": CORRECTION_WINDOW_MS,
@@ -658,27 +674,30 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
         truth = _flyspider_truth(t, teleport_at, teleport_dx)
         if t >= next_turn:
             next_turn += turn
+            # Did the reposition fall inside the interval this turn differentiates over? That
+            # is exactly when the host latch is set, so it is what `marked` describes.
+            jumped = (teleport_at is not None and last_ms < teleport_at <= t)
+            flag = marked and jumped
             vel = (0.0, 0.0)
             if has_last and t > last_ms:
-                vx = (truth[0] - last_pos[0]) / (t - last_ms)
-                vy = (truth[1] - last_pos[1]) / (t - last_ms)
-                # NetSession.MaxObservedSpeedPxPerMs -- the teleport guard. Production does NOT
-                # zero the velocity on a refusal, it falls back to the entity's DECLARED
-                # NetSpeedVector, which is the honest answer (it describes what the entity will do
-                # next). Modelling that rather than zero matters: zero would be strictly better
-                # than what ships, and the assertion below would then be measured against a
-                # fallback the game does not have.
-                if vel_guard is not None and math.hypot(vx, vy) > vel_guard:
-                    vx, vy = declared_vel
-                vel = (vx, vy)
+                if flag:
+                    # NetSession.CaptureBaseState: a MARKED sample is not differentiated at all --
+                    # the entity DECLARED NetSpeedVector goes out instead. That is the honest
+                    # answer (it describes what the entity will do NEXT) and modelling it rather
+                    # than zero matters: zero would be strictly better than what ships, and the
+                    # assertions below would be measured against a fallback the game lacks.
+                    vel = declared_vel
+                else:
+                    vel = ((truth[0] - last_pos[0]) / (t - last_ms),
+                           (truth[1] - last_pos[1]) / (t - last_ms))
             last_pos, last_ms, has_last = truth, t, True
-            pup.apply_snapshot(truth, vel)
+            pup.apply_snapshot(truth, vel, teleported=flag)
         steps.append(pup.drive(TICK_MS))
         host_steps.append(math.hypot(truth[0] - prev_host[0], truth[1] - prev_host[1]))
         prev_host = truth
     return {
         "turn": turn, "window": window, "pops": pup.pops,
-        "jerk": _stddev_of_deltas(steps), "maxstep": max(steps),
+        "jerk": _stddev_of_deltas(steps), "maxstep": max(steps), "endpos": pup.pos,
         "host_jerk": _stddev_of_deltas(host_steps), "host_maxstep": max(host_steps),
     }
 
@@ -708,22 +727,59 @@ def smoothness():
     print("\n  (2xturn is flat in N; fixed150 degrades with the world; the exponential drain is"
           "\n   worse than both at every size -- it was proposed first and measured out.)")
 
-    print("\nTELEPORT (card 8dabe812) -- an 800px reposition differentiated as velocity")
+    print("\nTELEPORT (cards 8dabe812 -> e79bb994) -- an 800px reposition on the wire")
     un = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=800.0)
-    gu = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=800.0,
-                        vel_guard=5.0)
-    print("  unguarded: maxstep %.1f px/tick  pops %d" % (un["maxstep"], un["pops"]))
-    print("  guarded  : maxstep %.1f px/tick  pops %d" % (gu["maxstep"], gu["pops"]))
-    if not gu["maxstep"] < un["maxstep"] * 0.25:
-        fails.append("the teleport guard did not cut the client's peak step by at least 4x "
-                     "(%.1f -> %.1f)" % (un["maxstep"], gu["maxstep"]))
-    # NEGATIVE LEG: the teleport must still be CORRECTED. A guard that swallowed the reposition
-    # would leave the puppet in the wrong place, which is worse than the lurch it removes.
-    if gu["pops"] < 1:
-        fails.append("the guarded run never popped -- the reposition must still snap the puppet "
-                     "to the host's position; a guard that hides it is not a fix")
-    print("  (the guarded run still POPS: the reposition is applied as a snap, which is correct."
-          "\n   It is only the VELOCITY that is refused, so the puppet stops being flung onward.)")
+    mk = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=800.0,
+                        marked=True)
+    print("  unmarked : maxstep %.1f px/tick  pops %d" % (un["maxstep"], un["pops"]))
+    print("  marked   : maxstep %.1f px/tick  pops %d" % (mk["maxstep"], mk["pops"]))
+    if not mk["maxstep"] < un["maxstep"] * 0.25:
+        fails.append("the teleport marker did not cut the client peak step by at least 4x "
+                     "(%.1f -> %.1f)" % (un["maxstep"], mk["maxstep"]))
+    # NEGATIVE LEG: the teleport must still be APPLIED. A marker that swallowed the reposition
+    # would leave the puppet in the wrong place, which is worse than the lurch it removes. The
+    # pop COUNTER no longer moves (an announced jump is not an unexplained error -- card
+    # e79bb994), so the arrival itself is what has to be checked.
+    truth_end = _flyspider_truth(6000.0, 3000.0, 800.0)
+    if math.hypot(mk["endpos"][0] - truth_end[0], mk["endpos"][1] - truth_end[1]) > 10.0:
+        fails.append("the marked run did not end up where the host is -- the reposition must "
+                     "still be applied; a marker that HIDES it is not a fix")
+    if mk["pops"] != 0:
+        fails.append("a MARKED reposition must not count a pupPops (%d) -- pops mean an error "
+                     "the layer could not account for, and this one was announced" % mk["pops"])
+    if un["pops"] < 1:
+        fails.append("CONTROL the unmarked run did not pop, so the pop counter is not live in "
+                     "this rig and the marked run zero proves nothing")
+    print("  (the marked run still ARRIVES -- the reposition is applied as a snap, which is"
+          "\n   correct. It is the VELOCITY that is refused, so the puppet stops being flung"
+          "\n   onward, and the pop counter stops being inflated by every fly-by.)")
+
+    # THE CASE THE OLD CAP COULD NOT REACH. It lived on the host and only ever refused a
+    # velocity, so a reposition SHORTER than SnapThresholdPx was BLENDED whatever its implied
+    # speed -- the entity slid across instead of reappearing. EvilSkull respawns at a random
+    # point, so plenty of its jumps are this size.
+    print("\nSUB-THRESHOLD TELEPORT (card e79bb994) -- a 60px reposition, under the 100px snap")
+    sun = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=60.0)
+    smk = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=60.0,
+                         marked=True)
+    # READ maxstep, NOT the arrival -- BOTH runs end up in the right place, which is precisely
+    # why this case was invisible and shipped. A snap moves `pos` outside `drive()`, so it costs
+    # NOTHING in the step series; a blend adds the whole 60px to the puppet's per-tick motion
+    # across the correction window, which is the SLIDE. So the marked run should look like the
+    # host (2.10 px/tick) and the unmarked one visibly should not.
+    print("  unmarked : maxstep %.2f px/tick  jerk %.4f (blended -- the entity SLIDES across)"
+          % (sun["maxstep"], sun["jerk"]))
+    print("  marked   : maxstep %.2f px/tick  jerk %.4f (snapped -- motion undisturbed)"
+          % (smk["maxstep"], smk["jerk"]))
+    if not smk["maxstep"] < sun["maxstep"] * 0.5:
+        fails.append("a marked SUB-threshold reposition was not snapped -- it should arrive "
+                     "outside the step series (%.2f px/tick, host-like) rather than sliding "
+                     "over the correction window (%.2f); this is the case the host-side cap "
+                     "could not reach at all" % (smk["maxstep"], sun["maxstep"]))
+    # And it must still ARRIVE, exactly as the over-threshold leg insists.
+    strue = _flyspider_truth(6000.0, 3000.0, 60.0)
+    if math.hypot(smk["endpos"][0] - strue[0], smk["endpos"][1] - strue[1]) > 10.0:
+        fails.append("the marked sub-threshold run did not end up where the host is")
 
     if fails:
         print("\nFAIL:")
@@ -731,7 +787,8 @@ def smoothness():
             print("  - " + f)
         return False
     print("\nOK: window scaling holds, the exponential alternative stays refuted, and the"
-          "\n    teleport guard removes the fling while keeping the correction.")
+          "\n    teleport marker removes the fling AND the sub-threshold slide while still"
+          "\n    putting the puppet where the host says it is.")
     return True
 
 def run_host_stall(stall_ms, n_enemies=16, speed=0.15, total_ms=6000.0):

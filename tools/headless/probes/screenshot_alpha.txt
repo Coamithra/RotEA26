@@ -1,0 +1,46 @@
+# PROBE: the level-select thumbnail is saved fully OPAQUE (alphaMin=255), card d67755d2
+# eahl: --flags "?level=Level2&invuln&aiplayer&loadlog"
+#
+# The level-select thumbnail is saved OPAQUE (card d67755d2).
+#
+# The defect: the XBLIG rendered to a Bgr565 back buffer, which has no alpha channel for a
+# translucent draw to erode. This port's sceneTarget is RGBA8 and every NonPremultiplied layer
+# eats alpha (destA = srcA^2 + destA*(1-srcA)), so a busy frame resolved with alpha well under 1
+# -- measured 134..255 on a real player save, 153 on this rig. ResolveBackBuffer copied that
+# verbatim and SaveScreenShot persisted it, so the carousel (which draws the thumbnail
+# alpha-blended) let the menu backdrop bleed through in the SHAPE of whatever background layers
+# were drawing. The RGB was always correct.
+#
+# WHY THIS IS A PROBE AND NOT A SCREENSHOT: the failure is one channel of a 300x225 texture that
+# is never displayed on its own, and its visible symptom depends on what happens to be BEHIND the
+# carousel entry. `alphaMin` is the defect as a number.
+#
+# ScreenshotSaver.SaveScreenShot prints the line; it derives alphaMin from the bytes it is about
+# to persist, so it cannot pass by restating the seal. Mutation-tested: deleting the SealAlpha
+# call turns it 255 -> 153 and this probe FAILS.
+#
+# The two `eval ShotNow` steps are the debug seam the same card added -- the real capture+save
+# path runs only at level EXIT, behind an on-screen busy-ness heuristic and two timers, which is
+# neither cheap nor deterministic. `arm` grabs the frame in the post-Draw hook, `save` composites
+# and persists it; they need a Draw between them, hence the `step 5`.
+
+# Settle past the level-entry white fade before grabbing anything (a frame inside it is a white
+# rectangle, and a white rectangle is exactly what a broken seal would NOT look like -- so
+# grabbing early could make this pass for the wrong reason).
+step 400
+
+mark
+eval ShotNow arm
+expect \[shotnow\] armed
+expect-not no live GameScene
+
+step 5
+
+eval ShotNow save
+# The POSITIVE control: the save must actually have happened. Without this the run could reach
+# neither branch and the alpha assertion below would pass vacuously on a line never printed.
+expect \[shotnow\] saved
+expect \[shot\] Level2 300x225 alphaMin=255
+# And the failure spelling explicitly, so a partially-eroded alpha cannot slip through on a
+# regex that happened to match a substring.
+expect-not alphaMin=(?!255\b)

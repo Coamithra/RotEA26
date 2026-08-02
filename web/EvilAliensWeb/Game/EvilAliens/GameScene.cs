@@ -295,7 +295,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		playerOptions.Remove();
 	}
 
-	private void eventList_OnCheckPointReached(GameEventList sender)
+	private void eventList_OnCheckPointReached(GameEventList sender, GameEvent checkpoint)
 	{
 		score.Save();
 		// Online co-op: the client saves the same baseline so a later reset's score.Load()
@@ -2042,6 +2042,63 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	// Base does nothing; WebcamLevel overrides it to stash the player overlay.
 	protected virtual void OnScreenshotResolved()
 	{
+	}
+
+	// Debug seam (card d67755d2): drive the level-select thumbnail capture WITHOUT ending the
+	// level. `SaveScreenShot` -- and so the alpha seal in it -- normally runs only from
+	// Terminate, and reaching it for real means an on-screen busy-ness heuristic (>30 entities,
+	// two timers) followed by a pause-menu quit, which is neither cheap nor deterministic for a
+	// probe. Console `eaShotNow()` / `eval ShotNow` under eahl.
+	//
+	// TWO steps because the grab itself happens in the post-Draw hook: Arm on one tick, Save on
+	// a later one. Save reports whether it had anything to persist, so a rig cannot mistake "no
+	// snapshot was ever grabbed" for a pass.
+	internal static bool DebugArmSnapshot(out string why)
+	{
+		why = null;
+		GameScene scene = NetActiveScene;
+		if (scene == null)
+		{
+			why = "no live GameScene";
+			return false;
+		}
+		// ForceSnapshot's FIRST guard is General.ScreenshotEnabled, which it fails SILENTLY -- and
+		// it is false for WebcamAliens unless the player opted into Settings.WebcamScreenshot
+		// (default off), i.e. the default case on the one level with a bespoke capture path.
+		// Clearing the other two guards below does not clear that one, so without this test the
+		// seam would report "armed" and then "nothing to save", which reads as a broken rig
+		// rather than a level that does not capture.
+		if (!General.ScreenshotEnabled(scene.level))
+		{
+			why = scene.level + " does not capture a level-select thumbnail "
+				+ "(General.ScreenshotEnabled is false; WebcamAliens needs Settings.WebcamScreenshot)";
+			return false;
+		}
+		// ForceSnapshot no-ops once a shot has been made this session; clear that so the seam is
+		// repeatable within one level run.
+		scene.snapshotMadeThisSession = false;
+		scene.snapshottimer.Stop();
+		scene.snapshottimer.Reset();
+		scene.ForceSnapshot();
+		return true;
+	}
+
+	internal static bool DebugSaveSnapshot(out string why)
+	{
+		why = null;
+		GameScene scene = NetActiveScene;
+		if (scene == null)
+		{
+			why = "no live GameScene";
+			return false;
+		}
+		if (!scene.snapshotMadeThisSession || scene.MyScreenShot == null)
+		{
+			why = "nothing grabbed yet -- call arm first, then step at least one frame";
+			return false;
+		}
+		ScreenshotSaver.SaveScreenShot((Texture2D)(object)scene.MyScreenShot, scene.level);
+		return true;
 	}
 
 	// Arm a one-off screenshot regardless of the on-screen busy-ness heuristic. The

@@ -497,6 +497,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
+  `eaBossTrain()` (the Boss Train's checkpoint/section oracle -- **destructive**, so run it in a
+  throwaway `?level=InsaneBossI` boot; see "Audio runtime"),
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
@@ -505,6 +507,12 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
   result as data -- see "Content-load diagnostics" above),
+  `eaShotNow('arm')` then `eaShotNow('save')` (capture + persist THIS level's level-select
+  thumbnail now -- card d67755d2. The real path runs only at level EXIT, behind an on-screen
+  busy-ness heuristic and two timers, which put `ScreenshotSaver.SaveScreenShot` -- and the alpha
+  seal in it -- out of reach of a cheap check. Needs a Draw between the two calls, and prints
+  `[shot] <Level> 300x225 alphaMin=<n>` under `?loadlog`, where 255 is the pass. **DESTRUCTIVE**
+  like `eaNetResetSpawn`: it overwrites the level's real saved `.dat`, so use a throwaway boot),
   `eaWorldCensus()` (SpriteBatch batches opened per frame + the live component population by
   type -- what PRODUCED the frame cost the FPS HUD only locates; arm once, let the scene settle,
   call again to read),
@@ -1011,6 +1019,17 @@ site now lives under:
   never `BlendState.AlphaBlend`). Two deliberate premultiplied-INTERMEDIATE exceptions, both
   "flatten translucent stacks into an RT, composite once": the text flatten and the group flatten
   below. Straight tints like `new Color(1,1,1,a)` are correct as written.
+- **An RGBA8 target that the ORIGINAL rendered as Bgr565 needs its alpha SEALED, and there are two
+  of them.** The XBLIG had no alpha channel on its back buffer, so no translucent draw could erode
+  one; every `NonPremultiplied` layer erodes this port's (`destA = srcA^2 + destA*(1-srcA)`), and a
+  busy frame lands well under 1. It is invisible until something SAMPLES that target with alpha
+  blending, and then it reads as the backdrop showing through in the shape of whatever layers drew.
+  `SpriteBatchWrapper.SealAlpha` is the cure; the two callers are `Background.Draw` (the death
+  cross-fade overlay) and `ScreenshotSaver.SaveScreenShot` (the level-select thumbnail, card
+  d67755d2 -- measured 134..255 on a real save, whose alpha channel held a clean picture of the
+  marshills parallax bands). **A new caller must pass its OWN `report` tag** -- `DrawStretched`'s
+  first-draw latch is keyed per tag precisely so one caller cannot spend the line another's probe
+  reads (`death_fade.txt` and `screenshot_alpha.txt` respectively).
 - **The custom font atlas is SUPERSAMPLED (3×) — never route `menufont` through stock
   `SpriteBatch.DrawString`.** `Cropping`/kerning/`LineSpacing` stay design-size (so raw
   `font.MeasureString` in ~40 layout sites is unchanged) while `BoundsInTexture` is 3×;
@@ -1431,6 +1450,17 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   The end-credits Cast "Brain Spawn" (`CastDisplayer.braineroid`) draws the same sheet by hand (no
   interpolation, `DefaultBrainFps` 10, `DefaultBrainScale` 1.7) + glow via `DrawBrainGlow`; tune
   via `?castbrain&castbrainscale=&castbrainfps=`, bake into the `DefaultBrain*` consts.
+  **The Paratrooper challenge's falling brains draw it too (card c25883a2)** -- `ParatrooperBrain`
+  was the last consumer of the pre-migration static `brainlargetransglow`, which is now DELETED
+  (asset, `textures.config` line, `PrecompiledTextures` row, and the five dead
+  `PreloadGraphicalContent` loads the earlier migrations left in `Level1`/`Level3`/`Demo1`/`Demo3`/
+  `BraineroidsLevel`). Its scales went `0.1/0.2/0.33` -> `0.5/1.0/1.65`, the SAME x5 the Braineroid
+  migration used -- not a derived size-preserving factor; the derivation and why x5 rather than
+  x5.19 or x5.52 is in `ParatrooperBrain.cs`. **The additive glow is shared code now**
+  (`BrainGlow.cs`, lifted verbatim out of `Braineroid.DrawGlow`): the sheet is chroma-keyed and
+  carries no halo, unlike the sprite it replaced, so every consumer must draw it or the brain
+  reads as a flat cut-out. `CastDisplayer` keeps its own copy -- it draws directly, with its own
+  `?castbrain` scale, so it shares no call shape.
 - **Earth fly-by (Level 1):** the hero earth texture is a vertical strip cropped to what shows —
   **invariant: `Background.QueueEarth`/`QueueEarthSim` set `doodadscrollspeed.X = 0`; don't
   re-enable X drift or the cut sides show.** `WaitForDoodadEvent` (polls `Background.DoodadActive`)
@@ -1960,6 +1990,39 @@ work on files under `Compat/Net/`. Design doc: `plans/stage11-online-coop.md`.
   Japanese-vocal `Songs.Classic` on Hard+ (an earned reward), else `Songs.ClassicClean`. The
   difficulty-selected challenges call the helper; the Tutorial forces clean (it locks difficulty
   for gameplay); TeamChallenge locks the menu-chosen difficulty and routes through the helper.
+- **Every music switch prints `[music] play <Song> cue=<cue> was=<Song|none>` / `[music] stop
+  was=<...>`** (`SoundManager`, card 4a3b22b7). It is the ONLY observable a music beat has:
+  **`eahl` stubs `eaMusic.*` entirely**, so headlessly a beat that never fires and a beat that
+  fires correctly are otherwise identical, and in the browser music has no pixels either. Both
+  halves of a failed switch now name themselves -- the C# line says what was REQUESTED, and
+  `eaMusic.play`'s two failure branches (`no music.json entry for cue '<x>'`, `could not load cue
+  '<x>' (<file>): <err>`) say when the request could not be HONOURED. Both JS branches leave the
+  previous track playing untouched and were silent before, which is exactly what made "the music
+  did not change" unattributable. Don't reformat the `[music]` line --
+  `tools/headless/probes/bosstrain_music.txt` greps it.
+- **A checkpoint revert restores NO scene state -- music, backdrop and floor all survive it**, and
+  `GameEventList.RevertToCheckpoint` walks back to the nearest checkpoint AT OR BEFORE the death,
+  which can be an earlier SECTION than the one you died in. That combination is card 4a3b22b7:
+  `InsaneBossI` (Boss Train) is the one level that walks three sections in a run, its alien-base
+  transition sits at script index 33 while the next checkpoint is 36, so dying in that ~10 s window
+  rewound the script to the SPIDER BOSS (checkpoint 24) with Level 3's backdrop and track still up
+  -- Level 2's set-piece replayed on Level 3's scenery, and the second arrival at "level 3's
+  bosses" changed no music because nothing had put it back.
+  **The fix is the shape to copy if another level ever grows a second section:** the section is
+  STATE, not an edge. `InsaneBossI.ApplySection` is idempotent, each `Go*` handler asks for a
+  section, and every checkpoint declares its section (`CheckPointSection` beside its
+  `SetLastEventAsCheckPoint`) and re-asserts it on entry -- a no-op on the forward pass, the fix on
+  a revert. `GameEventList.OnCheckPointReached` passes the checkpoint EVENT so a level can tell its
+  checkpoints apart. **Verify as DATA with console `eaBossTrain()`** (`Compat/BossTrainTest.cs`,
+  `eval BossTrain` under `eahl`): it checks every checkpoint's declared section against a forward
+  walk of the REAL script, then drives the REAL `RevertToCheckpoint` from the alien-base window and
+  reads the section + track back, with the pre-card behaviour as the negative control. A checkpoint
+  on a DIFFICULTY-CONDITIONAL event is the one gap: progressList tests the difficulty range before
+  it tests `checkpoints`, so such a checkpoint does not re-assert on the tiers that skip it (today
+  harmless -- see the caveat in InsaneBossI.cs). **It is
+  DESTRUCTIVE** (it moves the script position and the section) -- throwaway `?level=InsaneBossI`
+  boot only. A playthrough cannot cover this: eight full AI soaks, up to 25 deaths each, hit
+  `revert 33 -> 24` and never once died one index later.
 - **`Songs.LastSignal`** (`lastsignal.ogg`) is the end-of-level text-crawl theme in `CreditsScene`
   (played at rate 1.0). It replaced the bank's `sjaakslow` cue — both that cue and its ogg are
   gone; **don't reintroduce them.**

@@ -370,6 +370,12 @@ public class SoundManager : ISoundManagerService
 	{
 		// Online co-op (card 11.3): mid-level music switches come from the level script /
 		// boss code, which is host-only -- replicate the call (no-op unless active host).
+		// Card 4a3b22b7: the ONE observable that says which track the game asked for and when.
+		// A music switch is otherwise invisible to every verification tool here -- eahl stubs
+		// eaMusic.* entirely, so a beat that never fires and a beat that fires correctly look
+		// identical without this. Rare enough (a handful per level) to log unconditionally;
+		// tools/headless/probes/bosstrain_music.txt asserts against it.
+		System.Console.WriteLine("[music] play " + song + " cue=" + SongInstance.songFiles[(int)song] + " was=" + (_currentSong < 0 ? "none" : ((Songs)_currentSong).ToString()));
 		_currentSong = (int)song;
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic((int)song);
 		if (!Settings.GetInstance().PlayMusic)
@@ -383,6 +389,7 @@ public class SoundManager : ISoundManagerService
 
 	public void StopMusic()
 	{
+		System.Console.WriteLine("[music] stop was=" + (_currentSong < 0 ? "none" : ((Songs)_currentSong).ToString()));
 		_currentSong = -1;
 		EvilAliensWeb.Compat.Net.NetSession.OnMusic(-1);
 		_currentMusicCue = null;

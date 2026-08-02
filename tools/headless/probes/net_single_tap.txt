@@ -79,8 +79,9 @@ eval NetFire
 # peer on the old number misparses the friend stream rather than degrading), which is what this
 # leg is about -- but the NUMBER is shared with every other card that bumps it, so read a failure
 # here as "the protocol moved" and check that the move was deliberate before editing the literal.
-# It has already moved once since: card e79bb994's snapshot flags byte took v13.
-expect \[net\] session start role=host .* protocol=v13 transport=InMemory
+# It has already moved twice since: card e79bb994's snapshot flags byte took v13, and card
+# c1a38ef9's motion parameters (sent Lazer rates + the FlyingSpider path anchor) took v14.
+expect \[net\] session start role=host .* protocol=v14 transport=InMemory
 expect \[netfire\] replicated shot count
 expect 1\. the wrapped-delta decision over the whole u8 domain
 expect 2\. the SENDER -- the local ship's counter against the bullets it spawned

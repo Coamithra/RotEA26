@@ -889,6 +889,35 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// configure-then-Add rule tools/audit_add_order.py already lints.
 	internal virtual bool NetCosmeticOnly => false;
 
+	// ---- anchored motion (card c1a38ef9) ------------------------------------------------
+	// Does this type follow a DETERMINISTIC path the client can integrate for itself? The
+	// NetSpinPerMs / NetFrameLocal idiom two fields over, and the same trade one level up: the
+	// wire carries the motion MODEL instead of a velocity estimated from position differences.
+	//
+	// A true answer changes TWO things, and it is the pair that makes it work:
+	//   * the HOST sends this entity's DECLARED NetSpeedVector in the base state instead of the
+	//     finite difference NetSession.CaptureBaseState normally measures. A finite difference
+	//     over a whole snapshot turn is polluted by any periodic component -- the wasp's swivel
+	//     makes the sampled velocity describe a chord of the sine, not the drift it rides on;
+	//   * the CLIENT adds NetPathOffset's delta on top of that baseline every tick, and eases
+	//     each newly reported velocity in over the correction window rather than assigning it,
+	//     so a heading change (an asteroid nudged by a bullet) arrives as a nudge and not a kink.
+	//
+	// ONLY OVERRIDE IT WHERE THE DECLARED VELOCITY IS HONEST. Speed/Direction lie for every type
+	// that writes Position directly -- which is the very reason the observed-velocity baseline
+	// exists -- so a type whose motion is a scripted position curve must NOT take this path;
+	// it would be dead-reckoned at whatever stale SpeedVector it happens to hold. The two
+	// shipped users both move by Speed/Direction and nothing else: FlyingSpider (linear drift
+	// plus the swivel it returns as its offset) and Asteroid (constant velocity, no offset).
+	internal virtual bool NetPathAnchored => false;
+
+	// The ZERO-MEAN periodic offset of this entity's real position from that linear baseline,
+	// evaluated from the type's OWN locally-running state (a puppet's `timers` are ticked by the
+	// driver even though its Update is frozen, which is what makes a local evaluation possible).
+	// Read only while NetPathAnchored; the driver differences it across the tick, so a constant
+	// offset contributes nothing and only its CHANGE moves the puppet.
+	internal virtual Vector2 NetPathOffset => Vector2.Zero;
+
 	// ---- INetEntity (card 25ad0659 step 2c-ii) ------------------------------------------
 	// The net cores read this type through EvilAliensWeb.Compat.Net.INetEntity rather than by
 	// name. Every member above is already the implementation; these are the forwards for the
@@ -956,6 +985,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetFrameLocal => NetFrameLocal;
 
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetCosmeticOnly => NetCosmeticOnly;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetPathAnchored => NetPathAnchored;
+
+	Vector2 EvilAliensWeb.Compat.Net.INetEntity.NetPathOffset => NetPathOffset;
 
 	void EvilAliensWeb.Compat.Net.INetEntity.NetSetFrame(float frame)
 	{

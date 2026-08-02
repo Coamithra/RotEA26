@@ -1678,8 +1678,9 @@ internal static class Program
             "2. NetImpairment composed over an endpoint",
             "3. codec round trips through the wire",
             "4. stream-lane reorder + dedup",
+            "5. scaled-i16 motion rates",
         };
-        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetWireTest", sections, minAssertions: 69);
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetWireTest", sections, minAssertions: 88);
     }
 
     // Card 25ad0659 (step 2a) -- the INetHost seam: the clock, the two build/identity

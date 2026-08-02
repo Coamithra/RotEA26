@@ -120,4 +120,14 @@ public class Timer
 	{
 		_time = RandomHelper.RandomNextFloat(0f, _duration);
 	}
+
+	// Park this timer at a given point in its cycle, in the same 0..1 units Normalized reports
+	// (which count DOWN -- Normalized is TimeLeft/Duration). Added for the online co-op anchored
+	// motion lane (card c1a38ef9), where a puppet's swivel phase is pinned to the host's rather
+	// than left on Randomize's own roll; the value is clamped, so a phase off the wire can never
+	// park the timer outside its cycle.
+	internal void SetNormalized(float normalized)
+	{
+		_time = MathHelper.Clamp(normalized, 0f, 1f) * _duration;
+	}
 }

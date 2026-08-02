@@ -85,7 +85,13 @@ namespace EvilAliensWeb.Compat.Net
         // the appended event types before it, this MOVED AN EXISTING LAYOUT -- a v12 peer would
         // mis-parse every snapshot entry it received, so the bump is not a courtesy here, it is
         // the only thing standing between a stale peer and a garbage world.
-        public const byte ProtocolVersion = 13;
+        // v14 (card c1a38ef9): motion parameters on the wire -- LazerDescriptor's state extras
+        // grow three sent RATES (6 -> 12 bytes) and FlyingSpiderDescriptor gains a path anchor in
+        // its spawn extras (1 -> 5) plus state extras where it had none (0 -> 4).
+        // Both blocks are length-guarded, so an older peer degrades to exactly the pre-card
+        // behaviour rather than desyncing -- the ca4fd94f bump test, which this passes. The bump
+        // is the batch convention rather than a strict requirement; see NetProtocol's header.
+        public const byte ProtocolVersion = 14;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -1765,41 +1771,19 @@ namespace EvilAliensWeb.Compat.Net
             bool teleported = c.NetTakeTeleport();
             entryFlags = teleported ? NetProtocol.NetSnapshotFlags.Teleported : NetProtocol.NetSnapshotFlags.None;
 
-            // Observed velocity: differentiate real positions between this entity's snapshot
-            // turns -- robust for enemies that move Position directly (arcs, easing) where
-            // Speed/Direction would lie. First observation falls back to SpeedVector.
-            //
-            // ...and so does a REPOSITION, for the same reason and by the same fallback: a finite
-            // difference cannot tell motion from a jump, and the SpiderBoss is parked at the far
-            // screen edge to start each fly-by. Differentiating that ~800 px jump stamped 42-57
-            // px/ms onto the wire, and the client DEAD-RECKONED on it -- it snapped to the new
-            // position (correctly) and then flew onward at teleport speed until its next
-            // correction, collidably, killing the local player.
-            //
-            // THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER -- do not read the
-            // fallback as informative. Half the replicable set (the SpiderBoss included) moves by
-            // writing `Position` directly and never assigns `Speed`/`Direction`, so its
-            // `NetSpeedVector` is ZERO: a marked park sends zero velocity and the puppet stands
-            // still until its next turn, up to ~1.2 s in a big world. That is the correct trade
-            // against flinging it across the screen collidably, and it is what card 8dabe812's
-            // cap already did -- putting real motion parameters on the wire is card c1a38ef9.
-            //
-            // The host KNOWS, so it says so rather than guessing: the reposition sites call
-            // NetNoteTeleport (grep it -- Braineroid/EvilSkull/SpiderBoss/Ball) and the marker
-            // also rides the wire, so the client snaps this sample instead of blending it. Card
-            // 8dabe812's 5.0 px/ms cap is GONE from this decision; it survives one block below as
-            // a diagnostic that can no longer alter what is sent.
-            Vector2 vel = c.NetSpeedVector;
-            if (!teleported && e.HasLastPos && now > e.LastPosMs)
-            {
-                vel = (pos - e.LastPos) / (now - e.LastPosMs);
-            }
+            bool anchored = c.NetPathAnchored;
+            Vector2 vel = ResolveBaseVelocity(c.NetSpeedVector, anchored, teleported, pos,
+                e.HasLastPos, e.LastPos, e.LastPosMs, now);
             if (teleported)
             {
                 metrics.Teleports++;
             }
-            else if (e.HasLastPos && now > e.LastPosMs)
+            else if (!anchored && e.HasLastPos && now > e.LastPosMs)
             {
+                // ANCHORED TYPES ARE SKIPPED, and it costs nothing: `vel` is the DECLARED vector
+                // for them, not an observed one, so the safety net below would be measuring the
+                // wrong quantity. Neither anchored type repositions (a wasp and a rock fly a
+                // straight line and die off-screen), so there is no reposition site to miss.
                 NoteIfUnmarkedTeleport(c, vel);
             }
             e.LastPos = pos;
@@ -1814,6 +1798,50 @@ namespace EvilAliensWeb.Compat.Net
                 Scale = c.NetScale,
                 Hp = c.NetKillable is INetKillable k ? k.NetHitPoints : 0,
             };
+        }
+
+        // The velocity a snapshot carries, as a PURE decision (the OwnsSlotCore precedent): the
+        // whole of it is unobservable from any frame and all three of its branches are chosen by
+        // something other than the numbers, so a test that could not table-drive it could not
+        // cover it at all. Measured: a mutation dropping the ANCHORED branch passed the whole
+        // probe suite and every other leg of eaNetMotion until this was split out.
+        //
+        // Observed velocity: differentiate real positions between this entity's snapshot turns --
+        // robust for enemies that move Position directly (arcs, easing) where Speed/Direction
+        // would lie. THREE things fall back to the declared vector instead:
+        //
+        //   * the FIRST observation, which has nothing to difference against;
+        //   * a marked TELEPORT (card e79bb994) -- a finite difference cannot tell motion from a
+        //     jump, and the SpiderBoss is parked at the far screen edge to start each fly-by;
+        //     differentiating that ~800 px jump stamped 42-57 px/ms onto the wire and the client
+        //     dead-reckoned on it, collidably, killing the local player;
+        //   * an ANCHORED type (card c1a38ef9), whose real position is a linear baseline plus a
+        //     periodic component the client integrates for itself (INetEntity.NetPathOffset). A
+        //     difference taken over a whole snapshot turn describes a CHORD of that periodic
+        //     part rather than the baseline, so the estimate is wrong by construction and worse
+        //     the longer the turn. Here the declared vector is not a fallback at all -- it is the
+        //     baseline, exactly.
+        //
+        // FOR THE FIRST TWO THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER -- do
+        // not read that fallback as informative. Half the replicable set (the SpiderBoss included)
+        // moves by writing `Position` directly and never assigns `Speed`/`Direction`, so its
+        // NetSpeedVector is ZERO: a marked park sends zero velocity and the puppet stands still
+        // until its next turn, up to ~1.2 s in a big world. That is the correct trade against
+        // flinging it across the screen collidably. Fixing it properly means giving those types
+        // a real motion model -- the anchored branch is what that looks like, and they cannot
+        // take it as they stand, precisely because their declared vector is the thing that lies.
+        //
+        // The CALLER still stamps LastPos/LastPosMs whatever this returns: they are the entity's
+        // observation history and must stay live in case a type ever stops being anchored
+        // mid-life.
+        internal static Vector2 ResolveBaseVelocity(Vector2 declared, bool anchored, bool teleported,
+            Vector2 pos, bool hasLastPos, Vector2 lastPos, long lastPosMs, long now)
+        {
+            if (anchored || teleported || !hasLastPos || now <= lastPosMs)
+            {
+                return declared;
+            }
+            return (pos - lastPos) / (now - lastPosMs);
         }
 
         // Types already reported as suspected unmarked teleporters, so the console says each name

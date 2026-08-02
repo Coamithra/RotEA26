@@ -57,6 +57,9 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" 4. stream-lane reorder + dedup (ShipStateBuffer)\n");
             SectionStreamOrder(Check);
 
+            sb.Append(" 5. scaled-i16 motion rates (card c1a38ef9)\n");
+            SectionMotionRates(Check);
+
             sb.Append(string.Format(CultureInfo.InvariantCulture,
                 "[netwire] {0} passed, {1} failed\n", pass, fail));
             return sb.ToString();
@@ -766,6 +769,90 @@ namespace EvilAliensWeb.Compat.Net
                 }
             }
             check("control: an in-order stream is accepted in full", monoAccepted == sorted.Length);
+        }
+
+        // ---- 5. scaled-i16 motion rates ---------------------------------------------------
+        //
+        // The primitive under LazerDescriptor's three sent rates and FlyingSpiderDescriptor's
+        // amplitude/phase (card c1a38ef9). The DESCRIPTORS themselves cannot be tested here --
+        // building an entity needs a Game, and this suite is deliberately Game-free so it also
+        // runs under tools/sim/logic_probe -- so what is pinned is the two-byte field they are
+        // built on, over the real wire: sign, saturation, and that the two SCALES are not
+        // interchangeable.
+        private static void SectionMotionRates(Action<string, bool> check)
+        {
+            NetWire wire = new NetWire(2);
+            Recorder rx = new Recorder(wire[1]);
+            wire[0].Open("room");
+            wire[1].Open("room");
+
+            // Six rate fields in one frame, mirroring LazerDescriptor's block shape and sent on
+            // the STREAM lane, which is where snapshot state extras really ride.
+            float[] values = { 0.4f, 0f, -0.0007f, 0.0007f, 12.5f, -12.5f };
+            float[] scales =
+            {
+                NetProtocol.RatePxPerMsScale, NetProtocol.RatePxPerMsScale,
+                NetProtocol.RateRadPerMsScale, NetProtocol.RateRadPerMsScale,
+                NetProtocol.RatePxPerMsScale, NetProtocol.RatePxPerMsScale,
+            };
+            byte[] frame = new byte[values.Length * 2];
+            int w = 0;
+            for (int i = 0; i < values.Length; i++)
+            {
+                NetProtocol.WriteScaledI16(frame, ref w, values[i], scales[i]);
+            }
+            check("the block is exactly two bytes per rate", w == frame.Length);
+
+            rx.Clear();
+            wire[0].SendStream(frame);
+            wire.Pump();
+            byte[] got = rx.Count == 1 ? rx.Payloads[0] : null;
+            bool allBack = got != null && got.Length == frame.Length;
+            if (allBack)
+            {
+                for (int i = 0; i < values.Length; i++)
+                {
+                    // 1/scale is the quantisation step, so half of it is the tightest honest bound.
+                    if (Math.Abs(NetProtocol.ReadScaledI16(got, i * 2, scales[i]) - values[i])
+                        > 0.5f / scales[i])
+                    {
+                        allBack = false;
+                    }
+                }
+            }
+            check("every rate round-trips within its quantisation step", allBack);
+
+            // THE DISCRIMINATING LEG. A wrapping (short) cast of an out-of-range value flips the
+            // SIGN, which on the angle field turns the miniboss' sweep into a counter-sweep -- so
+            // saturation is asserted in BOTH directions and by sign, not just by magnitude.
+            byte[] sat = new byte[4];
+            int sw = 0;
+            NetProtocol.WriteScaledI16(sat, ref sw, 1000f, NetProtocol.RatePxPerMsScale);
+            NetProtocol.WriteScaledI16(sat, ref sw, -1000f, NetProtocol.RatePxPerMsScale);
+            float satHi = NetProtocol.ReadScaledI16(sat, 0, NetProtocol.RatePxPerMsScale);
+            float satLo = NetProtocol.ReadScaledI16(sat, 2, NetProtocol.RatePxPerMsScale);
+            // The range is asymmetric because two's complement is (-32768..32767), so the two
+            // ends are NOT mirror images -- asserting one figure for both would be asserting a
+            // wrong number that a wrapping cast could still satisfy.
+            check("an over-range rate SATURATES rather than wrapping (sign kept)",
+                satHi > 0f && satLo < 0f && Near(satHi, 32.767f) && Near(satLo, -32.768f));
+
+            // THE TWO SCALES ARE NOT INTERCHANGEABLE, which is the whole reason there are two.
+            // The miniboss sweep is -0.0007 rad/ms: at the rad scale that is 7 wire units and
+            // survives exactly, while at the px scale it is 0.7 of a unit and lands on 1 -- a 43%
+            // error in the beam's angular rate, integrated over the beam's whole life. Sharing
+            // one scale would leave every swept beam turning at the wrong speed with no frame and
+            // no counter to say so.
+            byte[] fine = new byte[4];
+            int fw = 0;
+            NetProtocol.WriteScaledI16(fine, ref fw, -0.0007f, NetProtocol.RateRadPerMsScale);
+            NetProtocol.WriteScaledI16(fine, ref fw, -0.0007f, NetProtocol.RatePxPerMsScale);
+            check("the sweep rate survives exactly at the rad scale",
+                Math.Abs(NetProtocol.ReadScaledI16(fine, 0, NetProtocol.RateRadPerMsScale)
+                    - -0.0007f) < 0.00001f);
+            check("...and is badly quantised at the px scale (why the scales differ)",
+                Math.Abs(NetProtocol.ReadScaledI16(fine, 2, NetProtocol.RatePxPerMsScale)
+                    - -0.0007f) > 0.0002f);
         }
 
         // ---- helpers ---------------------------------------------------------------------

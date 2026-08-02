@@ -111,10 +111,22 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   is built sound-free (SetupSingleShot playSound:false) and ApplyStateExtra plays nothing /
     //   spawns nothing.
     // Spawn extras: none (constructed at aim 0 / len ~0; the first snapshot supplies the beam).
-    // State extras: [angle:2][len:2][lead:2]  (angle u16 normalised [0,2pi); len/lead u16 px)
+    // State extras: [angle:2][len:2][lead:2][lenRate:2][leadRate:2][angleRate:2]
+    //   angle u16 normalised [0,2pi); len/lead u16 px; the three RATES scaled i16 (card
+    //   c1a38ef9) -- px/ms x1000 for the two growth rates, rad/ms x10000 for the sweep.
+    //
+    // THE RATES ARE WHAT LET A FROZEN BEAM MOVE BETWEEN TURNS. Without them the client only ever
+    // saw the three VALUES, once per SnapshotTurnMs, and a beam growing at 0.4 px/ms jumped in
+    // ~24 px steps. They are sent rather than differenced out of consecutive values: the host
+    // knows them exactly, and it applies Settings.DifficultyModifier before sending so the client
+    // never has to (its own modifier is a different number -- see Lazer's header).
     internal sealed class LazerDescriptor : NetTypeDescriptor<Lazer>
     {
         private const float TwoPi = 6.2831855f;
+        // The pre-rate layout. A frame carrying only these six bytes is still applied in full --
+        // the beam just holds its aim and length between turns, i.e. the pre-card behaviour.
+        private const int ValuesBytes = 6;
+        private const int RatesBytes = 12;
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
@@ -129,21 +141,36 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         {
             Lazer z = C(c);
             WriteAngle(buf, ref off, z.NetAngle);
-            WriteU16Px(buf, ref off, z.NetLen);
-            WriteU16Px(buf, ref off, z.NetLead);
+            NetProtocol.WriteU16Px(buf, ref off, z.NetLen);
+            NetProtocol.WriteU16Px(buf, ref off, z.NetLead);
+            NetProtocol.WriteScaledI16(buf, ref off, z.NetLenRate, NetProtocol.RatePxPerMsScale);
+            NetProtocol.WriteScaledI16(buf, ref off, z.NetLeadRate, NetProtocol.RatePxPerMsScale);
+            NetProtocol.WriteScaledI16(buf, ref off, z.NetAngleRate, NetProtocol.RateRadPerMsScale);
             return off;
         }
 
         public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
         {
-            if (len < 6)
+            if (len < ValuesBytes)
             {
                 return;
             }
             float angle = NetProtocol.ReadU16(buf, off) / 65535f * TwoPi;
             float length = NetProtocol.ReadU16(buf, off + 2);
             float leadValue = NetProtocol.ReadU16(buf, off + 4);
-            C(c).NetApplyBeam(angle, length, leadValue);
+            Lazer z = C(c);
+            // ORDER: the rates first, then the values. NetApplyBeam is what re-asserts the aim the
+            // driver's NetSpeedVector write just clobbered (see its header), so it has to run
+            // LAST -- and NetApplyRates resets the integration budget, which must not be spent
+            // against the previous turn's values.
+            if (len >= RatesBytes)
+            {
+                z.NetApplyRates(
+                    NetProtocol.ReadScaledI16(buf, off + 6, NetProtocol.RatePxPerMsScale),
+                    NetProtocol.ReadScaledI16(buf, off + 8, NetProtocol.RatePxPerMsScale),
+                    NetProtocol.ReadScaledI16(buf, off + 10, NetProtocol.RateRadPerMsScale));
+            }
+            z.NetApplyBeam(angle, length, leadValue);
         }
 
         private static void WriteAngle(byte[] buf, ref int off, float angle)
@@ -158,12 +185,6 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             buf[off++] = (byte)(v >> 8);
         }
 
-        private static void WriteU16Px(byte[] buf, ref int off, float px)
-        {
-            ushort v = (ushort)MathHelper.Clamp(px, 0f, 65535f);
-            buf[off++] = (byte)v;
-            buf[off++] = (byte)(v >> 8);
-        }
     }
 
     // Wall (Level-3 scrolling tower grid, AlienDrawableGameComponent) state surface:

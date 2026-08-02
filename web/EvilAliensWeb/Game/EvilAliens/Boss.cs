@@ -9,6 +9,13 @@ internal class Boss : KillableAlien
 {
 	private const int hitpointsinitially = 225;
 
+	// The Level-1 miniboss SWEEPS its beams as it tracks the player, at this constant angular
+	// rate (rad/ms, negative = counter-clockwise). Named because the online co-op lane sends it:
+	// a Lazer reports its own aim rate so a client puppet can turn the beam smoothly between
+	// snapshot turns instead of stepping it -- card 0108d1fc's rotation caveat, card c1a38ef9's
+	// implementation. See Lazer.NetAngleRate.
+	internal const float LazerSweepRadPerMs = -0.0007f;
+
 	private float targetDirection;
 
 	private float lazerangle;
@@ -95,13 +102,14 @@ internal class Boss : KillableAlien
 		foreach (Lazer lazor in lazors)
 		{
 			lazor.MoveTo(base.Position);
-			lazor.ChangeAim(-0.0007f * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+			lazor.ChangeAim(LazerSweepRadPerMs * (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 		}
 		if (lazertimer.Finished)
 		{
 			lazertimer.Duration = 800f;
 			Lazer lazer = Lazer.NewLazer(collection, base.Game);
 			lazer.Setup(base.Position, lazerangle, this, 50f);
+			lazer.SetSweepRate(LazerSweepRadPerMs);
 			lazors.Add(lazer);
 			collection.Add((GameComponent)(object)lazer);
 			lazerangle -= RandomHelper.RandomNextFloat(1.0995574f, (float)Math.PI * 9f / 20f);

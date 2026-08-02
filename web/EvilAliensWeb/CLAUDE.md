@@ -483,6 +483,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   on `AlienDrawableGameComponent` fronts the member it claims to, and that the
   `NetKillable`/`NetPickup` discriminants agree with the `is KillableAlien`/`is Powerup` tests
   they replaced; run from the main menu),
+  `eaNetMotion()` (anchored motion — card c1a38ef9: the sent Lazer rates and the FlyingSpider
+  path anchor. Asserts the `NetPathAnchored` predicate, both descriptors' real byte layouts,
+  and that a driven puppet grows/sweeps/bobs at the SENT parameters, each with the pre-card
+  block beside it as the control. Every way this lane can break degrades to the pre-card build,
+  which shipped and merely looks rougher — so nothing throws and no counter moves. Menu-runnable
+  and leave-no-trace; whether it is actually SMOOTHER is
+  `python tools/sim/net_puppet_drive_sim.py --smoothness`'s question, not this one's),
   `eaNetPuppetBench(n, iters)` (the pinned many-puppet drive bench — the same card's instrument:
   n real puppets, the real `NetPuppets.Drive` timed in a plain loop, in ABSOLUTE us. The FPS HUD
   cannot answer this — `Drive` runs inside `base.Update`, so it is buried in `UpdComponents`

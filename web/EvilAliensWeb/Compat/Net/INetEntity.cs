@@ -83,6 +83,14 @@ namespace EvilAliensWeb.Compat.Net
         bool NetFrameLocal { get; }
         bool NetCosmeticOnly { get; }
 
+        // Anchored motion (card c1a38ef9). NetPathAnchored makes the HOST send this entity's
+        // declared NetSpeedVector instead of a finite-differenced one, and makes the CLIENT
+        // integrate NetPathOffset locally on top of it and EASE each reported velocity in.
+        // The contract, and the rule for when a type may take it, is on
+        // AlienDrawableGameComponent.NetPathAnchored.
+        bool NetPathAnchored { get; }
+        Vector2 NetPathOffset { get; }
+
         // Frozen-puppet upkeep, all driven by NetPuppets.Drive on REAL dt.
         void NetSetFrame(float frame);
         void NetAdvanceFrame(float dtSeconds);

@@ -733,6 +733,17 @@
             catch (e) { console.warn('[debug] eaNetEntity failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: anchored motion — the sent Lazer rates and the FlyingSpider path anchor
+        // (card c1a38ef9). Asserts the NetPathAnchored predicate, the two descriptors' real
+        // byte layouts, and that a driven puppet grows/sweeps/bobs at the SENT parameters,
+        // each with the pre-card block beside it as the control. Prints PASS/FAIL.
+        // Leave-no-trace. The SHAPE of the smoothing is the sim's job, not this one's:
+        // python tools/sim/net_puppet_drive_sim.py --smoothness.
+        window.eaNetMotion = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetMotionTest')); }
+            catch (e) { console.warn('[debug] eaNetMotion failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
         // puppets in the world through the real self-heal path and times NetPuppets.Drive,
         // reporting ABSOLUTE us/call, ns/puppet and the share of the 16.7ms frame budget.

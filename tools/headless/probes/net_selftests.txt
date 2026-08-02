@@ -80,6 +80,11 @@ eval HostMenuLive
 # THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
 # not-short -- which is the whole reason those cards needed no protocol version bump, so if
 # it ever goes red the bump is back on the table.
+# Card 8a7772d6 raised it again, by the script-gate bit in MsgShipState's flags byte (asserted
+# SET with `alive` clear, beside the round-trip leg that pins it CLEAR with `alive` set -- either
+# half alone passes a bit wired to the wrong mask) and by EvIntroVolley's seed, whose risk is the
+# SIGN, so it round-trips int.MinValue and refuses a runt frame.
+#
 # Card e79bb994 raised it 77 -> 80: the snapshot entry's new per-sample flags byte, asserted PER
 # ENTRY (the two entries in the stride leg now carry different flags, so a codec that read the byte
 # from a fixed offset would report the same value for both), an UNKNOWN flag BIT surviving decode
@@ -87,13 +92,13 @@ eval HostMenuLive
 # and a decoder that validated the whole byte would stop correcting that entity the day a later
 # build appends a flag -- and a runt entry one byte short of the base block being refused, which is
 # the boundary the flags byte moved.
-# Card c1a38ef9 raised it 80 -> 85: the scaled-i16 rate field under LazerDescriptor's three
+# Card c1a38ef9 raised it 83 -> 88: the scaled-i16 rate field under LazerDescriptor's three
 # sent rates and FlyingSpiderDescriptor's amplitude/phase. Two of its five legs are the ones
 # worth keeping: an over-range value must SATURATE rather than wrap (a wrapping cast flips
 # the sign, turning the miniboss' beam sweep into a counter-sweep), and the two SCALES must
 # stay distinct -- the sweep rate is 7 wire units at the rad scale and 0.7 at the px one, so
 # sharing a scale would leave every swept beam turning 43% wrong, silently.
-expect \[netwire\] 85 passed, 0 failed
+expect \[netwire\] 88 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".

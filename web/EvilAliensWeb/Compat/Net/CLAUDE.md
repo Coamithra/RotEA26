@@ -41,6 +41,10 @@ inputs; the other peer's ship is an interpolated puppet.
   laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
   and Level 2's bees ambience. **One new event type (`EvFx`) for the whole family and NO protocol
   bump** -- see the transient-feedback bullet under "Protocol, NetIds & the replicable set".
+- **Level 1's intro cinematic plays on BOTH peers** (`8a7772d6`): the host's scripted no-ship
+  phase is replicated as a `MsgShipState` flag bit, so neither ship is on screen until the
+  cutscene ends and then both fly in together -- and the hail of bullets, which cannot replicate
+  at all, is mirrored as a seeded cosmetic volley (`EvIntroVolley`). No version bump.
 - **Diagnostics + rigs:** fake lag/loss/jitter (`40334a8f`), the snapshot unknown-id split and
   `snapTurn` (`48ab9b2f`), decorative swarms as one on/off beat (`9a3175d0`, v10), the
   standing-purge-filter races (`74403f83`), the signaling server deployed (`8c3c18da`).
@@ -575,12 +579,17 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   LAYOUT rather than appending something an old peer could ignore, so a v12 peer would mis-parse
   every snapshot entry it received: the handshake refusing the pairing is the only thing between a
   stale peer and a garbage world.
+  Card 8a7772d6 adds **`ShipFlagScriptGate`** (bit 1 of `MsgShipState`'s flags byte, the one v12
+  freed) and **`EvIntroVolley`** (event 24) and STAYS ON v13 -- both degrade to the pre-card
+  behaviour on an old peer in either direction, the `EvFx` bump test; see the intro-cinematic
+  bullet under "World authority".
   **v14** widens `LazerDescriptor`'s state extras 6 -> 12 (three sent RATES) and gives
   `FlyingSpiderDescriptor` a 5-byte spawn anchor plus 4-byte state extras where it had
   none -- card c1a38ef9, see the ANCHORED MOTION section. Unlike v12 and v13 both blocks
   are LENGTH-GUARDED and APPEND-ONLY, so an older peer degrades to exactly the pre-card
   behaviour (a beam that holds between turns, a wasp on its own phase) rather than
-  mis-parsing: this bump is the batch convention rather than a forced incompatibility.)
+  mis-parsing -- so like card 8a7772d6 above it did NOT have to bump, and did only as the
+  parallel batch's convention.)
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -825,13 +834,70 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   splits, bonus powerup drops, stray spawns) into the recycle pool -- the host's
   authoritative copy replicates in instead. AI-friend auto-join is HOST-ONLY in a net
   session (the host runs the AI friends and streams them; the client shows them as
-  `ControlDevice.RemoteFriend` puppets -- see the AI-friend bullet below). Because the script never runs on a client,
-  `GameScene.spawnPlayerNormally` reads as true on a join peer -- a scripted no-ship phase
-  (Level1's intro hands the ship spawn to its `demo_OnFinished` beat) would otherwise
-  leave the client shipless forever; the client's ship always uses the generic
-  startup/respawn path and the intro choreography stays host-only. Initial
+  `ControlDevice.RemoteFriend` puppets -- see the AI-friend bullet below). A SCRIPTED NO-SHIP
+  PHASE is the one thing the split cannot simply drop: `GameScene.spawnPlayerNormally` used to
+  read `_spawnplayernormally || IsClient`, which kept the joiner from being stranded shipless but
+  also made it spawn during Level 1's cutscene -- replaced by a REPLICATED hold, see the
+  intro-cinematic bullet below (card 8a7772d6). Initial
   background/music are local; mid-level script beats (messages, music switches,
   boss-phase choreography) do NOT replicate yet -- that is the next card.
+- **LEVEL 1'S INTRO CINEMATIC RUNS ON BOTH PEERS (card 8a7772d6).** Level 1 opens with ~10.5 s of
+  scripted cutscene (`Lvl1StartDemoEvent`: twenty UFOs fly in, then a hail of bullets, THEN the
+  player), and the script is host-only -- so the joiner spawned 1.3 s in and flew around for the
+  whole thing, invisible to the host besides (`ManagePuppet` gates the remote ship puppet on
+  having a local ship, which during the intro it has not got). User's ruling: mirror the host
+  fully -- neither ship on screen until the fly-in, then both together.
+  - **PART A, the spawn gate: a BIT IN `MsgShipState`, not an event.** `ShipFlagScriptGate`
+    (flags bit 2) carries the host's `!spawnPlayerNormally`; the client reads it as
+    `NetSession.PeerHoldsShipSpawn` and the scene's getter becomes
+    `_spawnplayernormally || (IsClient && !PeerHoldsShipSpawn)`. Sampled rather than an `Ev*`
+    beat because the state PERSISTS for the whole phase (the `EvFx` bullet's own rule), because a
+    30 Hz resend is self-healing against loss and reorder, and because it needs no level-entry
+    ordering and no JIP catch-up leg -- the stream is flowing long before a joiner's level loads,
+    which is exactly the "few seconds a JIP joiner also needs" the card asked for.
+  - **TWO CONTRACTS, both asserted rather than argued.** **FAIL-OPEN**: `PeerHoldsShipSpawn` is
+    false offline, false on the host and false while the peer is down, so a lost bit, a dropped
+    peer or a torn-down session degrades to the PRE-CARD behaviour, never to a joiner with no
+    ship. **A LATE GATE NEVER YANKS A SHIP**: the hold only refuses a spawn, it never removes one,
+    so a bit arriving after the joiner already spawned just means that peer missed the cutscene.
+  - **The RELEASE is the interesting edge, and it is POLLED on the scene's own tick**
+    (`GameScene.NetUpdateScriptShipGate`, outside the state switch) rather than pushed from the rx
+    handler -- a push would have to land on a scene, and the packet routinely arrives while a JIP
+    peer is still warming its level and has none. On the falling edge the client mirrors
+    `Level1.demo_OnFinished` (`SpawnAllPlayers(invulnerable: true)`) and LATCHES
+    `spawnPlayerNormally` locally, so the rest of the level no longer depends on the wire.
+    `UpdateNormal` has no spawn path of its own -- that is why the edge has to do it.
+  - **PART B, the volley: `EvIntroVolley` (event 24, reliable, `[seed:4]`).** `Bullet` is NOT in
+    `NetTypeRegistry` -- player bullets are never replicated, a remote ship's are re-fired locally
+    off the fire stream -- so a correctly gated joiner would watch the twenty intro UFOs pop with
+    nothing visibly killing them. The host announces the volley plus a seed and the joiner runs
+    its own copy through the shared `Lvl1StartDemoEvent.Volley`, ticked in `UpdateNormal`'s
+    `SuppressLevelScript` branch beside the decorative swarms (which is what gets pause, victory
+    and resetting for free).
+  - **THE CLIENT COPY IS COSMETIC, AND THAT IS A CONTRACT.** `Collides = false` (set AFTER the
+    `Add`, since `Bullet.Initialize` sets it and KNI runs `Initialize` inside the `Add`) and NO
+    `SetAsploding`, so it can neither kill a puppet, nor file an `EvClaim` for a kill the host's
+    own volley is already credited with, nor drop a damaging mini-`Blast`. The visible cost: no
+    ricochets, so the joiner's copies fly straight out of the top instead of scattering. **The
+    seed cannot make the two volleys identical and does not claim to** -- a bounce re-rolls off
+    the shared RNG and the client's copies never bounce; it matches the launch angles, i.e. it is
+    the same volley, not the same trajectories. A UFO visibly dying slightly out of step with a
+    cosmetic bullet is accepted for a cutscene.
+  - **NO PROTOCOL VERSION BUMP.** The gate bit is a previously-unused bit of an existing byte and
+    the event is a new type, so both degrade to the pre-card behaviour on an old peer in both
+    directions (`HandleEvent`'s switch has no `default:` arm -- the `EvFx` bullet's own bump
+    test). `Volley` also moves the host's 70 launch angles off `RandomHelper.Random` onto a
+    private seeded `Random`, the `Quad`/`ShipConnector` rule.
+  - **Verify with `eaNetIntroGate()`** (`Compat/Net/NetIntroGateTest.cs`, 32 assertions;
+    `tools/headless/probes/net_intro_gate.txt`). **DESTRUCTIVE and LEVEL-1-ONLY** -- the host-side
+    read is `!spawnPlayerNormally` on a REAL scene and Level 1's intro is the only shipped script
+    that sets it, so on any other level every leg is vacuous; it pairs real sessions onto the live
+    level, ticks the real scene and spawns the local ship, so use a throwaway
+    `?level=Level1&invuln` boot and run it EARLY. Mutation-tested five ways, each failing one
+    disjoint assertion. The one caveat worth carrying: the pre-card `|| IsClient` mutation fails
+    the GATE assertion and not the 120-tick one, because the suite attaches to a level already in
+    `GameState.Normal` where `UpdateStartup`'s 1300 ms branch cannot fire either way -- the gate
+    reading closed is what that branch consumes, so it is the leg that carries the bug.
 - **Client enemies = NetPuppets (`Compat/Net/NetPuppets`):** real game objects built by
   their own `New*+Setup` factories (the harness-proven path) on `EvSpawn`, then FROZEN --
   `Enabled=false` for life (gameplay Update/AI never runs; `ComponentBin.Pop` is patched to

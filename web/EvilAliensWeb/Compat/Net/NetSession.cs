@@ -207,6 +207,17 @@ namespace EvilAliensWeb.Compat.Net
         // types to the world (ComponentBin.Add checks SuppressWorldSpawn).
         public static bool SuppressLevelScript => IsClient;
 
+        // Card 8a7772d6: the HOST's level script is holding its player spawn, so we hold ours
+        // too and both ships fly in together at the end of the cinematic.
+        //
+        // FAIL-OPEN BY CONSTRUCTION, and every clause here is part of that. It is false with no
+        // session, on the host, and while the peer is not up -- so a dropped peer, a torn-down
+        // session or a build that never sends the bit all leave the joiner spawning normally.
+        // The only thing that can hold a ship back is a live host actively saying so, which is
+        // what keeps the worst case "P2 flies around during the intro" (the pre-card bug) rather
+        // than "P2 never gets a ship".
+        public static bool PeerHoldsShipSpawn => IsClient && PeerUp && peerScriptGate;
+
         // Card 9a3175d0: IsReplicableInstance, not IsReplicable -- a decorative instance is the
         // client's OWN to spawn (its spawner is what got replicated), so the bin must let it
         // through or the joiner's scenery vanishes entirely.
@@ -305,6 +316,9 @@ namespace EvilAliensWeb.Compat.Net
         private static float realDtMs;
         private static Vector2 lastPuppetPos;
         private static bool hasLastPuppetPos;
+        // Card 8a7772d6: the newest ShipFlagScriptGate off the HOST's stream (see
+        // PeerHoldsShipSpawn, which is what the scene actually reads).
+        private static bool peerScriptGate;
 
         // reliable-event bookkeeping
         private static int lastRxEventSeq = -1;
@@ -610,6 +624,7 @@ namespace EvilAliensWeb.Compat.Net
             haveRxSeq = false;
             lastRxEventSeq = -1;
             remoteAlive = false;
+            peerScriptGate = false;
             puppet = null;
             puppetSeenAlive = false;
             ResetFriends();
@@ -953,7 +968,14 @@ namespace EvilAliensWeb.Compat.Net
                 lastTxAim = aim;
                 lastTxShotCount = shotCount;
             }
-            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife));
+            // Card 8a7772d6: "my level script is holding the player spawn". Only meaningful
+            // from the HOST -- a client's own script never runs, and NetScriptHoldsShipSpawn
+            // reads through the client-side override, so what a CLIENT puts here is an echo of
+            // the host's own bit rather than a report about itself. Harmless because
+            // HandleShipState latches it only from a non-host peer; encoded unconditionally
+            // rather than gated on the role so there is one expression, not two.
+            bool scriptGate = NetScene.Current?.NetScriptHoldsShipSpawn ?? false;
+            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate));
             metrics.StreamTx++;
         }
 
@@ -1249,6 +1271,22 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             transport.SendReliable(NetProtocol.EncodeCosmeticSwarmEvent(txEventSeq++, (byte)kind, on, rate));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        // Card 8a7772d6: Level 1's intro bullet volley is starting on the host. Fire-and-forget
+        // -- a joiner that is not there yet simply misses it, which is correct (there is no
+        // catch-up leg, deliberately: replaying a 2.3s volley at a peer that arrived after it
+        // would put a hail of bullets on their screen with the cinematic already over -- the
+        // same reasoning that keeps EnemyLazerFire off the EvSpawn/ReplayLive path).
+        public static void OnIntroVolley(int seed)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeIntroVolleyEvent(txEventSeq++, seed));
             metrics.EventsTx++;
             metrics.BeatsTx++;
         }
@@ -2981,6 +3019,15 @@ namespace EvilAliensWeb.Compat.Net
             lastRxSeq = seq;
             haveRxSeq = true;
             remoteAlive = sample.Alive;
+            // Card 8a7772d6. HOST ONLY: the world is host-authoritative, and a client's own
+            // bit describes a script that never runs. Latched raw off the newest sample, with
+            // no edge detection here on purpose -- the edge belongs to the SCENE, which is not
+            // guaranteed to exist when the packet lands (a join-in-progress peer is still
+            // warming its level while this stream is already flowing).
+            if (!isHost)
+            {
+                peerScriptGate = sample.ScriptGate;
+            }
             remoteShotsPerSec = shots;
             remoteBulletLife = bulletLife;
             if (!buffer.Add(sample))
@@ -3301,6 +3348,19 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 NetScene.Current?.NetApplyCosmeticSwarm(kind, swarmOn, swarmRate);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvIntroVolley:
+            {
+                // Card 8a7772d6. Scene-gated like every world message: with no GameScene up
+                // there is nothing to fire into, and the volley is a moment, not a state.
+                if (isHost || NetScene.Current == null
+                    || !NetProtocol.TryDecodeIntroVolleyEvent(data, out int volleySeed))
+                {
+                    return;
+                }
+                NetScene.Current.NetApplyIntroVolley(volleySeed);
                 metrics.BeatsRx++;
                 break;
             }

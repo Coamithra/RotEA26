@@ -70,7 +70,9 @@ namespace EvilAliensWeb.Compat.Net
         public const byte ProtocolVersion = 10;
         public const float InterpDelayMs = 100f;
 
-        private const long StreamIntervalMs = 33;    // ~30 Hz ship stream
+        // ~30 Hz ship stream. INTERNAL because FiringHoldMsFor's contract is expressed in whole
+        // packets of it, and NetFireTest has to do the same arithmetic to assert that contract.
+        internal const long StreamIntervalMs = 33;
         // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
         // and it is a readout rather than something the sim reads back, so a third of the ship
         // rate is plenty and keeps the added stream traffic under ~400 B/s.
@@ -148,7 +150,11 @@ namespace EvilAliensWeb.Compat.Net
         // a closed tab still departs instantly via the pagehide 'bye'.
         private const long PausedPeerTimeoutMs = 120000;
         private const long MetricsIntervalMs = 5000;
-        private const float FiringHoldMs = 150f;     // "still firing" window after the last FireAt intent
+        // "Still firing" window after the last FireAt intent -- the CEILING of the hold, not the
+        // hold itself. See FiringHoldMsFor: the far side re-fires through a cadence gate of the
+        // same period we are streaming, so the hold has to stay inside one period. This was the
+        // whole hold until card a5c2a39b, which is what doubled a single tap.
+        private const float FiringHoldMs = 150f;
         private const float RenderClockSnapMs = 250f;
         // Pop detection: a rendered step larger than any plausible ship motion over the same
         // real time (PlayerShip.MaxSpeed is 0.33 px/ms; x2 margin + slack for frame jitter).
@@ -249,6 +255,9 @@ namespace EvilAliensWeb.Compat.Net
         private static int remoteShotsPerSec = 8;
         private static float remoteBulletLife = 450f;
         private static PlayerShip puppet;
+        // Has the peer reported alive=true while we held THIS puppet? Only then does losing
+        // alive mean a death worth showing -- card b4d0ba1d, see ManagePuppet.
+        private static bool puppetSeenAlive;
         private static double renderMs = double.NaN;
         private static long lastUpdateAt;
         private static float realDtMs;
@@ -560,6 +569,7 @@ namespace EvilAliensWeb.Compat.Net
             lastRxEventSeq = -1;
             remoteAlive = false;
             puppet = null;
+            puppetSeenAlive = false;
             ResetFriends();
             localPrimarySlot = HostPrimarySlot;
             peerPrimarySlot = NetProtocol.SlotNone;
@@ -819,6 +829,68 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- local ship -> wire ---------------------------------------------------------
 
+        // How long after the last FireAt intent we keep streaming firing=true (card a5c2a39b).
+        //
+        // THE BUG THIS FIXES. `firing` is a LEVEL on the wire, and the peer re-fires from it
+        // through the REAL FireAt path -- whose cadence gate the peer has already set to OUR
+        // period (NetApplyRemoteState does `shoottimer.Duration = 1000/shotsPerSec` off the
+        // same packet). So the peer spawns `1 + floor(hold / period)` bullets for one tap. The
+        // hold was a flat 150 ms against a 125 ms default period (shotspersec 8), i.e. EXACTLY
+        // TWO bullets for every single tap -- and three at the maxed rate of 18/s (55.6 ms).
+        // Those phantom bullets are real in the peer's world and damage what they hit, which is
+        // what made a tap look like it killed an enemy on one screen and not the other.
+        //
+        // WHAT THE PEER ACTUALLY SEES IS PACKETS, NOT MILLISECONDS, and that is the whole
+        // subtlety. It holds the NEWEST sample until a newer one arrives (DriveRemoteShip reads
+        // buffer.Newest every tick), so a hold of `H` ms puts firing=true in front of the re-fire
+        // gate for `ceil(H / I) * I` ms over there, where `I` is the REAL send interval. That
+        // product has to stay under one cadence period `P`, and it is not monotone in H alone.
+        //
+        // `H = P/2` IS THE BOUND, AND IT HOLDS FOR EVERY `I`, WHICH IS THE POINT. If I >= H the
+        // window is exactly I; if I < H then ceil(H/I)*I < H + I < 2H = P. So any send interval
+        // shorter than the cadence period is safe, whatever the frame rate.
+        //
+        // DO NOT DERIVE THIS FROM THE NOMINAL 33 ms INTERVAL -- that was the first attempt and it
+        // is only correct at exactly 60 Hz. `SendShipState` runs off the `now - lastStreamTx >=
+        // StreamIntervalMs` gate, which is evaluated ONCE PER FRAME, so the real interval is the
+        // smallest frame multiple >= 33: 33.3 ms at 60 Hz but 40 ms at 100 Hz, and never 33.0.
+        // Counting whole nominal packets over-fires at 7, 9, 10, 13, 14 and 15 shots/sec on a
+        // 100 Hz display -- ordinary in-play rates, since shotspersec walks 8 -> 18 one FirePower
+        // pickup at a time. A hitched frame is a DOUBLING risk here, not a missed-bullet one:
+        // ceil(H/I)*I GROWS with I.
+        //
+        // TWO RESIDUALS, both at the top of the fire-rate range and both accepted:
+        //   * The floor keeps a tap from expiring between two packets, and from 15/s up it is
+        //     what binds (P/2 falls below one send interval). There the tap rides a SINGLE packet
+        //     with no redundancy, so a stream-lane DROP loses that bullet on the peer -- the kill
+        //     still counts on the owner's screen, where the bullet was real. Exactness under loss
+        //     needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged not
+        //     worth it for one cosmetic bullet at one end of the range. Revisit if real-network
+        //     playtests show missing tap bullets.
+        //   * A send interval at or past the cadence period (below ~18 fps at the maxed fire
+        //     rate) cannot represent that cadence at all and doubles again. Nothing a level
+        //     encoding can do; the owner is already dropping frames faster than it shoots.
+        //
+        // NOT FIXED HERE, and unchanged by this card: `PlayerShip.FireAt` stamps NetLastFireMs on
+        // the INTENT, before its own cadence gate, so a second tap inside one cadence period
+        // restarts the hold while spawning no local bullet -- two taps ~80 ms apart are one bullet
+        // on the owner and two on the peer. The pre-card 150 ms hold did the same, so this is a
+        // pre-existing residual rather than a regression. Stamping on the actual SHOT instead
+        // would leave the hold uncovered between shots (H < P by construction above), so it
+        // trades this for a stretched sustained cadence; it needs its own card and its own
+        // measurement.
+        internal static float FiringHoldMsFor(int shotsPerSec)
+        {
+            // shotsPerSec arrives from a live ship (Setup seeds 8, FirePower caps at 18), but
+            // guard the divide rather than trust it -- a 0 here would be an infinite hold.
+            float period = 1000f / Math.Max(shotsPerSec, 1);
+            // Floor: a hold below one send interval can expire between two packets and lose the
+            // tap outright. Ceiling: a very low fire rate must not stream firing=true for most of
+            // a second off one tap. Both only ever LOWER the marked-packet count, so neither can
+            // reintroduce the overlap the P/2 bound rules out.
+            return Math.Clamp(period * 0.5f, (float)StreamIntervalMs, FiringHoldMs);
+        }
+
         private static void SendShipState(long now)
         {
             lastStreamTx = now;
@@ -834,7 +906,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 pos = local.GetPosition();
                 vel = local.NetVelocity;
-                firing = now - local.NetLastFireMs < FiringHoldMs;
+                firing = now - local.NetLastFireMs < FiringHoldMsFor(local.NetShotsPerSec);
                 if (firing || local.NetLastFireMs > 0)
                 {
                     aim = local.NetLastFireAim;
@@ -1171,6 +1243,32 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // "I am about to die a real death that nobody landed" -- a self-detonating space mine, a
+        // scripted crash (cards 4e406eba / 303bfb5b / 13aa596c). Called by the game immediately
+        // before its own Die(), so the note is on the entity when the removal seam reads it and
+        // OnHostDeath can put KillerSelf on the wire instead of KillerNone.
+        //
+        // IT IS OPT-IN AT THE CALL SITE, and that is the whole safety argument. The alternative
+        // -- inferring it from `IsDead` at the removal seam -- cannot tell a self-destruct from
+        // the dozens of FX-free Die() sites that mean "I have left the world" (every OffScreen
+        // despawn, Parachute's fade-out, ParatrooperBrain's merge, Lazer being eaten by the
+        // spider boss), so it would put a bang and a sound on the peer's screen where the host
+        // showed nothing. A hook says exactly what the game meant.
+        //
+        // Costs one bool test offline. Runs on BOTH peers -- a client's own mine puppet is still
+        // hit-testable, so its Asplode() reaches here too. The note is harmless there but NOT
+        // ignorable: the client's removal seam takes the echo-guard early return, so it consumes
+        // the note explicitly (killNotes is keyed on the entity, which ComponentBin recycles).
+        // When a claim IS sent for one, KillerSelf is non-payable at HandleClaim exactly as
+        // KillerNone was, so nothing is credited either way.
+        public static void NoteSelfDestruct(AlienDrawableGameComponent comp)
+        {
+            if (Active && NetTypeRegistry.IsReplicableInstance((GameComponent)(object)comp))
+            {
+                NoteKillSlot(comp, NetProtocol.KillerSelf);
+            }
+        }
+
         // Powerup pickups are claims too: the collecting side records WHO took it before
         // Powerup.Die() cascades into removal.
         public static void NotePowerupTaken(Powerup powerup, int playerSlot)
@@ -1276,6 +1374,22 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // How far outside the 800x600 design screen a self-destruct still counts as visible.
+        // Matches the buffer AlienDrawableGameComponent.OffScreen is called with by the types
+        // that despawn themselves (StarMine/ParatrooperAlien use 100), so "off screen enough to
+        // despawn" and "off screen enough not to bother exploding" are the same edge.
+        private const float DeathFxMarginPx = 100f;
+
+        // The same test AlienDrawableGameComponent.OffScreen(100) makes, inverted -- restated
+        // here rather than reached through the seam because INetEntity carries Position and not
+        // OffScreen, and putting a screen-bounds test on the entity seam for one caller would be
+        // a worse trade than four literals that already appear verbatim in the game code.
+        private static bool OnScreenForDeathFx(Vector2 pos)
+        {
+            return pos.X >= 0f - DeathFxMarginPx && pos.X <= 800f + DeathFxMarginPx
+                && pos.Y >= 0f - DeathFxMarginPx && pos.Y <= 600f + DeathFxMarginPx;
+        }
+
         internal static void OnHostDeath(NetIdRegistry.Entry e)
         {
             if (!Active)
@@ -1284,6 +1398,12 @@ namespace EvilAliensWeb.Compat.Net
             }
             byte killer = TakeKillNote(e.Comp);
             Vector2 pos = e.Comp.Position;
+            if (killer == NetProtocol.KillerSelf && !OnScreenForDeathFx(pos))
+            {
+                // A self-destruct the host itself showed nothing of: play nothing at the peer
+                // either. Downgrading to KillerNone means the ordinary silent despawn.
+                killer = NetProtocol.KillerNone;
+            }
             // recentDeaths keeps the BASE value: a later claim from the other peer is a fresh
             // generous payout the host still credits with its own live combo (card 11.2), not
             // a replay of the award below.
@@ -2710,7 +2830,10 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 ushort id = NetProtocol.ReadU16(data, 4);
-                byte killer = data[6]; // wire slot == oracle slot on both peers
+                // Wire slot == oracle slot on both peers. Clamped at the decode boundary like
+                // every other raw wire value -- see NetProtocol.ClampKillerSlot for why this
+                // one degrades to KillerNone instead of dropping the message.
+                byte killer = NetProtocol.ClampKillerSlot(data[6]);
                 Vector2 pos = new Vector2(NetProtocol.ReadF32(data, 7), NetProtocol.ReadF32(data, 11));
                 NetProtocol.ReadDeathAwards(data, deathAwardScratch);
                 NetPuppets.OnRemoteDeath(id, killer, pos, deathAwardScratch);
@@ -2726,7 +2849,11 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
-                HandleClaim(NetProtocol.ReadU16(data, 4), data[6]);
+                // Clamped like EvDeath's copy of the same byte -- one decode-boundary reader for
+                // both, per NetProtocol's validation contract. KillerSelf is a legal inbound
+                // value here (a client's own mine puppet can self-destruct on its screen) and is
+                // simply not payable, exactly as KillerNone is not.
+                HandleClaim(NetProtocol.ReadU16(data, 4), NetProtocol.ClampKillerSlot(data[6]));
                 break;
             }
             case NetProtocol.EvScoreSync:
@@ -3201,6 +3328,7 @@ namespace EvilAliensWeb.Compat.Net
             if (puppet != null && !oracle.GetShips().Contains(puppet))
             {
                 puppet = null;
+                puppetSeenAlive = false;
                 hasLastPuppetPos = false;
             }
             if (puppet == null)
@@ -3210,6 +3338,8 @@ namespace EvilAliensWeb.Compat.Net
                     if (s.Controller == ControlDevice.Remote)
                     {
                         puppet = s;
+                        // ADOPTED, not spawned by us, so we have NOT seen the peer alive on it.
+                        puppetSeenAlive = false;
                         hasLastPuppetPos = false;
                         break;
                     }
@@ -3219,13 +3349,45 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
+            puppetSeenAlive |= remoteAlive && puppet != null;
             if (remoteAlive && puppet == null && buffer.HasSamples && FindLocalShip() != null)
             {
                 SpawnPuppet();
             }
             else if (!remoteAlive && puppet != null)
             {
-                ExplodePuppet();
+                // THE FALLING EDGE, not the level (card b4d0ba1d). A death LOOK belongs to a
+                // peer we have actually seen alive on this puppet; firing on the level meant
+                // any ship that arrived in the Remote seat while the peer was still dead --
+                // the reset respawn, before that card stopped SpawnAllPlayers producing one --
+                // got the full explosion + cue for a death that never happened. A puppet we
+                // adopted without ever seeing the peer alive is released QUIETLY instead: the
+                // peer is dead, so its ship does not belong in our world either way.
+                if (puppetSeenAlive)
+                {
+                    ExplodePuppet();
+                }
+                else
+                {
+                    ReleasePuppetQuietly();
+                }
+            }
+        }
+
+        // Take a ship out of the Remote seat with no death FX and no cue -- see ManagePuppet.
+        // Same teardown as ExplodePuppet minus the explosions, the sound and the log's meaning.
+        private static void ReleasePuppetQuietly()
+        {
+            PlayerShip p = puppet;
+            puppet = null;
+            puppetSeenAlive = false;
+            hasLastPuppetPos = false;
+            bin.Remove((GameComponent)(object)p);
+            if (NetHost.Current.NetLog)
+            {
+                // "on this puppet", not "yet": a peer that was alive minutes ago on a PREVIOUS
+                // puppet, died, and had a fresh ship adopted into its seat lands here too.
+                Console.WriteLine("[net] remote ship released (never seen alive on this puppet, no death FX)");
             }
         }
 
@@ -3272,6 +3434,10 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             puppet = ship;
+            // We only get here with remoteAlive true, so this puppet HAS been seen alive --
+            // set it here rather than waiting for ManagePuppet's next pass, or a peer that
+            // died in the very next tick would be released quietly instead of exploding.
+            puppetSeenAlive = true;
             hasLastPuppetPos = false;
             renderMs = double.NaN;
             Console.WriteLine("[net] remote ship joined slot=" + slot);
@@ -3285,7 +3451,9 @@ namespace EvilAliensWeb.Compat.Net
         {
             PlayerShip p = puppet;
             puppet = null;
+            puppetSeenAlive = false;
             hasLastPuppetPos = false;
+            metrics.RemoteShipExplosions++;
             Vector2 at = p.GetPosition();
             Explosion explosion = Explosion.NewExplosion(bin, game);
             explosion.Setup(at, 2f, 2f, 0f, 0f);

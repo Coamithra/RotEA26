@@ -73,9 +73,24 @@ only 17-19 live entities (`snapTurn=120ms`) -- they spawn at 5.5/s but die off-s
 still sweeps to N=2048 because the question "how big would a world have to be" is worth an
 answer, not because that rig ever got there.
 
+--hoststall (card 68f62e92) asks the model's RECIPROCAL question, and it is the one the
+assert mode above cannot: what happens when the HOST's world stops and the client is perfectly
+healthy? A player death arms `Juice.AddHitStop(0.18f)` and `Game1.UpdateScaled` folds
+`TimeScale` into the gameTime every component gets, so the dying peer's WHOLE world halts --
+while `NetSession.Update` sits outside that scaled path and keeps streaming snapshots of the
+frozen positions on the real clock. The other peer's puppets keep dead-reckoning forward (as
+they must -- see above), so the corrections that follow walk every replicated enemy BACKWARD
+at once, over a background that never stopped scrolling. That is the "when P1 dies, the whole
+game rewinds a bit" report, and the fix is on the OTHER side of this model: no hit-stop while a
+session is active, so the host never stalls. Measured: 23 px of backward glide at a mid-sized
+world (N=64) and a typical 0.15 px/ms enemy, 45 px for a fast diver, against a stall=0 control
+that never steps backward at all. It saturates in stall length but scales with POPULATION,
+because the round robin corrects a small world several times inside a 180 ms freeze.
+
 Run:  python tools/sim/net_puppet_drive_sim.py               (assert mode; exit 0 = fix holds)
       python tools/sim/net_puppet_drive_sim.py --sweep       (pops vs window depth/length)
       python tools/sim/net_puppet_drive_sim.py --population  (pops vs live count / client tick)
+      python tools/sim/net_puppet_drive_sim.py --hoststall   (card 68f62e92: the HOST stalling)
 """
 
 import argparse
@@ -719,6 +734,118 @@ def smoothness():
           "\n    teleport guard removes the fling while keeping the correction.")
     return True
 
+def run_host_stall(stall_ms, n_enemies=16, speed=0.15, total_ms=6000.0):
+    """THE RECIPROCAL of the run() above (card 68f62e92), and the whole point is which SIDE
+    stops.
+
+    run() models the CLIENT's clock being scaled while the host runs on real time -- the case
+    the real-time driver fixed. This models the HOST's world halting for `stall_ms` while the
+    client is perfectly healthy: a player death on the host arms Juice.AddHitStop(0.18f), and
+    Game1.UpdateScaled folds TimeScale into the gameTime UpdateInner hands every component, so
+    the host's whole world stops advancing. NetSession.Update is NOT in that scaled path -- it
+    runs on TickCount64 -- so snapshots keep flowing at full cadence carrying the FROZEN
+    positions, while the client's puppets keep dead-reckoning forward on real time exactly as
+    designed.
+
+    The puppet therefore runs ahead by vel * (stall + that entity's blind window), and the
+    corrections that follow walk it BACKWARD. That backward motion is the report: "when P1
+    dies, the whole game rewinds a bit" -- every replicated enemy at once, over a background
+    that never stopped scrolling (the client scrolls its own).
+
+    Returns (max_backward_px, overshoot_px, pops). max_backward_px is the largest single-frame
+    backward step summed into a contiguous backward run, i.e. what the eye sees as a rewind.
+    """
+    enemies = [Enemy(pos=100.0 + 25.0 * i, vel=speed) for i in range(n_enemies)]
+    puppets = [Puppet(pos=e.pos) for e in enemies]
+    cursor = 0
+    next_snap = SNAPSHOT_INTERVAL_MS
+    stall_start = 2000.0          # steady state first, so nothing here is a spawn transient
+    pops = 0
+    overshoot = 0.0
+    back_run = [0.0] * n_enemies  # px travelled backward in the current contiguous run
+    max_back = 0.0
+    t = 0.0
+    while t < total_ms:
+        frozen = stall_start <= t < stall_start + stall_ms
+        if not frozen:
+            for e in enemies:
+                e.advance(TICK_MS)
+        if t >= next_snap:
+            # The host keeps SENDING through its own freeze -- that is the mechanism.
+            count = min(SNAPSHOT_MAX_ENTRIES, len(enemies))
+            for _ in range(count):
+                idx = cursor % len(enemies)
+                cursor = (cursor + 1) % len(enemies)
+                snap_pos, snap_vel = enemies[idx].observe(t)
+                if puppets[idx].apply_snapshot(snap_pos, snap_vel):
+                    pops += 1
+            next_snap += SNAPSHOT_INTERVAL_MS
+        for i, p in enumerate(puppets):
+            before = p.pos
+            p.drive(TICK_MS)      # the client is healthy: real dt, always
+            step = p.pos - before
+            if step < 0.0:
+                back_run[i] -= step
+                max_back = max(max_back, back_run[i])
+            else:
+                back_run[i] = 0.0
+            overshoot = max(overshoot, p.pos - enemies[i].pos)
+        t += TICK_MS
+    return max_back, overshoot, pops
+
+
+def host_stall():
+    print("Card 68f62e92 -- what does a HOST-side hit-stop do to the other peer's world?\n")
+    print("The client is healthy throughout; only the HOST's world stops advancing, while its")
+    print("snapshots keep flowing on the real clock. Enemies move at a constant speed, so every")
+    print("px of backward motion below is the correction blend undoing dead reckoning the host")
+    print("never earned -- there is no real reversal in the model to confuse it with.\n")
+    print(f"Snapshot round robin {SNAPSHOT_MAX_ENTRIES}/{SNAPSHOT_INTERVAL_MS:.0f}ms, "
+          f"correction window {CORRECTION_WINDOW_MS:.0f}ms, snap threshold {SNAP_THRESHOLD_PX:.0f}px.\n")
+
+    speeds = (0.08, 0.15, 0.30)   # px/ms: a drifting enemy, a typical UFO, a fast diver
+    print("A. AT A SMALL WORLD (N=16, snapTurn at its 60ms floor), vs stall length:\n")
+    header = f"{'stall ms':>9} " + "".join(f"{('v=' + str(s)):>22}" for s in speeds)
+    print(header)
+    print(f"{'':>9} " + "".join(f"{'rewind px / ahead px':>22}" for _ in speeds))
+    print("-" * len(header))
+    for stall in (0.0, 60.0, 120.0, HITSTOP_MS, 360.0):
+        row = f"{stall:>9.0f} "
+        for sp in speeds:
+            back, ahead, _ = run_host_stall(stall, speed=sp)
+            row += f"{(f'{back:8.1f} / {ahead:8.1f}'):>22}"
+        print(row)
+    print("\nThe rewind SATURATES down that column, and the reason is the round robin: at N=16")
+    print("every entity gets a turn every 60ms, so it is corrected 3 times INSIDE a 180ms")
+    print("freeze and can only ever be one turn's worth of dead reckoning ahead. A longer")
+    print("freeze buys no more error -- which is exactly why N is the variable that matters.\n")
+
+    print("B. AT THE SHIPPED 180ms DEATH HIT-STOP, vs world POPULATION:\n")
+    counts = (16, 32, 64, 128, 256)
+    header = f"{'N live':>7} {'snapTurn':>9} " + "".join(f"{('v=' + str(s)):>22}" for s in speeds)
+    print(header)
+    print(f"{'':>7} {'':>9} " + "".join(f"{'rewind px / ahead px':>22}" for _ in speeds))
+    print("-" * len(header))
+    for n in counts:
+        row = f"{n:>7} {snap_turn_ms(n):>9} "
+        for sp in speeds:
+            back, ahead, _ = run_host_stall(HITSTOP_MS, n_enemies=n, speed=sp)
+            row += f"{(f'{back:8.1f} / {ahead:8.1f}'):>22}"
+        print(row)
+    back, ahead, pops = run_host_stall(HITSTOP_MS, n_enemies=64, speed=0.15)
+    print(f"\nAt a mid-sized world (N=64, snapTurn {snap_turn_ms(64)}ms) and a typical 0.15 px/ms enemy:")
+    print(f"the puppet runs {ahead:.1f}px AHEAD of the host's frozen truth and is then walked")
+    print(f"{back:.1f}px BACKWARD over the {CORRECTION_WINDOW_MS:.0f}ms blend -- {pops} hard pops, so it is a")
+    print("visible GLIDE the wrong way rather than a teleport, which is how the report")
+    print("describes it. The stall=0 row in A is the control: a healthy pair never steps")
+    print("backward at all, at any speed.")
+    print("\nEvery replicated enemy does this at once, and the client's background keeps")
+    print("scrolling throughout -- hence 'the whole game rewinds a bit'.")
+    print("\nTHE FIX IS ON THE OTHER SIDE OF THIS MODEL: suppress the hit-stop while a session")
+    print("is active (Juice.AddHitStop), so the host's world never stops and no row below the")
+    print("control is ever reached. Nothing here changes the client's dead reckoning, which is")
+    print("correct as it stands -- see run() above for why it must stay on real time.")
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -728,6 +855,9 @@ def main():
     ap.add_argument("--smoothness", action="store_true",
                     help="jerk/maxstep vs correction window + the teleport guard "
                          "(cards 0dfc4495 / d3add86f / 8dabe812)")
+
+    ap.add_argument("--hoststall", action="store_true",
+                    help="card 68f62e92: how far a HOST-side hit-stop rewinds the peer's world")
     args = ap.parse_args()
     if args.sweep:
         sweep()
@@ -737,6 +867,10 @@ def main():
         return 0
     if args.smoothness:
         return 0 if smoothness() else 1
+
+    if args.hoststall:
+        host_stall()
+        return 0
     ok = assert_mode()
     if ok:
         print("\nOK: the REAL-time driver holds the puppets converged (0 pops) in every window; "

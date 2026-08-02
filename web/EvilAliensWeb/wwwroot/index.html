@@ -581,6 +581,18 @@
             catch (e) { console.warn('[debug] eaNetPickup failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: single-tap bullet count over a real co-op wire (card a5c2a39b). One tap used to
+        // reach the other peer as TWO bullets, because the sender streamed firing=true for a flat
+        // 150 ms while the peer re-fires through a 125 ms cadence gate. Asserts the packet-derived
+        // hold contract for every fire rate, then counts the bullets a scripted tap actually
+        // spawns on a real remote puppet — with the pre-card pattern beside it as the control.
+        // DESTRUCTIVE: needs a live level and fires real bullets into it, so run it in a
+        // throwaway ?level=Level2&invuln boot. Prints PASS/FAIL.
+        window.eaNetFire = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetFireTest')); }
+            catch (e) { console.warn('[debug] eaNetFire failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so
@@ -613,6 +625,18 @@
         window.eaNetSnap = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetSnapTest')); }
             catch (e) { console.warn('[debug] eaNetSnap failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: join-peer death FX (cards 4e406eba / 303bfb5b / 13aa596c) — a self-detonating
+        // space mine goes out as KillerSelf instead of a silent despawn, and a deferred death
+        // (BattleSkull, the surviving MarsBoss) releases its frozen puppet so its own 2.5–5 s
+        // animation plays locally. Prints PASS/FAIL. Run from the MAIN MENU — it plants real
+        // entities and really kills them, so it skips itself over a live session or level.
+        // Off-screen, so nothing is drawn — but the real death paths play their real cues,
+        // so expect a handful of explosion SFX.
+        window.eaNetDeathFx = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetDeathFx')); }
+            catch (e) { console.warn('[debug] eaNetDeathFx failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: the co-op scenario harness (card 25ad0659 step 4) — the generous-claim

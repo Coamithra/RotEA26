@@ -34,6 +34,10 @@ namespace EvilAliensWeb.Compat
 	//                  (Compat/Juice.cs KillPunch). OFF by default — it read as a stutter,
 	//                  not juice (Trello bd5efd9d). Player-death hit-stop and the
 	//                  eaHitstop() console/JS hook are unaffected by this flag.
+	//   ?nethitstop=1  let hit-stop freeze game time inside an online co-op session again
+	//                  (card 68f62e92 refuses every hit-stop there — one peer's world halting
+	//                  while the wire streams on is what rewound the other peer's enemies).
+	//                  THE DELIBERATE BUG REPRODUCTION, and IN `Active` for that reason.
 	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
 	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
@@ -354,6 +358,19 @@ namespace EvilAliensWeb.Compat
 		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
 		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
 		public static float ShakeAmount { get; private set; } = 1f;
+
+		// Restore the pre-card-68f62e92 behaviour: let a hit-stop freeze game time even
+		// inside an online co-op session. THE DELIBERATE BUG REPRODUCTION (the
+		// `?teampartner=pad` idiom) — a freeze halts one peer's whole world while the wire
+		// keeps streaming, and the other peer's enemies then slide backward when the
+		// corrections land (Compat/Juice.cs AddHitStop has the mechanism). It is the negative
+		// control NetResetSpawnTest's hit-stop leg needs.
+		// IN `Active` even though `?hitstop` is OUT, and the asymmetry is the point: since
+		// that card `?hitstop` can no longer degrade a session at all (AddHitStop refuses
+		// while NetSession.Active regardless), so this is the one flag whose whole purpose is
+		// reintroducing a net-desync bug — it must never reach a public lobby or a listed
+		// game. Every legitimate use is a dev `?net=` boot, which is anything-goes.
+		public static bool NetHitstop { get; private set; }
 
 		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from
 		// Juice.KillPunch (KillableAlien.HitBy) — NOT player-death hit-stop (PlayerShip
@@ -1480,6 +1497,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "hitstop":
 					Hitstop = IsOn(val);
+					break;
+				case "nethitstop":
+					NetHitstop = IsOn(val);
 					break;
 				case "slowmotrail":
 					SlowmoTrail = IsOn(val);
@@ -3280,7 +3300,7 @@ namespace EvilAliensWeb.Compat
 					+ "session ONLY, and NOTHING will be saved (no hiscores, no level completion, "
 					+ "no awardments). Reload without the flag to keep progress.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

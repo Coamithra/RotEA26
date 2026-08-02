@@ -114,6 +114,9 @@ namespace EvilAliensWeb.Compat.Net
         int NetHitPoints { get; }
         void NetApplyHp(int hp);
         void NetKill(ICollidable killer, bool isComboGenerator);
+        // The death nobody landed -- a self-destruct, a scripted crash. Separate from NetKill
+        // because the FX can differ from being shot; see KillableAlien.NetReplayUnattributedDeath.
+        void NetReplayUnattributedDeath(ICollidable agent);
     }
 
     // The Powerup half. `NetMarkTaken` fronts the public `taken` field for the same reason

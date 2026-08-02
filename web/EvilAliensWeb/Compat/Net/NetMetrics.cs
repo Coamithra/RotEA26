@@ -28,6 +28,15 @@ namespace EvilAliensWeb.Compat.Net
         public float MaxPopPx;
         public float BufferDepthMs;     // newest sample - render clock, latest value
 
+        // Times NetSession.ExplodePuppet played the PRIMARY remote ship's death LOOK (card
+        // b4d0ba1d). The FX itself leaves no other trace a headless scenario can read -- two
+        // Explosions and a cue into a live world -- so this is the observable that separates
+        // "one death, one explosion" from the reset artifact that fired a second one. Counts
+        // that method only: ExplodeFriend is a different lifecycle (stream timeout, not an
+        // alive flag) and is deliberately not folded in. Not on the [net] line -- it is a
+        // per-death event, not a health rate.
+        public long RemoteShipExplosions;
+
         // reliable event lane
         public long EventsTx;
         public long EventsRx;

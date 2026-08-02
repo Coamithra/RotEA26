@@ -689,8 +689,17 @@ def _stddev_of_vector_deltas(series):
 
 
 FLYSPIDER_SWIVEL_MS = 4000.0
-FLYSPIDER_AMP_PX = 25.0
+# NOT a round number, deliberately. The real amplitude is `50 * DifficultyModifier * scale`
+# (0.75 shipped), which is never an integer, and the wire carries it as u16 DESIGN PX -- so the
+# client's copy is quantised and the anchored puppet must carry a real model error. With a whole
+# 25.0 here the quantisation was a no-op and the anchored rows below could not have failed for
+# any reason to do with the wire, which is not a measurement.
+FLYSPIDER_AMP_PX = 25.4
 FLYSPIDER_BASE_VX = -0.12
+# The client's phase is anchored at spawn and re-sent every turn, but the two peers' clocks are
+# not identical, so it carries a small standing error the ease is still working off. One tick at
+# 60 Hz over a 4 s cycle is 0.004 of a cycle; this is that, doubled.
+FLYSPIDER_PHASE_ERR = 0.008
 
 
 def _flyspider_offset(t_ms):
@@ -706,11 +715,17 @@ def _flyspider_truth(t_ms, teleport_at=None, teleport_dx=0.0):
 
 
 def _anchored_offset(t_ms):
-    """What the CLIENT can reconstruct: the same swivel, with the amplitude quantised to the u16
-    px the state extras carry. The phase rides the EvSpawn anchor and is re-sent every turn, so
-    modelling it as exact is honest over a wasp's few-second life; the amplitude is not."""
+    """What the CLIENT can reconstruct -- deliberately NOT the host's truth.
+
+    Two errors, both real and both in the direction that makes the anchored rows harder: the
+    amplitude is quantised to the u16 design px the state extras carry, and the phase carries a
+    small standing offset (the two peers' clocks are not identical, and the ease is always still
+    working the last correction off). Without them this function reproduced _flyspider_truth
+    exactly and the anchored assertions were tautologies.
+    """
     amp = round(FLYSPIDER_AMP_PX)
-    return (0.0, amp * math.sin(2 * math.pi * t_ms / FLYSPIDER_SWIVEL_MS))
+    phase = t_ms / FLYSPIDER_SWIVEL_MS + FLYSPIDER_PHASE_ERR
+    return (0.0, amp * math.sin(2 * math.pi * phase))
 
 
 def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
@@ -849,6 +864,12 @@ def smoothness():
                          "blind window at all" % (anc["jerk"], ctrl["host_jerk"]))
     print("\n  (the estimator's jerk is set by the blind window it has to bridge; the anchored"
           "\n   client is not bridging anything, so it tracks the host at every world size.)")
+    print("  NOTE: the anchored client carries a REAL model error -- a quantised amplitude and a"
+          "\n   standing phase offset, see _anchored_offset -- and the rows barely move for it."
+          "\n   That is the physics, not a rigged rig: a STANDING error is a constant position"
+          "\n   offset, which the correction blend absorbs smoothly, so it costs accuracy rather"
+          "\n   than smoothness. What jerk measures is the blind window, which is what the anchor"
+          "\n   removes.")
 
     print("\nSHOT NUDGE (card d3add86f) -- an asteroid's heading tweaked by a bullet at t=3s.")
     print("A linear path is ALREADY dead-reckoned exactly, so the whole cost is the velocity")

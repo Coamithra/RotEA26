@@ -861,10 +861,17 @@ namespace EvilAliensWeb.Compat.Net
                     info.VelEaseMsLeft -= easeTake;
                 }
                 Vector2 step = NetSession.PeerStalled ? Vector2.Zero : info.Vel * dtMs;
-                if (info.PathAnchored && !NetSession.PeerStalled)
+                if (info.PathAnchored)
                 {
+                    // THE BASELINE IS REFRESHED EVEN WHILE STALLED, and only the STEP is
+                    // withheld. NetTickTimers below keeps advancing the type's own timers
+                    // throughout a stall (a puppet goes on animating by design), so a baseline
+                    // left frozen would accumulate the whole stall's worth of sine and pay it
+                    // out in ONE frame the tick the peer came back -- up to 2 x amplitude on a
+                    // collidable hitbox, which is precisely what the hold above exists to
+                    // prevent.
                     Vector2 offset = comp.NetPathOffset;
-                    if (info.HasPathOffset)
+                    if (info.HasPathOffset && !NetSession.PeerStalled)
                     {
                         step += offset - info.PathOffset;
                     }

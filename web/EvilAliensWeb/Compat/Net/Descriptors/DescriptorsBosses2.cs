@@ -141,8 +141,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         {
             Lazer z = C(c);
             WriteAngle(buf, ref off, z.NetAngle);
-            WriteU16Px(buf, ref off, z.NetLen);
-            WriteU16Px(buf, ref off, z.NetLead);
+            NetProtocol.WriteU16Px(buf, ref off, z.NetLen);
+            NetProtocol.WriteU16Px(buf, ref off, z.NetLead);
             NetProtocol.WriteScaledI16(buf, ref off, z.NetLenRate, NetProtocol.RatePxPerMsScale);
             NetProtocol.WriteScaledI16(buf, ref off, z.NetLeadRate, NetProtocol.RatePxPerMsScale);
             NetProtocol.WriteScaledI16(buf, ref off, z.NetAngleRate, NetProtocol.RateRadPerMsScale);
@@ -185,12 +185,6 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             buf[off++] = (byte)(v >> 8);
         }
 
-        private static void WriteU16Px(byte[] buf, ref int off, float px)
-        {
-            ushort v = (ushort)MathHelper.Clamp(px, 0f, 65535f);
-            buf[off++] = (byte)v;
-            buf[off++] = (byte)(v >> 8);
-        }
     }
 
     // Wall (Level-3 scrolling tower grid, AlienDrawableGameComponent) state surface:

@@ -1123,6 +1123,17 @@ namespace EvilAliensWeb.Compat.Net
         // mismatched pair is silent (the beam simply grows at the wrong speed).
         public const float RatePxPerMsScale = 1000f;
         public const float RateRadPerMsScale = 10000f;
+
+        // A non-negative design-space length in two bytes -- the beam's len/lead and the wasp's
+        // start height and swivel amplitude. Shared rather than copied into each descriptor: a
+        // later change here (rounding instead of truncating, say) must move BOTH layouts or the
+        // two silently diverge. Read back with ReadU16.
+        public static void WriteU16Px(byte[] b, ref int o, float px)
+        {
+            ushort v = (ushort)Math.Clamp(px, 0f, 65535f);
+            b[o++] = (byte)v;
+            b[o++] = (byte)(v >> 8);
+        }
     }
 
     // One received ship-stream sample. T is the SENDER's session-relative millisecond

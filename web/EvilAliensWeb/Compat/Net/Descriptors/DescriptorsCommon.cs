@@ -244,7 +244,7 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             }
             flags |= (byte)((f.NetColorIndex & 3) << 1);
             buf[off++] = flags;
-            WriteU16Px(buf, ref off, f.NetStartHeight);
+            NetProtocol.WriteU16Px(buf, ref off, f.NetStartHeight);
             WritePhase(buf, ref off, f.NetSwivelPhase);
             return off;
         }
@@ -271,7 +271,7 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
             FlyingSpider f = C(c);
-            WriteU16Px(buf, ref off, f.NetSwivelAmplitude);
+            NetProtocol.WriteU16Px(buf, ref off, f.NetSwivelAmplitude);
             WritePhase(buf, ref off, f.NetSwivelPhase);
             return off;
         }
@@ -285,13 +285,6 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             // RECORDED here, SPENT in FlyingSpider.NetDriveExtras over the next 250 ms -- see the
             // note there for why a correction applied inside this method would be a step.
             C(c).NetApplySwivel(NetProtocol.ReadU16(buf, off), ReadPhase(buf, off + 2));
-        }
-
-        private static void WriteU16Px(byte[] buf, ref int off, float px)
-        {
-            ushort v = (ushort)MathHelper.Clamp(px, 0f, 65535f);
-            buf[off++] = (byte)v;
-            buf[off++] = (byte)(v >> 8);
         }
 
         // Phase over [0,1). Written modulo 1 so a value that has drifted outside cannot wrap the

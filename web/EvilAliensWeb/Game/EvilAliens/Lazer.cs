@@ -76,6 +76,11 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public void Setup(Vector2 position, float direction, AlienDrawableGameComponent owner, float lead)
 	{
+		// Lazer is POOLED, so a beam whose new owner does not sweep must not inherit the last
+		// one's sweep rate and report it on the wire. Cleared HERE rather than in Initialize
+		// because a sweeper sets it between this call and ComponentBin.Add -- see
+		// NetResetExtrapolation's header.
+		netSweepRadPerMs = 0f;
 		issingle = false;
 		this.owner = owner;
 		base.Position = position;
@@ -93,6 +98,7 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public void SetupSingleShot(Vector2 position, float direction, float lead, bool playSound)
 	{
+		netSweepRadPerMs = 0f; // see Setup above
 		issingle = true;
 		base.Position = position;
 		this.lead = lead;
@@ -282,10 +288,16 @@ internal class Lazer : AlienDrawableGameComponent
 	// otherwise start its new life with the PREVIOUS beam's rates already armed: NetDriveExtras
 	// would integrate the old beam's aim and growth for up to NetExtrapolateCapMs before the
 	// first snapshot of the new life landed. That moves a COLLIDABLE hitbox (CollisionType reads
-	// len/lead/Direction), so it is not a cosmetic slip. It clears the HOST-side sweep rate for
-	// the mirror-image reason: a recycled beam whose new owner does not sweep must not inherit
-	// the last one's sweep and report it on the wire. Same recycle trap NetVelocityScan
+	// len/lead/Direction), so it is not a cosmetic slip. Same recycle trap NetVelocityScan
 	// documents on the measurement side.
+	//
+	// IT MUST NOT TOUCH netSweepRadPerMs, and that is not an oversight -- this runs from
+	// Initialize, which ComponentBin.Add invokes SYNCHRONOUSLY, and every sweeper sets the rate
+	// BEFORE the Add (Boss.Update: Setup -> SetSweepRate -> collection.Add). Clearing it here
+	// zeroed the rate of every miniboss beam right after it was set, so the angular half of the
+	// wire went permanently dead with nothing to say so. The host-side rate is cleared in the
+	// two Setup entry points instead -- the per-spawn seam that runs before the Add, which is
+	// where FlyingSpider.Setup clears its own recycled net state for the same reason.
 	private void NetResetExtrapolation()
 	{
 		netHasRates = false;
@@ -293,7 +305,6 @@ internal class Lazer : AlienDrawableGameComponent
 		netLenRate = 0f;
 		netLeadRate = 0f;
 		netExtrapolatedMs = 0f;
-		netSweepRadPerMs = 0f;
 	}
 
 	// ---- host readbacks for LazerDescriptor's state extras --------------------------------

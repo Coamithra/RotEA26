@@ -1975,7 +1975,7 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
   a wasp almost a whole 2.7 s period the wrong way whenever the pair straddles the 1 -> 0 wrap.
 - **`NetSession.ResolveBaseVelocity` is a PURE decision, split out of `CaptureBaseState`** (the
   `OwnsSlotCore` precedent) -- and the split is not tidiness. A mutation dropping its anchored
-  branch passed the whole 33-probe suite AND every other leg of `eaNetMotion` until it existed;
+  branch passed the whole probe suite AND every other leg of `eaNetMotion` until it existed;
   a host that goes back to differentiating an anchored entity makes the client count the periodic
   part TWICE. The teleport guard (card 8dabe812) lives inside it unchanged.
 - **The two scales are NOT interchangeable** (`NetProtocol.RatePxPerMsScale` 1000,
@@ -1984,11 +1984,11 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
   field SATURATES rather than wrapping -- a wrapping cast flips the SIGN, turning a sweep into a
   counter-sweep.
 - **VERIFY IN TWO PLACES, and they answer different questions.**
-  **`eaNetMotion()` / `tools/headless/probes/net_motion.txt`** (30 assertions,
+  **`eaNetMotion()` / `tools/headless/probes/net_motion.txt`** (32 assertions,
   `Compat/Net/NetMotionTest.cs`) asserts the mechanism is WIRED AND EXACT: the predicate with a
   UFO as the control, both descriptors' real byte layouts, a driven puppet growing/sweeping/bobbing
   at the SENT parameters, the ease being a nudge, and the host's velocity decision -- each with the
-  PRE-CARD block beside it as its control. Mutation-tested four ways, each failing a different leg.
+  PRE-CARD block beside it as its control. Mutation-tested five ways, each failing a different leg.
   **`python tools/sim/net_puppet_drive_sim.py --smoothness`** asserts it is WORTH HAVING: anchored
   rows at N=16/32/64/128 (0.0076 / 0.0049 / 0.0025 / 0.0014 against the estimator's flat ~0.013,
   i.e. within 1.6x of the host control at the biggest world) plus a SHOT-NUDGE scenario with

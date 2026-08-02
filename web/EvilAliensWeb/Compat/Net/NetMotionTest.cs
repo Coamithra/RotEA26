@@ -6,7 +6,7 @@ using Microsoft.Xna.Framework;
 namespace EvilAliensWeb.Compat.Net
 {
     // Console self-test for ANCHORED MOTION -- the motion-parameter lane (card c1a38ef9).
-    // Invoke with eaNetMotion() / `eval NetMotion`; menu-runnable and leave-no-trace.
+    // Invoke with eaNetMotion() / `eval NetMotionTest`; menu-runnable and leave-no-trace.
     //
     // WHY IT EXISTS. Every defect this lane can develop is SILENT and looks like the pre-card
     // build, which shipped, works, and is merely rougher:
@@ -32,10 +32,13 @@ namespace EvilAliensWeb.Compat.Net
     // `python tools/sim/net_puppet_drive_sim.py --smoothness`'s job. This suite asserts that the
     // mechanism is wired and exact; that one asserts it is worth having.
     //
-    // Leave-no-trace: every entity is CONSTRUCTED and never added to the bin or to
-    // Game.Components, exactly as NetEntityTest does. Initialize() is called by hand on the two
-    // that need their spawn rolls to have happened -- it is what ComponentBin.Add would have run
-    // synchronously, and running it on a detached instance touches no collection.
+    // Leave-no-trace: almost every entity is CONSTRUCTED and never added to the bin or to
+    // Game.Components, exactly as NetEntityTest does, and Initialize() is called by hand on the
+    // ones that need their spawn rolls to have happened -- it is what ComponentBin.Add would have
+    // run synchronously, and running it on a detached instance touches no collection. The
+    // exceptions are the pooled types: anything reached through New*/CreatePuppet has been taken
+    // OUT of the recycle pool, and section 4's sweep-order leg genuinely Adds one (that is its
+    // whole subject). All of them are bin.Remove()d on the way out.
     internal static class NetMotionTest
     {
         public static string Run()
@@ -146,6 +149,11 @@ namespace EvilAliensWeb.Compat.Net
             check("NetPathOffset tracks the swivel (quarter and three-quarter cycle oppose)",
                 atQuarter * atThreeQuarter < 0f
                     && System.Math.Abs(atQuarter - atThreeQuarter) > 10f);
+
+            // Both came out of the recycle pool via CreatePuppet -> NewFlyingSpider, so they go
+            // back -- section 4 does the same with its beams.
+            bin.Remove(puppet);
+            bin.Remove(unanchored);
         }
 
         // ---- 3. easing ---------------------------------------------------------------------
@@ -267,6 +275,25 @@ namespace EvilAliensWeb.Compat.Net
             host.SetSweepRate(Boss.LazerSweepRadPerMs);
             check("a swept beam reports the sweeper's constant",
                 Near(host.NetAngleRate, Boss.LazerSweepRadPerMs, 0.000001f));
+
+            // THE REAL SPAWN ORDER, and this leg is not optional: Boss.Update does
+            // Setup -> SetSweepRate -> collection.Add, and ComponentBin.Add runs Initialize
+            // SYNCHRONOUSLY. A first cut cleared the sweep rate from Initialize, which zeroed it
+            // for every miniboss beam a frame after it was set -- the angular half of the wire
+            // went permanently dead, and every leg above still passed because they never Added
+            // the beam. So this one drives the ordering rather than the values.
+            Lazer swept = Lazer.NewLazer(bin, game);
+            swept.Setup(new Vector2(400f, 300f), 1.0f, null, 50f);
+            swept.SetSweepRate(Boss.LazerSweepRadPerMs);
+            bin.Add(swept);
+            check("...and SURVIVES the Initialize that ComponentBin.Add runs on it",
+                Near(swept.NetAngleRate, Boss.LazerSweepRadPerMs, 0.000001f));
+            // The recycle half of the same rule: a pooled beam whose next owner does not sweep
+            // must not inherit this one's rate. Setup is where that is cleared.
+            swept.Setup(new Vector2(400f, 300f), 1.0f, null, 50f);
+            check("...and a re-Setup beam does NOT inherit it (the recycle trap)",
+                swept.NetAngleRate == 0f);
+            bin.Remove(swept);
 
             byte[] extra = new byte[64];
             int len = desc.EncodeStateExtra(host, extra, 0);

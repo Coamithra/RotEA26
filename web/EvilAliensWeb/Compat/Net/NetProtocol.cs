@@ -77,6 +77,16 @@ namespace EvilAliensWeb.Compat.Net
         // a sampled cue would double-fire or drop. [kind:1][netId:2][param:1].
         // See NetFxKind.
         public const byte EvFx = 22;
+        // Card f62116b5: "the killing blow landed and this type's death is going to TAKE A
+        // WHILE" -- the host's KilledBy returned without removing the component (BattleSkull's
+        // 2.5s dying state, the surviving MarsBoss's 5s crash). It is emitted at the moment the
+        // deferred state is entered, so the joiner can release its frozen puppet immediately
+        // instead of inferring the death from hp==0 on the entity's next round-robin snapshot
+        // turn (up to ~1.2s in a big world). `[netId:2]`, reliable lane, 6 bytes.
+        //
+        // It is NOT the death's settlement: the eventual EvDeath still carries the killer and
+        // the per-slot awards, exactly as before. This says only "it has begun".
+        public const byte EvDying = 23;
 
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
@@ -704,6 +714,29 @@ namespace EvilAliensWeb.Compat.Net
             {
                 into[i] = ReadF32(b, 15 + 4 * i);
             }
+        }
+
+        // EvDying (host -> client, reliable): [netId:2]. See the EvDying constant for what it
+        // means and why it exists. No killer and no award: this is the death BEGINNING, and the
+        // EvDeath that lands when the animation ends is still what settles who was paid.
+        public const int DyingEventBytes = 4 + 2;
+
+        public static byte[] EncodeDyingEvent(ushort eventSeq, ushort netId)
+        {
+            byte[] b = EventHeader(EvDying, eventSeq, 2);
+            WriteU16(b, 4, netId);
+            return b;
+        }
+
+        public static bool TryDecodeDyingEvent(byte[] b, out ushort netId)
+        {
+            netId = 0;
+            if (b == null || b.Length < DyingEventBytes || b[0] != MsgEvent || b[1] != EvDying)
+            {
+                return false;
+            }
+            netId = ReadU16(b, 4);
+            return true;
         }
 
         // EvClaim (client -> host, generous at-least-once): [netId:2][killerSlot:1] -- "this

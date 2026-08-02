@@ -27,10 +27,15 @@ namespace EvilAliensWeb.Compat.Net
     //    whole death in an Update-driven state machine (2.5s of shrink-and-flicker; a 5s crash to
     //    the ground) -- and a puppet is Enabled=false for life, so its Update never runs. The
     //    EvDeath does not even arrive until that animation ENDS on the host, so the peer saw an
-    //    intact enemy, then one frame of removal, seconds late. The fix reads the hp ALREADY in
-    //    every snapshot entry (0 on a killable == the host has killed it) and RELEASES the puppet
-    //    from the freeze so it finishes dying locally -- which is what card 13aa596c's own note
-    //    asked for ("animation doesn't need to be syncd and can be done locally").
+    //    intact enemy, then one frame of removal, seconds late. The fix RELEASES the puppet from
+    //    the freeze so it finishes dying locally -- which is what card 13aa596c's own note asked
+    //    for ("animation doesn't need to be syncd and can be done locally").
+    //
+    //    The TRIGGER for that release is card f62116b5's, and it is what sections 2d/2e and 6
+    //    are about: the host emits an explicit EvDying the moment its KilledBy returns without
+    //    removing the component, so the release happens on that tick at any world size. The two
+    //    inferences remain as fallbacks and keep their own sections -- hp==0 across TWO snapshot
+    //    turns (4, the loss/join-in-progress path) and the late EvDeath (5).
     //
     // ---- why this shape of test -------------------------------------------------------------
     //
@@ -87,6 +92,10 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdSkull2 = 61003;
         private const ushort IdBullet = 61004;
         private const ushort IdSkull3 = 61005;
+        private const ushort IdSkull4 = 61007;
+        private const ushort IdSkull5 = 61008;
+        // Never built, never registered: the "a beat for an id we do not hold" negative.
+        private const ushort IdUnknown = 61009;
 
         public static string Run()
         {
@@ -132,6 +141,7 @@ namespace EvilAliensWeb.Compat.Net
                 Section3ClientUnattributed(sb, Check, bin, game, score, planted);
                 Section4DeferredFromSnapshot(sb, Check, bin, game, score, planted);
                 Section5DeferredFromEvDeath(sb, Check, bin, game, score, planted);
+                Section6DeferredFromEvDying(sb, Check, bin, game, score, planted);
             }
             catch (Exception ex)
             {
@@ -139,7 +149,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             finally
             {
-                sb.Append(" 6. teardown\n");
+                sb.Append(" 7. teardown\n");
                 Teardown(sb, Check, bin, game, score, scoreBefore, planted);
                 NetHost.Current = hostBefore;
             }
@@ -203,17 +213,26 @@ namespace EvilAliensWeb.Compat.Net
         private static void Section2HostEmission(StringBuilder sb, Action<string, bool> Check,
             ComponentBin bin, Game game, List<GameComponent> planted)
         {
-            sb.Append(" 2. HOST -- a self-destruct goes out as KillerSelf, a fly-off does not\n");
+            sb.Append(" 2. HOST -- a self-destruct goes out as KillerSelf, a fly-off does not,"
+                + " a deferred death announces itself\n");
             NetWire wire = new NetWire(2);
             InMemoryTransport ours = wire[0];
             InMemoryTransport peer = wire[1];
             List<byte[]> deaths = new List<byte[]>();
+            List<byte[]> dyings = new List<byte[]>();
             void Sniff(byte[] payload, bool reliable, string from)
             {
-                if (payload.Length >= NetProtocol.DeathEventBytes
-                    && payload[0] == NetProtocol.MsgEvent && payload[1] == NetProtocol.EvDeath)
+                if (payload.Length < 2 || payload[0] != NetProtocol.MsgEvent)
+                {
+                    return;
+                }
+                if (payload[1] == NetProtocol.EvDeath && payload.Length >= NetProtocol.DeathEventBytes)
                 {
                     deaths.Add(payload);
+                }
+                else if (payload[1] == NetProtocol.EvDying)
+                {
+                    dyings.Add(payload);
                 }
             }
 
@@ -282,6 +301,53 @@ namespace EvilAliensWeb.Compat.Net
                 Check("a plain removal with no self-destruct note is KillerNone even on screen ("
                     + deaths.Count + " EvDeath)",
                     deaths.Count == 1 && deaths[0][6] == NetProtocol.KillerNone);
+
+                // 2d. THE TRIGGER-LATENCY LEG (card f62116b5). A deferred death must announce
+                // itself AT KilledBy TIME. Everything before this card had to wait for either the
+                // entity's round-robin snapshot turn (up to ~1.2 s in a big world) or the EvDeath
+                // at the END of the 2.5 s animation -- and the assertion that pins the difference
+                // is the SECOND one: the beat is on the wire while NO EvDeath is, because on the
+                // host the skull has not been removed and will not be for 2.5 s.
+                deaths.Clear();
+                dyings.Clear();
+                BattleSkull skull = BattleSkull.NewBattleSkull(bin, game);
+                skull.Setup(Nowhere); // configure-then-Add
+                bin.Add((GameComponent)(object)skull);
+                planted.Add((GameComponent)(object)skull);
+                skull.Position = Nowhere; // Initialize ran inside Add and may have moved it
+                bool gotId = NetIdRegistry.TryGetByComp((GameComponent)(object)skull,
+                    out NetIdRegistry.Entry skullEntry);
+                ushort skullId = gotId ? skullEntry.Id : (ushort)0;
+                Check("PRECONDITION the planted BattleSkull got a netId", gotId);
+                ((INetKillable)skull).NetKill(null, isComboGenerator: false);
+                wire.Pump();
+                Check("a DEFERRED death broadcast exactly one EvDying (" + dyings.Count + ")",
+                    dyings.Count == 1);
+                Check("...addressed to that entity's netId",
+                    dyings.Count == 1
+                    && NetProtocol.TryDecodeDyingEvent(dyings[0], out ushort dyingId)
+                    && dyingId == skullId && skullId != 0);
+                // THE LATENCY CLAIM ITSELF: the old trigger had nothing to work with at this
+                // moment -- the entity is still alive on the host and its EvDeath is 2.5 s away.
+                Check("...and NO EvDeath yet -- the animation has 2.5s to run (" + deaths.Count + ")",
+                    deaths.Count == 0);
+                Check("...and the host's own copy is still in the world, dying",
+                    InWorld(game, (GameComponent)(object)skull) && !skull.IsDead);
+
+                // 2e. NEGATIVE -- an ORDINARY kill announces nothing. Its KilledBy ends in Die(),
+                // so there is no frozen puppet to release and the EvDeath a flush later says
+                // everything. Without this leg a hook that fired on every kill would pass 2d.
+                deaths.Clear();
+                dyings.Clear();
+                StarMine shot = PlantMine(bin, game, planted, Nowhere);
+                ((INetKillable)shot).NetKill(null, isComboGenerator: false);
+                wire.Pump();
+                Check("NEGATIVE an ordinary (instant) kill broadcasts NO EvDying ("
+                    + dyings.Count + ")", dyings.Count == 0);
+                bin.Update();
+                wire.Pump();
+                Check("...and still settles as an ordinary EvDeath at the removal seam ("
+                    + deaths.Count + ")", deaths.Count == 1);
             }
             finally
             {
@@ -342,7 +408,7 @@ namespace EvilAliensWeb.Compat.Net
         private static void Section4DeferredFromSnapshot(StringBuilder sb, Action<string, bool> Check,
             ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
         {
-            sb.Append(" 4. CLIENT -- hp==0 in a snapshot releases the puppet to finish dying\n");
+            sb.Append(" 4. CLIENT -- hp==0 in TWO snapshot turns releases the puppet (the fallback)\n");
             byte skullType = TypeIdxOf(new BattleSkull(game));
 
             int boom = CountType<Explosion>(game);
@@ -358,6 +424,20 @@ namespace EvilAliensWeb.Compat.Net
 
             // A snapshot whose hp reads 0: the host has landed the killing blow and its copy is
             // in its 2.5s dying state.
+            //
+            // THE FIRST TURN MUST NOT FIRE (card f62116b5). The host's ComponentBin defers
+            // removal, so an ORDINARY kill is still in the registry for the one tick between the
+            // killing blow and the flush -- and a snapshot turn landing in that tick reads hp==0
+            // for an entity whose attributed EvDeath is already on its way. That one-tick-early
+            // residual was accepted while this was the only fast trigger; EvDying owns the live
+            // case now, so the fallback can afford to want a second opinion.
+            Snapshot(IdSkull, skullType, hp: 0);
+            Check("NEGATIVE ONE hp==0 turn changes nothing -- no death, no release (+"
+                + (CountType<Explosion>(game) - boom) + " explosions, enabled=" + skull.Enabled
+                + ", live " + liveBefore + "->" + NetPuppets.LiveCount + ")",
+                CountType<Explosion>(game) == boom && !skull.Enabled
+                && NetPuppets.LiveCount == liveBefore);
+
             Snapshot(IdSkull, skullType, hp: 0);
 
             Check("the death opened with its own FX (+" + (CountType<Explosion>(game) - boom)
@@ -412,6 +492,16 @@ namespace EvilAliensWeb.Compat.Net
                     CountType<Explosion>(game) == boom);
                 Check("...and leaves the puppet frozen and registered",
                     !healthy.Enabled && NetPuppets.LiveCount == liveBefore);
+                // The two turns must be CONSECUTIVE, which is the only thing that makes them
+                // stronger than one: a stale zero followed by a healthy turn is a puppet that is
+                // demonstrably still alive, and must not be able to team up with a later zero.
+                Snapshot(IdSkull2, skullType, hp: 0);
+                Snapshot(IdSkull2, skullType, hp: 25);
+                Snapshot(IdSkull2, skullType, hp: 0);
+                Check("NEGATIVE a zero, a healthy turn, then a zero does NOT release"
+                    + " (the turns must be consecutive)",
+                    CountType<Explosion>(game) == boom && !healthy.Enabled
+                    && NetPuppets.LiveCount == liveBefore);
             }
 
             // NEGATIVE 2: hp is 0 on the wire for every NON-killable too (NetBaseState.Hp's own
@@ -424,6 +514,9 @@ namespace EvilAliensWeb.Compat.Net
             if (bullet != null)
             {
                 liveBefore = NetPuppets.LiveCount;
+                // Twice, so it is the NetKillable discriminant being asserted and not the latch
+                // -- a bullet's hp is 0 on EVERY turn it ever gets.
+                Snapshot(IdBullet, bulletType, hp: 0);
                 Snapshot(IdBullet, bulletType, hp: 0);
                 Check("NEGATIVE hp==0 on a NON-killable is 'unknown', not a death (+"
                     + (CountType<Explosion>(game) - boom) + " explosions)",
@@ -466,6 +559,79 @@ namespace EvilAliensWeb.Compat.Net
             Check("...and the killer slot WAS paid, verbatim off the wire (+"
                 + Round(score.PointScore(PeerSlot) - before[PeerSlot]) + ")",
                 Math.Abs(score.PointScore(PeerSlot) - before[PeerSlot] - 400f) < 0.01f);
+        }
+
+        // ---- 6. the EvDying beat releases on the EVENT tick ----------------------------------
+        //
+        // The card's subject (f62116b5): sections 4 and 5 are both INFERENCES that cost time --
+        // the snapshot needs the entity's round-robin turn (60 ms at best, ~1.2 s in a big world)
+        // and the EvDeath does not arrive until the host's whole 2.5-5 s animation has finished.
+        // The host now says so outright at KilledBy time, and the release happens on the tick the
+        // beat lands.
+        //
+        // THE LATENCY CLAIM IS THE ABSENCE OF A SNAPSHOT, and that is what this section pins: no
+        // snapshot entry is delivered for this puppet at all, ever. Under the pre-card code the
+        // puppet would simply still be standing there, frozen and intact.
+        private static void Section6DeferredFromEvDying(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
+        {
+            sb.Append(" 6. CLIENT -- an EvDying beat releases the puppet on the EVENT tick\n");
+            byte skullType = TypeIdxOf(new BattleSkull(game));
+            int boom = CountType<Explosion>(game);
+            float[] before = Scores(score);
+            BattleSkull skull = (BattleSkull)BuildPuppet<BattleSkull>(game, IdSkull4, skullType, planted);
+            Check("PRECONDITION a BattleSkull puppet was built", skull != null);
+            if (skull == null)
+            {
+                return;
+            }
+            Check("PRECONDITION the puppet starts FROZEN, as every puppet does", !skull.Enabled);
+            int liveBefore = NetPuppets.LiveCount;
+
+            NetPuppets.OnDeathBegan(IdSkull4);
+
+            Check("the death opened with its own FX (+" + (CountType<Explosion>(game) - boom)
+                + " explosions), with NO snapshot delivered", CountType<Explosion>(game) > boom);
+            Check("the puppet is STILL IN THE WORLD -- its animation has 2.5s to run",
+                InWorld(game, (GameComponent)(object)skull));
+            Check("...and is UN-FROZEN, which is what lets that animation run at all",
+                skull.Enabled);
+            Check("...and can no longer collide with the local player",
+                !((AlienDrawableGameComponent)(object)skull).Collides);
+            Check("...and left the puppet registry (live " + liveBefore + " -> "
+                + NetPuppets.LiveCount + ")", NetPuppets.LiveCount == liveBefore - 1);
+            Check("nothing was credited -- the host's EvDeath is still the authority",
+                SameScores(score, before));
+
+            // The by-hand MarkRemoved, as in section 4: without it the host's next turn for this
+            // id is an unknown id and the self-heal rebuilds a fresh intact collidable enemy on
+            // top of the one that is visibly dying.
+            int worldBefore = CountType<BattleSkull>(game);
+            SnapshotKind(IdSkull4, skullType, hp: 32, out SnapUnknownKind kind);
+            Check("a later snapshot for the released id reports LeftDead, not Rebuilt (was "
+                + kind + ")", kind == SnapUnknownKind.LeftDead);
+            Check("...and builds no replacement", CountType<BattleSkull>(game) == worldBefore);
+
+            // NEGATIVE: a beat for an id we do not hold is a no-op, not a throw and not a stray
+            // explosion. A JIP peer, or one that already released this puppet, gets these.
+            boom = CountType<Explosion>(game);
+            NetPuppets.OnDeathBegan(IdUnknown);
+            NetPuppets.OnDeathBegan(IdSkull4); // already released -- the id is gone from byId
+            Check("NEGATIVE an EvDying for an unknown or already-released id does nothing (+"
+                + (CountType<Explosion>(game) - boom) + " explosions)",
+                CountType<Explosion>(game) == boom);
+
+            // NEGATIVE: the beat must not touch a puppet it was not addressed to. Without this a
+            // handler that released everything would pass every positive above.
+            BattleSkull bystander = (BattleSkull)BuildPuppet<BattleSkull>(game, IdSkull5, skullType, planted);
+            Check("PRECONDITION a bystander BattleSkull puppet was built", bystander != null);
+            if (bystander != null)
+            {
+                liveBefore = NetPuppets.LiveCount;
+                NetPuppets.OnDeathBegan(IdSkull4);
+                Check("NEGATIVE a bystander puppet stays frozen and registered",
+                    !bystander.Enabled && NetPuppets.LiveCount == liveBefore);
+            }
         }
 
         // ---- teardown ------------------------------------------------------------------------

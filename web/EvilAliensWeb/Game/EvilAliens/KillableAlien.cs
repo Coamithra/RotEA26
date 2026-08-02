@@ -175,6 +175,24 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 			EvilAliensWeb.Compat.Net.NetSession.NoteKill(this, other);
 			KilledBy(other, isComboGenerator);
 			dead = true;
+			NoteDeathBegan();
+		}
+	}
+
+	// Online co-op (card f62116b5): a KilledBy that returned with the component STILL IN THE
+	// WORLD deferred its own removal into a multi-second dying animation -- BattleSkull's 2.5s
+	// shrink-and-flicker, the surviving MarsBoss's 5s crash, the BrainBoss/FakeBoss asplode.
+	// A puppet is frozen for life, so the other peer has to be told NOW to let its copy go and
+	// finish dying locally; the host's own EvDeath does not arrive until that animation ENDS.
+	//
+	// Every other type ends its KilledBy in Die(), so IsDead is already true here and nothing is
+	// sent. One branch offline, and this is the only place either kill entry point converges --
+	// so a new deferred-death type costs nothing.
+	private void NoteDeathBegan()
+	{
+		if (!IsDead)
+		{
+			EvilAliensWeb.Compat.Net.NetSession.OnDeathBegan(this);
 		}
 	}
 
@@ -263,6 +281,10 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		EvilAliensWeb.Compat.Juice.KillPunch(isboss);
 		KilledBy(killer, isComboGenerator);
 		dead = true;
+		// The host reaches this from HandleClaim when the CLIENT landed the killing blow, so the
+		// deferred-death beat has to go out from here too -- see NoteDeathBegan. On a client this
+		// is a no-op (OnDeathBegan is host-gated).
+		NoteDeathBegan();
 	}
 
 	// Replay a death NOBODY landed the killing blow on (cards 4e406eba / 303bfb5b / 13aa596c):

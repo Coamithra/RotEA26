@@ -559,9 +559,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     - **It is SESSION-FREE on purpose** (no `NetLobby.Cancel`, no `NetGameBrowser.Stop`): a caller
       that returns to the menus with a session STILL UP must be able to re-enter deliberately.
     - **That entry point is `MenuScene.EnterNetLobby()`, and it is THE way to reach the net-lobby
-      menu state programmatically.** **It ships UNCALLED** -- card 3b6c12e7's level-end -> lobby
-      flow lands its first caller, and the seam is here so that card comes through a defined door
-      instead of inventing one against private state. It sets `netMode`, clears `netNoticeUp`,
+      menu state programmatically.** Its one caller is card 3b6c12e7's level-end -> lobby flow
+      (the seam landed first, so that card came through a defined door instead of inventing one
+      against private state). It sets `netMode`, clears `netNoticeUp`,
       **removes `mainMenu` itself** (`Initialize`
       re-adds it unconditionally and neither `netPickMenu` nor `NetStatusMenu` is modal, so a live
       main menu underneath would eat every keypress -- the 72143c11 lesson; a caller must NOT be

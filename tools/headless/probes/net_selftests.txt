@@ -111,7 +111,7 @@ expect \[nethost\] 33 passed, 0 failed
 # the wrong member of the same type (two floats swap silently), and a subtype that stops answering
 # the NetKillable / NetPickup discriminant, which turns every remote powerup pickup into an
 # explosion. Not a logic_probe case set, unlike eaNetHost: constructing an entity needs a Game.
-expect \[netentity\] PASS \(43 passed, 0 failed\)
+expect \[netentity\] PASS \(47 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)

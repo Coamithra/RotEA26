@@ -81,6 +81,7 @@ namespace EvilAliensWeb.Compat.Net
         float NetPointValue { get; }
         float NetSpinPerMs { get; }
         bool NetFrameLocal { get; }
+        bool NetScaleLocal { get; }
         bool NetCosmeticOnly { get; }
 
         // Anchored motion (card c1a38ef9). NetPathAnchored makes the HOST send this entity's

@@ -53,6 +53,11 @@ inputs; the other peer's ship is an interpolated puppet.
 - **Diagnostics + rigs:** fake lag/loss/jitter (`40334a8f`), the snapshot unknown-id split and
   `snapTurn` (`48ab9b2f`), decorative swarms as one on/off beat (`9a3175d0`, v10), the
   standing-purge-filter races (`74403f83`), the signaling server deployed (`8c3c18da`).
+- **Level-3 walls stop diverging** (`4392bd30` / `80749dc4`): a wall DERIVES its scale from the
+  grid variation the wire already carries, so the base state's u16-at-1/256 copy (4.9% out on the
+  12-wide grid, 402px of divergence down it) stops being applied; the collision grid takes its tile
+  size from the wall, closing the joiner-local hit-before-you-touch-it gap; and the scroll is
+  anchored. No protocol change -- see the LEVEL-3 WALLS section.
 - **Puppet smoothness** (`c92f3817` / `0dfc4495` / `d3add86f` / `8dabe812` / `0108d1fc`), and its
   wire-first successor: the host now MARKS a reposition instead of the observed-velocity estimator
   guessing at one (`e79bb994`, v13) -- see the teleport-marker bullet under "Puppet SMOOTHNESS".
@@ -242,7 +247,8 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     one level deeper**: `killable.NetKill` runs the real per-type `KilledBy` (explosions, cues,
     `AwardScoreToAll`), and `Boss.KilledBy` is scene-free -- but check the specific types a new
     scenario kills rather than assuming it of all of them.
-  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 17 members
+  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 18 members
+    (17 as shipped; `NetScaleLocal` joined them for the wall cards -- see LEVEL-3 WALLS)
     (the card's census measured 16 distinct ones over 42 call sites; `GetType()` is one of them
     and comes free from `object`, and the two discriminants below replace type tests rather than
     calls), implemented DIRECTLY on `AlienDrawableGameComponent` -- never
@@ -2138,7 +2144,8 @@ reads a contented 0 throughout. The instrument is
     `SpiderBoss` / `FakeBoss` / `BattleSkull` animate an `AnimatedSprite` through their own
     replicated `animFrame` state extra, and `Wall` / `Lazer` / `StationaryBoss` / `BrainBoss` /
     `Powerup` are single-frame.
-  - Covered by `eaNetEntity()` (43 checks now, up from 38) -- the base answer, an override, and the
+  - Covered by `eaNetEntity()` (47 checks now, up from 43 -- the four added are `NetScaleLocal`'s,
+    whose polarity is the OPPOSITE inversion; see LEVEL-3 WALLS) -- the base answer, an override, and the
     two real opt-outs with a UFO beside them as the control, since a predicate hard-wired to
     `false` would otherwise pass.
 - **The correction window is `max(150ms, 2 x SnapshotTurnMs)`, not a constant 150ms.** The window
@@ -2405,6 +2412,91 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
 - **`eaNetMotion` is deliberately ABSENT from `net_selftests.txt`** -- it has its own probe, which
   carries this card's mutation matrix, so listing it in both would run it twice for nothing. The
   `eaNetDeathFx` precedent.
+
+## LEVEL-3 WALLS -- derived scale, and the collision/draw coincidence (cards 4392bd30 / 80749dc4)
+
+Two reports -- "lvl3 walls go out of sync" and "walls stutter, and I hit them before I touch
+them" -- with ONE root cause, and it is not in the wall replication design at all. **The design
+was already what the second card proposed**: a `Walls` GameEvent spawns ONE `Wall` entity per
+section, `WallDescriptor` sends the grid VARIATION as a spawn extra, `CreatePuppet` rebuilds the
+identical grid locally, and the scroll is dead-reckoned from the base velocity. Nothing was ever
+sent per block or per frame.
+
+- **THE ROOT CAUSE IS `NetBaseState.Scale`'s PRECISION, and the lesson generalises past walls.**
+  It rides the wire as a u16 at 1/256 and the cast TRUNCATES, so the error is up to 1/256 in
+  ABSOLUTE terms **whatever the value** -- ~0.2% for a sprite drawn near scale 1 (invisible, which
+  is why it went unnoticed for the whole replicable set) and catastrophic for a type whose scale is
+  SMALL. `Wall.Setup` computes `800 / (LogicalWidth * gridWidth)` off the 1248px `756-v1` sheet:
+
+  | variation | grid width | true scale | wire scale | error |
+  |---|---|---|---|---|
+  | 0 (Level 3) | 12 | 0.053419 | 13/256 = 0.050781 | **4.94%** |
+  | 1 / 2 | 7 | 0.091575 | 23/256 = 0.089844 | 1.89% |
+  | 3 | 9 | 0.071225 | 18/256 = 0.070312 | 1.28% |
+  | 4 | 3 | 0.213675 | 54/256 = 0.210938 | 1.28% |
+
+  `Wall.Draw` sizes every block as `LogicalWidth/Height * scale`, so the joiner drew **63.38px rows
+  against the host's 66.67px** -- and variation 0 is **122 rows tall**, so the two peers were
+  **402px apart** by the bottom of the section. That is the "out of sync" screenshot: not a lag, a
+  vertically COMPRESSED grid showing different rows.
+- **`AlienDrawableGameComponent.NetScaleLocal` (default FALSE) is the fix, the `NetFrameLocal`
+  idiom one field over.** A true answer means the type DERIVES its scale from something already
+  replicated, so `NetPuppets` keeps what its own `CreatePuppet`/`Setup` computed and never applies
+  the wire's copy -- for `Wall` that is the grid variation, already in the spawn extras, so the
+  client computes the byte-for-byte number the host did. **Only `Wall` overrides it.** A type whose
+  scale is ROLLED, tweened or driven by host-side state must keep taking the replicated value, or
+  the two peers simply draw it at different sizes; a UFO is the standing control.
+  - **It is skipped in THREE places, and the third is the subtle one**: `ApplySnapshotState`'s
+    per-turn write, `OnSpawn`'s initial `TargetScale`, and the SELF-HEAL REBUILD's pose carry-over.
+    A self-healed puppet is built from DEFAULT spawn extras (card de4d5d65), so its derived scale is
+    the wrong grid's -- carrying it onto the `EvSpawn` rebuild would defeat the whole thing.
+- **THE SECOND SYMPTOM IS A JOINER-LOCAL COLLISION/DRAW MISMATCH -- NOT host-side authority.**
+  Worth stating flatly because the card asked and the wrong answer is the intuitive one:
+  `PlayerShip.CollidesWith` refuses damage to a `ControlDevice.Remote` puppet outright ("you never
+  die to something you dodged on your screen"), and a joiner's bullets are never replicated. Both
+  collide against the joiner's OWN wall puppet, on the joiner's own screen. Interpolation lag is
+  real but SYMMETRIC -- the joiner's whole world is one-way-latency behind, its own ship included --
+  so it cannot produce an asymmetry between hitting and seeing.
+  What could, and did: **`CollisionLevelMap` sized its tile as the literal `800/width`**, which
+  equals the drawn block size ONLY because `Setup` derives `scale` from that same expression -- an
+  agreement by coincidence of two formulas in different files. Once the wire changed `scale`, the
+  collision rows reached **3.29px further DOWN the screen per row** than the towers did: ~33px by
+  row 10, ~100px by row 30, worsening deeper into a section, which is exactly "I hit walls way
+  before I actually do" and "my bullets disappear before hitting". The grid now takes its tile size
+  FROM THE WALL (re-pushed beside the offset every `CollisionType` read), so the two cannot drift
+  again. **Offline that is bit-for-bit neutral** -- `LogicalWidth*scale == 800/width` in float32 at
+  every shipped width, asserted rather than assumed.
+- **`Wall.NetPathAnchored => true` is the third change and belongs to the STUTTER half.** A wall
+  moves by `Speed`/`Direction` and nothing else (`Setup` and `Update` both assign them; `ADC.Update`
+  moves by exactly those), so its declared velocity is honest and it meets the anchored-motion rule.
+  The host now sends the real scroll speed instead of differencing two positions across a snapshot
+  turn on the real clock -- which carried the host's frame pacing, and made a level `speedup` arrive
+  a whole turn late. A speed change is now a step the velocity ease absorbs, which is the
+  "resync on a scroll-speed change" the card asked for, with no new wire bytes.
+- **LATENCY FAST-FORWARD WAS PROPOSED BY THE CARD AND DECLINED (user ruling via the overseer).**
+  The joiner's ENTIRE world -- every enemy, every wall -- is uniformly one-way-latency behind, and
+  their own ship interacts with that world consistently. Pushing only the walls forward would make
+  them inconsistent with the enemies beside them and put collidable geometry AHEAD of where the
+  host has it. Two screens not matching side by side is not a gameplay defect; the felt problems
+  were the three above.
+- **NO PROTOCOL CHANGE and no version bump.** Every change here is a host-side decision about what
+  goes in existing base-state fields, or a client-side decision about what to do with them.
+- **STILL OPEN, filed as its own card:** `MsgWorldSnapshot` carries no sequence and no timestamp, so
+  a REORDERED stream packet still drags any puppet backwards (~12px at the reported rig's
+  `netjitter=40` and 0.31 px/ms) -- the same defect `NetFrameLocal` fixed for animation frames, with
+  no equivalent guard for position. Filed together with widening `NetBaseState.Scale`, since both
+  are changes to the same packet and share this suite's rig.
+- **Verify with `eaNetWalls()` / `eval NetWalls`** (`Compat/Net/NetWallTest.cs`, 24 assertions;
+  `tools/headless/probes/net_walls.txt`). MENU-only and leave-no-trace. **A screenshot cannot see
+  any of this**: on EACH screen a mis-scaled wall looks like a perfectly ordinary wall, which is why
+  the bug was reported from a two-window capture and reproducible from neither half of it. Section 1
+  is the NEGATIVE CONTROL for the whole suite -- it drives the real `WriteBaseState`/`ReadBaseState`
+  and PRINTS the table above, because everything after it asserts the puppet IGNORES the wire's
+  scale, which means nothing unless the wire's scale is shown to be wrong. Mutation-tested three
+  ways, each failing DISJOINT legs; note what the scale mutation does NOT fail, and why, in the
+  probe's header -- with the scale fixed, `800/width` and the drawn block AGREE again, so the
+  invariant leg cannot tell a derived tile size from the old hard-coded one and the guard leg forces
+  a scale on by hand to reproduce the pre-card condition.
 
 ## Public game browser & join-in-progress
 

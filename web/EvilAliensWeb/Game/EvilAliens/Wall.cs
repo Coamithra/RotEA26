@@ -223,13 +223,26 @@ internal class Wall : AlienDrawableGameComponent
 	{
 		get
 		{
+			// The tile size is the DRAWN block size, not a second copy of Setup's formula -- see
+			// CollisionLevelMap.tileSize for what it cost when the two were allowed to disagree.
+			// Re-pushed beside the offset every time, so nothing can rescale the wall behind the
+			// grid's back.
+			//
+			// ONE number for BOTH axes, because CollisionLevelMap has always divided X and Y by
+			// the same tile size -- so this inherits an assumption rather than adding one: the
+			// sheet must be SQUARE, or the collision rows stop lining up with the drawn ones
+			// (Draw sizes rows as LogicalHeight * scale). 756-v1 is 1248x1248 and it is the only
+			// wall sheet; NetWallTest asserts the squareness so a non-square replacement fails
+			// loudly instead of silently mis-aligning every row.
+			float blockSize = (float)texture.LogicalWidth() * scale;
 			if (collisionMap == null)
 			{
-				collisionMap = new CollisionLevelMap(base.Position, blocks);
+				collisionMap = new CollisionLevelMap(base.Position, blocks, blockSize);
 			}
 			else
 			{
 				collisionMap.SetOffset(base.Position);
+				collisionMap.SetTileSize(blockSize);
 			}
 			return collisionMap;
 		}
@@ -1895,4 +1908,26 @@ internal class Wall : AlienDrawableGameComponent
 	// frozen Draw + CollisionLevelMap need follows from base.Position (the driver-scrolled
 	// offset) plus the reconstructed grid.
 	internal int NetVariation => netVariation;
+
+	// The client DERIVES this wall's scale in Setup, from the grid variation the spawn extras
+	// already carry, so it computes the byte-for-byte number the host computed -- and the wire's
+	// copy is strictly worse (cards 4392bd30 / 80749dc4). NetBaseState.Scale is a u16 at 1/256
+	// and truncates, so the absolute error is up to 1/256 whatever the value: this scale is
+	// 800 / (1248 * width), i.e. 0.0534 for the 12-wide Level-3 grid, which quantizes to 13/256 =
+	// 0.0508. Draw sizes every block as LogicalWidth/Height * scale, so a 4.9% error drew 63.4px
+	// rows against the host's 66.7px -- ~400px of divergence by the bottom of that 122-row grid,
+	// i.e. the two peers looking at different parts of the same wall. It also put the drawn grid
+	// out of step with CollisionLevelMap, whose tile size is exact whatever `scale` says: the
+	// collision rows reached further DOWN than the towers, which is why the joiner hit walls it
+	// had not touched and its bullets vanished short of them.
+	internal override bool NetScaleLocal => true;
+
+	// A wall's declared velocity is HONEST -- Setup and Update both assign Speed/Direction
+	// (straight down at |oracle.BackgroundSpeed|) and base.Update moves it by exactly those, so it
+	// meets NetPathAnchored's rule. The host therefore sends the real scroll speed instead of a
+	// finite difference measured across a snapshot turn on the real clock, and the client
+	// dead-reckons the whole section from it -- no periodic component to alias, and a level's
+	// speedup arrives as one step the velocity ease absorbs rather than a turn of stale motion.
+	// No path offset: the motion is purely linear.
+	internal override bool NetPathAnchored => true;
 }

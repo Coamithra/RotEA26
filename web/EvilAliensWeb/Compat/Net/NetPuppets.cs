@@ -104,6 +104,12 @@ namespace EvilAliensWeb.Compat.Net
             // Cached once at spawn: NetPathAnchored is a per-TYPE constant, and this is read
             // per puppet per tick.
             public bool PathAnchored;
+            // Cached the same way and for the same reason: NetScaleLocal is a per-TYPE constant.
+            // True means the puppet DERIVES its scale (Wall, from the replicated grid variation),
+            // so TargetScale is never fed from the wire -- the base state's u16-at-1/256 Scale is
+            // up to 1/256 out in absolute terms, which is ~5% of a Level-3 wall's 0.053 (cards
+            // 4392bd30 / 80749dc4). See AlienDrawableGameComponent.NetScaleLocal.
+            public bool ScaleLocal;
             // The velocity the host last reported, which for an anchored puppet is a TARGET
             // rather than an assignment -- Vel eases toward it over VelEaseMs. That is what
             // turns a shot-induced heading change into a nudge instead of a step; see
@@ -348,10 +354,13 @@ namespace EvilAliensWeb.Compat.Net
                 TypeIdx = typeIdx,
                 Vel = state.Vel,
                 VelTarget = state.Vel,
-                TargetScale = state.Scale > 0f ? state.Scale : entity.NetScale,
+                // A scale-local type keeps whatever its own CreatePuppet/Setup derived -- the
+                // wire's copy is a lossy fixed-point encoding of that same number.
+                TargetScale = (!entity.NetScaleLocal && state.Scale > 0f) ? state.Scale : entity.NetScale,
                 SelfHealed = selfHealed,
                 // Cached rather than asked per tick: NetPathAnchored is a per-type constant.
                 PathAnchored = entity.NetPathAnchored,
+                ScaleLocal = entity.NetScaleLocal,
             };
             ApplySnapshotState(info, state, null, null, 0, 0, isSpawn: true);
             if (stale != null)
@@ -367,7 +376,13 @@ namespace EvilAliensWeb.Compat.Net
                 info.Correction = stale.Correction;
                 info.CorrectionMs = stale.CorrectionMs;
                 info.CorrectionMsLeft = stale.CorrectionMsLeft;
-                info.TargetScale = stale.TargetScale;
+                // NOT the scale, for a scale-local type: the stale puppet was built from DEFAULT
+                // spawn extras (that is what a self-heal is), so a Wall rebuilt on the host's real
+                // grid variation would inherit the wrong grid's derived scale.
+                if (!info.ScaleLocal)
+                {
+                    info.TargetScale = stale.TargetScale;
+                }
                 info.HasSnapshot = stale.HasSnapshot;
                 // The in-flight velocity ease travels with the pose, for the same reason: the
                 // replacement is a NEW entity object, so its offset baseline is re-seeded from
@@ -647,7 +662,15 @@ namespace EvilAliensWeb.Compat.Net
                 info.VelTarget = state.Vel;
                 info.VelEaseMsLeft = 0f;
             }
-            info.TargetScale = state.Scale;
+            // A SCALE-LOCAL type never takes the wire's copy (cards 4392bd30 / 80749dc4). The base
+            // state carries Scale as a u16 at 1/256 and the cast truncates, so the absolute error
+            // is up to 1/256 whatever the value -- ~5% of a Level-3 Wall's 0.053, which sizes every
+            // block it draws while its CollisionLevelMap keeps the exact tile size. The puppet's
+            // own Setup derived the number the host derived, from the replicated grid variation.
+            if (!info.ScaleLocal)
+            {
+                info.TargetScale = state.Scale;
+            }
             info.HasSnapshot = true;
             if (comp.NetSpinPerMs == 0f)
             {

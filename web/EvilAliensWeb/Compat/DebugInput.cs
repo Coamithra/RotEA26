@@ -628,6 +628,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetMotionTest.Run();
 		}
 
+		// JS bridge for the Level-3 wall's replication (eaNetWalls, cards 4392bd30 / 80749dc4):
+		// the wire's lossy scale, the derived-scale opt-out that refuses it, the drawn-block ==
+		// collision-tile invariant that the lossy scale broke, and the anchored scroll speed.
+		// Every one of those is invisible in a frame taken on either peer alone -- the wall looks
+		// like an ordinary wall on both screens, it is only the two together that disagree.
+		[JSInvokable("debugNetWallTest")]
+		public static string NetWalls()
+		{
+			return EvilAliensWeb.Compat.Net.NetWallTest.Run();
+		}
+
 		// Park a session-ending notice at the menus (card 72143c11), with no peer and no
 		// session -- the only offline way to reach MenuScene.NetUpdate's notice path, since
 		// every production writer of MenuNotice is inside NetSession.Stop(). MenuScene polls

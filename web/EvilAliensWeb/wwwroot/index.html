@@ -772,6 +772,16 @@
             catch (e) { console.warn('[debug] eaNetMotion failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the Level-3 wall's replication (cards 4392bd30 / 80749dc4). The wire's lossy
+        // u16-at-1/256 scale, the derived-scale opt-out that refuses it, the drawn-block ==
+        // collision-tile invariant that lossy scale broke (why the joiner hit walls before
+        // touching them), and the anchored scroll speed. MENU-only, leave-no-trace. A screenshot
+        // cannot see any of it -- the wall looks ordinary on each screen taken alone.
+        window.eaNetWalls = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetWallTest')); }
+            catch (e) { console.warn('[debug] eaNetWalls failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
         // puppets in the world through the real self-heal path and times NetPuppets.Drive,
         // reporting ABSOLUTE us/call, ns/puppet and the share of the 16.7ms frame budget.

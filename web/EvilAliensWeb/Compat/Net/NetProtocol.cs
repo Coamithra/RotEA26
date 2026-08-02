@@ -6,8 +6,8 @@ namespace EvilAliensWeb.Compat.Net
 {
     // The 3-layer wire protocol (plans/stage11-online-coop.md), little-endian binary:
     //   1. Ship stream (unreliable lane, ~30 Hz): MsgShipState -- each peer's own ship
-    //      STATE (pos, velocity, last aim, fire/alive flags, fire-rate loadout). The wire
-    //      carries state, never inputs.
+    //      STATE (pos, velocity, last aim, alive flag, cumulative shot count, fire-rate
+    //      loadout). The wire carries state, never inputs.
     //   2. World snapshot (host -> clients, unreliable lane, ~16.7 Hz): MsgWorldSnapshot --
     //      round-robin length-prefixed entries of the generic base block + per-type state
     //      extras (card 11.2, host world authority).
@@ -77,20 +77,33 @@ namespace EvilAliensWeb.Compat.Net
         // a sampled cue would double-fire or drop. [kind:1][netId:2][param:1].
         // See NetFxKind.
         public const byte EvFx = 22;
+        // Card f62116b5: "the killing blow landed and this type's death is going to TAKE A
+        // WHILE" -- the host's KilledBy returned without removing the component (BattleSkull's
+        // 2.5s dying state, the surviving MarsBoss's 5s crash). It is emitted at the moment the
+        // deferred state is entered, so the joiner can release its frozen puppet immediately
+        // instead of inferring the death from hp==0 on the entity's next round-robin snapshot
+        // turn (up to ~1.2s in a big world). `[netId:2]`, reliable lane, 6 bytes.
+        // KillableAlien.NoteDeathBegan has the census of which types do this.
+        //
+        // It is NOT the death's settlement: the eventual EvDeath still carries the killer and
+        // the per-slot awards, exactly as before. This says only "it has begun".
+        public const byte EvDying = 23;
 
         // Card 8a7772d6, host -> client, reliable: Level 1's intro "hail of bullets" is
         // starting, run your own COSMETIC copy of it with this seed. The bullets themselves
         // cannot replicate -- `Bullet` is not in the NetTypeRegistry table at all -- so without
         // this the joiner watches the intro UFOs die of nothing for 2.3 seconds. See
         // Lvl1StartDemoEvent.Volley for what "cosmetic" is contractually allowed to do.
-        public const byte EvIntroVolley = 23;
+        public const byte EvIntroVolley = 24;
 
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;
 
         public const byte ShipFlagAlive = 1 << 0;
-        public const byte ShipFlagFiring = 1 << 1;
+        // Bit 1 used to be ShipFlagFiring -- the fire INTENT as a level, deleted by card a45b78f6
+        // in favour of MsgShipState's cumulative shotCount byte, and reused here.
+        //
         // Card 8a7772d6: "my level script is holding the player spawn" -- Level 1's intro
         // cinematic (Lvl1StartDemoEvent) runs for ~10.5s with no ship on screen, and the script
         // is host-only, so without this the joiner spawns 1.3s in and plays through the host's
@@ -99,7 +112,7 @@ namespace EvilAliensWeb.Compat.Net
         // loss/reorder, and because it needs no level-entry ordering and no JIP catch-up leg:
         // the stream is already flowing before a joiner's level even loads.
         // ONLY THE HOST'S BIT IS HONOURED -- see NetSession.HandleShipState.
-        public const byte ShipFlagScriptGate = 1 << 2;
+        public const byte ShipFlagScriptGate = 1 << 1;
 
         // ---- wire enum validation (card 88f87ba2) -------------------------------------
         //
@@ -313,15 +326,23 @@ namespace EvilAliensWeb.Compat.Net
         // ---- ship stream --------------------------------------------------------------
 
         // [type][flags][shotsPerSec][bulletLife/10][seq:2][senderMs:4][posX:4][posY:4]
-        // [velX:4][velY:4][aim:4] = 31 bytes. Velocity is design px per MILLISECOND (the
-        // component system's native unit, see AlienDrawableGameComponent.Update).
+        // [velX:4][velY:4][aim:4][shotCount:1] = 31 bytes. Velocity is design px per MILLISECOND
+        // (the component system's native unit, see AlienDrawableGameComponent.Update).
         // senderMs is SESSION-RELATIVE (uint ms since the sender's NetSession.Start) --
         // an absolute machine-uptime tick in float32 loses ms precision within hours.
-        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, bool firing, int shotsPerSec, float bulletLife, bool scriptGate = false)
+        //
+        // shotCount (card a45b78f6, protocol v12) is a CUMULATIVE wrapping u8 of the shots the
+        // sender's ship has actually spawned -- incremented inside PlayerShip.FireAt's cadence
+        // gate, beside the Bullet it counts. It REPLACED the `firing` LEVEL flag, which could
+        // only ever be sampled at packet rate: the receiver takes the wrapped delta against the
+        // last count it applied, so a lost or reordered stream packet costs nothing (the next
+        // one carries the total) and two taps inside one cadence period are one increment,
+        // exactly as they are one bullet for the owner.
+        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false)
         {
             byte[] b = new byte[31];
             b[0] = MsgShipState;
-            b[1] = (byte)((alive ? ShipFlagAlive : 0) | (firing ? ShipFlagFiring : 0) | (scriptGate ? ShipFlagScriptGate : 0));
+            b[1] = (byte)((alive ? ShipFlagAlive : 0) | (scriptGate ? ShipFlagScriptGate : 0));
             b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[3] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 4, seq);
@@ -331,6 +352,7 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 18, vel.X);
             WriteF32(b, 22, vel.Y);
             WriteF32(b, 26, aim);
+            b[30] = shotCount;
             return b;
         }
 
@@ -352,20 +374,22 @@ namespace EvilAliensWeb.Compat.Net
             sample.Vel = new Vector2(ReadF32(b, 18), ReadF32(b, 22));
             sample.Aim = ReadF32(b, 26);
             sample.Alive = (b[1] & ShipFlagAlive) != 0;
-            sample.Firing = (b[1] & ShipFlagFiring) != 0;
             sample.ScriptGate = (b[1] & ShipFlagScriptGate) != 0;
+            sample.ShotCount = b[30];
             return true;
         }
 
         // Friend (host AI ship) stream: MsgShipState body shifted one byte right for the leading
         // player-slot. `alive` is implicit (a live friend is streamed; a dead/gone one simply stops
-        // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag.
-        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool firing, int shotsPerSec, float bulletLife)
+        // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag --
+        // and since card a45b78f6 no flags byte at all, the firing level having been the only bit
+        // it ever carried.
+        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, byte shotCount, int shotsPerSec, float bulletLife)
         {
             byte[] b = new byte[31];
             b[0] = MsgFriendState;
             b[1] = slot;
-            b[2] = (byte)(firing ? ShipFlagFiring : 0);
+            b[2] = shotCount;
             b[3] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[4] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 5, seq);
@@ -398,7 +422,7 @@ namespace EvilAliensWeb.Compat.Net
             sample.Vel = new Vector2(ReadF32(b, 19), ReadF32(b, 23));
             sample.Aim = ReadF32(b, 27);
             sample.Alive = true;
-            sample.Firing = (b[2] & ShipFlagFiring) != 0;
+            sample.ShotCount = b[2];
             return true;
         }
 
@@ -723,6 +747,29 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // EvDying (host -> client, reliable): [netId:2]. See the EvDying constant for what it
+        // means and why it exists. No killer and no award: this is the death BEGINNING, and the
+        // EvDeath that lands when the animation ends is still what settles who was paid.
+        public const int DyingEventBytes = 4 + 2;
+
+        public static byte[] EncodeDyingEvent(ushort eventSeq, ushort netId)
+        {
+            byte[] b = EventHeader(EvDying, eventSeq, 2);
+            WriteU16(b, 4, netId);
+            return b;
+        }
+
+        public static bool TryDecodeDyingEvent(byte[] b, out ushort netId)
+        {
+            netId = 0;
+            if (b == null || b.Length < DyingEventBytes || b[0] != MsgEvent || b[1] != EvDying)
+            {
+                return false;
+            }
+            netId = ReadU16(b, 4);
+            return true;
+        }
+
         // EvClaim (client -> host, generous at-least-once): [netId:2][killerSlot:1] -- "this
         // replicated entity died on my screen, killed by slot k (or despawned)".
         public static byte[] EncodeClaimEvent(ushort eventSeq, ushort netId, byte killerSlot)
@@ -757,18 +804,25 @@ namespace EvilAliensWeb.Compat.Net
         // ---- world snapshot (host -> clients, stream lane) --------------------------------
 
         // MsgWorldSnapshot: [0x20][count:1] then `count` length-prefixed entries:
-        //   [len:1][netId:2][typeIdx:1][base:24][per-type state extra:(len-28)]
+        //   [len:1][netId:2][typeIdx:1][flags:1][base:24][per-type state extra:(len-29)]
         // The len prefix makes entries for not-yet-spawned ids skippable without knowing the
         // type's extra size (stream lane may outrun the reliable spawn).
+        //
+        // `flags` is per-SAMPLE, not per-entity state -- see NetSnapshotFlags. It is deliberately
+        // NOT part of the shared base-state block: EvSpawn writes that same block, and a spawn is
+        // by definition an entity's FIRST observation, so every flag defined here would be
+        // permanently zero there. What this byte answers is "what should the receiver make of THIS
+        // sample", which only a snapshot entry can ask.
         public const int SnapshotHeaderBytes = 2;
-        public const int SnapshotEntryBaseBytes = 4 + BaseStateBytes; // len+netId+typeIdx+base
+        public const int SnapshotEntryBaseBytes = 5 + BaseStateBytes; // len+netId+typeIdx+flags+base
 
-        public static void WriteSnapshotEntry(byte[] b, ref int off, ushort netId, byte typeIdx, in NetBaseState state, byte[] extra, int extraLen)
+        public static void WriteSnapshotEntry(byte[] b, ref int off, ushort netId, byte typeIdx, byte flags, in NetBaseState state, byte[] extra, int extraLen)
         {
             b[off++] = (byte)(SnapshotEntryBaseBytes + extraLen);
             WriteU16(b, off, netId);
             off += 2;
             b[off++] = typeIdx;
+            b[off++] = flags;
             WriteBaseState(b, ref off, state);
             for (int i = 0; i < extraLen; i++)
             {
@@ -776,10 +830,11 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        public static bool TryReadSnapshotEntry(byte[] b, ref int off, out ushort netId, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen)
+        public static bool TryReadSnapshotEntry(byte[] b, ref int off, out ushort netId, out byte typeIdx, out byte flags, out NetBaseState state, out int extraOff, out int extraLen)
         {
             netId = 0;
             typeIdx = 0;
+            flags = 0;
             state = default;
             extraOff = 0;
             extraLen = 0;
@@ -796,11 +851,31 @@ namespace EvilAliensWeb.Compat.Net
             netId = ReadU16(b, p);
             p += 2;
             typeIdx = b[p++];
+            flags = b[p++];
             ReadBaseState(b, ref p, ref state);
             extraOff = p;
             extraLen = off + len - p;
             off += len;
             return true;
+        }
+
+        // Per-SAMPLE flags on a snapshot entry (card e79bb994). A BITMASK, not a wire enum: the
+        // decode-boundary validator rule in this file covers enums, whose whole value SELECTS
+        // something, whereas an unrecognised BIT here is simply a property this build does not
+        // know about and is correctly IGNORED -- the receiver tests the bits it knows and masking
+        // is the degradation. So this needs no validator and no ProbeWireEnums row; what it does
+        // need is for new bits to be APPEND-ONLY, like every other index on this wire.
+        public static class NetSnapshotFlags
+        {
+            public const byte None = 0x00;
+
+            // The host REPOSITIONED this entity since its last snapshot turn: the position in
+            // this sample is a discontinuity rather than motion. Two consequences on the
+            // receiving side, and the sender has already applied the first: the velocity in this
+            // sample is the entity's DECLARED speed rather than a finite difference across the
+            // jump (which would read 10-50 px/ms and be dead-reckoned on), and the client SNAPS
+            // to the position instead of blending the error over its correction window.
+            public const byte Teleported = 0x01;
         }
 
         // ---- shared base-state block (24 bytes) --------------------------------------------
@@ -1241,11 +1316,14 @@ namespace EvilAliensWeb.Compat.Net
         public Vector2 Vel; // design px per ms
         public float Aim;
         public bool Alive;
-        public bool Firing;
-        // Card 8a7772d6. Like Alive and Firing this is a LEVEL the receiver reads off the
-        // newest sample, not a quantity anything interpolates -- it rides here rather than in
-        // a sixth `out` because the decoder already carries the other two flag bits this way.
-        // Always false out of TryDecodeFriendState: an AI friend has no level script.
+        // Card 8a7772d6. Like Alive this is a LEVEL the receiver reads off the newest sample,
+        // not a quantity anything interpolates -- it rides here rather than in a fifth `out`
+        // because the decoder already carries the alive bit this way. Always false out of
+        // TryDecodeFriendState: an AI friend has no level script.
         public bool ScriptGate;
+        // Cumulative wrapping count of the shots the OWNER's ship has actually spawned (card
+        // a45b78f6). The receiver fires the wrapped delta; it is not a rate and never resets
+        // except with the ship itself.
+        public byte ShotCount;
     }
 }

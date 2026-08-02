@@ -463,12 +463,15 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   sequence, and the level-up sparkle. **Destructive** — it pairs a real host session onto the
   live level and spends real pickups into the live panels, so run it in a throwaway
   `?level=Level2&invuln` boot),
-  `eaNetFire()` (the single-tap bullet count — card a5c2a39b: one tap used to reach the other
-  peer as TWO bullets, because the sender streamed firing=true for a flat 150 ms while the peer
-  re-fires through a 125 ms cadence gate. Asserts the packet-derived hold contract for every
-  fire rate, then counts the bullets a scripted tap really spawns on a live remote puppet, with
-  the pre-card pattern beside it as the control. **Destructive** — it pairs a real host session
-  onto the live level and fires real bullets into it, so run it in a throwaway
+  `eaNetFire()` (the replicated shot count — cards a5c2a39b / a45b78f6: one tap used to reach the
+  other peer as TWO bullets, because the wire carried firing as a LEVEL and the peer re-fired
+  through its own cadence gate. The wire now carries a cumulative shot COUNT and the peer spends
+  the wrapped delta. Asserts that arithmetic over the whole u8 domain, then the SENDER's counter
+  against the bullets its ship really spawned, then the bullets a scripted burst spawns on a live
+  remote puppet — including a burst with four of ten packets DROPPED, where the count must stay
+  exact — with a reference implementation of the old firing-LEVEL rule beside it as the control.
+  **Destructive** — it pairs a real host session onto the live level, fires real bullets into it
+  and drives the local ship through scripted input, so run it in a throwaway
   `?level=Level2&invuln` boot),
   `eaNetWire.test()` (the in-process net wire + every wire-level codec round trip — card
   25ad0659; needs no session, level or second tab, and also runs under `logic_probe`),
@@ -530,10 +533,18 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   throwaway `?level=InsaneBossI` boot; see "Audio runtime"),
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
-  `eaNetVelScan(on?)` (the measured ceiling the co-op teleport guard's speed cap is set against
-  -- card 8dabe812: arm it, soak a level, call again for each replicable type's fastest SUSTAINED
-  speed against `NetSession.MaxObservedSpeedPxPerMs`. Needs NO net session, since it measures the
-  GAME's motion; the negative test that a cap never clips a real fast mover),
+  `eaNetVelScan(on?)` (the offline audit behind the co-op teleport marker -- cards 8dabe812 ->
+  e79bb994: arm it, soak a level, call again for each replicable type's fastest SUSTAINED speed
+  against `NetSession.MaxObservedSpeedPxPerMs` **and how many repositions it ANNOUNCED**
+  (`marked=`). Needs NO net session, since it measures the GAME's motion and the GAME's marking --
+  which is exactly why it, and not the live-session diagnostic, is what a headless probe can
+  assert. **REFUSES to arm inside a session**: it read-and-clears the same teleport latch, so it
+  would eat the markers before the host could send them),
+  `eaNetTeleport()` (the teleport marker end to end -- card e79bb994: a real HOST session's
+  snapshot frames read off a `NetWire` (flag set, DECLARED velocity rather than the jump's finite
+  difference, latch spent) and a real CLIENT session's puppet snapping a marked entry instead of
+  blending it, each with the identical jump left UNMARKED beside it -- the pre-card code also
+  ended up in the right PLACE, so position alone proves nothing. Menu-only, leave-no-trace),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),

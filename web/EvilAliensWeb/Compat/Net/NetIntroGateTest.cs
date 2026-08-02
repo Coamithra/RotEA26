@@ -426,7 +426,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             senderMs += 33; // advance, or ShipStateBuffer refuses the sample as stale
             return NetProtocol.EncodeShipState(seq++, senderMs, RemoteShipPos, Vector2.Zero,
-                FacingUp, alive: true, firing: false, shotsPerSec: 8, bulletLife: 450f,
+                FacingUp, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f,
                 scriptGate: gate);
         }
 

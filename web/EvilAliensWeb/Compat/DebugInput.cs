@@ -343,10 +343,12 @@ namespace EvilAliensWeb.Compat
 			return WorldCensus.Report(game);
 		}
 
-		// eaNetVelScan(on?): the measured ceiling the co-op teleport guard is set against (card
-		// 8dabe812). Arm it, play/soak a level, call again to read the fastest observed velocity
-		// per replicable type against NetSession.MaxObservedSpeedPxPerMs. Needs NO net session --
-		// it measures the GAME's motion, which is the quantity the guard bounds.
+		// eaNetVelScan(on?): the offline audit behind the teleport marker (cards 8dabe812 ->
+		// e79bb994). Arm it, play/soak a level, call again to read, per replicable type, the
+		// fastest observed velocity against NetSession.MaxObservedSpeedPxPerMs AND how many
+		// repositions that type ANNOUNCED. Needs NO net session -- it measures the GAME's motion
+		// and the GAME's marking, which is exactly why it can audit both where a live-session
+		// diagnostic cannot. It REFUSES to arm inside a session (it consumes the markers).
 		[JSInvokable("debugNetVelScan")]
 		public static string NetVelScan(bool arm)
 		{
@@ -354,8 +356,7 @@ namespace EvilAliensWeb.Compat
 				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin?.Game;
 			if (arm)
 			{
-				EvilAliensWeb.Compat.Net.NetVelocityScan.Arm(game);
-				return "[velscan] armed";
+				return EvilAliensWeb.Compat.Net.NetVelocityScan.Arm(game);
 			}
 			// Reading DISARMS: the scan owns a GameComponent and a ComponentRemoved subscription,
 			// and there is no other call that would ever take them down. Report first -- disarming
@@ -569,6 +570,18 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetFxTest.Run();
 		}
 
+		// JS bridge for the teleport marker (eaNetTeleport in wwwroot/index.html, card e79bb994).
+		// A real HOST session's snapshot frames read off the wire (flag set, declared velocity
+		// rather than the jump's finite difference) and a real CLIENT session's puppet snapping
+		// instead of blending -- each with the identical jump left UNMARKED beside it, since the
+		// pre-card code also ended up in the right PLACE and it was the velocity that poisoned
+		// the dead reckoning. Menu-only and leave-no-trace.
+		[JSInvokable("debugNetTeleport")]
+		public static string NetTeleport()
+		{
+			return EvilAliensWeb.Compat.Net.NetTeleportTest.Run();
+		}
+
 		// JS bridge for scenario 6 (eaNetSceneOrder in wwwroot/index.html, card 25ad0659 step 4).
 		// Reset / pause / checkpoint ORDERING against a REAL GameScene -- which is what makes it
 		// DESTRUCTIVE and keeps it out of NetScenarios: a stand-in scene would make every
@@ -763,6 +776,35 @@ namespace EvilAliensWeb.Compat
 		public static string KickTest()
 		{
 			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
+		}
+
+		// JS bridge for the host pause menu's Online Play decision (eaHostMenu in
+		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugHostMenuTest'). Runs
+		// Compat/Net/NetHostMenuTest.Run() (the exhaustive state sweep) and returns the PASS/FAIL
+		// report. Pure -- needs no session, level, peer or listing.
+		[JSInvokable("debugHostMenuTest")]
+		public static string HostMenuTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostMenuTest.Run();
+		}
+
+		// The LIVE counterpart: what the Online Play row resolves to RIGHT NOW. The suite above
+		// asserts the predicate; this reports the state it is being asked about, which is what
+		// separates "the predicate is wrong" from "this game genuinely has nothing to offer".
+		[JSInvokable("debugHostMenu")]
+		public static string HostMenu()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostMenu.Dump();
+		}
+
+		// The LIVE-SESSION half (eaHostMenu.live in wwwroot/index.html): a real host session with
+		// a scripted peer over an in-process NetWire, so the decision is read back through the
+		// live statics rather than the synthetic states HostMenuTest sweeps -- plus the kick the
+		// menu row makes. Menu-only and leave-no-trace; it SKIPS itself near a live world.
+		[JSInvokable("debugHostMenuLive")]
+		public static string HostMenuLive()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostMenuLiveTest.Run();
 		}
 
 		// JS bridge for the decorative-swarm replication (eaNetCosmetic in wwwroot/index.html):

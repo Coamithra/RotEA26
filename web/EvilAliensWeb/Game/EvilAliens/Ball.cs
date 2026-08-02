@@ -186,17 +186,25 @@ internal class Ball : AlienDrawableGameComponent
 		{
 			rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			float radius = r;
+			// Online co-op (card e79bb994): these three are screen WRAPS -- a jump of the best
+			// part of a screen, which the host's observed-velocity estimator would otherwise put
+			// on the wire as real motion for the joiner's puppet to dead-reckon on. Same defect
+			// class as the SpiderBoss fly-by park that card 8dabe812 was filed for; this type was
+			// simply never noticed.
 			if (base.Position.Y > 600f + radius + ybuffer / 3f)
 			{
 				base.Position = new Vector2(base.Position.X, -2f * ybuffer / 3f - radius);
+				NetNoteTeleport();
 			}
 			if (base.Position.X < 0f - radius)
 			{
 				base.Position = new Vector2(800f + radius, base.Position.Y);
+				NetNoteTeleport();
 			}
 			if (base.Position.X > 800f + radius)
 			{
 				base.Position = new Vector2(0f - radius, base.Position.Y);
+				NetNoteTeleport();
 			}
 			if (!starttimer.Active)
 			{

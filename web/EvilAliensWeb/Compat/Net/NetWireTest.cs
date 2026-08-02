@@ -481,25 +481,68 @@ namespace EvilAliensWeb.Compat.Net
             snap[0] = NetProtocol.MsgWorldSnapshot;
             snap[1] = 2;
             int wOff = NetProtocol.SnapshotHeaderBytes;
-            NetProtocol.WriteSnapshotEntry(snap, ref wOff, 101, 1, baseState, extras, 3);
+            //
+            // The two entries also carry DIFFERENT per-sample flags (card e79bb994), which is
+            // what makes the flags leg below non-vacuous: a codec that dropped the byte, or read
+            // it from a fixed offset, would report the same value for both.
+            NetProtocol.WriteSnapshotEntry(snap, ref wOff, 101, 1,
+                NetProtocol.NetSnapshotFlags.None, baseState, extras, 3);
             NetBaseState second = baseState;
             second.Pos = new Vector2(1f, 2f);
             second.Hp = 9;
-            NetProtocol.WriteSnapshotEntry(snap, ref wOff, 202, 2, second, null, 0);
+            NetProtocol.WriteSnapshotEntry(snap, ref wOff, 202, 2,
+                NetProtocol.NetSnapshotFlags.Teleported, second, null, 0);
             byte[] packed = new byte[wOff];
             Array.Copy(snap, packed, wOff);
             byte[] gotSnap = Round(packed, reliable: false);
             int rOff = NetProtocol.SnapshotHeaderBytes;
+            byte f1 = 0xFF;
+            byte f2 = 0xFF;
             bool snapOk = gotSnap != null && gotSnap[1] == 2
                 && NetProtocol.TryReadSnapshotEntry(gotSnap, ref rOff, out ushort id1, out byte t1,
-                    out NetBaseState st1, out int e1Off, out int e1Len)
+                    out f1, out NetBaseState st1, out int e1Off, out int e1Len)
                 && id1 == 101 && t1 == 1 && e1Len == 3 && gotSnap[e1Off] == 0xDE && st1.Hp == 40
                 && NetProtocol.TryReadSnapshotEntry(gotSnap, ref rOff, out ushort id2, out byte t2,
-                    out NetBaseState st2, out _, out int e2Len)
+                    out f2, out NetBaseState st2, out _, out int e2Len)
                 && id2 == 202 && t2 == 2 && e2Len == 0 && st2.Hp == 9
                 && Near(st2.Pos.X, 1f) && Near(st2.Pos.Y, 2f)
                 && rOff == gotSnap.Length;
             check("MsgWorldSnapshot walks two entries of different extra length", snapOk);
+            check("snapshot entry flags survive the wire per ENTRY (none vs teleported)",
+                f1 == NetProtocol.NetSnapshotFlags.None
+                && f2 == NetProtocol.NetSnapshotFlags.Teleported);
+
+            // An unrecognised BIT must survive decode rather than being refused: NetSnapshotFlags
+            // is a bitmask, not a wire enum, so a peer masks the bits it knows and ignores the
+            // rest. A decoder that validated the byte as a whole would drop the entry -- i.e.
+            // stop correcting that entity -- the moment a later build appended a flag.
+            byte[] fut = new byte[NetProtocol.SnapshotHeaderBytes + NetProtocol.SnapshotEntryBaseBytes];
+            fut[0] = NetProtocol.MsgWorldSnapshot;
+            fut[1] = 1;
+            int futOff = NetProtocol.SnapshotHeaderBytes;
+            const byte FutureBits = 0x81; // Teleported + an undefined high bit
+            NetProtocol.WriteSnapshotEntry(fut, ref futOff, 303, 3, FutureBits, second, null, 0);
+            byte[] gotFut = Round(fut, reliable: false);
+            int futROff = NetProtocol.SnapshotHeaderBytes;
+            check("an unknown snapshot flag BIT decodes rather than refusing the entry",
+                gotFut != null
+                && NetProtocol.TryReadSnapshotEntry(gotFut, ref futROff, out ushort idF, out _,
+                    out byte flagsF, out _, out _, out _)
+                && idF == 303 && flagsF == FutureBits
+                && (flagsF & NetProtocol.NetSnapshotFlags.Teleported) != 0);
+
+            // A snapshot entry one byte short of the base block must be REFUSED, not read past
+            // its end -- the flags byte grew that block, so this is the boundary that moved.
+            byte[] runt = new byte[NetProtocol.SnapshotHeaderBytes + NetProtocol.SnapshotEntryBaseBytes];
+            runt[0] = NetProtocol.MsgWorldSnapshot;
+            runt[1] = 1;
+            runt[NetProtocol.SnapshotHeaderBytes] = (byte)(NetProtocol.SnapshotEntryBaseBytes - 1);
+            byte[] gotRunt = Round(runt, reliable: false);
+            int runtOff = NetProtocol.SnapshotHeaderBytes;
+            check("a snapshot entry shorter than the base block is refused",
+                gotRunt != null
+                && !NetProtocol.TryReadSnapshotEntry(gotRunt, ref runtOff, out _, out _, out _,
+                    out _, out _, out _));
 
             byte[] bg = Round(NetProtocol.EncodeBackgroundEvent(
                 12, (byte)NetBackgroundOp.SetSpeed, new Vector2(0.75f, -0.25f)), reliable: true);

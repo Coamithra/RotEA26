@@ -709,7 +709,7 @@ namespace EvilAliensWeb.Compat.Net
             state.Pos = Nowhere;
             state.Scale = 1f;
             state.Hp = 0; // a spawn carries no hp; the descriptor's own Initialize sets it
-            NetPuppets.OnSnapshotEntry(netId, typeIdx, state, new byte[1], 0, 0, out _, out _);
+            NetPuppets.OnSnapshotEntry(netId, typeIdx, NetProtocol.NetSnapshotFlags.None, state, new byte[1], 0, 0, out _, out _);
             foreach (GameComponent item in CollectType<T>(game))
             {
                 if (!before.Contains(item))
@@ -732,7 +732,7 @@ namespace EvilAliensWeb.Compat.Net
             state.Pos = Nowhere;
             state.Scale = 1f;
             state.Hp = hp;
-            NetPuppets.OnSnapshotEntry(netId, typeIdx, state, new byte[1], 0, 0, out _, out kind);
+            NetPuppets.OnSnapshotEntry(netId, typeIdx, NetProtocol.NetSnapshotFlags.None, state, new byte[1], 0, 0, out _, out kind);
         }
 
         private static StarMine PlantMine(ComponentBin bin, Game game, List<GameComponent> planted,

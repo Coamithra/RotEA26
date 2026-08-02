@@ -786,18 +786,25 @@ namespace EvilAliensWeb.Compat.Net
         // ---- world snapshot (host -> clients, stream lane) --------------------------------
 
         // MsgWorldSnapshot: [0x20][count:1] then `count` length-prefixed entries:
-        //   [len:1][netId:2][typeIdx:1][base:24][per-type state extra:(len-28)]
+        //   [len:1][netId:2][typeIdx:1][flags:1][base:24][per-type state extra:(len-29)]
         // The len prefix makes entries for not-yet-spawned ids skippable without knowing the
         // type's extra size (stream lane may outrun the reliable spawn).
+        //
+        // `flags` is per-SAMPLE, not per-entity state -- see NetSnapshotFlags. It is deliberately
+        // NOT part of the shared base-state block: EvSpawn writes that same block, and a spawn is
+        // by definition an entity's FIRST observation, so every flag defined here would be
+        // permanently zero there. What this byte answers is "what should the receiver make of THIS
+        // sample", which only a snapshot entry can ask.
         public const int SnapshotHeaderBytes = 2;
-        public const int SnapshotEntryBaseBytes = 4 + BaseStateBytes; // len+netId+typeIdx+base
+        public const int SnapshotEntryBaseBytes = 5 + BaseStateBytes; // len+netId+typeIdx+flags+base
 
-        public static void WriteSnapshotEntry(byte[] b, ref int off, ushort netId, byte typeIdx, in NetBaseState state, byte[] extra, int extraLen)
+        public static void WriteSnapshotEntry(byte[] b, ref int off, ushort netId, byte typeIdx, byte flags, in NetBaseState state, byte[] extra, int extraLen)
         {
             b[off++] = (byte)(SnapshotEntryBaseBytes + extraLen);
             WriteU16(b, off, netId);
             off += 2;
             b[off++] = typeIdx;
+            b[off++] = flags;
             WriteBaseState(b, ref off, state);
             for (int i = 0; i < extraLen; i++)
             {
@@ -805,10 +812,11 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        public static bool TryReadSnapshotEntry(byte[] b, ref int off, out ushort netId, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen)
+        public static bool TryReadSnapshotEntry(byte[] b, ref int off, out ushort netId, out byte typeIdx, out byte flags, out NetBaseState state, out int extraOff, out int extraLen)
         {
             netId = 0;
             typeIdx = 0;
+            flags = 0;
             state = default;
             extraOff = 0;
             extraLen = 0;
@@ -825,11 +833,31 @@ namespace EvilAliensWeb.Compat.Net
             netId = ReadU16(b, p);
             p += 2;
             typeIdx = b[p++];
+            flags = b[p++];
             ReadBaseState(b, ref p, ref state);
             extraOff = p;
             extraLen = off + len - p;
             off += len;
             return true;
+        }
+
+        // Per-SAMPLE flags on a snapshot entry (card e79bb994). A BITMASK, not a wire enum: the
+        // decode-boundary validator rule in this file covers enums, whose whole value SELECTS
+        // something, whereas an unrecognised BIT here is simply a property this build does not
+        // know about and is correctly IGNORED -- the receiver tests the bits it knows and masking
+        // is the degradation. So this needs no validator and no ProbeWireEnums row; what it does
+        // need is for new bits to be APPEND-ONLY, like every other index on this wire.
+        public static class NetSnapshotFlags
+        {
+            public const byte None = 0x00;
+
+            // The host REPOSITIONED this entity since its last snapshot turn: the position in
+            // this sample is a discontinuity rather than motion. Two consequences on the
+            // receiving side, and the sender has already applied the first: the velocity in this
+            // sample is the entity's DECLARED speed rather than a finite difference across the
+            // jump (which would read 10-50 px/ms and be dead-reckoned on), and the client SNAPS
+            // to the position instead of blending the error over its correction window.
+            public const byte Teleported = 0x01;
         }
 
         // ---- shared base-state block (24 bytes) --------------------------------------------

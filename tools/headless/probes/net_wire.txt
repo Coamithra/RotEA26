@@ -56,6 +56,13 @@ expect 4\. stream-lane reorder \+ dedup
 # THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
 # not-short -- which is the whole reason those cards needed no protocol version bump, so if
 # it ever goes red the bump is back on the table.
-expect \[netwire\] 77 passed, 0 failed
+# Card e79bb994 raised it 77 -> 80: the snapshot entry's new per-sample flags byte, asserted PER
+# ENTRY (the two entries in the stride leg now carry different flags, so a codec that read the byte
+# from a fixed offset would report the same value for both), an UNKNOWN flag BIT surviving decode
+# rather than refusing the entry -- NetSnapshotFlags is a bitmask, so masking is the degradation,
+# and a decoder that validated the whole byte would stop correcting that entity the day a later
+# build appends a flag -- and a runt entry one byte short of the base block being refused, which is
+# the boundary the flags byte moved.
+expect \[netwire\] 80 passed, 0 failed
 expect-not FAIL
 quit

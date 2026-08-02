@@ -72,14 +72,21 @@ namespace EvilAliensWeb.Compat.Net
         public long SnapUnknownIds;     // entries for ids not (yet / anymore) puppeted == the 3 below
         public long PuppetPops;         // snapshot error > snap threshold: hard corrected
 
-        // Host-side: observed velocities refused by the teleport guard (card 8dabe812). It counts
-        // REPOSITIONS, so on a level with no repositioning entity it stays at 0 and that is the
-        // correct reading -- it is not a health metric. What makes it worth printing is that it is
-        // the ONLY externally visible sign the guard fired: a guarded sample looks, on the wire and
-        // on the client, exactly like an entity that was standing still. A count that climbs on a
-        // type with no reposition means the cap is clipping REAL motion (see
-        // NetSession.MaxObservedSpeedPxPerMs -- raise it, don't leave it clipping).
-        public long VelGuard;
+        // Host-side: entities that told us they had been REPOSITIONED (card e79bb994) -- the
+        // snapshot turns whose entry went out marked NetSnapshotFlags.Teleported. On a level with
+        // no repositioning entity it stays at 0 and that is the correct reading; it is not a
+        // health metric. What makes it worth printing is that it is the ONLY externally visible
+        // sign the marker path ran at all: a marked sample looks, on the wire and on the client,
+        // exactly like an entity that was standing still.
+        public long Teleports;
+
+        // Host-side: samples whose observed speed exceeded NetSession.MaxObservedSpeedPxPerMs
+        // with NO marker -- i.e. a reposition site that has not been taught to call
+        // NetNoteTeleport. **THIS ONE IS A 0 BAR**, and the opposite reading to `teleports`
+        // beside it: every nonzero here is a type whose puppets will dead-reckon at teleport
+        // speed on the other player's screen. The console names each type once; the count is what
+        // says how often. See NetSession.NoteIfUnmarkedTeleport.
+        public long UnmarkedTeleports;
 
         // The three reasons an entry can be "unknown" (card 48ab9b2f). They used to share one
         // counter, which made the total unreadable: two of them are ordinary traffic and one is
@@ -162,7 +169,7 @@ namespace EvilAliensWeb.Compat.Net
             // corrections. Printed because pupPops cannot be judged without it -- a big world
             // stretches the turn and pops follow, on a perfectly healthy link (card 48ab9b2f).
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} velGuard={44}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
@@ -171,7 +178,7 @@ namespace EvilAliensWeb.Compat.Net
                 SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, SnapNew, SnapDead, SnapBad, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
                 BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
-                HudTx, HudRx, DupLive, DupDeclined, DupBad, VelGuard) + sc + imp;
+                HudTx, HudRx, DupLive, DupDeclined, DupBad, Teleports, UnmarkedTeleports) + sc + imp;
         }
     }
 }

@@ -80,7 +80,12 @@ namespace EvilAliensWeb.Compat.Net
         // took the byte after `aim`, which v11 never read, so it would simply see firing=false
         // forever and the remote ship would never shoot). Either way a mixed pairing is wrong
         // rather than merely older, which is the bump test.
-        public const byte ProtocolVersion = 12;
+        // v13 (card e79bb994): a per-SAMPLE flags byte on every world-snapshot ENTRY
+        // (NetProtocol.NetSnapshotFlags), carrying the host's teleport marker. Like v12 and unlike
+        // the appended event types before it, this MOVED AN EXISTING LAYOUT -- a v12 peer would
+        // mis-parse every snapshot entry it received, so the bump is not a courtesy here, it is
+        // the only thing standing between a stale peer and a garbage world.
+        public const byte ProtocolVersion = 13;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -91,8 +96,17 @@ namespace EvilAliensWeb.Compat.Net
         private const long HudIntervalMs = 100;      // ~10 Hz per-slot HUD state
         internal const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
 
-        // Ceiling on a believable observed velocity, design px/ms -- the teleport guard's threshold
-        // (card 8dabe812; the reasoning is at the use site in CaptureBaseState).
+        // Ceiling on a believable observed velocity, design px/ms.
+        //
+        // IT IS A DIAGNOSTIC THRESHOLD, NOT A GUARD (card e79bb994). Card 8dabe812 used this as a
+        // plausibility CAP -- a sample above it had its velocity refused -- which was an estimator
+        // with a threshold, kept honest only by the measured gap below. It is now purely the
+        // trip-wire for a reposition site that forgot to call NetNoteTeleport
+        // (NetSession.NoteIfUnmarkedTeleport), and nothing it does can change what goes on the
+        // wire. That inverts its risk: as a cap, a value set too LOW silently clipped a genuinely
+        // fast enemy and recreated the very stutter it existed to remove; as a diagnostic, the
+        // worst it can do is print a spurious line. The measured separation is still what makes
+        // it useful, so the reasoning is kept verbatim:
         //
         // DERIVED FROM A MEASURED GAP, via `eaNetVelScan` (Compat/Net/NetVelocityScan) over
         // Level1/2/3 at Medium and Inzane, ~8 sim-minutes each. That tool reports each replicable
@@ -111,6 +125,9 @@ namespace EvilAliensWeb.Compat.Net
         //
         // 5.0 is the log midpoint of 2.5..11.6: 2.0x above the fastest real mover and 2.3x below
         // the slowest reposition. Well separated in both directions and tuned to neither.
+        // (Those three repositions are all MARKED now, so in a healthy build the diagnostic never
+        // sees them at all -- the right-hand side of the gap is what an UNMARKED one would land
+        // in, and is why the threshold is sited where it is rather than just above 2.5.)
         //
         // THE SEPARATION IS THE POINT, NOT THE PRECISION -- gameplay RNG is unseeded, so a soak
         // samples the MarsBoss entry curve wherever it happens to land and three runs of the same
@@ -597,6 +614,7 @@ namespace EvilAliensWeb.Compat.Net
             grantsAwaitingStream.Clear();
             localJoinSimDone = 0;
             localJoinSimAt = 0;
+            unmarkedTeleportReported.Clear();
             txSeq = 0;
             txEventSeq = 0;
             lastTxShotCount = 0;
@@ -1503,7 +1521,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            NetBaseState state = CaptureBaseState(e, NowMs);
+            // The entry flags are DISCARDED here, and that is not an oversight: EvSpawn's payload
+            // is the shared base-state block, which has no flags byte, because a spawn is the
+            // entity's first observation and "this sample is a discontinuity" is meaningless of
+            // it. Consuming the latch is still correct -- CaptureBaseState just advanced this
+            // entity's velocity baseline, so an unspent latch would refuse the FOLLOWING snapshot
+            // turn's velocity for a jump that happened before the entity existed on the wire.
+            NetBaseState state = CaptureBaseState(e, NowMs, out _);
             // Cast back for the descriptor: its extras surface is deliberately still on the
             // concrete type: 2c-iii measured moving it and DECLINED, so this cast is permanent
             // and is safe by construction -- see INetEntity's header for the argument.
@@ -1675,8 +1699,8 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 snapshotCursor = (snapshotCursor + 1) % live.Count;
-                NetBaseState state = CaptureBaseState(e, now);
-                NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, state, extraScratch, extraLen);
+                NetBaseState state = CaptureBaseState(e, now, out byte entryFlags);
+                NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, entryFlags, state, extraScratch, extraLen);
                 written++;
             }
             if (written == 0)
@@ -1691,46 +1715,54 @@ namespace EvilAliensWeb.Compat.Net
             metrics.SnapTx++;
         }
 
-        private static NetBaseState CaptureBaseState(NetIdRegistry.Entry e, long now)
+        private static NetBaseState CaptureBaseState(NetIdRegistry.Entry e, long now, out byte entryFlags)
         {
             INetEntity c = e.Comp;
             Vector2 pos = c.Position;
+            // TELEPORT MARKER (card e79bb994, replacing card 8dabe812's plausibility cap).
+            //
+            // Read-and-CLEAR first, unconditionally: the latch must be spent on this turn whether
+            // or not we go on to differentiate, or a teleport recorded before the entity's first
+            // observation would sit set and refuse a LATER turn's perfectly good velocity.
+            bool teleported = c.NetTakeTeleport();
+            entryFlags = teleported ? NetProtocol.NetSnapshotFlags.Teleported : NetProtocol.NetSnapshotFlags.None;
+
             // Observed velocity: differentiate real positions between this entity's snapshot
             // turns -- robust for enemies that move Position directly (arcs, easing) where
             // Speed/Direction would lie. First observation falls back to SpeedVector.
+            //
+            // ...and so does a REPOSITION, for the same reason and by the same fallback: a finite
+            // difference cannot tell motion from a jump, and the SpiderBoss is parked at the far
+            // screen edge to start each fly-by. Differentiating that ~800 px jump stamped 42-57
+            // px/ms onto the wire, and the client DEAD-RECKONED on it -- it snapped to the new
+            // position (correctly) and then flew onward at teleport speed until its next
+            // correction, collidably, killing the local player.
+            //
+            // THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER -- do not read the
+            // fallback as informative. Half the replicable set (the SpiderBoss included) moves by
+            // writing `Position` directly and never assigns `Speed`/`Direction`, so its
+            // `NetSpeedVector` is ZERO: a marked park sends zero velocity and the puppet stands
+            // still until its next turn, up to ~1.2 s in a big world. That is the correct trade
+            // against flinging it across the screen collidably, and it is what card 8dabe812's
+            // cap already did -- putting real motion parameters on the wire is card c1a38ef9.
+            //
+            // The host KNOWS, so it says so rather than guessing: the reposition sites call
+            // NetNoteTeleport (grep it -- Braineroid/EvilSkull/SpiderBoss/Ball) and the marker
+            // also rides the wire, so the client snaps this sample instead of blending it. Card
+            // 8dabe812's 5.0 px/ms cap is GONE from this decision; it survives one block below as
+            // a diagnostic that can no longer alter what is sent.
             Vector2 vel = c.NetSpeedVector;
-            if (e.HasLastPos && now > e.LastPosMs)
+            if (!teleported && e.HasLastPos && now > e.LastPosMs)
             {
-                Vector2 observed = (pos - e.LastPos) / (now - e.LastPosMs);
-                // TELEPORT GUARD (card 8dabe812). A finite difference cannot tell motion from a
-                // REPOSITION, and several entities are repositioned outright -- the SpiderBoss is
-                // parked at the far screen edge to start each fly-by. Differentiating that ~800 px
-                // jump over one turn stamps ~13 px/ms onto the wire, and the client then
-                // DEAD-RECKONS on it: it snaps to the new position (correctly -- the error is past
-                // SnapThresholdPx) and then flies onward at teleport speed until the next
-                // correction. Puppets are collidable, so the boss crosses the screen and kills the
-                // local player. Measured in tools/sim/net_puppet_drive_sim.py --smoothness: client
-                // peak 150.8 px/tick unguarded (~9000 px/s, the reported "2-3 frames"), 14.3 px/tick
-                // guarded, with the legitimate snap preserved and one spurious pop removed.
-                //
-                // Falling back to NetSpeedVector is the SAME fallback the first-observation branch
-                // above already uses, and it is the honest answer: for a repositioned entity the
-                // declared speed describes what it will do NEXT, which is what the client needs.
-                //
-                // THE CAP IS MEASURED, NOT GUESSED, and the measurement is the negative test:
-                // NetVelocityScan samples this exact quantity over real play and reports the
-                // fastest genuine mover per type. Clipping a real fast mover would recreate the
-                // stutter this card removes, one type at a time and invisibly -- so if a new type
-                // ever approaches this, RAISE THE CAP, and re-run the scan to say what it now
-                // clears. See tools/headless/probes/net_velguard.txt.
-                if (observed.LengthSquared() <= MaxObservedSpeedPxPerMs * MaxObservedSpeedPxPerMs)
-                {
-                    vel = observed;
-                }
-                else
-                {
-                    metrics.VelGuard++;
-                }
+                vel = (pos - e.LastPos) / (now - e.LastPosMs);
+            }
+            if (teleported)
+            {
+                metrics.Teleports++;
+            }
+            else if (e.HasLastPos && now > e.LastPosMs)
+            {
+                NoteIfUnmarkedTeleport(c, vel);
             }
             e.LastPos = pos;
             e.LastPosMs = now;
@@ -1744,6 +1776,68 @@ namespace EvilAliensWeb.Compat.Net
                 Scale = c.NetScale,
                 Hp = c.NetKillable is INetKillable k ? k.NetHitPoints : 0,
             };
+        }
+
+        // Types already reported as suspected unmarked teleporters, so the console says each name
+        // ONCE. A reposition site fires every fly-by, and this runs inside the snapshot encode.
+        //
+        // Cleared per SESSION (ResetPerSessionState) and per SCAN (NetVelocityScan.Arm), not per
+        // process: a name burned once for the whole process would let a suite that reports a type
+        // on purpose -- NetTeleportTest's unmarked-jump control does exactly that with a UFO --
+        // silence a genuine one hit later in the same run, leaving only a counter to notice it.
+        private static readonly HashSet<string> unmarkedTeleportReported = new HashSet<string>();
+
+        internal static void ClearUnmarkedTeleportReports()
+        {
+            unmarkedTeleportReported.Clear();
+        }
+
+        // THE SAFETY NET FOR A MISSED REPOSITION SITE (card e79bb994).
+        //
+        // The marker is only as good as its call sites, and a missed one fails exactly the way the
+        // pre-card bug did -- silently, on the OTHER player's screen, one type at a time. So the
+        // 5.0 px/ms figure card 8dabe812 measured survives here, DEMOTED: nothing above reads it,
+        // it cannot alter a single byte on the wire, and a wrong value can therefore no longer
+        // clip a legitimately fast mover (which was that cap's own dangerous failure). All it can
+        // do now is name a type.
+        //
+        // Read the line as "add NetNoteTeleport() at this type's reposition site", not as a fault
+        // in the net layer. The ceiling under it is measured -- `eaNetVelScan` reports every
+        // replicable type's SUSTAINED speed and tops out at MarsBoss's 2.404 px/ms entry curve --
+        // and tools/headless/probes/net_velguard.txt asserts BOTH halves: that the threshold still
+        // clears every genuine mover (so this cannot cry wolf), and that a Level-2 soak produces
+        // no line at all (so every reposition site reachable there is marked).
+        private static void NoteIfUnmarkedTeleport(INetEntity c, Vector2 observed)
+        {
+            if (observed.LengthSquared() <= MaxObservedSpeedPxPerMs * MaxObservedSpeedPxPerMs)
+            {
+                return;
+            }
+            metrics.UnmarkedTeleports++;
+            ReportUnmarkedTeleport(c.GetType().Name, observed.Length());
+        }
+
+        // THE ONE PLACE THAT WORDS IT, because there are TWO detectors and they must not drift.
+        // This one (a live host session) is what a real player would hit; NetVelocityScan carries
+        // the other, which needs no session and is therefore the one a headless probe can assert
+        // -- `tools/headless/probes/net_velguard.txt` greps this exact line, so its shape is an
+        // interface. The once-per-type set is shared too: the message names a CODE fact, so
+        // repeating it per fly-by would only bury it.
+        //
+        // **THE METRIC IS NOT BUMPED HERE, deliberately** -- `NetMetrics` has no reset (every
+        // scenario asserts on DELTAS instead), so letting the offline scan bump `tpUnmarked` would
+        // leave a figure from a menu-time audit sitting in the first `[net]` line of an unrelated
+        // session. The caller above owns it, so that counter stays what its comment says: what a
+        // LIVE HOST observed. The scan keeps its own tally and prints it in the velscan table.
+        internal static void ReportUnmarkedTeleport(string typeName, float speedPxPerMs)
+        {
+            if (unmarkedTeleportReported.Add(typeName))
+            {
+                Console.WriteLine("[net] UNMARKED teleport suspected: " + typeName + " at "
+                    + speedPxPerMs.ToString("0.0") + " px/ms (threshold "
+                    + MaxObservedSpeedPxPerMs.ToString("0.0")
+                    + ") -- add NetNoteTeleport() at its reposition site");
+            }
         }
 
         // ---- host score sync ------------------------------------------------------------------
@@ -2886,12 +2980,12 @@ namespace EvilAliensWeb.Compat.Net
             int off = NetProtocol.SnapshotHeaderBytes;
             for (int i = 0; i < count; i++)
             {
-                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
+                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out byte typeIdx, out byte entryFlags, out NetBaseState state, out int extraOff, out int extraLen))
                 {
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
+                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, entryFlags, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
                 {
                     if (popped)
                     {

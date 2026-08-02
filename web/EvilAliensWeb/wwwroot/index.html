@@ -673,6 +673,15 @@
             catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the teleport marker (card e79bb994) — the host's snapshot frames read off a
+        // real wire, and a real client session's puppet snapping a marked entry instead of
+        // blending it. Prints PASS/FAIL. Run from the MAIN MENU: it starts real sessions and
+        // plants real entities, so it skips itself over a live session or level.
+        window.eaNetTeleport = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetTeleport')); }
+            catch (e) { console.warn('[debug] eaNetTeleport failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: scenario 6 of the same harness -- reset / pause / checkpoint ORDERING against
         // a REAL GameScene. DESTRUCTIVE: it applies a real EvReset and leaves the scene in its
         // reset branch, so run it in a throwaway ?level=Level2&invuln boot, never in a game you
@@ -731,9 +740,13 @@
             catch (e) { console.warn('[debug] eaNetPuppetBench failed (game not booted yet?): ' + e.message); }
         };
 
-        // Debug: the measured ceiling the co-op teleport guard's speed cap is set against (card
-        // 8dabe812). eaNetVelScan(true) arms, eaNetVelScan() reads. Needs no net session -- it
-        // measures the game's own motion, which is the quantity the guard bounds.
+        // Debug: the offline audit behind the co-op teleport marker (cards 8dabe812 → e79bb994).
+        // eaNetVelScan(true) arms, eaNetVelScan() reads. Per replicable type it reports the
+        // fastest SUSTAINED speed against the unmarked-teleport diagnostic threshold, plus
+        // `marked=` — how many repositions that type announced. Needs no net session, since it
+        // measures the game's own motion and the game's own marking; it REFUSES to arm inside a
+        // session, and disarms itself if one starts, because it consumes the same markers the
+        // host needs to send.
         window.eaNetVelScan = (on) => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetVelScan', on === true)); }
             catch (e) { console.warn('[debug] eaNetVelScan failed (game not booted yet?): ' + e.message); }

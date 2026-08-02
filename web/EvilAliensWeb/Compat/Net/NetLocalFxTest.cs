@@ -259,6 +259,9 @@ namespace EvilAliensWeb.Compat.Net
             Check("...and puts exactly one EvSlowmo on the peer's wire (" + slowmoFrames.Count
                 + " frames, " + sentMs + "ms)",
                 sentOk && sentMs == (ushort)(LocalSlowmoSeconds * 1000f));
+            Check("...for the window it really opened locally ("
+                + Fmt(oracle.NetSlowmotionMsLeft) + "ms left of " + sentMs + ")",
+                Math.Abs(oracle.NetSlowmotionMsLeft - LocalSlowmoSeconds * 1000f) < 1f);
 
             // 2b. RX, plus the no-echo assertion. Cleared first, so "the peer's frame did it" is
             // distinguishable from "2a's slow motion is still running".
@@ -271,6 +274,13 @@ namespace EvilAliensWeb.Compat.Net
             NetSession.Update();
             Check("the peer's EvSlowmo scales our world too (slowmotion="
                 + Fmt(oracle.Slowmotion) + ")", oracle.Slowmotion == 0.4f);
+            // THE DURATION, and it needs its own leg: `Slowmotion` is a flat 0.4 whatever the
+            // window, so a receiver that dropped the ms->seconds conversion would open a window
+            // a THOUSAND times too long and every other assertion here would still be green.
+            // PeerSlowmoMs is deliberately not the value 2a sent, so this cannot read that one.
+            Check("...for the duration the peer asked for (" + Fmt(oracle.NetSlowmotionMsLeft)
+                + "ms left of " + PeerSlowmoMs + ")",
+                Math.Abs(oracle.NetSlowmotionMsLeft - PeerSlowmoMs) < 1f);
             // THE LOAD-BEARING ONE. An rx path calling SetSlowmotion instead of NetSetSlowmotion
             // would pass every assertion above and leave the two peers announcing each other's
             // announcements for as long as the session lasted.

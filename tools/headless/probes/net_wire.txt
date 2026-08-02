@@ -84,6 +84,6 @@ expect 5\. scaled-i16 motion rates
 # Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
 # game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
 # slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
-expect \[netwire\] 90 passed, 0 failed
+expect \[netwire\] 91 passed, 0 failed
 expect-not FAIL
 quit

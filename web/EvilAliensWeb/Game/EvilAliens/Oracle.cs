@@ -81,6 +81,12 @@ public class Oracle : GameComponent, IOracleService
 		EvilAliensWeb.Compat.Net.NetSession.OnLocalSlowmotion(seconds);
 	}
 
+	// How much of the slow-motion window is left, in ms (0 when none is running). The DURATION is
+	// otherwise unobservable -- `Slowmotion` is a flat 0.4 whatever the window -- so without this
+	// a receiver that forgot the ms->seconds conversion would set a window 1000x too long and
+	// every assertion about the scale would still pass. NetLocalFxTest reads it.
+	internal float NetSlowmotionMsLeft => slowmotimer.Active ? slowmotimer.TimeLeft : 0f;
+
 	// The same work without the announcement -- the inbound half of the pair above. Kept a
 	// separate method rather than a `fromNet` flag on SetSlowmotion: the whole no-echo argument
 	// then rests on every caller passing the right bool, where this rests on which name they

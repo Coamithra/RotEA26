@@ -545,7 +545,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v14):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v15):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive flag,
   CUMULATIVE shot count, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -1376,14 +1376,20 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       slow the ENEMIES is the host slowing its authoritative world.
     - The `?nethitstop=1` reproduction seam is unrelated and untouched: it re-enables `Juice`'s
       freeze, which is still the asymmetric case.
-  - **Verify with `eaNetLocalFx()`** (`Compat/Net/NetLocalFxTest.cs`, 22 assertions;
+    - **The received duration is CLAMPED at the decode boundary to `NetProtocol.MaxSlowmoMs`
+      (12000, what `PlayerShip.PowerUp` can produce), not rejected** -- the field is
+      presentation-shaped, so degrading a silly value beats dropping the message, and a bare u16
+      is a 65.5 s hold off a stranger's wire (`AllowOnlineJoins` defaults ON). The clamp bounds
+      ONE frame and nothing bounds REPETITION; that surface is card `2da92af9`'s, not this one's.
+  - **Verify with `eaNetLocalFx()`** (`Compat/Net/NetLocalFxTest.cs`, 24 assertions;
     `tools/headless/probes/net_local_fx.txt`), MENU-runnable and leave-no-trace. A screenshot
     cannot see either half: a floater moves no score, no metric and no component, so its absence
     is exactly as invisible as its presence, and the effects belong to the peer whose console you
     are not reading. **The two legs that carry the cards** are "no floater appeared AND the score
     still moved" (a gate that suppressed the whole payout, or a claim that never arrived, would
     pass the absence alone) and the no-echo assertion. Mutation-tested four ways, each failing one
-    leg. **Deliberately absent from `net_selftests.txt`** -- it has its own probe, which carries
+    leg -- including the ms->seconds conversion, which needs a leg of its own because `Slowmotion`
+    is a flat 0.4 whatever the window. **Deliberately absent from `net_selftests.txt`** -- it has its own probe, which carries
     the write-up and the mutation matrix, the `eaNetDeathFx` precedent.
   - **NOT VERIFIED ON TWO REAL SCREENS.** Whether 12 s of shared bullet-time from one player's
     1up FEELS right is a playtest question this rig cannot answer.

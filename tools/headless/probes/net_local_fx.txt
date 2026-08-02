@@ -55,10 +55,12 @@
 # else would say so: Oracle.SetSlowmotion EXTENDS a running window, so the failure is a world
 # that never speeds up again rather than a crash.
 #
-# MUTATION-TESTED FOUR WAYS, each failing exactly one leg: dropping the OwnsSlot gate on the
+# MUTATION-TESTED FIVE WAYS, each failing exactly one leg: dropping the OwnsSlot gate on the
 # positional overload (leg 1a), the rx path calling SetSlowmotion instead of NetSetSlowmotion
-# (the echo leg), dropping the send from SetSlowmotion (the tx leg), and reverting
-# AwardScoreToAll to the pre-card "first seated" rule (leg 1c).
+# (the echo leg), dropping the send from SetSlowmotion (the tx leg), reverting AwardScoreToAll
+# to the pre-card "first seated" rule (leg 1c), and dropping the rx path's ms->seconds
+# conversion (the duration leg -- `Slowmotion` is a flat 0.4 whatever the window, so a window a
+# THOUSAND times too long moves no other assertion).
 #
 # MENU-ONLY AND LEAVE-NO-TRACE, the eaNetScenarios shape -- so `?menu&noattract` and no level.
 # `?noattract` matters: the 20 s attract demo is a live world, and the suite would SKIP over it.
@@ -73,6 +75,6 @@ eval NetLocalFx
 # The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
 # happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
 # attract demo is up. Raise the count when legs are added.
-expect \[netlocalfx\] 22 passed, 0 failed
+expect \[netlocalfx\] 24 passed, 0 failed
 expect-not SKIP
 quit

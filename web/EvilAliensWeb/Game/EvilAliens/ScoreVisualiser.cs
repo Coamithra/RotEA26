@@ -450,10 +450,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// for a slot reports level 1 is a catch-up too, and sparkles. One sparkle at a join is not
 	// worth a per-slot "have we seen this one yet" latch.
 	//
-	// OneUp is unreachable here (it is past HudLevelCount) and must stay that way: its PowerUp
-	// case is Oracle.SetSlowmotion, a whole-sim time scale that is deliberately local -- the
-	// puppet driver dead-reckons on real time precisely so one peer's time scaling cannot poison
-	// replication. A DOWN step (a reset the peers reached at different moments) only snaps the
+	// OneUp is unreachable here (it is past HudLevelCount) and must stay that way. Since card
+	// a66e190a the slow motion's EFFECT replicates (as EvSlowmo, so both peers scale together),
+	// but its TRIGGER is still the owner's alone: a peer must never fire one off a slot it does
+	// not own, which is what levelling OneUp here would do. A DOWN step (a reset the peers reached at different moments) only snaps the
 	// readout; PowerUp's fields are MathHelper.Max accumulations and cannot be walked back.
 	private void NetSetPowerupLevel(int player, Powerup.PowerupType type, int level)
 	{

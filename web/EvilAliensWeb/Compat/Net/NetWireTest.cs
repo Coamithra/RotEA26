@@ -408,6 +408,13 @@ namespace EvilAliensWeb.Compat.Net
                     && smMs == 12000);
             check("EvSlowmo refuses a truncated frame",
                 !NetProtocol.TryDecodeSlowmoEvent(new byte[5], out _));
+            // CLAMPED rather than refused: the field is a time scale that ends by itself, so
+            // degrading a silly value beats dropping the message -- but a bare u16 is a 65.5 s
+            // hold off a stranger's wire, against the 12 s the game can produce.
+            byte[] tooLong = Round(NetProtocol.EncodeSlowmoEvent(12, ushort.MaxValue), reliable: true);
+            check("EvSlowmo clamps an over-long duration to what the game can produce",
+                tooLong != null && NetProtocol.TryDecodeSlowmoEvent(tooLong, out ushort clampedMs)
+                    && clampedMs == NetProtocol.MaxSlowmoMs);
 
             // The two ship messages share a body with the friend one shifted right by a byte for
             // the slot -- exactly the shape where an off-by-one reads the neighbouring field and

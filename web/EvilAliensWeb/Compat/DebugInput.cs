@@ -171,7 +171,9 @@ namespace EvilAliensWeb.Compat
 		// so the ghost-trail look can be seen on demand without grinding a powerup. The Oracle
 		// service is registered for the whole game's life, so this only no-ops meaningfully in a
 		// menu because Oracle.Update resets slowmo to 1f whenever no player ship is alive — i.e.
-		// it bites only inside a level with a live ship. Not gameplay input. The null guard
+		// it bites only inside a level with a live ship. INSIDE A CO-OP SESSION it also reaches
+		// the OTHER peer (card a66e190a): SetSlowmotion announces itself as EvSlowmo, so a
+		// console call here slows both worlds, not just this one. Not gameplay input. The null guard
 		// below is purely defensive (before the game is constructed).
 		[JSInvokable("debugSlowmo")]
 		public static void Slowmo(float seconds)

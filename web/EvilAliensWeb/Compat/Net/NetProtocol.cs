@@ -1122,11 +1122,20 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // EvSlowmo (either peer, card a66e190a): [durationMs:2]. A duration, not an on/off state,
-        // because Oracle.SetSlowmotion EXTENDS an already-running window rather than restarting
-        // it -- so the receiver needs the number, and a repeat is idempotent-ish rather than
-        // destructive. No enum to validate; a u16 is bounded by its own width (65.5 s worst case
-        // off a hostile wire, against the 12 s the game sends) and the effect is a time scale
-        // that ends by itself, so there is nothing here a REJECT would protect.
+        // because Oracle.SetSlowmotion EXTENDS an already-running window rather than restarting it
+        // -- so the receiver needs the number.
+        //
+        // CLAMPED at the decode boundary, not rejected: the field is presentation-shaped (a time
+        // scale that ends by itself), so degrading a silly value beats dropping the message. The
+        // bound is what the GAME can produce, PlayerShip.PowerUp's 12 s. Without it a u16 is a
+        // 65.5-second hold, and `Settings.AllowOnlineJoins` defaults ON, so the sender can be a
+        // stranger off the public game browser rather than someone you swapped a room code with.
+        // RESIDUAL, stated rather than papered over: the clamp bounds ONE frame, and nothing here
+        // bounds REPETITION -- a peer re-sending every tick holds the other side at 0.4x for as
+        // long as it likes. That is the same surface as every other beat and belongs to card
+        // 2da92af9 (public-list abuse bounds), not to a per-message check.
+        public const ushort MaxSlowmoMs = 12000;
+
         public static byte[] EncodeSlowmoEvent(ushort eventSeq, ushort durationMs)
         {
             byte[] b = EventHeader(EvSlowmo, eventSeq, 2);
@@ -1141,7 +1150,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return false;
             }
-            durationMs = ReadU16(b, 4);
+            durationMs = Math.Min(ReadU16(b, 4), MaxSlowmoMs);
             return true;
         }
 

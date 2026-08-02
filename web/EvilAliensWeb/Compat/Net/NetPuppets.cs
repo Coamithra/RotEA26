@@ -817,7 +817,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static bool IsPaid(ushort netId, byte slot)
         {
-            return slot < 8 && paidLedger.TryGetValue(netId, out byte mask) && (mask & (1 << slot)) != 0;
+            return slot < NetProtocol.PayableSlots && paidLedger.TryGetValue(netId, out byte mask) && (mask & (1 << slot)) != 0;
         }
 
         // ---- wire + apply round trip (card b0ab09ec) -------------------------------------------
@@ -967,7 +967,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void MarkPaid(ushort netId, byte slot)
         {
-            if (slot >= 8)
+            if (slot >= NetProtocol.PayableSlots)
             {
                 return;
             }

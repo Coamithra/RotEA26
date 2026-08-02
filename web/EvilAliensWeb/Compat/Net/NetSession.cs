@@ -1262,7 +1262,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             int slot = killer is IAlienKiller k ? k.Player() : -1;
-            NoteKillSlot(comp, slot >= 0 && slot < 8 ? (byte)slot : NetProtocol.KillerNone);
+            NoteKillSlot(comp, slot >= 0 && slot < NetProtocol.PayableSlots ? (byte)slot : NetProtocol.KillerNone);
         }
 
         internal static void NoteKillSlot(INetEntity comp, byte slot)
@@ -1319,7 +1319,7 @@ namespace EvilAliensWeb.Compat.Net
         // Powerup.Die() cascades into removal.
         public static void NotePowerupTaken(Powerup powerup, int playerSlot)
         {
-            if (Active && playerSlot >= 0 && playerSlot < 8)
+            if (Active && playerSlot >= 0 && playerSlot < NetProtocol.PayableSlots)
             {
                 NoteKillSlot(powerup, (byte)playerSlot);
             }
@@ -1536,7 +1536,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 Pos = pos,
                 Points = points,
-                PaidMask = (byte)(prepaidMask | (killerSlot < 8 ? 1 << killerSlot : 0)),
+                PaidMask = (byte)(prepaidMask | (killerSlot < NetProtocol.PayableSlots ? 1 << killerSlot : 0)),
                 OneUp = oneUp,
             };
             if (!recentDeaths.ContainsKey(id))

@@ -277,17 +277,21 @@ namespace EvilAliensWeb.Compat.Net
         // unrecognised value degrades to KillerNone, the FX-free silent despawn, which is the
         // least the receiver can do rather than crediting a slot 0x42 that does not exist.
         //
-        // The payable bound is 8, the width of the claim ledgers' PaidMask (NetPuppets.MarkPaid
-        // / IsPaid), NOT MaxSlots -- NetSession.NoteKill already admits 0..7, so bounding at 4
-        // here would silently reclassify a value the host is able to emit. Slots 4..7 are
-        // unreachable today (Oracle.MaxPlayers is 4); this keeps the two ends agreeing anyway.
+        // The payable bound is PayableSlots (8), the width of the claim ledgers' PaidMask
+        // (NetPuppets.MarkPaid / IsPaid), NOT MaxSlots -- NetSession.NoteKill already admits
+        // 0..7, so bounding at 4 here would silently reclassify a value the host is able to
+        // emit. Slots 4..7 are unreachable today (Oracle.MaxPlayers is 4); this keeps the two
+        // ends agreeing anyway. Every writer and reader of a killer/claim slot bounds against
+        // THIS const -- it was spelled as a bare 8 at six sites before it had a name.
+        internal const int PayableSlots = 8;
+
         internal static byte ClampKillerSlot(int raw)
         {
             if (raw == KillerSelf)
             {
                 return KillerSelf;
             }
-            return (raw >= 0 && raw < 8) ? (byte)raw : KillerNone;
+            return (raw >= 0 && raw < PayableSlots) ? (byte)raw : KillerNone;
         }
 
         // ---- ship stream --------------------------------------------------------------

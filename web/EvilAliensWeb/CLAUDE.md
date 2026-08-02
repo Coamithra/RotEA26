@@ -553,7 +553,11 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   blending it, each with the identical jump left UNMARKED beside it -- the pre-card code also
   ended up in the right PLACE, so position alone proves nothing. Menu-only, leave-no-trace),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
-  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
+  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses; its
+  `aliveSlots=[..]` field is the ship-liveness readout -- a bracketed slot list, so `[0]` is slot
+  0 flying and `[]` is a shipless world -- and is what a probe should assert a live-ship
+  PRECONDITION on rather than `eaWorldCensus`, whose report is capped at the fourteen most
+  populous types),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the

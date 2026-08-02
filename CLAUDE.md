@@ -126,6 +126,12 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     regression would otherwise go unnoticed until someone plays the game; mutation-test it
     first, and assert the POSITIVE too or it passes on a run that never got there. Conventions
     + the menu-navigation crib: `tools/headless/probes/README.md`.
+    **The runner REFUSES a stale binary (exit 2, not a probe-failure 1)** -- it checks eahl
+    against the newest `Game/`/`Compat/`/`tools/headless` source first, because a failed
+    `dotnet build` otherwise leaves the probes testing the previous binary and reporting green
+    (card 74998f22). Rebuild, or pass `--build`; `--allow-stale` is the deliberate override.
+    A probe's PRECONDITION must be pinned and asserted separately, not waited out -- unseeded
+    RNG turns "stepped far enough" into a coin flip (card af4c3694).
   - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
     scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
     `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first

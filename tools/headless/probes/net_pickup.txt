@@ -1,0 +1,75 @@
+# PROBE: a powerup the OTHER player collects must have its ship-side effect on this screen too --
+# the "2"/Linker arm, the option count, and the level-up sparkle.
+#
+# PINS: cards 83271f3d (netplay: the "2" powerup), 10f9dba4 (nr of options not synched) and
+# d53431b4 (show the little animation when a remote player powers up). One root cause for the
+# first two: NetSession.ApplyRemotePowerup mirrored ONLY the HUD icon, so the collector's ship --
+# a puppet on this screen -- got the readout and none of the effect.
+#
+# WHAT IT ASSERTS (Compat/Net/NetPickupTest.cs carries the full reasoning):
+#   1. NEGATIVE FIRST -- the owner arms locally, the puppet is still unarmed, and flying into it
+#      forms NO connector. That is card 83271f3d's symptom verbatim, so the positive under it
+#      cannot be read as "the rig always makes a connector".
+#      POSITIVE -- the peer's own Linker arrives as a real EvClaim off the wire and arms the
+#      puppet.
+#   2. The OwnsSlot gate: the HOST also runs this path for a CLIENT's claim, so a claim naming a
+#      slot we own must run no ship effect (the HUD half still lands -- the positive control that
+#      keeps the gate from being an early return).
+#   3. With both armed the connector forms, and the peer's EvTetherBreak breaks it HERE too. That
+#      second half is the base GameScene.NetApplyTetherBreak body this card added: it used to be
+#      empty outside TeamChallenge, so a Linker tether hit only one screen saw left the other
+#      player pulled toward an anchor already let go of.
+#   4. THE ONE A SINGLE-PATH TEST COULD NOT CATCH. On a real observer BOTH mirrors run -- the
+#      per-pickup one from these cards and the per-LEVEL one from card 1a3ad45a (MsgHudState ->
+#      NetSetPowerupLevel -> PowerUp) -- so the risk of fixing the reported "observer sees fewer
+#      options" is inverting it into "observer sees more". The leg drives the full sequence in
+#      real-session order (owner: real CollidesWith pickups + real combo-driven level-ups;
+#      observer: real EvClaim frames + the real MsgHudState content) and requires both counts to
+#      move by the SAME amount, with the PRE-CARD mirror run over the same shape first as the
+#      control. Measured owner +6 / observer +6 over 3 pickups + 3 level-ups; under the pre-card
+#      mutation the observer reads +3, i.e. exactly the level-derived half.
+#   5. The sparkle plays on a ONE-step remote level-up and NOT on a multi-step catch-up (a
+#      join-in-progress peer adopting a slot already at level 4 would otherwise fire four at once
+#      for events that happened before it was watching).
+#
+# MUTATION-TESTED FIVE WAYS, each isolated, each failing only the legs that name it: dropping the
+# ship-side mirror fails 1/3/4 (3 -> observer +3); removing the OwnsSlot gate fails 2; emptying
+# GameScene.NetApplyTetherBreak fails 3's break half; doEffect always-false fails 5's one-step
+# leg; doEffect always-true fails 5's catch-up leg.
+#
+# DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs
+# a real session onto the live level, seats a Remote puppet, spends real pickups into the live
+# ScoreVisualiser and really tethers the two ships. Teardown stops the session, sweeps what it
+# planted and frees the Remote seat, and asserts it did; it does NOT unwind the powerup levels or
+# the combo it spent.
+#
+# ?level=Level2 for a level that just runs with one keyboard player and a live ship (the suite's
+# leg-0 precondition -- a partner-seating level or the Mechanical Friends cheat would seat a
+# second slot and it would report rather than assert), ?invuln so the settle cannot lose that
+# ship, ?noattract because the suite needs the LEVEL and not a demo.
+#
+# NOT COVERED HERE: card d53431b4's mute half (a remote pickup no longer plays the "powerup"
+# cue). SoundManager exposes no cue counter and adding one solely for a test would be a
+# production field with no other reader.
+#
+# eahl: --flags "?level=Level2&invuln&noattract"
+
+step 400 nodraw
+mark
+eval NetPickup
+
+expect \[net\] session start role=host .* transport=InMemory
+expect \[netpickup\] remote powerup pickups
+expect 1\. Linker -- the "2" powerup arms the collector's ship
+expect 2\. the OwnsSlot gate
+expect 3\. with both ships armed the connector forms
+expect 4\. option count -- owner vs observer over the FULL remote sequence
+expect 5\. the sparkle
+expect 9\. teardown
+# A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
+# never happened, and this suite short-circuits its own legs on a bad precondition. Raise the
+# count when checks are added.
+expect \[netpickup\] 23 passed, 0 failed
+expect-not FAIL
+expect-not SKIP
+quit

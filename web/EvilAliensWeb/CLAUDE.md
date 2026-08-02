@@ -458,6 +458,11 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
+  `eaNetPickup()` (the remote-powerup-pickup suite — cards 83271f3d / 10f9dba4 / d53431b4: the
+  "2"/Linker arm and the connector it unblocks, the option count over the COMBINED claim + HUD
+  sequence, and the level-up sparkle. **Destructive** — it pairs a real host session onto the
+  live level and spends real pickups into the live panels, so run it in a throwaway
+  `?level=Level2&invuln` boot),
   `eaNetWire.test()` (the in-process net wire + every wire-level codec round trip — card
   25ad0659; needs no session, level or second tab, and also runs under `logic_probe`),
   `eaNetHost()` (the `INetHost` seam — card 25ad0659 step 2a: the production host's 1:1 mapping

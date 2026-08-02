@@ -861,6 +861,13 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	internal int NetShotsPerSec => shotspersec;
 
+	// Read seams for eaNetPickup() (cards 83271f3d / 10f9dba4). Both front private state a
+	// screenshot cannot show: whether the "2" powerup armed this ship, and how many Option ships
+	// it is flying -- the two things the remote-pickup mirror exists to keep equal between peers.
+	internal bool NetReadyToConnect => readyToConnect;
+
+	internal int NetOptionCount => options[0].Count + options[1].Count;
+
 	internal float NetBulletLife => bulletlifetime;
 
 	// Applied every tick to a ControlDevice.Remote puppet: interpolated position (speed
@@ -2030,30 +2037,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			Score.AddBomb(player);
 			break;
 		case Powerup.PowerupType.Option:
-		{
-			int perLayer = 1;
-			int layers = 1;
-			if (optionLevel == 3)
-			{
-				perLayer = 2;
-			}
-			if (optionLevel == 4)
-			{
-				layers = 2;
-			}
-			for (int i = 0; i < layers; i++)
-			{
-				for (int j = 0; j < perLayer; j++)
-				{
-					Option option = Option.NewOption(collection, base.Game);
-					option.Setup(this, 0f, i + 1, player);
-					collection.Add((GameComponent)(object)option);
-					options[i].Add(option);
-				}
-			}
-			RedressOptions();
+			SpawnPickupOptions();
 			break;
-		}
 		case Powerup.PowerupType.FirePower:
 			shotspersec++;
 			shotspersec = Math.Min(shotspersec, 18);
@@ -2064,6 +2049,71 @@ public class PlayerShip : AlienDrawableGameComponent
 			break;
 		case Powerup.PowerupType.OneUp:
 			Score.AddLife();
+			break;
+		}
+	}
+
+	// The Option pickup's spawn, factored out of DoSpecial so the online-co-op mirror
+	// (NetApplyRemotePickup) runs the SAME count rather than a second copy of this arithmetic --
+	// the two drifting apart is precisely the bug card 10f9dba4 reported, one peer showing fewer
+	// options than the other.
+	private void SpawnPickupOptions()
+	{
+		int perLayer = 1;
+		int layers = 1;
+		if (optionLevel == 3)
+		{
+			perLayer = 2;
+		}
+		if (optionLevel == 4)
+		{
+			layers = 2;
+		}
+		for (int i = 0; i < layers; i++)
+		{
+			for (int j = 0; j < perLayer; j++)
+			{
+				Option option = Option.NewOption(collection, base.Game);
+				option.Setup(this, 0f, i + 1, player);
+				collection.Add((GameComponent)(object)option);
+				options[i].Add(option);
+			}
+		}
+		RedressOptions();
+	}
+
+	// Online co-op (cards 83271f3d / 10f9dba4): the OTHER peer's player collected a powerup, and
+	// this ship is their puppet here. Mirror the SHIP-side half of the local pickup path
+	// (DoSpecial(pickup: true)) so the puppet is not a player with a HUD icon and none of the
+	// effect. NetSession.ApplyRemotePowerup is the only caller and gates on !OwnsSlot, so this
+	// never runs for a ship whose pickup already went through CollidesWith.
+	//
+	// Only the two types that are not already replicated by some other means are acted on:
+	//   Linker    -- readyToConnect is set NOWHERE else, so without this the "2" powerup's glow
+	//                never appears on the puppet AND PlayerShip.CollidesWith's
+	//                (readyToConnect & other.readyToConnect) is false on BOTH peers, i.e. the
+	//                connector is unreachable in an online session (card 83271f3d).
+	//   Option    -- the pickup's 1-4 options. The LEVEL-driven ones already arrive over
+	//                MsgHudState (ScoreVisualiser.NetSetPowerupLevel -> PowerUp), and a pickup
+	//                never changes a level, so the two paths are disjoint and add up (card
+	//                10f9dba4).
+	// The other four are deliberately inert here:
+	//   FirePower -- shotspersec rides MsgShipState (NetApplyRemoteState) already.
+	//   Range     -- bulletlifetime likewise.
+	//   Blast     -- AddBomb is deliberately not mirrored: the SPEND side (NetDoBlast) does not
+	//                decrement the remote's bombs either, so mirroring the increment alone would
+	//                pile the other player's bomb icons up forever.
+	//   OneUp     -- lives are host-authoritative (EvScoreSync sends them verbatim); the host
+	//                credits a client's extra life in NetSession.HandleClaim instead.
+	internal void NetApplyRemotePickup(Powerup.PowerupType type)
+	{
+		switch (type)
+		{
+		case Powerup.PowerupType.Linker:
+			readyToConnect = true;
+			break;
+		case Powerup.PowerupType.Option:
+			SpawnPickupOptions();
 			break;
 		}
 	}
@@ -2165,6 +2215,36 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 		}
 		base.CollidesWith(other);
+	}
+
+	// Online co-op (card 83271f3d): the peer broke a tether on its screen, so break the ones this
+	// ship holds. Only Linker connectors are ever in this list -- TeamChallenge's scripted tether
+	// is built by ShipConnector.Setup, which does not register with either endpoint, and the scene
+	// breaks that one itself.
+	//
+	// A Linker connector is formed INDEPENDENTLY on each peer (both run CollidesWith against their
+	// own copy of the pair), and ShipConnector.TakeHit fires EvTetherBreak unconditionally -- so
+	// without a break here the peer that did not see the hit stays tethered, and its
+	// NetPullOwnShip keeps dragging its ship toward an anchor the other player has already let go
+	// of.
+	//
+	// EVERY connector, NOT just the ones with a puppet endpoint. With couch players a pair of
+	// LOCALLY-owned ships can be connected here while the same pair is two puppets on the peer, so
+	// a puppet-endpoint filter would break that link when we saw the hit and not when they did --
+	// a one-directional break, which is worse than the known over-break below.
+	// KNOWN LIMIT: EvTetherBreak carries no connector identity (it is the or-of-either-peer
+	// idempotent event TeamChallenge's single tether was designed around), so a peer breaking one
+	// of two live connectors breaks both here. Fixing that means putting endpoint slots on the
+	// wire.
+	internal void NetBreakConnectors()
+	{
+		// Backwards because NetBreakSilently ends in Die(); removal is queued and this list is
+		// only mutated at the ComponentRemoved flush, so nothing can shrink under us today -- the
+		// reverse walk is what keeps that true if it ever becomes synchronous.
+		for (int i = connectors.Count - 1; i >= 0; i--)
+		{
+			connectors[i].NetBreakSilently();
+		}
 	}
 
 	private void Killer_OnDeath(object sender)

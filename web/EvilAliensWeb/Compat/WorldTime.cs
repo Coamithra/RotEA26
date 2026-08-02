@@ -59,9 +59,11 @@ namespace EvilAliensWeb.Compat
             Seconds += dt;
         }
 
-        // Boot/test reset. Not called on level entry: these are ambient phases, so
-        // a level starting mid-shimmer is invisible, while resetting would pop
-        // every effect that survived the transition.
+        // Test/probe rezero -- DebugInput.WorldClockReset is the only caller, and it exists so
+        // a probe can assert an exact reading rather than a boot-tick count. Nothing calls it at
+        // boot (the field starts at 0) and nothing calls it on level entry: these are ambient
+        // phases, so a level starting mid-shimmer is invisible, while resetting would pop every
+        // effect that survived the transition.
         internal static void Reset()
         {
             Seconds = 0f;

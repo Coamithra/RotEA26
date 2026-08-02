@@ -1210,11 +1210,14 @@ namespace EvilAliensWeb.Compat
 		[JSInvokable("debugWorldClock")]
 		public static void WorldClock()
 		{
+			// A MISSING bin reports depth=none, never 0: `frozen=False depth=0` is exactly what a
+			// genuinely running world prints, so a broken service lookup would read as healthy --
+			// and pause_world_clock.txt asserts that very string on two of its three legs.
 			EvilAliens.ComponentBin bin =
 				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin;
-			int depth = (bin != null) ? bin.FreezeDepth : 0;
 			Console.WriteLine("[worldclock] seconds=" + WorldTime.Seconds.ToString("0.000")
-				+ " frozen=" + (depth > 0) + " depth=" + depth);
+				+ " frozen=" + (bin != null && bin.FreezeDepth > 0)
+				+ " depth=" + ((bin != null) ? bin.FreezeDepth.ToString() : "none"));
 		}
 
 		// Rezero the world clock (`eaWorldClockReset()` / `eval WorldClockReset`), card d79a2f48.

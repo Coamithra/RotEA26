@@ -16,8 +16,9 @@
 // so a patch always sits exactly over the region it was cut from and pulses with
 // the boss. Playback ping-pongs (seamless loop) and rides the frame-interpolation
 // shader (same path as the animated Braineroid), so a low frame count still plays
-// smooth. Advancing on Draw time (not Update) keeps it cosmetic — unaffected by
-// hit-stop, like the metal sheen.
+// smooth. It advances in Draw rather than Update, but on Compat/WorldTime's delta
+// (card d79a2f48): it is cosmetic, yet it decorates a boss whose Update a pause
+// freezes, so on raw Draw time the patches kept cycling over a motionless boss.
 //
 // A patch with `triggerAvgSeconds` set does NOT loop: it rests on frame 0 (the
 // untouched crop, so it reads as the static art) and plays ONE ping-pong cycle each
@@ -60,7 +61,7 @@ internal sealed class BrainBossOverlays
         // eyeball). Mechanical flicker (pods) keeps interpolation for smooth light changes.
         public bool Interpolate;
         public SpriteBlendMode Blend;
-        public float Clock;   // seconds of real (draw) time
+        public float Clock;   // seconds of WORLD time (frozen by a pause, scaled by slow-mo)
         // > 0 => triggered: rest on frame 0, play one cycle every ~this many seconds.
         public float TriggerAvgSeconds;
         // true (gate:"spawn") => rest on frame 0 unless the boss is actively spawning enemies;
@@ -73,13 +74,12 @@ internal sealed class BrainBossOverlays
 
     private readonly List<Overlay> _overlays = new List<Overlay>();
     private bool _loaded;
-
-    // Zero every patch's playback clock. Called from BrainBoss.Initialize so a RECYCLED
-    // boss (re-fight) restarts its overlays at phase 0 instead of mid-loop.
     // WorldTime reading at the last Draw, so the patches advance on the WORLD's clock rather
     // than on raw Draw time (card d79a2f48). Negative until the first Draw seeds it.
     private float _lastWorldSeconds = -1f;
 
+    // Zero every patch's playback clock. Called from BrainBoss.Initialize so a RECYCLED
+    // boss (re-fight) restarts its overlays at phase 0 instead of mid-loop.
     public void Reset()
     {
         foreach (Overlay ov in _overlays)
@@ -203,7 +203,7 @@ internal sealed class BrainBossOverlays
     /// boss's live `color` so the patches redden in lockstep with the base sprite.
     /// </summary>
     public void Draw(SpriteBatchWrapper sb, Vector2 position, float drawScale,
-                     int bossTexW, int bossTexH, Color tint, GameTime gameTime, bool spawnActive)
+                     int bossTexW, int bossTexH, Color tint, bool spawnActive)
     {
         if (_overlays.Count == 0)
             return;
@@ -217,11 +217,19 @@ internal sealed class BrainBossOverlays
         //     zero), so a BrainBoss screenshot is repeatable without ?brainoverlayphase=;
         //   * the sprite harness still PLAYS the overlays -- it freezes the boss with
         //     Enabled=false rather than a pause layer, so WorldTime keeps running there.
+        // Clamped both ways, the same rule WorldTime.Advance and ShipConnector.Draw use: a
+        // stretch with no Draw at all (Visible off, a scene skipped during a level warm) leaves
+        // the last reading stale, and spending the whole accumulated gap in one step would jump
+        // the eye or the pods mid-cycle.
         float dt = (_lastWorldSeconds < 0f) ? 0f : WorldTime.Seconds - _lastWorldSeconds;
         _lastWorldSeconds = WorldTime.Seconds;
         if (dt < 0f)
         {
             dt = 0f;
+        }
+        else if (dt > 0.1f)
+        {
+            dt = 0.1f;
         }
         // Map manifest (1448x1086 reference) coords onto the actual boss texture, so a
         // future higher-res brainbosshd (with a matching DesignFrameWidth) still lines up —
@@ -247,7 +255,7 @@ internal sealed class BrainBossOverlays
                 // dt == 0 skips the whole advance, not just the accumulate: the triggered
                 // patch's per-frame roll would otherwise still fire under a pause and start
                 // an animation that then cannot run.
-                AdvanceClock(ov, dt, gameTime, spawnActive);
+                AdvanceClock(ov, dt, spawnActive);
             }
             FramePair(ov, out int f0, out int f1, out float frac);
             Rectangle r0 = CellRect(ov, f0);
@@ -286,7 +294,7 @@ internal sealed class BrainBossOverlays
     // (frame 0 = the untouched crop) and rolls RandomHelper's chance-per-tick each frame;
     // when it fires, one full cycle plays out and the clock snaps back to rest. The roll
     // is skipped mid-cycle, so the average gap between animations is TriggerAvgSeconds.
-    private static void AdvanceClock(Overlay ov, float dt, GameTime gameTime, bool spawnActive)
+    private static void AdvanceClock(Overlay ov, float dt, bool spawnActive)
     {
         // Spawn-gated (the exhaust pods): loop while the boss is venting a wave; when it stops,
         // finish the current cycle then rest at frame 0 (a clean power-down, no mid-flicker cut).
@@ -314,7 +322,11 @@ internal sealed class BrainBossOverlays
         }
         if (!ov.Playing)
         {
-            if (RandomHelper.RandomFromAverage(1f / ov.TriggerAvgSeconds, gameTime))
+            // The roll takes the WORLD dt, not the frame's: on the raw one the eye would go on
+            // triggering at its full real-time rate while the cycle it starts played back slowed
+            // by the 1-up slow-mo, and under ?aiff=<n> (n world ticks per Draw) it would trigger
+            // n times too rarely per world-second.
+            if (RandomHelper.RandomFromAverage(1f / ov.TriggerAvgSeconds, dt))
                 ov.Playing = true;
             return;
         }

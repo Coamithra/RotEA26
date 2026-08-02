@@ -1,50 +1,68 @@
-# PROBE: one tap of the fire button must reach the other peer as ONE bullet, not two.
+# PROBE: the bullets a co-op peer sees are exactly the bullets their owner fired -- one tap is one
+# bullet, and the count stays exact under packet loss.
 #
-# PINS: card a5c2a39b ("if P1 taps once to shoot a single bullet, P2 sees two bullets flying").
-# The card guessed we replicate mousedown+location. We do not -- the wire carries firing STATE on
-# MsgShipState and the peer re-fires through the real FireAt path. The defect was arithmetic:
-# SendShipState streamed firing=true for a flat 150 ms while the peer re-fires through a cadence
-# gate of 1000/shotsPerSec = 125 ms at the default 8 shots/sec, so one tap spawned
-# 1 + floor(150/125) = 2 bullets over there (3 at the maxed 18/s). Those phantom bullets are real
-# in the peer's world and damage what they hit, which is the card's other symptom -- "P1 can kill
-# an enemy on P2's screen that is alive on P1's".
+# PINS: cards a5c2a39b ("if P1 taps once to shoot a single bullet, P2 sees two bullets flying")
+# and a45b78f6 (the cumulative shot counter that replaced its fix).
+#
+# THE ORIGINAL BUG. We do not replicate mousedown+location -- the wire carried firing STATE and the
+# peer re-fired through the real FireAt path. The defect was arithmetic: `firing` was a LEVEL,
+# streamed for a flat 150 ms, in front of a re-fire gate of 1000/shotsPerSec = 125 ms at the
+# default 8 shots/sec, so one tap spawned 1 + floor(150/125) = 2 bullets over there (3 at the maxed
+# 18/s). Those phantom bullets are real in the peer's world and damage what they hit, which is the
+# card's other symptom -- "P1 can kill an enemy on P2's screen that is alive on P1's".
+#
+# THE SHIPPED DESIGN (a45b78f6): MsgShipState carries a CUMULATIVE u8 shot count, incremented
+# inside PlayerShip.FireAt's cadence gate beside the Bullet it counts; the receiver spends the
+# wrapped DELTA through the same shot construction with no second gate. That closes a5c2a39b's two
+# documented residuals rather than trading them off -- a lost or reordered packet costs nothing
+# (the next one carries the total), and two taps inside one cadence period are one increment
+# because the increment happens where the bullet does.
 #
 # WHAT IT ASSERTS (Compat/Net/NetFireTest.cs carries the full reasoning):
-#   1. The contract as a PURE DECISION, over every reachable fire rate CROSSED WITH every send
-#      interval a real frame rate produces: the worst-case number of packets a hold marks, times
-#      that interval, must stay under one cadence period. Sweeping the INTERVAL is the part that
-#      earns its keep -- the send gate is evaluated once per frame, so the real interval is 33.3 ms
-#      at 60 Hz but 40 ms at 100 Hz, and a hold derived from the nominal 33 passes at 60 Hz while
-#      over-firing at 7, 9, 10, 13, 14 and 15 shots/sec on a 100 Hz display. The pre-card flat
-#      150 ms hold is computed beside it and must VIOLATE the bound, so a predicate that had
-#      degenerated into "always true" cannot pass. Plus the other half of the trade -- every rate
-#      still holds for at least one send interval, so no tap goes unsent.
-#   2. The symptom END TO END over a real NetWire: a scripted peer taps once, the real remote
-#      puppet is driven at 60 Hz, and the bullets it spawns are COUNTED. Exactly 1.
-#   3. The same at the maxed fire rate (18/s, a 55.6 ms period) -- where the fix has least room.
-#   4. THE NEGATIVE CONTROL, and the reason a green run means anything: the identical rig is fed
-#      the packet pattern the PRE-CARD sender produced for one tap and must still report TWO.
-#      If leg 4 ever reports 1, the rig has stopped being able to see the bug.
-#   5. The overcorrection guard: ~1 s of held fire must still produce the owner's cadence (8 at
-#      8/s), not one bullet per packet (30) and not zero. Without it, "always 1 bullet" -- a
-#      re-fire that had stopped working entirely -- would pass legs 2-4.
+#   1. The delta arithmetic as a PURE DECISION over the whole 0..255 wrap domain -- every counter
+#      step spent exactly once or refused as a resync, the wrap itself (255 -> 2 is 3 shots, which
+#      a signed subtraction gets catastrophically wrong), and both sides of the catch-up bound.
+#      Plus the TX half: the count on the wire belongs to the SLOT, so a ship swap contributes
+#      nothing and a respawn cannot fabricate shots (a ship dying at 252 and restarting at 0 is a
+#      wrapped delta of 4 -- inside the catch-up bound, and asserted here as the negative).
+#      Phase-independent, so it is the rigorous half; the live legs script one packet cadence.
+#   2. THE SENDER, which the pre-card design could not test at all (its stamp read
+#      Environment.TickCount64, so driving it would have needed a clock seam on FireAt whose only
+#      reader was this suite). The real local ship is driven through the real input path and its
+#      increments are compared against the bullets it really spawned -- including two taps INSIDE
+#      one cadence period, which must be ONE bullet and ONE increment, with the same two taps a
+#      full period apart as the control.
+#   3. The symptom END TO END over a real NetWire: the scripted peer's count goes up by one, the
+#      real remote puppet is driven at 60 Hz, and the bullets it spawns are COUNTED. Exactly 1.
+#   4. The maxed fire rate, and a count arriving +2 in one packet -> exactly 2 bullets.
+#   5. PACKET LOSS mid-burst -- four of ten packets never reach the wire and the peer still fires
+#      all ten. This is the leg the old design could not have passed.
+#   6. Sustained fire at the OWNER'S cadence, as an EXACT number (8 shots over 32 packets) rather
+#      than the band the old hold-window design could only claim.
 #
-# MUTATION-TESTED THREE WAYS, and only the first is visible end to end -- which is the whole
-# argument for leg 1:
-#   * the pre-card flat 150 ms hold -> leg 1 fails (first violation 7/s at 33.33 ms sends), leg 2
-#     reports 2 bullets and leg 3 reports 3. Leg 4 still passes, as an independent control should.
-#   * whole NOMINAL 33 ms packets counted against the period (this card's SECOND attempt, and what
-#     the first commit shipped) -> leg 1 fails at 7/s ON 40 ms SENDS ONLY; every end-to-end leg
-#     passes, because the rig sends at 60 Hz. This is the one that would have shipped a bug.
-#   * a 0.6-fraction-of-the-period hold (the FIRST attempt; 37.5 ms against the 62.5 ms period at
-#     16 shots/sec) -> leg 1 fails at 16/s, every end-to-end leg passes.
-# Legs 2-5 sample ONE phase at ONE send cadence. Do not read a green leg 3 as covering the top of
-# the fire-rate range, or any of them as covering a non-60 Hz sender; leg 1 covers both.
+# THE NEGATIVE CONTROL IS A REFERENCE IMPLEMENTATION, not the old code, which is deleted:
+# `PreCardTapBullets` / `PreCardLossBullets` mirror the firing-LEVEL rule and are asserted to give
+# the WRONG answer on the same inputs (2 bullets for one tap, 3 at 18/s, 6 of 10 under the loss
+# pattern). Without them a green run says nothing -- a rig that had stopped exercising the fire
+# path would report 1 bullet everywhere.
 #
-# DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs
-# a real host session onto the live level, seats a Remote puppet and fires real bullets into the
-# world. Teardown stops the session, sweeps the bullets and frees the Remote seat, and asserts it
-# did.
+# MUTATION-TESTED THREE WAYS, each failing DISJOINT legs:
+#   * the counter stamped on the INTENT (outside FireAt's gate -- the pre-card shape) -> leg 2
+#     fails with `bullets=1 counter+2` on the double tap and `bullets=8 counter+60` on the hold;
+#     every wire leg passes, because the wire is not where that bug lives.
+#   * the receiver spending ONE bullet per counter CHANGE instead of per shot -> leg 4 reports 1
+#     for a +2 step and leg 5 reports 6 of 10, i.e. exactly the pre-card reference number.
+#   * a signed delta (no byte wrap) -> the three arithmetic assertions in leg 1 fail and nothing
+#     else does; the live legs never reach a wrap.
+#   * the RAW ship count put on the wire (dropping the ship-swap branch of AdvanceTxShotCount) ->
+#     only leg 1's two tx assertions fail, reporting `252 -> 0` where the slot's count must not
+#     move. That is the respawn hazard the per-slot counter exists for, and nothing else can see
+#     it: a respawn's wrapped delta can land inside the catch-up bound and look like real fire.
+#
+# DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs a
+# real host session onto the live level, seats a Remote puppet, fires real bullets into the world
+# and drives the LOCAL player's ship through scripted input. Teardown stops the session, sweeps
+# both ships' bullets, releases the scripted hold and frees the Remote seat, and asserts it did.
 #
 # ?level=Level2 for a level that just runs with one keyboard player and a live ship (the suite's
 # rig precondition -- a partner-seating level would seat a second slot and it would report rather
@@ -57,24 +75,34 @@ step 400 nodraw
 mark
 eval NetFire
 
-expect \[net\] session start role=host .* transport=InMemory
-expect \[netfire\] single-tap bullet count
-expect 1\. the hold-window contract over every fire rate AND every send interval
-expect 2\. rig -- a real HOST session, a scripted peer and its ship puppet
-expect 3\. the same tap at the maxed fire rate
-expect 4\. NEGATIVE -- the pre-card packet pattern
-expect 5\. sustained fire still runs at the OWNER'S cadence
-expect 6\. teardown
-# The counts themselves, not just the leg headings -- a bullet count is the whole subject here,
-# and "got 1" is the assertion the card is about. The negative control's "got 2" is asserted just
-# as hard: a rig that stopped reproducing the bug would otherwise go quietly green.
+# The version the session actually negotiated -- the layout change is what forced v12, and a peer
+# on the old number would misparse the friend stream rather than degrade.
+expect \[net\] session start role=host .* protocol=v12 transport=InMemory
+expect \[netfire\] replicated shot count
+expect 1\. the wrapped-delta decision over the whole u8 domain
+expect 2\. the SENDER -- the local ship's counter against the bullets it spawned
+expect 3\. rig -- a real HOST session, a scripted peer and its ship puppet
+expect 4\. the maxed fire rate
+expect 5\. PACKET LOSS mid-burst
+expect 6\. sustained fire runs at the OWNER'S cadence
+expect 7\. teardown
+# The counts themselves, not just the leg headings -- a bullet count is the whole subject here.
+# The sender's double-tap pair and the loss leg's exact ten are the two assertions the card is
+# about; the reference implementation's wrong answers are asserted just as hard, because a control
+# that stopped modelling the bug would let the whole suite go quietly green.
+expect two taps INSIDE one cadence period are one bullet AND one increment \(bullets=1 counter\+1\)
+expect two taps a full period APART are two bullets and two increments \(bullets=2 counter\+2\)
 expect spawns exactly ONE bullet on the peer \(got 1\)
-expect spawns exactly ONE bullet \(got 1\)
-expect spawns TWO bullets for one tap .* \(got 2\)
+expect spawns exactly two bullets \(got 2\)
+expect 10 owner shots over a lossy link are 10 bullets on the peer \(got 10\)
+expect the pre-card firing-LEVEL rule spawns 2 bullets for ONE tap
+expect the pre-card firing LEVEL would have spawned only 6 over the same loss
+expect a ship SWAP contributes no shots to the slot's wire count
+expect the raw ship count would have read as 4 spendable shots across that respawn
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
-# never happened, and this suite skips its end-to-end legs on a bad precondition. Raise the count
-# when checks are added.
-expect \[netfire\] 16 passed, 0 failed
+# never happened, and this suite skips its live legs on a bad precondition. Raise the count when
+# checks are added.
+expect \[netfire\] 29 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

@@ -6,8 +6,8 @@ namespace EvilAliensWeb.Compat.Net
 {
     // The 3-layer wire protocol (plans/stage11-online-coop.md), little-endian binary:
     //   1. Ship stream (unreliable lane, ~30 Hz): MsgShipState -- each peer's own ship
-    //      STATE (pos, velocity, last aim, fire/alive flags, fire-rate loadout). The wire
-    //      carries state, never inputs.
+    //      STATE (pos, velocity, last aim, alive flag, cumulative shot count, fire-rate
+    //      loadout). The wire carries state, never inputs.
     //   2. World snapshot (host -> clients, unreliable lane, ~16.7 Hz): MsgWorldSnapshot --
     //      round-robin length-prefixed entries of the generic base block + per-type state
     //      extras (card 11.2, host world authority).
@@ -94,7 +94,8 @@ namespace EvilAliensWeb.Compat.Net
         public const byte SlotNone = 0xFF;
 
         public const byte ShipFlagAlive = 1 << 0;
-        public const byte ShipFlagFiring = 1 << 1;
+        // Bit 1 used to be ShipFlagFiring -- the fire INTENT as a level, deleted by card a45b78f6
+        // in favour of MsgShipState's cumulative shotCount byte. Free for the next flag.
 
         // ---- wire enum validation (card 88f87ba2) -------------------------------------
         //
@@ -308,15 +309,23 @@ namespace EvilAliensWeb.Compat.Net
         // ---- ship stream --------------------------------------------------------------
 
         // [type][flags][shotsPerSec][bulletLife/10][seq:2][senderMs:4][posX:4][posY:4]
-        // [velX:4][velY:4][aim:4] = 31 bytes. Velocity is design px per MILLISECOND (the
-        // component system's native unit, see AlienDrawableGameComponent.Update).
+        // [velX:4][velY:4][aim:4][shotCount:1] = 31 bytes. Velocity is design px per MILLISECOND
+        // (the component system's native unit, see AlienDrawableGameComponent.Update).
         // senderMs is SESSION-RELATIVE (uint ms since the sender's NetSession.Start) --
         // an absolute machine-uptime tick in float32 loses ms precision within hours.
-        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, bool firing, int shotsPerSec, float bulletLife)
+        //
+        // shotCount (card a45b78f6, protocol v12) is a CUMULATIVE wrapping u8 of the shots the
+        // sender's ship has actually spawned -- incremented inside PlayerShip.FireAt's cadence
+        // gate, beside the Bullet it counts. It REPLACED the `firing` LEVEL flag, which could
+        // only ever be sampled at packet rate: the receiver takes the wrapped delta against the
+        // last count it applied, so a lost or reordered stream packet costs nothing (the next
+        // one carries the total) and two taps inside one cadence period are one increment,
+        // exactly as they are one bullet for the owner.
+        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife)
         {
             byte[] b = new byte[31];
             b[0] = MsgShipState;
-            b[1] = (byte)((alive ? ShipFlagAlive : 0) | (firing ? ShipFlagFiring : 0));
+            b[1] = (byte)(alive ? ShipFlagAlive : 0);
             b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[3] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 4, seq);
@@ -326,6 +335,7 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 18, vel.X);
             WriteF32(b, 22, vel.Y);
             WriteF32(b, 26, aim);
+            b[30] = shotCount;
             return b;
         }
 
@@ -347,19 +357,21 @@ namespace EvilAliensWeb.Compat.Net
             sample.Vel = new Vector2(ReadF32(b, 18), ReadF32(b, 22));
             sample.Aim = ReadF32(b, 26);
             sample.Alive = (b[1] & ShipFlagAlive) != 0;
-            sample.Firing = (b[1] & ShipFlagFiring) != 0;
+            sample.ShotCount = b[30];
             return true;
         }
 
         // Friend (host AI ship) stream: MsgShipState body shifted one byte right for the leading
         // player-slot. `alive` is implicit (a live friend is streamed; a dead/gone one simply stops
-        // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag.
-        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool firing, int shotsPerSec, float bulletLife)
+        // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag --
+        // and since card a45b78f6 no flags byte at all, the firing level having been the only bit
+        // it ever carried.
+        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, byte shotCount, int shotsPerSec, float bulletLife)
         {
             byte[] b = new byte[31];
             b[0] = MsgFriendState;
             b[1] = slot;
-            b[2] = (byte)(firing ? ShipFlagFiring : 0);
+            b[2] = shotCount;
             b[3] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[4] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 5, seq);
@@ -392,7 +404,7 @@ namespace EvilAliensWeb.Compat.Net
             sample.Vel = new Vector2(ReadF32(b, 19), ReadF32(b, 23));
             sample.Aim = ReadF32(b, 27);
             sample.Alive = true;
-            sample.Firing = (b[2] & ShipFlagFiring) != 0;
+            sample.ShotCount = b[2];
             return true;
         }
 
@@ -1237,6 +1249,9 @@ namespace EvilAliensWeb.Compat.Net
         public Vector2 Vel; // design px per ms
         public float Aim;
         public bool Alive;
-        public bool Firing;
+        // Cumulative wrapping count of the shots the OWNER's ship has actually spawned (card
+        // a45b78f6). The receiver fires the wrapped delta; it is not a rate and never resets
+        // except with the ship itself.
+        public byte ShotCount;
     }
 }

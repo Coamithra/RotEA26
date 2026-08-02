@@ -1144,11 +1144,15 @@ namespace EvilAliensWeb.Compat.Net
         // handful per level.
         //
         // NO `NetScene.Current` GATE, unlike OnGameFx and the script beats -- this is an ENTITY
-        // LIFECYCLE event off the NetIdRegistry, like OnHostSpawn and OnHostDeath beside it, and
-        // the registry's own enablement is what decides whether a world exists. Adding one would
-        // also make the host leg of eaNetDeathFx unreachable, since that suite plants real
-        // entities from the MENU. The client's rx handler is scene-gated, exactly as EvDeath's is.
-        public static void OnDeathBegan(AlienDrawableGameComponent comp)
+        // LIFECYCLE event off the NetIdRegistry, like OnHostSpawn/OnHostDeath (further down this
+        // file, in the registry-seam block), and the registry's own enablement is what decides
+        // whether a world exists. Adding one would also make the host leg of eaNetDeathFx
+        // unreachable, since that suite plants real entities from the MENU. The client's rx
+        // handler is scene-gated, exactly as EvDeath's is.
+        //
+        // Named for the HOST side, like OnHostSpawn/OnHostDeath: NetPuppets.OnDeathBegan is the
+        // rx half, and a bare OnDeathBegan in a stack trace would not say which end it is.
+        public static void OnHostDeathBegan(AlienDrawableGameComponent comp)
         {
             if (!IsHost || !PeerUp || comp == null)
             {
@@ -1158,11 +1162,22 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeDyingEvent(txEventSeq++, entry.Id));
+            OnHostDeathBegan(entry.Id);
+        }
+
+        // The by-id half, for NetIdRegistry.ReplayLive's catch-up: a peer joining mid-animation
+        // needs the beat for a death that began before it arrived.
+        internal static void OnHostDeathBegan(ushort netId)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeDyingEvent(txEventSeq++, netId));
             metrics.EventsTx++;
             if (NetHost.Current.NetLog)
             {
-                Console.WriteLine("[net] tx dying id=" + entry.Id + " type=" + comp.GetType().Name);
+                Console.WriteLine("[net] tx dying id=" + netId);
             }
         }
 

@@ -83,6 +83,7 @@ namespace EvilAliensWeb.Compat.Net
         // deferred state is entered, so the joiner can release its frozen puppet immediately
         // instead of inferring the death from hp==0 on the entity's next round-robin snapshot
         // turn (up to ~1.2s in a big world). `[netId:2]`, reliable lane, 6 bytes.
+        // KillableAlien.NoteDeathBegan has the census of which types do this.
         //
         // It is NOT the death's settlement: the eventual EvDeath still carries the killer and
         // the per-slot awards, exactly as before. This says only "it has begun".

@@ -546,13 +546,13 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   entities stop being replicated individually, card 9a3175d0, see the decorative-swarm bullet.
   No existing layout changed, but a v9 peer would ignore the beat AND still expect the
   per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move.
+  The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
+  says why that is a decision and not an oversight.
   **v11** adds `EvDying` (event 23) -- the host announces that a DEFERRED death has begun, at
   the moment `KilledBy` returns without removing the component, card f62116b5, see the
   deferred-death bullet under "Claims". A v10 peer would ignore it and fall back to the hp==0
   snapshot trigger, i.e. the pre-card latency rather than a desync -- so this bump is the
-  cheap-protocol ruling being taken at its word, not a forced incompatibility.
-  The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
-  says why that is a decision and not an oversight).
+  cheap-protocol ruling being taken at its word, not a forced incompatibility.)
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -965,13 +965,13 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       same thing, so the two ends agree by construction and an ordinary type -- whose `KilledBy`
       ends in `Die()` -- sends nothing. Two call sites, both in `KillableAlien`
       (`HitBy` and `NetKill`, the latter because the host also kills through it when the CLIENT
-      landed the blow), so a new deferred-death type costs nothing. `NetSession.OnDeathBegan` ->
+      landed the blow), so a new deferred-death type costs nothing. `NetSession.OnHostDeathBegan` ->
       `NetPuppets.OnDeathBegan` -> the shared `BeginDeferredDeath`.
       **It carries no killer and no award: this is the death BEGINNING**, and the `EvDeath` that
       lands when the animation ends still settles who was paid, exactly as before.
-    - **`OnDeathBegan` has NO `NetScene.Current` gate, unlike `OnGameFx` and the script beats.**
-      It is an entity-lifecycle event off the `NetIdRegistry`, like `OnHostSpawn`/`OnHostDeath`
-      beside it, and the registry's own enablement is what decides whether a world exists. Adding
+    - **`OnHostDeathBegan` has NO `NetScene.Current` gate, unlike `OnGameFx` and the script beats.**
+      It is an entity-lifecycle event off the `NetIdRegistry`, like `OnHostSpawn`/`OnHostDeath`,
+      and the registry's own enablement is what decides whether a world exists. Adding
       one would also make `eaNetDeathFx`'s host section unreachable, since that suite plants real
       entities from the MENU. The client's rx handler IS scene-gated, as `EvDeath`'s is.
     - **`NetBaseState.Hp == 0` on a puppet we know is KILLABLE also means the host has killed it,
@@ -988,8 +988,13 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       `KillerNone` scratch agent, a tick before the attributed `EvDeath`. That was accepted while
       this was the only fast trigger, because narrowing it cost the deferred case a whole
       `snapTurn`; it does not any more, since `EvDying` owns the live case and the extra turn is
-      only ever paid on the degraded path -- against a 2.5-5 s animation. A `PuppetInfo.SawZeroHp`
-      latch, cleared by any hp>0 turn.
+      only ever paid on a path nothing reaches today. A `PuppetInfo.SawZeroHp` latch, cleared by
+      any hp>0 turn.
+    - **A peer JOINING IN PROGRESS mid-animation gets the beat with its catch-up spawn** --
+      `NetIdRegistry.ReplayLive` sends one for every live entry already at zero hit points and
+      not yet dead. Without it the joiner would be the one case paying the two-turn rule above,
+      and paying it twice over (up to ~2.4 s of a 2.5 s animation) -- i.e. the very symptom the
+      release exists to fix, on the very peer it exists for.
     - **A deferred-death type the CLIENT killed itself is released too, and at RTT rather than at
       the end of the animation.** Its own `KilledBy` ran locally, so its hp is already 0 and it
       has been standing frozen mid-animation; `BeginDeferredDeath` skips the FX (a second
@@ -1006,7 +1011,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
       so it would have been a rare unreproducible ghost.
     - **`OnRemoteDeath` makes the same decision** when neither the beat nor the snapshot got
       there first -- the last-resort fallback, and the only one before card 303bfb5b.
-  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 71 assertions;
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 73 assertions;
     `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
     shape -- section 2 runs a real HOST session over a `NetWire` and reads the frames the peer
     RECEIVED (including the `EvDying` trigger-latency legs: the beat is on the wire while no

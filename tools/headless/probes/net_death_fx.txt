@@ -26,8 +26,10 @@
 #     The host emits an explicit EvDying (event 23, reliable, [netId:2], protocol v11) the moment
 #     its KilledBy returns WITHOUT having removed the component, so the peer releases on that
 #     tick at any world size. The two inferences stay as fallbacks: hp==0 across TWO consecutive
-#     snapshot turns (the loss / join-in-progress path -- one turn is no longer enough, which is
-#     what removes the pre-card one-tick-early residual on ordinary kills), and the late EvDeath.
+#     snapshot turns (one turn is no longer enough, which is what removes the pre-card
+#     one-tick-early residual on ordinary kills), and the late EvDeath. A peer JOINING IN
+#     PROGRESS mid-animation is on the fast path too -- NetIdRegistry.ReplayLive re-announces
+#     any live entity that is already dying, beside its catch-up spawn (section 2f).
 #
 # WHY A PROBE AND NOT A SCREENSHOT. Both symptoms are the ABSENCE of a one-to-five-second effect
 # at a moment no capture can be timed to (root CLAUDE.md: never verify motion with timed live
@@ -53,7 +55,7 @@
 #   * a section-5 failure means a deferred death is being deleted mid-animation again whenever the
 #     puppet's round-robin snapshot turn does not come round before the host's EvDeath.
 #
-# THE POSITIVE IS THE `71 passed` TALLY, and section 5's paid-award leg is the positive control
+# THE POSITIVE IS THE `73 passed` TALLY, and section 5's paid-award leg is the positive control
 # for every "no slot was credited" assertion above it -- an award path that had stopped working
 # entirely would satisfy all of those zeroes. Raise the count when checks are added.
 # `expect-not FAIL` is here too but is the weaker half: it passes on a run where the eval never
@@ -99,7 +101,7 @@ expect 4\. CLIENT -- hp==0 in TWO snapshot turns releases the puppet \(the fallb
 expect 5\. CLIENT -- an ATTRIBUTED EvDeath on a deferred-death type releases too
 expect 6\. CLIENT -- an EvDying beat releases the puppet on the EVENT tick
 expect 7\. teardown
-expect \[netdeathfx\] 71 passed, 0 failed
+expect \[netdeathfx\] 73 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

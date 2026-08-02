@@ -348,6 +348,28 @@ namespace EvilAliensWeb.Compat.Net
                 wire.Pump();
                 Check("...and still settles as an ordinary EvDeath at the removal seam ("
                     + deaths.Count + ")", deaths.Count == 1);
+
+                // 2f. THE JOIN-IN-PROGRESS CATCH-UP. A deferred death runs for 2.5-5 s, so a peer
+                // arriving mid-animation missed the live beat entirely -- and it is the one peer
+                // for which the snapshot fallback's two-turn rule is expensive. ReplayLive sends
+                // the beat again beside the catch-up spawn. The skull from 2d is still dying.
+                dyings.Clear();
+                NetIdRegistry.ReplayLive();
+                wire.Pump();
+                Check("a catch-up replay re-announces the STILL-DYING entity (" + dyings.Count + ")",
+                    dyings.Count == 1
+                    && NetProtocol.TryDecodeDyingEvent(dyings[0], out ushort replayId)
+                    && replayId == skullId);
+                // NEGATIVE: and nothing else in the live set. Without this, a replay that
+                // announced every entity would satisfy the positive and make every joiner run
+                // the award-free death path on a world full of healthy enemies.
+                StarMine healthyMine = PlantMine(bin, game, planted, Nowhere);
+                dyings.Clear();
+                NetIdRegistry.ReplayLive();
+                wire.Pump();
+                Check("NEGATIVE ...and only that one -- a healthy entity is not announced ("
+                    + dyings.Count + ")",
+                    dyings.Count == 1 && healthyMine != null);
             }
             finally
             {

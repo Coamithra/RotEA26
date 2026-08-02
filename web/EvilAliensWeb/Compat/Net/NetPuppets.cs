@@ -407,16 +407,19 @@ namespace EvilAliensWeb.Compat.Net
 
         // THE FALLBACK deferred-death trigger, since card f62116b5: the host's copy of this
         // killable is at ZERO HIT POINTS and still in its world, so its death has begun and is
-        // taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s crash (cards 13aa596c /
-        // 303bfb5b). The EvDeath for it does not arrive until that animation ENDS, so waiting for
+        // taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s crash and the other
+        // types KillableAlien.NoteDeathBegan censuses (cards 13aa596c / 303bfb5b). The EvDeath for it does not arrive until that animation ENDS, so waiting for
         // it means the peer sees an intact enemy and then, seconds later, one frame of removal.
         //
         // The FAST path is now the host's explicit EvDying beat (NetSession.OnDeathBegan ->
         // OnDeathBegan below), emitted the moment KilledBy defers. This reads the hp that is
-        // already in every snapshot entry's base block and so still covers the two cases a live
-        // beat cannot: a peer that JOINED IN PROGRESS after the death began (its catch-up
-        // EvSpawn carries the dying entity, but the beat itself is long gone), and any future
-        // deferred-death path that reaches its dying state without going through KillableAlien.
+        // already in every snapshot entry's base block and so still covers what the beat cannot.
+        // NOT packet loss -- EvDying rides the RELIABLE lane, so a lost one is not a case that
+        // exists. What is left is a deferred-death path that reaches its dying state WITHOUT
+        // going through KillableAlien, i.e. nothing today and a cheap safety net tomorrow.
+        // (A peer JOINING IN PROGRESS mid-animation used to be the other one, and it was the
+        // case that made the two-turn rule below expensive: NetIdRegistry.ReplayLive now sends
+        // the beat with the catch-up spawn instead, so that peer is on the fast path too.)
         //
         // Zero is unambiguous here because the entry belongs to a puppet we know is killable --
         // NetBaseState.Hp is also 0 for a non-killable, which is why the NetKillable
@@ -431,9 +434,9 @@ namespace EvilAliensWeb.Compat.Net
         // the death here a tick before the attributed EvDeath arrived, with the KillerNone
         // scratch agent instead of the real killer. That was accepted before because narrowing it
         // cost the deferred case a whole snapTurn; it does not any more, because EvDying owns the
-        // live case and the extra turn is only ever paid on this degraded path -- against a
-        // 2.5-5 s animation. An entity really dying stays at hp==0 for every remaining turn, so
-        // the second one always comes.
+        // live case (including the join-in-progress catch-up) and the extra turn is only ever
+        // paid on a path nothing reaches today. An entity really dying stays at hp==0 for every
+        // remaining turn, so the second one always comes.
         private static void ApplyHostKilledFromSnapshot(ushort netId, PuppetInfo info, in NetBaseState state)
         {
             if (state.Hp > 0)

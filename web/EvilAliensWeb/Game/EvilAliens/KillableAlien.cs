@@ -192,7 +192,7 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 	{
 		if (!IsDead)
 		{
-			EvilAliensWeb.Compat.Net.NetSession.OnDeathBegan(this);
+			EvilAliensWeb.Compat.Net.NetSession.OnHostDeathBegan(this);
 		}
 	}
 

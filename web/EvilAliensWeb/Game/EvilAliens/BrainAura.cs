@@ -1,4 +1,5 @@
 using System;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -66,7 +67,9 @@ internal class BrainAura : AlienDrawableGameComponent
 		{
 			return;
 		}
-		float t = (float)gameTime.TotalGameTime.TotalSeconds;
+		// WorldTime, not gameTime: the shimmer is Draw-time, so on the raw clock it kept
+		// breathing while the boss it decorates sat frozen in a pause (card d79a2f48).
+		float t = WorldTime.Seconds;
 		float s = (float)Math.Sin(t * ShimmerOmega);
 		scale = boss.scale * (1f + ScaleShimmer * s);    // follow brain heartbeat + breathe
 		float alpha = AlphaBase + AlphaShimmer * s;       // brightness shimmer

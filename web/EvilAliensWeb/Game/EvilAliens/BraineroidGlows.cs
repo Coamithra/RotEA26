@@ -134,7 +134,7 @@ internal class BraineroidGlows : DrawableGameComponent, IComponentWatcher
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		for (int i = 0; i < members.Count; i++)
 		{
-			members[i].DrawGlowOnly(gameTime);
+			members[i].DrawGlowOnly();
 		}
 		spriteBatch.BlendMode = savedBlend;
 	}

@@ -1,4 +1,5 @@
 using System;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -38,10 +39,10 @@ internal static class BrainGlow
 	// `drawScale` is the brain's effective on-screen scale (AlienDrawableGameComponent.DrawScale),
 	// already carrying any pulsate the caller applied; `blendMode` is what to restore afterwards.
 	internal static void Draw(SpriteBatchWrapper spriteBatch, Texture2D glowTexture, Vector2 position,
-		float rotation, float drawScale, float phase, GameTime gameTime, SpriteBlendMode blendMode)
+		float rotation, float drawScale, float phase, SpriteBlendMode blendMode)
 	{
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
-		DrawCore(spriteBatch, glowTexture, position, rotation, drawScale, phase, gameTime);
+		DrawCore(spriteBatch, glowTexture, position, rotation, drawScale, phase);
 		spriteBatch.BlendMode = blendMode;
 	}
 
@@ -50,13 +51,16 @@ internal static class BrainGlow
 	// so the two paths cannot drift -- the batched path has to be pixel-identical to the per-brain
 	// one or the A/B seam it ships with would be comparing two different glows.
 	internal static void DrawCore(SpriteBatchWrapper spriteBatch, Texture2D glowTexture, Vector2 position,
-		float rotation, float drawScale, float phase, GameTime gameTime)
+		float rotation, float drawScale, float phase)
 	{
 		if (glowTexture == null)
 		{
 			return;
 		}
-		float t = (float)gameTime.TotalGameTime.TotalSeconds;
+		// WorldTime rather than a GameTime the callers used to thread in: this is a Draw-time
+		// shimmer, and on the raw clock it kept breathing under a pause (card d79a2f48). No
+		// caller passes a clock now, which is why the parameter is gone rather than ignored.
+		float t = WorldTime.Seconds;
 		float s = (float)Math.Sin(t * Omega + phase);
 		float glowScale = drawScale * ScaleBase * (1f + ScaleShimmer * s);
 		float alpha = AlphaBase + AlphaShimmer * s;

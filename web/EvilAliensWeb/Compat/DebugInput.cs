@@ -1230,6 +1230,38 @@ namespace EvilAliensWeb.Compat
 					: "live"));
 		}
 
+		// Report the WORLD clock as data (`eaWorldClock()` / `eval WorldClock`), card d79a2f48.
+		// The clock every Draw-time cosmetic reads instead of gameTime.TotalGameTime, plus the
+		// freeze depth that gates it -- which is the whole mechanism, and the only part of it a
+		// probe can assert. A screenshot pair can show a paused frame is identical; it cannot say
+		// WHY, and "identical" also passes on a build that stopped drawing.
+		[JSInvokable("debugWorldClock")]
+		public static void WorldClock()
+		{
+			// A MISSING bin reports depth=none, never 0: `frozen=False depth=0` is exactly what a
+			// genuinely running world prints, so a broken service lookup would read as healthy --
+			// and pause_world_clock.txt asserts that very string on two of its three legs.
+			EvilAliens.ComponentBin bin =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin;
+			Console.WriteLine("[worldclock] seconds=" + WorldTime.Seconds.ToString("0.000")
+				+ " frozen=" + (bin != null && bin.FreezeDepth > 0)
+				+ " depth=" + ((bin != null) ? bin.FreezeDepth.ToString() : "none"));
+		}
+
+		// Rezero the world clock (`eaWorldClockReset()` / `eval WorldClockReset`), card d79a2f48.
+		// It exists so a probe can assert an EXACT reading: the clock is otherwise an absolute
+		// count from process start, so every assertion about it would be a boot-tick count that
+		// an unrelated change to the boot sequence silently invalidates. Rezero, step a known
+		// number of frames, assert the seconds -- boot-independent, and it reads the same under
+		// a freeze (where the answer is "still 0.000"). Cosmetic phases only, so a rezero mid-play
+		// just re-phases some shimmers.
+		[JSInvokable("debugWorldClockReset")]
+		public static void WorldClockReset()
+		{
+			WorldTime.Reset();
+			WorldClock();
+		}
+
 		// JS bridge for the live connector-tuner slider panel (eaConnector in wwwroot/index.html, shown
 		// on ?level=TeamChallenge / a bare ?connectortune): DotNet.invokeMethod('EvilAliensWeb',
 		// 'debugSetConnector', boltCount, arcRate, jitter, pulse, glow). Overrides the ShipConnector

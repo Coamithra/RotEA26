@@ -1178,6 +1178,16 @@ public class Game1 : Game
 			float num2 = (float)num / 100f * slowmotion * hitstop;
 			gameTime = new GameTime(new TimeSpan((long)((float)gameTime.TotalGameTime.Ticks * num2)), new TimeSpan((long)((float)gameTime.ElapsedGameTime.Ticks * num2)));
 		}
+		// The WORLD's clock (Compat/WorldTime.cs, card d79a2f48). Advanced with the delta the
+		// world itself is about to be updated with -- i.e. AFTER the turbo/slow-mo/hit-stop
+		// scale above -- and only while nothing holds a pause layer, which is the same gate
+		// ComponentBin.Push puts on every world component's Update. Draw-time cosmetics read
+		// it instead of gameTime.TotalGameTime, so they freeze with the world they decorate
+		// (Draw is still called under a pause; the frozen world is drawn behind the menu).
+		if (collectionHelper.FreezeDepth == 0)
+		{
+			WorldTime.Advance((float)gameTime.ElapsedGameTime.TotalSeconds);
+		}
 		if (graphics.IsFullScreen)
 		{
 			try
@@ -1598,14 +1608,24 @@ public class Game1 : Game
 	// sceneTarget through the refraction shader into rippleRT and copy it back -- the same
 	// ping-pong ApplyHoloSim needs, for the same reason. Two opaque full-frame blits, and
 	// only while a ring is actually live: every other frame (i.e. nearly all of them) skips
-	// at the first branch. Rings advance on RAW Draw time, so the wavefront keeps travelling
-	// through hit-stop like the other Draw-time cosmetics.
+	// at the first branch.
+	// TWO HALVES to the ring clock, and they are not the same rule (card d79a2f48):
+	//   * rings advance on RAW Draw time, so the wavefront keeps TRAVELLING through a hit-stop
+	//     -- the freeze is a punctuation mark, and stopping the wave dead in it reads as a
+	//     dropped frame rather than as impact;
+	//   * but they do NOT advance while the world is frozen by a PAUSE. A 0.75 s ring left
+	//     running would expand, fade and be gone behind the pause menu, so unpausing resumes a
+	//     bomb whose ripple silently finished while the player was reading the menu.
 	private void ApplyBombRipple(GameTime gameTime)
 	{
 		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 		if (dt <= 0f)
 		{
 			dt = 1f / 60f;
+		}
+		if (collectionHelper.FreezeDepth > 0)
+		{
+			dt = 0f;
 		}
 		BombRipple.Update(dt);
 		if (!BombRipple.Visible || bombRipple == null)

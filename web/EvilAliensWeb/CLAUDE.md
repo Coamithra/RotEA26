@@ -597,7 +597,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaCollisionBench(n, iters)` (the collision broad-phase cost in absolute us PLUS its
   behaviour-neutrality check against the pre-card algorithm -- MENU-only; card 391e11d2),
   `eaBraineroidGlowBatch(on)` (flip the Braineroid glow draw between the batched driver and the
-  pre-card per-brain path, for a same-frame appearance A/B).
+  pre-card per-brain path, for a same-frame appearance A/B),
+  `eaWorldClock()` + `eaWorldClock.reset()` (the world clock every Draw-time cosmetic reads, and
+  the ComponentBin freeze depth gating it -- see "Feel / post FX").
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -725,10 +727,13 @@ under them flashed white.
 the plain one, whose tint still rides the vertex colour, and `lighten_interpolate_fade` for the
 interpolated one, which already enables fade with the same tint).
 
-**Rig: `?brainoverlayphase=<0..1>` + `?brainhitflash`** (root CLAUDE.md). The phase park is also
-what makes ANY BrainBoss screenshot repeatable -- the overlays advance on Draw time, so two `shot`s
-with no `step` between them differ by ~15 000 px without it, which reads exactly like a real change
-and will waste an hour if you let it.
+**Rig: `?brainoverlayphase=<0..1>` + `?brainhitflash`** (root CLAUDE.md).
+**The repeatability half of that warning is now OBSOLETE (card d79a2f48) -- two `shot`s with no
+`step` between them are byte-identical**, measured, so an ordinary BrainBoss screenshot no longer
+needs the park. The overlays used to advance on RAW Draw time; they advance by however far
+`Compat/WorldTime` moved since the last Draw, which is zero without a step (and zero under a pause,
+which is what the card was actually about). The park is still what reaches a phase the boss will
+not otherwise show you -- the eye rests CLOSED and opens on a ~15 s roll.
 
 ### Braineroid glows draw as one batch per band (`BraineroidGlows`, card 391e11d2)
 
@@ -1185,6 +1190,40 @@ site now lives under:
 
 ## Feel / post FX
 
+- **The WORLD's clock: `Compat/WorldTime.cs` (card d79a2f48). A Draw in a world component reads
+  `WorldTime.Seconds`, NEVER `gameTime.TotalGameTime`.** A pause is `ComponentBin.Push()` ->
+  `Enabled = false`, which stops `Update` but not `Draw` (the frozen world is still drawn behind
+  the pause menu), and `Game1` hands `Draw` the RAW `GameTime` -- the turbo / 1-up slow-mo /
+  hit-stop rescale is on the `Update` path only. So a Draw-time animation on `TotalGameTime`
+  ignores all four freezes at once, which is precisely what eleven call sites were doing.
+  `Game1.UpdateScaled` advances `WorldTime` with the SCALED delta and only while
+  `ComponentBin.FreezeDepth == 0`, so local pause, the net layer's remote pause, the `Guide`
+  freeze, hit-stop and slow-mo are all honoured by construction rather than by each call site
+  remembering to check.
+  - **Prefer the shared ANIMATION classes where a component owns real per-instance state** --
+    `LoadAnimation` + `curframe` (advanced in `AlienDrawableGameComponent.Update` off the scaled
+    `gameTime`) for a sprite sheet, a `Timer` for a countdown. Both freeze correctly for free.
+    This clock is for the stateless ambient case -- a shimmer, a hue cycle, a spin phase -- where
+    a per-object accumulator would be pure overhead. **A component that needs a DELTA rather than
+    a phase** (the BrainBoss overlay patches, the ship connector) keeps its own accumulator but
+    feeds it `WorldTime.Seconds - lastWorldSeconds`, never `gameTime.ElapsedGameTime`.
+  - **What deliberately does NOT use it, and why the list is not an oversight.** The menus
+    (`MenuSub1`, `MenuSubWithSkull`, `Option`, `DifficultyMenu`, `PlayerSettingsMenu`,
+    `SubMenuAwardment*`, `StartScreen`, `SplashScene`, `CastDisplayer`,
+    `SpriteBatchWrapper.MetalTime`, `Game1.DrawLevelWarmIndicator`) keep real time -- they draw
+    the pause menu ITSELF, or only exist outside a level, and freezing them would stop the pause
+    menu's own glint and selection pulse. `WebcamLevel`'s "Step into view!" HUD prompt is in that
+    class too. `BombRipple` is the one WORLD-side exception (its own bullet below).
+  - **The sprite harness is unaffected**: it freezes an object with `Enabled = false`, not a pause
+    layer, so the world clock keeps running there and every harness animation still plays.
+  - **Verify with `eaWorldClock()` / `eval WorldClock`**, not with a screenshot pair alone -- a
+    paused frame being identical also passes on a build that stopped drawing, or on a frame that
+    held nothing animated. Pinned by `tools/headless/probes/pause_world_clock.txt` (runs, freezes,
+    runs again; `eaWorldClock.reset()` is what makes its readings boot-independent).
+  - The measurement that started it: BrainBoss paused, two frames 45 steps apart, **22 482 px
+    differing outside the pause menu -> 0**, with the pause menu's own animation unchanged as the
+    positive control.
+
 - **Juice (`Compat/Juice.cs`): screen shake + hit-stop.** Shake is the trauma model
   (`Juice.AddTrauma` from explosions/blasts/player death; strength = trauma², decays ~0.7s, max
   7px/1° — deliberately halved from the first pass, full shake impacted gameplay). Applied at the
@@ -1194,8 +1233,11 @@ site now lives under:
   `Juice.TimeScale` while REAL time keeps ticking Juice/shake/input; the per-kill micro-stop +
   boss-kill stop are **OFF by default** (read as stutter; `?hitstop=1` re-enables); player death
   keeps its 180ms stop OFFLINE. GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs
-  before the time scale) or it freezes and never thaws. Draw-time cosmetics keep animating during a
-  freeze by design. `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
+  before the time scale) or it freezes and never thaws. **Draw-time cosmetics no longer keep
+  animating during a freeze -- that line was true until card d79a2f48 and is now wrong except for
+  `BombRipple`**: they read `Compat/WorldTime`, which carries the hit-stop scale like the rest of
+  the world. The one deliberate exception is the bomb ripple, whose wavefront is a travelling wave
+  that would read as a dropped frame if it stopped (see its bullet below). `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
   - **ONLINE CO-OP REFUSES EVERY HIT-STOP, whatever the caller (card 68f62e92).** `AddHitStop`
     early-returns while `NetSession.Active`, so the death stop, the `?hitstop=1` kill/boss stops
     and `eaHitstop()` alike are no-ops in a session. It is a DESYNC fix, not a feel decision: a
@@ -1246,8 +1288,12 @@ site now lives under:
     wavefront is one sine cycle under a Gaussian envelope, so the frame is pushed out ahead of
     the crest and pulled in behind it. Amplitude decays `(1-t)^Falloff` on the C# side.
   - **Zero cost when no bomb is out** -- `BombRipple.Visible` is false and `Game1` skips the pass
-    at the first branch, exactly like `HoloSim`. Rings advance on RAW Draw time, so the wave
-    keeps travelling through hit-stop.
+    at the first branch, exactly like `HoloSim`. **Rings advance on RAW Draw time through a
+    HIT-STOP but not through a PAUSE** (card d79a2f48): the freeze is a punctuation mark and a
+    wave stopping dead in it reads as a dropped frame, but a 0.75 s ring left running under a
+    pause expands, fades and is gone behind the menu, so unpausing resumes a bomb whose ripple
+    finished while the player was reading. `Game1.ApplyBombRipple` zeroes the dt while
+    `ComponentBin.FreezeDepth > 0`; everything else Draw-time is on `WorldTime` instead.
   - **Known property, not a bug: as a post pass it distorts the HUD/score where the ring reaches
     them.** The radius is bounded and the HUD sits in the corners; `?rippleradius=` limits reach.
     A pre-HUD seam would need a new hook inside `DrawInner` and is deliberately out of scope.
@@ -1299,7 +1345,9 @@ prove the `interpolate.fx` frame-interpolation shader tweens); `?harness=blast` 
 lifecycle (`?blastloop=` sweep speed);
 `?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
 ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
-plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase (bullets).
+plays the boss overlays (they advance on `WorldTime`, which the harness does not freeze -- it
+uses `Enabled=false`, not a pause layer -- so they still play here while a `shot` pair with no
+`step` is identical); `?bulletshot` is another frozen showcase (bullets).
 `?castbrain` boots the end-credits Cast screen (its own mode).
 
 ## Feature notes
@@ -1386,8 +1434,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
 - **Ship-connector docking lightning (`ShipConnector.cs`):** breathing base sprite + fractal
   lightning bolts + crackle tendrils + a churning energy-well orb per ship (decorrelated phases).
   Self-contained reimplementation of the Quad techniques (own FX RNG, static scratch buffers). FX
-  advance on RAW Draw time (`fxTime += dt` in `Draw`) so they crackle through hit-stop — nothing in
-  `Update`. Flags `?connectorbolts= ?connectorarcs= ?connectorjitter= ?connectorpulse=
+  advance in `Draw` (`fxTime += dt`), but on `Compat/WorldTime`'s delta rather than raw Draw time
+  since card d79a2f48 — nothing in `Update`, so a pause would otherwise leave the connector
+  crackling between two motionless ships. It therefore no longer crackles through a hit-stop
+  either; `?harness=connector` is unaffected (the harness freezes with `Enabled=false`, not a
+  pause layer). Flags `?connectorbolts= ?connectorarcs= ?connectorjitter= ?connectorpulse=
   ?connectorglow=`; `eaConnector` panel; **verify with `?harness=connector`** (TeamChallenge
   auto-pauses on focus loss, a moving target the harness sidesteps).
 - **BattleSkull colorize tuner (`Compat/HarnessColorize.cs`):** `BattleSkull.Draw` hue-remaps the

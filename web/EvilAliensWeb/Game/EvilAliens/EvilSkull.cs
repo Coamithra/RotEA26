@@ -1,4 +1,5 @@
 using System;
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -225,7 +226,9 @@ internal class EvilSkull : KillableAlien
 			spriteBatch.colorizeEffect.RangeTarget = new Vector3(72f, 160f, Powerup.PowerUpHue(bonus.type));
 			if (bonus.type == Powerup.PowerupType.OneUp)
 			{
-				spriteBatch.colorizeEffect.RangeTarget = new Vector3(72f, 160f, 250f * (float)gameTime.TotalGameTime.TotalSeconds % 360f);
+				// WorldTime, not gameTime: a Draw-time hue cycle on the raw clock kept the OneUp
+				// rainbow rolling while the world sat frozen in a pause (card d79a2f48).
+				spriteBatch.colorizeEffect.RangeTarget = new Vector3(72f, 160f, 250f * WorldTime.Seconds % 360f);
 			}
 			spriteBatch.colorizeEffect.Enable();
 		}

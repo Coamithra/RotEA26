@@ -164,7 +164,12 @@ internal class Spider : KillableAlien
 		int cellW = (spiderJump.LogicalWidth() - (cols - 1) * sep) / cols;
 		int cellH = (spiderJump.LogicalHeight() - (rows - 1) * sep) / rows;
 		float fJump = SuperSampleFactor("GFX/Sprites/spiderjump", cellW);
-		int frame = (int)(gameTime.TotalGameTime.TotalMilliseconds / 55f) % (cols * rows);
+		// Clocked off WorldTime, not gameTime: this is a sprite SHEET advanced by hand (the base
+		// class's curframe drives the ground sheet, and a component gets only one), so on the raw
+		// Draw clock the airborne spider kept flapping through a pause while every Update-driven
+		// animation around it froze (card d79a2f48). WorldTime carries the world's freezes AND its
+		// slow-mo/hit-stop scaling, which curframe gets for free from the scaled gameTime.
+		int frame = (int)(WorldTime.Seconds * 1000f / 55f) % (cols * rows);
 		Rectangle src = new Rectangle(frame % cols * (cellW + sep), frame / cols * (cellH + sep), cellW, cellH);
 		// The airborne "flying" sheet has a different visual anchor than the ground rear-up sheet, so
 		// the first in-air pose can pop away from the last ground frame at launch (and the last in-air

@@ -165,14 +165,14 @@ internal class Braineroid : KillableAlien
 		scale = num * pulsate;
 		if (hasbonus)
 		{
-			ApplyBonusColorize(gameTime);
+			ApplyBonusColorize();
 		}
 		// When BraineroidGlows is driving (every GameScene), the glows were already drawn as one
 		// additive batch at DrawOrder 19 -- see that class. Only a scene with no driver (the
 		// sprite harness, the Cast screen) still pays the per-brain blend flip here.
 		if (!BraineroidGlows.Active)
 		{
-			DrawGlow(gameTime);
+			DrawGlow();
 		}
 		base.Draw(gameTime);
 		spriteBatch.colorizeEffect.Disable();
@@ -184,15 +184,15 @@ internal class Braineroid : KillableAlien
 	// the whole population (which is the entire point -- see that class). Applies the same
 	// pulsate scale and bonus hue-shift Draw does, so a glow drawn here is identical to the one
 	// Draw would have drawn, and restores `scale` because the brain's own Draw re-derives it.
-	internal void DrawGlowOnly(GameTime gameTime)
+	internal void DrawGlowOnly()
 	{
 		float num = scale;
 		scale = num * pulsate;
 		if (hasbonus)
 		{
-			ApplyBonusColorize(gameTime);
+			ApplyBonusColorize();
 		}
-		DrawGlowCore(gameTime);
+		DrawGlowCore();
 		if (hasbonus)
 		{
 			spriteBatch.colorizeEffect.Disable();
@@ -200,12 +200,14 @@ internal class Braineroid : KillableAlien
 		scale = num;
 	}
 
-	private void ApplyBonusColorize(GameTime gameTime)
+	private void ApplyBonusColorize()
 	{
 		spriteBatch.colorizeEffect.RangeTarget = new Vector3(100f, 280f, Powerup.PowerUpHue(bonus.type));
 		if (bonus.type == Powerup.PowerupType.OneUp)
 		{
-			spriteBatch.colorizeEffect.RangeTarget = new Vector3(100f, 280f, 250f * (float)gameTime.TotalGameTime.TotalSeconds % 360f);
+			// WorldTime, not gameTime: a Draw-time hue cycle on the raw clock kept the OneUp
+			// rainbow rolling while the world sat frozen in a pause (card d79a2f48).
+			spriteBatch.colorizeEffect.RangeTarget = new Vector3(100f, 280f, 250f * WorldTime.Seconds % 360f);
 		}
 		spriteBatch.colorizeEffect.Enable();
 	}
@@ -214,16 +216,16 @@ internal class Braineroid : KillableAlien
 	// with its own subtle shimmer (BrainGlow). Caller has already set scale = num * pulsate
 	// (so DrawScale tracks the brain) and, for a bonus-carrying Braineroid, enabled colorize —
 	// so the glow gets hue-shifted with the brain.
-	private void DrawGlow(GameTime gameTime)
+	private void DrawGlow()
 	{
-		BrainGlow.Draw(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, gameTime, blendMode);
+		BrainGlow.Draw(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, blendMode);
 	}
 
 	// The same draw with NO blend-state change -- so BraineroidGlows can set additive once for the
 	// whole population instead of twice per brain (card 391e11d2).
-	private void DrawGlowCore(GameTime gameTime)
+	private void DrawGlowCore()
 	{
-		BrainGlow.DrawCore(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, gameTime);
+		BrainGlow.DrawCore(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase);
 	}
 
 	public override void Update(GameTime gameTime)

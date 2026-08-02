@@ -40,7 +40,16 @@ public static class RandomHelper
 
 	public static bool RandomFromAverage(float hitsPerSec, GameTime gameTime)
 	{
-		return _random.NextDouble() <= (double)(hitsPerSec * (float)gameTime.ElapsedGameTime.TotalSeconds);
+		return RandomFromAverage(hitsPerSec, (float)gameTime.ElapsedGameTime.TotalSeconds);
+	}
+
+	// The same roll for a caller holding a delta rather than a GameTime -- a Draw-side clock on
+	// Compat/WorldTime, where the frame's own ElapsedGameTime is the WRONG number (card d79a2f48):
+	// it ignores the pause, the hit-stop and the slow-mo the world delta carries, so the rate
+	// would be per REAL second while everything it gates runs on world seconds.
+	public static bool RandomFromAverage(float hitsPerSec, float dtSeconds)
+	{
+		return _random.NextDouble() <= (double)(hitsPerSec * dtSeconds);
 	}
 
 	public static float RandomNextFloat(float min, float max)

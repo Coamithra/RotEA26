@@ -23,7 +23,9 @@
 # prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
 # probe by loosening an expectation: these are all-or-nothing tallies on purpose.
 #
-# TWELVE SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
+# EVERY SUITE BELOW IS ASSERTED AS A TALLY, never as `expect-not FAIL`. (This said TWELVE; the
+# set has grown since and the number was not being maintained, so the count is gone rather than
+# wrong -- the `eval` lines are the list.) Three reasons, each of which has
 # already cost something in this repo: (a) an `expect-not` passes on a run where the eval never
 # happened, which a renamed DebugInput method silently produces; (b) several of these suites SKIP
 # legs they cannot reach (NetCosmetic's client apply path needs a level, NetKickTest's
@@ -67,6 +69,8 @@ eval TeamSeat
 eval NetSimTest 150 20 60 200
 eval NetScenarios
 eval NetFx
+eval HostMenuTest
+eval HostMenuLive
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
 # Cards 43e85936 / c146422f raised this 69 -> 77: the EvFx codec (kind/netId/pos/param, its
@@ -145,6 +149,17 @@ expect \[netscen\] 80 passed, 0 failed
 # the ordering that split depends on: ApplyStateExtra only RECORDS, and the puppet DRIVER is what
 # builds and frees the child.
 expect \[netfx\] 24 passed, 0 failed
+# The host pause menu's Online Play decision (card 0d6ffe70), in two halves that fail
+# differently. `hostmenu` is the PURE sweep -- all 32 combinations of the five booleans through
+# the real NetHostMenu.Entries, plus the properties no `if` restates (entry 0 is never a kick,
+# the room and kick shapes never coexist, Available agrees with Entries); it also runs under
+# logic_probe as ProbeHostMenu. `hostmenulive` is what that sweep structurally cannot see:
+# CurrentState() reading the LIVE statics, which could be wired to the wrong ones and leave all
+# 47 of the sweep's assertions green while the row silently never appears for anyone. It pairs a
+# real host session with a scripted peer, then makes the exact KickPeer call the Kick row makes
+# and asserts the EvKick frame reached the peer and the row RETRACTED.
+expect \[hostmenu\] 47 passed, 0 failed
+expect \[hostmenulive\] 18 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

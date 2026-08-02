@@ -615,6 +615,27 @@
             catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the host pause menu's "Online Play" row (card 0d6ffe70). Called bare it DUMPS
+        // the live decision (is a session up, are we its host, is a peer in it, is this game one
+        // toggle away from being listed, and which rows that resolves to); .test() runs the
+        // exhaustive 32-state sweep of the predicate itself. Both are pure — no session, level,
+        // peer or listing needed, and neither touches the live menus.
+        window.eaHostMenu = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugHostMenu')); }
+            catch (e) { console.warn('[debug] eaHostMenu failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaHostMenu.test = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugHostMenuTest')); }
+            catch (e) { console.warn('[debug] eaHostMenu.test failed (game not booted yet?): ' + e.message); }
+        };
+        // .live() is the same decision read off a REAL host session with a scripted peer, plus
+        // the kick the Kick row makes. MENU-ONLY -- it starts and stops a real session, so it
+        // skips itself over a live session, level or attract demo rather than wrecking one.
+        window.eaHostMenu.live = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugHostMenuLive')); }
+            catch (e) { console.warn('[debug] eaHostMenu.live failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: world-snapshot unknown-id attribution (card 48ab9b2f). A snapshot entry with no
         // puppet takes one of three branches — the self-heal REBUILT it (the stream lane
         // outrunning the reliable EvSpawn: ordinary), it was LEFT DEAD inside the removal window

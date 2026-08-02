@@ -1172,6 +1172,11 @@ namespace EvilAliensWeb.Compat
 		// menu's "Listed online -- room XYZAB" line and ScoreVisualiser's corner beacon. Reaching
 		// either for real needs a live server plus a game the eligibility predicate accepts, which
 		// is not something a headless screenshot run can stand up.
+		// Card 0d6ffe70 gave the short-circuit two more jobs, so the fake room behaves like a
+		// real one rather than being pinned on: it sets NetListing.CouldList (which is what puts
+		// the pause menu's "Online Play" row on screen) and it reports Listed = the live
+		// Settings.AllowOnlineJoins, so that row's room toggle is a working control here
+		// instead of a dead one. Still no socket and still nothing registered.
 		// Any value is legal, so nothing is reported -- the ?netfakepeer=/?netfakehash= class of
 		// silent flag. Unlike those two it is UPPER-CASED as well as trimmed, because a real room
 		// code is upper case (the server mints them that way) and this has to render like one.

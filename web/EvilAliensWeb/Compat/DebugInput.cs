@@ -753,6 +753,35 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetKickTest.Run();
 		}
 
+		// JS bridge for the host pause menu's Online Play decision (eaHostMenu in
+		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugHostMenuTest'). Runs
+		// Compat/Net/NetHostMenuTest.Run() (the exhaustive state sweep) and returns the PASS/FAIL
+		// report. Pure -- needs no session, level, peer or listing.
+		[JSInvokable("debugHostMenuTest")]
+		public static string HostMenuTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostMenuTest.Run();
+		}
+
+		// The LIVE counterpart: what the Online Play row resolves to RIGHT NOW. The suite above
+		// asserts the predicate; this reports the state it is being asked about, which is what
+		// separates "the predicate is wrong" from "this game genuinely has nothing to offer".
+		[JSInvokable("debugHostMenu")]
+		public static string HostMenu()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostMenu.Dump();
+		}
+
+		// The LIVE-SESSION half (eaHostMenu.live in wwwroot/index.html): a real host session with
+		// a scripted peer over an in-process NetWire, so the decision is read back through the
+		// live statics rather than the synthetic states HostMenuTest sweeps -- plus the kick the
+		// menu row makes. Menu-only and leave-no-trace; it SKIPS itself near a live world.
+		[JSInvokable("debugHostMenuLive")]
+		public static string HostMenuLive()
+		{
+			return EvilAliensWeb.Compat.Net.NetHostMenuLiveTest.Run();
+		}
+
 		// JS bridge for the decorative-swarm replication (eaNetCosmetic in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugNetCosmetic'). Runs
 		// Compat/Net/NetCosmeticTest.Run() and returns the PASS/FAIL report. Leave-no-trace, so

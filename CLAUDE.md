@@ -195,6 +195,14 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
   two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
   the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
+- **Host pause menu -- "Online Play"** (card 0d6ffe70): the host's own way to reach the kick
+  above (`?netkickshot`'s menu only ever appears under a REMOTE pause) plus an open/close-room
+  toggle. No new flag: `?netfakelisted=<code>` reaches the room half (it now sets `CouldList`
+  and honours `Settings.AllowOnlineJoins`, so the toggle is live), and the kick half is a
+  scripted-peer session. Console: **`eaHostMenu()`** dumps the LIVE decision (session/host/peer/
+  couldList/allowJoins -> which rows), **`.test()`** sweeps the predicate over all 32 states
+  (also `logic_probe`'s `ProbeHostMenu`), **`.live()`** drives it over a real session and kicks.
+  Pinned by `tools/headless/probes/net_host_menu.txt` + `net_host_menu_absent.txt`.
 - **Net UI screenshot/probe seams** (card group `fix/net-ui-smalls`): **`?netfakelisted=<code>`**
   reports the game as publicly LISTED under that code with **no socket and no server**, so the
   pause menu's "Listed online -- room XYZAB" line and `ScoreVisualiser`'s corner beacon can be

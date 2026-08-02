@@ -1,0 +1,101 @@
+# PROBE: the host pause menu's Online Play row opens its submenu and its room toggle works
+#
+# PINS:   card 0d6ffe70 -- the WIRING between NetHostMenu's (separately swept) decision and the
+#         real pause menu. The predicate itself is proved as data by tools/sim/logic_probe's
+#         ProbeHostMenu / eaHostMenu.test(); what nothing there can see is whether GameScene
+#         actually builds the row, whether choosing it swaps PausedScene for the submenu, and
+#         whether the room toggle reaches Settings + NetListing. Those are three separate
+#         seams and each fails silently: a row that is never built looks exactly like a game
+#         with nothing to offer, and a toggle that flips the setting but never reaches the
+#         listing looks exactly like a working one from inside the menu.
+#
+# WHY ?netfakelisted= IS THE RIG. Reaching a real listing needs a live signaling server AND a
+# level the eligibility predicate accepts AND no debug flags -- i.e. not a headless run at all.
+# The flag reports the game as LISTED with no socket and no server, and since this card it
+# obeys Settings.AllowOnlineJoins exactly as a real room does, which is what makes the toggle
+# below a live control rather than a dead one.
+#
+# FAILURE MEANS: read which line went red.
+#   * `live=PausedScene` missing        -> the pause never opened (the run did not get here).
+#   * `rows=RoomToggle,Back` missing    -> NetHostMenu.Entries disagrees with the live state;
+#                                          the dump prints that state, so read it rather than
+#                                          guessing (session/host/peer/couldList/allowJoins).
+#   * `live=NetHostMenu` missing        -> the Online Play row is not where this probe navigates
+#                                          to (an entry added to or removed from BuildPauseEntries
+#                                          moves it -- fix the down-count here, deliberately).
+#   * `allowJoins=False ... listed=no`  -> the toggle no longer reaches Settings, or NetListing
+#     missing                              no longer honours the setting. Both un-close the room.
+#   * the RE-OPEN leg red               -> closing the room became a one-way door: the row is
+#                                          gated on the setting it toggles. That is the exact
+#                                          shape the card forbids.
+#
+# The negative control -- that the row is ABSENT when there is nothing behind it -- cannot live
+# here (boot flags are per file) and is net_host_menu_absent.txt.
+#
+# MUTATION-TESTED: dropping the Online Play row from BuildPauseEntries fails the
+# `live=NetHostMenu` leg (the navigation lands on Exit's confirmation instead); making the row
+# conditional on AllowOnlineJoins fails the re-open leg alone.
+#
+# eahl: --flags "?level=Level2&invuln&netfakelisted=ABCDE"
+
+# Settle: the level's intro white-fade is ~120 frames, and the ship must be seated before
+# GameScene's pause trigger will fire at all.
+step 400 nodraw
+mark
+
+# The state this probe is about, before touching anything.
+eval HostMenu
+expect \[hostmenu\] session=False host=False peer=False couldList=True allowJoins=True listed=ABCDE available=True rows=RoomToggle,Back
+
+# Pause. MenuCensus, not a screenshot: a menu drawn UNDER another still eats every keypress,
+# which is what card 72143c11 cost, and a picture cannot tell the two apart.
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=PausedScene
+
+# Continue / Controller Settings / Instructions / >Online Play< / Exit to Main Menu.
+eval Press down 1
+step 3 nodraw
+eval Press down 1
+step 3 nodraw
+eval Press down 1
+step 3 nodraw
+eval Press enter 1
+step 10 nodraw
+# count=1 is half the assertion: the pause menu must be GONE, not merely drawn behind.
+eval MenuCensus
+expect \[menucensus\] count=1 live=NetHostMenu
+
+mark
+# Entry 0 is the room toggle (never a kick -- see NetHostMenuTest section 2), so this closes
+# the room. The setting flips AND the fake listing goes dark, which is the end-to-end claim.
+eval Press enter 1
+step 30 nodraw
+eval HostMenu
+expect \[hostmenu\] .* allowJoins=False listed=no available=True rows=RoomToggle,Back
+
+mark
+# Back out to the pause menu and re-open the submenu with the room CLOSED. The row must still
+# be there -- offering the toggle only while the room is open would make closing it permanent
+# for the rest of the run.
+eval Press down 1
+step 3 nodraw
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=PausedScene
+eval Press down 1
+step 3 nodraw
+eval Press down 1
+step 3 nodraw
+eval Press down 1
+step 3 nodraw
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=NetHostMenu
+eval HostMenu
+expect \[hostmenu\] .* allowJoins=False .* rows=RoomToggle,Back
+
+quit

@@ -37,6 +37,13 @@ namespace EvilAliensWeb.Compat.Net
         // no cheats). The pause indicator distinguishes "listed" from "not listed" with this.
         public static bool Eligible { get; private set; }
 
+        // Eligible EXCEPT for the Settings.AllowOnlineJoins switch -- i.e. "this game is one
+        // toggle away from being joinable". Card 0d6ffe70: the pause menu's Online Play entry
+        // needs to offer the room toggle precisely when flipping it would change something, and
+        // Eligible cannot answer that (it is already false whenever the setting is off, so it
+        // cannot tell "the player closed the room" from "this level can never be listed").
+        public static bool CouldList { get; private set; }
+
         private static Game game;
         private static bool subscribed;
         private static readonly Queue<(string phase, string detail)> phaseQueue = new Queue<(string, string)>();
@@ -58,10 +65,18 @@ namespace EvilAliensWeb.Compat.Net
             // exactly as they do for a real listing, which is the whole point of the rig.
             if (!string.IsNullOrEmpty(DebugFlags.NetFakeListed))
             {
-                // Listed only -- Eligible is deliberately left alone. It answers "could the
-                // RUNNING GAME be listed", which has no meaning here (there may be no GameScene
-                // at all), and faking it would be a claim about a predicate this flag bypasses.
-                Listed = true;
+                // Eligible is deliberately left alone. It answers "could the RUNNING GAME be
+                // listed", which has no meaning here (there may be no GameScene at all), and
+                // faking it would be a claim about a predicate this flag bypasses.
+                //
+                // CouldList and the AllowOnlineJoins test on Listed, however, are the point of
+                // the flag since card 0d6ffe70: the fake listing is the only offline way to
+                // reach the pause menu's room toggle, and a Listed pinned to true would make
+                // that toggle a dead control in the one rig that can drive it. So the fake
+                // room obeys the setting exactly as a real one does -- close it and the pause
+                // line + corner beacon go away; re-open it and the same code comes back.
+                CouldList = true;
+                Listed = Settings.GetInstance().AllowOnlineJoins;
                 RoomCode = DebugFlags.NetFakeListed;
                 return;
             }
@@ -73,7 +88,8 @@ namespace EvilAliensWeb.Compat.Net
             DrainPhases();
 
             GameScene scene = GameScene.NetActiveScene;
-            Eligible = ComputeEligible(scene);
+            CouldList = ComputeEligibleIgnoringSetting(scene);
+            Eligible = CouldList && Settings.GetInstance().AllowOnlineJoins;
 
             if (Eligible)
             {
@@ -152,9 +168,12 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
-        // Single eligibility predicate. Excludes scene==null and an active session up front,
-        // so the caller can use it verbatim.
-        private static bool ComputeEligible(GameScene scene)
+        // Single eligibility predicate, MINUS the AllowOnlineJoins switch -- Tick ANDs that in
+        // one line above, and CouldList is this half on its own (card 0d6ffe70). Splitting it
+        // this way rather than adding a second predicate keeps the one-source-of-truth property
+        // the header claims: there is still exactly one place that decides what is listable.
+        // Excludes scene==null and an active session up front, so the caller can use it verbatim.
+        private static bool ComputeEligibleIgnoringSetting(GameScene scene)
         {
             if (scene == null)
             {
@@ -163,10 +182,6 @@ namespace EvilAliensWeb.Compat.Net
             if (NetSession.Active)
             {
                 return false;                              // already in a session (JIP done / lobby / URL)
-            }
-            if (!Settings.GetInstance().AllowOnlineJoins)
-            {
-                return false;
             }
             if (!IsNetEligibleLevel(scene.Level))
             {

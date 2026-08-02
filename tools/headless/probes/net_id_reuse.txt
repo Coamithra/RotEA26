@@ -1,0 +1,94 @@
+# The vanishing laser UFO -- cards 9ccfe295 and 54e9a590.
+#
+# THE REPORT. "large (laser firing) ufo's seem to randomly disappear sometimes" -- on the HOST's
+# screen -- and, after more play, "P2 does in fact shoot these, but sometimes they do not play
+# the explosion effect on P1's screen". The card guessed at a late kill message for a reused
+# object id. The id scheme turned out to be innocent; the actual defect is a four-step chain,
+# and no single step is a bug on its own.
+#
+#   1. `Lazer.owner` is written ONLY by `Lazer.Setup`, which no puppet ever runs.
+#      `LazerDescriptor` builds every client beam through `SetupSingleShot`, so on the JOINER a
+#      replicated beam had NO emitter. (Worse, `Lazer` is POOLED and `SetupSingleShot` did not
+#      clear the field, so a recycled beam carried the PREVIOUS emitter.)
+#   2. `UFO.CollidesWith` damages itself off any `Lazer` whose `owner != this`. With a null
+#      owner that test is TRUE for the very ship that fired it, so the joiner's big laser UFO
+#      was hit by its OWN beam -- 11 hit points at a 35 ms hittimer, i.e. ~385 ms of contact.
+#   3. `KillableAlien.HitBy` attributes the kill via `NoteKill(this, other)`, and a `Lazer` is
+#      not an `IAlienKiller` -- so the note came out `KillerNone`.
+#   4. The client's removal seam sent `EvClaim(netId, KillerNone)` anyway, and `HandleClaim`'s
+#      live branch fell through to the NON-KILLABLE arm's bare `bin.Remove`. The host's real,
+#      healthy UFO was deleted with no explosion, no cue, no award, and an `EvDeath` carrying
+#      `KillerNone` -- whose client branch is also a silent despawn. Both screens, nothing seen.
+#
+# WHY IT WAS INTERMITTENT, and the number that settles it. At the exact fire pose the beam's
+# 75 px lead CLEARS the emitter's hitbox -- they do not meet. What closes the gap is DRIFT: the
+# UFO and its beam are separate puppets, corrected on separate snapshot round-robin turns and
+# dead-reckoned blind in between. The suite measures the threshold rather than assuming it:
+# **11 px** of relative drift along the beam is enough, against a `SnapThresholdPx` of 100 and
+# corrections that blend over >= 150 ms. So it is easily reachable, and reached more often the
+# longer `snapTurn` grows -- i.e. in exactly the dense waves the report described.
+#
+# TWO FIXES, AND THIS PROBE DEFENDS THEM SEPARATELY.
+#   * THE EMITTER GOES ON THE WIRE. `LazerDescriptor` gains a 2-byte spawn extra carrying the
+#     emitter's netId (protocol v18), resolved client-side through the live puppet map;
+#     `SetupSingleShot` clears `owner` so a recycled beam cannot inherit one. Ordering holds by
+#     construction: the emitter's EvSpawn always precedes its beam's on the ORDERED reliable
+#     lane, and `NetIdRegistry.ReplayLive` walks `liveList` in spawn order for a JIP peer.
+#   * AN UNATTRIBUTED CLAIM NEVER SETTLES A LIVE ENTITY. It means the joiner LOST the entity,
+#     not that it killed it, so the host keeps it and RE-ANNOUNCES it (the same `OnHostSpawn`
+#     the JIP catch-up uses -- no new protocol). The client stops sending them at all. Both
+#     halves ship: the near half is the fix, the far half means a peer on an older build, or a
+#     stranger's wire, cannot reach it either.
+#
+# THE SECOND FIX STANDS ON ITS OWN and is why the guard is not merely belt-and-braces: the
+# self-hit was the loudest route to step 4, not the only one. A puppet dead-reckoned into the
+# `Floorbottom`, or into an `Asteroid` or `Spider` puppet, reaches `UFO.CollidesWith`'s direct
+# `KilledBy` calls with no attribution at all.
+#
+# WHY A PROBE AND NOT A SCREENSHOT OR A TWO-WINDOW RUN. The symptom is an ABSENCE -- an enemy
+# that is not there and an explosion that did not play -- on the peer whose console you are not
+# reading, at a moment no capture can be timed to. And a backgrounded second tab ticks at ~1 Hz,
+# so a two-window run cannot produce the drift this needs at any useful rate.
+#
+# THE LEG THAT CARRIES THE CARD is not "the UFO survived": that passes on a build where the two
+# never collided at all. It is the pair -- the ownerless configuration DAMAGES the emitter over
+# the identical geometry, and the owned one does not -- plus "another ship's beam still hurts",
+# which is the over-correction to watch for (a fix that made every enemy immune to every other
+# enemy's laser would pass both of the first two).
+#
+# MUTATION-TESTED FIVE WAYS, each failing DISJOINT legs:
+#   * dropping `owner = null` from `SetupSingleShot`      -> 1 leg (the pooling leg, section 1)
+#   * `CreatePuppet` ignoring the wired owner             -> 1 leg (the adopt leg, section 5)
+#   * `EncodeSpawnExtra` always writing 0                 -> 1 leg (the emitter leg, section 3)
+#   * the client still sending unattributed claims        -> 2 legs (section 5a only)
+#   * `HandleClaim` restored to its exact pre-card shape  -> 5 legs (section 4a only), and it
+#     reproduces the report verbatim: the entity leaves the world, an `EvDeath` goes out, and
+#     "no explosion was spawned" still PASSES -- it vanishes silently, which is the bug.
+#
+# SECTION 6 IS A FINDING, NOT A FIX (card 54e9a590, "what if a game object dies and is reused in
+# the same frame?"). `ComponentBin.Add` on a component whose removal is still QUEUED cancels the
+# death, re-runs `Initialize()` and returns, firing NO collection events -- so the netId would
+# survive across what is, on the host, a different entity, and the joiner's puppet would keep
+# the OLD spawn extras while being dragged to the new spawn position by the interpolation blend.
+# That hazard is REAL but UNREACHED: every reuse in the shipped game goes through
+# `bin.Recycle<T>()`, which draws from `idleList` -- i.e. only components that have already left
+# the collection and therefore already fired `ComponentRemoved`. The leg pins the bin's
+# behaviour so a future call site that re-adds a live-but-dying component fails here rather than
+# in play.
+#
+# MENU-ONLY AND LEAVE-NO-TRACE, the eaNetScenarios shape -- so `?menu&noattract` and no level.
+# `?noattract` matters: the 20 s attract demo is a live world, and the suite would SKIP over it.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+
+eval NetIdReuse
+
+# The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
+# happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
+# attract demo is up. Raise the count when legs are added.
+expect \[netidreuse\] 35 passed, 0 failed
+expect-not SKIP
+quit

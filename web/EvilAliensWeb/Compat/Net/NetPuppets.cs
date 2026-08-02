@@ -894,10 +894,20 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             byte killerSlot = NetSession.TakeKillNote(comp);
-            if (killerSlot != NetProtocol.KillerNone)
+            // AN UNATTRIBUTED DEATH IS NOT A CLAIM (card 9ccfe295). `KillerNone` means our own
+            // copy died a gameplay death no player landed -- a puppet-vs-puppet collision the
+            // host never saw (its own beam, another enemy), a dead-reckoned puppet reaching the
+            // Floorbottom -- which is this peer MIS-SIMULATING state the host owns, not a kill.
+            // There is nothing to credit and nothing for the host to do, and sending it anyway
+            // is what used to delete the host's live entity with no death FX at all.
+            // The host guards the same case (`HandleClaim`), so this is the near half of one
+            // rule rather than the only one; keeping both means a stranger's wire cannot reach
+            // it either. `KillerSelf` still goes -- an opted-in self-destruct really happened.
+            if (killerSlot == NetProtocol.KillerNone)
             {
-                MarkPaid(netId, killerSlot); // the local death path already paid this slot
+                return;
             }
+            MarkPaid(netId, killerSlot); // the local death path already paid this slot
             NetSession.SendClaim(netId, killerSlot);
         }
 

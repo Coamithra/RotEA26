@@ -556,6 +556,12 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   asserting the EFFECT on the live puppet. The hit blink and the detach burst are private state
   that no metric moves and no frame can be timed to — which is the same reason those effects
   needed a wire beat at all. Menu-only and leave-no-trace),
+  `eaNetIdReuse()` (the vanishing laser UFO — cards 9ccfe295 / 54e9a590: a client's replicated
+  beam had no EMITTER, so `UFO.CollidesWith`'s `owner != this` test made a big laser UFO shoot
+  itself dead on the joiner, and the `KillerNone` claim that followed deleted the host's live
+  copy with no explosion at all. Asserts the emitter on the wire, the self-hit it prevents with
+  the ownerless pre-card configuration beside it as the control, and that an unattributed claim
+  now keeps and re-announces the entity. Menu-only and leave-no-trace),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec, plus the stale

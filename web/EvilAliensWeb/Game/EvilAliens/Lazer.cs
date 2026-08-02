@@ -100,6 +100,12 @@ internal class Lazer : AlienDrawableGameComponent
 	public void SetupSingleShot(Vector2 position, float direction, float lead, bool playSound)
 	{
 		netSweepRadPerMs = 0f; // see Setup above
+		// ...and the OWNER, for the same pooling reason and one more (card 9ccfe295). A single
+		// shot has no emitter to spare, so a recycled beam that kept the last one's `owner` would
+		// spare the WRONG enemy -- and every consumer of this field is a "did MY beam hit me"
+		// test. LazerDescriptor builds every client puppet through here, so this is also what
+		// makes an unresolved owner read as null rather than as whatever the pool last held.
+		owner = null;
 		issingle = true;
 		base.Position = position;
 		this.lead = lead;
@@ -222,6 +228,22 @@ internal class Lazer : AlienDrawableGameComponent
 	internal float NetLen => len;
 
 	internal float NetLead => lead;
+
+	// THE EMITTER, and it has to cross the wire (card 9ccfe295). `owner` is set only by Setup,
+	// which no puppet runs -- so a client's beam had NO owner, and `UFO.CollidesWith`'s
+	// `other is Lazer && ((Lazer)other).owner != this` was TRUE for the very ship that fired it:
+	// on the joiner a big laser UFO shot itself dead with its own beam. The host knows the
+	// emitter, so it says so (LazerDescriptor spawn extras) rather than the client guessing from
+	// geometry. Null is a real answer -- every SetupSingleShot emitter (JunkBoss, the two
+	// motherships) genuinely has no owner on either peer, and that is shipped behaviour.
+	internal AlienDrawableGameComponent NetOwner => owner;
+
+	// Adopt the emitter a spawn extra named. Only the puppet layer calls this; the host's own
+	// beams get their owner from Setup.
+	internal void NetSetOwner(AlienDrawableGameComponent emitter)
+	{
+		owner = emitter;
+	}
 
 	// Push the host's beam aim/length/lead into BOTH the collision line fields (Direction/len/
 	// lead, read by CollisionType) and the drawn Quad geometry, WITHOUT resetting the FX tendril

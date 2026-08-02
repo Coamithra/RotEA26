@@ -29,10 +29,11 @@ namespace EvilAliensWeb.Compat.Net
     public enum SpawnRejectKind
     {
         None = 0,     // the puppet was BUILT and landed. Not a rejection.
-        AlreadyLive,  // we already hold this id -- and it was NOT self-healed, so it already
-                      // carries the host's spawn extras and this really is a duplicate. (A
-                      // self-healed puppet takes the rebuild path in OnSpawn instead and
-                      // reports None, card de4d5d65.) BENIGN and expected in bursts: the snapshot
+        AlreadyLive,  // we already hold this id and are KEEPING what we hold. Card de4d5d65
+                      // added a second way to reach it: a SELF-HEALED puppet is normally
+                      // rebuilt from this spawn's extras (reporting None), but a rebuild that
+                      // cannot be constructed reports AlreadyLive rather than destroying the
+                      // working puppet. BENIGN and expected in bursts: the snapshot
                       // self-heal rebuilds ids off the unreliable stream lane, so the ordered
                       // EvSpawn for one of those arrives second, and a checkpoint revert
                       // re-spawns ids across a purge the client is still settling. Measured on
@@ -95,7 +96,8 @@ namespace EvilAliensWeb.Compat.Net
             public bool HasSnapshot;
             // Built by the snapshot self-heal, i.e. with NO spawn extras -- so its variant
             // cosmetics are the descriptor's defaults, not the host's. The reliable EvSpawn
-            // that follows rebuilds it properly (card de4d5d65); cleared once it has.
+            // that follows rebuilds it properly (card de4d5d65) -- the rebuild is a whole new
+            // PuppetInfo, so this is never cleared in place, it is replaced by a false one.
             public bool SelfHealed;
         }
 
@@ -209,6 +211,10 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return SpawnRejectKind.Disabled;
             }
+            // The self-healed puppet this spawn is about to REPLACE, if any. It stays live and
+            // registered until the replacement has been built AND landed -- see the three
+            // "keep the stale" returns below.
+            PuppetInfo stale = null;
             if (byId.TryGetValue(netId, out PuppetInfo livePuppet))
             {
                 // A self-healed puppet was built from a SNAPSHOT, i.e. with no spawn extras --
@@ -223,42 +229,45 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return SpawnRejectKind.AlreadyLive;
                 }
-                // Detach BEFORE asking the bin to remove: bin.Remove is DEFERRED to the next
-                // flush, by which point the replacement is already registered under this same
-                // netId. Components_ComponentRemoved early-returns on an unmapped component, so
-                // dropping the old maps here makes that late event a complete no-op -- leave the
-                // maps in place and it would evict the REPLACEMENT from byId and MarkRemoved the
-                // id, and every following snapshot entry would read as LeftDead.
-                var stale = (GameComponent)(object)livePuppet.Comp;
-                idByComp.Remove(stale);
-                byId.Remove(netId);
-                live.Remove(livePuppet);
-                bin.Remove(stale);
+                stale = livePuppet;
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(typeIdx);
             if (desc == null)
             {
-                return SpawnRejectKind.Unknown;
+                // A generically-dressed puppet beats no puppet: tearing the live one down for a
+                // spawn we cannot build would leave the id `MarkRemoved` and every snapshot for
+                // the next RecentRemovalWindowMs reading LeftDead. The typeIdx still came off
+                // the wire from a stranger via the public game browser, so this is reachable.
+                return stale != null ? SpawnRejectKind.AlreadyLive : SpawnRejectKind.Unknown;
             }
             AlienDrawableGameComponent comp;
-            bool landed;
+            bool landed = false;
             constructing = true;
             try
             {
                 comp = desc.CreatePuppet(bin, game, state, buf, off, len);
-                if (comp == null)
+                if (comp != null)
                 {
-                    // A descriptor may legitimately decline (e.g. a Ball with no JunkBoss).
-                    // Mark the id removed so the snapshot self-heal doesn't re-attempt
-                    // construction every 60ms turn -- it retries after the suppression window.
-                    MarkRemoved(netId);
-                    return SpawnRejectKind.Declined;
+                    landed = bin.TryAdd((GameComponent)(object)comp);
                 }
-                landed = bin.TryAdd((GameComponent)(object)comp);
             }
             finally
             {
                 constructing = false;
+            }
+            if (comp == null)
+            {
+                // A descriptor may legitimately decline (e.g. a Ball with no JunkBoss, or a
+                // Powerup whose type byte is not a real PowerupType). Mark the id removed so the
+                // snapshot self-heal doesn't re-attempt construction every 60ms turn -- it
+                // retries after the suppression window. Keeping a stale puppet instead is the
+                // same trade as the no-descriptor branch above.
+                if (stale != null)
+                {
+                    return SpawnRejectKind.AlreadyLive;
+                }
+                MarkRemoved(netId);
+                return SpawnRejectKind.Declined;
             }
             if (!landed)
             {
@@ -274,8 +283,27 @@ namespace EvilAliensWeb.Compat.Net
                 // own divert log sits inside the branch the exemption skips).
                 Console.WriteLine("[net] puppet add was diverted by the bin, id=" + netId
                     + " type=" + typeIdx + " -- retrying after the removal window");
+                if (stale != null)
+                {
+                    return SpawnRejectKind.AlreadyLive;
+                }
                 MarkRemoved(netId);
                 return SpawnRejectKind.Swallowed;
+            }
+            if (stale != null)
+            {
+                // The replacement has landed, so the stale one goes now. Detach BEFORE asking the
+                // bin to remove: bin.Remove is DEFERRED to the next flush, by which point the
+                // replacement is already registered under this same netId.
+                // Components_ComponentRemoved early-returns on an unmapped component, so dropping
+                // the maps here makes that late event a complete no-op -- leave them in place and
+                // it evicts the REPLACEMENT from byId and MarkRemoveds the id, after which every
+                // snapshot entry reads LeftDead and the puppet is never corrected again.
+                var staleComp = (GameComponent)(object)stale.Comp;
+                idByComp.Remove(staleComp);
+                byId.Remove(netId);
+                live.Remove(stale);
+                bin.Remove(staleComp);
             }
             comp.Enabled = false; // frozen from the first tick (bin.Add force-enables)
             INetEntity entity = comp;
@@ -288,6 +316,21 @@ namespace EvilAliensWeb.Compat.Net
                 SelfHealed = selfHealed,
             };
             ApplySnapshotState(info, state, null, null, 0, 0, isSpawn: true);
+            if (stale != null)
+            {
+                // `state` here is the SPAWN-time base state, and the snapshot that self-healed
+                // this id is by definition newer -- that lane skew is the whole reason the puppet
+                // existed to be rebuilt. ApplySnapshotState has just hard-written the entity back
+                // to where it entered the world, so carry the corrected pose across: without it
+                // the enemy teleports backwards and dead-reckons from there, collidable, until its
+                // next round-robin turn (up to snapTurn, ~1.2s in a big world).
+                entity.Position = stale.Comp.Position;
+                info.Vel = stale.Vel;
+                info.Correction = stale.Correction;
+                info.CorrectionMsLeft = stale.CorrectionMsLeft;
+                info.TargetScale = stale.TargetScale;
+                info.HasSnapshot = stale.HasSnapshot;
+            }
             byId[netId] = info;
             idByComp[(GameComponent)(object)comp] = netId;
             live.Add(info);

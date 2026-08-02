@@ -84,14 +84,18 @@ expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
 expect \[kicktest\] PASS \(29/29 checks\)
 # snapshot unknown-id attribution + the snapTurn arithmetic (card 48ab9b2f). Card de4d5d65 added
-# section 6 -- 18 -> 36 -- the self-heal builds with NO spawn extras, so the reliable EvSpawn that
+# section 6 -- 18 -> 40 -- the self-heal builds with NO spawn extras, so the reliable EvSpawn that
 # follows must REBUILD the puppet rather than be dropped as a duplicate: a Powerup otherwise keeps
 # Randomize()'s local random type and a bonus UFO never gets its SetAsBonus, i.e. the joiner sees a
-# carrier whose colour does not match its powerup, permanently. Two of those legs are not about the
-# extras at all but about the ORDER the rebuild detaches in (bin.Remove is deferred, so the stale
-# component's ComponentRemoved lands after the replacement took the same netId); mutation-tested
-# separately, and that mutation fails ONLY those two.
-expect \[netsnap\] PASS \(36 passed, 0 failed\)
+# carrier whose colour does not match its powerup, permanently. Mutation-tested three ways, and the
+# three mutations fail DISJOINT legs, which is what says the section is testing three things and
+# not one: (a) the pre-card behaviour, never rebuilding, fails 9; (b) skipping the detach before
+# the stale component's DEFERRED bin.Remove fails exactly 2 (that late ComponentRemoved then
+# evicts the replacement, which took the same netId, and the id reads LeftDead ever after); (c)
+# tearing the stale one down BEFORE the replacement is built and landed fails exactly 2 -- a spawn
+# extras byte off a stranger's wire that no descriptor can build would otherwise delete a working
+# puppet and MarkRemove its id.
+expect \[netsnap\] PASS \(40 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a)
 expect -> ALL PASS \(36 passed, 0 failed\)
 # the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)

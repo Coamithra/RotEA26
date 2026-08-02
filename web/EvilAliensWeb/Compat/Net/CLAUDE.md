@@ -737,15 +737,29 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     host's extras (reporting `None`, not `AlreadyLive`); a puppet that already carries its extras
     still refuses the duplicate. **The reported symptom was the UFO/powerup colour mismatch on
     P2; the fix is type-agnostic, so size, sheet, behaviour and every boss variant come with it.**
-  - **The rebuild DETACHES FROM THE MAPS BEFORE `bin.Remove`, and that order is the subtle
+  - **THE STALE PUPPET IS NOT TOUCHED UNTIL THE REPLACEMENT HAS BEEN BUILT AND LANDED.** The
+    spawn extras are bytes off a stranger's wire (public game browser), and a descriptor can
+    genuinely decline them -- `PowerupDescriptor` returns null for an unrecognised type byte.
+    Tearing the puppet down first would let one bad byte DELETE a working enemy and
+    `MarkRemoved` its id, after which every snapshot for `RecentRemovalWindowMs` reads
+    `LeftDead`. So all three failure branches (no descriptor, declined, `TryAdd` refused) report
+    `AlreadyLive` and keep what they have: a generically-dressed puppet beats no puppet.
+  - **The rebuild then DETACHES FROM THE MAPS BEFORE `bin.Remove`, and that order is the subtle
     part.** `bin.Remove` is DEFERRED, so the stale component's `ComponentRemoved` fires on a
     later flush -- by which point the replacement is registered under the same netId. Dropping
     `idByComp`/`byId`/`live` first makes that late event a complete no-op (the handler
     early-returns on an unmapped component); leave them and it evicts the REPLACEMENT and
     `MarkRemoved`s the id, after which every snapshot entry reads `LeftDead` and the puppet is
-    never corrected again -- silent, and invisible in any frame. Pinned by `eaNetSnap()`
-    section 6 (36 checks now, up from 18); the no-detach mutation fails exactly the two legs
-    that name it.
+    never corrected again -- silent, and invisible in any frame.
+  - **The corrected POSE is carried across the rebuild.** The `EvSpawn`'s base state is the
+    spawn-time one and the snapshot that self-healed the id is by definition newer -- that lane
+    skew is the whole reason the puppet existed -- so `Position`/`Vel`/`Correction` come off the
+    stale `PuppetInfo` after `ApplySnapshotState`. Without it the enemy teleports back to where
+    it entered the world and dead-reckons from there, collidable, until its next round-robin
+    turn (up to `snapTurn`, ~1.2 s in a big world).
+  - Pinned by `eaNetSnap()` section 6 (40 checks now, up from 18), mutation-tested three ways
+    that fail DISJOINT legs -- the pre-card never-rebuild fails 9, the missing detach fails 2,
+    the tear-down-before-construction fails 2.
 - **Per-type descriptors (`Compat/Net/NetTypeRegistry` + `Compat/Net/Descriptors/`):**
   the wire typeIdx IS the registry order -- append-only, never reorder. A descriptor owns
   (a) puppet CONSTRUCTION: spawn extras pin every random/caller-chosen look (e.g. UFO's

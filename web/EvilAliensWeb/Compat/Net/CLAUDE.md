@@ -35,7 +35,9 @@ inputs; the other peer's ship is an interpolated puppet.
   new protocol, both halves are second doors onto existing machinery.
 - **Score + per-slot HUD correctness:** the awarded AMOUNT is replicated, not the combo
   (`b0ab09ec`, v7); a slot's combo and powerup progression belong to its OWNER (`1a3ad45a`, v9,
-  `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`).
+  `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`); the OPTION SHIP
+  population is owner-authoritative too, per orbit layer (`c5228350`, v16) -- see the option-count
+  bullet under the remote pickup.
 - **Transient feedback -- the beats a frozen puppet could never reach** (`43e85936` / `57ea30cd` /
   `ee939dd1` / `8d063d33` / `c146422f`): boss + asteroid hit flashes, the Ball detach burst, enemy
   laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
@@ -54,6 +56,11 @@ inputs; the other peer's ship is an interpolated puppet.
 - **Diagnostics + rigs:** fake lag/loss/jitter (`40334a8f`), the snapshot unknown-id split and
   `snapTurn` (`48ab9b2f`), decorative swarms as one on/off beat (`9a3175d0`, v10), the
   standing-purge-filter races (`74403f83`), the signaling server deployed (`8c3c18da`).
+- **Level-3 walls stop diverging** (`4392bd30` / `80749dc4`): a wall DERIVES its scale from the
+  grid variation the wire already carries, so the base state's u16-at-1/256 copy (4.9% out on the
+  12-wide grid, 402px of divergence down it) stops being applied; the collision grid takes its tile
+  size from the wall, closing the joiner-local hit-before-you-touch-it gap; and the scroll is
+  anchored. No protocol change -- see the LEVEL-3 WALLS section.
 - **Puppet smoothness** (`c92f3817` / `0dfc4495` / `d3add86f` / `8dabe812` / `0108d1fc`), and its
   wire-first successor: the host now MARKS a reposition instead of the observed-velocity estimator
   guessing at one (`e79bb994`, v13) -- see the teleport-marker bullet under "Puppet SMOOTHNESS".
@@ -243,7 +250,8 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     one level deeper**: `killable.NetKill` runs the real per-type `KilledBy` (explosions, cues,
     `AwardScoreToAll`), and `Boss.KilledBy` is scene-free -- but check the specific types a new
     scenario kills rather than assuming it of all of them.
-  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 17 members
+  - **The entity is the THIRD seam, `INetEntity` (card 25ad0659 step 2c-ii).** 18 members
+    (17 as shipped; `NetScaleLocal` joined them for the wall cards -- see LEVEL-3 WALLS)
     (the card's census measured 16 distinct ones over 42 call sites; `GetType()` is one of them
     and comes free from `object`, and the two discriminants below replace type tests rather than
     calls), implemented DIRECTLY on `AlienDrawableGameComponent` -- never
@@ -507,22 +515,59 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES, and `netMode` is why (card 72143c11).**
-    `MenuScene.netMode` lives on the long-lived menu scene and NOTHING clears it across a level
-    launch, so a lobby co-op match that ends mid-level returns to a menu still holding it -- while
-    `MenuScene.Initialize` has already re-added `mainMenu`. `NetUpdate`'s notice branch used to
-    call `CloseNetFlowMenus()` there, which does not touch `mainMenu`, so the panel went up over
-    a LIVE main menu: the text overlapped the rows, and since **`MenuSub1` has no modality at all**
-    -- every menu in the collection runs `HandleInput` every tick -- arrows moved two selections
-    and Enter invoked two entries. `mainMenu.RemoveInstantly()` now runs unconditionally
-    (`Collection.Remove` of a menu that is not shown is a no-op, so the lobby paths are
-    unaffected). **The stale `netMode` itself is NOT fixed** -- clearing it at launch changes the
-    lobby's exit routing and wants its own card.
+  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES (card 72143c11).** `NetUpdate`'s notice
+    branch used to call `CloseNetFlowMenus()` on the `netMode` branch only, and that does not
+    touch `mainMenu`, so the panel could go up over a LIVE main menu: the text overlapped the
+    rows, and since **`MenuSub1` has no modality at all** -- every menu in the collection runs
+    `HandleInput` every tick -- arrows moved two selections and Enter invoked two entries.
+    `mainMenu.RemoveInstantly()` now runs unconditionally (`Collection.Remove` of a menu that is
+    not shown is a no-op, so the lobby paths are unaffected). Card c337222a changed WHICH branch a
+    post-level notice arrives on, not whether that line is needed -- it now arrives with `netMode`
+    false and `mainMenu` live, i.e. the case it closes.
     Verify with `eaMenuCensus()` / `tools/headless/probes/net_notice_menu.txt`, never a
     screenshot: `NetStatusMenu` has DrawOrder 2000 and draws its own 50% darken, so a menu live
     underneath it looks merely dim while still eating every keypress. `eaNetNotice(text)` parks
-    the notice with no peer and `eaMenuNetMode()` supplies the stale flag -- the one precondition
-    a headless run cannot otherwise produce.
+    the notice with no peer and `eaMenuNetMode()` supplies the flag -- the one precondition a
+    headless run cannot otherwise produce.
+  - **`MenuScene.netMode` IS MENU-NAVIGATION STATE AND DIES WITH THE VISIT TO THE MENU (card
+    c337222a).** `MenuScene` is a singleton -- `Game1` builds it once and re-ADDS it to the
+    collection on every return from a level, re-running `Initialize` -- so nothing on it is fresh
+    unless something clears it, and nothing cleared `netMode`. A lobby co-op match therefore came
+    back to a main menu that still believed it was inside the Online Co-op flow, and every reader
+    was reading a lie: `difficultyMenu_difficultySelected` silently ABORTED the next ordinary
+    launch after `mainMenu` and the selector were already gone (a reload-only dead end, the
+    sharpest of the four), the two selector `OnExit`s backed out to `netPickMenu`, the carousel
+    refused `WebcamAliens` offline, and `NetUpdate` ran the lobby pump. `MenuScene.Initialize` now
+    calls `ResetNetFlowState()` -- `netMode`, `netNoticeUp`, `browsingGames` and the status panel
+    as ONE lifecycle -- placed before the `?gamebrowser` block so that flag's own
+    `netMode = true` still wins. **`netNoticeUp` is a second real fix, not a ride-along**:
+    `netStatus_CancelSelected` is its only clearer, so a notice still up at a level launch left it
+    set forever and `if (!netMode || netNoticeUp) return;` then killed the lobby pump for the rest
+    of the process -- every later Host/Join stuck on "Contacting server...". (`browsingGames` and
+    `netStatusShown` really are near-unreachable today; they ride along because one lifecycle
+    beats three near-misses.)
+    - **It is SESSION-FREE on purpose** (no `NetLobby.Cancel`, no `NetGameBrowser.Stop`): a caller
+      that returns to the menus with a session STILL UP must be able to re-enter deliberately.
+    - **That entry point is `MenuScene.EnterNetLobby()`, and it is THE way to reach the net-lobby
+      menu state programmatically.** **It ships UNCALLED** -- card 3b6c12e7's level-end -> lobby
+      flow lands its first caller, and the seam is here so that card comes through a defined door
+      instead of inventing one against private state. It sets `netMode`, clears `netNoticeUp`,
+      **removes `mainMenu` itself** (`Initialize`
+      re-adds it unconditionally and neither `netPickMenu` nor `NetStatusMenu` is modal, so a live
+      main menu underneath would eat every keypress -- the 72143c11 lesson; a caller must NOT be
+      relied on to do this), then mirrors the lobby's own `Connected` branch: host to the level
+      pick, client to the waiting panel.
+    - **Deriving it from `NetSession` instead was evaluated and is IMPOSSIBLE** -- the lobby's
+      `Contacting`/`Prompting`/`Connecting` phases have no session at all, so `NetSession.Active`
+      under-reports exactly where the pump must run; and the selector-exit routing is a
+      "where did I come from" question, not a "is a session up" one.
+    - `difficultyMenu_difficultySelected`'s abort now also recovers (`mainMenu.Show()`) when there
+      is neither a session nor a pending notice, so that branch can no longer strand the player.
+      `NetSession.MenuNotice` is PEEKED there, never taken -- `TakeMenuNotice` consumes.
+    - **Verify with `eaMenuNetState()` / `eval MenuNetState`**, pinned by
+      `tools/headless/probes/net_menumode_reset.txt` (plant the flag, round-trip through the
+      Tutorial, require it clear AND require an ordinary Mission 1 launch to still launch). None
+      of those four fields changes a pixel, so no screenshot can see any of this.
 
 ## Protocol, NetIds & the replicable set
 
@@ -600,12 +645,15 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   worlds scale together, card a66e190a. A v14 peer ignores the unknown event and falls back
   to the pre-card unilateral slowdown, so like v14 the bump is the batch convention rather
   than a forced incompatibility.
+  **v16** appends the owner's per-LAYER Option ship COUNT to every `MsgHudState` entry
+  (`HudSlotBytes` 10 -> 12) -- card c5228350, see the option-count bullet under the remote
+  pickup. Like v13 this MOVED A FIXED-WIDTH LAYOUT rather than appending something an old peer
+  could ignore, so a v15 peer mis-parses every entry after the first: a forced bump, not a
+  convention one.
   **v17** adds `EvRespawn` (event 26) -- either peer announces that one of its ships has started
   its respawn clock, so the other peer draws the indicator too, card 37f3a663. A v16 peer ignores
-  the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14-v16 the
-  bump is the batch convention. (v16 is RESERVED for card c5228350's `MsgHudState` widening, in
-  flight in the same batch; if that card lands differently, v16 is an unused number rather than a
-  gap in this history.)
+  the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14 and v15
+  the bump is the batch convention rather than a forced incompatibility.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1230,13 +1278,37 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     simulation -- each peer forms its own connector off its own collision, `isConnectedWith`
     dedupes, and `NetPullOwnShip` (the TeamChallenge tether path) already handles the net case --
     so there is no form event and no protocol change.
-  - **`Option`** -- the pickup's 1-4 Option ships. **The two mirrors ADD UP rather than
-    double-count, and that is the property to preserve**: the LEVEL-driven options already
-    arrive over `MsgHudState` (card 1a3ad45a), and a PICKUP NEVER CHANGES A LEVEL, so `DoSpecial`
-    and `PowerUp` are disjoint -- both peers derive the pickup's own count from the same
-    ship-local `optionLevel`, which only `PowerUp` writes. Pre-card the observer got the level
-    half alone, i.e. always FEWER (card 10f9dba4). Residual, accepted: a pickup landing within
-    one ~10 Hz HUD packet of a level-up to 3 or 4 can spawn the pre-level count on the observer.
+  - **`Option` -- NO LONGER ON THIS PATH AT ALL (card c5228350, protocol v16). The option
+    population is OWNER-AUTHORITATIVE: `MsgHudState` carries the per-LAYER COUNT and the observer
+    reconciles its puppet to it** (`PlayerShip.NetSetOptionCounts`, called from
+    `NetSession.HandleHudState` AFTER `NetSetHudState`, whose level loop spawns the level-driven
+    ones itself). The `case Option:` here is deleted; do not re-add it as a low-latency estimate.
+    - **Why the two-derivations design could not be finished.** It ADDED UP correctly in steady
+      state (a pickup never changes a level, so `DoSpecial` and `PowerUp` are disjoint), but both
+      halves were DERIVED, and a JOIN-IN-PROGRESS peer replays no `EvClaim` -- so it reconstructed
+      the level half alone and was permanently short, whatever the steady-state arithmetic did
+      (card 10f9dba4's own residual, filed as c5228350). The same fix absorbs PR #264's other
+      residual (a pickup landing within one ~10 Hz packet of a level-up to 3/4 derived the count
+      from a stale `optionLevel`): there is no second derivation left to be stale.
+    - **PER LAYER, not a total**: `options[0]`/`options[1]` are two orbits at radius 40 and 60, so
+      one number would let the observer hang the owner's outer ring on the inner one.
+    - **It reconciles DOWNWARD as well**, which is a real fix beyond the card: `Option` is a 2-hp
+      `KillableAlien` that local enemy bullets shoot off, so the two peers lost them
+      independently and nothing ever corrected it.
+    - The count is SHIP state where the rest of the entry is roster state (which outlives a
+      death); no ship reports 0/0, and the peer's puppet is gone at the same moment anyway --
+      an Option dies with its owner. Clamped at the decode boundary
+      (`NetProtocol.HudMaxOptionsPerLayer` 32): the byte is off a stranger's wire and it drives
+      real component spawns.
+    - Two costs, both taken deliberately over an estimate that can be visibly WRONG and then pop.
+      A remote player's pickup options appear up to one HUD interval (~50 ms mean) later than
+      they used to; and because a dead owner reports 0/0 while its puppet is still ~100 ms of
+      interpolation behind, the orbit blinks out slightly before the ship it belongs to does.
+    - **The spawn goes through `ComponentBin.TryAdd`, not `Add`** -- this caller adopts what it
+      adds, and the rx drains inside a tick where a `Purge<AlienDrawableGameComponent>` can be
+      standing. Adopting a diverted option would satisfy the list count with a component the
+      world does not have and the reconcile would never notice; a refusal simply waits for the
+      next packet.
   - `FirePower`/`Range` already ride `MsgShipState`; `Blast` and `OneUp` stay unmirrored for the
     reasons in the hardening bullet above and in `HandleClaim`.
   - **`OwnsSlot(slot)` gates the SHIP half and the HUD half stays ungated.** The host also runs
@@ -1265,16 +1337,24 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot
     already at 4, or the first HUD packet for a slot) and would fire four sparkles in a tick for
     events from before we were watching. Stateless, because a genuine level-up is always one step.
-  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 23 assertions;
+  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 33 assertions;
     `tools/headless/probes/net_pickup.txt`). **DESTRUCTIVE** like `eaNetResetSpawn` -- it pairs a
     real HOST session onto the live level, adopts a real ship puppet off a scripted client's
     stream and drives real `EvClaim` frames at it -- so run it in a throwaway
-    `?level=Level2&invuln` boot. The leg the suite rests on is the option arithmetic, driven over the
-    FULL remote sequence (claims AND HUD state) rather than either path alone, because the risk
-    of fixing "the observer sees fewer" is inverting it into "the observer sees more"; measured
-    owner +6 / observer +6 over 3 pickups + 3 level-ups, and +3 on the observer under the
-    pre-card mutation. The connector leg leads with the NEGATIVE (unarmed puppet -> no connector)
-    so the positive cannot read as "the rig always makes one". Mutation-tested five ways.
+    `?level=Level2&invuln` boot. The legs the suite rests on are the option ones, driven over the
+    FULL remote sequence (claims AND a REAL `MsgHudState` packet through the production encoder,
+    decoder and rx drain -- the hand-written stand-in that packet used to be is gone, precisely
+    because it could drift from production with every leg green): measured owner +6 / observer
+    +6 over 3 pickups + 3 level-ups, and +3 -- exactly the level-derived half -- with the
+    reconcile mutated out. **Leg 6 is card c5228350's own subject**: the same shape with NO claim
+    delivered, i.e. what a join-in-progress peer gets, asserting the observer falls behind and
+    that ONE packet catches it up per layer; leg 7 pins PR #264's race residual against the
+    pre-card arithmetic transcribed beside it, leg 8 the DOWNWARD direction plus the outer orbit
+    layer (unreachable otherwise -- the owner would have to be at option level 4).
+    The connector leg leads with the NEGATIVE (unarmed puppet -> no connector)
+    so the positive cannot read as "the rig always makes one". Mutation-tested seven ways.
+    **Re-adding the deleted claim-side Option spawn fails NOTHING** (the reconcile absorbs it
+    within one packet) -- the single-source property is a review invariant here, not a probed one.
     **The mute half is NOT covered** -- `SoundManager` has no cue counter and adding one for a
     test would be a production field with no other reader.
 - **Per-slot HUD state: a slot's combo and powerup progression belong to its OWNER (card
@@ -1303,8 +1383,8 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     so the test can table-drive `Remote`/`RemoteFriend`/unseated -- offline the predicate is
     unconditionally true, so a live-roster-only test could never reach those cases at all.
   - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
-    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5]` per owned slot.
-    Protocol **v9**. **combo is a USHORT and that is load-bearing** -- the host SPENDS the
+    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5][optionCount x 2]` per
+    owned slot. Protocol **v9**, the option counts **v16** (card c5228350 -- the bullet above). **combo is a USHORT and that is load-bearing** -- the host SPENDS the
     adopted figure (`AwardScoreToAll` -> `comboModify`), so a byte would cap a client's real
     400x combo at 255 and underpay it; combos past 255 are expected (1000 precached combo
     strings, an explicit `>= 1000` draw fallback). Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
@@ -2120,7 +2200,8 @@ reads a contented 0 throughout. The instrument is
     `SpiderBoss` / `FakeBoss` / `BattleSkull` animate an `AnimatedSprite` through their own
     replicated `animFrame` state extra, and `Wall` / `Lazer` / `StationaryBoss` / `BrainBoss` /
     `Powerup` are single-frame.
-  - Covered by `eaNetEntity()` (43 checks now, up from 38) -- the base answer, an override, and the
+  - Covered by `eaNetEntity()` (47 checks now, up from 43 -- the four added are `NetScaleLocal`'s,
+    whose polarity is the OPPOSITE inversion; see LEVEL-3 WALLS) -- the base answer, an override, and the
     two real opt-outs with a UFO beside them as the control, since a predicate hard-wired to
     `false` would otherwise pass.
 - **The correction window is `max(150ms, 2 x SnapshotTurnMs)`, not a constant 150ms.** The window
@@ -2387,6 +2468,91 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
 - **`eaNetMotion` is deliberately ABSENT from `net_selftests.txt`** -- it has its own probe, which
   carries this card's mutation matrix, so listing it in both would run it twice for nothing. The
   `eaNetDeathFx` precedent.
+
+## LEVEL-3 WALLS -- derived scale, and the collision/draw coincidence (cards 4392bd30 / 80749dc4)
+
+Two reports -- "lvl3 walls go out of sync" and "walls stutter, and I hit them before I touch
+them" -- with ONE root cause, and it is not in the wall replication design at all. **The design
+was already what the second card proposed**: a `Walls` GameEvent spawns ONE `Wall` entity per
+section, `WallDescriptor` sends the grid VARIATION as a spawn extra, `CreatePuppet` rebuilds the
+identical grid locally, and the scroll is dead-reckoned from the base velocity. Nothing was ever
+sent per block or per frame.
+
+- **THE ROOT CAUSE IS `NetBaseState.Scale`'s PRECISION, and the lesson generalises past walls.**
+  It rides the wire as a u16 at 1/256 and the cast TRUNCATES, so the error is up to 1/256 in
+  ABSOLUTE terms **whatever the value** -- ~0.2% for a sprite drawn near scale 1 (invisible, which
+  is why it went unnoticed for the whole replicable set) and catastrophic for a type whose scale is
+  SMALL. `Wall.Setup` computes `800 / (LogicalWidth * gridWidth)` off the 1248px `756-v1` sheet:
+
+  | variation | grid width | true scale | wire scale | error |
+  |---|---|---|---|---|
+  | 0 (Level 3) | 12 | 0.053419 | 13/256 = 0.050781 | **4.94%** |
+  | 1 / 2 | 7 | 0.091575 | 23/256 = 0.089844 | 1.89% |
+  | 3 | 9 | 0.071225 | 18/256 = 0.070312 | 1.28% |
+  | 4 | 3 | 0.213675 | 54/256 = 0.210938 | 1.28% |
+
+  `Wall.Draw` sizes every block as `LogicalWidth/Height * scale`, so the joiner drew **63.38px rows
+  against the host's 66.67px** -- and variation 0 is **122 rows tall**, so the two peers were
+  **402px apart** by the bottom of the section. That is the "out of sync" screenshot: not a lag, a
+  vertically COMPRESSED grid showing different rows.
+- **`AlienDrawableGameComponent.NetScaleLocal` (default FALSE) is the fix, the `NetFrameLocal`
+  idiom one field over.** A true answer means the type DERIVES its scale from something already
+  replicated, so `NetPuppets` keeps what its own `CreatePuppet`/`Setup` computed and never applies
+  the wire's copy -- for `Wall` that is the grid variation, already in the spawn extras, so the
+  client computes the byte-for-byte number the host did. **Only `Wall` overrides it.** A type whose
+  scale is ROLLED, tweened or driven by host-side state must keep taking the replicated value, or
+  the two peers simply draw it at different sizes; a UFO is the standing control.
+  - **It is skipped in THREE places, and the third is the subtle one**: `ApplySnapshotState`'s
+    per-turn write, `OnSpawn`'s initial `TargetScale`, and the SELF-HEAL REBUILD's pose carry-over.
+    A self-healed puppet is built from DEFAULT spawn extras (card de4d5d65), so its derived scale is
+    the wrong grid's -- carrying it onto the `EvSpawn` rebuild would defeat the whole thing.
+- **THE SECOND SYMPTOM IS A JOINER-LOCAL COLLISION/DRAW MISMATCH -- NOT host-side authority.**
+  Worth stating flatly because the card asked and the wrong answer is the intuitive one:
+  `PlayerShip.CollidesWith` refuses damage to a `ControlDevice.Remote` puppet outright ("you never
+  die to something you dodged on your screen"), and a joiner's bullets are never replicated. Both
+  collide against the joiner's OWN wall puppet, on the joiner's own screen. Interpolation lag is
+  real but SYMMETRIC -- the joiner's whole world is one-way-latency behind, its own ship included --
+  so it cannot produce an asymmetry between hitting and seeing.
+  What could, and did: **`CollisionLevelMap` sized its tile as the literal `800/width`**, which
+  equals the drawn block size ONLY because `Setup` derives `scale` from that same expression -- an
+  agreement by coincidence of two formulas in different files. Once the wire changed `scale`, the
+  collision rows reached **3.29px further DOWN the screen per row** than the towers did: ~33px by
+  row 10, ~100px by row 30, worsening deeper into a section, which is exactly "I hit walls way
+  before I actually do" and "my bullets disappear before hitting". The grid now takes its tile size
+  FROM THE WALL (re-pushed beside the offset every `CollisionType` read), so the two cannot drift
+  again. **Offline that is bit-for-bit neutral** -- `LogicalWidth*scale == 800/width` in float32 at
+  every shipped width, asserted rather than assumed.
+- **`Wall.NetPathAnchored => true` is the third change and belongs to the STUTTER half.** A wall
+  moves by `Speed`/`Direction` and nothing else (`Setup` and `Update` both assign them; `ADC.Update`
+  moves by exactly those), so its declared velocity is honest and it meets the anchored-motion rule.
+  The host now sends the real scroll speed instead of differencing two positions across a snapshot
+  turn on the real clock -- which carried the host's frame pacing, and made a level `speedup` arrive
+  a whole turn late. A speed change is now a step the velocity ease absorbs, which is the
+  "resync on a scroll-speed change" the card asked for, with no new wire bytes.
+- **LATENCY FAST-FORWARD WAS PROPOSED BY THE CARD AND DECLINED (user ruling via the overseer).**
+  The joiner's ENTIRE world -- every enemy, every wall -- is uniformly one-way-latency behind, and
+  their own ship interacts with that world consistently. Pushing only the walls forward would make
+  them inconsistent with the enemies beside them and put collidable geometry AHEAD of where the
+  host has it. Two screens not matching side by side is not a gameplay defect; the felt problems
+  were the three above.
+- **NO PROTOCOL CHANGE and no version bump.** Every change here is a host-side decision about what
+  goes in existing base-state fields, or a client-side decision about what to do with them.
+- **STILL OPEN, filed as its own card:** `MsgWorldSnapshot` carries no sequence and no timestamp, so
+  a REORDERED stream packet still drags any puppet backwards (~12px at the reported rig's
+  `netjitter=40` and 0.31 px/ms) -- the same defect `NetFrameLocal` fixed for animation frames, with
+  no equivalent guard for position. Filed together with widening `NetBaseState.Scale`, since both
+  are changes to the same packet and share this suite's rig.
+- **Verify with `eaNetWalls()` / `eval NetWalls`** (`Compat/Net/NetWallTest.cs`, 24 assertions;
+  `tools/headless/probes/net_walls.txt`). MENU-only and leave-no-trace. **A screenshot cannot see
+  any of this**: on EACH screen a mis-scaled wall looks like a perfectly ordinary wall, which is why
+  the bug was reported from a two-window capture and reproducible from neither half of it. Section 1
+  is the NEGATIVE CONTROL for the whole suite -- it drives the real `WriteBaseState`/`ReadBaseState`
+  and PRINTS the table above, because everything after it asserts the puppet IGNORES the wire's
+  scale, which means nothing unless the wire's scale is shown to be wrong. Mutation-tested three
+  ways, each failing DISJOINT legs; note what the scale mutation does NOT fail, and why, in the
+  probe's header -- with the scale fixed, `800/width` and the drawn block AGREE again, so the
+  invariant leg cannot tell a derived tile size from the old hard-coded one and the guard leg forces
+  a scale on by hand to reproduce the pre-card condition.
 
 ## Public game browser & join-in-progress
 

@@ -460,13 +460,31 @@ namespace EvilAliensWeb.Compat.Net
         // makes the enum append-only for this message too: a new type must go AFTER OneUp, or
         // widen this and bump ProtocolVersion.
         public const int HudLevelCount = 5;
-        public const int HudSlotBytes = 5 + HudLevelCount;  // slot+combo:2+activeType+progress+levels
+        // How many Option orbit LAYERS ride the wire, one count byte each. PlayerShip keeps
+        // exactly two (options[0] at radius 40, options[1] at 60), and the layer is what the
+        // count cannot be flattened into: a total would let the observer hang the owner's outer
+        // ring on the inner orbit.
+        public const int HudOptionLayers = 2;
+        // slot+combo:2+activeType+progress+levels+optionCounts
+        public const int HudSlotBytes = 5 + HudLevelCount + HudOptionLayers;
+        // Hostile-peer bound on a decoded option count. Real play sits far below it (a pickup
+        // adds 1, 2 or 2x2 and options are shot off again), so this is only what stops a garbled
+        // or malicious byte asking for 255 real components per layer. Clamped rather than
+        // rejected: the rest of the entry is a readout worth applying either way.
+        public const int HudMaxOptionsPerLayer = 32;
         // 0xFF = "this slot has no powerup active", so the receiver blanks the bar instead of
         // leaving a stale one lit. A real Powerup.PowerupType is 0..5 and can never collide.
         public const byte HudPowerupNone = 0xFF;
 
         // MsgHudState: [0x12][count:1] then `count` fixed-width HudSlotBytes entries:
         //   [slot:1][combo:2][activeType:1][progress:1][level x HudLevelCount]
+        //   [optionCount x HudOptionLayers]
+        //
+        // The option counts (v16, card c5228350) make the owner AUTHORITATIVE over that slot's
+        // Option ship population instead of every peer re-deriving it from events. The two
+        // sources a peer used to derive it from -- the powerup LEVEL in this same entry, and the
+        // per-pickup EvClaim -- disagree by construction for a join-in-progress peer, which
+        // replays no claims and so reconstructed only the level-driven half.
         //
         // combo is a USHORT, not a byte, and that is load-bearing rather than generous: the host
         // pays every slot's boss share with THAT slot's own multiplier (AwardScoreToAll ->
@@ -475,7 +493,7 @@ namespace EvilAliensWeb.Compat.Net
         // and combos well past 255 are expected (ScoreVisualiser precaches 1000 combo strings and
         // drawPlayerScore has an explicit >= 1000 fallback). Saturation at ushort is unreachable
         // in play. progress is the active bar's 0..1 fill quantised to a byte.
-        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int count)
+        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int[][] optionCounts, int count)
         {
             byte[] b = new byte[2 + HudSlotBytes * count];
             b[0] = MsgHudState;
@@ -492,6 +510,10 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     b[off++] = (byte)Math.Clamp(levels[i][t], 0, 4);
                 }
+                for (int layer = 0; layer < HudOptionLayers; layer++)
+                {
+                    b[off++] = (byte)Math.Clamp(optionCounts[i][layer], 0, HudMaxOptionsPerLayer);
+                }
             }
             return b;
         }
@@ -503,13 +525,14 @@ namespace EvilAliensWeb.Compat.Net
         // slot has no powerup active", which covers the explicit HudPowerupNone sentinel and any
         // value we do not recognise in one answer, so the consumer has one case to handle
         // instead of two tests it could get individually wrong.
-        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress)
+        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, int[] optionCounts, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress)
         {
             slot = 0;
             combo = 0;
             activeType = null;
             progress = 0f;
-            if (!TryDecodeHudCount(b, out int count) || index < 0 || index >= count || levels == null || levels.Length < HudLevelCount)
+            if (!TryDecodeHudCount(b, out int count) || index < 0 || index >= count || levels == null || levels.Length < HudLevelCount
+                || optionCounts == null || optionCounts.Length < HudOptionLayers)
             {
                 return false;
             }
@@ -521,6 +544,12 @@ namespace EvilAliensWeb.Compat.Net
             for (int t = 0; t < HudLevelCount; t++)
             {
                 levels[t] = b[off + 5 + t];
+            }
+            // Clamped HERE, at the decode boundary, not in the apply loop: the byte is off a
+            // stranger's wire (the public game browser) and it drives real component spawns.
+            for (int layer = 0; layer < HudOptionLayers; layer++)
+            {
+                optionCounts[layer] = Math.Clamp((int)b[off + 5 + HudLevelCount + layer], 0, HudMaxOptionsPerLayer);
             }
             return true;
         }

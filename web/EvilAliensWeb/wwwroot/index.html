@@ -735,6 +735,9 @@
         // eaMenuCensus() lists the LIVE menus: MenuSub1 has no modality, so two live menus both
         // take input, and the census is the only thing that separates "drawn behind the notice"
         // from "still selectable underneath it" — a screenshot cannot tell them apart.
+        // eaMenuNetState() (card c337222a) reads that flag and its three siblings back: none of
+        // them changes a pixel, so it is the only way to see whether a level launch left the menu
+        // believing it is still inside the Online Co-op flow.
         window.eaNetNotice = (text) => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetNotice', text || '')); }
             catch (e) { console.warn('[debug] eaNetNotice failed (game not booted yet?): ' + e.message); }
@@ -742,6 +745,10 @@
         window.eaMenuNetMode = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuNetMode')); }
             catch (e) { console.warn('[debug] eaMenuNetMode failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaMenuNetState = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuNetState')); }
+            catch (e) { console.warn('[debug] eaMenuNetState failed (game not booted yet?): ' + e.message); }
         };
         window.eaMenuCensus = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuCensus')); }
@@ -767,6 +774,16 @@
         window.eaNetMotion = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetMotionTest')); }
             catch (e) { console.warn('[debug] eaNetMotion failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the Level-3 wall's replication (cards 4392bd30 / 80749dc4). The wire's lossy
+        // u16-at-1/256 scale, the derived-scale opt-out that refuses it, the drawn-block ==
+        // collision-tile invariant that lossy scale broke (why the joiner hit walls before
+        // touching them), and the anchored scroll speed. MENU-only, leave-no-trace. A screenshot
+        // cannot see any of it -- the wall looks ordinary on each screen taken alone.
+        window.eaNetWalls = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetWallTest')); }
+            catch (e) { console.warn('[debug] eaNetWalls failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real

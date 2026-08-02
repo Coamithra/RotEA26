@@ -207,6 +207,20 @@ namespace EvilAliensWeb.Compat.Net
             Check("UFO keeps local frames (a plain free-running loop)",
                 ((INetEntity)new UFO(game)).NetFrameLocal);
 
+            // NetScaleLocal (cards 4392bd30 / 80749dc4) is the fourth virtual of this shape, and
+            // it needs the pair for the same reason NetFrameLocal does, INVERTED: it defaults
+            // FALSE, so a forward accidentally bound to NetFrameLocal -- the member immediately
+            // above it in every one of these files -- would answer TRUE for almost every type,
+            // and every entity in the game would silently stop taking the replicated scale. The
+            // shipped opt-out is Wall (it derives its scale from the replicated grid variation);
+            // the UFO beside it is the control, since its scale is caller-chosen per spawn.
+            Check("a plain entity's NetScaleLocal is the base false", !e.NetScaleLocal);
+            Check("a NetScaleLocal override reaches the seam (true)", variant.NetScaleLocal);
+            Check("Wall opts OUT of replicated scale (it derives its own)",
+                ((INetEntity)new Wall(game)).NetScaleLocal);
+            Check("UFO keeps the replicated scale (caller-chosen per spawn)",
+                !((INetEntity)new UFO(game)).NetScaleLocal);
+
             // ... and then the REAL shipped case for the cosmetic half, which is what the
             // production opt-out actually looks like (card 9a3175d0): a belt-decoration
             // Asteroid, whose answer flips on SetBackground rather than on its type.
@@ -349,6 +363,10 @@ namespace EvilAliensWeb.Compat.Net
             // Opposite polarity to the two above, deliberately: NetFrameLocal DEFAULTS to true,
             // so an override has to answer false to be distinguishable from the base at all.
             internal override bool NetFrameLocal => false;
+
+            // Same polarity as NetSpinPerMs/NetCosmeticOnly: NetScaleLocal DEFAULTS to false, so
+            // an override answers true.
+            internal override bool NetScaleLocal => true;
         }
 
         // A content-free KillableAlien, for the same reason ProbeEntity is a content-free

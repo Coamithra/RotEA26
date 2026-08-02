@@ -478,9 +478,10 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
-  `eaNetPickup()` (the remote-powerup-pickup suite — cards 83271f3d / 10f9dba4 / d53431b4: the
-  "2"/Linker arm and the connector it unblocks, the option count over the COMBINED claim + HUD
-  sequence, and the level-up sparkle. **Destructive** — it pairs a real host session onto the
+  `eaNetPickup()` (the remote-powerup-pickup suite — cards 83271f3d / 10f9dba4 / d53431b4 /
+  c5228350: the "2"/Linker arm and the connector it unblocks, the option count (now owner-
+  authoritative over `MsgHudState`, incl. the join-in-progress catch-up and the downward
+  reconcile), and the level-up sparkle. **Destructive** — it pairs a real host session onto the
   live level and spends real pickups into the live panels, so run it in a throwaway
   `?level=Level2&invuln` boot),
   `eaNetFire()` (the replicated shot count — cards a5c2a39b / a45b78f6: one tap used to reach the
@@ -510,6 +511,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   which shipped and merely looks rougher — so nothing throws and no counter moves. Menu-runnable
   and leave-no-trace; whether it is actually SMOOTHER is
   `python tools/sim/net_puppet_drive_sim.py --smoothness`'s question, not this one's),
+  `eaNetWalls()` (the Level-3 wall's replication — cards 4392bd30 / 80749dc4: the base state's
+  u16-at-1/256 scale is 4.9% out on a wall's tiny derived scale, which drew the joiner's grid 402px
+  short of the host's and put its collision rows below its towers. Asserts that a real puppet keeps
+  the scale its own Setup derived, that its collision tile IS its drawn block, and that the scroll
+  is anchored — each with the wire's own (wrong) number beside it as the control. Menu-only and
+  leave-no-trace; a screenshot cannot see any of it, since a mis-scaled wall looks perfectly
+  ordinary on each screen taken alone),
   `eaNetPuppetBench(n, iters)` (the pinned many-puppet drive bench — the same card's instrument:
   n real puppets, the real `NetPuppets.Drive` timed in a plain loop, in ABSOLUTE us. The FPS HUD
   cannot answer this — `Drive` runs inside `base.Update`, so it is buried in `UpdComponents`
@@ -1594,6 +1602,12 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     used to pop in). Both collapse to the flat values with `?walltowers=0`.
   - Grid files load via `TitleContainer.OpenStream` (`Wall.OpenLevelGrid`) — **never
     `new StreamReader(path)`** (WASM FS has no wwwroot content; it throws on web).
+  - **`CollisionLevelMap`'s tile size comes FROM THE WALL, not from a second copy of the formula**
+    (cards 4392bd30 / 80749dc4). It used to be the literal `800/width`, which equals the drawn
+    block size (`texture.LogicalWidth() * scale`) only because `Setup` derives `scale` from that
+    same expression — bit-for-bit true offline, and false the moment anything else sets `scale`.
+    Online co-op did exactly that and the collision rows ended up 3.29px below the towers per row.
+    A new consumer of the grid must ask `TileSize`, never re-derive it.
   - Haze = real `BasicEffect` distance fog toward the measured floor colour (baked `?wallfog` 0.55,
     RGB(46,125,201)); per-face shading = flat vertex colour (`?wallfacelight` 0.35,
     `?wallfaceangle` 140). The old sprite-slice path's `FaceShadeEffect`/`756-v1-side.png`/

@@ -996,7 +996,7 @@ public class Background : Scene
 			// erode this RGBA8 target's alpha below 1. Seal it opaque before it's reused
 			// as the DrawForeground dissolve overlay, so that overlay covers the objects
 			// uniformly by its own tint alpha (matching the alpha-less Bgr565 original).
-			base.SpriteBatch.SealAlpha(blank, RenderScale.Width, RenderScale.Height);
+			base.SpriteBatch.SealAlpha(blank, RenderScale.Width, RenderScale.Height, "[xfade] seal");
 			base.GraphicsDevice.SetRenderTarget(0, (RenderTarget2D)null);
 			base.SpriteBatch.BlendMode = (SpriteBlendMode)0;
 			// Stage 10: render-sized RT -> 1:1 identity composite (DrawPresent).

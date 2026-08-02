@@ -28,7 +28,9 @@ internal class Paratrooper : GameScene
 	{
 		base.PreloadGraphicalContent();
 		ContentManager contentManager = ServiceHelper.Get<IContentManagerService>().ContentManager;
-		contentManager.Load<Texture2D>("GFX/Sprites/brainlargetransglow");
+		// Card c25883a2: the paratroopers moved to the animated brain sheet + its additive glow.
+		contentManager.Load<Texture2D>("GFX/Sprites/brainanimated");
+		contentManager.Load<Texture2D>("GFX/Sprites/brainanimatedglow");
 		contentManager.Load<Texture2D>("GFX/Sprites/plasmaball2");
 		contentManager.Load<Texture2D>("GFX/Sprites/parachute");
 	}

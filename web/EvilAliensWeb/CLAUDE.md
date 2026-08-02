@@ -504,7 +504,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
-  result as data -- see "Content-load diagnostics" above).
+  result as data -- see "Content-load diagnostics" above),
+  `eaShotNow('arm')` then `eaShotNow('save')` (capture + persist THIS level's level-select
+  thumbnail now -- card d67755d2. The real path runs only at level EXIT, behind an on-screen
+  busy-ness heuristic and two timers, which put `ScreenshotSaver.SaveScreenShot` -- and the alpha
+  seal in it -- out of reach of a cheap check. Needs a Draw between the two calls, and prints
+  `[shot] <Level> 300x225 alphaMin=<n>` under `?loadlog`, where 255 is the pass. **DESTRUCTIVE**
+  like `eaNetResetSpawn`: it overwrites the level's real saved `.dat`, so use a throwaway boot).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -909,6 +915,17 @@ site now lives under:
   never `BlendState.AlphaBlend`). Two deliberate premultiplied-INTERMEDIATE exceptions, both
   "flatten translucent stacks into an RT, composite once": the text flatten and the group flatten
   below. Straight tints like `new Color(1,1,1,a)` are correct as written.
+- **An RGBA8 target that the ORIGINAL rendered as Bgr565 needs its alpha SEALED, and there are two
+  of them.** The XBLIG had no alpha channel on its back buffer, so no translucent draw could erode
+  one; every `NonPremultiplied` layer erodes this port's (`destA = srcA^2 + destA*(1-srcA)`), and a
+  busy frame lands well under 1. It is invisible until something SAMPLES that target with alpha
+  blending, and then it reads as the backdrop showing through in the shape of whatever layers drew.
+  `SpriteBatchWrapper.SealAlpha` is the cure; the two callers are `Background.Draw` (the death
+  cross-fade overlay) and `ScreenshotSaver.SaveScreenShot` (the level-select thumbnail, card
+  d67755d2 -- measured 134..255 on a real save, whose alpha channel held a clean picture of the
+  marshills parallax bands). **A new caller must pass its OWN `report` tag** -- `DrawStretched`'s
+  first-draw latch is keyed per tag precisely so one caller cannot spend the line another's probe
+  reads (`death_fade.txt` and `screenshot_alpha.txt` respectively).
 - **The custom font atlas is SUPERSAMPLED (3×) — never route `menufont` through stock
   `SpriteBatch.DrawString`.** `Cropping`/kerning/`LineSpacing` stay design-size (so raw
   `font.MeasureString` in ~40 layout sites is unchanged) while `BoundsInTexture` is 3×;
@@ -1329,6 +1346,17 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
   The end-credits Cast "Brain Spawn" (`CastDisplayer.braineroid`) draws the same sheet by hand (no
   interpolation, `DefaultBrainFps` 10, `DefaultBrainScale` 1.7) + glow via `DrawBrainGlow`; tune
   via `?castbrain&castbrainscale=&castbrainfps=`, bake into the `DefaultBrain*` consts.
+  **The Paratrooper challenge's falling brains draw it too (card c25883a2)** -- `ParatrooperBrain`
+  was the last consumer of the pre-migration static `brainlargetransglow`, which is now DELETED
+  (asset, `textures.config` line, `PrecompiledTextures` row, and the five dead
+  `PreloadGraphicalContent` loads the earlier migrations left in `Level1`/`Level3`/`Demo1`/`Demo3`/
+  `BraineroidsLevel`). Its scales went `0.1/0.2/0.33` -> `0.5/1.0/1.65`, the SAME x5 the Braineroid
+  migration used -- not a derived size-preserving factor; the derivation and why x5 rather than
+  x5.19 or x5.52 is in `ParatrooperBrain.cs`. **The additive glow is shared code now**
+  (`BrainGlow.cs`, lifted verbatim out of `Braineroid.DrawGlow`): the sheet is chroma-keyed and
+  carries no halo, unlike the sprite it replaced, so every consumer must draw it or the brain
+  reads as a flat cut-out. `CastDisplayer` keeps its own copy -- it draws directly, with its own
+  `?castbrain` scale, so it shares no call shape.
 - **Earth fly-by (Level 1):** the hero earth texture is a vertical strip cropped to what shows —
   **invariant: `Background.QueueEarth`/`QueueEarthSim` set `doodadscrollspeed.X = 0`; don't
   re-enable X drift or the cut sides show.** `WaitForDoodadEvent` (polls `Background.DoodadActive`)

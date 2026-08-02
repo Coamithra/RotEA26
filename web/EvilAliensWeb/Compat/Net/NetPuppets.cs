@@ -100,6 +100,22 @@ namespace EvilAliensWeb.Compat.Net
             public float CorrectionMs;
             public float TargetScale;
             public bool HasSnapshot;
+            // ---- anchored motion (card c1a38ef9) ----------------------------------------
+            // Cached once at spawn: NetPathAnchored is a per-TYPE constant, and this is read
+            // per puppet per tick.
+            public bool PathAnchored;
+            // The velocity the host last reported, which for an anchored puppet is a TARGET
+            // rather than an assignment -- Vel eases toward it over VelEaseMs. That is what
+            // turns a shot-induced heading change into a nudge instead of a step; see
+            // AlienDrawableGameComponent.NetPathAnchored.
+            public Vector2 VelTarget;
+            public float VelEaseMsLeft;
+            public float VelEaseMs;
+            // The type's own periodic offset as of the previous tick. The driver moves the
+            // puppet by the DELTA, so only the offset's change matters and a puppet adopted
+            // mid-cycle does not jump by the offset's absolute value.
+            public Vector2 PathOffset;
+            public bool HasPathOffset;
             // Built by the snapshot self-heal, i.e. with NO spawn extras -- so its variant
             // cosmetics are the descriptor's defaults, not the host's. The reliable EvSpawn
             // that follows rebuilds it properly (card de4d5d65) -- the rebuild is a whole new
@@ -327,8 +343,11 @@ namespace EvilAliensWeb.Compat.Net
                 Comp = entity,
                 TypeIdx = typeIdx,
                 Vel = state.Vel,
+                VelTarget = state.Vel,
                 TargetScale = state.Scale > 0f ? state.Scale : entity.NetScale,
                 SelfHealed = selfHealed,
+                // Cached rather than asked per tick: NetPathAnchored is a per-type constant.
+                PathAnchored = entity.NetPathAnchored,
             };
             ApplySnapshotState(info, state, null, null, 0, 0, isSpawn: true);
             if (stale != null)
@@ -346,6 +365,12 @@ namespace EvilAliensWeb.Compat.Net
                 info.CorrectionMsLeft = stale.CorrectionMsLeft;
                 info.TargetScale = stale.TargetScale;
                 info.HasSnapshot = stale.HasSnapshot;
+                // The in-flight velocity ease travels with the pose, for the same reason: the
+                // replacement is a NEW entity object, so its offset baseline is re-seeded from
+                // scratch (HasPathOffset stays false) and only the CHANGE is used from then on.
+                info.VelTarget = stale.VelTarget;
+                info.VelEaseMs = stale.VelEaseMs;
+                info.VelEaseMsLeft = stale.VelEaseMsLeft;
             }
             byId[netId] = info;
             idByComp[(GameComponent)(object)comp] = netId;
@@ -484,6 +509,16 @@ namespace EvilAliensWeb.Compat.Net
         //     N          16      32      64     128
         //     fixed 150  0.089   0.114   0.180   0.327     maxstep 3.04 -> 8.52 px
         //     2x turn    0.096   0.092   0.091   0.090     maxstep 3.27 -> 3.03 px
+        //
+        // THOSE ABSOLUTE FIGURES ARE INFLATED BY A RIG ARTIFACT -- read the RATIOS, not the
+        // ~100x-host gap (card c1a38ef9). The rig gave a new puppet vel = (0,0) for its first
+        // turn, so it stood still and then ate one large correction, and that single transient
+        // dominated every number in the table. A real EvSpawn carries CaptureBaseState's
+        // velocity, which on a first observation is the DECLARED NetSpeedVector, so a puppet is
+        // born moving. With the spawn modelled properly the same rows read 0.013 / 0.013 / 0.014
+        // / 0.019, and the steady-state penalty is ~4x to ~21x the host, not ~100x. The COMPARISON
+        // this constant rests on is unaffected -- both columns carried the same transient -- and
+        // 2x-turn still wins at every N. See the ANCHORED MOTION section in Compat/Net/CLAUDE.md.
         // i.e. flat in the world size instead of degrading 3.7x, at the cost of a hair at N=16 --
         // which the 150 ms FLOOR keeps, since below 75 ms of turn the fixed window is the better of
         // the two. A longer window is NOT free in general (it holds a bigger error for longer), so
@@ -524,7 +559,26 @@ namespace EvilAliensWeb.Compat.Net
                     info.CorrectionMsLeft = info.CorrectionMs;
                 }
             }
-            info.Vel = state.Vel;
+            // An ANCHORED puppet EASES toward the reported velocity instead of adopting it (card
+            // c1a38ef9). The host sends such a type's declared linear velocity, which is a step
+            // function -- constant for an asteroid's whole life until a bullet tweaks its heading,
+            // and then constant again. Assigning it puts that whole step into one tick, which is
+            // the kink the card is about; spreading it over the SAME window the position error
+            // already drains over makes it a nudge and needs no second constant.
+            //
+            // The very first snapshot (and any snap) assigns: there is nothing to ease FROM.
+            if (info.PathAnchored && info.HasSnapshot && !popped)
+            {
+                info.VelTarget = state.Vel;
+                info.VelEaseMs = CorrectionWindowFor(LiveCount);
+                info.VelEaseMsLeft = info.VelEaseMs;
+            }
+            else
+            {
+                info.Vel = state.Vel;
+                info.VelTarget = state.Vel;
+                info.VelEaseMsLeft = 0f;
+            }
             info.TargetScale = state.Scale;
             info.HasSnapshot = true;
             if (comp.NetSpinPerMs == 0f)
@@ -792,7 +846,31 @@ namespace EvilAliensWeb.Compat.Net
                 // since each peer owns its own hits -- then snap back hard when the host returns.
                 // ShipStateBuffer caps its own extrapolation at 250ms for exactly this reason.
                 // An in-flight correction still drains; it is finishing a snapshot we DID get.
+                // Anchored motion (card c1a38ef9): ease the baseline toward the last reported
+                // velocity, then add the type's own periodic component locally. Both are skipped
+                // for a stalled peer for the same reason the dead-reckon is -- we are no longer
+                // being told anything, so inventing motion moves a COLLIDABLE hitbox.
+                if (info.PathAnchored && !NetSession.PeerStalled && info.VelEaseMsLeft > 0f
+                    && info.VelEaseMs > 0f)
+                {
+                    float easeTake = MathHelper.Min(dtMs, info.VelEaseMsLeft);
+                    // Fraction of what REMAINS, so the ease lands exactly on the target on the
+                    // last tick whatever the dt pattern was -- a fraction of the whole window
+                    // would leave a residue that the next snapshot then has to correct.
+                    info.Vel += (info.VelTarget - info.Vel) * (easeTake / info.VelEaseMsLeft);
+                    info.VelEaseMsLeft -= easeTake;
+                }
                 Vector2 step = NetSession.PeerStalled ? Vector2.Zero : info.Vel * dtMs;
+                if (info.PathAnchored && !NetSession.PeerStalled)
+                {
+                    Vector2 offset = comp.NetPathOffset;
+                    if (info.HasPathOffset)
+                    {
+                        step += offset - info.PathOffset;
+                    }
+                    info.PathOffset = offset;
+                    info.HasPathOffset = true;
+                }
                 if (info.CorrectionMsLeft > 0f && info.CorrectionMs > 0f)
                 {
                     float take = MathHelper.Min(dtMs, info.CorrectionMsLeft);

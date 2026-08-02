@@ -1,0 +1,54 @@
+# PROBE: anchored motion -- the sent Lazer rates and the FlyingSpider path anchor.
+#
+# PINS: card c1a38ef9 -- Compat/Net/NetMotionTest, driven by eaNetMotion() / `eval NetMotion`.
+# The lane carries the MOTION MODEL on the wire (INetEntity.NetPathAnchored / NetPathOffset, the
+# three rates in LazerDescriptor's state extras, the height+phase anchor in
+# FlyingSpiderDescriptor's spawn extras) instead of estimating it from position differences.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line. EVERY defect this lane can develop degrades to
+# the PRE-CARD build, which shipped, works, and is merely rougher -- so nothing throws, no counter
+# moves, and `pupPops` stays at the contented 0 it already read (that is the whole point of the
+# smoothness family: these stutters never approach SnapThresholdPx). That is why this is a probe
+# and not something a person notices.
+#
+# WHY IT IS NOT A logic_probe CASE SET, unlike net_wire: every leg here builds a real
+# FlyingSpider / Asteroid / UFO / Lazer, and constructing an entity needs a Game. eahl is the only
+# headless runner. (The wire-LAYOUT half of this card -- the scaled-i16 rate field itself -- IS in
+# net_wire.txt, which does run under logic_probe.)
+#
+# WHAT THIS DOES NOT COVER, deliberately: whether anchored motion is actually SMOOTHER. That is a
+# property of a whole run measured against a host control, and it belongs to
+# `python tools/sim/net_puppet_drive_sim.py --smoothness`, which asserts it. This suite asserts
+# that the mechanism is wired and exact.
+#
+# MUTATION-TESTED FOUR WAYS, each isolated and each failing a DIFFERENT leg:
+#   * FlyingSpider.NetPathAnchored -> false                     1 FAIL (the predicate)
+#   * ApplyStateExtra spends the swivel correction in one step   1 FAIL (the ease leg)
+#   * the sweep rate encoded at the px scale instead of the rad  1 FAIL (the driven sweep)
+#   * NetSession.ResolveBaseVelocity drops its anchored branch   1 FAIL (section 5)
+# The LAST one is the reason section 5 exists and why the host's decision was split out of
+# CaptureBaseState as a pure function: before that split it passed the whole 32-probe suite AND
+# every other leg of this one. A host that goes back to differentiating an anchored entity makes
+# the client count the swivel TWICE -- double amplitude, fought by the correction every turn.
+#
+# Menu-runnable and leave-no-trace: nothing it builds enters the world or the recycle pool.
+# No level and no session: `?menu&noattract` only keeps the attract demo from taking the scene
+# over mid-window, which would put a live world under the entities this suite constructs.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval NetMotionTest
+
+expect \[netmotion\] anchored motion
+expect 1\. the NetPathAnchored predicate
+expect 2\. FlyingSpider path anchor through the real descriptor
+expect 3\. FlyingSpider drifting parameters are EASED, not snapped
+expect 4\. Lazer sent rates
+expect 5\. the HOST's velocity decision
+# A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
+# eval never happened at all. Raise it when legs are added; never lower it to make a run green.
+expect \[netmotion\] 30 passed, 0 failed
+expect-not FAIL
+quit

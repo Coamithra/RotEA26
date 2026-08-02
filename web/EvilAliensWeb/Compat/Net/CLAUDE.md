@@ -523,11 +523,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   explicit death-began event (replaces the hp==0 snapshot trigger's latency + one-tick residual,
   card 303bfb5b), `e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
   card 8dabe812), `c1a38ef9` motion parameters on the wire (sent Lazer rates, card 0108d1fc +
-  deterministic-path spawn anchors, card 0dfc4495 -- the second half gated on the playtest).
+  deterministic-path spawn anchors, card 0dfc4495 -- **SHIPPED, protocol v11**: the playtest gate
+  on the second half was waived and both halves landed; see the ANCHORED MOTION section).
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v11):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
@@ -547,7 +548,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   No existing layout changed, but a v9 peer would ignore the beat AND still expect the
   per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move.
   The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
-  says why that is a decision and not an oversight).
+  says why that is a decision and not an oversight;
+  **v11** widens `LazerDescriptor`'s state extras 6 -> 12 (three sent RATES) and gives
+  `FlyingSpiderDescriptor` a 5-byte spawn anchor and 4-byte state extras where it had none --
+  card c1a38ef9, see the ANCHORED MOTION section. Both blocks are length-guarded, so an older
+  peer degrades to exactly the pre-card behaviour; the bump is the batch convention rather
+  than a strict requirement).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1763,6 +1769,12 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
 
 ## Puppet SMOOTHNESS (cards c92f3817 / 0dfc4495 / d3add86f / 8dabe812 / 0108d1fc)
 
+**Read the ANCHORED MOTION section after this one (card c1a38ef9): it REPLACES the Lazer
+estimator below outright, and it corrects the "~100x host" jerk floor quoted here and in
+`CorrectionWindowFor`'s header -- most of that figure was a rig artifact (a spawn transient), not
+the steady state.**
+
+
 A family, not four bugs: everything a puppet does between snapshot turns was either not simulated
 at all or corrected as if the blind window were fixed. **`pupPops` cannot see any of it** -- every
 one of these stutters happens while the error stays well under `SnapThresholdPx`, so the counter
@@ -1856,17 +1868,15 @@ reads a contented 0 throughout. The instrument is
     clipping real motion -- raise it.**
 - **Per-type LOCAL SIMULATION, via the existing `NetDriveExtras` hook -- no wire bytes, no
   protocol change.**
-  - **`Lazer` (card 0108d1fc):** aim, length and lead are state extras, so a frozen beam only moved
-    on its round-robin turn -- a beam growing at 0.4 px/ms jumped in ~24px steps. `NetApplyBeam`
-    now records the three values and derives their RATES from consecutive snapshots (the
-    `CaptureBaseState` observed-velocity idiom, one layer down), and `NetDriveExtras` extrapolates
-    on real dt. **Observed rather than wired on purpose:** `len` is scaled by
-    `Settings.DifficultyModifier`, which ramps with play time and adapts on death and so is NOT
-    equal on the two peers -- a wired `growthspeed` would be the wrong number, while an observed
-    rate carries that scaling for free. **It covers the card's rotation caveat** (Level 1's
-    miniboss sweeps its beam) out of the same two samples, with the angle delta wrapped so a beam
-    crossing the 0/2PI seam does not extrapolate backwards. Bounded at 250ms of silence: puppets
-    are collidable, so an invented beam can kill the local player.
+  - **`Lazer` (card 0108d1fc, REPLACED by the sent rates below -- card c1a38ef9):** aim, length and
+    lead are state extras, so a frozen beam only moved on its round-robin turn -- a beam growing at
+    0.4 px/ms jumped in ~24px steps. The first cut ESTIMATED the three rates by differencing
+    consecutive `NetApplyBeam` calls (the `CaptureBaseState` observed-velocity idiom, one layer
+    down) and `NetDriveExtras` extrapolated on real dt. **That estimator is gone**; the rates are
+    on the wire now. Its header argued a wired rate would be WRONG because `len` is scaled by
+    `Settings.DifficultyModifier`, which is not equal on the two peers -- the answer is to scale at
+    SEND time, which is what ships. The rest of the design (the 250 ms cap, the recycle reset) is
+    unchanged and is described below.
   - **`PlasmaBall` (card 435db27f, "the final boss's electricity balls"):** `BrainBoss.Update`
     spawns these, and both crackle angles only advance in `Update`, so a puppet was a STILL IMAGE.
     `NetDriveExtras` runs the +-PI/2 rad/s counter-spin and the re-roll locally. The angles were
@@ -1879,6 +1889,120 @@ reads a contented 0 throughout. The instrument is
   now does strictly less work for most types). `eaNetPuppetBench(128, 2000)` reads 8.6-9.7 us/call
   (~67 ns/puppet) across runs in one process, so any delta here is below the instrument's own
   resolution -- which is the honest claim, not a measured 0.
+
+## ANCHORED MOTION -- the motion model on the wire (card c1a38ef9, protocol v11)
+
+The second half of the smoothness family and its REPLACEMENT for two of the fixes above: carry the
+motion MODEL instead of estimating it from position differences. Chartered by the cheap-protocol
+ruling; the two shipped estimators it replaces were both bent around avoiding wire bytes.
+
+- **THE "~100x HOST" JERK FLOOR IN `CorrectionWindowFor`'s HEADER WAS MOSTLY A SPAWN TRANSIENT,
+  and correcting that came first.** The `--smoothness` rig gave a new puppet `vel = (0,0)` for its
+  first snapshot turn, so it stood still for a whole turn and then ate one large correction --
+  which dominated every jerk figure the mode printed. A real `EvSpawn` carries
+  `CaptureBaseState`'s velocity, and on a first observation that is the entity's DECLARED
+  `NetSpeedVector`, so a puppet is born already moving. With the rig's spawn fixed (and the host's
+  first-observation fallback modelled as `declared` rather than zero), the same runs read:
+
+  | truth shape | N | pre-fix (the quoted figure) | steady state |
+  |---|---|---|---|
+  | linear (asteroid) | 16 | 0.0843 | **0.0000** |
+  | linear | 128 | 0.0884 | **0.0011** |
+  | swivel (wasp) | 16 | 0.0886 | 0.0034 |
+  | swivel | 128 | 0.0904 | **0.0174** |
+
+  Host control 0.00084. So the real steady-state penalty is ~4x (small world) to ~21x (big world)
+  for a PERIODIC mover and **essentially zero for a LINEAR one** -- not the ~100x the header
+  implied. **Fix a rig's spawn model before quoting anchored-vs-not rows**, or the anchor wins on
+  a rig artifact rather than on the defect.
+- **The seam is a DE-TRENDED baseline plus a local path offset**, two members on `INetEntity`
+  (the `NetSpinPerMs` / `NetFrameLocal` idiom):
+  - **`NetPathAnchored`** (default false) makes the HOST send the entity's DECLARED
+    `NetSpeedVector` instead of the finite difference. A difference taken over a whole snapshot
+    turn measures a CHORD of any periodic component, so for the wasp it is wrong by construction
+    and worse the longer the turn.
+  - **`NetPathOffset`** (default zero) is the type's zero-mean periodic offset from that baseline,
+    evaluated from its OWN locally-running state -- which is possible because the driver already
+    ticks a frozen puppet's `timers`. `NetPuppets.Drive` adds its DELTA across the tick, so a
+    constant offset contributes nothing and a puppet adopted mid-cycle does not jump.
+  - **ONLY OVERRIDE IT WHERE THE DECLARED VELOCITY IS HONEST.** `Speed`/`Direction` lie for every
+    type that writes `Position` directly -- the very reason the observed baseline exists -- so a
+    scripted position curve (a UFO) must NOT take this path or it dead-reckons at a stale
+    `SpeedVector`. The two users both move by `Speed`/`Direction` and nothing else.
+- **Velocity is EASED, not assigned, for an anchored puppet** -- over the SAME
+  `CorrectionWindowFor(live)` the position error already drains over, so it inherits the cadence
+  and needs no second constant. That is the whole asteroid fix: a declared velocity is a STEP
+  function (constant for a rock's life until a bullet tweaks its heading), and assigning it puts
+  the whole step into one tick. `PuppetInfo.VelTarget`/`VelEaseMsLeft`. The ease takes a fraction
+  of what REMAINS, so it lands exactly on the target whatever the dt pattern was.
+- **CORRECTIONS ARE STILL ALWAYS APPLIED -- there is deliberately NO divergence deadband**, which
+  is a narrowing of the card's "corrections only on genuine divergence" wording, taken on the
+  user's nudge ruling. A deadband lets error accumulate to the edge of the band and then move;
+  what ships is corrections that are tiny and eased. `SnapThresholdPx` is untouched.
+- **The two halves, and what each type sends:**
+  - **`Lazer`** -- state extras `6 -> 12` bytes: `[angle:2][len:2][lead:2]` gains
+    `[lenRate:2][leadRate:2][angleRate:2]` as scaled i16. `NetLenRate`/`NetLeadRate` read Update's
+    own expressions INCLUDING its gates (`stopped` zeroes the length rate, `freed` starts the lead
+    one), so a client stops extending the moment the host does rather than a turn later, and the
+    host multiplies by `DifficultyModifier` before sending. `NetAngleRate` is the sweeper's
+    constant, handed over by `Boss.LazerSweepRadPerMs` via `Lazer.SetSweepRate` -- exact, where an
+    estimator could only ever approach it. The rates are ASSIGNED, not eased: they are step
+    functions, and easing across a step would leave a COLLIDABLE beam growing after the host's had
+    stopped.
+  - **`FlyingSpider`** (the foreground wasp) -- spawn extras `1 -> 5`
+    (`[flags][startHeight:2][swivelPhase:2]`) and state extras `0 -> 4`
+    (`[amplitude:2][swivelPhase:2]`). `startheight` and the phase are ROLLED by `Initialize`, so
+    both must be pinned; the amplitude (`50 * DifficultyModifier`) and the phase both DRIFT, so
+    both are re-sent every turn and eased. The swivel DURATION needs nothing -- it is 2700/4000
+    keyed off the `isbackground` bit already in the flags.
+  - **`Asteroid`** takes the flag and NOTHING ELSE -- no spawn anchor, no offset, no new bytes. Its
+    steady linear path is already dead-reckoned exactly (a finite difference of a straight line IS
+    that line; measured 0.000-0.001 jerk above), so an anchor has nothing to improve. The kink at a
+    shot-induced heading change is the whole defect and the velocity easing is what removes it.
+- **THE SPAWN ANCHOR RIDES THE PRE-`Add` SEAM, inverted from the usual rule.** `Initialize` WRITES
+  both anchored quantities and `ComponentBin.Add` runs it synchronously, so a value written after
+  the Add is the one that survives and one written before it is clobbered.
+  `FlyingSpider.NetForceAnchor` stores it and `Initialize` applies it at its very end -- exactly
+  the `NetForceColor` shape. Both are cleared in `Setup`, the per-spawn reset seam: `FlyingSpider`
+  and `Lazer` are both POOLED, so a recycled puppet would otherwise spend the previous life's
+  half-finished phase correction (or integrate the previous beam's rates) against the new one, on
+  a collidable hitbox.
+- **The drifting parameters are spent in `NetDriveExtras`, NOT in `ApplyStateExtra`, and that is
+  load-bearing.** The driver DIFFERENCES `NetPathOffset` across the tick, so anything applied in
+  one step moves the puppet by that much in one frame -- the very artefact the card removes -- and
+  it would land after that turn's position error was measured, so the correction blend could not
+  absorb it either. The phase correction walks the WRAPPED SHORTEST ARC; a naive difference swings
+  a wasp almost a whole 2.7 s period the wrong way whenever the pair straddles the 1 -> 0 wrap.
+- **`NetSession.ResolveBaseVelocity` is a PURE decision, split out of `CaptureBaseState`** (the
+  `OwnsSlotCore` precedent) -- and the split is not tidiness. A mutation dropping its anchored
+  branch passed the whole 33-probe suite AND every other leg of `eaNetMotion` until it existed;
+  a host that goes back to differentiating an anchored entity makes the client count the periodic
+  part TWICE. The teleport guard (card 8dabe812) lives inside it unchanged.
+- **The two scales are NOT interchangeable** (`NetProtocol.RatePxPerMsScale` 1000,
+  `RateRadPerMsScale` 10000). The miniboss sweep is -0.0007 rad/ms: 7 wire units at the rad scale,
+  0.7 at the px one, i.e. sharing a scale leaves every swept beam turning 43% wrong, silently. The
+  field SATURATES rather than wrapping -- a wrapping cast flips the SIGN, turning a sweep into a
+  counter-sweep.
+- **VERIFY IN TWO PLACES, and they answer different questions.**
+  **`eaNetMotion()` / `tools/headless/probes/net_motion.txt`** (30 assertions,
+  `Compat/Net/NetMotionTest.cs`) asserts the mechanism is WIRED AND EXACT: the predicate with a
+  UFO as the control, both descriptors' real byte layouts, a driven puppet growing/sweeping/bobbing
+  at the SENT parameters, the ease being a nudge, and the host's velocity decision -- each with the
+  PRE-CARD block beside it as its control. Mutation-tested four ways, each failing a different leg.
+  **`python tools/sim/net_puppet_drive_sim.py --smoothness`** asserts it is WORTH HAVING: anchored
+  rows at N=16/32/64/128 (0.0076 / 0.0049 / 0.0025 / 0.0014 against the estimator's flat ~0.013,
+  i.e. within 1.6x of the host control at the biggest world) plus a SHOT-NUDGE scenario with
+  instant velocity assignment as the refuted control.
+  **The shot nudge has to be read on a VECTOR jerk** (`_stddev_of_vector_deltas`) -- the scalar
+  metric differences |step|, so an asteroid nudged 11 degrees keeps almost exactly its old speed
+  and reads as nothing at all (measured 0.01682 vs 0.01681 between the two policies, against
+  0.04010 vs 0.02445 on the vector one). The sim ASSERTS that the scalar metric stays blind, so
+  the vector one cannot quietly be simplified away.
+  The wire FIELD itself is in `eaNetWire.test` section 5 (and so runs under `logic_probe`); the
+  entity-level legs cannot be, because constructing an entity needs a `Game`.
+- **`eaNetMotion` is deliberately ABSENT from `net_selftests.txt`** -- it has its own probe, which
+  carries this card's mutation matrix, so listing it in both would run it twice for nothing. The
+  `eaNetDeathFx` precedent.
 
 ## Public game browser & join-in-progress
 

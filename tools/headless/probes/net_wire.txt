@@ -50,12 +50,19 @@ expect 1\. transport contract
 expect 2\. NetImpairment composed over an endpoint
 expect 3\. codec round trips through the wire
 expect 4\. stream-lane reorder \+ dedup
+expect 5\. scaled-i16 motion rates
+# Card c1a38ef9 raised this 77 -> 82: the scaled-i16 rate field under LazerDescriptor's three
+# sent rates and FlyingSpiderDescriptor's amplitude/phase. Two of its five legs are the ones
+# worth keeping: an over-range value must SATURATE rather than wrap (a wrapping cast flips the
+# sign, which turns the miniboss' beam sweep into a counter-sweep), and the two SCALES must
+# stay distinct -- the sweep rate is 7 wire units at the rad scale and 0.7 at the px one, so
+# sharing a scale would leave every swept beam turning 43% wrong, silently.
 # Cards 43e85936 / c146422f raised this 69 -> 77: the EvFx codec (kind/netId/pos/param, its
 # entity-free netId-0 form, a truncated frame, an out-of-enum KIND refused and a known one
 # accepted as the control) plus EvMessage's optional trailing `short` flag. That flag's
 # THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
 # not-short -- which is the whole reason those cards needed no protocol version bump, so if
 # it ever goes red the bump is back on the table.
-expect \[netwire\] 77 passed, 0 failed
+expect \[netwire\] 82 passed, 0 failed
 expect-not FAIL
 quit

@@ -591,6 +591,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetEntityTest.Run();
 		}
 
+		// JS bridge for the anchored-motion lane (eaNetMotion, card c1a38ef9): the sent Lazer
+		// rates and the FlyingSpider path anchor. Every way that lane can break is SILENT and
+		// degrades to the pre-card build, which shipped and merely looks rougher -- so the
+		// suite asserts the predicate, the real descriptors' bytes and what the real per-tick
+		// drive does over a chosen dt, each beside the pre-card behaviour as its control.
+		[JSInvokable("debugNetMotionTest")]
+		public static string NetMotionTest()
+		{
+			return EvilAliensWeb.Compat.Net.NetMotionTest.Run();
+		}
+
 		// Park a session-ending notice at the menus (card 72143c11), with no peer and no
 		// session -- the only offline way to reach MenuScene.NetUpdate's notice path, since
 		// every production writer of MenuNotice is inside NetSession.Stop(). MenuScene polls

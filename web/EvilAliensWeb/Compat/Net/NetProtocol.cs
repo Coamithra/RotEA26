@@ -1094,6 +1094,35 @@ namespace EvilAliensWeb.Compat.Net
         {
             return BitConverter.Int32BitsToSingle((int)ReadU32(b, o));
         }
+
+        // ---- scaled i16 (card c1a38ef9) --------------------------------------------------
+        //
+        // A signed RATE in two bytes, for the motion-parameter state extras. `scale` converts to
+        // wire units and must be picked per field so the whole live range fits +-32767 with
+        // resolution to spare -- the two shipped users are px/ms at x1000 (a beam grows at ~0.4,
+        // so 400 units) and rad/ms at x10000 (the miniboss sweep is -0.0007, i.e. SEVEN units at
+        // that scale and none at all at x1000, which is why they do not share one).
+        //
+        // SATURATING, not wrapping: a rate past the range is clamped to the range, so the worst
+        // a bad value can do is arrive slower or faster than it should. A wrapping cast would
+        // flip the SIGN, which on the angle field turns a sweep into a counter-sweep.
+        public static void WriteScaledI16(byte[] b, ref int o, float v, float scale)
+        {
+            int units = (int)MathF.Round(v * scale);
+            short clamped = (short)Math.Clamp(units, short.MinValue, short.MaxValue);
+            b[o++] = (byte)clamped;
+            b[o++] = (byte)((ushort)clamped >> 8);
+        }
+
+        public static float ReadScaledI16(byte[] b, int o, float scale)
+        {
+            return (short)ReadU16(b, o) / scale;
+        }
+
+        // The two scales in use. Named so an encoder and its decoder cannot drift apart -- a
+        // mismatched pair is silent (the beam simply grows at the wrong speed).
+        public const float RatePxPerMsScale = 1000f;
+        public const float RateRadPerMsScale = 10000f;
     }
 
     // One received ship-stream sample. T is the SENDER's session-relative millisecond

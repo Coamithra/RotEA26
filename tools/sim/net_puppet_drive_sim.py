@@ -582,15 +582,28 @@ def population():
 
 
 class SmoothPuppet:
-    """NetPuppets.Drive + ApplySnapshotState, with the correction window as a parameter."""
+    """NetPuppets.Drive + ApplySnapshotState, with the correction window as a parameter.
 
-    def __init__(self, pos, window_ms, exponential=False):
+    `anchored` models card c1a38ef9's motion-parameter lane (INetEntity.NetPathAnchored /
+    NetPathOffset): the reported velocity is the entity's DECLARED linear baseline rather than a
+    finite difference, the type's periodic component is integrated LOCALLY from `path_offset`, and
+    a newly reported velocity is EASED in over the correction window instead of being assigned.
+    With `anchored=False` every line below is the pre-card driver.
+    """
+
+    def __init__(self, pos, window_ms, exponential=False, anchored=False, path_offset=None):
         self.pos = pos
         self.vel = (0.0, 0.0)
+        self.vel_target = (0.0, 0.0)
+        self.vel_ease_left = 0.0
         self.corr = (0.0, 0.0)
         self.corr_left = 0.0
         self.window = window_ms
         self.exponential = exponential
+        self.anchored = anchored
+        # t_ms -> (dx, dy); the zero-mean periodic offset from the linear baseline.
+        self.path_offset = path_offset or (lambda t: (0.0, 0.0))
+        self.t = 0.0
         self.has = False
         self.pops = 0
 
@@ -598,21 +611,43 @@ class SmoothPuppet:
         if not self.has:
             self.pos = pos
             self.has = True
+            # A real EvSpawn carries CaptureBaseState's velocity, which on a first observation is
+            # the entity's DECLARED NetSpeedVector -- never zero. Assigning it here rather than
+            # easing is right: there is no previous value to ease from.
+            self.vel = vel
+            self.vel_target = vel
+            self.vel_ease_left = 0.0
+            return
+        err = (pos[0] - self.pos[0], pos[1] - self.pos[1])
+        if math.hypot(*err) > SNAP_THRESHOLD_PX:
+            self.pos = pos
+            self.corr = (0.0, 0.0)
+            self.corr_left = 0.0
+            self.pops += 1
         else:
-            err = (pos[0] - self.pos[0], pos[1] - self.pos[1])
-            if math.hypot(*err) > SNAP_THRESHOLD_PX:
-                self.pos = pos
-                self.corr = (0.0, 0.0)
-                self.corr_left = 0.0
-                self.pops += 1
-            else:
-                self.corr = err
-                self.corr_left = self.window
-        self.vel = vel
+            self.corr = err
+            self.corr_left = self.window
+        if self.anchored:
+            self.vel_target = vel
+            self.vel_ease_left = self.window
+        else:
+            self.vel = vel
 
     def drive(self, dt_ms):
+        if self.anchored and self.vel_ease_left > 0.0:
+            take = min(dt_ms, self.vel_ease_left)
+            f = take / self.vel_ease_left
+            self.vel = (self.vel[0] + (self.vel_target[0] - self.vel[0]) * f,
+                        self.vel[1] + (self.vel_target[1] - self.vel[1]) * f)
+            self.vel_ease_left -= take
         sx = self.vel[0] * dt_ms
         sy = self.vel[1] * dt_ms
+        if self.anchored:
+            before = self.path_offset(self.t)
+            after = self.path_offset(self.t + dt_ms)
+            sx += after[0] - before[0]
+            sy += after[1] - before[1]
+        self.t += dt_ms
         if self.exponential:
             k = 1.0 - math.exp(-dt_ms / (self.window / 3.0))
             dx, dy = self.corr[0] * k, self.corr[1] * k
@@ -625,6 +660,7 @@ class SmoothPuppet:
             sy += self.corr[1] * (take / self.window)
             self.corr_left -= take
         self.pos = (self.pos[0] + sx, self.pos[1] + sy)
+        self.last_step = (sx, sy)
         return math.hypot(sx, sy)
 
 
@@ -636,30 +672,84 @@ def _stddev_of_deltas(series):
     return math.sqrt(sum((x - mean) ** 2 for x in d) / len(d))
 
 
+def _stddev_of_vector_deltas(series):
+    """Same statistic over the step VECTORS rather than their lengths.
+
+    `jerk` above differences |step|, so it is blind to a pure DIRECTION change -- an asteroid
+    nudged 11 degrees by a bullet keeps almost exactly its old speed, and the scalar metric reads
+    the kink as nothing at all (measured: 0.01682 vs 0.01681 between instant assignment and
+    easing). Every heading-change result has to be read on this one.
+    """
+    if len(series) < 2:
+        return 0.0
+    d = [math.hypot(series[i][0] - series[i - 1][0], series[i][1] - series[i - 1][1])
+         for i in range(1, len(series))]
+    mean = sum(d) / len(d)
+    return math.sqrt(sum((x - mean) ** 2 for x in d) / len(d))
+
+
+FLYSPIDER_SWIVEL_MS = 4000.0
+FLYSPIDER_AMP_PX = 25.0
+FLYSPIDER_BASE_VX = -0.12
+
+
+def _flyspider_offset(t_ms):
+    """The zero-mean periodic part of the wasp's path -- FlyingSpider.Update's vertical swivel,
+    which is what an anchored client integrates locally (INetEntity.NetPathOffset)."""
+    return (0.0, FLYSPIDER_AMP_PX * math.sin(2 * math.pi * t_ms / FLYSPIDER_SWIVEL_MS))
+
+
 def _flyspider_truth(t_ms, teleport_at=None, teleport_dx=0.0):
     """FlyingSpider-shaped: linear X drift plus the ~4s +-25px vertical swivel."""
     jump = teleport_dx if (teleport_at is not None and t_ms >= teleport_at) else 0.0
-    return (-0.12 * t_ms + jump, 300.0 + 25.0 * math.sin(2 * math.pi * t_ms / 4000.0))
+    return (FLYSPIDER_BASE_VX * t_ms + jump, 300.0 + _flyspider_offset(t_ms)[1])
+
+
+def _anchored_offset(t_ms):
+    """What the CLIENT can reconstruct: the same swivel, with the amplitude quantised to the u16
+    px the state extras carry. The phase rides the EvSpawn anchor and is re-sent every turn, so
+    modelling it as exact is honest over a wasp's few-second life; the amplitude is not."""
+    amp = round(FLYSPIDER_AMP_PX)
+    return (0.0, amp * math.sin(2 * math.pi * t_ms / FLYSPIDER_SWIVEL_MS))
 
 
 def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
                    teleport_at=None, teleport_dx=0.0, vel_guard=None,
-                   declared_vel=(-0.12, 0.0)):
+                   declared_vel=(FLYSPIDER_BASE_VX, 0.0), anchored=False,
+                   truth_fn=None, path_offset=None, shot_at=None, shot_vel=None):
     turn = snap_turn_ms(n_live)
     window = {"fixed150": CORRECTION_WINDOW_MS,
               "2xturn": max(CORRECTION_WINDOW_MS, 2.0 * turn)}[window_mode]
-    pup = SmoothPuppet(_flyspider_truth(0.0), window, exponential)
-    last_pos, last_ms, has_last = _flyspider_truth(0.0), 0.0, False
+    truth_of = truth_fn or (lambda t: _flyspider_truth(t, teleport_at, teleport_dx))
+    pup = SmoothPuppet(truth_of(0.0), window, exponential, anchored=anchored,
+                       path_offset=(path_offset or _anchored_offset) if anchored else None)
+    # THE SPAWN. A real EvSpawn carries CaptureBaseState's velocity, and on a first observation
+    # that is the entity's DECLARED NetSpeedVector -- so a puppet is born already moving. The rig
+    # used to leave it at (0,0) until the SECOND turn, which made it stand still for a whole turn
+    # and then eat one large correction. That single transient dominated every jerk figure this
+    # mode printed (see the header), so it is seeded here and the host's first-observation
+    # fallback below is declared_vel rather than zero, matching CaptureBaseState.
+    pup.apply_snapshot(truth_of(0.0), declared_vel)
+    last_pos, last_ms, has_last = truth_of(0.0), 0.0, True
     next_turn, t = turn, 0.0
-    steps, host_steps = [], []
-    prev_host = _flyspider_truth(0.0)
+    steps, host_steps, step_vecs, host_vecs = [], [], [], []
+    prev_host = truth_of(0.0)
+    # The entity's declared baseline, which is what an ANCHORED type puts on the wire instead of
+    # the finite difference. `shot_at`/`shot_vel` model a bullet nudging an asteroid's heading.
+    baseline = declared_vel
     while t < total_ms:
         t += TICK_MS
-        truth = _flyspider_truth(t, teleport_at, teleport_dx)
+        if shot_at is not None and t >= shot_at and baseline != shot_vel:
+            baseline = shot_vel
+        truth = truth_of(t)
         if t >= next_turn:
             next_turn += turn
-            vel = (0.0, 0.0)
-            if has_last and t > last_ms:
+            vel = declared_vel
+            if anchored:
+                # NetPathAnchored: the host sends the entity's own linear velocity, so the
+                # periodic component never pollutes it and there is nothing to differentiate.
+                vel = baseline
+            elif has_last and t > last_ms:
                 vx = (truth[0] - last_pos[0]) / (t - last_ms)
                 vy = (truth[1] - last_pos[1]) / (t - last_ms)
                 # NetSession.MaxObservedSpeedPxPerMs -- the teleport guard. Production does NOT
@@ -674,9 +764,13 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
             last_pos, last_ms, has_last = truth, t, True
             pup.apply_snapshot(truth, vel)
         steps.append(pup.drive(TICK_MS))
-        host_steps.append(math.hypot(truth[0] - prev_host[0], truth[1] - prev_host[1]))
+        step_vecs.append(pup.last_step)
+        host_vecs.append((truth[0] - prev_host[0], truth[1] - prev_host[1]))
+        host_steps.append(math.hypot(*host_vecs[-1]))
         prev_host = truth
     return {
+        "vjerk": _stddev_of_vector_deltas(step_vecs),
+        "host_vjerk": _stddev_of_vector_deltas(host_vecs),
         "turn": turn, "window": window, "pops": pup.pops,
         "jerk": _stddev_of_deltas(steps), "maxstep": max(steps),
         "host_jerk": _stddev_of_deltas(host_steps), "host_maxstep": max(host_steps),
@@ -724,6 +818,79 @@ def smoothness():
                      "to the host's position; a guard that hides it is not a fix")
     print("  (the guarded run still POPS: the reposition is applied as a snap, which is correct."
           "\n   It is only the VELOCITY that is refused, so the puppet stops being flung onward.)")
+
+    print("\nANCHORED MOTION (card c1a38ef9) -- the wasp's swivel integrated LOCALLY from the")
+    print("spawn anchor + sent parameters, instead of being finite-differenced out of positions.")
+    print("  %-5s %-8s %-12s %-12s %-8s" % ("N", "turn", "observed", "anchored", "vs host"))
+    for n in (16, 32, 64, 128):
+        obs = run_smoothness(n, "2xturn")
+        anc = run_smoothness(n, "2xturn", anchored=True)
+        print("  %-5d %-8.0f %-12.5f %-12.5f %-8.1fx"
+              % (n, obs["turn"], obs["jerk"], anc["jerk"],
+                 anc["jerk"] / ctrl["host_jerk"] if ctrl["host_jerk"] else 0.0))
+        # The whole claim of the card: carrying the motion MODEL beats estimating it. The
+        # advantage grows with the world, because the blind window is what the estimator has to
+        # bridge -- so the bar is tightest where it matters most.
+        if not anc["jerk"] < obs["jerk"]:
+            fails.append("N=%d: anchored motion (%.5f) is not smoother than the observed-rate "
+                         "estimator (%.5f)" % (n, anc["jerk"], obs["jerk"]))
+        if n >= 64 and not anc["jerk"] < obs["jerk"] * 0.25:
+            fails.append("N=%d: anchored motion (%.5f) should be at least 4x smoother than the "
+                         "estimator (%.5f) once the blind window stretches"
+                         % (n, anc["jerk"], obs["jerk"]))
+        # THE CARD'S OWN CLAIM, and the assertion to read first: at the biggest world the
+        # anchored client should be tracking the HOST, not merely beating the estimator. It is
+        # stated against the host control rather than as a ratio to the estimator because the
+        # ratio bar is thin here -- a mutation that drops the local path integration measured
+        # 0.00448 against a 0.00473 bar (a 5% margin) while reading 5.3x the host control.
+        if n == 128 and not anc["jerk"] < ctrl["host_jerk"] * 3.0:
+            fails.append("N=128: anchored motion (%.5f) is not within 3x of the host control "
+                         "(%.5f) -- the point of the lane is that the client is not bridging a "
+                         "blind window at all" % (anc["jerk"], ctrl["host_jerk"]))
+    print("\n  (the estimator's jerk is set by the blind window it has to bridge; the anchored"
+          "\n   client is not bridging anything, so it tracks the host at every world size.)")
+
+    print("\nSHOT NUDGE (card d3add86f) -- an asteroid's heading tweaked by a bullet at t=3s.")
+    print("A linear path is ALREADY dead-reckoned exactly, so the whole cost is the velocity")
+    print("STEP at the turn that reports the new heading.")
+
+    def _shot_truth(t_ms):
+        # 0.18 px/ms drifting right, nudged ~11 degrees at 3s -- the small heading change the
+        # card describes ("only when they get shot do they very minorly change heading").
+        if t_ms <= 3000.0:
+            return (0.18 * t_ms, 300.0)
+        return (0.18 * 3000.0 + 0.177 * (t_ms - 3000.0), 300.0 + 0.035 * (t_ms - 3000.0))
+
+    step_run = run_smoothness(24, "2xturn", total_ms=6000.0, truth_fn=_shot_truth,
+                              declared_vel=(0.18, 0.0))
+    eased_run = run_smoothness(24, "2xturn", total_ms=6000.0, truth_fn=_shot_truth,
+                               declared_vel=(0.18, 0.0), anchored=True,
+                               path_offset=lambda t: (0.0, 0.0),
+                               shot_at=3000.0, shot_vel=(0.177, 0.035))
+    print("  host truth    : vjerk %.5f" % step_run["host_vjerk"])
+    print("  instant assign: vjerk %.5f  (scalar jerk %.5f)"
+          % (step_run["vjerk"], step_run["jerk"]))
+    print("  eased         : vjerk %.5f  (scalar jerk %.5f)"
+          % (eased_run["vjerk"], eased_run["jerk"]))
+    # NEGATIVE CONTROL, and it is the instant-assign row itself: easing must WIN here, and the
+    # comparison is only meaningful because both runs see the identical host truth.
+    if not eased_run["vjerk"] < step_run["vjerk"]:
+        fails.append("the eased velocity (%.5f) did not beat instant assignment (%.5f) on the "
+                     "shot nudge -- the easing is what makes a heading change a nudge"
+                     % (eased_run["vjerk"], step_run["vjerk"]))
+    # The scalar metric MUST stay unable to tell them apart -- that is the finding that made the
+    # vector one necessary, and an assertion here is what stops it quietly being 'simplified' back.
+    if abs(eased_run["jerk"] - step_run["jerk"]) > 0.001:
+        fails.append("the scalar jerk now separates the two shot-nudge runs (%.5f vs %.5f); it is "
+                     "supposed to be blind to a heading change -- re-read _stddev_of_vector_deltas"
+                     % (eased_run["jerk"], step_run["jerk"]))
+    # POSITIVE leg: the nudge must still be FOLLOWED. Easing that never arrives is not smoothing,
+    # it is ignoring the host -- so the puppet has to end up where the host put it.
+    if eased_run["pops"] != 0:
+        fails.append("the eased run popped (%d) -- a 11-degree heading tweak must never reach the "
+                     "100px snap threshold" % eased_run["pops"])
+    print("  (both runs end tracking the host; easing only spreads the velocity STEP over the"
+          "\n   correction window, which is the 'periodic slight nudges' the card asks for.)")
 
     if fails:
         print("\nFAIL:")

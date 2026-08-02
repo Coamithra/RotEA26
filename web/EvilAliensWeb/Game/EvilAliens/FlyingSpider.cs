@@ -61,6 +61,13 @@ internal class FlyingSpider : KillableAlien
 	// play => the random pick. See NetForceColor.
 	private byte? netForcedColorIndex;
 
+	// Net puppet only (card c1a38ef9): the host's path anchor, forced onto Initialize's own
+	// random entry height and Randomize()d swivel phase. null in normal play => the rolls stand.
+	// See NetForceAnchor.
+	private float? netForcedStartHeight;
+
+	private float? netForcedSwivelPhase;
+
 	// ?flyspidercount= bench only: this spider's slot in the pinned grid, set before bin.Add so
 	// Initialize can place + freeze it. null in normal play => the random entry position and the
 	// level's real crossing speed. See SetupBench / Level2.PopulateFlyingSpidersOnly.
@@ -129,6 +136,15 @@ internal class FlyingSpider : KillableAlien
 		benchIndex = null;
 		benchCount = 0;
 		netForcedColorIndex = null;
+		netForcedStartHeight = null;
+		netForcedSwivelPhase = null;
+		// NewFlyingSpider RECYCLES, so a puppet reusing a dead one's instance would otherwise
+		// inherit its half-spent phase correction and its last amplitude -- and spend that
+		// correction against the NEW wasp's path over the next 250 ms, on a collidable hitbox.
+		// The same trap NetForceColor's note describes, and Lazer.NetResetExtrapolation's.
+		netSwivelAmplitude = 50f;
+		netSwivelAmplitudeTarget = 50f;
+		netSwivelPhaseError = 0f;
 	}
 
 	// ?flyspidercount= bench (card 9c92962e): pin this spider to slot `index` of `count` instead of
@@ -193,6 +209,17 @@ internal class FlyingSpider : KillableAlien
 			swiveltimer.Reset();
 		}
 		ApplyBenchPlacement();
+		// LAST, after both the background branch's startheight clamp and the swivel Randomize:
+		// a net puppet flies the HOST's path, so its anchor overrides every roll above rather
+		// than being one more input to them. Absent in normal play (both fields null).
+		if (netForcedStartHeight.HasValue)
+		{
+			startheight = netForcedStartHeight.Value;
+		}
+		if (netForcedSwivelPhase.HasValue)
+		{
+			swiveltimer.SetNormalized(netForcedSwivelPhase.Value);
+		}
 	}
 
 	// The three body tints, by roll index. Extracted only because the bench re-picks from its grid
@@ -477,5 +504,121 @@ internal class FlyingSpider : KillableAlien
 	internal void NetForceColor(byte idx)
 	{
 		netForcedColorIndex = idx;
+	}
+
+	// ---- anchored motion (card c1a38ef9) -------------------------------------------------
+	// Update is `Position.Y = startheight + amp * scale * sin(2pi * swiveltimer.Normalized)` over
+	// a plain linear X drift, i.e. a DETERMINISTIC path: a client that knows startheight, the
+	// swivel phase and the amplitude can integrate it exactly instead of dead-reckoning on a
+	// velocity finite-differenced across a snapshot turn -- which for this shape measures a chord
+	// of the sine and is wrong by construction (see NetPathAnchored's header).
+	//
+	// X is honest as a declared velocity: Initialize sets Direction = PI and a constant Speed, and
+	// nothing ever writes Position.X directly. That is the precondition the seam requires.
+
+	internal override bool NetPathAnchored => true;
+
+	// The swivel, as an offset from that baseline. swiveltimer is in `timers`, so the driver's
+	// NetTickTimers advances it on a frozen puppet -- which is what makes a local evaluation
+	// possible at all. `scale` rides the base state (the driver lerps it), and netSwivelAmplitude
+	// is the host's own `50 * DifficultyModifier` off the wire, so both peers use the same number
+	// rather than each applying its own drifting modifier.
+	//
+	// Zero-mean by construction (a full sine), which the driver relies on: it differences this
+	// across the tick, so a non-zero mean would simply never be seen.
+	internal override Vector2 NetPathOffset =>
+		new Vector2(0f, netSwivelAmplitude * scale * (float)Math.Sin(swiveltimer.Normalized * ((float)Math.PI * 2f)));
+
+	// Update's own coefficient, read on the HOST for the wire. Kept beside the Update expression
+	// it mirrors -- if that constant moves, both must move together.
+	internal float NetSwivelAmplitude => 50f * Settings.GetInstance().DifficultyModifier;
+
+	// The swivel phase, 0..1 over the cycle. This is what the EvSpawn anchor pins and what the
+	// state extras re-assert: Initialize calls swiveltimer.Randomize(), so a client's own phase is
+	// an unrelated roll and the wasp would bob in antiphase with the host's.
+	internal float NetSwivelPhase => swiveltimer.Normalized;
+
+	// ---- puppet side: the two DRIFTING parameters, eased per TICK ------------------------
+	//
+	// Both are corrected in NetDriveExtras rather than in the descriptor's apply, and that is the
+	// load-bearing detail. NetPathOffset is DIFFERENCED across the tick by NetPuppets.Drive, so
+	// anything that moves the amplitude or the phase moves the puppet by that much immediately --
+	// applying a whole turn's correction inside ApplyStateExtra would put it into ONE tick, which
+	// is the very step this card exists to remove. (It would also land after that turn's position
+	// error was measured, so the correction blend could not absorb it either.) Spreading it over
+	// NetParamEaseMs of real time makes it a nudge instead.
+	private const float NetParamEaseMs = 250f;
+
+	// The host's swivel amplitude in design px, DifficultyModifier already applied. Defaults to
+	// the un-modified 50 so a puppet that has not yet had a state extra still swivels sanely
+	// (DifficultyModifier starts at 1), rather than standing flat.
+	private float netSwivelAmplitude = 50f;
+
+	private float netSwivelAmplitudeTarget = 50f;
+
+	// The remaining phase correction, in cycles, SIGNED along the shortest arc. Held as an amount
+	// still to spend rather than a target phase, because the phase itself keeps advancing on its
+	// own timer -- a stored target would be stale the moment it was recorded.
+	private float netSwivelPhaseError;
+
+	// Narrow readback for NetMotionTest, the NetFxTest precedent: the amplitude a puppet is
+	// actually swivelling at is private state that moves no metric and appears in no frame, and
+	// whether it EASES or snaps is the whole subject of that suite's section 3.
+	internal float NetLocalSwivelAmplitude => netSwivelAmplitude;
+
+	// Puppet only. Records what the host reported; NetDriveExtras spends it.
+	internal void NetApplySwivel(float amplitude, float phase01)
+	{
+		netSwivelAmplitudeTarget = amplitude;
+		if (swiveltimer.Duration <= 0f)
+		{
+			return;
+		}
+		// WRAPPED SHORTEST ARC: a naive (target - current) walks the long way round whenever the
+		// pair straddles the 1 -> 0 wrap, which for a 2.7 s cycle is a wasp swinging a whole
+		// period the wrong way.
+		float delta = phase01 - swiveltimer.Normalized;
+		if (delta > 0.5f)
+		{
+			delta -= 1f;
+		}
+		else if (delta < -0.5f)
+		{
+			delta += 1f;
+		}
+		netSwivelPhaseError = delta;
+	}
+
+	// Called by NetPuppets.Drive once per tick on a frozen puppet (the NetChargeGlow seam).
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		base.NetDriveExtras(gameTime);
+		float fraction = MathHelper.Clamp(
+			(float)gameTime.ElapsedGameTime.TotalMilliseconds / NetParamEaseMs, 0f, 1f);
+		netSwivelAmplitude += (netSwivelAmplitudeTarget - netSwivelAmplitude) * fraction;
+		if (netSwivelPhaseError != 0f && swiveltimer.Duration > 0f)
+		{
+			float spend = netSwivelPhaseError * fraction;
+			netSwivelPhaseError -= spend;
+			float next = swiveltimer.Normalized + spend;
+			// Wrap into [0,1) before handing it back -- Timer.SetNormalized CLAMPS, so an
+			// out-of-range value would silently park the phase at an end of the cycle instead of
+			// carrying it round.
+			next -= (float)Math.Floor(next);
+			swiveltimer.SetNormalized(next);
+		}
+	}
+
+	// The path anchor: the Y the swivel oscillates ABOUT. Initialize rolls it (a random entry
+	// height), so it must be pinned from the host or the client's wasp flies a parallel path at
+	// the wrong altitude -- which the position correction would then fight every turn.
+	internal float NetStartHeight => startheight;
+
+	// Set BEFORE bin.Add, like NetForceColor: Initialize WRITES both of these, and Add runs it
+	// synchronously, so the host's values are stored here and applied at the end of Initialize.
+	internal void NetForceAnchor(float startHeightY, float swivelPhase01)
+	{
+		netForcedStartHeight = startHeightY;
+		netForcedSwivelPhase = swivelPhase01;
 	}
 }

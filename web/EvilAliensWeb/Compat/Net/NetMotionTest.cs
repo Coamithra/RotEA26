@@ -1,0 +1,383 @@
+using System.Text;
+using EvilAliens;
+using EvilAliensWeb.Compat.Net.Descriptors;
+using Microsoft.Xna.Framework;
+
+namespace EvilAliensWeb.Compat.Net
+{
+    // Console self-test for ANCHORED MOTION -- the motion-parameter lane (card c1a38ef9).
+    // Invoke with eaNetMotion() / `eval NetMotion`; menu-runnable and leave-no-trace.
+    //
+    // WHY IT EXISTS. Every defect this lane can develop is SILENT and looks like the pre-card
+    // build, which shipped, works, and is merely rougher:
+    //
+    //   * a lost NetPathAnchored override -- the host goes back to finite-differencing the wasp's
+    //     swivel into the base velocity and the client stops integrating. Nothing throws, no
+    //     counter moves, and pupPops stays at the contented 0 it already reads (the whole point
+    //     of the smoothness family: these stutters never approach SnapThresholdPx);
+    //   * a spawn anchor that stops being sent or stops being applied -- the client's wasp bobs
+    //     in an unrelated phase about an unrelated height, which the position correction then
+    //     fights every turn, i.e. it looks exactly like ordinary jitter;
+    //   * a Lazer rate that arrives at the wrong scale or the wrong sign -- the beam grows or
+    //     sweeps at the wrong speed between turns, on a COLLIDABLE hitbox.
+    //
+    // None of those is visible in a frame, and a timed screenshot of a beam that is supposed to
+    // be moving proves nothing either way. So the observables here are the DATA: the predicate,
+    // the bytes the real descriptors produce, and what the real per-tick drive does to a real
+    // entity over a chosen dt.
+    //
+    // The SHAPE of the smoothing -- whether anchored motion is actually smoother than the
+    // estimator it replaced -- is NOT asserted here and cannot be: it is a property of a whole
+    // run against a host control, which is
+    // `python tools/sim/net_puppet_drive_sim.py --smoothness`'s job. This suite asserts that the
+    // mechanism is wired and exact; that one asserts it is worth having.
+    //
+    // Leave-no-trace: every entity is CONSTRUCTED and never added to the bin or to
+    // Game.Components, exactly as NetEntityTest does. Initialize() is called by hand on the two
+    // that need their spawn rolls to have happened -- it is what ComponentBin.Add would have run
+    // synchronously, and running it on a detached instance touches no collection.
+    internal static class NetMotionTest
+    {
+        public static string Run()
+        {
+            ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
+            Game game = bin.Game;
+            StringBuilder sb = new StringBuilder();
+            int pass = 0;
+            int fail = 0;
+            void Check(string what, bool ok)
+            {
+                sb.Append(ok ? "  PASS " : "  FAIL ").Append(what).Append('\n');
+                if (ok) { pass++; } else { fail++; }
+            }
+
+            sb.Append("[netmotion] anchored motion -- sent rates + path anchors (card c1a38ef9)\n");
+
+            sb.Append(" 1. the NetPathAnchored predicate\n");
+            SectionPredicate(game, Check);
+
+            sb.Append(" 2. FlyingSpider path anchor through the real descriptor\n");
+            SectionSpiderAnchor(bin, game, Check);
+
+            sb.Append(" 3. FlyingSpider drifting parameters are EASED, not snapped\n");
+            SectionSpiderEase(bin, game, Check);
+
+            sb.Append(" 4. Lazer sent rates\n");
+            SectionLazerRates(bin, game, Check);
+
+            sb.Append(" 5. the HOST's velocity decision (NetSession.ResolveBaseVelocity)\n");
+            SectionHostVelocity(Check);
+
+            sb.Append(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "[netmotion] {0} passed, {1} failed\n", pass, fail));
+            return sb.ToString();
+        }
+
+        // ---- 1. the predicate --------------------------------------------------------------
+        //
+        // A per-type constant, and the two users are the whole set. The UFO is the CONTROL and is
+        // not decoration: a predicate hard-wired to true would satisfy both positives, and it
+        // would be actively wrong -- a UFO's flight is a scripted position curve, so its declared
+        // SpeedVector lies and anchoring it would dead-reckon it at a stale velocity.
+        private static void SectionPredicate(Game game, System.Action<string, bool> check)
+        {
+            check("FlyingSpider is anchored (linear drift + its own swivel)",
+                ((INetEntity)new FlyingSpider(game)).NetPathAnchored);
+            check("Asteroid is anchored (constant velocity)",
+                ((INetEntity)new Asteroid(game)).NetPathAnchored);
+            check("a UFO is NOT anchored -- control, and its Position curve is why",
+                !((INetEntity)new UFO(game)).NetPathAnchored);
+
+            // An anchored type with no periodic component must return the base's ZERO, or the
+            // driver would difference a stale value into the puppet's position every tick.
+            check("Asteroid's path offset is zero (no periodic component)",
+                ((INetEntity)new Asteroid(game)).NetPathOffset == Vector2.Zero);
+        }
+
+        // ---- 2. the spawn anchor -----------------------------------------------------------
+
+        private static void SectionSpiderAnchor(ComponentBin bin, Game game,
+            System.Action<string, bool> check)
+        {
+            FlyingSpiderDescriptor desc = new FlyingSpiderDescriptor();
+
+            // A "host" spider: constructed and Initialized, so it has ROLLED its own entry height
+            // and swivel phase exactly as a real spawn does.
+            FlyingSpider host = new FlyingSpider(game);
+            host.Setup(isbackground: false);
+            host.Initialize();
+
+            byte[] extra = new byte[64];
+            int len = desc.EncodeSpawnExtra(host, extra, 0);
+            check("the spawn extras are the anchored layout (flags + height + phase)", len == 5);
+
+            NetBaseState state = default;
+            state.Pos = new Vector2(850f, host.NetStartHeight);
+            FlyingSpider puppet = (FlyingSpider)desc.CreatePuppet(bin, game, state, extra, 0, len);
+            // CreatePuppet stores the anchor; ComponentBin.Add would run Initialize, which is
+            // what applies it (and what would otherwise clobber it with its own rolls). Running
+            // it by hand here is that step, without entering the world.
+            puppet.Initialize();
+
+            check("the puppet adopts the host's start height",
+                Near(puppet.NetStartHeight, host.NetStartHeight, 1.5f));
+            check("the puppet adopts the host's swivel phase",
+                Near(puppet.NetSwivelPhase, host.NetSwivelPhase, 0.002f));
+
+            // NEGATIVE CONTROL, and it is what makes the two legs above mean something: a puppet
+            // built from the PRE-CARD one-byte extras block keeps Initialize's own rolls. Without
+            // it, a rig whose "host" and "puppet" happened to roll alike would pass. The height
+            // is the discriminator -- it is uniform over 0..475, so an agreement inside 1.5px by
+            // chance is a ~0.6% event, while two phases can agree far more often.
+            FlyingSpider unanchored =
+                (FlyingSpider)desc.CreatePuppet(bin, game, state, extra, 0, 1);
+            unanchored.Initialize();
+            check("...and a pre-card 1-byte extras block leaves the puppet on its OWN roll",
+                !Near(unanchored.NetStartHeight, host.NetStartHeight, 1.5f));
+
+            // The offset really is the swivel: two phases a quarter cycle apart must differ by
+            // about the full amplitude, and the shape must be the sine Update draws.
+            puppet.NetApplySwivel(50f, 0.25f);
+            DriveOnce(puppet, 1000f); // one long tick spends the whole phase ease
+            float atQuarter = ((INetEntity)puppet).NetPathOffset.Y;
+            puppet.NetApplySwivel(50f, 0.75f);
+            DriveOnce(puppet, 1000f);
+            float atThreeQuarter = ((INetEntity)puppet).NetPathOffset.Y;
+            check("NetPathOffset tracks the swivel (quarter and three-quarter cycle oppose)",
+                atQuarter * atThreeQuarter < 0f
+                    && System.Math.Abs(atQuarter - atThreeQuarter) > 10f);
+        }
+
+        // ---- 3. easing ---------------------------------------------------------------------
+        //
+        // THE POINT OF THE WHOLE LANE IS THAT A CORRECTION IS A NUDGE. Both drifting parameters
+        // are recorded by ApplyStateExtra and SPENT by NetDriveExtras over real time, because
+        // NetPuppets.Drive DIFFERENCES NetPathOffset across the tick -- so anything applied in
+        // one step moves the puppet by that much in one frame, which is the artefact this card
+        // exists to remove. A regression that "simplified" the ease into a straight write would
+        // change no output but this.
+        private static void SectionSpiderEase(ComponentBin bin, Game game,
+            System.Action<string, bool> check)
+        {
+            FlyingSpiderDescriptor desc = new FlyingSpiderDescriptor();
+
+            FlyingSpider host = new FlyingSpider(game);
+            host.Setup(isbackground: false);
+            host.Initialize();
+            byte[] extra = new byte[64];
+            int len = desc.EncodeStateExtra(host, extra, 0);
+            check("the state extras are the anchored layout (amplitude + phase)", len == 4);
+
+            FlyingSpider p = new FlyingSpider(game);
+            p.Setup(isbackground: false);
+            p.NetForceAnchor(300f, 0f);
+            p.Initialize();
+
+            // A large amplitude step: 50 (the default a puppet starts on) -> 200, delivered as a
+            // REAL state-extra frame through the REAL descriptor. Driving NetApplySwivel directly
+            // would be the wrong seam and was measured to be: a mutation that spent the whole
+            // correction inside ApplyStateExtra -- which is exactly the "simplify the ease into a
+            // straight write" regression this section exists to catch -- passed a version of
+            // these legs that called the entity by hand.
+            byte[] step = new byte[4];
+            step[0] = 200;
+            step[1] = 0;
+            step[2] = extra[2];
+            step[3] = extra[3];
+
+            float before = p.NetLocalSwivelAmplitude;
+            desc.ApplyStateExtra(p, step, 0, 4);
+            DriveOnce(p, 16.7f);
+            float afterOne = p.NetLocalSwivelAmplitude;
+            for (int i = 0; i < 200; i++)
+            {
+                DriveOnce(p, 16.7f);
+            }
+            float afterMany = p.NetLocalSwivelAmplitude;
+
+            check("the amplitude starts at the un-modified default", Near(before, 50f, 0.01f));
+            check("one tick moves it only PART of the way (a nudge, not a step)",
+                afterOne > before && afterOne < before + (200f - before) * 0.5f);
+            check("...and it does converge, so the ease is not a leak",
+                Near(afterMany, 200f, 1f));
+
+            // THE WRAPPED SHORTEST ARC. A phase 0.95 -> 0.05 correction is +0.1 of a cycle, not
+            // -0.9: a naive difference walks the wasp almost a whole period the wrong way, which
+            // for a 2.7s swivel is a full visible dive. Asserted on the recorded ERROR rather
+            // than on the phase itself, because the timer also advances on its own during the
+            // tick and would blur the sign this leg is about.
+            check("a phase correction across the 1 -> 0 wrap takes the SHORT arc",
+                ShortestArc(0.95f, 0.05f) > 0f && ShortestArc(0.95f, 0.05f) < 0.2f);
+            check("...and the other way round too", ShortestArc(0.05f, 0.95f) < 0f);
+        }
+
+        // Drives the real FlyingSpider.NetApplySwivel and reads back the arc it recorded, by
+        // measuring how far ONE full ease moves the phase. The type keeps the error private, so
+        // this is the observable: a naive (target - current) would report ~-0.9 where the short
+        // arc is +0.1.
+        private static float ShortestArc(float from, float to)
+        {
+            ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
+            FlyingSpider f = new FlyingSpider(bin.Game);
+            f.Setup(isbackground: false);
+            f.NetForceAnchor(300f, from);
+            f.Initialize();
+            f.NetApplySwivel(50f, to);
+            float start = f.NetSwivelPhase;
+            // A tick long enough to spend the whole correction, but the timer advances too --
+            // so subtract the free-running part, which is dt / Duration of a cycle.
+            const float dtMs = 250f;
+            DriveOnce(f, dtMs);
+            float moved = f.NetSwivelPhase - start + dtMs / 2700f;
+            if (moved > 0.5f)
+            {
+                moved -= 1f;
+            }
+            else if (moved < -0.5f)
+            {
+                moved += 1f;
+            }
+            return moved;
+        }
+
+        // ---- 4. Lazer rates ----------------------------------------------------------------
+
+        private static void SectionLazerRates(ComponentBin bin, Game game,
+            System.Action<string, bool> check)
+        {
+            LazerDescriptor desc = new LazerDescriptor();
+
+            Lazer host = Lazer.NewLazer(bin, game);
+            host.Initialize();
+            host.SetupSingleShot(new Vector2(400f, 300f), 1.0f, 50f, playSound: false);
+
+            float modifier = Settings.GetInstance().DifficultyModifier;
+            check("the host reports its REAL growth rate (growthspeed x DifficultyModifier)",
+                Near(host.NetLenRate, 0.4f * modifier, 0.0005f));
+            // The lead rate is gated on `freed` and the length rate on `stopped`, so a beam that
+            // has just been fired reports growth and no lead catch-up. Asserting the gate rather
+            // than just the number is what stops a readback that ignored Update's own conditions.
+            check("...and no lead rate until the emitter lets go", host.NetLeadRate == 0f);
+            host.Free();
+            check("...which STARTS once it does", Near(host.NetLeadRate, 0.4f * modifier, 0.0005f));
+
+            // Nothing sweeps a single shot, so the angular rate is honestly zero -- and the
+            // miniboss' constant is what a swept beam reports.
+            check("an unswept beam reports no angular rate", host.NetAngleRate == 0f);
+            host.SetSweepRate(Boss.LazerSweepRadPerMs);
+            check("a swept beam reports the sweeper's constant",
+                Near(host.NetAngleRate, Boss.LazerSweepRadPerMs, 0.000001f));
+
+            byte[] extra = new byte[64];
+            int len = desc.EncodeStateExtra(host, extra, 0);
+            check("the state extras carry the values AND the three rates", len == 12);
+
+            // The puppet: built through the real descriptor, fed the real frame, then DRIVEN.
+            NetBaseState state = default;
+            state.Pos = new Vector2(400f, 300f);
+            Lazer puppet = (Lazer)desc.CreatePuppet(bin, game, state, extra, 0, 0);
+            puppet.Initialize();
+            desc.ApplyStateExtra(puppet, extra, 0, len);
+            float lenBefore = puppet.NetLen;
+            float aimBefore = puppet.NetAngle;
+            DriveOnce(puppet, 100f);
+            check("a driven puppet GROWS at the sent rate between turns",
+                Near(puppet.NetLen - lenBefore, 0.4f * modifier * 100f, 1f));
+            check("...and SWEEPS at the sent angular rate",
+                Near(puppet.NetAngle - aimBefore, Boss.LazerSweepRadPerMs * 100f, 0.0005f));
+
+            // NEGATIVE CONTROL: the same puppet given the PRE-CARD six-byte block has no rates,
+            // so it holds its beam between turns -- which is the reported chop, and is what every
+            // leg above is measured against. Without it, a driver that grew the beam off some
+            // other state would pass.
+            Lazer noRates = (Lazer)desc.CreatePuppet(bin, game, state, extra, 0, 0);
+            noRates.Initialize();
+            desc.ApplyStateExtra(noRates, extra, 0, 6);
+            float heldLen = noRates.NetLen;
+            float heldAim = noRates.NetAngle;
+            DriveOnce(noRates, 100f);
+            check("a pre-card 6-byte block leaves the beam HOLDING (the reported chop)",
+                noRates.NetLen == heldLen && noRates.NetAngle == heldAim);
+
+            // The 250ms integration cap: a puppet whose peer went quiet must not grow without
+            // limit across the screen, because the beam is collidable and can kill the local
+            // player. Drive far past the cap and require the growth to have stopped at it.
+            Lazer capped = (Lazer)desc.CreatePuppet(bin, game, state, extra, 0, 0);
+            capped.Initialize();
+            desc.ApplyStateExtra(capped, extra, 0, len);
+            float capBefore = capped.NetLen;
+            DriveOnce(capped, 5000f);
+            check("integration is CAPPED at 250ms of silence (a collidable beam)",
+                Near(capped.NetLen - capBefore, 0.4f * modifier * 250f, 1f));
+
+            bin.Remove(host);
+            bin.Remove(puppet);
+            bin.Remove(noRates);
+            bin.Remove(capped);
+        }
+
+        // ---- 5. the host's velocity decision -----------------------------------------------
+        //
+        // THE OTHER HALF OF THE LANE, and the half that was uncovered until it was split out of
+        // CaptureBaseState. An anchored client integrates its own periodic component ON TOP of
+        // the velocity the host sends, so if the host goes back to differentiating, that periodic
+        // part is counted TWICE -- the wasp bobs at double amplitude and the correction fights it
+        // every turn. Measured: a mutation dropping the anchored branch passed the whole 32-probe
+        // suite and every other leg here, which is why this section exists.
+        private static void SectionHostVelocity(System.Action<string, bool> check)
+        {
+            // One entity, sampled 100 ms apart, with a DECLARED velocity that deliberately
+            // disagrees with the observed one -- which is the wasp's real situation: it drifts at
+            // -0.12 px/ms in X and its Y displacement is the swivel, not travel.
+            Vector2 declared = new Vector2(-0.12f, 0f);
+            Vector2 last = new Vector2(400f, 300f);
+            Vector2 now = new Vector2(388f, 320f); // -12 px of X drift, +20 px of swivel
+
+            Vector2 anchored = NetSession.ResolveBaseVelocity(declared, anchored: true, now,
+                hasLastPos: true, last, 0L, 100L, out bool anchoredGuard);
+            Vector2 observed = NetSession.ResolveBaseVelocity(declared, anchored: false, now,
+                hasLastPos: true, last, 0L, 100L, out _);
+
+            check("an ANCHORED entity's velocity is its declared vector, never differenced",
+                anchored == declared);
+            // The CONTROL, and it is what makes the line above mean something: on the identical
+            // inputs the ordinary path really does differ, and specifically it picks the swivel
+            // up as Y travel -- the pollution the anchor exists to remove.
+            check("...while an ordinary entity IS differenced on the same inputs",
+                observed != declared && Near(observed.Y, 0.2f, 0.001f));
+            check("...and the anchored path never spends the teleport guard", !anchoredGuard);
+
+            // The first-observation fallback is the declared vector for BOTH, which is what makes
+            // an anchored entity's first snapshot correct rather than a special case.
+            check("with no history both paths fall back to the declared vector",
+                NetSession.ResolveBaseVelocity(declared, anchored: true, now,
+                        hasLastPos: false, last, 0L, 100L, out _) == declared
+                    && NetSession.ResolveBaseVelocity(declared, anchored: false, now,
+                        hasLastPos: false, last, 0L, 100L, out _) == declared);
+
+            // The teleport guard (card 8dabe812) still stands on the un-anchored path: an 800 px
+            // reposition over 100 ms is 8 px/ms, past MaxObservedSpeedPxPerMs.
+            Vector2 far = new Vector2(1200f, 300f);
+            Vector2 guardedVel = NetSession.ResolveBaseVelocity(declared, anchored: false, far,
+                hasLastPos: true, last, 0L, 100L, out bool guarded);
+            check("the teleport guard still refuses an implausible sample",
+                guarded && guardedVel == declared);
+        }
+
+        // ---- helpers -----------------------------------------------------------------------
+
+        // One tick of the per-puppet drive hook, exactly as NetPuppets.Drive calls it.
+        private static void DriveOnce(AlienDrawableGameComponent c, float dtMs)
+        {
+            GameTime t = new GameTime(System.TimeSpan.Zero,
+                System.TimeSpan.FromMilliseconds(dtMs));
+            ((INetEntity)c).NetTickTimers(t);
+            ((INetEntity)c).NetDriveExtras(t);
+        }
+
+        private static bool Near(float a, float b, float tol)
+        {
+            return System.Math.Abs(a - b) < tol;
+        }
+    }
+}

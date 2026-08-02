@@ -101,6 +101,21 @@ internal class Asteroid : AlienDrawableGameComponent
 	// round-robin turn (which read as a stutter).
 	internal override float NetSpinPerMs => rotationspeed;
 
+	// Anchored motion (card c1a38ef9). An asteroid's whole translation is `Position +=
+	// SpeedVector * dt` at a Speed/Direction pair Setup fixes -- a constant-velocity line with no
+	// periodic component, so NetPathOffset stays the base's zero and this flag buys exactly one
+	// thing: the CHANGE of heading when a bullet nudges it (CollidesWith below) arrives on the
+	// client as an eased velocity rather than a step at the snapshot turn that reports it.
+	//
+	// It carries NO spawn anchor and no new wire bytes, which is a deliberate narrowing of the
+	// card's wording. The steady linear path is ALREADY dead-reckoned exactly -- a finite
+	// difference of a straight line is that line -- and it measures so:
+	// tools/sim/net_puppet_drive_sim.py --smoothness reads a steady-state jerk of 0.000 (N=16) to
+	// 0.001 (N=128) for a linear mover against the host's own 0.0008. There is nothing there for
+	// an anchor to improve; the kink at a heading change is the whole defect, and the easing is
+	// what removes it.
+	internal override bool NetPathAnchored => true;
+
 	public override void Update(GameTime gameTime)
 	{
 		rotation += rotationspeed * (float)gameTime.ElapsedGameTime.TotalMilliseconds;

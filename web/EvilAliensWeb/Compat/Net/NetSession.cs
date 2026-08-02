@@ -67,7 +67,13 @@ namespace EvilAliensWeb.Compat.Net
         // replicated individually. A v9 peer would ignore the beat (unknown event type) AND
         // still expect the per-entity spawns, so it would see empty scenery: a real
         // incompatibility, hence the version move even though no existing layout changed.
-        public const byte ProtocolVersion = 10;
+        // v11 (card c1a38ef9): motion parameters on the wire -- LazerDescriptor's state extras
+        // grow three sent RATES (6 -> 12 bytes) and FlyingSpiderDescriptor gains a path anchor in
+        // its spawn extras (1 -> 5) plus state extras where it had none (0 -> 4).
+        // Both blocks are length-guarded, so an older peer degrades to exactly the pre-card
+        // behaviour rather than desyncing -- the ca4fd94f bump test, which this passes. The bump
+        // is the batch convention rather than a strict requirement; see NetProtocol's header.
+        public const byte ProtocolVersion = 11;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because FiringHoldMsFor's contract is expressed in whole
@@ -1628,13 +1634,52 @@ namespace EvilAliensWeb.Compat.Net
         {
             INetEntity c = e.Comp;
             Vector2 pos = c.Position;
-            // Observed velocity: differentiate real positions between this entity's snapshot
-            // turns -- robust for enemies that move Position directly (arcs, easing) where
-            // Speed/Direction would lie. First observation falls back to SpeedVector.
-            Vector2 vel = c.NetSpeedVector;
-            if (e.HasLastPos && now > e.LastPosMs)
+            Vector2 vel = ResolveBaseVelocity(c.NetSpeedVector, c.NetPathAnchored, pos,
+                e.HasLastPos, e.LastPos, e.LastPosMs, now, out bool guarded);
+            if (guarded)
             {
-                Vector2 observed = (pos - e.LastPos) / (now - e.LastPosMs);
+                metrics.VelGuard++;
+            }
+            e.LastPos = pos;
+            e.LastPosMs = now;
+            e.HasLastPos = true;
+            return new NetBaseState
+            {
+                Pos = pos,
+                Vel = vel,
+                Rotation = c.NetRotation,
+                CurFrame = c.NetCurFrame,
+                Scale = c.NetScale,
+                Hp = c.NetKillable is INetKillable k ? k.NetHitPoints : 0,
+            };
+        }
+
+        // The velocity a snapshot carries, as a PURE decision (the OwnsSlotCore precedent): the
+        // whole of it is unobservable from any frame, and two of its three branches are chosen by
+        // an entity property, so a test that could not table-drive it could not cover it at all.
+        // Measured: a mutation dropping the anchored branch below passed the entire 32-probe
+        // suite and every leg of eaNetMotion until this was split out.
+        //
+        // Observed velocity: differentiate real positions between this entity's snapshot turns --
+        // robust for enemies that move Position directly (arcs, easing) where Speed/Direction
+        // would lie. First observation falls back to SpeedVector.
+        internal static Vector2 ResolveBaseVelocity(Vector2 declared, bool anchored, Vector2 pos,
+            bool hasLastPos, Vector2 lastPos, long lastPosMs, long now, out bool guarded)
+        {
+            guarded = false;
+            Vector2 vel = declared;
+            // ANCHORED MOTION (card c1a38ef9): an anchored type keeps that declared value and is
+            // never differentiated. Its real position is a linear baseline plus a periodic
+            // component the client integrates for itself (INetEntity.NetPathOffset), and a finite
+            // difference taken over a whole snapshot turn describes a CHORD of that periodic part
+            // rather than the baseline -- so the estimate is wrong by construction, and worse the
+            // longer the turn. The declared vector is the baseline exactly.
+            //
+            // The caller still stamps LastPos/LastPosMs: they are the entity's observation
+            // history and must stay live in case the type ever stops being anchored mid-life.
+            if (!anchored && hasLastPos && now > lastPosMs)
+            {
+                Vector2 observed = (pos - lastPos) / (now - lastPosMs);
                 // TELEPORT GUARD (card 8dabe812). A finite difference cannot tell motion from a
                 // REPOSITION, and several entities are repositioned outright -- the SpiderBoss is
                 // parked at the far screen edge to start each fly-by. Differentiating that ~800 px
@@ -1662,21 +1707,10 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else
                 {
-                    metrics.VelGuard++;
+                    guarded = true;
                 }
             }
-            e.LastPos = pos;
-            e.LastPosMs = now;
-            e.HasLastPos = true;
-            return new NetBaseState
-            {
-                Pos = pos,
-                Vel = vel,
-                Rotation = c.NetRotation,
-                CurFrame = c.NetCurFrame,
-                Scale = c.NetScale,
-                Hp = c.NetKillable is INetKillable k ? k.NetHitPoints : 0,
-            };
+            return vel;
         }
 
         // ---- host score sync ------------------------------------------------------------------

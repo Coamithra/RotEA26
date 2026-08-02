@@ -202,8 +202,26 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     // NetTickTimers), the vertical bob (carried by base pos), and curframe (base + NetAdvanceFrame)
     // all self-animate, so there is NO continuous state extra. Foreground spiders also take a random
     // grey tint (background ones are forced to the fog colour), forced onto the host's pick.
-    // Spawn extras: [flags:1]  (bit0 = isbackground, bits1-2 = colorIdx for foreground)
-    // State extras: none -- everything continuous rides base fields + self-driven timers.
+    // Spawn extras: [flags:1][startHeight:2][swivelPhase:2]
+    // State extras: [amplitude:2][swivelPhase:2]
+    //   (flags: bit0 = isbackground, bits1-2 = colorIdx for foreground)
+    //
+    // ANCHORED MOTION (card c1a38ef9). FlyingSpider is NetPathAnchored: its path is a linear X
+    // drift plus `startheight + amp * scale * sin(2pi * swivelPhase)`, so the client integrates
+    // the swivel itself rather than having it finite-differenced into the base-state velocity --
+    // where it becomes a chord of the sine and is wrong by construction. Three things have to
+    // cross for that to work, and each is rolled locally otherwise:
+    //   * startHeight -- Initialize picks a RANDOM entry height, and it is the Y the swivel
+    //     oscillates about. u16 design px; the field is 0..475 and never negative.
+    //   * swivelPhase -- Initialize calls swiveltimer.Randomize(), so an un-anchored client bobs
+    //     in an unrelated phase. u16 over [0,1). In the SPAWN extras as the anchor AND in the
+    //     state extras, because the two peers' clocks drift; the client EASES toward it on the
+    //     wrapped shortest arc, so a late packet can never snap the wasp vertically.
+    //   * amplitude -- `50 * DifficultyModifier`, which DRIFTS (the modifier ramps with elapsed
+    //     play time and adapts on death) and is not equal on the two peers, so the host sends the
+    //     product and the client eases toward it. u16 design px.
+    // The swivel DURATION needs nothing: it is 2700/4000 keyed off the isbackground bit already
+    // in the flags, so both peers derive the same value.
     //
     // Only the FOREGROUND form reaches this descriptor now (card 9a3175d0): a background spider
     // is NetCosmeticOnly, so NetIdRegistry never gives it an id and bit0 can no longer be set by
@@ -213,6 +231,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     internal sealed class FlyingSpiderDescriptor : NetTypeDescriptor<FlyingSpider>
     {
         private const byte FlagBackground = 1;
+        private const int SpawnAnchorBytes = 5;   // flags + startHeight + phase
+        private const int StateExtraBytes = 4;    // amplitude + phase
 
         public override int EncodeSpawnExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
@@ -224,6 +244,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             }
             flags |= (byte)((f.NetColorIndex & 3) << 1);
             buf[off++] = flags;
+            WriteU16Px(buf, ref off, f.NetStartHeight);
+            WritePhase(buf, ref off, f.NetSwivelPhase);
             return off;
         }
 
@@ -233,7 +255,58 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             FlyingSpider f = FlyingSpider.NewFlyingSpider(bin, game);
             f.Setup((flags & FlagBackground) != 0);
             f.NetForceColor((byte)((flags >> 1) & 3));
+            // The path anchor rides the same pre-Add seam as the colour, and it has to: BOTH
+            // quantities are written by Initialize (a random entry height, a Randomize()d swivel
+            // phase), and ComponentBin.Add runs Initialize synchronously -- so a value written
+            // here after the Add would be the one that survives, and one written before it would
+            // be clobbered. NetForceAnchor stores it and Initialize applies it at its end, exactly
+            // as NetForceColor does.
+            if (len >= SpawnAnchorBytes)
+            {
+                f.NetForceAnchor(NetProtocol.ReadU16(buf, off + 1), ReadPhase(buf, off + 3));
+            }
             return f;
+        }
+
+        public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
+        {
+            FlyingSpider f = C(c);
+            WriteU16Px(buf, ref off, f.NetSwivelAmplitude);
+            WritePhase(buf, ref off, f.NetSwivelPhase);
+            return off;
+        }
+
+        public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
+        {
+            if (len < StateExtraBytes)
+            {
+                return;
+            }
+            // RECORDED here, SPENT in FlyingSpider.NetDriveExtras over the next 250 ms -- see the
+            // note there for why a correction applied inside this method would be a step.
+            C(c).NetApplySwivel(NetProtocol.ReadU16(buf, off), ReadPhase(buf, off + 2));
+        }
+
+        private static void WriteU16Px(byte[] buf, ref int off, float px)
+        {
+            ushort v = (ushort)MathHelper.Clamp(px, 0f, 65535f);
+            buf[off++] = (byte)v;
+            buf[off++] = (byte)(v >> 8);
+        }
+
+        // Phase over [0,1). Written modulo 1 so a value that has drifted outside cannot wrap the
+        // cast; read back straight, since every u16 maps into range by construction.
+        private static void WritePhase(byte[] buf, ref int off, float phase01)
+        {
+            float p = phase01 - (float)System.Math.Floor(phase01);
+            ushort v = (ushort)MathHelper.Clamp(p * 65535f, 0f, 65535f);
+            buf[off++] = (byte)v;
+            buf[off++] = (byte)(v >> 8);
+        }
+
+        private static float ReadPhase(byte[] buf, int off)
+        {
+            return NetProtocol.ReadU16(buf, off) / 65535f;
         }
     }
 

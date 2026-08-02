@@ -77,7 +77,44 @@ namespace EvilAliensWeb.Compat.Net
         // and it is a readout rather than something the sim reads back, so a third of the ship
         // rate is plenty and keeps the added stream traffic under ~400 B/s.
         private const long HudIntervalMs = 100;      // ~10 Hz per-slot HUD state
-        private const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
+        internal const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
+
+        // Ceiling on a believable observed velocity, design px/ms -- the teleport guard's threshold
+        // (card 8dabe812; the reasoning is at the use site in CaptureBaseState).
+        //
+        // DERIVED FROM A MEASURED GAP, via `eaNetVelScan` (Compat/Net/NetVelocityScan) over
+        // Level1/2/3 at Medium and Inzane, ~8 sim-minutes each. That tool reports each replicable
+        // type's SUSTAINED speed -- one whose neighbouring sample is at least half as fast, i.e. a
+        // plateau rather than a one-interval spike -- which is what separates flight from a
+        // reposition. Highest sustained readings for types that do NOT reposition, px/ms:
+        //     MarsBoss 2.404 (its entry PowerCurve) · Spider 1.237 · SweepUFO 0.385 ·
+        //     EvilBullet 0.240 · PlasmaBall 0.600 · BrainBoss 0.101 · JunkBoss 0.075
+        // and the fastest DECLARED speed anywhere in the set is EvilSkull's launched MaxSpeed 2.5.
+        // So genuine motion tops out at ~2.5 px/ms.
+        //
+        // The repositions sit an order of magnitude up, and each is a code fact rather than a
+        // reading to explain away: SpiderBoss's fly-by park measures 42-57 (THE CARD), EvilSkull
+        // respawns at a random point on screen and measures 11.6, and a `wrapping` Braineroid
+        // teleports across the screen and measures 13.5.
+        //
+        // 5.0 is the log midpoint of 2.5..11.6: 2.0x above the fastest real mover and 2.3x below
+        // the slowest reposition. Well separated in both directions and tuned to neither.
+        //
+        // THE SEPARATION IS THE POINT, NOT THE PRECISION -- gameplay RNG is unseeded, so a soak
+        // samples the MarsBoss entry curve wherever it happens to land and three runs of the same
+        // rig read 1.777 / 2.013 / 2.404. Any cap chosen inside that band would be a coin flip
+        // (measured: a trial cap of 2.0 passed the probe on one run and failed it on the next),
+        // which is exactly why this sits a factor of two clear of the whole band rather than just
+        // above the largest reading. Do not "tighten" it toward the measurements.
+        //
+        // A new fast type RAISES this; it never gets clipped. `eaNetVelScan` re-measures the
+        // left-hand side and reports PASS/FAIL against this constant, and
+        // tools/headless/probes/net_velguard.txt runs it -- that probe IS the negative test the
+        // cap rests on. Two things it caught, both of which would have shipped a wrong number:
+        // a first cut at 3.0 clipped MarsBoss's own arrival, and the scan's own sampler was
+        // differencing across POOL RECYCLES, which reported an EvilBullet whose declared speed is
+        // 0.24 px/ms at a sustained 14.9.
+        internal const float MaxObservedSpeedPxPerMs = 5.0f;
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
         private const long PeerTimeoutMs = 3000;
@@ -1597,7 +1634,36 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 vel = c.NetSpeedVector;
             if (e.HasLastPos && now > e.LastPosMs)
             {
-                vel = (pos - e.LastPos) / (now - e.LastPosMs);
+                Vector2 observed = (pos - e.LastPos) / (now - e.LastPosMs);
+                // TELEPORT GUARD (card 8dabe812). A finite difference cannot tell motion from a
+                // REPOSITION, and several entities are repositioned outright -- the SpiderBoss is
+                // parked at the far screen edge to start each fly-by. Differentiating that ~800 px
+                // jump over one turn stamps ~13 px/ms onto the wire, and the client then
+                // DEAD-RECKONS on it: it snaps to the new position (correctly -- the error is past
+                // SnapThresholdPx) and then flies onward at teleport speed until the next
+                // correction. Puppets are collidable, so the boss crosses the screen and kills the
+                // local player. Measured in tools/sim/net_puppet_drive_sim.py --smoothness: client
+                // peak 150.8 px/tick unguarded (~9000 px/s, the reported "2-3 frames"), 14.3 px/tick
+                // guarded, with the legitimate snap preserved and one spurious pop removed.
+                //
+                // Falling back to NetSpeedVector is the SAME fallback the first-observation branch
+                // above already uses, and it is the honest answer: for a repositioned entity the
+                // declared speed describes what it will do NEXT, which is what the client needs.
+                //
+                // THE CAP IS MEASURED, NOT GUESSED, and the measurement is the negative test:
+                // NetVelocityScan samples this exact quantity over real play and reports the
+                // fastest genuine mover per type. Clipping a real fast mover would recreate the
+                // stutter this card removes, one type at a time and invisibly -- so if a new type
+                // ever approaches this, RAISE THE CAP, and re-run the scan to say what it now
+                // clears. See tools/headless/probes/net_velguard.txt.
+                if (observed.LengthSquared() <= MaxObservedSpeedPxPerMs * MaxObservedSpeedPxPerMs)
+                {
+                    vel = observed;
+                }
+                else
+                {
+                    metrics.VelGuard++;
+                }
             }
             e.LastPos = pos;
             e.LastPosMs = now;

@@ -710,6 +710,14 @@
             catch (e) { console.warn('[debug] eaNetPuppetBench failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the measured ceiling the co-op teleport guard's speed cap is set against (card
+        // 8dabe812). eaNetVelScan(true) arms, eaNetVelScan() reads. Needs no net session -- it
+        // measures the game's own motion, which is the quantity the guard bounds.
+        window.eaNetVelScan = (on) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetVelScan', on === true)); }
+            catch (e) { console.warn('[debug] eaNetVelScan failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the collision broad-phase bench + its behaviour-neutrality check against the
         // pre-card algorithm (card 391e11d2). MENU-only. Defaults n=160 / iters=400, applied
         // ONLY when the argument is omitted — a supplied 0 is passed through so the C# guard can

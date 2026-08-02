@@ -184,6 +184,29 @@ namespace EvilAliensWeb.Compat.Net
             Check("a NetSpinPerMs override reaches the seam (0.125)", variant.NetSpinPerMs == 0.125f);
             Check("a NetCosmeticOnly override reaches the seam (true)", variant.NetCosmeticOnly);
 
+            // NetFrameLocal is the third virtual of this shape (the puppet animation opt-out,
+            // cards c92f3817 / 0dfc4495 / d3add86f) and it DEFAULTS TRUE, unlike the two above.
+            // That inversion is exactly why it needs its own pair of checks: a forward
+            // accidentally bound to the base would answer `true` everywhere, which is the
+            // shipped answer for almost every type -- so only a type that opts OUT can tell the
+            // two apart, and getting it wrong silently reintroduces the animation kick on the
+            // handful of types whose frame is host-gated.
+            Check("a plain entity's NetFrameLocal is the base true", e.NetFrameLocal);
+            Check("a NetFrameLocal override reaches the seam (false)", !variant.NetFrameLocal);
+
+            // ... and the REAL shipped opt-outs, which is what the audit actually rests on.
+            // Spider writes curframe from its rear-up/land state machine; MarsBoss re-derives
+            // `fps` from HitPointsNormalized every Update, so a puppet would free-run at the
+            // wrong RATE. Both must answer false; a UFO -- the plain free-running case the
+            // cards are about -- must answer true beside them, or a predicate hard-wired to
+            // false would pass this leg.
+            Check("Spider opts OUT of local frames (host-gated pose)",
+                !((INetEntity)new Spider(game)).NetFrameLocal);
+            Check("MarsBoss opts OUT of local frames (Update mutates fps)",
+                !((INetEntity)new MarsBoss(game)).NetFrameLocal);
+            Check("UFO keeps local frames (a plain free-running loop)",
+                ((INetEntity)new UFO(game)).NetFrameLocal);
+
             // ... and then the REAL shipped case for the cosmetic half, which is what the
             // production opt-out actually looks like (card 9a3175d0): a belt-decoration
             // Asteroid, whose answer flips on SetBackground rather than on its type.
@@ -322,6 +345,10 @@ namespace EvilAliensWeb.Compat.Net
             internal override float NetSpinPerMs => 0.125f;
 
             internal override bool NetCosmeticOnly => true;
+
+            // Opposite polarity to the two above, deliberately: NetFrameLocal DEFAULTS to true,
+            // so an override has to answer false to be distinguishable from the base at all.
+            internal override bool NetFrameLocal => false;
         }
 
         // A content-free KillableAlien, for the same reason ProbeEntity is a content-free

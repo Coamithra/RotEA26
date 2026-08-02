@@ -390,6 +390,12 @@ internal class Spider : KillableAlien
 	// airborne frame self-drives off wall-clock), so the one continuous state bit is hasJumped.
 	// The grey tint Initialize randomises is a spawn-time pick, forced via netForcedColorIndex.
 
+	// GROUNDED curframe is NOT a free-running loop: Update writes it outright from the rear-up /
+	// launch / land choreography (the WrapFrame(entryFrame + fps * t) sites above), so it encodes
+	// which POSE the host is in, not just how far round a cycle it has got. A puppet advancing it
+	// locally would rear up and pounce on its own schedule. Keep taking the replicated frame.
+	internal override bool NetFrameLocal => false;
+
 	internal byte NetColorIndex
 	{
 		get

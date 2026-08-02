@@ -13,11 +13,14 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     // poses may diverge until their state extras grow); the divergences are documented per type.
 
     // PlasmaBall (PlasmaBall.cs) -- BASE-ONLY. The hazard a landed paratrooper brain vomits at the
-    //   player. Draw is a fixed additive "lightning ball": the plasmaball2 sheet drawn twice at two
-    //   spinning rotation angles. Those angles are seeded RANDOMLY and spun only in Update, so on a
-    //   frozen puppet they hold at their spawn angles -- the orb still reads as a plasma ball but its
-    //   crackle doesn't spin (best-effort, purely cosmetic; the angles were already per-instance
-    //   random, so they never matched across peers anyway). Everything that matters for dodging it --
+    //   player, and the final boss's "electricity balls" (BrainBoss.Update spawns them too). Draw is
+    //   a fixed additive "lightning ball": the plasmaball2 sheet drawn twice at two spinning
+    //   rotation angles. Those angles are spun only in Update, so on a frozen puppet they used to
+    //   hold at their spawn values and the orb was a STILL IMAGE (card 435db27f). They are now
+    //   simulated LOCALLY in PlasmaBall.NetDriveExtras -- the spin is a fixed +-PI/2 rad/s and the
+    //   angles were already per-instance random, so they never matched across peers anyway, which
+    //   makes a local copy exactly as correct as the host's and costs no wire bytes.
+    //   Everything that matters for dodging it --
     //   position, the entry scale ramp (0.025 -> 0.25) and flight -- rides the base fields (Pos, Vel,
     //   Scale x256). Setup(pos, direction) only seeds the entry velocity, which NetBaseState overrides.
     internal sealed class PlasmaBallDescriptor : NetTypeDescriptor<PlasmaBall>

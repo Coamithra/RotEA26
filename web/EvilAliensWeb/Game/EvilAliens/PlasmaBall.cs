@@ -131,4 +131,39 @@ internal class PlasmaBall : AlienDrawableGameComponent
 	{
 		base.CollidesWith(other);
 	}
+
+	// ---- Online co-op replication seams (Compat/Net/Descriptors/PlasmaBallDescriptor) ------
+	// The final boss's "electricity balls" (BrainBoss.Update spawns these). A frozen client puppet
+	// never runs Update, so both crackle angles held at their spawn values and the orb was a STILL
+	// IMAGE -- the reported "they don't animate" (card 435db27f). The descriptor header noted it as
+	// an accepted cosmetic loss; it is not accepted any more, and it costs no wire bytes because
+	// the whole thing is locally simulable: a fixed +-PI/2 rad/s counter-spin plus a re-roll on an
+	// average-10/s coin flip. Nothing reads `rotations` but Draw, and the angles were ALREADY
+	// per-instance random and so never matched across peers -- so running them locally is exactly
+	// as correct as the host's copy and strictly better than a freeze.
+	//
+	// PRIVATE RNG, never RandomHelper.Random -- the Quad / ShipConnector rule. A per-frame draw off
+	// the shared generator from a client-only path desynchronises every other consumer of it on
+	// that peer, and this runs once per puppet per tick.
+	//
+	// Real dt, like everything else NetPuppets.Drive hands out.
+	private static readonly System.Random netSpinRng = new System.Random();
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		base.NetDriveExtras(gameTime);
+		float dtSeconds = (float)gameTime.ElapsedGameTime.TotalSeconds;
+		// The live Update rolls this through RandomFromAverage(10f); reproduce the RATE directly
+		// rather than the call, since that helper reads the shared generator.
+		if (netSpinRng.NextDouble() < 10f * dtSeconds)
+		{
+			rotations[netSpinRng.Next(rotations.Length)] =
+				(float)(netSpinRng.NextDouble() * Math.PI * 2.0);
+		}
+		for (int i = 0; i < rotations.Length; i++)
+		{
+			float dir = ((i % 2 == 0) ? (-1f) : 1f);
+			rotations[i] += (float)Math.PI / 2f * dir * dtSeconds;
+		}
+	}
 }

@@ -346,6 +346,14 @@ internal class MarsBoss : KillableAlien
 	// mothershipA/mothershipB halves each animation wrap in Update; that A/B choice is the one
 	// bit of Draw state the base fields (curframe/Hp) don't carry, so it is streamed.
 
+	// The 4x4 loop IS free-running, but its RATE is not: Update re-derives
+	// `fps = Lerp(32, 16, HitPointsNormalized)` every tick, so a wounded boss flaps up to twice as
+	// fast. A puppet's Update never runs, so it would free-run forever at Initialize's 16 and drift
+	// away from the host -- and drag the wrap-driven A/B sheet half out of step with the replicated
+	// one. Keep taking the replicated frame. (SpiderHelperMothership is the near-identical type
+	// that DOES qualify: its fps is a constant 16 set once in Initialize.)
+	internal override bool NetFrameLocal => false;
+
 	internal byte NetBossPosition => (byte)bossPosition;
 
 	internal bool NetSecondHalf => texture == secondHalfOfSpritesheet;

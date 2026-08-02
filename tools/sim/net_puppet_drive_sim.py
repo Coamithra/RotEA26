@@ -547,6 +547,193 @@ def population():
           "undecidable two-window run.")
 
 
+
+# ---- smoothness (cards 0dfc4495 / d3add86f / 8dabe812) ---------------------------------------
+#
+# A DIFFERENT question from pops. `--population` above asks "does the puppet diverge far enough to
+# SNAP", and answers "essentially never on a healthy client". But the cards are not about snapping,
+# they are about the motion being visibly ROUGH while never once crossing the 100px threshold --
+# stutter, not teleporting. So this mode measures the SHAPE of the motion rather than its error:
+#
+#   jerk    = stddev of |step_n| - |step_n-1| over the run, i.e. how much the per-tick distance
+#             keeps CHANGING. Smooth motion holds a near-constant step; the host control reads
+#             ~0.0008 px/tick^2 and is the yardstick every client row is read against.
+#   maxstep = the worst single-tick distance, which is what a lurch looks like.
+#
+# TWO FINDINGS, and the second one refuted the fix that was proposed first.
+#
+# 1. THE CORRECTION WINDOW WAS FIXED WHILE THE BLIND WINDOW WAS NOT. NetPuppets blended every
+#    snapshot error over a constant 150ms, but an entity is only corrected every SnapshotTurnMs,
+#    which scales with the world (60ms at 16 live entities, 480ms at 128). Draining faster than
+#    corrections arrive means the puppet spends most of its life on a stale dead-reckon and then
+#    lurches when the next one lands. Scaling the window to 2x the turn flattens the jerk across
+#    every world size instead of letting it degrade 3.7x.
+#
+# 2. AN EXPONENTIAL / CRITICALLY-DAMPED DRAIN IS WORSE, AT EVERY SIZE. It was the obvious
+#    alternative (no reset discontinuity when a new correction replaces an old one) and it loses
+#    outright, because its tail keeps a velocity offset alive to be re-hit by the next correction.
+#    Do not re-propose it without re-running this.
+#
+# The teleport section is card 8dabe812 and is the sharpest result here: a reposition
+# differentiated as velocity (NetSession.CaptureBaseState) is dead-reckoned by the client at
+# teleport speed until its next turn, and puppets are collidable, so the boss crosses the screen
+# and kills the local player. The guard lives in CaptureBaseState; its CAP is measured separately
+# and in the REAL GAME by eaNetVelScan, not here -- this only shows what an unguarded sample does.
+
+
+class SmoothPuppet:
+    """NetPuppets.Drive + ApplySnapshotState, with the correction window as a parameter."""
+
+    def __init__(self, pos, window_ms, exponential=False):
+        self.pos = pos
+        self.vel = (0.0, 0.0)
+        self.corr = (0.0, 0.0)
+        self.corr_left = 0.0
+        self.window = window_ms
+        self.exponential = exponential
+        self.has = False
+        self.pops = 0
+
+    def apply_snapshot(self, pos, vel):
+        if not self.has:
+            self.pos = pos
+            self.has = True
+        else:
+            err = (pos[0] - self.pos[0], pos[1] - self.pos[1])
+            if math.hypot(*err) > SNAP_THRESHOLD_PX:
+                self.pos = pos
+                self.corr = (0.0, 0.0)
+                self.corr_left = 0.0
+                self.pops += 1
+            else:
+                self.corr = err
+                self.corr_left = self.window
+        self.vel = vel
+
+    def drive(self, dt_ms):
+        sx = self.vel[0] * dt_ms
+        sy = self.vel[1] * dt_ms
+        if self.exponential:
+            k = 1.0 - math.exp(-dt_ms / (self.window / 3.0))
+            dx, dy = self.corr[0] * k, self.corr[1] * k
+            sx += dx
+            sy += dy
+            self.corr = (self.corr[0] - dx, self.corr[1] - dy)
+        elif self.corr_left > 0.0:
+            take = min(dt_ms, self.corr_left)
+            sx += self.corr[0] * (take / self.window)
+            sy += self.corr[1] * (take / self.window)
+            self.corr_left -= take
+        self.pos = (self.pos[0] + sx, self.pos[1] + sy)
+        return math.hypot(sx, sy)
+
+
+def _stddev_of_deltas(series):
+    if len(series) < 2:
+        return 0.0
+    d = [abs(series[i] - series[i - 1]) for i in range(1, len(series))]
+    mean = sum(d) / len(d)
+    return math.sqrt(sum((x - mean) ** 2 for x in d) / len(d))
+
+
+def _flyspider_truth(t_ms, teleport_at=None, teleport_dx=0.0):
+    """FlyingSpider-shaped: linear X drift plus the ~4s +-25px vertical swivel."""
+    jump = teleport_dx if (teleport_at is not None and t_ms >= teleport_at) else 0.0
+    return (-0.12 * t_ms + jump, 300.0 + 25.0 * math.sin(2 * math.pi * t_ms / 4000.0))
+
+
+def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
+                   teleport_at=None, teleport_dx=0.0, vel_guard=None,
+                   declared_vel=(-0.12, 0.0)):
+    turn = snap_turn_ms(n_live)
+    window = {"fixed150": CORRECTION_WINDOW_MS,
+              "2xturn": max(CORRECTION_WINDOW_MS, 2.0 * turn)}[window_mode]
+    pup = SmoothPuppet(_flyspider_truth(0.0), window, exponential)
+    last_pos, last_ms, has_last = _flyspider_truth(0.0), 0.0, False
+    next_turn, t = turn, 0.0
+    steps, host_steps = [], []
+    prev_host = _flyspider_truth(0.0)
+    while t < total_ms:
+        t += TICK_MS
+        truth = _flyspider_truth(t, teleport_at, teleport_dx)
+        if t >= next_turn:
+            next_turn += turn
+            vel = (0.0, 0.0)
+            if has_last and t > last_ms:
+                vx = (truth[0] - last_pos[0]) / (t - last_ms)
+                vy = (truth[1] - last_pos[1]) / (t - last_ms)
+                # NetSession.MaxObservedSpeedPxPerMs -- the teleport guard. Production does NOT
+                # zero the velocity on a refusal, it falls back to the entity's DECLARED
+                # NetSpeedVector, which is the honest answer (it describes what the entity will do
+                # next). Modelling that rather than zero matters: zero would be strictly better
+                # than what ships, and the assertion below would then be measured against a
+                # fallback the game does not have.
+                if vel_guard is not None and math.hypot(vx, vy) > vel_guard:
+                    vx, vy = declared_vel
+                vel = (vx, vy)
+            last_pos, last_ms, has_last = truth, t, True
+            pup.apply_snapshot(truth, vel)
+        steps.append(pup.drive(TICK_MS))
+        host_steps.append(math.hypot(truth[0] - prev_host[0], truth[1] - prev_host[1]))
+        prev_host = truth
+    return {
+        "turn": turn, "window": window, "pops": pup.pops,
+        "jerk": _stddev_of_deltas(steps), "maxstep": max(steps),
+        "host_jerk": _stddev_of_deltas(host_steps), "host_maxstep": max(host_steps),
+    }
+
+
+def smoothness():
+    print("SMOOTHNESS -- FlyingSpider-shaped motion, client puppet vs host truth")
+    print("jerk = stddev of successive per-tick step deltas (px/tick^2); lower is smoother.\n")
+    ctrl = run_smoothness(16, "fixed150")
+    print("  host truth (the yardstick):  jerk %.4f  maxstep %.2f px\n"
+          % (ctrl["host_jerk"], ctrl["host_maxstep"]))
+    print("  %-5s %-8s %-10s %-10s %-10s" % ("N", "turn", "fixed150", "2xturn", "exp(150)"))
+    fails = []
+    for n in (16, 32, 64, 128):
+        a = run_smoothness(n, "fixed150")
+        b = run_smoothness(n, "2xturn")
+        c = run_smoothness(n, "fixed150", exponential=True)
+        print("  %-5d %-8.0f %-10.4f %-10.4f %-10.4f"
+              % (n, a["turn"], a["jerk"], b["jerk"], c["jerk"]))
+        # The shipped fix must be clearly better once the turn stretches past the 150ms floor.
+        if n >= 32 and not b["jerk"] < a["jerk"] * 0.9:
+            fails.append("N=%d: 2xturn (%.4f) is not clearly better than fixed150 (%.4f)"
+                         % (n, b["jerk"], a["jerk"]))
+        if not c["jerk"] > a["jerk"]:
+            fails.append("N=%d: the exponential drain (%.4f) was expected to be WORSE than "
+                         "fixed150 (%.4f) -- re-read the finding before changing the drain"
+                         % (n, c["jerk"], a["jerk"]))
+    print("\n  (2xturn is flat in N; fixed150 degrades with the world; the exponential drain is"
+          "\n   worse than both at every size -- it was proposed first and measured out.)")
+
+    print("\nTELEPORT (card 8dabe812) -- an 800px reposition differentiated as velocity")
+    un = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=800.0)
+    gu = run_smoothness(24, "2xturn", total_ms=6000.0, teleport_at=3000.0, teleport_dx=800.0,
+                        vel_guard=5.0)
+    print("  unguarded: maxstep %.1f px/tick  pops %d" % (un["maxstep"], un["pops"]))
+    print("  guarded  : maxstep %.1f px/tick  pops %d" % (gu["maxstep"], gu["pops"]))
+    if not gu["maxstep"] < un["maxstep"] * 0.25:
+        fails.append("the teleport guard did not cut the client's peak step by at least 4x "
+                     "(%.1f -> %.1f)" % (un["maxstep"], gu["maxstep"]))
+    # NEGATIVE LEG: the teleport must still be CORRECTED. A guard that swallowed the reposition
+    # would leave the puppet in the wrong place, which is worse than the lurch it removes.
+    if gu["pops"] < 1:
+        fails.append("the guarded run never popped -- the reposition must still snap the puppet "
+                     "to the host's position; a guard that hides it is not a fix")
+    print("  (the guarded run still POPS: the reposition is applied as a snap, which is correct."
+          "\n   It is only the VELOCITY that is refused, so the puppet stops being flung onward.)")
+
+    if fails:
+        print("\nFAIL:")
+        for f in fails:
+            print("  - " + f)
+        return False
+    print("\nOK: window scaling holds, the exponential alternative stays refuted, and the"
+          "\n    teleport guard removes the fling while keeping the correction.")
+    return True
+
 def run_host_stall(stall_ms, n_enemies=16, speed=0.15, total_ms=6000.0):
     """THE RECIPROCAL of the run() above (card 68f62e92), and the whole point is which SIDE
     stops.
@@ -665,6 +852,10 @@ def main():
     ap.add_argument("--sweep", action="store_true", help="pops vs window depth/length (eyeball)")
     ap.add_argument("--population", action="store_true",
                     help="pops vs live entity count (card 48ab9b2f: is pupPops a swarm artifact?)")
+    ap.add_argument("--smoothness", action="store_true",
+                    help="jerk/maxstep vs correction window + the teleport guard "
+                         "(cards 0dfc4495 / d3add86f / 8dabe812)")
+
     ap.add_argument("--hoststall", action="store_true",
                     help="card 68f62e92: how far a HOST-side hit-stop rewinds the peer's world")
     args = ap.parse_args()
@@ -674,6 +865,9 @@ def main():
     if args.population:
         population()
         return 0
+    if args.smoothness:
+        return 0 if smoothness() else 1
+
     if args.hoststall:
         host_stall()
         return 0

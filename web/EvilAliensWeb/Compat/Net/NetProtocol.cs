@@ -96,6 +96,16 @@ namespace EvilAliensWeb.Compat.Net
         // Lvl1StartDemoEvent.Volley for what "cosmetic" is contractually allowed to do.
         public const byte EvIntroVolley = 24;
 
+        // Card a66e190a, EITHER PEER, reliable: "my 1up bar filled -- run the slow motion".
+        // `[durationMs:2]`, 6 bytes. The receiver calls Oracle.NetSetSlowmotion, which is the
+        // same work SetSlowmotion does minus the send, so there is no echo to guard against.
+        //
+        // It is the one Ev* that scales GAME TIME on the far peer, which is why it is NOT an
+        // EvFx (that lane is host-only and contractually draw/audio only). It is safe -- and
+        // safer than the pre-card unilateral slowdown -- because the scaling is SYMMETRIC and
+        // the whole net layer runs on real time: see the slow-motion bullet in Compat/Net/CLAUDE.md.
+        public const byte EvSlowmo = 25;
+
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;
@@ -1108,6 +1118,39 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             seed = (int)ReadU32(b, 4);
+            return true;
+        }
+
+        // EvSlowmo (either peer, card a66e190a): [durationMs:2]. A duration, not an on/off state,
+        // because Oracle.SetSlowmotion EXTENDS an already-running window rather than restarting it
+        // -- so the receiver needs the number.
+        //
+        // CLAMPED at the decode boundary, not rejected: the field is presentation-shaped (a time
+        // scale that ends by itself), so degrading a silly value beats dropping the message. The
+        // bound is what the GAME can produce, PlayerShip.PowerUp's 12 s. Without it a u16 is a
+        // 65.5-second hold, and `Settings.AllowOnlineJoins` defaults ON, so the sender can be a
+        // stranger off the public game browser rather than someone you swapped a room code with.
+        // RESIDUAL, stated rather than papered over: the clamp bounds ONE frame, and nothing here
+        // bounds REPETITION -- a peer re-sending every tick holds the other side at 0.4x for as
+        // long as it likes. That is the same surface as every other beat and belongs to card
+        // 2da92af9 (public-list abuse bounds), not to a per-message check.
+        public const ushort MaxSlowmoMs = 12000;
+
+        public static byte[] EncodeSlowmoEvent(ushort eventSeq, ushort durationMs)
+        {
+            byte[] b = EventHeader(EvSlowmo, eventSeq, 2);
+            WriteU16(b, 4, durationMs);
+            return b;
+        }
+
+        internal static bool TryDecodeSlowmoEvent(byte[] b, out ushort durationMs)
+        {
+            durationMs = 0;
+            if (b.Length < 6)
+            {
+                return false;
+            }
+            durationMs = Math.Min(ReadU16(b, 4), MaxSlowmoMs);
             return true;
         }
 

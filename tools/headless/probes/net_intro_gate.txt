@@ -89,8 +89,8 @@ eval NetIntroGate
 
 # Both roles really ran on the in-process wire (the transport= field is the only thing that says
 # which wire a run was on).
-expect \[net\] session start role=host room=introgate protocol=v14 transport=InMemory
-expect \[net\] session start role=join room=introgate protocol=v14 transport=InMemory
+expect \[net\] session start role=host room=introgate protocol=v15 transport=InMemory
+expect \[net\] session start role=join room=introgate protocol=v15 transport=InMemory
 expect \[introgate\] Level 1 intro cinematic in co-op
 expect 1\. the host read comes off the REAL Level 1 script
 expect 2\. a real HOST session streams the gate bit

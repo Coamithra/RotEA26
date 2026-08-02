@@ -68,7 +68,30 @@ public class Oracle : GameComponent, IOracleService
 
 	Oracle IOracleService.Oracle => this;
 
+	// Online co-op (card a66e190a): a slow motion that STARTS HERE is announced to the peer, so
+	// both worlds scale together. This is the one place a local one can begin -- the 1up bar's
+	// PlayerShip.PowerUp case and the eaSlowmo() QA seam both land here -- which is why the send
+	// sits at the bottom of it rather than at either caller. No-op offline.
+	//
+	// The peer's copy arrives through NetSetSlowmotion below, NOT here, so an applied slow motion
+	// can never be re-announced and the two peers cannot echo each other into a permanent one.
 	public void SetSlowmotion(float seconds)
+	{
+		NetSetSlowmotion(seconds);
+		EvilAliensWeb.Compat.Net.NetSession.OnLocalSlowmotion(seconds);
+	}
+
+	// How much of the slow-motion window is left, in ms (0 when none is running). The DURATION is
+	// otherwise unobservable -- `Slowmotion` is a flat 0.4 whatever the window -- so without this
+	// a receiver that forgot the ms->seconds conversion would set a window 1000x too long and
+	// every assertion about the scale would still pass. NetLocalFxTest reads it.
+	internal float NetSlowmotionMsLeft => slowmotimer.Active ? slowmotimer.TimeLeft : 0f;
+
+	// The same work without the announcement -- the inbound half of the pair above. Kept a
+	// separate method rather than a `fromNet` flag on SetSlowmotion: the whole no-echo argument
+	// then rests on every caller passing the right bool, where this rests on which name they
+	// typed and the compiler.
+	internal void NetSetSlowmotion(float seconds)
 	{
 		slowmotion = 0.4f;
 		if (slowmotimer.Active)

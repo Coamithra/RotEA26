@@ -436,6 +436,26 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   why `?noattract` is out (card af63f958): it unwires the main menu's idle timeout and nothing
   else, and a joiner needs it precisely because its lobby is a menu. A boot carrying only
   out-of-`Active` flags prints the `no boot-hijacking debug flags` hint instead.
+- **`?seed=<n>` -- the reproducible-world flag** (card d937c721). Seeds `RandomHelper`, the
+  gameplay RNG, at parse time (`RandomHelper.Reseed`); null => `new Random()` as shipped. It is
+  what makes a gameplay-level eahl A/B measure the change instead of the divergence: unseeded,
+  two runs of `?level=OwnLevel&noattract` differ by mean |diff| 0.2 / **MAX 210** of 255, which
+  is more than most effects under test. **Near-deterministic, not deterministic -- a same-seed run
+  lands in one of a handful of discrete worlds, and the count tracks machine load**, so capture
+  each side of an A/B twice and require the same-side pair to match (the residual is eahl's boot
+  `Tick`, not the RNG; `tools/headless/README.md` -> "Reproducibility"). Two more things to know
+  before leaning on it:
+  - **It reaches `RandomHelper` ONLY.** `Quad.fxr`, `ShipConnector.fxr`, `Juice.rng` and
+    `SplashScene.rng` are separate instances *by design* -- a cosmetic draw must not advance the
+    gameplay stream -- and stay unseeded, so a rig showing a laser, the connector, a shake or the
+    splash keeps some jitter of its own.
+  - **Deliberately OUT of `Active`**, unlike most world-affecting flags. It hijacks nothing (a
+    seeded boot is a normal winnable level, the `?difficulty=` precedent), and `Active` refuses
+    online play -- which would forbid exactly the two-peer netplay captures the flag exists for.
+    It cannot desync a session either: co-op is distributed-authority replication, NOT lockstep,
+    so the peers already run two different unseeded streams today. The mitigation for staying out
+    is that a seeded boot prints its own `[debug] ?seed=` line regardless of the `Active` dump.
+  Pinned by `logic_probe`'s `ProbeSeedFlag` (the claim is a SEQUENCE, so it cannot be a picture).
 - **Live slider panels** are HTML built in `index.html` OUTSIDE `#app`, only constructed on their
   trigger page (a normal boot has no extra DOM). Pattern: `window.eaXxx(...)` →
   `Compat/DebugInput.SetXxx` ([JSInvokable]) → `DebugFlags.SetXxxOverride`, read every Draw/tick;
@@ -520,6 +540,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   is not silent — the real death paths play their real cues),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
+  `eaNetLocalFx()` (which peer sees a presentation effect -- cards 7a8ec0d3 / a66e190a: a
+  floating score is suppressed for a slot this peer does not own, and the 1up slow motion
+  crosses the wire in both directions with no echo. Menu-only and leave-no-trace),
   `eaNetFx()` (the transient-feedback beats — cards 43e85936 / 57ea30cd / ee939dd1 / 8d063d33 /
   c146422f: real EvFx frames from a scripted host over a NetWire into a real client session,
   asserting the EFFECT on the live puppet. The hit blink and the detach burst are private state
@@ -553,7 +576,11 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   blending it, each with the identical jump left UNMARKED beside it -- the pre-card code also
   ended up in the right PLACE, so position alone proves nothing. Menu-only, leave-no-trace),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
-  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
+  `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses; its
+  `aliveSlots=[..]` field is the ship-liveness readout -- a bracketed slot list, so `[0]` is slot
+  0 flying and `[]` is a shipless world -- and is what a probe should assert a live-ship
+  PRECONDITION on rather than `eaWorldCensus`, whose report is capped at the fourteen most
+  populous types),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),
   `eaNetCouchJoin()` (seat a couch player now, the way a gamepad Start does),
   `eaTexProbe('GFX/Base/756')` (drive the real texture load path for one asset and read the
@@ -570,7 +597,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaCollisionBench(n, iters)` (the collision broad-phase cost in absolute us PLUS its
   behaviour-neutrality check against the pre-card algorithm -- MENU-only; card 391e11d2),
   `eaBraineroidGlowBatch(on)` (flip the Braineroid glow draw between the batched driver and the
-  pre-card per-brain path, for a same-frame appearance A/B).
+  pre-card per-brain path, for a same-frame appearance A/B),
+  `eaWorldClock()` + `eaWorldClock.reset()` (the world clock every Draw-time cosmetic reads, and
+  the ComponentBin freeze depth gating it -- see "Feel / post FX").
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -698,10 +727,13 @@ under them flashed white.
 the plain one, whose tint still rides the vertex colour, and `lighten_interpolate_fade` for the
 interpolated one, which already enables fade with the same tint).
 
-**Rig: `?brainoverlayphase=<0..1>` + `?brainhitflash`** (root CLAUDE.md). The phase park is also
-what makes ANY BrainBoss screenshot repeatable -- the overlays advance on Draw time, so two `shot`s
-with no `step` between them differ by ~15 000 px without it, which reads exactly like a real change
-and will waste an hour if you let it.
+**Rig: `?brainoverlayphase=<0..1>` + `?brainhitflash`** (root CLAUDE.md).
+**The repeatability half of that warning is now OBSOLETE (card d79a2f48) -- two `shot`s with no
+`step` between them are byte-identical**, measured, so an ordinary BrainBoss screenshot no longer
+needs the park. The overlays used to advance on RAW Draw time; they advance by however far
+`Compat/WorldTime` moved since the last Draw, which is zero without a step (and zero under a pause,
+which is what the card was actually about). The park is still what reaches a phase the boss will
+not otherwise show you -- the eye rests CLOSED and opens on a ~15 s roll.
 
 ### Braineroid glows draw as one batch per band (`BraineroidGlows`, card 391e11d2)
 
@@ -719,8 +751,11 @@ themselves stay one batch each -- the interpolation-shader half above.)
   **a new Braineroid size drawing at a new DrawOrder must be added to it** or its glow silently
   changes layer.
 - **Verify with `eaBraineroidGlowBatch(on)` between two `shot`s and NO `step`.** Gameplay RNG is
-  unseeded, so two boots of a level never reach the same world state and a cross-boot pixel diff
-  measures the wave, not the change (the bomb-ripple card's lesson). Pair it with
+  unseeded by default, so two boots of a level never reach the same world state and a cross-boot
+  pixel diff measures the wave, not the change (the bomb-ripple card's lesson). `?seed=<n>`
+  (card d937c721) removes most of that -- but it does not make the in-process A/B above
+  unnecessary: two `shot`s off ONE boot are exact,
+  and the seed's residual outlier would land in a cross-boot diff. Pair it with
   `?brainoverlayphase=` or the boss overlays alone drift ~15 000 px between the two frames.
 
 ## Component lifecycle (`ComponentBin`) — the spawn/death contract
@@ -1155,6 +1190,40 @@ site now lives under:
 
 ## Feel / post FX
 
+- **The WORLD's clock: `Compat/WorldTime.cs` (card d79a2f48). A Draw in a world component reads
+  `WorldTime.Seconds`, NEVER `gameTime.TotalGameTime`.** A pause is `ComponentBin.Push()` ->
+  `Enabled = false`, which stops `Update` but not `Draw` (the frozen world is still drawn behind
+  the pause menu), and `Game1` hands `Draw` the RAW `GameTime` -- the turbo / 1-up slow-mo /
+  hit-stop rescale is on the `Update` path only. So a Draw-time animation on `TotalGameTime`
+  ignores all four freezes at once, which is precisely what eleven call sites were doing.
+  `Game1.UpdateScaled` advances `WorldTime` with the SCALED delta and only while
+  `ComponentBin.FreezeDepth == 0`, so local pause, the net layer's remote pause, the `Guide`
+  freeze, hit-stop and slow-mo are all honoured by construction rather than by each call site
+  remembering to check.
+  - **Prefer the shared ANIMATION classes where a component owns real per-instance state** --
+    `LoadAnimation` + `curframe` (advanced in `AlienDrawableGameComponent.Update` off the scaled
+    `gameTime`) for a sprite sheet, a `Timer` for a countdown. Both freeze correctly for free.
+    This clock is for the stateless ambient case -- a shimmer, a hue cycle, a spin phase -- where
+    a per-object accumulator would be pure overhead. **A component that needs a DELTA rather than
+    a phase** (the BrainBoss overlay patches, the ship connector) keeps its own accumulator but
+    feeds it `WorldTime.Seconds - lastWorldSeconds`, never `gameTime.ElapsedGameTime`.
+  - **What deliberately does NOT use it, and why the list is not an oversight.** The menus
+    (`MenuSub1`, `MenuSubWithSkull`, `Option`, `DifficultyMenu`, `PlayerSettingsMenu`,
+    `SubMenuAwardment*`, `StartScreen`, `SplashScene`, `CastDisplayer`,
+    `SpriteBatchWrapper.MetalTime`, `Game1.DrawLevelWarmIndicator`) keep real time -- they draw
+    the pause menu ITSELF, or only exist outside a level, and freezing them would stop the pause
+    menu's own glint and selection pulse. `WebcamLevel`'s "Step into view!" HUD prompt is in that
+    class too. `BombRipple` is the one WORLD-side exception (its own bullet below).
+  - **The sprite harness is unaffected**: it freezes an object with `Enabled = false`, not a pause
+    layer, so the world clock keeps running there and every harness animation still plays.
+  - **Verify with `eaWorldClock()` / `eval WorldClock`**, not with a screenshot pair alone -- a
+    paused frame being identical also passes on a build that stopped drawing, or on a frame that
+    held nothing animated. Pinned by `tools/headless/probes/pause_world_clock.txt` (runs, freezes,
+    runs again; `eaWorldClock.reset()` is what makes its readings boot-independent).
+  - The measurement that started it: BrainBoss paused, two frames 45 steps apart, **22 482 px
+    differing outside the pause menu -> 0**, with the pause menu's own animation unchanged as the
+    positive control.
+
 - **Juice (`Compat/Juice.cs`): screen shake + hit-stop.** Shake is the trauma model
   (`Juice.AddTrauma` from explosions/blasts/player death; strength = trauma², decays ~0.7s, max
   7px/1° — deliberately halved from the first pass, full shake impacted gameplay). Applied at the
@@ -1164,8 +1233,11 @@ site now lives under:
   `Juice.TimeScale` while REAL time keeps ticking Juice/shake/input; the per-kill micro-stop +
   boss-kill stop are **OFF by default** (read as stutter; `?hitstop=1` re-enables); player death
   keeps its 180ms stop OFFLINE. GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs
-  before the time scale) or it freezes and never thaws. Draw-time cosmetics keep animating during a
-  freeze by design. `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
+  before the time scale) or it freezes and never thaws. **Draw-time cosmetics no longer keep
+  animating during a freeze -- that line was true until card d79a2f48 and is now wrong except for
+  `BombRipple`**: they read `Compat/WorldTime`, which carries the hit-stop scale like the rest of
+  the world. The one deliberate exception is the bomb ripple, whose wavefront is a travelling wave
+  that would read as a dropped frame if it stopped (see its bullet below). `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
   - **ONLINE CO-OP REFUSES EVERY HIT-STOP, whatever the caller (card 68f62e92).** `AddHitStop`
     early-returns while `NetSession.Active`, so the death stop, the `?hitstop=1` kill/boss stops
     and `eaHitstop()` alike are no-ops in a session. It is a DESYNC fix, not a feel decision: a
@@ -1173,6 +1245,10 @@ site now lives under:
     other peer's puppets are then corrected backward -- the mechanism, the measurement and
     `?nethitstop=1` are in `Compat/Net/CLAUDE.md`. **Shake is untouched** (present-blit only, no
     gameplay time), so a co-op death still reads as an impact.
+    **The rule is "no ASYMMETRIC time scaling", not "no time scaling"** -- the 1up slow motion
+    (`Oracle.SetSlowmotion`, a different mechanism entirely) DOES run in a session and since card
+    a66e190a replicates as `EvSlowmo`, so both peers scale together. A hit-stop is scale ZERO on
+    ONE peer; that is what makes it the banned shape.
 - **Slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up slowmo adds an accumulation-
   buffer motion blur on the composited+bloomed `sceneTarget` before the present blit:
   `trail = trail*decay + scene*(1-decay)`, mixed back with an eased `slowmoTrailMix` (~0.25s); the
@@ -1212,8 +1288,12 @@ site now lives under:
     wavefront is one sine cycle under a Gaussian envelope, so the frame is pushed out ahead of
     the crest and pulled in behind it. Amplitude decays `(1-t)^Falloff` on the C# side.
   - **Zero cost when no bomb is out** -- `BombRipple.Visible` is false and `Game1` skips the pass
-    at the first branch, exactly like `HoloSim`. Rings advance on RAW Draw time, so the wave
-    keeps travelling through hit-stop.
+    at the first branch, exactly like `HoloSim`. **Rings advance on RAW Draw time through a
+    HIT-STOP but not through a PAUSE** (card d79a2f48): the freeze is a punctuation mark and a
+    wave stopping dead in it reads as a dropped frame, but a 0.75 s ring left running under a
+    pause expands, fades and is gone behind the menu, so unpausing resumes a bomb whose ripple
+    finished while the player was reading. `Game1.ApplyBombRipple` zeroes the dt while
+    `ComponentBin.FreezeDepth > 0`; everything else Draw-time is on `WorldTime` instead.
   - **Known property, not a bug: as a post pass it distorts the HUD/score where the ring reaches
     them.** The radius is bounded and the HUD sits in the corners; `?rippleradius=` limits reach.
     A pre-HUD seam would need a new hook inside `DrawInner` and is deliberately out of scope.
@@ -1265,7 +1345,9 @@ prove the `interpolate.fx` frame-interpolation shader tweens); `?harness=blast` 
 lifecycle (`?blastloop=` sweep speed);
 `?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
 ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
-plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase (bullets).
+plays the boss overlays (they advance on `WorldTime`, which the harness does not freeze -- it
+uses `Enabled=false`, not a pause layer -- so they still play here while a `shot` pair with no
+`step` is identical); `?bulletshot` is another frozen showcase (bullets).
 `?castbrain` boots the end-credits Cast screen (its own mode).
 
 ## Feature notes
@@ -1352,8 +1434,11 @@ plays the boss overlays (Draw-driven); `?bulletshot` is another frozen showcase 
 - **Ship-connector docking lightning (`ShipConnector.cs`):** breathing base sprite + fractal
   lightning bolts + crackle tendrils + a churning energy-well orb per ship (decorrelated phases).
   Self-contained reimplementation of the Quad techniques (own FX RNG, static scratch buffers). FX
-  advance on RAW Draw time (`fxTime += dt` in `Draw`) so they crackle through hit-stop — nothing in
-  `Update`. Flags `?connectorbolts= ?connectorarcs= ?connectorjitter= ?connectorpulse=
+  advance in `Draw` (`fxTime += dt`), but on `Compat/WorldTime`'s delta rather than raw Draw time
+  since card d79a2f48 — nothing in `Update`, so a pause would otherwise leave the connector
+  crackling between two motionless ships. It therefore no longer crackles through a hit-stop
+  either; `?harness=connector` is unaffected (the harness freezes with `Enabled=false`, not a
+  pause layer). Flags `?connectorbolts= ?connectorarcs= ?connectorjitter= ?connectorpulse=
   ?connectorglow=`; `eaConnector` panel; **verify with `?harness=connector`** (TeamChallenge
   auto-pauses on focus loss, a moving target the harness sidesteps).
 - **BattleSkull colorize tuner (`Compat/HarnessColorize.cs`):** `BattleSkull.Draw` hue-remaps the

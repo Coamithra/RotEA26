@@ -1,3 +1,4 @@
+using EvilAliensWeb.Compat;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 
@@ -154,7 +155,10 @@ internal class Lazer : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		lazor.Draw((float)gameTime.TotalGameTime.TotalSeconds);
+		// WorldTime, not gameTime: the beam's crackle/tendril animation is Draw-time, so on the
+		// raw clock the beam kept writhing while the world it is frozen into sat in a pause
+		// (card d79a2f48).
+		lazor.Draw(WorldTime.Seconds);
 	}
 
 	public override void Update(GameTime gameTime)

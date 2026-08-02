@@ -5,7 +5,30 @@ dotnet build tools/headless -c Debug
 python tools/headless/probes/run_probes.py          # 0 = all passed, 1 = a probe failed
 python tools/headless/probes/run_probes.py --list
 python tools/headless/probes/run_probes.py --only preload_*
+python tools/headless/probes/run_probes.py --build  # build eahl first, then run
 ```
+
+**The runner REFUSES to run against a stale `eahl` (exit 2), and that is the point** (card
+74998f22). These probes exercise the game through `eahl.exe`, which source-links `Game/**` +
+`Compat/**` — so after a source edit, or after a `dotnet build` that FAILED, a probe run tests the
+PREVIOUS binary and prints a green suite for code that does not compile. That happened (card
+4a3b22b7) and was caught only by separately grepping the build output. Before the first probe the
+runner compares eahl's build time against the newest file it is built from and, if the sources win,
+prints both timestamps and stops:
+
+```
+STALE BINARY -- refusing to run the probes.
+  eahl built     2026-08-02 20:52:05   tools/headless/bin/Debug/net8.0/eahl.exe
+  newest source  2026-08-02 20:59:51   web/EvilAliensWeb/Game/EvilAliens/OwnLevel.cs
+```
+
+`--build` cures it; `--allow-stale` prints the same block as a WARNING and runs anyway. **Exit 2 is
+the runner refusing, exit 1 is a probe failing — keep them apart when scripting.** The rule itself
+is tested by `run_probes.py --selftest` (no dotnet, no eahl, no probes), which is worth re-running
+if you touch the scan: it covers the bin/obj skip, the equal-mtime boundary and the dll-vs-exe
+pair, each of which has a mutation listed in its docstring. Note the check dates only what is
+COMPILED IN — `wwwroot/Content` and the probe files themselves are read live off disk, so
+regenerating an asset never reads as stale.
 
 ## What a probe is for
 
@@ -56,7 +79,7 @@ last `mark` — the game's own `Console.WriteLine` diagnostics (`[loadprofile]`,
 `[net]`, …) as well as command replies. A failure quotes the offending line, so a red probe
 tells you what broke rather than just that something did.
 
-Four rules, each of which has already cost something:
+Five rules, each of which has already cost something:
 
 1. **Assert the positive too.** `expect-not "COLD decode in Level2"` passes beautifully on a
    run that never reached Level 2. Pair it with an `expect` that proves the run got where it
@@ -71,6 +94,18 @@ Four rules, each of which has already cost something:
 4. **Mutation-test it before committing.** Break the thing it defends and watch it go red; the
    probe's header should say what you broke. Same standard `tools/sim/logic_probe` and the
    texture canary are held to.
+5. **Make the PRECONDITION deterministic, and assert it separately** (card af4c3694). A probe
+   that needs the world in some state before it acts — a live ship, a boss on screen, a level
+   past its intro — must not merely wait long enough and hope. `RandomHelper` is unseeded, so
+   "long enough" is a probability: `death_fade.txt` parked an un-invulned ship on a level with a
+   live enemy spawner and flaked in **3 of 30** runs when the ship happened to die first, always
+   with a downstream-looking message (`asploded 0 local ships`). Pin the state (`?invuln` there),
+   then `expect` it BEFORE the step that depends on it, so a run that lost it fails as a
+   precondition rather than as the defect the probe is about.
+   **Pick an observable that cannot silently drop your subject**: `eval Census` prints only the
+   fourteen most populous component types, so `PlayerShip=1` vanishes on a busy scene and reads
+   as "no ship". `eval OracleRoster`'s `aliveSlots=` is the ship-liveness readout (a bracketed slot list:
+   `aliveSlots=[0]` is slot 0 flying, `aliveSlots=[]` is a shipless world).
 
 ## The trap that will otherwise cost you an afternoon
 
@@ -180,7 +215,13 @@ entirely, and WIDENING the clamp to `texture.Bounds` — the shape a real regres
 still compiles and still passes a source rect — prints `src=112x112` and fails both its lines.
 That second mutation is why the `expect-not` names the padded canvas rather than a sentinel: it is
 a value this code can actually produce. **Rebuild `tools/headless` after either**, or the probe tests the old
-binary and passes. Its companion is `tools/audit_unclamped_draw.py`, which lints the SHAPE across
+binary and passes — since card 74998f22 the runner refuses that run rather than letting it pass.
+Its third mutation is its PRECONDITION (card af4c3694): kill the ship before the `aliveSlots=`
+assertion (an extra `eval KillShips` above it) and that line goes red FIRST, which is the shape of
+every run that used to flake here — it was booted without `?invuln` on a level with a live enemy
+spawner, so the parked ship sometimes died before frame 600 and sat in its ~10 s respawn countdown
+(3 of 30 runs; 30 of 30 pass with `?invuln`). Its companion is
+`tools/audit_unclamped_draw.py`, which lints the SHAPE across
 the whole wrapper rather than one call's output.
 `silence` goes red under `--audio` (`masterVolume=1 alGain=1`), which is also its standing
 negative control. Its `lib=<unresolved>` line (added by card 72297923, which made the readback

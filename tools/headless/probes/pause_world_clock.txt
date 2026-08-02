@@ -1,0 +1,80 @@
+# PROBE: the world clock stops under a pause, and starts again on resume
+#
+# PINS:   card d79a2f48. Pause is ComponentBin.Push -> Enabled = false, which stops Update but
+#         NOT Draw (the frozen world is still drawn behind the pause menu). So every Draw-time
+#         cosmetic that read gameTime.TotalGameTime kept animating while the game was paused --
+#         the BrainBoss aura/glow/overlay patches, the blast spin, the laser crackle, the OneUp
+#         rainbow, the airborne spider's sprite sheet. They all read Compat/WorldTime.Seconds
+#         now, which Game1.UpdateScaled advances only while ComponentBin.FreezeDepth == 0.
+#
+# WHY THE CLOCK AND NOT A SCREENSHOT: a paired screenshot can show that a paused frame is
+# identical, but not WHY -- and "identical" also passes on a build that has stopped drawing, or
+# on a frame that happened to hold no animated object. Freezing the clock is the mechanism, and
+# it is one line in Game1 that a future edit could quietly move above the gate.
+#
+# EVERY LEG RE-`mark`s AFTER ITS REZERO, and that is not tidiness. WorldClockReset echoes the
+# clock it just zeroed, so without the mark the window holds a `seconds=0.000` line that leg 2's
+# expect matches by itself -- the probe would pass on a build whose clock ran right through the
+# pause. Caught by mutation-testing it, which is what rule 4 is for.
+#
+# WHY IT REZEROES: the clock counts from process start, so any absolute assertion would really
+# be an assertion about how many ticks boot took. `WorldClockReset` makes each reading a
+# function of the steps since the rezero and nothing else.
+#
+# THREE LEGS, and the third is the one that is easy to forget:
+#   1. unpaused, 60 steps -> 1.000  (positive control; a clock that NEVER ran would pass leg 2)
+#   2. paused,   45 steps -> 0.000  (the assertion)
+#   3. resumed,  60 steps -> 1.000  (Pop rethaws it; a gate stuck on would pass legs 1 and 2 if
+#                                    it latched only after the first pause)
+#
+# FAILURE MEANS:
+#   * leg 2 reads a non-zero seconds -> the advance is no longer gated on FreezeDepth, and every
+#     Draw-time cosmetic listed above is animating through the pause again.
+#   * leg 2 reads frozen=False       -> the pause did not take (the Enter did not open the menu),
+#                                       so the probe is not testing what it claims. Read the
+#                                       [menucensus] line above it.
+#   * leg 3 reads 0.000              -> the world resumed but its clock did not, so every one of
+#                                       those cosmetics is now frozen for the rest of the level.
+#
+# MUTATION-TESTED: dropping the `if (collectionHelper.FreezeDepth == 0)` guard in
+# Game1.UpdateScaled turns leg 2 red (seconds=0.750 frozen=True).
+#
+# eahl: --flags "?level=Level2&invuln"
+
+step 400 nodraw
+mark
+
+# Leg 1 -- the clock runs with the world.
+eval WorldClockReset
+mark
+step 60 nodraw
+eval WorldClock
+expect \[worldclock\] seconds=1.000 frozen=False depth=0
+
+# Pause. Assert the menu is really up before believing anything about the freeze.
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=PausedScene
+
+# Leg 2 -- 45 frames of pause move it not at all.
+eval WorldClockReset
+mark
+step 45 nodraw
+eval WorldClock
+expect \[worldclock\] seconds=0.000 frozen=True depth=1
+
+# Resume on Continue (the first entry, so no navigation needed).
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=0 live=\(none\)
+
+# Leg 3 -- and it runs again afterwards.
+eval WorldClockReset
+mark
+step 60 nodraw
+eval WorldClock
+expect \[worldclock\] seconds=1.000 frozen=False depth=0
+
+quit

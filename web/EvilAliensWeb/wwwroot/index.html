@@ -206,6 +206,20 @@
             catch (e) { console.warn('[debug] eaBinTest failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: read the WORLD clock (card d79a2f48) — the clock every Draw-time cosmetic reads
+        // instead of gameTime.TotalGameTime, plus the ComponentBin freeze depth that gates it.
+        // Prints `[worldclock] seconds= frozen= depth=`. Pause the game and call it twice: the
+        // seconds must not move. eaWorldClock.reset() rezeroes it (cosmetic phases only), which
+        // is what lets a probe assert an exact reading instead of a boot-tick count.
+        window.eaWorldClock = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugWorldClock'); }
+            catch (e) { console.warn('[debug] eaWorldClock failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaWorldClock.reset = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugWorldClockReset'); }
+            catch (e) { console.warn('[debug] eaWorldClock.reset failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: dump the AI telemetry (card f4d1721f) — wall contacts (counted even under
         // ?invuln), the heading-reversal jitter rate, fire idleness, level progress and the run
         // verdict. Only meaningful on a ?aibench boot, e.g.
@@ -676,6 +690,13 @@
         window.eaNetFx = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetFx')); }
             catch (e) { console.warn('[debug] eaNetFx failed (game not booted yet?): ' + e.message); }
+        };
+        // Debug: which peer sees a presentation effect (cards 7a8ec0d3 / a66e190a) — the
+        // floating score suppressed for a slot this peer does not own, and the 1up slow motion
+        // replicated in both directions with no echo. Prints PASS/FAIL. Run from the MAIN MENU.
+        window.eaNetLocalFx = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLocalFx')); }
+            catch (e) { console.warn('[debug] eaNetLocalFx failed (game not booted yet?): ' + e.message); }
         };
         window.eaNetScenarios = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScenarios')); }

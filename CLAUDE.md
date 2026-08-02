@@ -126,6 +126,12 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     regression would otherwise go unnoticed until someone plays the game; mutation-test it
     first, and assert the POSITIVE too or it passes on a run that never got there. Conventions
     + the menu-navigation crib: `tools/headless/probes/README.md`.
+    **The runner REFUSES a stale binary (exit 2, not a probe-failure 1)** -- it checks eahl
+    against the newest `Game/`/`Compat/`/`tools/headless` source first, because a failed
+    `dotnet build` otherwise leaves the probes testing the previous binary and reporting green
+    (card 74998f22). Rebuild, or pass `--build`; `--allow-stale` is the deliberate override.
+    A probe's PRECONDITION must be pinned and asserted separately, not waited out -- unseeded
+    RNG turns "stepped far enough" into a coin flip (card af4c3694).
   - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
     scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
     `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first
@@ -290,6 +296,18 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   to reach the disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
   pad-connection masks through the real resolver + the pre-card policy as the negative control) —
   it needs no level and no gamepads. Replaces `?aiteam`.
+- **`?seed=<n>`** (card d937c721): seed the gameplay RNG (`RandomHelper`) so a level-level eahl
+  A/B measures the change rather than two different worlds -- unseeded, two runs of
+  `?level=OwnLevel&noattract` differ by mean |diff| 0.2, **MAX 210** of 255. **Near-deterministic,
+  not deterministic: a same-seed run lands in one of a handful of discrete worlds** -- 10
+  consecutive runs identical on a quiet box, 4 distinct states over 10 while sibling builds loaded
+  the CPU. **So capture each side of an A/B TWICE and require the same-side pair to match before
+  comparing sides** (the residual is eahl's boot frame, not the RNG -- `tools/headless/README.md`
+  -> "Reproducibility"). Reaches `RandomHelper` only; the
+  FX/shake/splash RNGs are separate instances by design and stay unseeded. Out of
+  `DebugFlags.Active` on purpose (it hijacks nothing, and `Active` would refuse the two-peer
+  netplay captures it exists for), so a seeded boot announces itself on its own `[debug]` line.
+  No flag => unseeded, exactly as shipped.
 - **`?splashvariant=revenged|pure|glasses`** (card 57555583): pin which reveal the splash's
   channel flip lands on. The two portrait shots are a 5% branch each, and since that card the
   roll (in `SplashScene.LoadContent`) also decides which texture is DECODED at all -- so this
@@ -368,6 +386,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   and reverted). Don't premultiply exports or tints; `new Color(1,1,1,a)` is correct. The two
   deliberate premultiplied-INTERMEDIATE exceptions (text/group flatten RTs) are in web CLAUDE.md.
   Evidence: `plans/plan.md` Stage 3.
+  **Consequence for ART: a fully-transparent texel's RGB is still sampled**, so it must carry the
+  nearest ink's colour, not black, or every scaled sprite draws with a dark halo. Handled offline
+  by `tools/imagebleed.py` via `build_textures.py` (precompiled assets) and
+  `tools/textures/bleed_pngs.py` (everything else) — tools/CLAUDE.md, "Textures".
 - **Content paths are CASE-SENSITIVE on the live host (not on Windows).** Asset root is
   `wwwroot/Content` (capital C), everything lowercase under it; every request must match — a
   casing mismatch passes locally and 404s on the live host (black screen). True of BOTH hosts —

@@ -211,7 +211,7 @@ internal class BrainBoss : KillableAlien
 		{
 			spriteBatch.lightenEffect.Enable();
 		}
-		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.LogicalWidth(), texture.LogicalHeight(), color, gameTime, spawnActive);
+		overlays.Draw(spriteBatch, base.Position, DrawScale, texture.LogicalWidth(), texture.LogicalHeight(), color, spawnActive);
 		if (flashing)
 		{
 			spriteBatch.lightenEffect.Disable();

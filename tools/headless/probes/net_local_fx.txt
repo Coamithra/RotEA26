@@ -1,0 +1,80 @@
+# Which peer sees a presentation effect -- cards 7a8ec0d3 and a66e190a.
+#
+# Two reports, one question. "if a player kills a ufo and there's a little floating 10, only
+# show it for that player's view" and "(p2): 1up slowmotion vfx not synched" are opposite
+# answers to it: one effect belongs to ONE player and was leaking onto both screens, the other
+# belongs to the WORLD and was stuck on one.
+#
+# WHAT WENT WRONG.
+#   * FLOATING SCORES. ScoreVisualiser.AddScore's positional overload is the one place a "+10"
+#     is born, and four net paths reach it for a slot this peer does not own: the host locally
+#     re-fires a remote player's bullets (so their kill runs AwardScore here), the host pays an
+#     EvClaim (HandleClaim / PayDeadClaim), and the client pays the host's EvDeath award array
+#     (NetPuppets.ApplyAwards). Every one of the other player's kills popped a figure on your
+#     screen.
+#   * THE 1UP SLOW MOTION. PlayerShip.PowerUp's OneUp case is Oracle.SetSlowmotion(12f), a
+#     whole-sim time scale, and it never crossed the wire in either direction. So the peer who
+#     filled the bar crawled for 12 seconds while the other one ran at full speed -- and on a
+#     CLIENT it was worse than one-sided, since enemies there are host-driven puppets: its own
+#     ship slowed while the enemies it was dodging did not.
+#
+# THE FIX, and therefore what this probe defends.
+#   * ONE gate on the positional overload (NetSession.OwnsSlot), not four gates at the four
+#     call sites. Offline and for couch slots OwnsSlot is unconditionally true, so single-player
+#     and local co-op are unchanged and a partner sharing your screen keeps their own popups.
+#     AwardScoreToAll's single positional figure goes to the first seated slot WE OWN, or a boss
+#     kill would show a joiner nothing at all.
+#   * EvSlowmo (event 25, reliable, [durationMs:2], protocol v15), sent by EITHER peer from
+#     inside Oracle.SetSlowmotion -- the one place a local slow motion begins. The rx side calls
+#     Oracle.NetSetSlowmotion, which does the identical work WITHOUT the send, so there is no
+#     echo by construction rather than by a latch.
+#
+# WHY REPLICATING A TIME SCALE IS SAFE HERE, when Juice.AddHitStop is refused outright inside a
+# session (card 68f62e92). A hit-stop is scale ZERO on ONE peer: that peer stops producing
+# motion while the wire keeps streaming, and the other peer's puppets are corrected BACKWARD
+# (measured 23 px). This is 0.4 on BOTH, and every net clock -- the cadence, NetPuppets.Drive,
+# the observed velocities -- reads real time and is untouched by the game time scale, so the
+# wire carries the slowed truth and nothing is corrected backward. It REPLACES a 12-second
+# divergence with the ~one-way-trip skew at each end of the window. Cosmetic-only replication
+# was considered and cannot fix the card at all: on a client the only thing that can slow the
+# enemies is the HOST slowing its authoritative world.
+#
+# WHY A PROBE AND NOT A SCREENSHOT. A floating text is a local list entry drawn for a second and
+# recycled -- it moves no score, no metric and no component, so its ABSENCE is exactly as
+# invisible as its presence in any frame you could time. And a two-window run cannot see either
+# half: the effects belong to the peer whose console you are not reading, and a backgrounded tab
+# ticks at ~1 Hz.
+#
+# THE LEG THAT CARRIES THE FIRST CARD is not "no floater appeared" -- it is "no floater appeared
+# AND the score still moved", because a gate that suppressed the whole payout would pass the
+# first half, and a rig whose claim never arrived would pass it too. The owned-slot claim beside
+# it is the positive control.
+#
+# THE LEG THAT CARRIES THE SECOND is the no-echo assertion. Two peers that each re-announced
+# what they received would slow-motion each other for as long as the session lasted, and nothing
+# else would say so: Oracle.SetSlowmotion EXTENDS a running window, so the failure is a world
+# that never speeds up again rather than a crash.
+#
+# MUTATION-TESTED FIVE WAYS, each failing exactly one leg: dropping the OwnsSlot gate on the
+# positional overload (leg 1a), the rx path calling SetSlowmotion instead of NetSetSlowmotion
+# (the echo leg), dropping the send from SetSlowmotion (the tx leg), reverting AwardScoreToAll
+# to the pre-card "first seated" rule (leg 1c), and dropping the rx path's ms->seconds
+# conversion (the duration leg -- `Slowmotion` is a flat 0.4 whatever the window, so a window a
+# THOUSAND times too long moves no other assertion).
+#
+# MENU-ONLY AND LEAVE-NO-TRACE, the eaNetScenarios shape -- so `?menu&noattract` and no level.
+# `?noattract` matters: the 20 s attract demo is a live world, and the suite would SKIP over it.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+
+eval NetLocalFx
+
+# The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
+# happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
+# attract demo is up. Raise the count when legs are added.
+expect \[netlocalfx\] 24 passed, 0 failed
+expect-not SKIP
+quit

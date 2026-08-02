@@ -69,7 +69,7 @@ expect 9\. teardown
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite short-circuits its own legs on a bad precondition. Raise the
 # count when checks are added.
-expect \[netpickup\] 22 passed, 0 failed
+expect \[netpickup\] 23 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

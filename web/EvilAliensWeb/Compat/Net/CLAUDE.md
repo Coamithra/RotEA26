@@ -215,7 +215,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     Full re-plan, including what a second-collection `ComponentBin` would cost, in
     `plans/net-headless-sim.md`.
   - **`NetSession.HandleClaim` reads NO scene** -- it reaches `NetIdRegistry` / `bin` / `score` /
-    `sound` (via `ApplyRemotePowerup`'s `PlayCue`) / `Explosion` / `NetPuppets.KillerAgent`. So
+    `Explosion` / `NetPuppets.KillerAgent`, and since card d53431b4 muted the remote pickup, no
+    longer `sound` on the pickup branch (`killable.NetKill` below still plays its own cues). So
     the claim scenarios are MENU-runnable and leave-no-trace-able (the `eaNetSnap` shape), NOT
     destructive like `eaNetResetSpawn`. **That is about the transitive closure, so it was checked
     one level deeper**: `killable.NetKill` runs the real per-type `KilledBy` (explosions, cues,
@@ -853,12 +854,20 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   - **`OwnsSlot(slot)` gates the SHIP half and the HUD half stays ungated.** The host also runs
     this path for a CLIENT's claim, so a claim naming a slot we own would re-run a pickup our own
     `CollidesWith` already ran -- a second batch of Options each time. The icon is idempotent.
-  - **`GameScene.NetApplyTetherBreak` gained a real default body** (break any local
-    `ShipConnector` with a `ControlDevice.Remote` endpoint). It was an empty virtual outside
-    `TeamChallenge`, while `ShipConnector.TakeHit` sends `EvTetherBreak` unconditionally -- so
-    once a Linker connector CAN form, a hit only one screen saw would leave the other player
-    tethered and pulled toward an anchor already let go of. `TeamChallenge`'s override now calls
-    `base` as well as breaking its own scripted tether.
+  - **`GameScene.NetApplyTetherBreak` gained a real default body** (`PlayerShip`'s own
+    `connectors` list, which holds ONLY Linker connectors -- `ShipConnector.Setup` does not
+    register the scripted TeamChallenge tether with either endpoint). It was an empty virtual
+    outside `TeamChallenge`, while `ShipConnector.TakeHit` sends `EvTetherBreak` unconditionally
+    -- so once a Linker connector CAN form, a hit only one screen saw would leave the other
+    player tethered and pulled toward an anchor already let go of. `TeamChallenge`'s override now
+    calls `base` as well as breaking its own scripted tether.
+    **It breaks EVERY connector on the ship, not only the ones with a puppet endpoint**: with
+    couch players a pair of LOCALLY-owned ships can be connected on this peer while the same pair
+    is two puppets on the other, so a puppet-endpoint filter would break that link when we saw
+    the hit and not when they did -- a one-directional break. The cost is a known OVER-break
+    (`EvTetherBreak` carries no connector identity, being the or-of-either-peer event
+    TeamChallenge's single tether was designed around, so one peer breaking one of two live
+    connectors breaks both here); fixing that means putting endpoint slots on the wire.
   - **A remote pickup is SILENT (card d53431b4, the user's ruling).** The `"powerup"` cue is gone
     from this path -- every powerup the other player collected used to make a noise on your
     screen. Local pickups and local co-op are untouched; both go through `PlayerShip.CollidesWith`,
@@ -868,7 +877,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot
     already at 4, or the first HUD packet for a slot) and would fire four sparkles in a tick for
     events from before we were watching. Stateless, because a genuine level-up is always one step.
-  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 22 assertions;
+  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 23 assertions;
     `tools/headless/probes/net_pickup.txt`). **DESTRUCTIVE** like `eaNetResetSpawn` -- it pairs a
     real HOST session onto the live level, adopts a real ship puppet off a scripted client's
     stream and drives real `EvClaim` frames at it -- so run it in a throwaway

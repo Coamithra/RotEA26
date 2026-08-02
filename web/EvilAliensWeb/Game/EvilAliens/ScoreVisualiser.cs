@@ -444,8 +444,11 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// does -- but only when this really is a level-up, i.e. a climb of exactly ONE step. A
 	// multi-step climb is a CATCH-UP (a join-in-progress peer adopting a slot already at level 4,
 	// or the first HUD packet for a slot) and would fire four sparkles in one tick for events that
-	// happened before we were watching. That is the whole rule; it needs no per-slot state, since a
-	// genuine level-up can only ever be one step.
+	// happened before we were watching. It needs no per-slot state, since a genuine level-up can
+	// only ever be one step.
+	// The converse does NOT hold, and the false positive is accepted: a peer whose FIRST packet
+	// for a slot reports level 1 is a catch-up too, and sparkles. One sparkle at a join is not
+	// worth a per-slot "have we seen this one yet" latch.
 	//
 	// OneUp is unreachable here (it is past HudLevelCount) and must stay that way: its PowerUp
 	// case is Oracle.SetSlowmotion, a whole-sim time scale that is deliberately local -- the

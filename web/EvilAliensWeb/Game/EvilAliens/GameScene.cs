@@ -905,7 +905,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	{
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
-			ship.NetBreakPuppetConnectors();
+			ship.NetBreakConnectors();
 		}
 	}
 

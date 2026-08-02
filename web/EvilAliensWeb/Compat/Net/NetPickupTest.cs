@@ -201,13 +201,20 @@ namespace EvilAliensWeb.Compat.Net
             int ownOptionsBefore = owner.NetOptionCount;
             score.RemovePowerup(NetSession.HostPrimarySlot);
             Powerup ours2 = Plant(bin, game, planted, Powerup.PowerupType.Option);
-            if (Claim(peer, wire, bin, ref eventSeq, ours2, NetSession.HostPrimarySlot, planted))
+            // Asserted, not branched on: a Claim that finds no netId would otherwise skip the two
+            // checks below and still report "all passed" for a run that never reached the gate.
+            bool claimed2 = Claim(peer, wire, bin, ref eventSeq, ours2, NetSession.HostPrimarySlot,
+                planted);
+            Check("PRECONDITION the planted Option got a netId and its claim was delivered",
+                claimed2);
+            if (!claimed2)
             {
-                Check("no Option was spawned on our own ship (" + ownOptionsBefore + " -> "
-                    + owner.NetOptionCount + ")", owner.NetOptionCount == ownOptionsBefore);
-                Check("CONTROL the HUD indicator still landed, so the gate is not an early return",
-                    score.NetPowerupActive(NetSession.HostPrimarySlot));
+                return;
             }
+            Check("no Option was spawned on our own ship (" + ownOptionsBefore + " -> "
+                + owner.NetOptionCount + ")", owner.NetOptionCount == ownOptionsBefore);
+            Check("CONTROL the HUD indicator still landed, so the gate is not an early return",
+                score.NetPowerupActive(NetSession.HostPrimarySlot));
 
             // ---- 3. the connector can form, and breaks on both peers (card 83271f3d) -----
             sb.Append(" 3. with both ships armed the connector forms, and EvTetherBreak breaks it\n");
@@ -245,11 +252,15 @@ namespace EvilAliensWeb.Compat.Net
             ownerBase = owner.NetOptionCount;
             obsBase = puppet.NetOptionCount;
             int levelUps = 0;
+            int claims = 0;
             for (int round = 0; round < 3; round++)
             {
                 TakeLocalPickup(owner, score, Powerup.PowerupType.Option);
                 Powerup mirrored = Plant(bin, game, planted, Powerup.PowerupType.Option);
-                Claim(peer, wire, bin, ref eventSeq, mirrored, (byte)peerSlot, planted);
+                if (Claim(peer, wire, bin, ref eventSeq, mirrored, (byte)peerSlot, planted))
+                {
+                    claims++;
+                }
                 if (DriveOneLevelUp(score, owner, Powerup.PowerupType.Option))
                 {
                     levelUps++;
@@ -258,8 +269,12 @@ namespace EvilAliensWeb.Compat.Net
             }
             int ownerDelta = owner.NetOptionCount - ownerBase;
             int obsDelta = puppet.NetOptionCount - obsBase;
-            Check("PRECONDITION the sequence really exercised both paths (3 pickups, "
-                + levelUps + " level-ups)", levelUps > 0 && ownerDelta > 3);
+            // Both counts are asserted: a run where no claim was delivered would make the equality
+            // below fail loudly, but it would fail as "the fix is broken" rather than "the rig
+            // never fired", and a run with no level-up would pass it vacuously on the pickup half.
+            Check("PRECONDITION the sequence really exercised both paths (" + claims
+                + " claims delivered, " + levelUps + " level-ups)",
+                claims == 3 && levelUps > 0 && ownerDelta > 3);
             Check("owner and observer moved by the SAME amount (owner +" + ownerDelta
                 + ", observer +" + obsDelta + ")", ownerDelta == obsDelta);
             Check("... and the two ships agree on the Option level ("

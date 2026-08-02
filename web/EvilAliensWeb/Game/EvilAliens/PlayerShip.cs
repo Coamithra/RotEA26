@@ -2217,24 +2217,33 @@ public class PlayerShip : AlienDrawableGameComponent
 		base.CollidesWith(other);
 	}
 
-	// Online co-op (card 83271f3d): the peer broke a tether on its screen. Break every connector
-	// this ship holds that ties it to a network-driven puppet.
+	// Online co-op (card 83271f3d): the peer broke a tether on its screen, so break the ones this
+	// ship holds. Only Linker connectors are ever in this list -- TeamChallenge's scripted tether
+	// is built by ShipConnector.Setup, which does not register with either endpoint, and the scene
+	// breaks that one itself.
 	//
-	// A Linker connector is formed INDEPENDENTLY on each peer (both run this CollidesWith against
-	// their own copy of the pair), and ShipConnector.TakeHit fires EvTetherBreak unconditionally
-	// -- so without a break here the peer that did not see the hit stays tethered, and its
+	// A Linker connector is formed INDEPENDENTLY on each peer (both run CollidesWith against their
+	// own copy of the pair), and ShipConnector.TakeHit fires EvTetherBreak unconditionally -- so
+	// without a break here the peer that did not see the hit stays tethered, and its
 	// NetPullOwnShip keeps dragging its ship toward an anchor the other player has already let go
-	// of. Iterated backwards because Die() is deferred but OnComponentRemoved is not ordered
-	// against us.
-	internal void NetBreakPuppetConnectors()
+	// of.
+	//
+	// EVERY connector, NOT just the ones with a puppet endpoint. With couch players a pair of
+	// LOCALLY-owned ships can be connected here while the same pair is two puppets on the peer, so
+	// a puppet-endpoint filter would break that link when we saw the hit and not when they did --
+	// a one-directional break, which is worse than the known over-break below.
+	// KNOWN LIMIT: EvTetherBreak carries no connector identity (it is the or-of-either-peer
+	// idempotent event TeamChallenge's single tether was designed around), so a peer breaking one
+	// of two live connectors breaks both here. Fixing that means putting endpoint slots on the
+	// wire.
+	internal void NetBreakConnectors()
 	{
+		// Backwards because NetBreakSilently ends in Die(); removal is queued and this list is
+		// only mutated at the ComponentRemoved flush, so nothing can shrink under us today -- the
+		// reverse walk is what keeps that true if it ever becomes synchronous.
 		for (int i = connectors.Count - 1; i >= 0; i--)
 		{
-			ShipConnector c = connectors[i];
-			if ((c.A != null && c.A.IsNetPuppet) || (c.B != null && c.B.IsNetPuppet))
-			{
-				c.NetBreakSilently();
-			}
+			connectors[i].NetBreakSilently();
 		}
 	}
 

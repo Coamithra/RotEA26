@@ -588,6 +588,11 @@ namespace EvilAliensWeb.Compat.Net
         // If it does, the puppets fall behind the host's real-time snapshots and the growing error
         // snaps past SnapThresholdPx again and again: that was the one-time pupPops burst on the
         // first wipe (deferred from card 11.3; characterised in tools/sim/net_puppet_drive_sim.py).
+        // NOTE card 68f62e92 removed the death hit-stop FROM SESSIONS ENTIRELY (Juice.AddHitStop
+        // refuses while NetSession.Active), for the RECIPROCAL fault -- the dying peer's world
+        // halting while its snapshots kept flowing rewound the other peer's enemies. That does
+        // NOT make this rule redundant: the 1-up slow motion is still local and unreplicated, and
+        // a scaled driver would diverge under it exactly as before. Keep it on real time.
         // This is the same real-time rule the remote-SHIP puppet already follows
         // (NetSession.DriveRemoteShip advances on realDtMs "never the turbo/slowmo/hit-stop-scaled
         // game time") and that NetAdvanceFrame's own contract already assumes ("on real dt").

@@ -1117,9 +1117,16 @@ site now lives under:
   does, so only its finale shakes). Hit-stop folds into `Game1.Update`'s time scale as
   `Juice.TimeScale` while REAL time keeps ticking Juice/shake/input; the per-kill micro-stop +
   boss-kill stop are **OFF by default** (read as stutter; `?hitstop=1` re-enables); player death
-  keeps its 180ms stop. GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs before
-  the time scale) or it freezes and never thaws. Draw-time cosmetics keep animating during a freeze
-  by design. `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
+  keeps its 180ms stop OFFLINE. GOTCHA: hit-stop must decrement on UNSCALED dt (`Juice.Update` runs
+  before the time scale) or it freezes and never thaws. Draw-time cosmetics keep animating during a
+  freeze by design. `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
+  - **ONLINE CO-OP REFUSES EVERY HIT-STOP, whatever the caller (card 68f62e92).** `AddHitStop`
+    early-returns while `NetSession.Active`, so the death stop, the `?hitstop=1` kill/boss stops
+    and `eaHitstop()` alike are no-ops in a session. It is a DESYNC fix, not a feel decision: a
+    freeze halts that peer's whole world while the wire keeps streaming frozen positions, and the
+    other peer's puppets are then corrected backward -- the mechanism, the measurement and
+    `?nethitstop=1` are in `Compat/Net/CLAUDE.md`. **Shake is untouched** (present-blit only, no
+    gameplay time), so a co-op death still reads as an impact.
 - **Slow-motion ghost trails (`Game1.ApplySlowmoTrail`).** The 1up slowmo adds an accumulation-
   buffer motion blur on the composited+bloomed `sceneTarget` before the present blit:
   `trail = trail*decay + scene*(1-decay)`, mixed back with an eased `slowmoTrailMix` (~0.25s); the

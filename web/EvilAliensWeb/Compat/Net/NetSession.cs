@@ -212,6 +212,9 @@ namespace EvilAliensWeb.Compat.Net
         private static int remoteShotsPerSec = 8;
         private static float remoteBulletLife = 450f;
         private static PlayerShip puppet;
+        // Has the peer reported alive=true while we held THIS puppet? Only then does losing
+        // alive mean a death worth showing -- card b4d0ba1d, see ManagePuppet.
+        private static bool puppetSeenAlive;
         private static double renderMs = double.NaN;
         private static long lastUpdateAt;
         private static float realDtMs;
@@ -523,6 +526,7 @@ namespace EvilAliensWeb.Compat.Net
             lastRxEventSeq = -1;
             remoteAlive = false;
             puppet = null;
+            puppetSeenAlive = false;
             ResetFriends();
             localPrimarySlot = HostPrimarySlot;
             peerPrimarySlot = NetProtocol.SlotNone;
@@ -3135,6 +3139,7 @@ namespace EvilAliensWeb.Compat.Net
             if (puppet != null && !oracle.GetShips().Contains(puppet))
             {
                 puppet = null;
+                puppetSeenAlive = false;
                 hasLastPuppetPos = false;
             }
             if (puppet == null)
@@ -3144,6 +3149,8 @@ namespace EvilAliensWeb.Compat.Net
                     if (s.Controller == ControlDevice.Remote)
                     {
                         puppet = s;
+                        // ADOPTED, not spawned by us, so we have NOT seen the peer alive on it.
+                        puppetSeenAlive = false;
                         hasLastPuppetPos = false;
                         break;
                     }
@@ -3153,13 +3160,45 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
+            puppetSeenAlive |= remoteAlive && puppet != null;
             if (remoteAlive && puppet == null && buffer.HasSamples && FindLocalShip() != null)
             {
                 SpawnPuppet();
             }
             else if (!remoteAlive && puppet != null)
             {
-                ExplodePuppet();
+                // THE FALLING EDGE, not the level (card b4d0ba1d). A death LOOK belongs to a
+                // peer we have actually seen alive on this puppet; firing on the level meant
+                // any ship that arrived in the Remote seat while the peer was still dead --
+                // the reset respawn, before that card stopped SpawnAllPlayers producing one --
+                // got the full explosion + cue for a death that never happened. A puppet we
+                // adopted without ever seeing the peer alive is released QUIETLY instead: the
+                // peer is dead, so its ship does not belong in our world either way.
+                if (puppetSeenAlive)
+                {
+                    ExplodePuppet();
+                }
+                else
+                {
+                    ReleasePuppetQuietly();
+                }
+            }
+        }
+
+        // Take a ship out of the Remote seat with no death FX and no cue -- see ManagePuppet.
+        // Same teardown as ExplodePuppet minus the explosions, the sound and the log's meaning.
+        private static void ReleasePuppetQuietly()
+        {
+            PlayerShip p = puppet;
+            puppet = null;
+            puppetSeenAlive = false;
+            hasLastPuppetPos = false;
+            bin.Remove((GameComponent)(object)p);
+            if (NetHost.Current.NetLog)
+            {
+                // "on this puppet", not "yet": a peer that was alive minutes ago on a PREVIOUS
+                // puppet, died, and had a fresh ship adopted into its seat lands here too.
+                Console.WriteLine("[net] remote ship released (never seen alive on this puppet, no death FX)");
             }
         }
 
@@ -3206,6 +3245,10 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             puppet = ship;
+            // We only get here with remoteAlive true, so this puppet HAS been seen alive --
+            // set it here rather than waiting for ManagePuppet's next pass, or a peer that
+            // died in the very next tick would be released quietly instead of exploding.
+            puppetSeenAlive = true;
             hasLastPuppetPos = false;
             renderMs = double.NaN;
             Console.WriteLine("[net] remote ship joined slot=" + slot);
@@ -3219,7 +3262,9 @@ namespace EvilAliensWeb.Compat.Net
         {
             PlayerShip p = puppet;
             puppet = null;
+            puppetSeenAlive = false;
             hasLastPuppetPos = false;
+            metrics.RemoteShipExplosions++;
             Vector2 at = p.GetPosition();
             Explosion explosion = Explosion.NewExplosion(bin, game);
             explosion.Setup(at, 2f, 2f, 0f, 0f);

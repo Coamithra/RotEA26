@@ -99,6 +99,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	// the angle instead would force a genuine 180 reversal to sweep the long way round.
 	public const float DefaultSteerSmoothMs = 90f;
 
+	// The player's own death is the biggest impact in the game, so it gets a real freeze frame
+	// (Compat/Juice.cs) on top of the two explosions' shake. Named rather than literal because
+	// NetResetSpawnTest's hit-stop control has to request the SAME duration to be a control at
+	// all -- a third unlinked copy of 0.18f would drift silently. Refused outright inside an
+	// online co-op session; see Juice.AddHitStop for why.
+	public const float DeathHitStopSeconds = 0.18f;
+
 	// Smoothing floor, used when the push is strong (see the adaptive blend in DoAIMove).
 	public const float DefaultSteerSmoothUrgentMs = 15f;
 
@@ -2293,7 +2300,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		EvilAliensWeb.Compat.AiBench.NoteDeath(this);
 		// Game juice: the player's own death is the biggest impact in the game — a real
 		// freeze-frame + extra trauma on top of what the two explosions below add.
-		EvilAliensWeb.Compat.Juice.AddHitStop(0.18f);
+		EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);
 		EvilAliensWeb.Compat.Juice.AddTrauma(0.35f);
 		Die();
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
@@ -2314,7 +2321,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			EvilAliensWeb.Compat.AiBench.NoteDeath(this);
 			// Game juice: same death punch as AsplodeWall — freeze-frame + extra trauma on
 			// top of the two explosions' own shake.
-			EvilAliensWeb.Compat.Juice.AddHitStop(0.18f);
+			EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);
 			EvilAliensWeb.Compat.Juice.AddTrauma(0.35f);
 			Die();
 			Explosion explosion = Explosion.NewExplosion(collection, base.Game);

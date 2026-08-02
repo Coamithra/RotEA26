@@ -98,6 +98,49 @@
 # severity claim is overstated. Leg 2's single assertion is therefore the load-bearing one here;
 # do not add legs expecting the broken code to stay broken into leg 3.
 #
+# LEGS 0a / 5 / 6 ARE THE DEATH-AND-RESET ARTIFACT PAIR (cards 68f62e92 + b4d0ba1d). They live
+# here rather than in a probe of their own because both need the same three expensive things this
+# suite already stands up: a live GameScene, a real session over the in-process wire, and a
+# scripted peer whose ship stream can be driven by hand.
+#
+# LEG 5 -- "netplay: extra explosion?". After a reset, on P1's screen, both ships flew in and then
+# P2 EXPLODED instantly again before flying in again. `ManagePuppet` read the peer's `alive` flag
+# as a LEVEL: `SpawnAllPlayers` respawns every SEATED slot and the peer's seat is deliberately
+# reserved across a death, so ~1.3s into the reset a ship arrived in the Remote seat while the
+# peer -- still running its OWN reset -- honestly reported alive=false, and the session played the
+# full death FX on a death that never happened. Two halves, both driven here: 5b calls the REAL
+# `GameScene.SpawnAllPlayers` (through the `NetSpawnAllPlayersForTest` seam, since its only
+# production caller sits behind ~1.3s of choreography this suite does not tick) and requires the
+# net-owned seat left alone; 5c puts a Remote ship in that seat by hand -- the pre-card shape --
+# and requires it released with NO FX. 5a and 5d are the positive controls: a real death still
+# explodes exactly ONCE, before and after. The observable is `metrics.RemoteShipExplosions`,
+# which exists because the FX leaves no other headless trace (two Explosions and a cue into a
+# live world).
+#
+# LEG 6 -- "when P1 dies, the whole game rewinds a bit". `Juice.AddHitStop(0.18f)` at
+# `PlayerShip.Asplode` halts the dying peer's WHOLE world (Game1.UpdateScaled folds TimeScale
+# into the gameTime every component gets) while `NetSession.Update`, outside that scaled path,
+# keeps streaming snapshots of the frozen positions -- so the other peer's puppets, which
+# dead-reckon on real time by design, run ahead and are then corrected BACKWARD. Measured at 23px
+# of backward glide (N=64, 0.15 px/ms) by `python tools/sim/net_puppet_drive_sim.py --hoststall`.
+# The fix refuses every hit-stop while a session is active; this leg drives the REAL
+# `PlayerShip.Asplode` and reads `Juice.TimeScale`. **LEG 0a IS ITS CONTROL AND IS NOT OPTIONAL** --
+# `NetSession.Active` is the gate, so the only moment a "a hit-stop would otherwise land here"
+# reading can be taken is before `StartForTest`. Without it leg 6 passes on a build where
+# `AddHitStop` is broken outright or `Asplode` stopped calling it.
+#
+# MUTATION-TESTED THREE MORE WAYS for those legs, each isolated, each failing exactly ONE
+# assertion and naming its half:
+#   * drop `|| HitStopSuppressed` from Juice.AddHitStop -> **1** (leg 6, "game time was NOT
+#     frozen (TimeScale=0)"). Leg 0a still passes, which is the point of taking it offline.
+#   * drop the `ControlDevice.Remote` skip from GameScene.SpawnAllPlayers -> **1** (leg 5b,
+#     "put NO ship in the peer's Remote seat"). Note it does NOT fail 5b's explosion assertion:
+#     the edge fix below catches the ship and releases it quietly, which is the defence in depth
+#     working.
+#   * revert ManagePuppet's explode to the unconditional level test -> **1** (leg 5c, "it was
+#     released with NO death FX (fx+1)"). Reverting BOTH is the true pre-card state and fails
+#     both of the above.
+#
 # DESTRUCTIVE, which is why this probe is a whole process to itself (the runner gives every probe
 # one anyway). It pairs a real session onto the live level, moves the local player's seat and
 # applies a real EvReset, so the scene ends in its reset branch. The suite restores the roster and
@@ -120,6 +163,7 @@ eval NetResetSpawn
 # over it, so without this the lie can come back for free.
 expect \[net\] session start role=join .* transport=InMemory
 expect \[netreset\] EvReset -> SpawnPuppet/SpawnFriend TryAdd
+expect 0a\. hit-stop baseline
 expect 0b\. the session was built through the INetHost seam
 expect 0c\. handshake
 expect 1\. NEGATIVE
@@ -127,8 +171,13 @@ expect 2\. POSITIVE -- EvReset purges inside the drain
 expect 3\. POSITIVE -- next tick, filter expired
 expect 3b\. the session's cadence runs on the INJECTED clock
 expect 3c\. the world reaches the scene through the INetScene seam
+expect 5\. the peer's death FX fires ONCE
+expect 5b\. SpawnAllPlayers leaves the net-owned seat alone
+expect 5c\. a puppet adopted while the peer is DEAD
+expect 5d\. positive control
+expect 6\. a player death arms NO hit-stop inside a session
 expect 4\. teardown
-expect \[netreset\] 42 passed, 0 failed
+expect \[netreset\] 63 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

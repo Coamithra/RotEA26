@@ -297,6 +297,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   without it. **`?brainhitflash`** forces the hit-flash brighten on (draw-side only, nothing is
   damaged), which no rig can time inside the real 35 ms hittimer window. e.g.
   `?harness=brainboss&brainoverlayphase=0.5&brainhitflash`.
+- **Post-level text crawl** (card bee8f0e0): the crawl now tapers like a Star Wars opening.
+  **`?creditsshot=<1|2|3>`** boots straight into it for that level (otherwise reachable only by
+  finishing a level or `?level=N&win`), **`?crawlpos=<designY>`** parks the scroll for a
+  screenshot, **`?crawlskew=<f>`** dials the taper (`0` = the flat pre-card crawl). **The amount
+  is CLAMPED to what keeps the widest line on screen and the shipped crawls saturate it at
+  0.081-0.095, not the card's 0.2** -- +20% of a 669px line does not fit 800px at any pivot. Read
+  `[crawl] skew= effective= fit=` for what is actually drawn; details in web CLAUDE.md.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

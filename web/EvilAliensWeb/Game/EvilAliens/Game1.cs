@@ -494,6 +494,26 @@ public class Game1 : Game
 		{
 			collectionHelper.Add((GameComponent)(object)textShowcaseScene);
 		}
+		// Debug (?creditsshot=1|2|3): bypass the menu and boot straight into the post-level text
+		// crawl for that level, set up exactly as beating it would (card bee8f0e0). creditsScene
+		// is the same boot-time singleton the victory path uses and is already wired to
+		// creditsScene_OnFinished above, so Esc/Enter drops back to the menu as in normal play.
+		else if (DebugFlags.CreditsShot.HasValue)
+		{
+			switch (DebugFlags.CreditsShot.Value)
+			{
+			case 2:
+				creditsScene.SetupLevel2();
+				break;
+			case 3:
+				creditsScene.SetupLevel3();
+				break;
+			default:
+				creditsScene.SetupLevel1();
+				break;
+			}
+			collectionHelper.Add((GameComponent)(object)creditsScene);
+		}
 		// Debug (?level=...): bypass the menu and boot straight into the requested level.
 		// menuScene is still created + wired above, so returning from the level (or losing)
 		// drops back to a normal menu via gameScene_OnFinished.

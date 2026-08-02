@@ -102,6 +102,18 @@ namespace EvilAliensWeb.Compat
 	//     ?castbrainscale=<f>  on-screen size of the cast brain (default baked in CastDisplayer)
 	//     ?castbrainfps=<f>    animation speed (the cast draws frames by hand, no interpolation,
 	//                          so it plays faster than the in-game 0.4 fps; default baked in)
+	//   ?creditsshot[=1|2|3]  POST-LEVEL TEXT CRAWL: boot straight into CreditsScene set up as
+	//                  though that level had just been beaten (3 = the Hard "you have done it"
+	//                  crawl + Cast + full credits). Reaching it otherwise means finishing a
+	//                  level (or ?level=N&win). Esc/Enter -> menu, as in normal play.
+	//     ?crawlpos=<designY>  park the crawl at that scroll position instead of scrolling it,
+	//                  so the taper can be screenshot at a chosen point (textpos starts at 650
+	//                  and falls; ~560 puts the first line at the screen bottom).
+	//     ?crawlskew=<f>  amount of the Star Wars-style perspective taper on the crawl (larger
+	//                  at the screen bottom, smaller at the top; 0 = the flat pre-card crawl).
+	//                  CLAMPED to what keeps the widest line on screen -- the shipped crawls
+	//                  saturate at ~0.08-0.10, so the 0.2 default draws as that and a bigger
+	//                  value changes nothing. Applies in normal play too -- the shipped look.
 	//   With ?harness=spiderjump the harness LOOPS the Mars jumping-spider's whole crawl -> launch
 	//   -> arc -> land cycle (shadow + jump-X/ground markers + a readout) so its alignment values
 	//   can be tuned by eye. The spider crosses the screen over one loop, jumping at jumpX with the
@@ -837,6 +849,25 @@ namespace EvilAliensWeb.Compat
 		// Level 3 on Hard; this is the way to eyeball it (e.g. the per-member frame
 		// interpolation). True => SkipSplash + AutoStart, routes into the harness.
 		public static bool CastShow { get; private set; }
+
+		// Post-level text crawl (card bee8f0e0), all three read by CreditsScene.
+		//
+		// ?creditsshot=<1|2|3> boots straight into the crawl for the level just "beaten"
+		// (bare => 1). It hijacks boot => SkipSplash + AutoStart, so it is IN `Active`.
+		public static int? CreditsShot { get; private set; }
+
+		// ?crawlpos=<designY> parks the crawl at a scroll position instead of scrolling it --
+		// the scrub rig for a taper that is a function of each line's Y. IN `Active`: it
+		// stalls the post-level crawl indefinitely, which a co-op peer would share.
+		public static float? CrawlPos { get; private set; }
+
+		// ?crawlskew=<f> overrides the crawl's perspective taper; null => the baked
+		// CreditsScene.DefaultCrawlSkew, and ?crawlskew=0 restores the flat pre-card crawl.
+		// The value is CLAMPED to what keeps the widest line on screen (the shipped crawls
+		// saturate around 0.08-0.10), so any value here is safe -- it just stops growing. The
+		// `[crawl]` console line reports requested vs effective. Pure render/feel => OUT of
+		// `Active`.
+		public static float? CrawlSkew { get; private set; }
 
 		// On-screen scale + animation fps of the cast "Brain Spawn" specimen. null => the baked
 		// defaults in CastDisplayer, so a shipped build is unchanged; these override for by-eye
@@ -2913,6 +2944,52 @@ namespace EvilAliensWeb.Compat
 						AutoStart = true;
 					}
 					break;
+				case "creditsshot":
+					// Bare => level 1 (and "=1" reads the same either way).
+					if (val == null || val.Trim().Length == 0)
+					{
+						CreditsShot = 1;
+					}
+					else if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var csl)
+						&& csl >= 1 && csl <= 3)
+					{
+						CreditsShot = csl;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "1, 2 or 3 (the level just beaten)",
+							CreditsShot.HasValue ? InForce(CreditsShot) : "a normal boot");
+					}
+					if (CreditsShot.HasValue)
+					{
+						SkipSplash = true;
+						AutoStart = true;
+					}
+					break;
+				case "crawlpos":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cwp))
+					{
+						CrawlPos = cwp;
+					}
+					else
+					{
+						// Any design Y is meaningful here (the crawl scrolls from 650 down
+						// through negative values), so the only refusal is unparseable.
+						RejectFlagValue(key, val, "a design-space Y",
+							CrawlPos.HasValue ? InForce(CrawlPos) : "a scrolling crawl");
+					}
+					break;
+				case "crawlskew":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cws) && cws >= 0f)
+					{
+						CrawlSkew = cws;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0 (0 = no taper)",
+							InForce(CrawlSkew));
+					}
+					break;
 				case "castbrainscale":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbs) && cbs > 0f)
 					{
@@ -3203,7 +3280,7 @@ namespace EvilAliensWeb.Compat
 					+ "session ONLY, and NOTHING will be saved (no hiscores, no level completion, "
 					+ "no awardments). Reload without the flag to keep progress.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

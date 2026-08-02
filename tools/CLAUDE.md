@@ -276,8 +276,16 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
   everything the run printed since the last `mark` -- the game's own `[loadprofile]` / `[hitch]` /
   `[net]` console output included, since the console is teed at boot. That is what makes a SILENT
   failure mode (a data file, a manifest, a host default) defensible: run the set with
-  `python tools/headless/probes/run_probes.py` (exit 1 on any failure). Conventions, the four
+  `python tools/headless/probes/run_probes.py` (exit 1 on any failure). Conventions, the five
   rules for writing a probe, and the menu-navigation crib: `tools/headless/probes/README.md`.
+  **The runner refuses to run against a STALE `eahl` (exit 2, distinct from a probe failing) --
+  card 74998f22.** It compares eahl's build time against the newest `Game/**`, `Compat/**`,
+  `tools/headless/**` source and stops with both timestamps if the sources win, because that is
+  exactly the state a FAILED `dotnet build` leaves behind: the probes then exercise the previous
+  binary and report a green suite for code that does not compile (observed on card 4a3b22b7).
+  `--build` builds first, `--allow-stale` warns and runs anyway, `--selftest` tests the rule
+  itself with no dotnet and no probes. Content and the probe files are read live off disk and
+  are deliberately outside the check.
   **The trap: a preload/`COLD` probe must drive the MENU, never `?level=<Name>`** -- a `?level=`
   boot drains `QueueIdleWarm` into that level's cold population (exactly 20 spurious
   `gfx/game/space/*` lines, measured on Level2/Paratrooper/InsaneBossI alike).

@@ -201,6 +201,25 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   `held |= MouseLatch.Consume(i)` lines -- turns 3, namely the two section-2 positives plus the
   leaves-nothing-latched check (that build never drains the latch at all), with every section-1
   leg still passing.
+- **Latest case set: `?seed=<n>`** (card d937c721) -- the flag that seeds `RandomHelper`, the
+  gameplay RNG. **It is here because the claim is about a SEQUENCE, not a picture**: an eahl A/B
+  can only show that two frames happened to match, and the card's own measurements are why that is
+  not evidence (`?level=Level3&wallsonly` matched on 5 of 6 UNSEEDED runs). Every leg is built so
+  the implementation cannot be its own expectation: reproducibility is asserted between two runs
+  rather than against a captured list (so it survives a BCL generator change), a DIFFERENT seed
+  must diverge (or a `Reseed` ignoring its argument passes), and the no-`?seed=` leg asserts the
+  stream keeps RUNNING mid-sequence against an unbroken draw of the same length -- which is what
+  makes it insensitive to whatever seed an earlier leg left in force, since the statics persist
+  across `Parse` calls exactly as a repeated flag does in one query. The rejection legs assert the
+  message AND that the stream was untouched: "reported" and "ignored" are separate promises and a
+  build can keep one while breaking the other. It runs LAST in `Main` because it is the only set
+  that seeds `RandomHelper` and cannot unseed afterwards (adding an un-seed API for a probe would
+  be a production change made for a test), and its first leg asserts that pristine state out loud
+  so a future set that seeds earlier FAILS rather than silently weakening it. Absent from
+  `ProbeFlagRejectionSweep`'s table on purpose: any int is a legal seed, so the sweep's shared
+  "a negative is clamped or refused" shape does not describe it. Mutation-tested: stubbing
+  `RandomHelper.Reseed` to a no-op turns **4** legs FAIL -- note the divergence leg is NOT one of
+  them (unseeded runs diverge anyway), which is what it is there to guard the opposite way.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
@@ -238,6 +257,19 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
 - **It does NOT replace the browser pass.** Trimming, IndexedDB saves, WebGL-specific shader
   behaviour, the `index.html` JS layer and real WebRTC only fail in Chrome. The `CONTRIBUTING.md`
   gate is unchanged -- this gets you to the frame/number faster, it is not the final smoke check.
+- **A gameplay-level A/B needs `?seed=<n>`, and even then capture each side TWICE** (card
+  d937c721). Unseeded, two runs of one level are two different worlds -- measured on
+  `?level=OwnLevel&noattract`: mean |diff| 0.2, **MAX 210** of 255, i.e. noise bigger than most
+  effects under test. `?seed=` pins `RandomHelper` (only that -- Quad's, ShipConnector's, Juice's
+  and SplashScene's own `Random`s stay unseeded by design) and the boot frame's dt is now pinned
+  to one fixed step. Together those leave a same-seed run landing in one of a HANDFUL of discrete
+  worlds rather than one: 10 consecutive runs byte-identical on a quiet box, but **4 distinct
+  states over 10 runs while sibling builds loaded the CPU** (modal 6/10), the odd ones sitting on
+  the unseeded noise floor where they look exactly like a real effect. **So capture each side of
+  the A/B twice and require the same-side pair to match before comparing sides** -- or do the A/B
+  in-process (two `shot`s off one boot, no `step`) and skip the lottery. The
+  residual is the boot `Tick`'s varying catch-up step count; the mechanism, the two refuted fixes
+  and the working practice are in `tools/headless/README.md` -> "Reproducibility".
 - **GOTCHA -- a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is wrong.** Every
   scene that calls `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
   `LeavingHyperspace` with `fadeFactor = 0.998`, decaying at `0.0005/ms` = ~120 frames. Settle

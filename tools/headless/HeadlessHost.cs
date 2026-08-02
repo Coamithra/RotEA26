@@ -102,11 +102,37 @@ namespace EvilAliensWeb.Headless
             gdm.SynchronizeWithVerticalRetrace = false;
             _game.Present = _opt.Present;
 
-            // Creates the GL device and runs Initialize/LoadContent. It also ticks ONCE off
-            // the wall clock (RunOneFrame = CallInitialize + CallBeginRun + Tick + CallEndRun)
-            // -- that one boot frame is the only non-synthesised dt in a run, and it is
-            // clamped by Game.MaxElapsedTime. Frames counted/stepped below are all fixed-dt.
+            // Creates the GL device and runs Initialize/LoadContent. It also ticks ONCE
+            // (RunOneFrame = CallInitialize + CallBeginRun + Tick + CallEndRun) -- that boot
+            // frame is the one tick this host does not step itself. Frames counted/stepped
+            // below are all fixed-dt.
+            //
+            // Its dt is pinned here as far as this host can (card d937c721). Game1 sets
+            // IsFixedTimeStep = false, which handed that tick however many milliseconds the boot
+            // happened to take -- and since RandomHelper.RandomFromAverage
+            // is dt-PROPORTIONAL, a variable boot dt makes even a ?seed=<n> run draw a different
+            // amount of the seeded stream. That is why seeding alone did NOT make a level A/B
+            // repeat: measured on ?level=OwnLevel&noattract&seed=12345, two runs still differed
+            // by mean |diff| 0.45 / MAX 203 -- the unseeded noise floor. With this pin the same
+            // pair was byte-identical for 10 consecutive runs on a quiet box (though only 6 of
+            // 10 while sibling builds loaded the CPU -- see below), while a different seed (1.48)
+            // and an unseeded pair (1.08) still diverge, so it is the seed doing the work.
+            // `IsFixedTimeStep` is put back straight after; `TargetElapsedTime` is deliberately
+            // left at `_step`, because nothing reads it once Step() drives Update/Draw by hand
+            // and `_step` is the value it would want anyway.
+            //
+            // NOT the whole story, and the remainder is a card of its own (see
+            // tools/headless/README.md -> "Reproducibility"): a fixed-step Tick still runs
+            // `accumulated / TargetElapsedTime` catch-up updates, and the boot's accumulated wall
+            // time varies with machine load, so a run starts some whole number of steps in and
+            // the same seed yields one of a handful of discrete worlds (measured: 4 states over
+            // 10 runs under load). Two fixes were
+            // tried and refuted here: MaxElapsedTime = _step throws (KNI enforces a 0.5 s floor),
+            // and ResetElapsedTime() from a BeginRun override made every run diverge again.
+            _game.IsFixedTimeStep = true;
+            _game.TargetElapsedTime = _step;
             _game.RunOneFrame();
+            _game.IsFixedTimeStep = false;
 
             Log("device   " + GraphicsAdapter.DefaultAdapter.Description
                 + "  profile=" + _game.GraphicsDevice.GraphicsProfile

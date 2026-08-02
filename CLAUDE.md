@@ -289,6 +289,18 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   to reach the disconnected-pad pause loop. Verify the decision as DATA with console **`eaTeamSeat()`** (all 16
   pad-connection masks through the real resolver + the pre-card policy as the negative control) —
   it needs no level and no gamepads. Replaces `?aiteam`.
+- **`?seed=<n>`** (card d937c721): seed the gameplay RNG (`RandomHelper`) so a level-level eahl
+  A/B measures the change rather than two different worlds -- unseeded, two runs of
+  `?level=OwnLevel&noattract` differ by mean |diff| 0.2, **MAX 210** of 255. **Near-deterministic,
+  not deterministic: a same-seed run lands in one of a handful of discrete worlds** -- 10
+  consecutive runs identical on a quiet box, 4 distinct states over 10 while sibling builds loaded
+  the CPU. **So capture each side of an A/B TWICE and require the same-side pair to match before
+  comparing sides** (the residual is eahl's boot frame, not the RNG -- `tools/headless/README.md`
+  -> "Reproducibility"). Reaches `RandomHelper` only; the
+  FX/shake/splash RNGs are separate instances by design and stay unseeded. Out of
+  `DebugFlags.Active` on purpose (it hijacks nothing, and `Active` would refuse the two-peer
+  netplay captures it exists for), so a seeded boot announces itself on its own `[debug]` line.
+  No flag => unseeded, exactly as shipped.
 - **`?splashvariant=revenged|pure|glasses`** (card 57555583): pin which reveal the splash's
   channel flip lands on. The two portrait shots are a 5% branch each, and since that card the
   roll (in `SplashScene.LoadContent`) also decides which texture is DECODED at all -- so this

@@ -436,6 +436,26 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   why `?noattract` is out (card af63f958): it unwires the main menu's idle timeout and nothing
   else, and a joiner needs it precisely because its lobby is a menu. A boot carrying only
   out-of-`Active` flags prints the `no boot-hijacking debug flags` hint instead.
+- **`?seed=<n>` -- the reproducible-world flag** (card d937c721). Seeds `RandomHelper`, the
+  gameplay RNG, at parse time (`RandomHelper.Reseed`); null => `new Random()` as shipped. It is
+  what makes a gameplay-level eahl A/B measure the change instead of the divergence: unseeded,
+  two runs of `?level=OwnLevel&noattract` differ by mean |diff| 0.2 / **MAX 210** of 255, which
+  is more than most effects under test. **Near-deterministic, not deterministic -- a same-seed run
+  lands in one of a handful of discrete worlds, and the count tracks machine load**, so capture
+  each side of an A/B twice and require the same-side pair to match (the residual is eahl's boot
+  `Tick`, not the RNG; `tools/headless/README.md` -> "Reproducibility"). Two more things to know
+  before leaning on it:
+  - **It reaches `RandomHelper` ONLY.** `Quad.fxr`, `ShipConnector.fxr`, `Juice.rng` and
+    `SplashScene.rng` are separate instances *by design* -- a cosmetic draw must not advance the
+    gameplay stream -- and stay unseeded, so a rig showing a laser, the connector, a shake or the
+    splash keeps some jitter of its own.
+  - **Deliberately OUT of `Active`**, unlike most world-affecting flags. It hijacks nothing (a
+    seeded boot is a normal winnable level, the `?difficulty=` precedent), and `Active` refuses
+    online play -- which would forbid exactly the two-peer netplay captures the flag exists for.
+    It cannot desync a session either: co-op is distributed-authority replication, NOT lockstep,
+    so the peers already run two different unseeded streams today. The mitigation for staying out
+    is that a seeded boot prints its own `[debug] ?seed=` line regardless of the `Active` dump.
+  Pinned by `logic_probe`'s `ProbeSeedFlag` (the claim is a SEQUENCE, so it cannot be a picture).
 - **Live slider panels** are HTML built in `index.html` OUTSIDE `#app`, only constructed on their
   trigger page (a normal boot has no extra DOM). Pattern: `window.eaXxx(...)` →
   `Compat/DebugInput.SetXxx` ([JSInvokable]) → `DebugFlags.SetXxxOverride`, read every Draw/tick;
@@ -723,8 +743,11 @@ themselves stay one batch each -- the interpolation-shader half above.)
   **a new Braineroid size drawing at a new DrawOrder must be added to it** or its glow silently
   changes layer.
 - **Verify with `eaBraineroidGlowBatch(on)` between two `shot`s and NO `step`.** Gameplay RNG is
-  unseeded, so two boots of a level never reach the same world state and a cross-boot pixel diff
-  measures the wave, not the change (the bomb-ripple card's lesson). Pair it with
+  unseeded by default, so two boots of a level never reach the same world state and a cross-boot
+  pixel diff measures the wave, not the change (the bomb-ripple card's lesson). `?seed=<n>`
+  (card d937c721) removes most of that -- but it does not make the in-process A/B above
+  unnecessary: two `shot`s off ONE boot are exact,
+  and the seed's residual outlier would land in a cross-boot diff. Pair it with
   `?brainoverlayphase=` or the boss overlays alone drift ~15 000 px between the two frames.
 
 ## Component lifecycle (`ComponentBin`) — the spawn/death contract

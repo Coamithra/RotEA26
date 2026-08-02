@@ -178,6 +178,16 @@ internal static class Program
             return rc;
         }
 
+        // LAST ON PURPOSE -- it is the only set that seeds RandomHelper, and it cannot unseed
+        // afterwards (there is no un-seed API and adding one for a probe would be a production
+        // change made for a test). Nothing above draws from RandomHelper, so the order costs
+        // nothing; its own first leg asserts the pristine state it needs.
+        rc = ProbeSeedFlag(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -2180,6 +2190,155 @@ internal static class Program
             }
         }
         Check("exactly ONE level changed verdict", diffs == 1, "changed=" + diffs);
+
+        return 0;
+    }
+
+    // Card d937c721 -- ?seed=<n>, the flag that makes the gameplay RNG reproducible.
+    //
+    // WHY HERE AND NOT IN A RIG. The claim is "two runs of the same boot draw the same numbers",
+    // which is a property of a SEQUENCE, not of a picture: an eahl A/B can only show that two
+    // frames happen to match, and the card's own measurements are the reason that is not
+    // evidence (?level=Level3&wallsonly matched on 5 of 6 unseeded runs). Here the real
+    // RandomHelper is driven directly, so the sequence is the observable.
+    //
+    // Every leg draws through the REAL DebugFlags.Parse, and each pair of legs is built so the
+    // implementation cannot be its own expectation:
+    //   * reproducibility is asserted against a SECOND run, never against a captured constant;
+    //   * a different seed must DIVERGE, or a Reseed that ignored its argument would pass;
+    //   * a Parse with no ?seed= must leave the stream CONTINUING mid-sequence -- compared
+    //     against an unbroken draw of the same length, which is what makes it insensitive to
+    //     whatever seed a previous leg left in force (statics persist across Parse calls in one
+    //     process exactly as a repeated flag does in one query);
+    //   * the rejection legs assert the message AND that the stream was untouched, because
+    //     "reported" and "ignored" are separate promises and a run can keep one while breaking
+    //     the other.
+    private static int ProbeSeedFlag(Assembly asm)
+    {
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        Type helper = asm.GetType("EvilAliens.RandomHelper", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        PropertyInfo seedProp = flags.GetProperty("Seed", anyStatic);
+        PropertyInfo activeProp = flags.GetProperty("Active", anyStatic);
+        PropertyInfo randProp = helper.GetProperty("Random", anyStatic);
+        PropertyInfo seededWithProp = helper.GetProperty("SeededWith", anyStatic);
+        if (parse == null || seedProp == null || activeProp == null || randProp == null || seededWithProp == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (Parse=" + (parse != null)
+                + " Seed=" + (seedProp != null) + " Active=" + (activeProp != null)
+                + " RandomHelper.Random=" + (randProp != null)
+                + " RandomHelper.SeededWith=" + (seededWithProp != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        // Re-fetch the property every time: Reseed REPLACES the instance, so a cached one would
+        // keep drawing from the pre-seed stream and every reproducibility leg would fail.
+        Func<int, string> draw = n =>
+        {
+            var vals = new System.Collections.Generic.List<string>(n);
+            for (int i = 0; i < n; i++)
+            {
+                vals.Add(((Random)randProp.GetValue(null)).Next(1000000)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            return string.Join(",", vals);
+        };
+
+        Console.WriteLine("[logic_probe] ?seed= (card d937c721)");
+
+        // 1. PRISTINE STATE, and the "staying on ..." wording that is only reachable from it.
+        // Nothing above this set passes ?seed=, so the shipped default is still in force here --
+        // and the check says so out loud, so a future probe that seeded first FAILS rather than
+        // silently turning this leg into a weaker one.
+        Check("pristine: no ?seed= has been parsed yet",
+            seedProp.GetValue(null) == null && seededWithProp.GetValue(null) == null,
+            "if this fails, an earlier Probe* now seeds -- move this set back to the front");
+        // Sampled HERE, in that pristine window, for leg 8 at the bottom -- and the ordering is
+        // the whole point. Read after a ?seed= had already been parsed, the comparison is
+        // vacuous: `Seed` is a persistent static, so a build with `|| Seed.HasValue` folded into
+        // the Active expression would read true on BOTH sides and pass. Measured exactly that.
+        bool activeUnseeded = (bool)activeProp.GetValue(null);
+        string outVirgin = FirstLine(RunParse(parse, "?seed=abc"));
+        Check("a malformed ?seed= is reported", outVirgin.Contains("unknown ?seed="), outVirgin);
+        Check("... naming the unseeded default as what stands",
+            outVirgin.Contains("an unseeded Random (the shipped default)"), outVirgin);
+        Check("... and it did NOT seed anything",
+            seedProp.GetValue(null) == null && seededWithProp.GetValue(null) == null, null);
+
+        // 2. THE CLAIM: same seed, same sequence. Asserted between two runs rather than against a
+        // baked-in expected list, so it stays true if the BCL's generator ever changes.
+        RunParse(parse, "?seed=12345");
+        Check("?seed=12345 records the seed",
+            (int?)seedProp.GetValue(null) == 12345 && (int?)seededWithProp.GetValue(null) == 12345, null);
+        string runA = draw(8);
+        RunParse(parse, "?seed=12345");
+        string runB = draw(8);
+        Check("same seed => same sequence", runA == runB, runA + " vs " + runB);
+
+        // 3. DIVERGENCE CONTROL. Without it, a Reseed ignoring its argument (or seeding a
+        // constant) passes leg 2 perfectly.
+        RunParse(parse, "?seed=999");
+        string runC = draw(8);
+        Check("a DIFFERENT seed diverges", runC != runA, runC + " vs " + runA);
+
+        // 4. Negatives are legal seeds -- there is no range predicate here, which is why this
+        // flag is absent from ProbeFlagRejectionSweep's table (its shared shape is "a negative is
+        // clamped or refused"). int.MinValue is called out because the legacy Math.Abs(seed)
+        // implementation threw on it.
+        RunParse(parse, "?seed=-7");
+        string negA = draw(4);
+        RunParse(parse, "?seed=-7");
+        // Drawn on its own statement, never inside the `&&`: a short-circuit would skip the four
+        // draws and leave the stream where no later leg expects it.
+        string negB = draw(4);
+        Check("a negative seed is accepted and reproducible",
+            (int?)seedProp.GetValue(null) == -7 && negB == negA, negA + " vs " + negB);
+        string outMin = RunParse(parse, "?seed=-2147483648");
+        Check("int.MinValue is accepted (no Math.Abs overflow)",
+            (int?)seedProp.GetValue(null) == int.MinValue && !outMin.Contains("unknown ?seed="), null);
+
+        // 5. A Parse WITHOUT ?seed= must not touch the stream. Compared against an unbroken draw
+        // of the same length from the same seed, so it cannot be satisfied by a reseed that
+        // happens to restore the same value.
+        RunParse(parse, "?seed=4242");
+        string unbroken = draw(10);
+        RunParse(parse, "?seed=4242");
+        string firstHalf = draw(5);
+        RunParse(parse, "?noattract");
+        string secondHalf = draw(5);
+        Check("a Parse with no ?seed= leaves the stream running",
+            firstHalf + "," + secondHalf == unbroken, firstHalf + "," + secondHalf + " vs " + unbroken);
+
+        // 6. REJECTION with a seed already in force: reported, naming the seed actually standing
+        // (not the typo, not a baked default), and genuinely ignored -- the stream keeps running.
+        RunParse(parse, "?seed=4242");
+        string half = draw(5);
+        string outBad = FirstLine(RunParse(parse, "?seed=42x2"));
+        Check("a malformed ?seed= is reported when one is in force",
+            outBad.Contains("unknown ?seed="), outBad);
+        Check("... naming the seed in force", outBad.Contains("staying on 4242"), outBad);
+        Check("... and the stream was untouched", half + "," + draw(5) == unbroken,
+            "a typo must not re-seed, nor clear the seed");
+        Check("... and Seed still reads the valid value",
+            (int?)seedProp.GetValue(null) == 4242, null);
+        // CONTROL: a VALID value reports nothing, so a diagnostic that printed unconditionally
+        // fails here and only here.
+        Check("a valid ?seed= reports no rejection",
+            !RunParse(parse, "?seed=4242").Contains("unknown ?seed="), null);
+
+        // 7. The announcement line, which is the ONLY record that a capture came from a pinned
+        // world -- ?seed is deliberately out of `Active`, so the flag dump need never print.
+        string announce = RunParse(parse, "?seed=31337");
+        Check("a seeded boot announces itself", announce.Contains("[debug] ?seed=31337"), FirstLine(announce));
+
+        // 8. OUT OF `Active` -- the ruling that keeps a seeded peer able to pair and to list
+        // (NetSession.HandleHello / NetListing.ComputeEligible both refuse on that bit).
+        // Compared against `activeUnseeded`, sampled before this set parsed its first ?seed= --
+        // see there for why a locally-sampled "before" cannot fail.
+        RunParse(parse, "?seed=555");
+        Check("?seed= does not set Active", (bool)activeProp.GetValue(null) == activeUnseeded,
+            "Active=" + activeProp.GetValue(null) + " unseeded=" + activeUnseeded);
 
         return 0;
     }

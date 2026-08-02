@@ -1055,6 +1055,15 @@ namespace EvilAliensWeb.Compat
 		// (the menu-lobby handshake allocates from it). eaScore() also reports seated-ness per
 		// slot; what this adds is the CONTROLLER DEVICE per seat, which is what distinguishes an
 		// attract demo's leftover AI seats from a real player's.
+		//
+		// `aliveSlots=` lists the slots that own a LIVE PlayerShip right now, off Oracle.IsAlive --
+		// the same read SpawnAllPlayers respawns off. BRACKETED so it cannot be misread as a
+		// count: `aliveSlots=[0]` is slot 0 flying, `aliveSlots=[]` is a shipless world.
+		// A seat stays seated across a death, so seated-ness
+		// alone cannot say whether there is a ship in the world -- which is a PRECONDITION for
+		// anything that kills one, and `death_fade.txt` asserts on it for exactly that reason
+		// (card af4c3694). Do not reach for `eval Census` instead: WorldCensus.Report prints only
+		// the fourteen most populous types, so PlayerShip=1 silently drops off a busy scene.
 		[JSInvokable("debugOracleRoster")]
 		public static string OracleRoster()
 		{
@@ -1064,15 +1073,21 @@ namespace EvilAliensWeb.Compat
 				return "[debug] eaOracleRoster: no oracle service (game not booted yet?)";
 			}
 			string seats = "";
+			string alive = "";
 			for (int slot = 0; slot < EvilAliens.Oracle.MaxPlayers; slot++)
 			{
 				if (oracle.IsSeated(slot))
 				{
 					seats += (seats.Length > 0 ? "," : "") + slot + ":" + oracle.Controller(slot);
 				}
+				if (oracle.IsAlive(slot))
+				{
+					alive += (alive.Length > 0 ? "," : "") + slot;
+				}
 			}
 			return "[debug] eaOracleRoster: players=" + oracle.Players
-				+ " seated=" + (seats.Length > 0 ? seats : "-");
+				+ " seated=" + (seats.Length > 0 ? seats : "-")
+				+ " aliveSlots=[" + alive + "]";
 		}
 
 		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):

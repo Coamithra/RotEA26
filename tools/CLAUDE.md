@@ -201,6 +201,25 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   `held |= MouseLatch.Consume(i)` lines -- turns 3, namely the two section-2 positives plus the
   leaves-nothing-latched check (that build never drains the latch at all), with every section-1
   leg still passing.
+- **Latest case set: `?seed=<n>`** (card d937c721) -- the flag that seeds `RandomHelper`, the
+  gameplay RNG. **It is here because the claim is about a SEQUENCE, not a picture**: an eahl A/B
+  can only show that two frames happened to match, and the card's own measurements are why that is
+  not evidence (`?level=Level3&wallsonly` matched on 5 of 6 UNSEEDED runs). Every leg is built so
+  the implementation cannot be its own expectation: reproducibility is asserted between two runs
+  rather than against a captured list (so it survives a BCL generator change), a DIFFERENT seed
+  must diverge (or a `Reseed` ignoring its argument passes), and the no-`?seed=` leg asserts the
+  stream keeps RUNNING mid-sequence against an unbroken draw of the same length -- which is what
+  makes it insensitive to whatever seed an earlier leg left in force, since the statics persist
+  across `Parse` calls exactly as a repeated flag does in one query. The rejection legs assert the
+  message AND that the stream was untouched: "reported" and "ignored" are separate promises and a
+  build can keep one while breaking the other. It runs LAST in `Main` because it is the only set
+  that seeds `RandomHelper` and cannot unseed afterwards (adding an un-seed API for a probe would
+  be a production change made for a test), and its first leg asserts that pristine state out loud
+  so a future set that seeds earlier FAILS rather than silently weakening it. Absent from
+  `ProbeFlagRejectionSweep`'s table on purpose: any int is a legal seed, so the sweep's shared
+  "a negative is clamped or refused" shape does not describe it. Mutation-tested: stubbing
+  `RandomHelper.Reseed` to a no-op turns **4** legs FAIL -- note the divergence leg is NOT one of
+  them (unseeded runs diverge anyway), which is what it is there to guard the opposite way.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
@@ -238,6 +257,19 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
 - **It does NOT replace the browser pass.** Trimming, IndexedDB saves, WebGL-specific shader
   behaviour, the `index.html` JS layer and real WebRTC only fail in Chrome. The `CONTRIBUTING.md`
   gate is unchanged -- this gets you to the frame/number faster, it is not the final smoke check.
+- **A gameplay-level A/B needs `?seed=<n>`, and even then capture each side TWICE** (card
+  d937c721). Unseeded, two runs of one level are two different worlds -- measured on
+  `?level=OwnLevel&noattract`: mean |diff| 0.2, **MAX 210** of 255, i.e. noise bigger than most
+  effects under test. `?seed=` pins `RandomHelper` (only that -- Quad's, ShipConnector's, Juice's
+  and SplashScene's own `Random`s stay unseeded by design) and the boot frame's dt is now pinned
+  to one fixed step. Together those leave a same-seed run landing in one of a HANDFUL of discrete
+  worlds rather than one: 10 consecutive runs byte-identical on a quiet box, but **4 distinct
+  states over 10 runs while sibling builds loaded the CPU** (modal 6/10), the odd ones sitting on
+  the unseeded noise floor where they look exactly like a real effect. **So capture each side of
+  the A/B twice and require the same-side pair to match before comparing sides** -- or do the A/B
+  in-process (two `shot`s off one boot, no `step`) and skip the lottery. The
+  residual is the boot `Tick`'s varying catch-up step count; the mechanism, the two refuted fixes
+  and the working practice are in `tools/headless/README.md` -> "Reproducibility".
 - **GOTCHA -- a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is wrong.** Every
   scene that calls `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
   `LeavingHyperspace` with `fadeFactor = 0.998`, decaying at `0.0005/ms` = ~120 frames. Settle
@@ -276,8 +308,16 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
   everything the run printed since the last `mark` -- the game's own `[loadprofile]` / `[hitch]` /
   `[net]` console output included, since the console is teed at boot. That is what makes a SILENT
   failure mode (a data file, a manifest, a host default) defensible: run the set with
-  `python tools/headless/probes/run_probes.py` (exit 1 on any failure). Conventions, the four
+  `python tools/headless/probes/run_probes.py` (exit 1 on any failure). Conventions, the five
   rules for writing a probe, and the menu-navigation crib: `tools/headless/probes/README.md`.
+  **The runner refuses to run against a STALE `eahl` (exit 2, distinct from a probe failing) --
+  card 74998f22.** It compares eahl's build time against the newest `Game/**`, `Compat/**`,
+  `tools/headless/**` source and stops with both timestamps if the sources win, because that is
+  exactly the state a FAILED `dotnet build` leaves behind: the probes then exercise the previous
+  binary and report a green suite for code that does not compile (observed on card 4a3b22b7).
+  `--build` builds first, `--allow-stale` warns and runs anyway, `--selftest` tests the rule
+  itself with no dotnet and no probes. Content and the probe files are read live off disk and
+  are deliberately outside the check.
   **The trap: a preload/`COLD` probe must drive the MENU, never `?level=<Name>`** -- a `?level=`
   boot drains `QueueIdleWarm` into that level's cold population (exactly 20 spurious
   `gfx/game/space/*` lines, measured on Level2/Paratrooper/InsaneBossI alike).
@@ -491,6 +531,31 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 
 ## Textures — `tools/textures/`
 
+**The straight-alpha edge bleed (card `5d75b700`) — `tools/imagebleed.py`, and WHO owns which
+asset.** Bilinear averages RGB *ignoring* alpha here, so whatever sits on the transparent side of a
+sprite edge is mixed into that edge; every producer leaves it black, so 72 of the 127 shipped RGBA
+PNGs drew with a dark halo (the menufont's bug, card `5d8becc2`, at fleet scale). `imagebleed.py`
+is the one implementation — `bleed_transparent_rgb()` gives each fully-transparent texel its
+nearest ink's RGB, `check_bled()` is the guard. **Alpha is never written**, so coverage, shapes and
+AA are bit-for-bit unchanged. Exactly one tool owns each asset:
+
+- **Listed in `textures.config`** → `build_textures.py`'s `load_source()` bleeds the source on the
+  way into the `.dds`/`.rtex`. Its PNG is only an INPUT and stays exactly as its producer wrote it
+  (much of it verbatim `tools/xnb/unpack.py` output), so the fix is at the shipping layer.
+- **Unlisted** → the PNG *is* the shipped artifact and there is no compile step to hook, so
+  **`bleed_pngs.py` owns it**. It skips anything with a `.dds`/`.rtex` sibling **or** a
+  `textures.config` entry — the UNION, because each signal alone has a hole: a removed config line
+  leaves a shipping sibling behind, and a line added but not yet BUILT leaves no sibling, which
+  would let this script rewrite a source `build_textures.py` deliberately leaves alone. Its nominal
+  producers are ~8 scattered scripts, several unrunnable (gitignored raw sources, AI models), and
+  four assets have no producer beyond the unpack — which is why the bleed is a separate layer
+  rather than smeared across scripts that cannot be executed to prove it.
+
+**Re-run `python tools/textures/bleed_pngs.py` after any tool regenerates an unlisted PNG** (an
+`upscale/` pipeline, an unpack, a hand re-export) — it is idempotent, and **`--check` exits 1 on
+any asset that has drifted back**, which is the lint for exactly that silent regression. A
+regenerated *listed* PNG needs no such step; `build_textures.py` bleeds it on the next build.
+
 - **`build_textures.py`** reads `textures.config` and precompiles listed sprites to a GPU-ready
   sibling that `WebContentManager` prefers over the PNG: **`.dds`** (BC3/DXT5, lossy, ~0 decode;
   needs `texconv.exe`; dims padded up to a mult-of-4 with the logical size stamped in the header —
@@ -627,6 +692,9 @@ authored with the live editor (`editor/serve.py` after `--emit-editor`) and bake
   normal case here (the atlas is `SS`x denser than the design quad). Same class as
   `build_textures.py`'s `edge_gutter()`, one level down. Measured on `?textshot`: 5921 pixels
   changed, **100% of them brighter, none darker**.
+  **It lives in `tools/imagebleed.py` now** (card `5d75b700`) and this script imports it — the same
+  halo was found across the sprite fleet, so there is one implementation, not three. The font
+  rebuild is byte-identical across that move.
 - **A `*.orig` backup must NOT be present when you build.** The committed atlas was built with
   none, so `read_orig()`'s carried glyphs (space + debug symbols) came from the LIVE font; reading
   a backup instead shifts 1258 texels (measured, with one seeded from git history) and the build
@@ -634,13 +702,19 @@ authored with the live editor (`editor/serve.py` after `--emit-editor`) and bake
   `--commit` CREATES the pair as a side effect, so a second `--commit` in a row is already the bad
   case: delete them after every commit run. `read_orig()` warns loudly when it finds one. Revert
   through git history, which is the documented recovery path (`.gitignore` says so too).
-- **`check_no_black_halo()` gates `write_font`**, because losing the bleed fails silently — a
-  slightly dark glyph edge, no error and no metrics diff. It stays quiet on art that is
-  legitimately all-black.
-- **51 of the 94 shipped RGBA PNGs under `Content/` have the same all-black transparent field**
-  (36 load as `.dds`, 15 as plain PNG), i.e. the sprite fleet plausibly carries this halo too.
-  Measured while fixing the font under card `5d8becc2`; deliberately NOT addressed there and no
-  card filed yet — treat this as an open lead, not a closed question.
+- **`check_bled()` gates `write_font`**, because losing the bleed fails silently — a slightly dark
+  glyph edge, no error and no metrics diff. It also lives in `tools/imagebleed.py` now, and its
+  PREDICATE CHANGED with the move: it used to ask "is any fully-transparent texel still black",
+  which only works for white-on-transparent art. **52% of `gfx/sprites/spider_sheet2`'s edge ink is
+  itself pure black**, so a correctly bled dark sprite keeps millions of black transparent texels
+  and the old rule cried wolf (measured: 6763990 on a perfectly bled sheet). It now asks whether
+  the image is a FIXED POINT of `bleed_transparent_rgb()` — every transparent texel already carries
+  its nearest ink's RGB, whatever colour that is — which needs no exemption for black art and is
+  strictly stronger for the font.
+- **The sprite fleet carried the same halo, and card `5d75b700` fixed it.** See the Textures
+  section (`load_source` in `build_textures.py`, and `bleed_pngs.py` for the assets with no
+  precompile step). The lead this bullet used to record read "51 of 94"; re-measured on the current
+  fleet it is **72 of 127 RGBA PNGs**, split 55 precompiled / 17 plain PNG.
 
 ## Cursor — `tools/cursor/`
 

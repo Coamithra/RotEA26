@@ -657,6 +657,19 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetResetSpawnTest.Run();
 		}
 
+		// JS bridge for the remote-powerup-pickup suite (eaNetPickup in wwwroot/index.html; cards
+		// 83271f3d / 10f9dba4 / d53431b4). Pairs a REAL host session to a scripted client, adopts
+		// its ship puppet, and drives real EvClaim pickups plus the real MsgHudState level mirror
+		// at it -- the two halves that add up on a live observer, which is why the option count is
+		// asserted over the combined sequence rather than either path alone. **DESTRUCTIVE**: it
+		// needs a live GameScene and spends real pickups into the live panels, so run it in a
+		// throwaway ?level=Level2&invuln boot.
+		[JSInvokable("debugNetPickupTest")]
+		public static string NetPickup()
+		{
+			return EvilAliensWeb.Compat.Net.NetPickupTest.Run();
+		}
+
 		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
 		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
 		// then drives the real PowerupData exp curve over two divergent combo streams -- running

@@ -1153,10 +1153,18 @@ namespace EvilAliensWeb.Compat.Net
         // Card 1a3ad45a moved the LEVEL half of this elsewhere: that slot's progression is its
         // owner's alone now (ScoreVisualiser.SustainCombo is gated on OwnsSlot), and its real
         // level arrives over MsgHudState -- which also re-asserts the indicator, making the
-        // SetPowerup below a redundant-but-immediate head start on the next ~10 Hz packet. The
-        // sound cue is what only this path can do: it belongs to the pickup INSTANT.
+        // SetPowerup below a redundant-but-immediate head start on the next ~10 Hz packet.
         // Idempotent: the collector's own side already ran the local path and never reaches
         // a settle branch for its own pickup (its entity is gone before the echo arrives).
+        //
+        // Cards 83271f3d / 10f9dba4: the HUD icon used to be ALL of it, so a remote collector got
+        // the readout and none of the ship-side effect -- see PlayerShip.NetApplyRemotePickup for
+        // which types that costs and which are already covered elsewhere.
+        //
+        // Card d53431b4: it is SILENT. The pickup used to play the "powerup" cue here, i.e. every
+        // powerup the other player picked up made a noise on this screen; a remote pickup is
+        // visual-only now. Local pickups and local co-op are untouched -- both go through
+        // PlayerShip.CollidesWith, which still plays it.
         internal static void ApplyRemotePowerup(INetPickup powerup, byte slot)
         {
             // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
@@ -1167,15 +1175,37 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             score.SetPowerup(powerup.NetPickupType, slot);
-            // Only the powerup INDICATOR is mirrored. The local path also does AddBomb for
-            // PowerupType.Blast, deliberately not mirrored here: the spend side (NetDoBlast)
-            // does not decrement bombs on the remote either, so replicating the increment
-            // alone would make the other player's bomb icons pile up and never clear.
-            sound.PlayCue("powerup"); // local co-op plays it for either collector too
+            // OwnsSlot is the double-apply guard, not a formality: the host runs this for a
+            // CLIENT's claim too, so a claim naming a slot we own would otherwise re-run the
+            // pickup on a ship that already took it -- a second batch of Options every time.
+            // (The HUD SetPowerup above is idempotent and stays ungated.)
+            if (!OwnsSlot(slot))
+            {
+                FindShipForSlot(slot)?.NetApplyRemotePickup(powerup.NetPickupType);
+            }
             if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] remote powerup " + powerup.NetPickupType + " -> slot " + slot);
             }
+        }
+
+        // The collector's ship, or null. Null is a real case rather than a defensive one: the
+        // claim scenarios drive this path from the MENU, where no ship (and no oracle binding)
+        // exists -- the HUD half still lands there.
+        private static PlayerShip FindShipForSlot(int slot)
+        {
+            if (oracle == null)
+            {
+                return null;
+            }
+            foreach (PlayerShip s in oracle.GetShips())
+            {
+                if (s.Owner == slot)
+                {
+                    return s;
+                }
+            }
+            return null;
         }
 
         internal static byte TakeKillNote(INetEntity comp)

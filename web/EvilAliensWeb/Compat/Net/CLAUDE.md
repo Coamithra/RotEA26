@@ -828,6 +828,58 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     proof.) Measured over a two-peer run: `scSkew=0.0` steady state, and `scSkewMax` held at
     10.0 while `clTx` grew 20 -> 67 -- i.e. the worst deviation is one kill's correction and
     does NOT accumulate with kill count, which is exactly the property max() lacked.
+- **A remote pickup runs the collector's SHIP effect too, not just its HUD icon (cards
+  83271f3d / 10f9dba4 / d53431b4).** `ApplyRemotePowerup` used to be `score.SetPowerup` plus a
+  sound cue, so the other player's ship -- a puppet on this screen -- got the readout and none of
+  what the powerup DOES. It now calls `PlayerShip.NetApplyRemotePickup`, the mirrorable subset of
+  the local `DoSpecial(pickup: true)`. Only two types need it; the rest are inert there for
+  reasons that are already elsewhere:
+  - **`Linker` (the "2") -- `readyToConnect` is written NOWHERE else**, so the puppet never lit
+    its `singleconnectorglow` AND `PlayerShip.CollidesWith`'s `(readyToConnect &
+    other.readyToConnect)` was false on BOTH peers: **the ship connector was unreachable in any
+    online session**, which is what card 83271f3d reported. Formation stays a symmetric LOCAL
+    simulation -- each peer forms its own connector off its own collision, `isConnectedWith`
+    dedupes, and `NetPullOwnShip` (the TeamChallenge tether path) already handles the net case --
+    so there is no form event and no protocol change.
+  - **`Option`** -- the pickup's 1-4 Option ships. **The two mirrors ADD UP rather than
+    double-count, and that is the property to preserve**: the LEVEL-driven options already
+    arrive over `MsgHudState` (card 1a3ad45a), and a PICKUP NEVER CHANGES A LEVEL, so `DoSpecial`
+    and `PowerUp` are disjoint -- both peers derive the pickup's own count from the same
+    ship-local `optionLevel`, which only `PowerUp` writes. Pre-card the observer got the level
+    half alone, i.e. always FEWER (card 10f9dba4). Residual, accepted: a pickup landing within
+    one ~10 Hz HUD packet of a level-up to 3 or 4 can spawn the pre-level count on the observer.
+  - `FirePower`/`Range` already ride `MsgShipState`; `Blast` and `OneUp` stay unmirrored for the
+    reasons in the hardening bullet above and in `HandleClaim`.
+  - **`OwnsSlot(slot)` gates the SHIP half and the HUD half stays ungated.** The host also runs
+    this path for a CLIENT's claim, so a claim naming a slot we own would re-run a pickup our own
+    `CollidesWith` already ran -- a second batch of Options each time. The icon is idempotent.
+  - **`GameScene.NetApplyTetherBreak` gained a real default body** (break any local
+    `ShipConnector` with a `ControlDevice.Remote` endpoint). It was an empty virtual outside
+    `TeamChallenge`, while `ShipConnector.TakeHit` sends `EvTetherBreak` unconditionally -- so
+    once a Linker connector CAN form, a hit only one screen saw would leave the other player
+    tethered and pulled toward an anchor already let go of. `TeamChallenge`'s override now calls
+    `base` as well as breaking its own scripted tether.
+  - **A remote pickup is SILENT (card d53431b4, the user's ruling).** The `"powerup"` cue is gone
+    from this path -- every powerup the other player collected used to make a noise on your
+    screen. Local pickups and local co-op are untouched; both go through `PlayerShip.CollidesWith`,
+    which still plays it.
+  - **A remote LEVEL-UP now shows the `PowerupEffect` sparkle**, which
+    `ScoreVisualiser.NetSetPowerupLevel` deliberately suppressed. `doEffect` is true **only on a
+    climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot
+    already at 4, or the first HUD packet for a slot) and would fire four sparkles in a tick for
+    events from before we were watching. Stateless, because a genuine level-up is always one step.
+  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 22 assertions;
+    `tools/headless/probes/net_pickup.txt`). **DESTRUCTIVE** like `eaNetResetSpawn` -- it pairs a
+    real HOST session onto the live level, adopts a real ship puppet off a scripted client's
+    stream and drives real `EvClaim` frames at it -- so run it in a throwaway
+    `?level=Level2&invuln` boot. Its load-bearing leg is the option arithmetic, driven over the
+    FULL remote sequence (claims AND HUD state) rather than either path alone, because the risk
+    of fixing "the observer sees fewer" is inverting it into "the observer sees more"; measured
+    owner +6 / observer +6 over 3 pickups + 3 level-ups, and +3 on the observer under the
+    pre-card mutation. The connector leg leads with the NEGATIVE (unarmed puppet -> no connector)
+    so the positive cannot read as "the rig always makes one". Mutation-tested five ways.
+    **The mute half is NOT covered** -- `SoundManager` has no cue counter and adding one for a
+    test would be a production field with no other reader.
 - **Per-slot HUD state: a slot's combo and powerup progression belong to its OWNER (card
   1a3ad45a).** Every peer used to simulate BOTH -- a remote ship's shots are re-fired locally
   through the real `FireAt` path, so they are ordinary local `Bullet`s stamped with that slot's
@@ -1305,10 +1357,11 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     settled as a bare despawn. Both settle paths (host `HandleClaim`, client
     `NetPuppets.OnRemoteDeath`) now call `NetSession.ApplyRemotePowerup`. This also restores the
     remote player's powerup LEVEL, since `ScoreVisualiser.increasecombo` only feeds `AddExp`
-    while that slot's `powerupactive` is set. Only the INDICATOR is mirrored -- the Blast/bomb
-    count deliberately is not, because the spend side (`NetDoBlast`) does not decrement it
-    either. A slot off the wire must be bounded by `ScoreVisualiser.SlotCount` (4), NOT the 8 of
-    the claim ledgers' PaidMask.
+    while that slot's `powerupactive` is set. **Only the INDICATOR was mirrored, and that turned
+    out to be a bug in its own right -- see the remote-pickup bullet below** (cards 83271f3d /
+    10f9dba4 / d53431b4). The Blast/bomb count is STILL deliberately unmirrored, because the
+    spend side (`NetDoBlast`) does not decrement it either. A slot off the wire must be bounded
+    by `ScoreVisualiser.SlotCount` (4), NOT the 8 of the claim ledgers' PaidMask.
   - **`AlienDrawableGameComponent.NetSpinPerMs` opts a type out of REPLICATED rotation** and
     spins its puppets locally instead (Asteroid). A puppet's Update is frozen, so a
     continuously spinning type could only advance at its ~16.7 Hz round-robin snapshot turn --

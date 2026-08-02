@@ -568,6 +568,19 @@
             catch (e) { console.warn('[debug] eaNetResetSpawn failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the remote-powerup-pickup suite (cards 83271f3d / 10f9dba4 / d53431b4). Pairs a
+        // real host session to a scripted client over the in-process wire, adopts its ship puppet,
+        // and drives real EvClaim pickups plus the real MsgHudState level mirror at it — proving
+        // the "2" powerup arms the puppet (so the connector can finally form), that the option
+        // count moves by the same amount on both peers over the COMBINED sequence, and that the
+        // level-up sparkle plays on a real remote level-up but not on a join-in-progress catch-up.
+        // DESTRUCTIVE: needs a live level and spends real pickups into the live panels, so run it
+        // in a throwaway ?level=Level2&invuln boot. Prints PASS/FAIL.
+        window.eaNetPickup = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetPickupTest')); }
+            catch (e) { console.warn('[debug] eaNetPickup failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so

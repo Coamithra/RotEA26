@@ -440,7 +440,12 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// Raise one slot's powerup level to the owner's, one step at a time through the SAME
 	// PlayerShip.PowerUp path a local level-up takes -- so the puppet's re-fired bullets get the
 	// owner's real asploding/bouncing/splitting loadout and its Option ships actually spawn.
-	// doEffect is false: the pickup sparkle belongs to the owner's screen, not to a catch-up.
+	// Card d53431b4: a remote player levelling up shows the SAME PowerupEffect sparkle a local one
+	// does -- but only when this really is a level-up, i.e. a climb of exactly ONE step. A
+	// multi-step climb is a CATCH-UP (a join-in-progress peer adopting a slot already at level 4,
+	// or the first HUD packet for a slot) and would fire four sparkles in one tick for events that
+	// happened before we were watching. That is the whole rule; it needs no per-slot state, since a
+	// genuine level-up can only ever be one step.
 	//
 	// OneUp is unreachable here (it is past HudLevelCount) and must stay that way: its PowerUp
 	// case is Oracle.SetSlowmotion, a whole-sim time scale that is deliberately local -- the
@@ -464,6 +469,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			data.NetSetLevel(level);
 			return;
 		}
+		bool singleStep = level - data.GetLevel() == 1;
 		while (data.GetLevel() < level)
 		{
 			int before = data.GetLevel();
@@ -472,7 +478,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 			{
 				break;
 			}
-			FindShip(player)?.PowerUp(type, data.GetLevel(), doEffect: false);
+			FindShip(player)?.PowerUp(type, data.GetLevel(), doEffect: singleStep);
 		}
 	}
 

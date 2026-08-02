@@ -895,9 +895,18 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			+ "\n  caught : " + after;
 	}
 
-	// TeamChallenge overrides this to break its tether on the peer's EvTetherBreak.
+	// The peer broke a tether on its screen (or-of-either-peer, idempotent).
+	//
+	// TeamChallenge extends this for its own scripted tether. The base body covers the Linker
+	// ("2") powerup's connector, which since card 83271f3d can actually form in an online session:
+	// each peer builds and breaks its own copy locally off its own collisions, so a hit only one
+	// screen saw would otherwise leave this one tethered to a puppet whose owner is already free.
 	public virtual void NetApplyTetherBreak()
 	{
+		foreach (PlayerShip ship in oracle.GetShips())
+		{
+			ship.NetBreakPuppetConnectors();
+		}
 	}
 
 	// The REMOTE peer paused/resumed. Freeze/unfreeze our world like a local pause, but

@@ -185,11 +185,13 @@ internal static class Program
             return rc;
         }
 
-<<<<<<< HEAD
         rc = ProbeSpawnDirection(asm);
-=======
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeRespawnSummon(asm);
->>>>>>> origin/main
         if (rc != 0)
         {
             return rc;

@@ -504,22 +504,59 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES, and `netMode` is why (card 72143c11).**
-    `MenuScene.netMode` lives on the long-lived menu scene and NOTHING clears it across a level
-    launch, so a lobby co-op match that ends mid-level returns to a menu still holding it -- while
-    `MenuScene.Initialize` has already re-added `mainMenu`. `NetUpdate`'s notice branch used to
-    call `CloseNetFlowMenus()` there, which does not touch `mainMenu`, so the panel went up over
-    a LIVE main menu: the text overlapped the rows, and since **`MenuSub1` has no modality at all**
-    -- every menu in the collection runs `HandleInput` every tick -- arrows moved two selections
-    and Enter invoked two entries. `mainMenu.RemoveInstantly()` now runs unconditionally
-    (`Collection.Remove` of a menu that is not shown is a no-op, so the lobby paths are
-    unaffected). **The stale `netMode` itself is NOT fixed** -- clearing it at launch changes the
-    lobby's exit routing and wants its own card.
+  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES (card 72143c11).** `NetUpdate`'s notice
+    branch used to call `CloseNetFlowMenus()` on the `netMode` branch only, and that does not
+    touch `mainMenu`, so the panel could go up over a LIVE main menu: the text overlapped the
+    rows, and since **`MenuSub1` has no modality at all** -- every menu in the collection runs
+    `HandleInput` every tick -- arrows moved two selections and Enter invoked two entries.
+    `mainMenu.RemoveInstantly()` now runs unconditionally (`Collection.Remove` of a menu that is
+    not shown is a no-op, so the lobby paths are unaffected). Card c337222a changed WHICH branch a
+    post-level notice arrives on, not whether that line is needed -- it now arrives with `netMode`
+    false and `mainMenu` live, i.e. the case it closes.
     Verify with `eaMenuCensus()` / `tools/headless/probes/net_notice_menu.txt`, never a
     screenshot: `NetStatusMenu` has DrawOrder 2000 and draws its own 50% darken, so a menu live
     underneath it looks merely dim while still eating every keypress. `eaNetNotice(text)` parks
-    the notice with no peer and `eaMenuNetMode()` supplies the stale flag -- the one precondition
-    a headless run cannot otherwise produce.
+    the notice with no peer and `eaMenuNetMode()` supplies the flag -- the one precondition a
+    headless run cannot otherwise produce.
+  - **`MenuScene.netMode` IS MENU-NAVIGATION STATE AND DIES WITH THE VISIT TO THE MENU (card
+    c337222a).** `MenuScene` is a singleton -- `Game1` builds it once and re-ADDS it to the
+    collection on every return from a level, re-running `Initialize` -- so nothing on it is fresh
+    unless something clears it, and nothing cleared `netMode`. A lobby co-op match therefore came
+    back to a main menu that still believed it was inside the Online Co-op flow, and every reader
+    was reading a lie: `difficultyMenu_difficultySelected` silently ABORTED the next ordinary
+    launch after `mainMenu` and the selector were already gone (a reload-only dead end, the
+    sharpest of the four), the two selector `OnExit`s backed out to `netPickMenu`, the carousel
+    refused `WebcamAliens` offline, and `NetUpdate` ran the lobby pump. `MenuScene.Initialize` now
+    calls `ResetNetFlowState()` -- `netMode`, `netNoticeUp`, `browsingGames` and the status panel
+    as ONE lifecycle -- placed before the `?gamebrowser` block so that flag's own
+    `netMode = true` still wins. **`netNoticeUp` is a second real fix, not a ride-along**:
+    `netStatus_CancelSelected` is its only clearer, so a notice still up at a level launch left it
+    set forever and `if (!netMode || netNoticeUp) return;` then killed the lobby pump for the rest
+    of the process -- every later Host/Join stuck on "Contacting server...". (`browsingGames` and
+    `netStatusShown` really are near-unreachable today; they ride along because one lifecycle
+    beats three near-misses.)
+    - **It is SESSION-FREE on purpose** (no `NetLobby.Cancel`, no `NetGameBrowser.Stop`): a caller
+      that returns to the menus with a session STILL UP must be able to re-enter deliberately.
+    - **That entry point is `MenuScene.EnterNetLobby()`, and it is THE way to reach the net-lobby
+      menu state programmatically.** **It ships UNCALLED** -- card 3b6c12e7's level-end -> lobby
+      flow lands its first caller, and the seam is here so that card comes through a defined door
+      instead of inventing one against private state. It sets `netMode`, clears `netNoticeUp`,
+      **removes `mainMenu` itself** (`Initialize`
+      re-adds it unconditionally and neither `netPickMenu` nor `NetStatusMenu` is modal, so a live
+      main menu underneath would eat every keypress -- the 72143c11 lesson; a caller must NOT be
+      relied on to do this), then mirrors the lobby's own `Connected` branch: host to the level
+      pick, client to the waiting panel.
+    - **Deriving it from `NetSession` instead was evaluated and is IMPOSSIBLE** -- the lobby's
+      `Contacting`/`Prompting`/`Connecting` phases have no session at all, so `NetSession.Active`
+      under-reports exactly where the pump must run; and the selector-exit routing is a
+      "where did I come from" question, not a "is a session up" one.
+    - `difficultyMenu_difficultySelected`'s abort now also recovers (`mainMenu.Show()`) when there
+      is neither a session nor a pending notice, so that branch can no longer strand the player.
+      `NetSession.MenuNotice` is PEEKED there, never taken -- `TakeMenuNotice` consumes.
+    - **Verify with `eaMenuNetState()` / `eval MenuNetState`**, pinned by
+      `tools/headless/probes/net_menumode_reset.txt` (plant the flag, round-trip through the
+      Tutorial, require it clear AND require an ordinary Mission 1 launch to still launch). None
+      of those four fields changes a pixel, so no screenshot can see any of this.
 
 ## Protocol, NetIds & the replicable set
 

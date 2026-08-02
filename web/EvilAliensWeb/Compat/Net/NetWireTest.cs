@@ -445,26 +445,37 @@ namespace EvilAliensWeb.Compat.Net
                 new int[] { 1, 2, 3, 4, 0 },
                 new int[] { 0, 0, 0, 0, 0 },
             };
-            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, 2), reliable: false);
+            // Per-layer Option counts (v16, card c5228350). Asymmetric per entry AND per layer, so
+            // a swap between the two layers or between the two entries cannot pass.
+            int[][] optionCounts = new int[][]
+            {
+                new int[] { 4, 2 },
+                new int[] { 0, 1 },
+            };
+            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, optionCounts, 2), reliable: false);
             // One scratch array PER ENTRY. TryDecodeHudState writes the levels of whichever entry
             // it was asked for, so a shared buffer makes every later assertion depend on decode
             // ORDER -- which is the exact latent defect this commit fixes in NetComboTest. Cheap
             // here, so it is simply avoided rather than commented around.
             int[] outLevels = new int[NetProtocol.HudLevelCount];
             int[] outLevels1 = new int[NetProtocol.HudLevelCount];
+            int[] outOptions = new int[NetProtocol.HudOptionLayers];
+            int[] outOptions1 = new int[NetProtocol.HudOptionLayers];
             bool hudOk = hud != null
                 && NetProtocol.TryDecodeHudCount(hud, out int hudCount) && hudCount == 2
-                && NetProtocol.TryDecodeHudState(hud, 0, outLevels, out byte hslot, out int hcombo,
+                && NetProtocol.TryDecodeHudState(hud, 0, outLevels, outOptions, out byte hslot, out int hcombo,
                     out EvilAliens.Powerup.PowerupType? hactive, out float hprog)
                 && hslot == 1 && hcombo == 400 && hactive.HasValue && (byte)hactive.Value == 2
                 && Near(hprog, 0f)
                 && outLevels[0] == 1 && outLevels[1] == 2 && outLevels[2] == 3 && outLevels[3] == 4
-                && outLevels[4] == 0;
-            check("MsgHudState round-trips entry 0 (combo > 255 survives)", hudOk);
+                && outLevels[4] == 0
+                && outOptions[0] == 4 && outOptions[1] == 2;
+            check("MsgHudState round-trips entry 0 (combo > 255 and the per-layer option counts survive)", hudOk);
             bool hud1Ok = hud != null
-                && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, out byte h1slot, out int h1combo,
+                && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, outOptions1, out byte h1slot, out int h1combo,
                     out EvilAliens.Powerup.PowerupType? h1active, out float h1prog)
-                && h1slot == 2 && h1combo == 3 && !h1active.HasValue && Near(h1prog, 1f);
+                && h1slot == 2 && h1combo == 3 && !h1active.HasValue && Near(h1prog, 1f)
+                && outOptions1[0] == 0 && outOptions1[1] == 1;
             check("MsgHudState entry 1 decodes, and HudPowerupNone reads as no powerup", hud1Ok);
 
             // The handshake, both spellings. isHost is what tells the two roles apart and the

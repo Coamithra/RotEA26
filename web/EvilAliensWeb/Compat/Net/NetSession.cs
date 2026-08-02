@@ -95,7 +95,11 @@ namespace EvilAliensWeb.Compat.Net
         // so both worlds scale together instead of one crawling while the other runs. A v14 peer
         // ignores the unknown event and falls back to the pre-card unilateral slowdown, so like
         // v14 this is the batch convention rather than a forced incompatibility.
-        public const byte ProtocolVersion = 15;
+        // v16 (card c5228350): MsgHudState's per-slot entry carries the owner's OPTION SHIP
+        // POPULATION, per orbit layer (HudSlotBytes 10 -> 12). The entries are FIXED WIDTH, so
+        // this MOVED AN EXISTING LAYOUT like v13 -- a v15 peer would mis-parse every entry after
+        // the first, which is a garbage HUD rather than a missing field. Not a courtesy bump.
+        public const byte ProtocolVersion = 16;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -291,15 +295,17 @@ namespace EvilAliensWeb.Compat.Net
         private static readonly int[] hudTxCombos = new int[NetProtocol.MaxSlots];
         private static readonly byte[] hudTxTypes = new byte[NetProtocol.MaxSlots];
         private static readonly float[] hudTxProgress = new float[NetProtocol.MaxSlots];
-        private static readonly int[][] hudTxLevels = CreateHudLevelScratch();
+        private static readonly int[][] hudTxLevels = CreateHudScratch(NetProtocol.HudLevelCount);
+        private static readonly int[][] hudTxOptions = CreateHudScratch(NetProtocol.HudOptionLayers);
         private static readonly int[] hudRxLevels = new int[NetProtocol.HudLevelCount];
+        private static readonly int[] hudRxOptions = new int[NetProtocol.HudOptionLayers];
 
-        private static int[][] CreateHudLevelScratch()
+        private static int[][] CreateHudScratch(int width)
         {
             int[][] rows = new int[NetProtocol.MaxSlots][];
             for (int i = 0; i < rows.Length; i++)
             {
-                rows[i] = new int[NetProtocol.HudLevelCount];
+                rows[i] = new int[width];
             }
             return rows;
         }
@@ -1009,13 +1015,25 @@ namespace EvilAliensWeb.Compat.Net
                 // receiver folds it back into the same null (NetProtocol.TryDecodeHudState).
                 hudTxTypes[count] = activeType.HasValue ? (byte)activeType.Value : NetProtocol.HudPowerupNone;
                 hudTxProgress[count] = progress;
+                // The Option population is SHIP state, unlike everything else in this entry, which
+                // is roster state that outlives a death (card c5228350). With no ship we report
+                // 0/0, which is indistinguishable from a live ship flying none -- and that is
+                // correct either way, since an Option dies with its owner
+                // (Option.OnComponentRemoved). The cost is that a dead owner's 0/0 can reach the
+                // observer before the puppet's own death does, so the orbit blinks out up to one
+                // interpolation delay early.
+                PlayerShip owner = FindShipForSlot(slot);
+                for (int layer = 0; layer < NetProtocol.HudOptionLayers; layer++)
+                {
+                    hudTxOptions[count][layer] = owner != null ? owner.NetOptionLayerCount(layer) : 0;
+                }
                 count++;
             }
             if (count == 0)
             {
                 return;
             }
-            transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxTypes, hudTxProgress, hudTxLevels, count));
+            transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxTypes, hudTxProgress, hudTxLevels, hudTxOptions, count));
             // Counted in ENTRIES, matching HudRx -- a peer with a couch partner puts two slots in
             // one packet, so counting packets here would make the two sides incomparable.
             metrics.HudTx += count;
@@ -1029,7 +1047,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             for (int i = 0; i < count; i++)
             {
-                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress))
+                if (!NetProtocol.TryDecodeHudState(data, i, hudRxLevels, hudRxOptions, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress))
                 {
                     continue;
                 }
@@ -1042,6 +1060,13 @@ namespace EvilAliensWeb.Compat.Net
                     continue;
                 }
                 score.NetSetHudState(slot, combo, activeType, progress, hudRxLevels);
+                // AFTER the HUD state, never before: its level loop drives the real
+                // PlayerShip.PowerUp one step at a time, which spawns the level-driven options
+                // itself. Reconciling first would leave those extras standing until the next
+                // packet. The owner's count is authoritative over the whole population, so this
+                // both catches up a join-in-progress peer (which replays no EvClaim, so it never
+                // saw the per-pickup options at all) and drops any this peer is over.
+                FindShipForSlot(slot)?.NetSetOptionCounts(hudRxOptions);
                 metrics.HudRx++;
             }
         }

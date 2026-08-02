@@ -350,6 +350,19 @@ namespace EvilAliensWeb.Compat
 			RipplePhase = phase;
 		}
 
+		// ?respawnphase=<0..1>: park the respawn clock ring at that point in its fill and hold
+		// it there (card 37f3a663) -- the ?ripplephase= convention, negative meaning live. The
+		// real ring takes ~10 s to fill and pops in the last 220 ms, so no timed screenshot can
+		// catch a chosen phase; this is what makes the look verifiable. Applies to the sprite
+		// harness (?harness=respawn) and to a live co-op respawn alike.
+		public static float? RespawnPhase { get; private set; }
+
+		// Park/un-park it from the console (eaRespawn.park(phase) / DebugInput.RespawnPark).
+		internal static void SetRespawnPhaseOverride(float? phase)
+		{
+			RespawnPhase = phase;
+		}
+
 		// ?brainoverlayphase=<0..1>: park EVERY BrainBoss overlay patch at that point in its
 		// ping-pong cycle and hold it there (card 9f90978c). The eye rests on frame 0 -- the
 		// untouched crop, i.e. closed -- and only opens on a ~15 s random roll, so without this
@@ -1738,6 +1751,18 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number 0..1, or negative for live",
 							InForce(RipplePhase));
+					}
+					break;
+				case "respawnphase":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var respp))
+					{
+						// Negative = live, exactly as ?ripplephase= above.
+						RespawnPhase = (respp < 0f) ? (float?)null : (respp > 1f) ? 1f : respp;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number 0..1, or negative for live",
+							InForce(RespawnPhase));
 					}
 					break;
 				case "ripplepower":

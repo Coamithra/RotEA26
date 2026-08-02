@@ -445,26 +445,37 @@ namespace EvilAliensWeb.Compat.Net
                 new int[] { 1, 2, 3, 4, 0 },
                 new int[] { 0, 0, 0, 0, 0 },
             };
-            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, 2), reliable: false);
+            // Per-layer Option counts (v16, card c5228350). Asymmetric per entry AND per layer, so
+            // a swap between the two layers or between the two entries cannot pass.
+            int[][] optionCounts = new int[][]
+            {
+                new int[] { 4, 2 },
+                new int[] { 0, 1 },
+            };
+            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, optionCounts, 2), reliable: false);
             // One scratch array PER ENTRY. TryDecodeHudState writes the levels of whichever entry
             // it was asked for, so a shared buffer makes every later assertion depend on decode
             // ORDER -- which is the exact latent defect this commit fixes in NetComboTest. Cheap
             // here, so it is simply avoided rather than commented around.
             int[] outLevels = new int[NetProtocol.HudLevelCount];
             int[] outLevels1 = new int[NetProtocol.HudLevelCount];
+            int[] outOptions = new int[NetProtocol.HudOptionLayers];
+            int[] outOptions1 = new int[NetProtocol.HudOptionLayers];
             bool hudOk = hud != null
                 && NetProtocol.TryDecodeHudCount(hud, out int hudCount) && hudCount == 2
-                && NetProtocol.TryDecodeHudState(hud, 0, outLevels, out byte hslot, out int hcombo,
+                && NetProtocol.TryDecodeHudState(hud, 0, outLevels, outOptions, out byte hslot, out int hcombo,
                     out EvilAliens.Powerup.PowerupType? hactive, out float hprog)
                 && hslot == 1 && hcombo == 400 && hactive.HasValue && (byte)hactive.Value == 2
                 && Near(hprog, 0f)
                 && outLevels[0] == 1 && outLevels[1] == 2 && outLevels[2] == 3 && outLevels[3] == 4
-                && outLevels[4] == 0;
-            check("MsgHudState round-trips entry 0 (combo > 255 survives)", hudOk);
+                && outLevels[4] == 0
+                && outOptions[0] == 4 && outOptions[1] == 2;
+            check("MsgHudState round-trips entry 0 (combo > 255 and the per-layer option counts survive)", hudOk);
             bool hud1Ok = hud != null
-                && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, out byte h1slot, out int h1combo,
+                && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, outOptions1, out byte h1slot, out int h1combo,
                     out EvilAliens.Powerup.PowerupType? h1active, out float h1prog)
-                && h1slot == 2 && h1combo == 3 && !h1active.HasValue && Near(h1prog, 1f);
+                && h1slot == 2 && h1combo == 3 && !h1active.HasValue && Near(h1prog, 1f)
+                && outOptions1[0] == 0 && outOptions1[1] == 1;
             check("MsgHudState entry 1 decodes, and HudPowerupNone reads as no powerup", hud1Ok);
 
             // The handshake, both spellings. isHost is what tells the two roles apart and the
@@ -673,6 +684,15 @@ namespace EvilAliensWeb.Compat.Net
             byte[] blast = Round(NetProtocol.EncodeBlastEvent(18, 1, new Vector2(9f, 9f), 2), reliable: true);
             check("EvBlast envelope", blast != null
                 && blast[0] == NetProtocol.MsgEvent && blast[1] == NetProtocol.EvBlast && blast[2] == 18);
+            // EvRespawn (card 37f3a663) DOES have a Try* decoder, so it is round-tripped by
+            // VALUE rather than by envelope. Slot, position and duration are driven to three
+            // distinct values so a pair of swapped offsets cannot pass.
+            byte[] respawn = Round(NetProtocol.EncodeRespawnEvent(21, 3, new Vector2(123f, 456f), 9500), reliable: true);
+            check("EvRespawn round-trips slot/pos/duration", respawn != null
+                && respawn[0] == NetProtocol.MsgEvent && respawn[1] == NetProtocol.EvRespawn
+                && NetProtocol.TryDecodeRespawnEvent(respawn, out byte rsSlot, out Vector2 rsPos,
+                    out int rsMs)
+                && rsSlot == 3 && rsPos.X == 123f && rsPos.Y == 456f && rsMs == 9500);
             byte[] pause = Round(NetProtocol.EncodeByteEvent(19, NetProtocol.EvPause, 1), reliable: true);
             check("a byte event envelope carries its value", pause != null
                 && pause.Length == 5 && pause[1] == NetProtocol.EvPause && pause[4] == 1);
@@ -697,6 +717,8 @@ namespace EvilAliensWeb.Compat.Net
                 !NetProtocol.TryDecodeBackgroundEvent(Truncate(bg), out _, out _));
             check("a truncated EvCosmeticSwarm is refused",
                 !NetProtocol.TryDecodeCosmeticSwarmEvent(Truncate(swarm), out _, out _, out _));
+            check("a truncated EvRespawn is refused",
+                !NetProtocol.TryDecodeRespawnEvent(Truncate(respawn), out _, out _, out _));
             // TWICE, and that is not a typo: since the short flag was appended, dropping ONE byte
             // off a banner produces a legal older-peer frame (asserted three lines up), so a
             // single Truncate here would assert the OPPOSITE of the compatibility leg and fail.

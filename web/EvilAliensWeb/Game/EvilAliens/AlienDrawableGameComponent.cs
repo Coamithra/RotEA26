@@ -876,6 +876,26 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// the default. When in doubt, override to false: the cost is only the pre-existing behaviour.
 	internal virtual bool NetFrameLocal => true;
 
+	// Does this type DERIVE its own `scale` from data both peers already have? Default FALSE (the
+	// snapshot's Scale field wins, as it always has); a true answer opts the puppet out of
+	// REPLICATED scale, so NetPuppets keeps whatever the puppet's own Setup computed and never
+	// applies the wire's copy. The NetFrameLocal idiom one field over (cards 4392bd30 / 80749dc4).
+	//
+	// WHY IT IS NOT FREE TO REPLICATE IT. NetBaseState.Scale rides the wire as a u16 at 1/256, and
+	// the cast TRUNCATES -- so the error is up to 1/256 in ABSOLUTE terms whatever the value. That
+	// is ~0.2% for a sprite drawn near scale 1 (invisible) and catastrophic for a type whose scale
+	// is small: Wall.Setup computes 800 / (1248 * gridWidth), i.e. 0.0534 for the 12-wide Level-3
+	// grid, which quantizes to 13/256 = 0.0508 -- a 4.9% error. Wall sizes every block as
+	// LogicalWidth * scale, so the joiner drew 63.4px rows where the host drew 66.7px, and over a
+	// 122-row grid that is ~400px of accumulated divergence: two peers looking at different parts
+	// of the same wall (card 4392bd30's screenshot).
+	//
+	// OVERRIDE TO TRUE only where the client can compute the EXACT same number the host did, from
+	// something already replicated -- for Wall that is the grid variation, which rides the spawn
+	// extras. A type whose scale is rolled at random, tweened, or driven by host-side state must
+	// keep taking the replicated value, or the two peers simply draw it at different sizes.
+	internal virtual bool NetScaleLocal => false;
+
 	// INSTANCE-level opt-out from replication (card 9a3175d0): this particular instance is pure
 	// scenery, so it gets no NetId, no EvSpawn/EvDeath and no share of the world-snapshot round
 	// robin. The SPAWNER is replicated instead (NetCosmeticKind, one "effect on/off" beat) and
@@ -990,6 +1010,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	float EvilAliensWeb.Compat.Net.INetEntity.NetSpinPerMs => NetSpinPerMs;
 
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetFrameLocal => NetFrameLocal;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetScaleLocal => NetScaleLocal;
 
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetCosmeticOnly => NetCosmeticOnly;
 

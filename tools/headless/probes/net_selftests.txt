@@ -69,6 +69,7 @@ eval TeamSeat
 eval NetSimTest 150 20 60 200
 eval NetScenarios
 eval NetFx
+eval NetRespawn
 eval NetTeleport
 eval HostMenuTest
 eval HostMenuLive
@@ -101,7 +102,7 @@ eval HostMenuLive
 # Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
 # game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
 # slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
-expect \[netwire\] 91 passed, 0 failed
+expect \[netwire\] 93 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -111,7 +112,7 @@ expect \[nethost\] 33 passed, 0 failed
 # the wrong member of the same type (two floats swap silently), and a subtype that stops answering
 # the NetKillable / NetPickup discriminant, which turns every remote powerup pickup into an
 # explosion. Not a logic_probe case set, unlike eaNetHost: constructing an entity needs a Game.
-expect \[netentity\] PASS \(43 passed, 0 failed\)
+expect \[netentity\] PASS \(47 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
@@ -129,8 +130,11 @@ expect \[kicktest\] PASS \(29/29 checks\)
 # extras byte off a stranger's wire that no descriptor can build would otherwise delete a working
 # puppet and MarkRemove its id.
 expect \[netsnap\] PASS \(40 passed, 0 failed\)
-# per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a)
-expect -> ALL PASS \(36 passed, 0 failed\)
+# per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a), plus the
+# per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
+# clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can
+# never reach the decoder's guard.
+expect -> ALL PASS \(40 passed, 0 failed\)
 # the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)
 expect \[netscore\] PASS \(5/5\)
 expect \[netscore\] wire PASS \(9/9\)
@@ -171,6 +175,16 @@ expect \[netscen\] 80 passed, 0 failed
 # the ordering that split depends on: ApplyStateExtra only RECORDS, and the puppet DRIVER is what
 # builds and frees the child.
 expect \[netfx\] 24 passed, 0 failed
+# The co-op respawn indicator (card 37f3a663). The peer used to see NOTHING for the ten seconds
+# its buddy was waiting to come back -- ExplodePuppet takes the puppet out WITHOUT Die(), so no
+# summon was ever raised for it. Three sections, and the third is the one that would be
+# catastrophic and silent: a COSMETIC summon that spawned a PlayerShip would give the peer's
+# player a second body on this screen for the rest of the match, and every other assertion here
+# would still be green. Section 1 drives the REAL death path (two planted ships, one Asplode'd)
+# rather than calling the sender, so the chain OnDeath -> ShouldSummon -> OnLocalRespawnSummon is
+# what is asserted; its negative is a PUPPET dying, which must raise nothing and announce nothing
+# back. Menu-runnable and leave-no-trace, the eaNetScenarios shape.
+expect \[netrespawn\] 25 passed, 0 failed
 # The teleport marker (card e79bb994), which REPLACED card 8dabe812's observed-velocity cap.
 # Two halves, each with the identical jump left UNMARKED beside it: section 1 runs a real HOST
 # session and reads the snapshot frames the peer RECEIVED (the wire is the only place the host's

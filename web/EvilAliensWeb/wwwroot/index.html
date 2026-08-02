@@ -698,6 +698,10 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLocalFx')); }
             catch (e) { console.warn('[debug] eaNetLocalFx failed (game not booted yet?): ' + e.message); }
         };
+        window.eaNetRespawn = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRespawn')); }
+            catch (e) { console.warn('[debug] eaNetRespawn failed (game not booted yet?): ' + e.message); }
+        };
         window.eaNetScenarios = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScenarios')); }
             catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }
@@ -795,6 +799,16 @@
         window.eaNetMotion = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetMotionTest')); }
             catch (e) { console.warn('[debug] eaNetMotion failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the Level-3 wall's replication (cards 4392bd30 / 80749dc4). The wire's lossy
+        // u16-at-1/256 scale, the derived-scale opt-out that refuses it, the drawn-block ==
+        // collision-tile invariant that lossy scale broke (why the joiner hit walls before
+        // touching them), and the anchored scroll speed. MENU-only, leave-no-trace. A screenshot
+        // cannot see any of it -- the wall looks ordinary on each screen taken alone.
+        window.eaNetWalls = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetWallTest')); }
+            catch (e) { console.warn('[debug] eaNetWalls failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
@@ -941,6 +955,13 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
             catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
         };
+        // eaKillShip(slot) — asplode ONE locally-owned ship. eaKillShips() takes them all in the
+        // same tick, which is the case where the respawn summon is correctly suppressed; this is
+        // how you reach the co-op case where one player dies and the other flies on.
+        window.eaKillShip = (slot) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShip', Number(slot) | 0)); }
+            catch (e) { console.warn('[debug] eaKillShip failed (game not booted yet?): ' + e.message); }
+        };
 
         // Debug: live flying-spider population + the group-flatten settings in force (card
         // 9c92962e). The flatten costs per BACKGROUND spider, so a frame-time figure without
@@ -1073,6 +1094,26 @@
         window.eaRipple.state = () => {
             try { DotNet.invokeMethod('EvilAliensWeb', 'debugRippleState'); }
             catch (e) { console.warn('[debug] eaRipple.state failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the respawn clock ring (card 37f3a663).
+        //   eaRespawn.park(phase) — park the ring at 0..1 of its fill for a screenshot; pass
+        //                           nothing (or a negative) to let it run again.
+        //   eaRespawn.state()     — print every live summon's fill/pulse/pop as data. The pulse
+        //                           moves, so a screenshot pair cannot verify it (an identical
+        //                           frame also passes on a build that stopped drawing the ring).
+        window.eaRespawn = {
+            park: (phase) => {
+                try {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnPark',
+                        phase === undefined || phase === null || isNaN(Number(phase)) ? -1 : Number(phase));
+                }
+                catch (e) { console.warn('[debug] eaRespawn.park failed (game not booted yet?): ' + e.message); }
+            },
+            state: () => {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnState'); }
+                catch (e) { console.warn('[debug] eaRespawn.state failed (game not booted yet?): ' + e.message); }
+            }
         };
 
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives

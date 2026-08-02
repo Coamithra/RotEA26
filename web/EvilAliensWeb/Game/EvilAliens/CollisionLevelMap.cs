@@ -9,12 +9,27 @@ public class CollisionLevelMap : ICollisionType
 
 	private Vector2 offset;
 
+	// Design-space size of one tile, SUPPLIED BY THE OWNER rather than re-derived here.
+	//
+	// It used to be the literal 800/width, which equals Wall's own drawn block size
+	// (texture.LogicalWidth() * scale) ONLY because Wall.Setup computes scale as
+	// 800/(LogicalWidth*width) -- an agreement by coincidence of two formulas in different files,
+	// with nothing tying them together. Online co-op broke exactly that coincidence: a puppet's
+	// `scale` came off the wire as a truncated u16 at 1/256 (up to 4.9% out for a Level-3 wall),
+	// so the joiner DREW 63.4px rows while this grid still COLLIDED on 66.7px ones -- the
+	// collision rows reaching progressively further down than the towers, which is why the joiner
+	// hit walls before touching them and its bullets vanished short of them (cards 4392bd30 /
+	// 80749dc4). The scale bug itself is fixed at the source (Wall.NetScaleLocal); taking the size
+	// from the owner is what makes the two able to disagree again a compile error rather than a
+	// silent divergence.
+	private float tileSize;
+
 	public int Width => map.GetLength(1);
 
 	// Design-space width of one tile. GetMapCoords divides by this, so anything reasoning about
 	// the grid in world units (the AI's wall navigation) needs the same number rather than a
-	// second copy of the 800/width formula.
-	public float TileSize => 800f / (float)map.GetLength(1);
+	// second copy of the owner's formula.
+	public float TileSize => tileSize;
 
 	// World X of column `x`'s centre -- the inverse of GetMapCoords' X mapping. The grid's
 	// `offset` scrolls and is private, so a caller that wants to FLY to a column (rather than
@@ -50,20 +65,26 @@ public class CollisionLevelMap : ICollisionType
 	public void GetMapCoords(ref int x, ref int y, Vector2 position)
 	{
 		position -= offset;
-		float num = 800f / (float)map.GetLength(1);
+		float num = tileSize;
 		x = (int)Math.Floor(position.X / num);
 		y = (int)Math.Floor(position.Y / num);
 	}
 
-	public CollisionLevelMap(Vector2 offset, bool[,] map)
+	public CollisionLevelMap(Vector2 offset, bool[,] map, float tileSize)
 	{
 		this.map = map;
 		this.offset = offset;
+		this.tileSize = tileSize;
 	}
 
 	public void SetOffset(Vector2 offset)
 	{
 		this.offset = offset;
+	}
+
+	public void SetTileSize(float tileSize)
+	{
+		this.tileSize = tileSize;
 	}
 
 	public void SetMap(bool[,] map)

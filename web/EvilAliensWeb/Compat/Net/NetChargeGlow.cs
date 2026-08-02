@@ -16,7 +16,8 @@ namespace EvilAliensWeb.Compat.Net
     // re-creates a local, silent LazerGenerator that self-animates.
     //
     // The child is stored in the emitter's OWN generator field (SweepUFO.g / MarsBoss.lazerGenerator
-    // / SpiderHelperMothership.windup), so the emitter's existing hand-draw + its OnComponentRemoved
+    // / SpiderHelperMothership.windup / UFO.lazerGenerator / JunkBoss.suckeffect), so the emitter's
+    // existing hand-draw + its OnComponentRemoved
     // Free() both already cover it -- no Draw/removal edits. On the host this field holds the real
     // generator and Drive is never called (the puppet driver is client-only); the two never overlap.
     internal static class NetChargeGlow
@@ -32,10 +33,15 @@ namespace EvilAliensWeb.Compat.Net
                 if (child == null)
                 {
                     child = LazerGenerator.NewLazerGenerator(collection, game);
-                    // Setup clears the silent flag, so SetupSilent MUST follow it: a puppet must never
-                    // play the "lazercharge" cue (it is not the local shooter).
                     child.Setup(emitterPos + offset, size, 1f, 0f, 0f);
-                    child.SetupSilent();
+                    // AUDIBLE, and it used to be SetupSilent() -- reversed by cards 57ea30cd /
+                    // c146422f. The old reasoning ("a puppet is not the local shooter") is the
+                    // right rule for a remote PLAYER's private business, which is why a remote
+                    // powerup pickup is silent (card d53431b4). An ENEMY windup is the opposite
+                    // kind of thing: it is a world event both players are dodging, and the whole
+                    // point of a telegraph is that you hear it coming. Muting it on the join peer
+                    // was a gameplay disadvantage, not politeness. The looped "lazercharge" cue
+                    // stops with the child on Free(), same as the host's.
                     child.SetWindup(windupSeconds, loop: false); // ramp fills the replicated windup exactly
                     collection.Add((GameComponent)(object)child);
                 }

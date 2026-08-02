@@ -1416,6 +1416,7 @@ internal static class Program
             ("TryMessageType",  "EvilAliens.AnimatedMessage+MessageType"),
             ("TrySpeech",       "EvilAliens.SoundManager+Texts"),
             ("TryBackgroundOp", "EvilAliensWeb.Compat.Net.NetBackgroundOp"),
+            ("TryFxKind",       "EvilAliensWeb.Compat.Net.NetFxKind"),
         };
 
         MethodInfo launchEnc = proto.GetMethod("EncodeLaunchEvent", anyStatic);
@@ -1574,12 +1575,13 @@ internal static class Program
         // banner STYLE still renders readable text. So this one must SUCCEED.
         Func<byte[], ValueTuple<bool, object, object>> decodeMsg = frame =>
         {
-            object[] a = { frame, null, null, null, null };
+            // Six outs since the transient-feedback cards: the trailing `short` flag.
+            object[] a = { frame, null, null, null, null, null };
             bool ok = (bool)msgDec.Invoke(null, a);
             return new ValueTuple<bool, object, object>(ok, a[1], a[2]);
         };
         ValueTuple<bool, object, object> badStyle =
-            decodeMsg((byte[])msgEnc.Invoke(null, new object[] { (ushort)7, (byte)200, (byte)200, 0f, "hello" }));
+            decodeMsg((byte[])msgEnc.Invoke(null, new object[] { (ushort)7, (byte)200, (byte)200, 0f, "hello", false }));
         Check("EvMessage: an out-of-enum style is CLAMPED, not refused",
             badStyle.Item1 && Equals(badStyle.Item2, Enum.Parse(msgTypeEnum, "starwarsblue")),
             badStyle.Item1 ? badStyle.Item2.ToString() : "REFUSED");
@@ -1587,7 +1589,7 @@ internal static class Program
             badStyle.Item1 && Convert.ToInt32(badStyle.Item3) == 0, null);
         // ... and a VALID style is not clamped away, or the row above would pass vacuously.
         ValueTuple<bool, object, object> goodStyle = decodeMsg((byte[])msgEnc.Invoke(null, new object[]
-            { (ushort)8, Convert.ToByte(Enum.Parse(msgTypeEnum, "redwarning")), (byte)1, 0f, "hello" }));
+            { (ushort)8, Convert.ToByte(Enum.Parse(msgTypeEnum, "redwarning")), (byte)1, 0f, "hello", false }));
         Check("EvMessage: a valid style survives the clamp untouched",
             goodStyle.Item1 && Equals(goodStyle.Item2, Enum.Parse(msgTypeEnum, "redwarning")),
             goodStyle.Item1 ? goodStyle.Item2.ToString() : "REFUSED");

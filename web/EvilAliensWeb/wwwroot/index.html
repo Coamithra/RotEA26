@@ -619,6 +619,10 @@
         // contract driven end to end over an in-process wire, plus the id-churn self-heal and
         // its pupPops probe. Prints PASS/FAIL. Run from the MAIN MENU: it starts and stops real
         // sessions and plants real entities, so it skips itself over a live session or level.
+        window.eaNetFx = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetFx')); }
+            catch (e) { console.warn('[debug] eaNetFx failed (game not booted yet?): ' + e.message); }
+        };
         window.eaNetScenarios = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScenarios')); }
             catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }

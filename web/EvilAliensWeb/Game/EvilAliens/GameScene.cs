@@ -515,6 +515,13 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	private readonly System.Collections.Generic.List<NetCosmeticEntry> netCosmeticSwarms
 		= new System.Collections.Generic.List<NetCosmeticEntry>();
 
+	// CLIENT ONLY: the live looping cue for NetCosmeticKind.BeesLoop (card 8d063d33). Some
+	// decorative effects are a SOUND rather than a spawner -- Level 2's bees ambience is started
+	// and stopped by two host-only script events wrapped around the fog swarm -- so this kind's
+	// "our own copy of the effect" is an instance rather than a GameEvent, and its entry carries a
+	// null Spawner exactly like a host latch does. Never non-null on a host.
+	private Microsoft.Xna.Framework.Audio.SoundEffectInstance netCosmeticLoop;
+
 	// A rate off the wire drives GenericSpawner's `while (num >= 1f) DoEvent()` loop, so a
 	// non-finite one wedges the tick outright and a merely huge one spawns its whole backlog in
 	// a single frame -- and a publicly listed game has a stranger on the other end
@@ -604,6 +611,16 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		// number -- storing the raw rate and clamping only what reaches the spawner would make
 		// eaNetBg()'s two-window diff lie about what is actually running.
 		rate = MathHelper.Min(rate, NetCosmeticMaxRate);
+		// A LOOPING CUE rather than a spawner (card 8d063d33). It still takes an entry, so it is
+		// caught up, cleared at a checkpoint revert and printed in eaNetBg()'s state line exactly
+		// like the swarms it belongs to; `Rate` is meaningless for it (the emitter sends 1 so the
+		// shared "rate <= 0 means off" guard above needs no special case).
+		if (kind == EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop)
+		{
+			netCosmeticLoop = SoundManager.Play("bees");
+			netCosmeticSwarms.Add(new NetCosmeticEntry { Kind = kind, Rate = rate });
+			return;
+		}
 		GameEvent spawner = NetBuildCosmeticSpawner(kind, rate);
 		if (spawner != null)
 		{
@@ -657,6 +674,22 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 				netCosmeticSwarms.RemoveAt(i);
 			}
 		}
+		if (kind == EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop)
+		{
+			NetStopCosmeticLoop();
+		}
+	}
+
+	// A looping cue outlives the entry that describes it, so EVERY path that drops an entry has to
+	// come through here -- an "off" beat, a checkpoint revert, and the scene going down. A leaked
+	// loop is the worst failure this feature has: it is the only one that survives the level.
+	private void NetStopCosmeticLoop()
+	{
+		if (netCosmeticLoop != null)
+		{
+			SoundManager.Stop(netCosmeticLoop);
+			netCosmeticLoop = null;
+		}
 	}
 
 	// Both peers, at the checkpoint revert: the host's eventList drops its active events without
@@ -667,6 +700,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	private void NetClearCosmeticSwarms()
 	{
 		netCosmeticSwarms.Clear();
+		NetStopCosmeticLoop();
 	}
 
 	// Host: replay the swarms our script already started, for a peer that just came up (EvReady).
@@ -741,6 +775,31 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			&& NetCosmeticSpawnerRate(netCosmeticSwarms[0].Spawner) == 5.5f,
 			"a shipped rate reaches the spawner unclamped (positive control)");
 
+		// A LOOPING CUE kind (card 8d063d33). Its "our own copy of the effect" is a sound
+		// instance, not a spawner, so it is the one kind whose entry legitimately carries a null
+		// Spawner on a CLIENT -- and the thing that can go wrong is the opposite of the swarms':
+		// not scenery that fails to appear, but a loop that fails to STOP and outlives the level.
+		// So the "off" leg here is the one that matters, and it reads the live instance rather
+		// than the entry (an entry can be dropped while the sound plays on forever, which is
+		// precisely the leak).
+		netCosmeticSwarms.Clear();
+		NetStopCosmeticLoop();
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop, on: true, 1f);
+		Check(netCosmeticSwarms.Count == 1 && netCosmeticLoop != null,
+			"an 'on' beat for a looping-cue kind starts the cue");
+		Check(netCosmeticSwarms.Count == 1 && netCosmeticSwarms[0].Spawner == null,
+			"...with no spawner -- it is a sound, not scenery");
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop, on: false, 0f);
+		Check(netCosmeticSwarms.Count == 0 && netCosmeticLoop == null,
+			"an 'off' beat STOPS the cue, not just the entry");
+		// ...and so does a checkpoint revert, which drops every entry without an "off" ever being
+		// sent (the host's eventList discards active events rather than terminating them).
+		NetApplyCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop, on: true, 1f);
+		Check(netCosmeticLoop != null, "the cue is running again (the revert leg's precondition)");
+		NetClearCosmeticSwarms();
+		Check(netCosmeticSwarms.Count == 0 && netCosmeticLoop == null,
+			"a checkpoint revert stops the cue too");
+
 		// The HOST latch's refcount. Its failure mode is the nastiest one here -- an "off" from
 		// the first of two overlapping spawners, killing the joiner's scenery while the host's
 		// own screen stays full -- and it is unreachable from any shipped level script, so it can
@@ -762,6 +821,9 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			"an 'off' with nothing latched sends nothing");
 
 		netCosmeticSwarms.Clear();
+		// Leave no cue running: the legs above start the bees twice, and the entries this puts
+		// back describe the live scenery, never a sound this suite began.
+		NetStopCosmeticLoop();
 		netCosmeticSwarms.AddRange(saved);
 	}
 

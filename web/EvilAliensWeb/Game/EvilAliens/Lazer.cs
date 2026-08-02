@@ -102,6 +102,15 @@ internal class Lazer : AlienDrawableGameComponent
 		if (playSound)
 		{
 			sound.PlayCue("lazershotnoloop");
+			// Online co-op (card c146422f, "the junkboss' laser makes no sound for p2"): the beam
+			// replicates as its own puppet, but LazerDescriptor builds it with playSound:false --
+			// a puppet is not the shooter. That is right for the CONSTRUCTION and wrong for the
+			// event, so the report rides its own beat, emitted HERE at the host's real firing
+			// moment. Not off the beam's EvSpawn: NetIdRegistry.ReplayLive re-sends EvSpawn for
+			// the whole live set when a peer joins in progress, and the puppet layer cannot tell
+			// that from a fresh spawn -- the joiner would be met by every live beam at once.
+			EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+				EvilAliensWeb.Compat.Net.NetFxKind.EnemyLazerFire, null, position);
 		}
 		smallshottimer.Reset();
 		smallshottimer.Start();

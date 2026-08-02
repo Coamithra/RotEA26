@@ -20,16 +20,21 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //     curframe (driver-advanced at the sheet's 12fps) animates within whichever sheet is loaded.
     //   * `color` reddens with HP (Colorize=true; initial HP 150, NOT difficulty-scaled) -> carried
     //     by the base Hp field + KillableAlien.NetApplyHp, which recomputes the redden identically.
+    //   * The `suckeffect` swirl (a second child LazerGenerator, hand-drawn like the eye) appears
+    //     one sucktimer INTO the attract state and is what the asteroids are visibly being pulled
+    //     by -- so it is not derivable from the eye flag and gets its own bit (card c146422f).
     // Spawn extras: none. (Setup(isbase) only gates Update-side ball summoning / danger message /
     //   Presence -- pure behaviour, invisible on a frozen puppet; the puppet is always the non-base
-    //   variant.) State extras: [flags:1]  (bit0 = eye showing the attract sheet).
-    // Best-effort divergences: the `suckeffect` suck-in swarm and the ~3px sine `ydrawingoffset` bob
-    //   are Update-spawned/Update-computed and absent on the puppet (the eye still shows the attract
-    //   spin, the main tell). Its multi-explosion `asplode` death sequence does not play -- an
+    //   variant.) State extras: [flags:1]  (bit0 = eye showing the attract sheet, bit1 = the suck
+    //   swarm is live) + the 7-byte NetChargeWire block while it is. No wire-width change and no
+    //   protocol bump -- the flags byte already existed and an older peer ignores bit1.
+    // Best-effort divergences: the ~3px sine `ydrawingoffset` bob is Update-computed and absent on
+    //   the puppet. Its multi-explosion `asplode` death sequence does not play -- an
     //   attributed remote death removes the puppet immediately (NetPuppets.OnRemoteDeath).
     internal sealed class JunkBossDescriptor : NetTypeDescriptor<JunkBoss>
     {
         private const byte FlagAttract = 1;
+        private const byte FlagCharging = 2;
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
@@ -40,12 +45,22 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
 
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
+            JunkBoss j = C(c);
             byte flags = 0;
-            if (C(c).NetEyeAttracting)
+            if (j.NetEyeAttracting)
             {
                 flags |= FlagAttract;
             }
+            bool charging = j.NetCharging;
+            if (charging)
+            {
+                flags |= FlagCharging;
+            }
             buf[off++] = flags;
+            if (charging)
+            {
+                off = NetChargeWire.Encode(buf, off, j.NetChargeOffset, j.NetChargeWindup, j.NetChargeSize);
+            }
             return off;
         }
 
@@ -55,7 +70,17 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             {
                 return;
             }
-            C(c).NetSetEyeAttract((buf[off] & FlagAttract) != 0);
+            JunkBoss j = C(c);
+            j.NetSetEyeAttract((buf[off] & FlagAttract) != 0);
+            if ((buf[off] & FlagCharging) != 0 && len >= 1 + NetChargeWire.Bytes)
+            {
+                NetChargeWire.Decode(buf, off + 1, out Vector2 chargeOffset, out float windup, out float size);
+                j.NetApplyCharge(true, chargeOffset, windup, size);
+            }
+            else
+            {
+                j.NetApplyCharge(false, Vector2.Zero, 2.5f, 4f);
+            }
         }
     }
 

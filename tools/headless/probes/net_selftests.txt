@@ -66,9 +66,16 @@ eval BinTest
 eval TeamSeat
 eval NetSimTest 150 20 60 200
 eval NetScenarios
+eval NetFx
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
-expect \[netwire\] 69 passed, 0 failed
+# Cards 43e85936 / c146422f raised this 69 -> 77: the EvFx codec (kind/netId/pos/param, its
+# entity-free netId-0 form, a truncated frame, an out-of-enum KIND refused and a known one
+# accepted as the control) plus EvMessage's optional trailing `short` flag. That flag's
+# THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
+# not-short -- which is the whole reason those cards needed no protocol version bump, so if
+# it ever goes red the bump is back on the table.
+expect \[netwire\] 77 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -123,6 +130,21 @@ expect \[teamseat\] ALL PASS -- 17 passed, 0 failed
 # still refused by the decode. The one
 # remaining `info` line is scenario 5's pupPops count, a reported measurement rather than a gap.
 expect \[netscen\] 80 passed, 0 failed
+# The transient-feedback beats (cards 43e85936 / 57ea30cd / ee939dd1 / 8d063d33 / c146422f):
+# real EvFx frames from a scripted host, over a NetWire, into a real client session --
+# asserting the EFFECT on the live puppet, not the decode (net_wire.txt covers the layout).
+# It is here rather than in a probe of its own because it is menu-runnable and leave-no-trace,
+# the eaNetScenarios shape. Its observables are private state that moves NO metric -- a 35 ms
+# hit-blink timer read only by Draw, and an Explosion entering the bin -- which is exactly why
+# the effects needed a wire beat in the first place and why nothing else in this file can see
+# them. Mutation-tested five ways: dropping the detach latch, dropping it on the chip beat,
+# a no-op KillableAlien apply (the pre-card behaviour), an rx case that decodes and discards,
+# and a puppet lookup that finds nothing -- each fails legs the others do not.
+# Section 4 covers the OTHER half of the same card group -- the charge glow, which is a STATE
+# EXTRA rather than a beat because a windup lasts seconds where a hit blink lasts 35 ms. It pins
+# the ordering that split depends on: ApplyStateExtra only RECORDS, and the puppet DRIVER is what
+# builds and frees the child.
+expect \[netfx\] 24 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

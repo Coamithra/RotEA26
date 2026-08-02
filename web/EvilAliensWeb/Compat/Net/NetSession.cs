@@ -966,6 +966,47 @@ namespace EvilAliensWeb.Compat.Net
             metrics.BeatsTx++;
         }
 
+        // A banner spawned by BOSS code rather than by a MessageEvent -- SpiderBoss's three
+        // "Danger!" sweep warnings and its helper-mothership "Warning!", JunkBoss's meteor
+        // "Danger!". Same lane as OnScriptMessage and for the same reason (the host runs the
+        // Update that spawns them and a frozen puppet never can), with the compact MakeShort
+        // layout the bosses use carried in EvMessage's optional trailing byte.
+        public static void OnGameMessage(string text, int speech, int msgType, float angle, bool isShort)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeMessageEvent(txEventSeq++, (byte)msgType, (byte)speech, angle, text, isShort));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
+        // A one-shot cosmetic beat the host observed (EvFx). `target` may be null for a purely
+        // POSITIONAL kind (EnemyLazerFire); when it is given, the beat is addressed to that
+        // entity's netId and is DROPPED if it has none -- an entity outside the replicable set
+        // has no puppet on the other screen to light up, so there is nothing to say.
+        public static void OnGameFx(NetFxKind kind, AlienDrawableGameComponent target, Vector2 pos, byte param = 0)
+        {
+            if (!IsHost || !PeerUp || NetScene.Current == null)
+            {
+                return;
+            }
+            ushort netId = 0;
+            if (target != null)
+            {
+                if (!NetIdRegistry.TryGetByComp((GameComponent)(object)target, out NetIdRegistry.Entry entry))
+                {
+                    return;
+                }
+                netId = entry.Id;
+                pos = target.Position;
+            }
+            transport.SendReliable(NetProtocol.EncodeFxEvent(txEventSeq++, (byte)kind, netId, pos, param));
+            metrics.EventsTx++;
+            metrics.BeatsTx++;
+        }
+
         public static void OnScriptUnlock(int item, int unlockType, int speech, string text)
         {
             if (!IsHost || !PeerUp)
@@ -1165,6 +1206,34 @@ namespace EvilAliensWeb.Compat.Net
         // powerup the other player picked up made a noise on this screen; a remote pickup is
         // visual-only now. Local pickups and local co-op are untouched -- both go through
         // PlayerShip.CollidesWith, which still plays it.
+        // Client: apply a one-shot cosmetic beat (EvFx). Split out of HandleEvent so a scenario
+        // can drive it directly, and kept DELIBERATELY THIN -- the per-type knowledge lives on
+        // the entity (INetEntity.NetPlayFx), so the wire never has to name a cue or a sprite.
+        //
+        // Every branch is a no-op when the beat has nothing to act on: an unknown/late netId
+        // simply has no puppet (an FX beat is never retried or queued -- it is stale by the time
+        // the entity could arrive, and a flash for a hit two seconds ago is worse than none).
+        internal static void ApplyFx(NetFxKind kind, ushort netId, Vector2 pos, byte param)
+        {
+            switch (kind)
+            {
+            case NetFxKind.EnemyHitFlash:
+            case NetFxKind.BallDetach:
+            {
+                INetEntity target = NetPuppets.FindPuppet(netId);
+                target?.NetPlayFx(kind);
+                break;
+            }
+            case NetFxKind.EnemyLazerFire:
+                // Positional and entity-free: the beam itself already replicates as its own Lazer
+                // puppet, built sound-free by LazerDescriptor; this is only its report. An ENEMY
+                // telegraph is a world event both players are dodging, unlike a remote PLAYER's
+                // own pickups and summons, which stay silent (card d53431b4).
+                sound.PlayCue("lazershotnoloop");
+                break;
+            }
+        }
+
         internal static void ApplyRemotePowerup(INetPickup powerup, byte slot)
         {
             // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
@@ -2740,7 +2809,7 @@ namespace EvilAliensWeb.Compat.Net
             case NetProtocol.EvMessage:
             {
                 if (isHost || NetScene.Current == null
-                    || !NetProtocol.TryDecodeMessageEvent(data, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text))
+                    || !NetProtocol.TryDecodeMessageEvent(data, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text, out bool isShort))
                 {
                     return;
                 }
@@ -2749,6 +2818,12 @@ namespace EvilAliensWeb.Compat.Net
                 if (msgType == AnimatedMessage.MessageType.redwarning)
                 {
                     msg.SetWarningDirection(angle);
+                }
+                // MakeShort AFTER Setup -- Setup re-seeds the layout for the type, so the compact
+                // form has to be applied on top of it (the boss call sites do the same).
+                if (isShort)
+                {
+                    msg.MakeShort();
                 }
                 // A standing Purge<AnimatedMessage> can eat this add (GameScene.UpdateWin /
                 // UpdateResetting arm one, and the rx drain runs later in the same tick), and
@@ -2822,6 +2897,19 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 NetScene.Current?.NetApplyCosmeticSwarm(kind, swarmOn, swarmRate);
+                metrics.BeatsRx++;
+                break;
+            }
+            case NetProtocol.EvFx:
+            {
+                // One-shot cosmetic feedback the host observed. Scene-gated like every world
+                // message; DRAW/AUDIO ONLY on this side (see the NetFxKind contract).
+                if (isHost || NetScene.Current == null
+                    || !NetProtocol.TryDecodeFxEvent(data, out NetFxKind fxKind, out ushort fxId, out Vector2 fxPos, out byte fxParam))
+                {
+                    return;
+                }
+                ApplyFx(fxKind, fxId, fxPos, fxParam);
                 metrics.BeatsRx++;
                 break;
             }

@@ -518,6 +518,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetScenarioTest.Run();
 		}
 
+		// JS bridge for the transient-feedback beats (eaNetFx in wwwroot/index.html; cards
+		// 43e85936 / 57ea30cd / ee939dd1 / 8d063d33 / c146422f). Real EvFx frames from a
+		// scripted host over a NetWire into a real client session, asserting the EFFECT on the
+		// live puppet -- the hit blink and the detach burst are private state that no metric
+		// moves and no frame can be timed to. Menu-only and leave-no-trace.
+		[JSInvokable("debugNetFx")]
+		public static string NetFx()
+		{
+			return EvilAliensWeb.Compat.Net.NetFxTest.Run();
+		}
+
 		// JS bridge for scenario 6 (eaNetSceneOrder in wwwroot/index.html, card 25ad0659 step 4).
 		// Reset / pause / checkpoint ORDERING against a REAL GameScene -- which is what makes it
 		// DESTRUCTIVE and keeps it out of NetScenarios: a stand-in scene would make every

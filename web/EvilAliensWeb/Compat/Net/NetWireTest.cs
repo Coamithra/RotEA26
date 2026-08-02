@@ -522,9 +522,48 @@ namespace EvilAliensWeb.Compat.Net
                 14, 0, 0, 1.25f, "wire test"), reliable: true);
             bool msgOk = msg != null
                 && NetProtocol.TryDecodeMessageEvent(msg, out EvilAliens.AnimatedMessage.MessageType mt,
-                    out EvilAliens.SoundManager.Texts speech, out float angle, out string text)
+                    out EvilAliens.SoundManager.Texts speech, out float angle, out string text, out _)
                 && (byte)mt == 0 && (byte)speech == 0 && Near(angle, 1.25f) && text == "wire test";
             check("EvMessage round-trips its text and angle", msgOk);
+
+            // The `short` flag (the compact boss warning arrow) is APPENDED PAST the variable-length
+            // text, which is what makes it optional in both directions and is why this change needed
+            // no protocol bump. Three legs, and the third is the one that matters: a frame WITHOUT
+            // the byte -- i.e. one an older peer encoded -- must still decode, as not-short.
+            byte[] msgShort = Round(NetProtocol.EncodeMessageEvent(
+                14, 1, 0, 2.5f, "danger", isShort: true), reliable: true);
+            check("EvMessage carries the short flag past its text", msgShort != null
+                && NetProtocol.TryDecodeMessageEvent(msgShort, out _, out _, out float shortAngle,
+                    out string shortText, out bool wasShort)
+                && wasShort && shortText == "danger" && Near(shortAngle, 2.5f));
+            check("...and a banner encoded without it decodes as not-short", msg != null
+                && NetProtocol.TryDecodeMessageEvent(msg, out _, out _, out _, out _, out bool notShort)
+                && !notShort);
+            byte[] msgLegacy = msgShort != null ? Truncate(msgShort) : null;
+            check("a frame with the flag byte MISSING (an older peer's) still decodes, as not-short",
+                msgLegacy != null
+                && NetProtocol.TryDecodeMessageEvent(msgLegacy, out _, out _, out _,
+                    out string legacyText, out bool legacyShort)
+                && !legacyShort && legacyText == "danger");
+            
+            // EvFx: the transient-feedback beat. Fixed layout, so this is stride-sensitive in the
+            // ordinary way -- but its netId sits between two floats, which is exactly the shape a
+            // one-byte offset slip reads back as a plausible wrong entity.
+            byte[] fx = Round(NetProtocol.EncodeFxEvent(
+                21, (byte)NetFxKind.BallDetach, 4242, new Vector2(-12.5f, 340.25f), 7), reliable: true);
+            check("EvFx round-trips kind/netId/pos/param", fx != null
+                && NetProtocol.TryDecodeFxEvent(fx, out NetFxKind fxKind, out ushort fxId,
+                    out Vector2 fxPos, out byte fxParam)
+                && fxKind == NetFxKind.BallDetach && fxId == 4242
+                && Near(fxPos.X, -12.5f) && Near(fxPos.Y, 340.25f) && fxParam == 7);
+            // netId 0 is the reserved "positional, no entity" form (EnemyLazerFire), so it has to
+            // survive the round trip rather than reading as a decode failure.
+            byte[] fxPositional = Round(NetProtocol.EncodeFxEvent(
+                22, (byte)NetFxKind.EnemyLazerFire, 0, new Vector2(400f, 300f), 0), reliable: true);
+            check("EvFx carries the entity-free form (netId 0)", fxPositional != null
+                && NetProtocol.TryDecodeFxEvent(fxPositional, out NetFxKind lazerKind, out ushort zeroId,
+                    out Vector2 lazerPos, out _)
+                && lazerKind == NetFxKind.EnemyLazerFire && zeroId == 0 && Near(lazerPos.X, 400f));
 
             // The inline-decoded families (EvDeath / EvClaim / EvScoreSync / EvBlast and the
             // bare byte/empty events) are read straight out of the buffer in
@@ -573,8 +612,27 @@ namespace EvilAliensWeb.Compat.Net
                 !NetProtocol.TryDecodeBackgroundEvent(Truncate(bg), out _, out _));
             check("a truncated EvCosmeticSwarm is refused",
                 !NetProtocol.TryDecodeCosmeticSwarmEvent(Truncate(swarm), out _, out _, out _));
-            check("a truncated EvMessage is refused",
-                !NetProtocol.TryDecodeMessageEvent(Truncate(msg), out _, out _, out _, out _));
+            // TWICE, and that is not a typo: since the short flag was appended, dropping ONE byte
+            // off a banner produces a legal older-peer frame (asserted three lines up), so a
+            // single Truncate here would assert the OPPOSITE of the compatibility leg and fail.
+            // Two bytes cuts into the text itself, which is the bound this leg is actually about.
+            check("an EvMessage truncated INTO its text is refused",
+                !NetProtocol.TryDecodeMessageEvent(Truncate(Truncate(msg)), out _, out _, out _, out _, out _));
+            check("a truncated EvFx is refused",
+                !NetProtocol.TryDecodeFxEvent(Truncate(fx), out _, out _, out _, out _));
+            // The kind is REJECT-policy, so an out-of-enum byte must drop the whole frame rather
+            // than decode to something plausible -- a beat is EXECUTED on arrival.
+            byte[] fxBadKind = fx != null ? (byte[])fx.Clone() : new byte[16];
+            fxBadKind[4] = 200;
+            check("an EvFx naming an unknown kind is refused",
+                !NetProtocol.TryDecodeFxEvent(fxBadKind, out _, out _, out _, out _));
+            // ...with the positive control beside it, or a decoder that refused EVERYTHING would
+            // pass the line above.
+            byte[] fxGoodKind = fx != null ? (byte[])fx.Clone() : new byte[16];
+            fxGoodKind[4] = (byte)NetFxKind.EnemyHitFlash;
+            check("...and the same frame with a known kind is accepted (positive control)",
+                NetProtocol.TryDecodeFxEvent(fxGoodKind, out NetFxKind okKind, out _, out _, out _)
+                && okKind == NetFxKind.EnemyHitFlash);
             // A frame of the right length whose TYPE byte is wrong must also be refused -- the
             // lanes are shared, so every decoder is handed frames of other types routinely.
             byte[] mistyped = ship != null ? (byte[])ship.Clone() : new byte[31];

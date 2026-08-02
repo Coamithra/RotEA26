@@ -451,6 +451,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				animatedMessage.SetWarningDirection(warningDirection);
 				animatedMessage.MakeShort();
 				collection.Add((GameComponent)(object)animatedMessage);
+				// Online co-op (card ee939dd1): this arrow is the ONLY warning the player gets before
+				// a screen-wide sweep, and it is spawned from the boss's own Update -- host-only, and
+				// unreachable on a frozen puppet, so the join peer was swept with no warning at all.
+				// MessageEvent's script banners already ride EvMessage; a boss-spawned one takes the
+				// same lane (its compact MakeShort form rides that event's optional trailing byte).
+				EvilAliensWeb.Compat.Net.NetSession.OnGameMessage(
+					"Danger!", (int)SoundManager.Texts.Danger,
+					(int)AnimatedMessage.MessageType.redwarning, warningDirection, isShort: true);
 				waittimer.Duration = flyPauseMs;
 				waittimer.Reset();
 				waittimer.Start();
@@ -471,6 +479,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				animatedMessage.SetWarningDirection(warningDirection);
 				animatedMessage.MakeShort();
 				collection.Add((GameComponent)(object)animatedMessage);
+				// Online co-op (card ee939dd1): this arrow is the ONLY warning the player gets before
+				// a screen-wide sweep, and it is spawned from the boss's own Update -- host-only, and
+				// unreachable on a frozen puppet, so the join peer was swept with no warning at all.
+				// MessageEvent's script banners already ride EvMessage; a boss-spawned one takes the
+				// same lane (its compact MakeShort form rides that event's optional trailing byte).
+				EvilAliensWeb.Compat.Net.NetSession.OnGameMessage(
+					"Danger!", (int)SoundManager.Texts.Danger,
+					(int)AnimatedMessage.MessageType.redwarning, warningDirection, isShort: true);
 				state = SpiderBossState.land;
 				base.Position = new Vector2(600f, -345f);
 				waittimer.Duration = landWarningLeadMs;
@@ -500,6 +516,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				animatedMessage.SetWarningDirection(warningDirection);
 				animatedMessage.MakeShort();
 				collection.Add((GameComponent)(object)animatedMessage);
+				// Online co-op (card ee939dd1): this arrow is the ONLY warning the player gets before
+				// a screen-wide sweep, and it is spawned from the boss's own Update -- host-only, and
+				// unreachable on a frozen puppet, so the join peer was swept with no warning at all.
+				// MessageEvent's script banners already ride EvMessage; a boss-spawned one takes the
+				// same lane (its compact MakeShort form rides that event's optional trailing byte).
+				EvilAliensWeb.Compat.Net.NetSession.OnGameMessage(
+					"Danger!", (int)SoundManager.Texts.Danger,
+					(int)AnimatedMessage.MessageType.redwarning, warningDirection, isShort: true);
 				waittimer.Duration = flyPauseMs;
 				waittimer.Reset();
 				waittimer.Start();
@@ -711,6 +735,15 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			alreadyHitBy.Add((Lazer)other);
 			hittimer.Start();
 			hittimer.Reset();
+			// Online co-op (card 43e85936): the boss taking a hit read as "messy, missing sfx and
+			// animation sometimes" on the join peer, and the "sometimes" is the whole tell -- the
+			// client hit-tests puppets locally, so a hit IT saw ran this method and a hit only the
+			// host saw produced nothing at all. Both the boss AND the beam that hurts it are
+			// frozen puppets there, interpolated independently, so whether the two overlap on that
+			// screen is a coin toss. The host owns "the boss was hit"; the peer plays the cue and
+			// the light-up off this beat.
+			EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+				EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this, base.Position);
 			for (int n = 0; n < 5; n++)
 			{
 				Bleed(2.5f);
@@ -781,6 +814,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		warning.SetWarningDirection((float)Math.PI * 5f / 4f);
 		warning.MakeShort();
 		collection.Add((GameComponent)(object)warning);
+		// Same lane as the sweep arrows above (card ee939dd1) -- the helper mothership is what
+		// eventually kills this boss, so its arrival matters to both players.
+		EvilAliensWeb.Compat.Net.NetSession.OnGameMessage(
+			"Warning!", (int)SoundManager.Texts.Warning,
+			(int)AnimatedMessage.MessageType.redwarning, (float)Math.PI * 5f / 4f, isShort: true);
 	}
 
 	// The centre of the boss's standing hitbox -- where the helper aims its beam on Easy/Medium when
@@ -926,6 +964,30 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		set
 		{
 			animationProgress = value;
+		}
+	}
+
+	// Card 43e85936: the client half of the hit beat emitted in CollidesWith. Reproduces exactly
+	// what the host's own hit branch does MINUS the hp spend and the kill check -- the hit itself
+	// is the host's to count, and the death arrives as an ordinary EvDeath.
+	//
+	// Idempotent on `hittimer.Active`, which is also the boss's own re-hit gate: a Lazer the
+	// client saw connect already ran the real branch, so the host's beat for that same hit lands
+	// inside the 800ms blink and does nothing. (BloodExplosion is not a replicable type, so the
+	// bleed spray is a legal local spawn on a client -- the same one its own hits produce.)
+	internal override void NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
+	{
+		if (kind != EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash || base.IsDead || hittimer.Active)
+		{
+			return;
+		}
+		sound.PlayCue("bugdies");
+		sound.PlayCue("bugdies");
+		hittimer.Start();
+		hittimer.Reset();
+		for (int i = 0; i < 5; i++)
+		{
+			Bleed(2.5f);
 		}
 	}
 }

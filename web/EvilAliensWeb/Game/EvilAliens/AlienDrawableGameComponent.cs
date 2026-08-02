@@ -782,6 +782,20 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 	}
 
+	// One-shot cosmetic beat off the wire (EvFx / NetFxKind), applied to THIS puppet. The host
+	// runs the real world, so a hit flash, a chunk breaking off or a fired beam happens inside an
+	// Update this puppet never runs -- and unlike a sheet swap it is far too short-lived to ride
+	// the round-robin snapshot (a 35ms blink against a 60ms-to-1.2s correction interval).
+	//
+	// DRAW AND AUDIO ONLY, and IDEMPOTENT: see the INetEntity.NetPlayFx contract. The base is a
+	// no-op -- a type with a hit timer or a detach effect of its own overrides it. Do NOT put a
+	// generic "start a blink" here: the blink lives in a private timer on each type that has one
+	// (KillableAlien.hittimer, Ball.hittimer, SpiderBoss.hittimer), and there is no shared field
+	// to write.
+	internal virtual void NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
+	{
+	}
+
 	// Radians/ms of FREE-SPINNING, purely cosmetic rotation. A type overriding this to a
 	// non-zero value opts its puppets OUT of replicated rotation: the driver spins them
 	// locally at this rate and the snapshot's rotation field is ignored for them.
@@ -903,6 +917,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	void EvilAliensWeb.Compat.Net.INetEntity.NetSuppressAward()
 	{
 		NetSuppressAward();
+	}
+
+	void EvilAliensWeb.Compat.Net.INetEntity.NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
+	{
+		NetPlayFx(kind);
 	}
 
 	// The two discriminants. The base answers "no" to both; KillableAlien and Powerup override

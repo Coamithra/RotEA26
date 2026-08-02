@@ -156,6 +156,13 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		WasHit = true;
 		hittimer.Reset();
 		hittimer.Start();
+		// Online co-op: tell the other peer this thing was hit. Its copy is a FROZEN puppet, so
+		// the only damage it ever sees is the hp field arriving in a world snapshot -- and
+		// NetApplyHp deliberately does not touch the blink (an older snapshot must not resurrect
+		// one). The blink is 35ms against a 60ms-to-1.2s snapshot turn, so it cannot ride the
+		// snapshot at all; it needs its own beat. A no-op with no session or no peer.
+		EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+			EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this, base.Position);
 		if ((hitpoints <= 0) & !dead)
 		{
 			// Game juice: every confirmed kill lands a punch — a micro freeze-frame + a tap
@@ -190,6 +197,28 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 	}
 
 	internal int NetHitPoints => hitpoints;
+
+	// Read by NetFxTest. The hit blink is a private timer read only by Draw, so a beat that
+	// quietly stopped starting it would move no counter and show up in no frame a test can take.
+	internal bool NetHitBlinking => isBlinking();
+
+	// The client half of the hit beat above: light the puppet up for the same 35ms the host did.
+	// Draw-only -- no hp is spent here, because damage is the host's to decide and arrives in the
+	// snapshot; this is the flash that damage was ALREADY invisible without.
+	//
+	// The `hittimer.Active` guard is what makes it idempotent against our own simulation: a
+	// client's bullets hit puppets locally (the CollisionHandler.IsActive seam) and run the real
+	// HitBy, so for a hit WE observed the host's beat lands on a blink already running and does
+	// nothing. That is the same gate HitBy opens with, so a beat can never extend a blink either.
+	internal override void NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
+	{
+		if (kind != EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash || dead || hittimer.Active)
+		{
+			return;
+		}
+		hittimer.Reset();
+		hittimer.Start();
+	}
 
 	// Apply a replicated hp value to a frozen client puppet. Only ever lowers (local hits
 	// already landed must not be resurrected by an older snapshot) and floors at 1 — deaths

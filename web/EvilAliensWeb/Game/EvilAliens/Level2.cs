@@ -529,14 +529,24 @@ internal class Level2 : GameScene
 		Background.SetSpeed(new Vector2(-0.2f, 0f) / 16.666666f);
 	}
 
+	// The swarm's ambience. Online co-op (card 8d063d33): these two are SCRIPT events, and a
+	// join peer never runs the script -- so the spiderwasp wave played out in silence there
+	// while the fog swarm itself (already replicated as one on/off beat) filled its screen.
+	// It rides that same lane as NetCosmeticKind.BeesLoop: it IS the sound of that swarm, it
+	// is turned on and off by the same stretch of script, and the lane already carries the
+	// join-in-progress catch-up and the checkpoint-revert clear a looping cue needs. `rate` is
+	// meaningless here -- 1 is a positive value so the lane's shared "rate <= 0 means off"
+	// guard behaves. A no-op offline and on a client (NetNoteCosmeticSwarm refuses there).
 	private void beesSoundOn(GameEvent sender)
 	{
 		bees = base.SoundManager.Play("bees");
+		GameScene.NetNoteCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop, on: true, 1f);
 	}
 
 	private void beesSoundOff(GameEvent sender)
 	{
 		base.SoundManager.Stop(bees);
+		GameScene.NetNoteCosmeticSwarm(EvilAliensWeb.Compat.Net.NetCosmeticKind.BeesLoop, on: false, 0f);
 	}
 
 	private void resetlives(GameEvent sender)

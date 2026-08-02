@@ -91,6 +91,14 @@ namespace EvilAliensWeb.Compat.Net
         // Claim the award slot before a client-side death path runs (card b0ab09ec).
         void NetSuppressAward();
 
+        // Play a one-shot cosmetic beat the host observed (EvFx / NetFxKind). DRAW AND AUDIO
+        // ONLY: an implementation must not damage, kill, award, spawn a replicable entity or
+        // touch gameplay state, and must be IDEMPOTENT against the client's own simulation --
+        // a client hit-tests puppets with its own bullets, so the effect may already be running,
+        // and the beat is then a no-op. The base answers the kinds that are generic
+        // (AlienDrawableGameComponent); a type with its own hit timer or death chunk overrides.
+        void NetPlayFx(NetFxKind kind);
+
         // ---- the two discriminants an interface cannot carry as a type test --------------
         //
         // The layer does `is KillableAlien` and `is Powerup` in four and three places. A type

@@ -200,6 +200,15 @@ namespace EvilAliensWeb.Compat.Net
             return enabled && idByComp.ContainsKey(g);
         }
 
+        // The puppet a wire beat is addressed to, or null. Used by NetSession's EvFx apply --
+        // a one-shot cosmetic beat names an entity by netId and has to reach the local copy.
+        // Null for an id we never built, one already torn down, or a beat that arrived before
+        // its EvSpawn: all three mean "nothing to light up", and an FX beat is never retried.
+        internal static INetEntity FindPuppet(ushort netId)
+        {
+            return enabled && byId.TryGetValue(netId, out PuppetInfo info) ? info.Comp : null;
+        }
+
         // ---- wire -> puppets ----------------------------------------------------------------
 
         // `selfHealed` is true ONLY for the snapshot self-heal below, which constructs with no

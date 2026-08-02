@@ -725,6 +725,41 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   `SnapUnknownKind` and counted separately -- see the `snapNew`/`snapDead`/`snapBad` bullet
   under "Verify with LOGGED METRICS"; they all return "not applied", so the single total they
   used to share could not be judged.
+  - **A SELF-HEALED PUPPET IS PROVISIONAL, and the reliable `EvSpawn` REBUILDS it (card
+    de4d5d65).** The self-heal calls `OnSpawn` with a literal extras length of **0**, so
+    `CreatePuppet` runs on the descriptor's DEFAULTS -- `PowerupDescriptor` skips its `MakeType`
+    and the puppet keeps `Randomize()`'s LOCAL RANDOM TYPE (wrong colour AND wrong letter, and
+    `ApplyRemotePowerup` then drives the wrong HUD slot when the other peer collects it);
+    `UfoDescriptor` gets no `SetAsBonus`, so a bonus carrier draws untinted and its state extras
+    can only ever turn a bonus OFF. That was permanent, because the `EvSpawn` carrying the real
+    extras arrived second and was dropped as `AlreadyLive`. `PuppetInfo.SelfHealed` now marks
+    those puppets and the later `EvSpawn` tears the stale one down and reconstructs it from the
+    host's extras (reporting `None`, not `AlreadyLive`); a puppet that already carries its extras
+    still refuses the duplicate. **The reported symptom was the UFO/powerup colour mismatch on
+    P2; the fix is type-agnostic, so size, sheet, behaviour and every boss variant come with it.**
+  - **THE STALE PUPPET IS NOT TOUCHED UNTIL THE REPLACEMENT HAS BEEN BUILT AND LANDED.** The
+    spawn extras are bytes off a stranger's wire (public game browser), and a descriptor can
+    genuinely decline them -- `PowerupDescriptor` returns null for an unrecognised type byte.
+    Tearing the puppet down first would let one bad byte DELETE a working enemy and
+    `MarkRemoved` its id, after which every snapshot for `RecentRemovalWindowMs` reads
+    `LeftDead`. So all three failure branches (no descriptor, declined, `TryAdd` refused) report
+    `AlreadyLive` and keep what they have: a generically-dressed puppet beats no puppet.
+  - **The rebuild then DETACHES FROM THE MAPS BEFORE `bin.Remove`, and that order is the subtle
+    part.** `bin.Remove` is DEFERRED, so the stale component's `ComponentRemoved` fires on a
+    later flush -- by which point the replacement is registered under the same netId. Dropping
+    `idByComp`/`byId`/`live` first makes that late event a complete no-op (the handler
+    early-returns on an unmapped component); leave them and it evicts the REPLACEMENT and
+    `MarkRemoved`s the id, after which every snapshot entry reads `LeftDead` and the puppet is
+    never corrected again -- silent, and invisible in any frame.
+  - **The corrected POSE is carried across the rebuild.** The `EvSpawn`'s base state is the
+    spawn-time one and the snapshot that self-healed the id is by definition newer -- that lane
+    skew is the whole reason the puppet existed -- so `Position`/`Vel`/`Correction` come off the
+    stale `PuppetInfo` after `ApplySnapshotState`. Without it the enemy teleports back to where
+    it entered the world and dead-reckons from there, collidable, until its next round-robin
+    turn (up to `snapTurn`, ~1.2 s in a big world).
+  - Pinned by `eaNetSnap()` section 6 (40 checks now, up from 18), mutation-tested three ways
+    that fail DISJOINT legs -- the pre-card never-rebuild fails 9, the missing detach fails 2,
+    the tear-down-before-construction fails 2.
 - **Per-type descriptors (`Compat/Net/NetTypeRegistry` + `Compat/Net/Descriptors/`):**
   the wire typeIdx IS the registry order -- append-only, never reorder. A descriptor owns
   (a) puppet CONSTRUCTION: spawn extras pin every random/caller-chosen look (e.g. UFO's

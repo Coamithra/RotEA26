@@ -21,9 +21,13 @@ emits from textures.config; this tool is only the comparison harness. Kept separ
 build_textures.py precisely so these previews can never leak into the shipped Content siblings /
 PrecompiledTextures.cs.
 
-"raw" == the PNG decode: an .rtex is uncompressed straight-alpha RGBA8, i.e. pixel-identical to the
-PNG's StbImageSharp decode. So the scene compares the original .png (the raw reference) against this
-.dds; we only need to build the .dds here.
+"raw" == the PNG decode: an .rtex is uncompressed straight-alpha RGBA8, so the scene compares the
+original .png (the raw reference) against this .dds and we only need to build the .dds here. It is
+no longer pixel-identical to the PNG on disk: since card 5d75b700 the ship path bleeds each source's
+transparent field (build_textures.load_source) while deliberately leaving the source PNG as its
+producer wrote it, so a shipped .rtex differs from its .png in fully-transparent texels' RGB. The
+preview build below applies the same bleed, so both sides of the comparison agree -- but the raw
+REFERENCE the scene draws is the unbled .png, and only in texels that are invisible on their own.
 
 Grid (cols/rows) only matters for the mult-of-4 crop that preserves a sheet's cell pitch. BC3 is a
 per-4x4-block codec, so the artifacts a 1x1 whole-image preview shows are representative of any grid;
@@ -49,6 +53,9 @@ import sys
 # That only shifts which edge texels exist, and ?texviewer samples PointClamp/PointWrap, so the
 # comparison it is there to make (BC3 artifacts vs the PNG) is unaffected.
 import build_textures as bt
+# Straight from the shared module rather than through bt's re-export, so the "one bleed,
+# three callers" story is visible here too (card 5d75b700).
+from imagebleed import bleed_transparent_rgb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -93,7 +100,9 @@ def enumerate_pngs():
 def build_dds_preview(png_path, asset, cols, rows, dry):
     """texconv the PNG to a BC3 .dds under VIEWER_DIR/<asset>.dds. Returns byte size or None."""
     from PIL import Image
-    im = Image.open(png_path).convert("RGBA")
+    # Bled like the ship path (build_textures.load_source), or the viewer would A/B a
+    # preview against a shipped sibling built from different pixels (card 5d75b700).
+    im = bleed_transparent_rgb(Image.open(png_path).convert("RGBA"))
     w, h = im.size
     tw, _ = bt.mult4_preserving_pitch(w, cols)
     th, _ = bt.mult4_preserving_pitch(h, rows)

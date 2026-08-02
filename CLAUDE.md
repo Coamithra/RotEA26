@@ -367,6 +367,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   and reverted). Don't premultiply exports or tints; `new Color(1,1,1,a)` is correct. The two
   deliberate premultiplied-INTERMEDIATE exceptions (text/group flatten RTs) are in web CLAUDE.md.
   Evidence: `plans/plan.md` Stage 3.
+  **Consequence for ART: a fully-transparent texel's RGB is still sampled**, so it must carry the
+  nearest ink's colour, not black, or every scaled sprite draws with a dark halo. Handled offline
+  by `tools/imagebleed.py` via `build_textures.py` (precompiled assets) and
+  `tools/textures/bleed_pngs.py` (everything else) — tools/CLAUDE.md, "Textures".
 - **Content paths are CASE-SENSITIVE on the live host (not on Windows).** Asset root is
   `wwwroot/Content` (capital C), everything lowercase under it; every request must match — a
   casing mismatch passes locally and 404s on the live host (black screen). True of BOTH hosts —

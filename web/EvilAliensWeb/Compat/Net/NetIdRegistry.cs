@@ -108,6 +108,21 @@ namespace EvilAliensWeb.Compat.Net
             foreach (Entry e in liveList)
             {
                 NetSession.OnHostSpawn(e);
+                // ...and if it is ALREADY DYING, say so straight after its spawn (card
+                // f62116b5). A deferred death runs for 2.5-5 s, so a peer joining in progress
+                // routinely arrives mid-animation -- and the EvDying beat for it fired before it
+                // was here. Without this the joiner holds a frozen, intact copy until the
+                // hp==0 snapshot fallback gets round to it, which is the one case that fallback
+                // exists for and the slowest thing it does.
+                //
+                // The same discriminant as the live emitter: a killable at zero hit points that
+                // is still in the world has deferred its own removal. (An ordinary kill is never
+                // seen here -- the entity leaves liveList at the removal seam a flush later.)
+                if (e.Comp.NetKillable is INetKillable killable && killable.NetHitPoints <= 0
+                    && !e.Comp.IsDead)
+                {
+                    NetSession.OnHostDeathBegan(e.Id);
+                }
             }
         }
 

@@ -75,9 +75,9 @@ step 400 nodraw
 mark
 eval NetFire
 
-# The version the session actually negotiated -- the layout change is what forced v11, and a peer
-# on the old number would misparse every ship packet rather than degrade.
-expect \[net\] session start role=host .* protocol=v11 transport=InMemory
+# The version the session actually negotiated -- the layout change is what forced v12, and a peer
+# on the old number would misparse the friend stream rather than degrade.
+expect \[net\] session start role=host .* protocol=v12 transport=InMemory
 expect \[netfire\] replicated shot count
 expect 1\. the wrapped-delta decision over the whole u8 domain
 expect 2\. the SENDER -- the local ship's counter against the bullets it spawned

@@ -35,7 +35,9 @@ inputs; the other peer's ship is an interpolated puppet.
   new protocol, both halves are second doors onto existing machinery.
 - **Score + per-slot HUD correctness:** the awarded AMOUNT is replicated, not the combo
   (`b0ab09ec`, v7); a slot's combo and powerup progression belong to its OWNER (`1a3ad45a`, v9,
-  `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`).
+  `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`); the OPTION SHIP
+  population is owner-authoritative too, per orbit layer (`c5228350`, v16) -- see the option-count
+  bullet under the remote pickup.
 - **Transient feedback -- the beats a frozen puppet could never reach** (`43e85936` / `57ea30cd` /
   `ee939dd1` / `8d063d33` / `c146422f`): boss + asteroid hit flashes, the Ball detach burst, enemy
   laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
@@ -510,22 +512,59 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
   loss, reconnect works).
-  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES, and `netMode` is why (card 72143c11).**
-    `MenuScene.netMode` lives on the long-lived menu scene and NOTHING clears it across a level
-    launch, so a lobby co-op match that ends mid-level returns to a menu still holding it -- while
-    `MenuScene.Initialize` has already re-added `mainMenu`. `NetUpdate`'s notice branch used to
-    call `CloseNetFlowMenus()` there, which does not touch `mainMenu`, so the panel went up over
-    a LIVE main menu: the text overlapped the rows, and since **`MenuSub1` has no modality at all**
-    -- every menu in the collection runs `HandleInput` every tick -- arrows moved two selections
-    and Enter invoked two entries. `mainMenu.RemoveInstantly()` now runs unconditionally
-    (`Collection.Remove` of a menu that is not shown is a no-op, so the lobby paths are
-    unaffected). **The stale `netMode` itself is NOT fixed** -- clearing it at launch changes the
-    lobby's exit routing and wants its own card.
+  - **A NOTICE CLOSES THE MAIN MENU ON BOTH BRANCHES (card 72143c11).** `NetUpdate`'s notice
+    branch used to call `CloseNetFlowMenus()` on the `netMode` branch only, and that does not
+    touch `mainMenu`, so the panel could go up over a LIVE main menu: the text overlapped the
+    rows, and since **`MenuSub1` has no modality at all** -- every menu in the collection runs
+    `HandleInput` every tick -- arrows moved two selections and Enter invoked two entries.
+    `mainMenu.RemoveInstantly()` now runs unconditionally (`Collection.Remove` of a menu that is
+    not shown is a no-op, so the lobby paths are unaffected). Card c337222a changed WHICH branch a
+    post-level notice arrives on, not whether that line is needed -- it now arrives with `netMode`
+    false and `mainMenu` live, i.e. the case it closes.
     Verify with `eaMenuCensus()` / `tools/headless/probes/net_notice_menu.txt`, never a
     screenshot: `NetStatusMenu` has DrawOrder 2000 and draws its own 50% darken, so a menu live
     underneath it looks merely dim while still eating every keypress. `eaNetNotice(text)` parks
-    the notice with no peer and `eaMenuNetMode()` supplies the stale flag -- the one precondition
-    a headless run cannot otherwise produce.
+    the notice with no peer and `eaMenuNetMode()` supplies the flag -- the one precondition a
+    headless run cannot otherwise produce.
+  - **`MenuScene.netMode` IS MENU-NAVIGATION STATE AND DIES WITH THE VISIT TO THE MENU (card
+    c337222a).** `MenuScene` is a singleton -- `Game1` builds it once and re-ADDS it to the
+    collection on every return from a level, re-running `Initialize` -- so nothing on it is fresh
+    unless something clears it, and nothing cleared `netMode`. A lobby co-op match therefore came
+    back to a main menu that still believed it was inside the Online Co-op flow, and every reader
+    was reading a lie: `difficultyMenu_difficultySelected` silently ABORTED the next ordinary
+    launch after `mainMenu` and the selector were already gone (a reload-only dead end, the
+    sharpest of the four), the two selector `OnExit`s backed out to `netPickMenu`, the carousel
+    refused `WebcamAliens` offline, and `NetUpdate` ran the lobby pump. `MenuScene.Initialize` now
+    calls `ResetNetFlowState()` -- `netMode`, `netNoticeUp`, `browsingGames` and the status panel
+    as ONE lifecycle -- placed before the `?gamebrowser` block so that flag's own
+    `netMode = true` still wins. **`netNoticeUp` is a second real fix, not a ride-along**:
+    `netStatus_CancelSelected` is its only clearer, so a notice still up at a level launch left it
+    set forever and `if (!netMode || netNoticeUp) return;` then killed the lobby pump for the rest
+    of the process -- every later Host/Join stuck on "Contacting server...". (`browsingGames` and
+    `netStatusShown` really are near-unreachable today; they ride along because one lifecycle
+    beats three near-misses.)
+    - **It is SESSION-FREE on purpose** (no `NetLobby.Cancel`, no `NetGameBrowser.Stop`): a caller
+      that returns to the menus with a session STILL UP must be able to re-enter deliberately.
+    - **That entry point is `MenuScene.EnterNetLobby()`, and it is THE way to reach the net-lobby
+      menu state programmatically.** **It ships UNCALLED** -- card 3b6c12e7's level-end -> lobby
+      flow lands its first caller, and the seam is here so that card comes through a defined door
+      instead of inventing one against private state. It sets `netMode`, clears `netNoticeUp`,
+      **removes `mainMenu` itself** (`Initialize`
+      re-adds it unconditionally and neither `netPickMenu` nor `NetStatusMenu` is modal, so a live
+      main menu underneath would eat every keypress -- the 72143c11 lesson; a caller must NOT be
+      relied on to do this), then mirrors the lobby's own `Connected` branch: host to the level
+      pick, client to the waiting panel.
+    - **Deriving it from `NetSession` instead was evaluated and is IMPOSSIBLE** -- the lobby's
+      `Contacting`/`Prompting`/`Connecting` phases have no session at all, so `NetSession.Active`
+      under-reports exactly where the pump must run; and the selector-exit routing is a
+      "where did I come from" question, not a "is a session up" one.
+    - `difficultyMenu_difficultySelected`'s abort now also recovers (`mainMenu.Show()`) when there
+      is neither a session nor a pending notice, so that branch can no longer strand the player.
+      `NetSession.MenuNotice` is PEEKED there, never taken -- `TakeMenuNotice` consumes.
+    - **Verify with `eaMenuNetState()` / `eval MenuNetState`**, pinned by
+      `tools/headless/probes/net_menumode_reset.txt` (plant the flag, round-trip through the
+      Tutorial, require it clear AND require an ordinary Mission 1 launch to still launch). None
+      of those four fields changes a pixel, so no screenshot can see any of this.
 
 ## Protocol, NetIds & the replicable set
 
@@ -603,6 +642,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   worlds scale together, card a66e190a. A v14 peer ignores the unknown event and falls back
   to the pre-card unilateral slowdown, so like v14 the bump is the batch convention rather
   than a forced incompatibility.
+  **v16** appends the owner's per-LAYER Option ship COUNT to every `MsgHudState` entry
+  (`HudSlotBytes` 10 -> 12) -- card c5228350, see the option-count bullet under the remote
+  pickup. Like v13 this MOVED A FIXED-WIDTH LAYOUT rather than appending something an old peer
+  could ignore, so a v15 peer mis-parses every entry after the first: a forced bump, not a
+  convention one.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1227,13 +1271,37 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     simulation -- each peer forms its own connector off its own collision, `isConnectedWith`
     dedupes, and `NetPullOwnShip` (the TeamChallenge tether path) already handles the net case --
     so there is no form event and no protocol change.
-  - **`Option`** -- the pickup's 1-4 Option ships. **The two mirrors ADD UP rather than
-    double-count, and that is the property to preserve**: the LEVEL-driven options already
-    arrive over `MsgHudState` (card 1a3ad45a), and a PICKUP NEVER CHANGES A LEVEL, so `DoSpecial`
-    and `PowerUp` are disjoint -- both peers derive the pickup's own count from the same
-    ship-local `optionLevel`, which only `PowerUp` writes. Pre-card the observer got the level
-    half alone, i.e. always FEWER (card 10f9dba4). Residual, accepted: a pickup landing within
-    one ~10 Hz HUD packet of a level-up to 3 or 4 can spawn the pre-level count on the observer.
+  - **`Option` -- NO LONGER ON THIS PATH AT ALL (card c5228350, protocol v16). The option
+    population is OWNER-AUTHORITATIVE: `MsgHudState` carries the per-LAYER COUNT and the observer
+    reconciles its puppet to it** (`PlayerShip.NetSetOptionCounts`, called from
+    `NetSession.HandleHudState` AFTER `NetSetHudState`, whose level loop spawns the level-driven
+    ones itself). The `case Option:` here is deleted; do not re-add it as a low-latency estimate.
+    - **Why the two-derivations design could not be finished.** It ADDED UP correctly in steady
+      state (a pickup never changes a level, so `DoSpecial` and `PowerUp` are disjoint), but both
+      halves were DERIVED, and a JOIN-IN-PROGRESS peer replays no `EvClaim` -- so it reconstructed
+      the level half alone and was permanently short, whatever the steady-state arithmetic did
+      (card 10f9dba4's own residual, filed as c5228350). The same fix absorbs PR #264's other
+      residual (a pickup landing within one ~10 Hz packet of a level-up to 3/4 derived the count
+      from a stale `optionLevel`): there is no second derivation left to be stale.
+    - **PER LAYER, not a total**: `options[0]`/`options[1]` are two orbits at radius 40 and 60, so
+      one number would let the observer hang the owner's outer ring on the inner one.
+    - **It reconciles DOWNWARD as well**, which is a real fix beyond the card: `Option` is a 2-hp
+      `KillableAlien` that local enemy bullets shoot off, so the two peers lost them
+      independently and nothing ever corrected it.
+    - The count is SHIP state where the rest of the entry is roster state (which outlives a
+      death); no ship reports 0/0, and the peer's puppet is gone at the same moment anyway --
+      an Option dies with its owner. Clamped at the decode boundary
+      (`NetProtocol.HudMaxOptionsPerLayer` 32): the byte is off a stranger's wire and it drives
+      real component spawns.
+    - Two costs, both taken deliberately over an estimate that can be visibly WRONG and then pop.
+      A remote player's pickup options appear up to one HUD interval (~50 ms mean) later than
+      they used to; and because a dead owner reports 0/0 while its puppet is still ~100 ms of
+      interpolation behind, the orbit blinks out slightly before the ship it belongs to does.
+    - **The spawn goes through `ComponentBin.TryAdd`, not `Add`** -- this caller adopts what it
+      adds, and the rx drains inside a tick where a `Purge<AlienDrawableGameComponent>` can be
+      standing. Adopting a diverted option would satisfy the list count with a component the
+      world does not have and the reconcile would never notice; a refusal simply waits for the
+      next packet.
   - `FirePower`/`Range` already ride `MsgShipState`; `Blast` and `OneUp` stay unmirrored for the
     reasons in the hardening bullet above and in `HandleClaim`.
   - **`OwnsSlot(slot)` gates the SHIP half and the HUD half stays ungated.** The host also runs
@@ -1262,16 +1330,24 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot
     already at 4, or the first HUD packet for a slot) and would fire four sparkles in a tick for
     events from before we were watching. Stateless, because a genuine level-up is always one step.
-  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 23 assertions;
+  - **Verify with `eaNetPickup()`** (`Compat/Net/NetPickupTest.cs`, 33 assertions;
     `tools/headless/probes/net_pickup.txt`). **DESTRUCTIVE** like `eaNetResetSpawn` -- it pairs a
     real HOST session onto the live level, adopts a real ship puppet off a scripted client's
     stream and drives real `EvClaim` frames at it -- so run it in a throwaway
-    `?level=Level2&invuln` boot. The leg the suite rests on is the option arithmetic, driven over the
-    FULL remote sequence (claims AND HUD state) rather than either path alone, because the risk
-    of fixing "the observer sees fewer" is inverting it into "the observer sees more"; measured
-    owner +6 / observer +6 over 3 pickups + 3 level-ups, and +3 on the observer under the
-    pre-card mutation. The connector leg leads with the NEGATIVE (unarmed puppet -> no connector)
-    so the positive cannot read as "the rig always makes one". Mutation-tested five ways.
+    `?level=Level2&invuln` boot. The legs the suite rests on are the option ones, driven over the
+    FULL remote sequence (claims AND a REAL `MsgHudState` packet through the production encoder,
+    decoder and rx drain -- the hand-written stand-in that packet used to be is gone, precisely
+    because it could drift from production with every leg green): measured owner +6 / observer
+    +6 over 3 pickups + 3 level-ups, and +3 -- exactly the level-derived half -- with the
+    reconcile mutated out. **Leg 6 is card c5228350's own subject**: the same shape with NO claim
+    delivered, i.e. what a join-in-progress peer gets, asserting the observer falls behind and
+    that ONE packet catches it up per layer; leg 7 pins PR #264's race residual against the
+    pre-card arithmetic transcribed beside it, leg 8 the DOWNWARD direction plus the outer orbit
+    layer (unreachable otherwise -- the owner would have to be at option level 4).
+    The connector leg leads with the NEGATIVE (unarmed puppet -> no connector)
+    so the positive cannot read as "the rig always makes one". Mutation-tested seven ways.
+    **Re-adding the deleted claim-side Option spawn fails NOTHING** (the reconcile absorbs it
+    within one packet) -- the single-source property is a review invariant here, not a probed one.
     **The mute half is NOT covered** -- `SoundManager` has no cue counter and adding one for a
     test would be a production field with no other reader.
 - **Per-slot HUD state: a slot's combo and powerup progression belong to its OWNER (card
@@ -1300,8 +1376,8 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     so the test can table-drive `Remote`/`RemoteFriend`/unseated -- offline the predicate is
     unconditionally true, so a live-roster-only test could never reach those cases at all.
   - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
-    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5]` per owned slot.
-    Protocol **v9**. **combo is a USHORT and that is load-bearing** -- the host SPENDS the
+    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5][optionCount x 2]` per
+    owned slot. Protocol **v9**, the option counts **v16** (card c5228350 -- the bullet above). **combo is a USHORT and that is load-bearing** -- the host SPENDS the
     adopted figure (`AwardScoreToAll` -> `comboModify`), so a byte would cap a client's real
     400x combo at 255 and underpay it; combos past 255 are expected (1000 precached combo
     strings, an explicit `>= 1000` draw fallback). Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is

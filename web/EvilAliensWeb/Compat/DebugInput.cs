@@ -684,21 +684,42 @@ namespace EvilAliensWeb.Compat
 
 		// Put the live MenuScene into net-lobby mode (card 72143c11). It is the ONE precondition
 		// of the overlapping-notice bug a headless run cannot otherwise produce: netMode is set
-		// by entering the Online Co-op flow and nothing clears it across a level launch, so a
-		// lobby match that ends mid-level returns to a menu holding it -- which needs a real
-		// paired peer to reach. Everything the probe then exercises (NetUpdate's notice branch)
-		// is the real code.
+		// by entering the Online Co-op flow, and reaching it for real needs a paired peer.
+		// Everything the probe then exercises (NetUpdate's notice branch) is the real code.
+		// Since card c337222a the flag no longer SURVIVES a level launch (MenuScene.Initialize
+		// clears it), so this is also how a probe plants the stale flag a menu round trip must
+		// clear -- read it back with MenuNetState below.
 		[JSInvokable("debugMenuNetMode")]
 		public static string MenuNetMode()
 		{
-			EvilAliens.IComponentBinService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>();
-			System.Collections.Generic.List<EvilAliens.MenuScene> scenes = svc?.ComponentBin?.InCollection<EvilAliens.MenuScene>();
-			if (scenes == null || scenes.Count == 0)
+			EvilAliens.MenuScene scene = LiveMenuScene();
+			if (scene == null)
 			{
 				return "[menunetmode] no live MenuScene -- boot ?menu first";
 			}
-			scenes[0].NetDebugForceNetMode();
+			scene.NetDebugForceNetMode();
 			return "[menunetmode] netMode=true on the live MenuScene";
+		}
+
+		// Read the live MenuScene's net-flow UI state (card c337222a). None of those four fields
+		// is visible in a frame, so this is the only observable for "did a level launch leave the
+		// menu believing it is still inside the Online Co-op flow".
+		[JSInvokable("debugMenuNetState")]
+		public static string MenuNetState()
+		{
+			EvilAliens.MenuScene scene = LiveMenuScene();
+			if (scene == null)
+			{
+				return "[menunetstate] no live MenuScene -- boot ?menu first";
+			}
+			return "[menunetstate] " + scene.NetDebugStateLine();
+		}
+
+		private static EvilAliens.MenuScene LiveMenuScene()
+		{
+			EvilAliens.IComponentBinService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>();
+			System.Collections.Generic.List<EvilAliens.MenuScene> scenes = svc?.ComponentBin?.InCollection<EvilAliens.MenuScene>();
+			return (scenes == null || scenes.Count == 0) ? null : scenes[0];
 		}
 
 		private static System.Collections.Generic.List<EvilAliens.MenuSub1> LiveMenus()

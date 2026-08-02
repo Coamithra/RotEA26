@@ -1,0 +1,95 @@
+# PROBE: a level launch leaves the menu OUT of the Online Co-op flow (MenuScene.netMode)
+#
+# PINS:   card c337222a. MenuScene is a singleton -- Game1 builds it once and re-ADDS it on every
+#         return from a level -- so netMode used to survive a launch, and every reader of it after
+#         a lobby co-op match was reading a lie. The sharp one is the LAST leg here:
+#         difficultyMenu_difficultySelected aborts the launch when netMode is set and no session
+#         is up, AFTER mainMenu and the selector are already gone, so an ordinary "Start ->
+#         Mission 1 -> difficulty" left the player on a menu screen with NO live menu at all --
+#         reload-only. MenuScene.Initialize now clears the four net-flow UI fields.
+#
+# FAILURE MEANS: read WHICH line went red.
+#         netMode=True missing        -> the eaMenuNetMode plant no longer works; this run proved
+#                                        nothing about the reset (precondition, per rule 5).
+#         ClassicClean missing        -> the run never reached the Tutorial; the menu navigation
+#                                        below drifted (see the row-order note).
+#         MenuSubWithSkull missing    -> the run never got back to the main menu.
+#         netMode=False ... missing   -> THE REGRESSION: the reset in MenuScene.Initialize is gone
+#                                        or ran too late (it must precede the ?gamebrowser block).
+#         Level1 cue=stage1 missing   -> the ordinary launch was aborted, i.e. the stale flag is
+#                                        back and the player is stranded on a menu-less screen.
+#
+# NOTES:  eval MouseAt 5 5 parks the cursor in a corner FIRST and is not optional. Under eahl the
+#         real mouse is wherever SDL reports (the window centre), MenuSub1.HandleMouse
+#         hover-selects every tick, and the exit ConfirmationMenu's rows sit at screen centre --
+#         so an un-parked cursor re-selects "No" every tick and the arrow keys look broken.
+#         Menu row order is the WIPED-SAVE one (eahl wipes saves per run, card 36db5d75): five
+#         rows, Start / Options / Tutorial / Online Co-op / Exit, so down x2 is Tutorial. The
+#         Tutorial is used for the round trip on purpose -- it is the one launch path that reads
+#         no netMode, so it works on both sides of the fix and the round trip cannot beg the
+#         question. Pause menu with no session is four rows, Exit to Main Menu last, and its
+#         confirmation opens on "No" (ConfirmationMenu.Initialize sets selectedEntry = 1).
+#
+# eahl: --flags "?menu&noattract"
+
+eval MouseAt 5 5
+step 150 nodraw
+
+# --- 1. plant the stale flag (a real one needs a paired peer and a level) -------------------
+mark
+eval MenuNetMode
+eval MenuNetState
+expect      \[menunetstate\] netMode=True
+
+# --- 2. round trip: main menu -> Tutorial -> pause -> Exit to Main Menu ---------------------
+mark
+eval Press down 1
+step 5
+eval Press down 1
+step 5
+eval Press enter 1
+step 600 nodraw
+expect      \[music\] play ClassicClean
+
+eval Press esc 1
+step 40
+eval Press down 1
+step 5
+eval Press down 1
+step 5
+eval Press down 1
+step 5
+eval Press enter 1
+step 90
+eval Press up 1
+step 20
+eval Press enter 1
+step 400 nodraw
+
+# --- 3. the menu came back CLEAN -----------------------------------------------------------
+mark
+eval MenuCensus
+eval MenuNetState
+expect      \[menucensus\] count=1 live=MenuSubWithSkull
+expect      \[menunetstate\] netMode=False noticeUp=False statusShown=False browsing=False
+
+# --- 4. and an ordinary launch through the difficulty menu still LAUNCHES -------------------
+mark
+eval Press up 1
+step 8
+eval Press up 1
+step 8
+eval Press enter 1
+step 90
+eval MenuCensus
+expect      \[menucensus\] count=1 live=SubMenuLevelChoice
+eval Press enter 1
+step 90
+eval MenuCensus
+expect      \[menucensus\] count=1 live=DifficultyMenu
+eval Press enter 1
+step 600 nodraw
+eval MenuNetState
+expect      \[music\] play Level1 cue=stage1
+expect      \[menunetstate\] no live MenuScene
+quit

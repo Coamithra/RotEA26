@@ -21,8 +21,12 @@ namespace EvilAliensWeb.Compat.Net
     //              was unreachable in an online session, which is precisely what card 83271f3d
     //              reported ("impossible to trigger the connector ... even if both players have
     //              the 2 powerup in their local view").
-    //   Option  -- the pickup's 1-4 Option ships. The LEVEL-driven ones already arrive over
-    //              MsgHudState, which is why the observer saw SOME and always FEWER.
+    //   Option  -- the pickup's 1-4 Option ships. Card c5228350 moved this OFF the claim path
+    //              entirely: MsgHudState carries the owner's per-LAYER option COUNT and the
+    //              observer reconciles its puppet to it (PlayerShip.NetSetOptionCounts), because
+    //              two derived sources for one population cannot agree for a JOIN-IN-PROGRESS
+    //              peer -- it replays no claims, so it rebuilt the level-driven half alone and
+    //              was permanently short (leg 6).
     // FirePower and Range ride MsgShipState already; Blast and OneUp are deliberately unmirrored.
     //
     // WHY A DATA SUITE AND NOT TWO WINDOWS. Every claim here is about state a frame cannot show
@@ -32,14 +36,14 @@ namespace EvilAliensWeb.Compat.Net
     // stands beside the PRE-CARD behaviour over the identical input, because a green tick means
     // nothing unless the same sequence is shown to break what it replaced.
     //
-    // THE COMBINED-PATH ARITHMETIC (leg 4) is the leg to read first, and it is the one a
-    // single-path test could not have caught. On a real observer BOTH mirrors run: the per-pickup
-    // one added by this card and the per-level one from card 1a3ad45a. They add up rather than
-    // double-count because a PICKUP NEVER CHANGES A LEVEL -- DoSpecial and PowerUp are disjoint,
-    // and both peers derive the pickup's own count from the SAME ship-local optionLevel, which
-    // only PowerUp writes. So leg 4 drives the full sequence in real-session order (owner: real
-    // CollidesWith pickups + real combo-driven level-ups; observer: real EvClaim frames off the
-    // wire + the real MsgHudState content) and requires the two counts to move by the same amount.
+    // THE OPTION COUNT (legs 4, 6, 7, 8) is what to read first. Leg 4 drives the full sequence in
+    // real-session order (owner: real CollidesWith pickups + real combo-driven level-ups;
+    // observer: real EvClaim frames off the wire + a REAL MsgHudState packet through the
+    // production encoder, decoder and rx drain) and requires the two counts to move by the same
+    // amount. Leg 6 is card c5228350's own subject -- the same shape with NO claim delivered at
+    // all, which is what a join-in-progress peer gets. Leg 7 pins PR #264's residual (a pickup
+    // racing a level-up) and leg 8 the downward direction, since owner authority has to drive the
+    // count both ways or an observer that shot its own copies down stays short forever.
     //
     // *** DESTRUCTIVE, like eaNetResetSpawn / eaNetSceneOrder. *** It pairs a real session onto
     // the live level, seats a Remote puppet, spends real pickups into the live ScoreVisualiser and
@@ -248,9 +252,19 @@ namespace EvilAliensWeb.Compat.Net
                 + ", observer +" + obsCtl + ")", ownerCtl > 0 && obsCtl == 0);
 
             // FIXED: the same shape, but the observer gets what a real one gets -- an EvClaim per
-            // pickup and the owner's MsgHudState content per level-up, in that order.
+            // pickup and a REAL MsgHudState packet per level-up, in that order. Since card
+            // c5228350 the claim no longer spawns options at all; the packet's per-layer count is
+            // the single authority, so this leg now asserts that count tracks the owner over a
+            // sequence of pickups AND level-ups rather than that two derivations add up.
+            // Clear the gap the CONTROL just opened before taking the bases. The counts are
+            // ABSOLUTE now, so an observer starting one behind would fail a delta comparison for
+            // the control's reason rather than this leg's -- and the delta is what card 10f9dba4
+            // is about, so it stays the assertion.
+            SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
             ownerBase = owner.NetOptionCount;
             obsBase = puppet.NetOptionCount;
+            Check("PRECONDITION the two ships start this sequence level (owner " + Layers(owner)
+                + ", observer " + Layers(puppet) + ")", OptionLayersAgree(owner, puppet));
             int levelUps = 0;
             int claims = 0;
             for (int round = 0; round < 3; round++)
@@ -265,7 +279,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     levelUps++;
                 }
-                ReplicateHudState(score, NetSession.HostPrimarySlot, peerSlot);
+                SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
             }
             int ownerDelta = owner.NetOptionCount - ownerBase;
             int obsDelta = puppet.NetOptionCount - obsBase;
@@ -301,6 +315,79 @@ namespace EvilAliensWeb.Compat.Net
             Check("CONTROL the catch-up still applied, so the leg is not vacuous ("
                 + score.GetPowerupLevel(Powerup.PowerupType.Option, peerSlot) + ")",
                 score.GetPowerupLevel(Powerup.PowerupType.Option, peerSlot) == 4);
+
+            // ---- 6. JOIN IN PROGRESS -- no claims were ever replayed (card c5228350) -----
+            // The card's subject. A peer that joins mid-level replays no EvClaim, so every
+            // pickup-derived option the owner is flying happened before it was watching. Pre-card
+            // the observer could only ever reconstruct the LEVEL-driven half and was permanently
+            // short; the count on MsgHudState is what closes it.
+            sb.Append(" 6. join-in-progress -- pickups taken with NO claim delivered\n");
+            SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
+            Check("PRECONDITION one packet leaves the two ships agreeing (owner " + Layers(owner)
+                + ", observer " + Layers(puppet) + ")", OptionLayersAgree(owner, puppet));
+            int jipOwnerBase = owner.NetOptionCount;
+            int jipObsBase = puppet.NetOptionCount;
+            TakeLocalPickup(owner, score, Powerup.PowerupType.Option);
+            TakeLocalPickup(owner, score, Powerup.PowerupType.Option);
+            int jipOwnerGain = owner.NetOptionCount - jipOwnerBase;
+            Check("NEGATIVE with no claim replayed the observer is behind -- the reported bug"
+                + " (owner +" + jipOwnerGain + ", observer +" + (puppet.NetOptionCount - jipObsBase)
+                + ")", jipOwnerGain > 0 && puppet.NetOptionCount == jipObsBase);
+            SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
+            Check("ONE HUD packet catches the joiner up, per LAYER (owner " + Layers(owner)
+                + ", observer " + Layers(puppet) + ")", OptionLayersAgree(owner, puppet));
+
+            // ---- 7. the PR #264 residual -- a pickup racing a level-up ------------------
+            // A pickup landing within one ~10Hz packet of a level-up to 3 or 4 made the observer
+            // derive the count from a STALE optionLevel. There is no second derivation left to be
+            // stale, so the residual is closed by construction -- what this leg pins is that the
+            // arithmetic which produced it really does give a different answer here, i.e. the leg
+            // is about a reachable divergence rather than a coincidence.
+            sb.Append(" 7. the pickup-vs-level-up race (PR #264's residual)\n");
+            SetRemoteOptionLevel(score, peerSlot, levels, 2);   // the observer's stale view
+            int ownerLevel = score.GetPowerupLevel(Powerup.PowerupType.Option, NetSession.HostPrimarySlot);
+            int staleLevel = score.GetPowerupLevel(Powerup.PowerupType.Option, peerSlot);
+            int raceOwnerBase = owner.NetOptionCount;
+            TakeLocalPickup(owner, score, Powerup.PowerupType.Option);
+            int raceOwnerGain = owner.NetOptionCount - raceOwnerBase;
+            Check("PRECONDITION the two views of the level really disagree (owner " + ownerLevel
+                + ", observer " + staleLevel + ") and the pre-card mirror would have derived "
+                + PreCardPickupOptions(staleLevel) + " where the owner spawned " + raceOwnerGain,
+                staleLevel != ownerLevel && PreCardPickupOptions(staleLevel) != raceOwnerGain);
+            SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
+            Check("the packet lands the observer on the owner's real count anyway (owner "
+                + Layers(owner) + ", observer " + Layers(puppet) + ")",
+                OptionLayersAgree(owner, puppet));
+
+            // ---- 8. the reconcile runs DOWNWARD too -------------------------------------
+            // An observer shoots at its own local copies (Option is a 2-hp KillableAlien), so it
+            // can hold FEWER than the owner -- and, once anything gives it more, MORE. Owner
+            // authority means the count is driven both ways from one packet.
+            sb.Append(" 8. surplus options on the observer are dropped, not left standing\n");
+            puppet.PowerUp(Powerup.PowerupType.Option, 4, doEffect: false);
+            puppet.PowerUp(Powerup.PowerupType.Option, 4, doEffect: false);
+            Check("PRECONDITION the observer now holds MORE than the owner (owner " + Layers(owner)
+                + ", observer " + Layers(puppet) + ")", !OptionLayersAgree(owner, puppet)
+                && puppet.NetOptionCount > owner.NetOptionCount);
+            SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
+            bin.TopOfTickFlush();
+            Check("one packet drops the surplus (owner " + Layers(owner) + ", observer "
+                + Layers(puppet) + ")", OptionLayersAgree(owner, puppet));
+
+            // The OUTER layer end to end. Nothing above reaches it -- the owner would have to be
+            // at option level 4, which is a run this suite cannot script -- so without this the
+            // ship-side half of the per-layer design is only ever exercised at layer 0, and a
+            // reconcile that ignored layer 1 outright would pass everything above it.
+            SendHudFrame(peer, wire, score, NetSession.HostPrimarySlot, peerSlot, 2, 3);
+            bin.TopOfTickFlush();
+            Check("an explicit outer-layer count lands on the OUTER orbit (observer "
+                + Layers(puppet) + ", wanted 2/3)", puppet.NetOptionLayerCount(0) == 2
+                && puppet.NetOptionLayerCount(1) == 3);
+            SendHudFrame(peer, wire, score, owner, NetSession.HostPrimarySlot, peerSlot);
+            bin.TopOfTickFlush();
+            Check("... and the next real packet puts it back on the owner's count (owner "
+                + Layers(owner) + ", observer " + Layers(puppet) + ")",
+                OptionLayersAgree(owner, puppet));
         }
 
         // ---- helpers -----------------------------------------------------------------------
@@ -363,16 +450,64 @@ namespace EvilAliensWeb.Compat.Net
             return score.GetPowerupLevel(type, owner.Owner) != before;
         }
 
-        // What MsgHudState carries, read off the owner's slot and applied to the observer's
-        // through the very members NetSession's send and rx paths use. The byte layout is
-        // eaNetCombo.test's job; what matters here is that the level half of the mirror runs
-        // beside the pickup half.
-        private static void ReplicateHudState(ScoreVisualiser score, int from, int to)
+        // ONE REAL MsgHudState PACKET from the scripted peer, carrying the owner's slot state as
+        // the peer's own. It goes out through the production encoder and comes back in through
+        // NetSession's own rx drain, so the option-count reconcile (card c5228350) is exercised
+        // where it lives rather than mirrored by the rig -- a hand-written stand-in for this
+        // packet is exactly what could drift from production while every leg stayed green.
+        private static void SendHudFrame(InMemoryTransport peer, NetWire wire, ScoreVisualiser score,
+            PlayerShip owner, int fromSlot, int toSlot)
+        {
+            SendHudFrame(peer, wire, score, fromSlot, toSlot,
+                owner.NetOptionLayerCount(0), owner.NetOptionLayerCount(1));
+        }
+
+        // The same packet with the option counts SPELLED OUT rather than read off the owner --
+        // the only way to drive the OUTER orbit layer through the reconcile, since reaching
+        // option level 4 on the owner takes a run this suite cannot script.
+        private static void SendHudFrame(InMemoryTransport peer, NetWire wire, ScoreVisualiser score,
+            int fromSlot, int toSlot, int options0, int options1)
         {
             int[] levels = new int[NetProtocol.HudLevelCount];
-            score.NetReadHudState(from, levels, out int combo, out Powerup.PowerupType? type,
+            score.NetReadHudState(fromSlot, levels, out int combo, out Powerup.PowerupType? type,
                 out float progress);
-            score.NetSetHudState(to, combo, type, progress, levels);
+            byte[] slots = { (byte)toSlot };
+            int[] combos = { combo };
+            byte[] types = { type.HasValue ? (byte)type.Value : NetProtocol.HudPowerupNone };
+            float[] progressRow = { progress };
+            int[][] levelRows = { levels };
+            int[][] optionRows = { new[] { options0, options1 } };
+            peer.SendStream(NetProtocol.EncodeHudState(slots, combos, types, progressRow, levelRows,
+                optionRows, 1));
+            wire.Pump();
+            NetSession.Update();
+        }
+
+        // PlayerShip.SpawnPickupOptions' arithmetic, transcribed -- the PRE-CARD mirror's answer,
+        // which an observer derived from its OWN stale optionLevel. It is the negative control for
+        // the race leg and must give the wrong number there; it is never what production runs.
+        private static int PreCardPickupOptions(int optionLevel)
+        {
+            int perLayer = optionLevel == 3 ? 2 : 1;
+            int layers = optionLevel == 4 ? 2 : 1;
+            return perLayer * layers;
+        }
+
+        private static bool OptionLayersAgree(PlayerShip a, PlayerShip b)
+        {
+            for (int layer = 0; layer < NetProtocol.HudOptionLayers; layer++)
+            {
+                if (a.NetOptionLayerCount(layer) != b.NetOptionLayerCount(layer))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static string Layers(PlayerShip ship)
+        {
+            return ship.NetOptionLayerCount(0) + "/" + ship.NetOptionLayerCount(1);
         }
 
         private static void SetRemoteOptionLevel(ScoreVisualiser score, int slot, int[] levels,
